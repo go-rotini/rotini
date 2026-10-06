@@ -10,7 +10,7 @@
        at its last line (no trailing newline) — so you don't have to fight template
        whitespace to get clean output.
 
-       DATA (see helpData):
+       DATA:
          .Header .Summary .Description .Footer   strings
          .Invocation     full command path, e.g. "rotini generate"
          .Usage          spec declarative (may be empty)
@@ -37,10 +37,8 @@
 {{- with .Header}}{{.}}
 
 {{end -}}
-{{- /* Prose: the description, or the summary when there is no description. Without the
-       fallback a command declaring only a summary renders a page that never says what it
-       does — the summary appears in its PARENT's command list and nowhere on its own page.
-       man carries it in NAME and markdown renders it outright; help was the odd one out. */ -}}
+{{- /* Prose: the description, or the summary when there is no description, so a command
+       that declares only a summary still says what it does on its own page. */ -}}
 {{- $prose := .Description}}{{if not $prose}}{{$prose = .Summary}}{{end -}}
 {{- with $prose}}{{.}}
 

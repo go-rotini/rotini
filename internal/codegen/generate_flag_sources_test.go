@@ -150,7 +150,7 @@ func TestFlagRows_envMatchesTheGeneratedTag(t *testing.T) {
 }
 
 // TestFlagSources_render pins the line help, man and markdown draw under a flag with a
-// fallback, and that a flag without one renders as before.
+// fallback, and that a flag without one gets no such line.
 func TestFlagSources_render(t *testing.T) {
 	_, pages := flagSourcesProgram(t)
 	data := pages["deploy"]

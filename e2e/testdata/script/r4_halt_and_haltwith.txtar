@@ -1,15 +1,12 @@
 # R4 — where Halt bites, and why failing is one call.
 #
-# Halt stops FORWARD progress. That makes it load-bearing in two of the five hooks and a no-op
-# in the other three: Run is the last forward step of the default plan, and the unwind never
-# consults the halt flag — only a hard Exit cuts teardown short. A unit test pins that matrix;
-# this pins the consequence a real binary shows, because a real binary is where it was missed.
+# Halt stops forward progress, so it matters in the two setup hooks and is a no-op in the
+# other three: Run is the last forward step, and the unwind never consults the halt flag —
+# only a hard Exit cuts teardown short.
 #
-# The hazard is not a wrong verdict. A setup hook that records an error WITHOUT halting exits
-# with the same code and the same stderr as one that halts, byte for byte. The only difference
-# is that the command went on to do the work its setup had just established it must not do.
-# Nothing in the output says so — which is why no output-asserting test caught it, and why
-# HaltWith exists: record-and-stop as one call cannot be half-written.
+# A setup hook that records an error without halting exits with the same code and stderr as
+# one that halts; the only difference is that the work runs anyway. HaltWith records and stops
+# in one call, so it cannot be half-written.
 
 gomodinit example.com/halt
 
@@ -36,7 +33,7 @@ stdout 'setup: refusing'
 # Halting is not aborting: teardown still unwinds for the step that began.
 stdout 'teardown'
 
-# The stderr is byte-identical to the unhalted run. That is the finding: the output
+# The stderr is byte-identical to the unhalted run: the output
 # cannot tell you whether the work ran, so only skipping it proves anything.
 cmp stderr recorded-stderr.txt
 

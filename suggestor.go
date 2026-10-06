@@ -8,12 +8,11 @@ import (
 
 // defaultMinScore is the cutoff a [Suggestor] keeps candidates at or above. 0.75 is the highest
 // threshold that tolerates one edit in a four-character word (`hlep` → `help`); lower values
-// start suggesting unrelated words, and three-character commands are deliberately left
-// unmatched.
+// start suggesting unrelated words. Three-character commands are left unmatched.
 const defaultMinScore = 0.75
 
 // Suggestor ranks a possibly-mistyped token against a list of candidates by optimal string
-// alignment distance. It prints nothing and holds no state beyond its configuration. rotini
+// alignment distance. It prints nothing and holds no state beyond its configuration. Rotini
 // never suggests on its own; a program opts in by calling a Suggestor, typically from its
 // reporter with [Suggestor.For]:
 //

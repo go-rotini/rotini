@@ -13,7 +13,7 @@ var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\
 const esc = '\x1b'
 
 // StripANSI removes every ANSI escape sequence from text, SGR styling and OSC alike, leaving the
-// characters a terminal would display. rotini applies it to man pages, markdown pages and
+// characters a terminal would display. Rotini applies it to man pages, markdown pages and
 // completion descriptions, whose consumers would print escapes literally.
 func StripANSI(text string) string {
 	if !strings.ContainsRune(text, esc) {

@@ -1,11 +1,10 @@
 {{- /* rotini markdown-reference template (default — edit freely). Renders the
-       SAME per-command doc-data as help/man (see helpData) as one markdown
-       reference page per command. No tab columns here — markdown lists render
-       better than tabwriter alignment in a .md file. After rendering, rotini
-       trims trailing whitespace, collapses blank-line runs, and drops the
-       trailing newline.
+       SAME per-command doc-data as help/man as one markdown reference page per
+       command. No tab columns here: markdown lists render better than tabwriter
+       alignment in a .md file. After rendering, rotini trims trailing whitespace,
+       collapses blank-line runs, and drops the trailing newline.
 
-       DATA (see helpData): .Header .Summary .Description .Footer .Invocation
+       DATA: .Header .Summary .Description .Footer .Invocation
          .Usage/.UsageDerived .CommandGroups[] .Arguments[] .Flags[] .Environment[]
          .Configuration[] .Cascading[] .Examples[] .Output .ExitStatus[] .SeeAlso[]
          (.Output is nil when the command declares no output)

@@ -9,15 +9,11 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-007d9c?labelColor=5c5c5c&style=flat-square"></a>
 </p>
 
-Rotini lets you describe a command-line program in a JSON schema specification format and generates
-a Go program around it. You provide the implementation for what each command does, and rotini
-handles the CLI program plumbing. Rather than investing time into writing the plumbing that supports
-a Go CLI program, you can focus on writing your program-specific logic. However, rotini does not
-enforce its structure and was written with inversion of control and dependency injection in mind;
-you can adopt as much or as little of rotini as you want. If you buy in to the lightest commitment
-of the framework — the spec-driven codegen model — you can bring your own command routing, parsing,
-input handling, help and error reporting, while rotini still generates the command tree, typed
-inputs, documentation and shell completion from your spec.
+Rotini lets you describe a command-line program in a spec file (YAML, JSON, JSONC or TOML) and
+generates the Go program around it. You write what each command does; rotini handles the
+plumbing. You can adopt as much or as little of it as you want: bring your own command routing,
+parsing, input handling, help or error reporting, and rotini still generates the command tree,
+typed inputs, documentation and shell completion from your spec.
 
 ## Rotini in a GIF
 
@@ -59,13 +55,10 @@ the handler, build and run.
 
 Requires Go 1.27 or later.
 
-Create a Go module and add the rotini tool to it. `go tool rotini init <name>` then sets up a
-working program: a spec and a conf, an entrypoint, a handler for each command, and the generated
-code; `go mod tidy` records rotini as a direct dependency, since that code imports it. From there,
-development is a loop:
-describe a change in the spec (a command, a flag, an input, an output), run `go generate ./...` to
-regenerate the typed code, pages and completion, implement the handler for any new command, and
-build.
+Create a Go module and add the rotini tool to it. `go tool rotini init <name>` sets up a working
+program: a spec and a conf, an entrypoint, a handler for each command, and the generated code.
+From there, development is a loop: change the spec, run `go generate ./...`, implement the
+handler for any new command, and build.
 
 <details>
 <summary><strong>Example</strong></summary>
@@ -78,7 +71,8 @@ go mod init github.com/me/helloworld
 go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
 ```
 
-**2. Set up the program.**
+**2. Set up the program.** `go mod tidy` records rotini as a direct dependency, since the
+generated code imports it.
 
 ```bash
 go tool rotini init helloworld
@@ -164,10 +158,9 @@ HELLO, ROTINI!
 
 ## Documentation
 
-For more information, see the [rotini](https://rotini.dev) documentation.
-
-- Full API reference is available on [pkg.go.dev](https://pkg.go.dev/github.com/go-rotini/rotini).
-- Upgrading: breaking changes are listed in each release's notes; see [upgrading](https://rotini.dev/docs#upgrading) for how to upgrade.
+- The guide and references are at [rotini.dev](https://rotini.dev).
+- The full API reference is on [pkg.go.dev](https://pkg.go.dev/github.com/go-rotini/rotini).
+- Breaking changes are listed in each release's notes; see [upgrading](https://rotini.dev/docs#upgrading).
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to this project.
 - This project follows a code of conduct to ensure a welcoming community. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 - To report a vulnerability, see [SECURITY.md](SECURITY.md).

@@ -1,16 +1,9 @@
 # R0 — a command's own --help outranks its own required inputs (the per-stub shape).
 #
-# `mycli grab --help` once answered
-#   Error: missing required input: <what>
-# because the seeded stub called Inputs — which validates — and returned on its error before
-# it reached the `if inputs.…Flags.Help` branch. The user asked NOT to run the command and was
-# told off for not supplying what running it would need.
-#
-# A spec whose --help is NOT short_circuit (every project seeded before v1.3.0, and any command
-# that declares its own --help, as grab does here) still gets the per-stub answer: the stub
-# reads --help from ArgvInputs, which applies no required or enum validation, BEFORE Inputs.
-# This script keeps that shape working. The short-circuit shape `rotini init` seeds today
-# (one root CascadingPreRun, the flag marked short_circuit) is r0_short_circuit.txtar.
+# A --help that is not short_circuit (projects seeded before v1.3.0, and any command that
+# declares its own --help, as grab does here) is answered per stub: the stub reads --help from
+# ArgvInputs, which applies no required or enum validation, before calling Inputs. The
+# short-circuit shape `rotini init` seeds is covered by r0_short_circuit.txtar.
 
 gomodinit example.com/helped
 
@@ -18,14 +11,14 @@ exec rotini generate cmd/mycli/.rotini.spec.yaml --config cmd/mycli/.rotini.conf
 exec go mod tidy
 exec go build -o mycli$exe ./cmd/mycli
 
-# The case that was broken, in both spellings, and on the command that has the required input.
+# --help answers in both spellings, on the command that has the required input.
 exec ./mycli$exe grab --help
 stdout 'a command with a required argument'
 ! stdout 'missing required'
 exec ./mycli$exe grab -h
 stdout 'a command with a required argument'
 
-# --version is the same shape and was broken the same way.
+# --version works the same way.
 exec ./mycli$exe grab --version
 stdout '0\.0\.0'
 
@@ -39,7 +32,7 @@ exec ./mycli$exe grab thing
 stdout 'thing'
 
 # An unknown flag is still reported. Answering help early must not swallow a parse error:
-# the root's own body prints a page and reads no inputs, and it STILL has to validate.
+# the root's own body prints a page and reads no inputs, and it still has to validate.
 ! exec ./mycli$exe --nope
 stderr 'nope'
 ! exec ./mycli$exe grab thing --nope

@@ -8,85 +8,67 @@ You should receive a response within 72 hours. If accepted, a fix will be develo
 
 ## Threat Model
 
-`rotini` is a spec-driven CLI **code generator** plus the **runtime library** the
-generated CLIs import. Its security posture is shaped around three trust boundaries:
+Rotini is a spec-driven CLI **code generator** plus the **runtime library** the generated CLIs
+import. There are three trust boundaries:
 
-1. **A spec/conf as codegen input.** `rotini generate` turns a `.rotini.spec.*`
-   (and `.rotini.conf.*`) into Go source that you then compile and ship. A spec is
-   therefore code-adjacent: treat one you did not author with the same care as any
-   dependency you vendor.
-2. **Composed (`$ref`) specs from outside the repo.** A spec can compose another
-   spec by reference — a local relative path, or `mod://` for a spec inside a Go
-   module you already depend on. Either way the ref pulls authored intent across a
-   trust boundary into your generated binary.
-3. **The generated CLI's own runtime.** What the rotini runtime does — and
-   deliberately does *not* do — when the end user's compiled program runs.
-
-The package's job is to make the safe path the easy path: codegen never reaches the
-network, the runtime injects nothing you did not declare, and errors are built not
-to leak secrets.
+1. **A spec and conf as codegen input.** `rotini generate` turns a `.rotini.spec.*` (and
+   `.rotini.conf.*`) into Go source that you compile and ship. Treat a spec you did not write
+   with the same care as any dependency you vendor.
+2. **Composed (`$ref`) specs from outside the repo.** A spec can include another spec by a local
+   relative path, or by `mod://` from a Go module you already depend on. Either way, the
+   referenced spec shapes your generated binary.
+3. **The generated CLI's runtime.** What the rotini runtime does, and does not do, when your
+   compiled program runs.
 
 ## Spec Composition Never Reaches the Network
 
-`rotini` has no fetcher. Every `$ref` resolves from something already on disk:
+Rotini has no fetcher. Every `$ref` resolves from something already on disk:
 
-- **`generate` and `validate` are offline, always.** There is no command that
-  fetches a spec, so a code-generation pass cannot be influenced by the network.
-- **`git::` and raw `https://` refs are REFUSED.** rotini neither fetches nor pins
-  them; a spec naming one fails validation rather than being retrieved.
-- **`mod://` refs ride Go's integrity.** A spec inside a Go module you depend on is
-  read from the module cache, so `go.mod`/`go.sum` are its pins and Go's own
-  verification applies. Local relative refs are pinned by the filesystem.
+- **`generate` and `validate` are always offline.** They read only the filesystem and the Go
+  module cache.
+- **`git::` and raw `https://` refs are refused.** A spec naming one fails validation.
+- **`mod://` refs use Go's integrity checks.** The spec is read from the module cache, so
+  `go.mod` and `go.sum` pin it and Go's own verification applies. Local relative refs are pinned
+  by the filesystem.
 
-Review the contents of a composed `$ref` before depending on it, exactly as you
-would a new module dependency.
+Review a composed `$ref` before depending on it, as you would a new module dependency.
 
-## Tool / Library Version Compatibility
+## Tool and Library Versions
 
-The rotini **tool** that generates code and the rotini **library** the consuming
-module builds against are one module, so `go tool rotini` runs at the version your
-`go.mod` requires. On top of that, every spec and conf declares a `version:`: the
-minimum rotini it was written against. `validate` and `generate` reject a document
-that needs a newer rotini than the running tool, or that belongs to a different
-major version, so generated code never quietly diverges from the definition it came
-from.
+The rotini **tool** that generates code and the rotini **library** your module builds against
+are one module, so `go tool rotini` runs at the version your `go.mod` requires. Every spec and
+conf also declares a `version:`, the minimum rotini it was written for. `validate` and
+`generate` reject a document that needs a newer rotini than the running tool, or that belongs
+to a different major version.
 
 ## Secret Handling
 
-- **Secret-aware inputs.** Inputs marked `secret` in the spec carry that
-  marking through to the generated binding, so secret values are handled distinctly
-  from ordinary inputs.
-- **Errors do not leak secrets.** The typed error and fault classes
-  (`ParseError`, `InputError`, `PluginError`, `WiringError`, `DependencyError`,
-  `PanicError`, and the `ErrUsage` / `ErrInternal` sentinels) are designed to be
-  non-leaky: messages describe the failure without echoing secret input values, and
-  internal faults surface as `ErrInternal` rather than spilling internals.
+- **Secret inputs are redacted.** An input marked `secret` in the spec has its value replaced
+  with `[redacted]` in error messages.
+- **Errors do not leak internals.** The typed errors (`ParseError`, `InputError`,
+  `PluginError`, `WiringError`, `DependencyError`, `PanicError`, and the `ErrUsage` /
+  `ErrInternal` sentinels) describe the failure without echoing secret values or exposing
+  decoder or OS internals.
 
-## What the Runtime Does NOT Do
+## What the Runtime Does Not Do
 
-The runtime injects nothing you did not ask for:
+- **No telemetry.** The runtime emits no logs, metrics or network calls of its own.
+- **No injected flags.** There are no implicit `--help`, `--version` or `--color` flags; declare
+  the ones you want in the spec.
+- **No "did you mean" suggestions by default.** A `ParseError` carries the rejected token and
+  its candidates, and a program can rank them with `Suggestor` if its author chooses to.
 
-- **No telemetry.** The runtime emits no logs, metrics, or network calls of its own.
-- **No auto-injected behavior.** No implicit `--help`/`--version`/`--color`/`--no-*`
-  flags; declare the ones you want in the spec.
-- **No "did you mean" suggestions by default.** A program built with rotini prints
-  none. A `ParseError` carries the rejected token and its candidates, and a program may
-  rank them with `Suggestor` — the program author's choice, never rotini's default. The
-  `rotini` tool itself makes that choice, as any program can.
-- **No network during generation.** rotini has no fetcher at all: `generate` and
-  `validate` read only the filesystem and the Go module cache.
-- **One runtime default.** Interrupt/SIGTERM handling is on by default (so a CLI
-  shuts down cleanly on Ctrl-C); it is opt-out via `WithoutSignalHandling`. Every
-  other runtime service is something a handler explicitly fetches or binds.
+The runtime has two built-in behaviors: it handles Ctrl+C and SIGTERM so the program shuts down
+cleanly (turn this off with `WithoutSignalHandling`), and it answers a hidden `__complete`
+command that the generated completion scripts call.
 
 ## Known Caveats
 
-- **A spec is trusted input to codegen.** `rotini` does not sandbox generation
-  against a hostile spec; it generates the code the spec describes. Do not run
-  `rotini generate` against a spec from an untrusted source you have not reviewed.
-- **The composition contract is enforced at compile time.** A `$ref` that delegates
-  to an external Go package is checked when you build, not by rotini — rotini cannot
-  type-check a foreign package on your behalf.
+- **A spec is trusted input to codegen.** Rotini does not sandbox generation against a hostile
+  spec; it generates the code the spec describes. Do not run `rotini generate` on a spec from an
+  untrusted source you have not reviewed.
+- **Composition across packages is checked at compile time.** A `$ref` that delegates to an
+  external Go package is checked when you build, not by rotini.
 
-For the runtime contract, the outcome/error model, and the dependency and opt-in seams,
-see the package documentation in `doc.go`.
+For the runtime's error model and options, see the
+[package documentation](https://pkg.go.dev/github.com/go-rotini/rotini).

@@ -299,27 +299,27 @@ func TestRun_recordedErrorsFireReporter(t *testing.T) {
 		}
 	})
 
-	t.Run("record without exit + custom reporter: fires, code stays 0 (custom reporter owns it — edges 2,3)", func(t *testing.T) {
+	t.Run("record without exit + custom reporter: fires, code stays 0", func(t *testing.T) {
 		log, code, _, _, fired := exec(func(rtx *Context) {
 			rtx.RecordError(errB) // no HaltWithCode/Exit; the custom reporter (in exec) sets no code either
 		})
 		if !fired {
-			t.Fatal("the reporter did not fire on record-without-exit (edge 2)")
+			t.Fatal("the reporter did not fire on record-without-exit")
 		}
 		if code != 0 {
-			t.Errorf("code = %d, want 0 — the error floor is the DEFAULT reporter's; a custom reporter that sets no code exits 0 (edge 3)", code)
+			t.Errorf("code = %d, want 0 — the error floor is the default reporter's; a custom reporter that sets no code exits 0", code)
 		}
 		if !contains(log, "run.PostRun") {
 			t.Errorf("teardown should run when no exit was called: %v", log)
 		}
 	})
 
-	t.Run("no errors recorded: does NOT fire (edge 1)", func(t *testing.T) {
+	t.Run("no errors recorded: does not fire", func(t *testing.T) {
 		_, code, _, _, fired := exec(func(rtx *Context) {
 			rtx.HaltWithCode(0) // clean success
 		})
 		if fired {
-			t.Error("the reporter fired with no recorded errors (edge 1 violated)")
+			t.Error("the reporter fired with no recorded errors")
 		}
 		if code != 0 {
 			t.Errorf("code = %d, want 0", code)
@@ -663,9 +663,8 @@ func TestHalt_isLoadBearingInSetupAndInertElsewhere(t *testing.T) {
 	}
 }
 
-// TestHaltWith_isExactlyRecordErrorPlusHalt is the equivalence contract. HaltWith is a
-// convenience, not a new behaviour: if the two forms ever diverge, the convenience has become a
-// second set of semantics to learn, which is the opposite of the point.
+// TestHaltWith_isExactlyRecordErrorPlusHalt pins that HaltWith behaves exactly like RecordError
+// followed by Halt.
 func TestHaltWith_isExactlyRecordErrorPlusHalt(t *testing.T) {
 	boom := errors.New("setup failed")
 
@@ -935,7 +934,7 @@ func TestInvoked(t *testing.T) {
 		wantMid  bool
 		wantRoot bool
 	}{
-		{[]string{"mid"}, true, false},          // mid IS the invocation
+		{[]string{"mid"}, true, false},          // mid is the invocation
 		{[]string{"mid", "leaf"}, false, false}, // both are ancestors of `leaf`
 	} {
 		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {

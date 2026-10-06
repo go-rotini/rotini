@@ -1,8 +1,7 @@
 # R1 — the raw stdin formats: the grep/jq/fmt family, whose stdin is not a document.
 #
-# Before `text` and `lines`, a filter could not DECLARE its stdin channel at all: the four
-# formats were json/yaml/jsonc/toml, so a plain-text consumer read rtx.Stdin directly — which
-# appears in no help page, in no completion, and in no validation.
+# The text and lines formats let a filter declare a plain-text stdin channel, so it shows in
+# help and is validated like any other input.
 
 gomodinit example.com/filter
 

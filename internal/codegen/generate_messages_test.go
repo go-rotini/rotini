@@ -121,7 +121,7 @@ func TestCompletionMessages_switchIsListed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(script, "#compdef app\n# Set APP_COMPLETION_MESSAGES=off to hide completion messages.\n") {
+	if !strings.HasPrefix(script, "#compdef app\n# zsh completion for app\n# Set APP_COMPLETION_MESSAGES=off to hide completion messages.\n") {
 		t.Errorf("zsh script header = %q", script[:120])
 	}
 }

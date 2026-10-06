@@ -8,10 +8,9 @@ import (
 )
 
 // Shared helpers for announcing resolved inputs and reporting pass results, so every command's
-// output has the same shape. --help and --version are answered once, by the root handler's
-// CascadingPreRun.
+// output has the same shape.
 
-// suggestor ranks a mistyped command, flag or value against what the companion cli accepts.
+// suggestor ranks a mistyped command, flag or value against what the rotini CLI accepts.
 // The framework suggests nothing by default; this program opts in.
 var suggestor = rotini.NewSuggestor()
 

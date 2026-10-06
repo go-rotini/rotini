@@ -154,8 +154,8 @@ func TestCompletionMessages_formats(t *testing.T) {
 	}
 }
 
-// TestCompletionMessages_noFeatureIsUnchanged pins that a program without the feature answers
-// byte for byte as before.
+// TestCompletionMessages_noFeatureIsUnchanged pins that a program without the feature prints no
+// messages, even when a completer adds some.
 func TestCompletionMessages_noFeatureIsUnchanged(t *testing.T) {
 	def := msgDef("")
 	def.CompletionMessages = nil

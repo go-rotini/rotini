@@ -1,26 +1,22 @@
 # R9 — plugin dispatch, against real sibling binaries.
 #
-# Plugin dispatch is "hand argv to another process, pass stdio through, return its exit code",
-# and a fake process tests none of that. So this builds actual plugins and runs them.
+# Plugin dispatch hands argv to another process, passes stdio through and returns its exit
+# code, so this builds actual plugins and runs them.
 #
-# The interesting part is not that dispatch works — it is that the SAME symptom, "no binary",
-# is a different party's fault depending on who promised the command existed:
+# A missing binary is categorized by who promised the command existed:
 #
-#   a DECLARED plugin appears in help and completion whether or not it is installed, so its
+#   a declared plugin appears in help and completion whether or not it is installed, so its
 #   absence is a broken install — CategoryInternal, the author's or packager's problem;
 #
-#   a DISCOVERED token appears only when its binary does, so a missing one is a typo —
+#   a discovered token appears only when its binary does, so a missing one is a typo —
 #   CategoryUsage, the user's problem.
-#
-# A framework that returned "not found" for both would make a plugin host unable to tell its
-# users apart from its packagers.
 
 gomodinit example.com/host
 
 exec rotini generate cmd/host/.rotini.spec.yaml --config cmd/host/.rotini.conf.yaml
 exec go mod tidy
 
-# The host and its plugins go in one directory: rotini looks NEXT TO THE HOST BINARY first,
+# The host and its plugins go in one directory: rotini looks next to the host binary first,
 # which is the git/kubectl convention.
 mkdir bin
 mkdir extra-plugins
@@ -43,7 +39,7 @@ stdin payload.txt
 exec bin/host$exe sync --count
 stdout 'host-sync counted 3'
 
-# The plugin's OWN non-zero exit passes through unchanged, and rotini says nothing about it:
+# The plugin's own non-zero exit passes through unchanged, and rotini says nothing about it:
 # it has no opinion on what 3 means to host-sync.
 wantexit 3 bin/host$exe sync --fail
 stderr 'host-sync: refused'
@@ -54,15 +50,14 @@ stderr 'host-sync: refused'
 exec bin/host$exe extra one
 stdout 'host-extra got: one'
 
-# ── the plugin path serves BOTH kinds ────────────────────────────────────────
-# host-vendored is a DECLARED plugin whose binary lives only in plugin_path — nowhere near
-# the host binary and not on PATH. Before the path was promoted off plugin_discovery, this
-# was simply not expressible.
+# ── the plugin path serves both kinds ────────────────────────────────────────
+# host-vendored is a declared plugin whose binary lives only in plugin_path — nowhere near
+# the host binary and not on PATH.
 exec go build -o extra-plugins/host-vendored$exe ./plugins/vendored
 exec bin/host$exe vendored one two
 stdout 'host-vendored got: one two'
 
-# ...and a DISCOVERED plugin in the same directory works the same way.
+# ...and a discovered plugin in the same directory works the same way.
 exec go build -o extra-plugins/host-found$exe ./plugins/extra
 exec bin/host$exe found alpha
 stdout 'host-extra got: alpha'
@@ -83,9 +78,8 @@ stderr 'not found'
 wantexit 2 bin/host$exe nosuchthing
 stderr 'not found'
 
-# The failure message names the places actually searched, and now BOTH kinds search the same
-# three: next to the binary, the plugin path, then PATH. The message used to claim it had
-# looked in a discovery path it never consulted for a declared plugin.
+# The failure message names the places actually searched; both kinds search the same
+# three: next to the binary, the plugin path, then PATH.
 ! exec bin/host$exe absent
 stderr 'next to the binary'
 stderr 'the plugin path'

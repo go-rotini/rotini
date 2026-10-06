@@ -1,21 +1,14 @@
-# R6b — the two composition shapes that did not compile.
+# R6 — composition with merged commands and a models package, built.
 #
-# r6_compose_transitive covers parent → child → grandchild. This covers the two things a real
-# monorepo CLI (example-suite) reached for on top of it, both of which produced a package that
-# did not build:
+# r6_compose_transitive covers parent → child → grandchild. This covers two shapes on top of
+# it whose generated code has to compile:
 #
-#   1. a `commands:` authored BESIDE a `$ref`, which the overlay model merges additively onto
-#      the composed child's subtree. The merged command belongs to the PARENT, so the parent
-#      generates its stub and its types — and its <Prefix>Inputs names every ancestor, the
-#      COMPOSED one included. The parent emitted no type for a composed node, so it emitted a
-#      field of type MonoBuildCommandInputs that nothing declared.
+#   1. a `commands:` authored beside a `$ref`, which the overlay model merges onto the composed
+#      child's subtree. The merged command belongs to the parent, so the parent generates its
+#      stub and types, and its <Prefix>Inputs names every ancestor, the composed one included.
 #
-#   2. the `models` package target, which is what makes handler-code passthrough possible at
-#      all (the cmd package imports the handler package, so the handler cannot import cmd back
-#      for its inputs). It surfaced the same dangling type one layer further out, plus an
-#      alias re-exporting a type the models package did not define.
-#
-# Both failed at `go build`, after a clean validate and a clean generate, in generated code.
+#   2. the `models` package target, which lets a handler package import its inputs types
+#      without importing cmd (cmd imports the handler package).
 
 gomodinit example.com/merged
 
@@ -30,7 +23,7 @@ exec go build -o root$exe ./cmd/root
 grep 'type RootChildCommandInputs struct' internal/models/zz_models.go
 grep 'Target string' internal/models/zz_models.go
 
-# ...and there is NO empty RootChildInputs: nothing collects a composed command's inputs
+# ...and there is no empty RootChildInputs: nothing collects a composed command's inputs
 # through the parent, so the type would have no fields and no consumer.
 ! grep 'type RootChildInputs struct' internal/models/zz_models.go
 ! grep 'RootChildInputs = models' internal/cmd/root/zz_root.go
@@ -40,13 +33,13 @@ exec ./root$exe help child
 stdout 'build it'
 stdout 'added by the parent'
 
-# The merged command runs from the PARENT's package and reads the COMPOSED command's flag.
+# The merged command runs from the parent's package and reads the composed command's flag.
 exec ./root$exe child extra
 stdout 'extra: target=all'
 exec ./root$exe child --target api extra
 stdout 'extra: target=api'
 
-# The child's own command still runs from the CHILD's package.
+# The child's own command still runs from the child's package.
 exec ./root$exe child make
 stdout 'child made all'
 

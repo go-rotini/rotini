@@ -1,18 +1,7 @@
-# R1c — a repeatable input's multi-value default, end to end.
+# R1 — a repeatable input's multi-value default, end to end.
 #
-# A default reaches the runtime as argv OCCURRENCES, and FlagDef.Default is one string — so a
-# repeatable flag could not express a multi-value default at all. Written the natural way it
-# stringified into a single mangled element:
-#
-#   default: [defaults, files, env, argv]   ->   Default: "[defaults files env argv]"
-#
-# which the program then received as ONE value and rejected: `unknown layer "[defaults files
-# env argv]"`. A lint rule later caught the shape, but its advice was to seed the default in
-# the HANDLER — pushing a declared value back into hand-written Go, which is the thing
-# declaring inputs in a spec exists to avoid.
-#
-# Now a list seeds one occurrence per element, and a map — which is repeatable too, taking
-# `key=value` pairs — seeds one pair per entry.
+# A default reaches the runtime as argv occurrences: a list default seeds one occurrence per
+# element, and a map default (repeatable too, taking `key=value` pairs) one pair per entry.
 
 gomodinit example.com/dfl
 
@@ -26,14 +15,13 @@ grep 'Defaults: \[\]string\{"team=core", "tier=1"\}' internal/cmd/dfl/zz_dfl.go
 exec go mod tidy
 exec go build -o dfl$exe ./cmd/dfl
 
-# Unset: every element is seeded and coerced through the ELEMENT type (ports are ints).
+# Unset: every element is seeded and coerced through the element type (ports are ints).
 exec ./dfl$exe
 stdout 'order=\[defaults files env argv\]'
 stdout 'label=map\[team:core tier:1\]'
 stdout 'port=\[80 443\]'
 
-# Supplied: the default is REPLACED, not merged. Merging would make a default impossible to
-# opt out of, which is the whole reason it is a fallback rather than a seed.
+# Supplied: the default is replaced, not merged, so a default can always be opted out of.
 exec ./dfl$exe --order argv
 stdout 'order=\[argv\]'
 # ...and the untouched flags still take theirs.
@@ -43,8 +31,8 @@ stdout 'port=\[80 443\]'
 exec ./dfl$exe --order env --order argv
 stdout 'order=\[env argv\]'
 
-# A multi-value default on a SINGLE-valued input has nowhere to put the second element, and is
-# still rejected — with a message that names the type and says what to declare instead.
+# A multi-value default on a single-valued input has nowhere to put the second element, and is
+# rejected with a message that names the type and says what to declare instead.
 ! exec rotini validate cmd/bad/.rotini.spec.yaml --config cmd/dfl/.rotini.conf.yaml
 stderr 'a multi-value `default` needs a repeatable type, and this one is string'
 stderr 'Declare the type as a list'

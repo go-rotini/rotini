@@ -331,8 +331,8 @@ func TestParse_constraintsWidenedTypes(t *testing.T) {
 		wantErr string // "" = must pass
 	}{
 		{[]string{"--workers", "8"}, ""},
-		{[]string{"--workers", "0"}, "must be >= 1"},    // was silently accepted pre-R1
-		{[]string{"--workers", "100"}, "must be <= 64"}, //
+		{[]string{"--workers", "0"}, "must be >= 1"},
+		{[]string{"--workers", "100"}, "must be <= 64"},
 		{[]string{"--offset", "-200"}, "must be >= -100"},
 		{[]string{"--rate", "1.5"}, "must be <= 1"},
 		{[]string{"--port", "80", "--port", "443"}, ""},
@@ -728,7 +728,7 @@ func TestParse_coercionErrors(t *testing.T) {
 		argv []string
 		want string // substring; "" = should parse
 	}{
-		{[]string{"--count", "abc"}, "-c"},         // built-in int: was silently 0, now errors (label = first identifier)
+		{[]string{"--count", "abc"}, "-c"},         // built-in int (label = first identifier)
 		{[]string{"--ttl", "soon"}, "--ttl"},       // built-in duration
 		{[]string{"--when", "tomorrow"}, "--when"}, // custom type (TextUnmarshaler error surfaced)
 		{[]string{"notanint"}, "<n>"},              // positional argument coercion
@@ -1019,7 +1019,7 @@ func TestParse_multiCharShortVsCluster(t *testing.T) {
 		t.Errorf("-x A -y 7: %+v err=%v", in.App.Flags, err)
 	}
 	// A non-exact short token clusters single-char from the left: -x is value-taking,
-	// so -xA → Ex="A" (NOT the -xy flag; multi-char ids aren't matched as prefixes).
+	// so -xA → Ex="A" (not the -xy flag; multi-char ids aren't matched as prefixes).
 	if in, err := parse("-xA"); err != nil || in.App.Flags.Ex != "A" || in.App.Flags.Exy != "" {
 		t.Errorf("-xA: %+v err=%v; want Ex=A", in.App.Flags, err)
 	}

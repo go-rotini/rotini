@@ -876,9 +876,6 @@ func (c *cfgRegs) Close() {
 	}
 }
 
-// bindPinnedConfig re-binds each pinned field of one Config struct against only its own
-// file's registry, required marker included. A pinned key absent from its file zeroes the
-// field even when another file holds it.
 // bindReconWaived binds target from reg. In a short-circuited run (waived) it drops recon's
 // requirement errors (a missing required key, an empty notEmpty key, a schema rule) and keeps
 // those about reading a value, such as one of the wrong type. recon collects every field's
@@ -915,6 +912,9 @@ func isRequirementError(err error) bool {
 	return errors.As(err, &mre) || errors.As(err, &eve) || errors.As(err, &ve)
 }
 
+// bindPinnedConfig re-binds each pinned field of one Config struct against only its own
+// file's registry, required marker included. A pinned key absent from its file zeroes the
+// field even when another file holds it.
 func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 	st := cs.Type()
 	byFile := map[string][]int{}
@@ -1527,8 +1527,7 @@ func canonicalizeField(f reflect.Value, enum []string) {
 }
 
 // channelConstraints reads the validation struct-tags codegen emits on a channel field into a
-// [Constraints]. Tag presence carries a numeric bound's declaredness, so min:"0" is a real,
-// enforced >= 0.
+// [Constraints]. A numeric bound is set whenever its tag is present, so min:"0" enforces >= 0.
 func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 	var c Constraints
 	has := false
@@ -1636,7 +1635,7 @@ const (
 type InputError struct {
 	Channel string // one of "env", "config", "stdin", "flag"
 	Input   string // the offending input key/path, when a single one is known (else "")
-	Msg     string // a clean, non-leaky, rotini-owned message
+	Msg     string // the message Error returns; it never includes Cause's text
 	Cause   error  // the underlying recon/decode/OS error, reachable via errors.As (may be nil)
 
 	// Token and Candidates are set when a value is not one of an env or config input's enum:

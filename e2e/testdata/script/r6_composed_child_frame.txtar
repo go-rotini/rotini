@@ -1,20 +1,12 @@
-# R6 — a composed child's cascading hook reads its OWN flags.
+# R6 — a composed child's cascading hook reads its own flags.
 #
-# This is the case that had no correct call at all. A composed child's generated inputs type
-# spans only its own lineage, because the child does not know which tree it will be mounted
-# into. When the anchor was inferred from the struct's field count against the chain:
+# A composed child's generated inputs type spans only its own lineage, because the child does
+# not know which tree it will be mounted into. Inputs anchors on rtx.Command(), the command
+# whose hook is running, so the call the child makes standalone is correct once composed, at
+# any depth:
 #
 #   umbrella kid work        chain: umbrella → kid → work
-#
-#   kid's CascadingPreRun collecting KidInputs (one field)
-#     leaf-anchored → the field lands on `work`     → wrong frame
-#     root-anchored → the field lands on `umbrella` → wrong frame
-#
-# Both returned zeros and a nil error, and the alignment guard could not fire because every
-# frame declares --help. So the hook whose job was to act on --loud silently saw false.
-#
-# Inputs now anchors on rtx.Command() — the command whose hook is running — so the same call the
-# child uses standalone is correct once composed, at any depth.
+#   kid's CascadingPreRun collecting KidInputs (one field) binds kid's frame
 
 gomodinit example.com/frames
 
@@ -29,13 +21,12 @@ exec ./kid$exe --loud work
 stdout 'kid cascading: loud=true'
 stdout 'work ran'
 
-# ── composed, child is a MIDDLE frame: the same hook, the same call, same answer ──
-# This is the cell that used to be unreachable.
+# ── composed, child is a middle frame: the same hook, the same call, same answer ──
 exec ./umbrella$exe kid --loud work
 stdout 'kid cascading: loud=true'
 stdout 'work ran'
 
-# ── composed, child is the LEAF ────────────────────────────────────────────────
+# ── composed, child is the leaf ────────────────────────────────────────────────
 exec ./umbrella$exe kid --loud
 stdout 'kid cascading: loud=true'
 
@@ -45,12 +36,10 @@ stdout 'kid cascading: loud=true'
 exec ./umbrella$exe --quiet kid work
 stdout 'kid cascading: loud=false'
 
-# ── a shared flag NAME is a separate rule, and worth pinning next to this one ──
-# A flag binds by POSITION: only the commands reached so far are eligible, so a flag written
+# ── a shared flag name is a separate rule, pinned next to this one ─────────────
+# A flag binds by position: only the commands reached so far are eligible, so a flag written
 # before a sub-command's name belongs to an ancestor. Both frames declare --shared: before `kid`
-# it is the umbrella's, after `kid` it is the child's. (It once bound to the DEEPEST declaration
-# wherever it sat, which made `umbrella --shared kid` set the child's flag and misattributed
-# deprecations.)
+# it is the umbrella's, after `kid` it is the child's.
 exec ./umbrella$exe --shared kid work
 stdout 'shared=false'
 exec ./umbrella$exe kid --shared work

@@ -1,9 +1,7 @@
 # R6 — local composition, two levels deep.
 #
-# Composition is rotini's biggest architectural bet and the thing no competitor offers, and it
-# was the least-covered part of the codebase: composeNestedRef (parent -> child -> grandchild)
-# sat at 0.0%. This script is a three-spec tree assembled by $ref, built, and dispatched to
-# every node — which needs no network, only three files in one module.
+# A three-spec tree (parent -> child -> grandchild) assembled by $ref, built, and dispatched
+# to every node. It needs no network, only three files in one module.
 
 gomodinit example.com/compose
 
@@ -16,13 +14,13 @@ exec rotini generate cmd/root/.rotini.spec.yaml --config cmd/root/.rotini.conf.y
 exec go mod tidy
 exec go build -o root$exe ./cmd/root
 
-# The parent's help lists the composed child, using the overlay summary the PARENT declared,
+# The parent's help lists the composed child, using the overlay summary the parent declared,
 # not the child's own — the overlay model in one assertion.
 exec ./root$exe --help
 stdout 'child'
 stdout 'as the parent describes it'
 
-# Dispatch reaches every level, and each node runs its OWN handler — the handler that lives
+# Dispatch reaches every level, and each node runs its own handler — the handler that lives
 # in the composed child's package, not one the parent regenerated.
 exec ./root$exe child
 stdout 'child ran'

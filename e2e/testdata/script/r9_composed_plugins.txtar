@@ -1,10 +1,9 @@
 # R9 — a composed child's plugins, dispatched through the parent.
 #
-# A child spec composed with $ref brings its whole command tree: including the declared plugins
-# commands, discovery and plugin path its root declares. The composed node was once rebuilt
-# from its presentation keys alone, so the child's own binary ran `child deploy` while the
-# parent answered `root kid deploy` with "takes no arguments". Plugins keep the CHILD's name
-# (child-deploy), so one install serves both binaries.
+# A child spec composed with $ref brings its whole command tree, including the declared
+# plugins, discovery and plugin path its root declares, so `root kid deploy` runs what
+# `child deploy` runs. Plugins keep the child's name (child-deploy), so one install serves
+# both binaries.
 
 gomodinit example.com/umbrella
 

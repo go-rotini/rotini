@@ -37,7 +37,7 @@ import (
 //     [Context.AddCompletionMessage]
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
-//   - rotini's own seams — [Context.Version], [Context.Help] and [Context.Parser] read them;
+//   - rotini's own settings — [Context.Version], [Context.Help] and [Context.Parser] read them;
 //     [Context.WithVersion], [Context.WithHelp], [Context.WithParser],
 //     [Context.WithInputSettings] and [Context.WithInputReader] set them on a standalone Context
 //
@@ -86,7 +86,7 @@ type Context struct {
 	// and the inputs methods anchor on it.
 	frame int
 
-	// rotini's own seams, seeded from the Program each run and kept out of services so a
+	// rotini's own settings, seeded from the Program each run and kept out of services so a
 	// dependency can never shadow them.
 	meta     *InputSettings
 	readerFn func(InputSettings) *InputReader
@@ -189,7 +189,7 @@ func newContext() *Context {
 }
 
 // NewContextFor builds a [Context] with argv resolved against def, as the runtime does before
-// dispatch, using the os streams and no seams. It serves tests of the [Parser], the
+// dispatch, using the os streams and no program settings. It serves tests of the [Parser], the
 // [Context.Inputs] family, or a single hook:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
@@ -593,10 +593,7 @@ func (rtx *Context) recordFault(pe *PanicError) {
 	rtx.faults = append(rtx.faults, pe)
 }
 
-// ── rotini's own seams, set on a standalone Context ─────────────────────────.
-//
-// A dispatched Context is seeded from the Program; these setters serve a Context built by
-// [NewContextFor]. Called during a run, a change applies to the rest of that run only.
+// ── rotini's own settings, set on a standalone Context ──────────────────────.
 
 // WithInputSettings supplies the generated descriptor [Context.Inputs] reads from. See
 // [Program.WithInputSettings]. It is for a Context built with [NewContextFor]; during a run,
@@ -657,7 +654,7 @@ func (rtx *Context) WithParser(parser *Parser) *Context {
 	return rtx
 }
 
-// ── rotini's own seams, as the handler sees them ────────────────────────────.
+// ── rotini's own settings, as the handler sees them ─────────────────────────.
 
 // Help returns the help page of [Context.Command] from [Program.WithHelp], as a generated
 // --help prints it, or "" when there is none. A cascading hook gets its own command's page.

@@ -22,8 +22,7 @@ import (
 // dependencies) read it, and value rules apply only to the fields it names, so a zero value
 // left unset is not checked against its enum or bounds. As on the command line, a list flag or
 // variadic argument left out has zero items, so its minItems applies unless it has a default.
-// [PresenceOf] builds a set from v's
-// non-zero fields when that is the right reading; build one by hand when a zero value must
+// [PresenceOf] builds a set from v's non-zero fields; build one by hand when a zero value must
 // count as supplied. A declared default satisfies a required input, as it does for
 // [Context.Inputs].
 //
@@ -82,10 +81,9 @@ func (rtx *Context) CheckInputs[T any](v T, set Presence) error {
 }
 
 // PresenceOf returns a [Presence] marking every non-zero input field of v as supplied, in the
-// shape [Context.CheckInputs] and a hand-built [InputLayer] read. It is an explicit choice to
-// infer presence from values: a field whose meaningful value is its zero value (false, 0, "")
-// is not marked, so build the Presence by hand when a zero value must count as supplied. A
-// non-nil pointer to a zero value (a nullable input) is marked.
+// shape [Context.CheckInputs] and a hand-built [InputLayer] read. A field holding its zero value
+// (false, 0, "") is not marked, so build the Presence by hand when a zero value must count as
+// supplied. A non-nil pointer to a zero value (a nullable input) is marked.
 func PresenceOf[T any](v T) Presence {
 	set := Presence{}
 	rv := reflect.ValueOf(v)

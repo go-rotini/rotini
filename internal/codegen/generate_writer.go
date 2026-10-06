@@ -11,15 +11,13 @@ import (
 	"github.com/go-rotini/fs"
 )
 
-// planner is the one way generate and init touch the filesystem. Each effect becomes an
-// operation in an [fs.Plan], and only a real change does: a generated file whose content
-// already matches, a create-once file that exists, or a removal of a file that is gone plans
-// nothing.
+// planner is the one way generate and init touch the filesystem. Each real change becomes an
+// operation in an [fs.Plan]; a generated file whose content already matches, a create-once
+// file that exists, or a removal of a file that is gone plans nothing.
 //
-// A real run applies each operation as it is planned, so files are written in the same
-// order, and read back the same way, as before there was a plan. A dry run applies nothing
-// and answers later questions from the plan instead: a file it would have created exists, and
-// one it would have removed does not.
+// A real run applies each operation as soon as it is planned, so later reads see the change.
+// A dry run applies nothing and answers later reads from the plan instead: a file it would
+// have created exists, and one it would have removed does not.
 type planner struct {
 	dry  bool
 	plan *fs.Plan

@@ -1,4 +1,4 @@
-# R5 — the default signal trap, stopped by a REAL signal.
+# R5 — the default signal trap, stopped by a real signal.
 #
 # program_test.go cancels contexts itself. This proves what an operator actually depends on:
 # a signal the kernel delivers cancels the handler's context, forward progress stops, every

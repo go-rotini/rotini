@@ -1,8 +1,7 @@
 # R2 — man pages are real roff pages: a man page checker accepts them and man displays them.
 #
-# The man feature used to write plain text laid out to LOOK like a man page, which `man` could
-# not format and a package could not install. Each command now gets a roff page named after its
-# path (notes-add), with the section as the extension in embed mode (notes-add.1).
+# Each command gets a roff page named after its path (notes-add), with the section as the
+# extension in embed mode (notes-add.1).
 
 gomodinit example.com/notes
 

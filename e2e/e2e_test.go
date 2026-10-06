@@ -10,13 +10,13 @@
 // A script is a .txtar under testdata/script: commands, then files after `-- name --` lines.
 // `rotini` is on $PATH, built from this working tree. The usual verbs:
 //
-//	exec rotini init demo      run a command; a leading ! means it must FAIL
+//	exec rotini init demo      run a command; a leading ! means it must fail
 //	stdout 'Usage:'            the last command's stdout must match this regexp
 //	! stderr .                 stderr must be empty
 //	cmp got.txt want.txt       two files must be identical (-update rewrites want)
 //	env NO_COLOR=1             set an environment variable
 //	exists cmd/demo/main.go    a path must exist
-//	wantexit 2 ./app --bad     run a command and assert its EXACT exit status
+//	wantexit 2 ./app --bad     run a command and assert its exact exit status
 //
 // wantexit and gomodinit are rotini's own commands; `! exec` only proves a non-zero exit.
 //

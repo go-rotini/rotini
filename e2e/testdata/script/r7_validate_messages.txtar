@@ -1,8 +1,8 @@
 # R7 — the negative rig: make rules fire and judge the message as a stranger would.
 #
 # The in-repo corpus (internal/codegen/testdata/lint) freezes every rule's text. This script
-# is the other half: it runs `rotini validate` as a USER runs it and checks the three things
-# a rejection owes the reader — what is wrong, WHERE, and what to do
+# is the other half: it runs `rotini validate` as a user runs it and checks the three things
+# a rejection owes the reader — what is wrong, where, and what to do
 # instead — plus the exit code and the stream, which the corpus cannot see.
 
 gomodinit example.com/bad
@@ -13,18 +13,18 @@ stderr '\.spec\.yaml:\d+:\d+'
 stderr 'identifier "-o" is already declared by flag "out"'
 ! stdout 'Error'
 
-# An unknown key is rejected by the schema, positioned, and NOT silently ignored.
+# An unknown key is rejected by the schema, positioned, and not silently ignored.
 ! exec rotini validate unknown.spec.yaml --config ok.conf.yaml
 stderr '\.spec\.yaml:\d+:\d+'
 stderr 'bogus_key'
 
-# A type that cannot become Go is caught before codegen, and the message lists what IS legal
+# A type that cannot become Go is caught before codegen, and the message lists what is legal
 # rather than only saying no.
 ! exec rotini validate badtype.spec.yaml --config ok.conf.yaml
 stderr 'is not a Go type'
 stderr 'builtin'
 
-# `timeout` on a local command: the schema accepts the key ONLY so the error can say where it
+# `timeout` on a local command: the schema accepts the key only so the error can say where it
 # belongs. A generic "unknown property" would leave the author guessing.
 ! exec rotini validate timeout.spec.yaml --config ok.conf.yaml
 stderr 'plugins'
@@ -38,8 +38,8 @@ stderr 'variadic'
 stderr 'declared twice'
 ! stderr 'variadic'
 
-# Every problem is its own "Error:" line, from validate and from generate alike — generate
-# used to mark only the first, leaving the rest looking like the informational banner.
+# Every problem is its own "Error:" line, from validate and from generate alike, so none
+# looks like the informational banner.
 ! exec rotini validate many.spec.yaml --config ok.conf.yaml --fail collect
 stderr '^Error: .*declared twice'
 stderr '^Error: .*variadic'

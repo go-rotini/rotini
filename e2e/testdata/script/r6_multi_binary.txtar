@@ -1,31 +1,25 @@
-# R6c — parent and child CLIs in ONE codebase, each separately shippable.
+# R6 — parent and child CLIs in one codebase, each separately shippable.
 #
-# r6_compose_transitive proves a $ref tree dispatches. This proves the shape a monorepo
-# actually wants on top of it: several children that each BUILD THEIR OWN BINARY and are also
-# composed by a parent, with one shared handler package serving all of them.
+# r6_compose_transitive proves a $ref tree dispatches. This covers several children that each
+# build their own binary and are also composed by a parent, with one shared handler package
+# serving all of them. Throughout, the composed output must equal the standalone output for
+# the same command: `parent alpha work` runs the code `alpha work` runs.
 #
-# The assertion throughout is EQUALITY — the composed output must equal the standalone output
-# for the same command — because that is the whole claim. `parent alpha work` runs the
-# identical code `alpha work` runs, since it is that code. If the two ever diverge,
-# composition has quietly become duplication.
+# Pinned here:
 #
-# Three things are easy to get wrong and are pinned here:
-#
-#   1. a child is named after the BINARY it ships as, and the parent's $ref renames it on the
-#      way in — otherwise you choose between a truthful standalone help page and `parent
-#      my-alpha` as a sub-command name;
-#   2. a shared handler names NONE of the generated inputs types (there is one per CLI and
+#   1. a child is named after the binary it ships as, and the parent's $ref renames it on the
+#      way in, so both the standalone help page and the parent's sub-command name read well;
+#   2. a shared handler names none of the generated inputs types (there is one per CLI and
 #      they differ), and declares the shape it needs instead;
-#   3. identity that must survive composition is BOUND by the child, not read from a command
+#   3. identity that must survive composition is bound by the child, not read from a command
 #      name the parent is free to change.
 #
-# One practical consequence of (1) worth knowing: a stub's FILENAME derives from the command
-# name, so a command called my-alpha seeds my-alpha.go. A hand-written handler has to use that
-# name, or rotini seeds a stub beside it and the package has two of everything.
+# A stub's filename derives from the command name, so a command called my-alpha seeds
+# my-alpha.go; a hand-written handler has to use that name, or rotini seeds a stub beside it.
 
 gomodinit example.com/multi
 
-# Order is irrelevant: the parent reads each child's SPEC, not its generated Go.
+# Order is irrelevant: the parent reads each child's spec, not its generated Go.
 exec rotini generate cmd/parent/.rotini.spec.yaml --config cmd/parent/.rotini.conf.yaml
 exec rotini generate cmd/alpha/.rotini.spec.yaml --config cmd/alpha/.rotini.conf.yaml
 exec rotini generate cmd/beta/.rotini.spec.yaml --config cmd/beta/.rotini.conf.yaml
@@ -55,7 +49,7 @@ exec ./parent$exe alpha --tag prod work --count 1
 stdout 'alpha did 1 \(prod\)'
 
 # ── the overlay rename ───────────────────────────────────────────────────────
-# The child names itself after its binary, so ITS help is truthful...
+# The child names itself after its binary, so its help is truthful...
 exec ./my-alpha$exe --help
 stdout 'my-alpha <command>'
 # ...and the parent lists it short.
@@ -64,7 +58,7 @@ stdout '  alpha '
 ! stdout 'my-alpha'
 
 # ── the shared handler, one implementation, both depths ──────────────────────
-# It reports the COMPONENT each child bound, not the name the parent gave it — which is the
+# It reports the component each child bound, not the name the parent gave it — which is the
 # only way the two agree once a rename is in play.
 exec ./my-alpha$exe status
 stdout '^status: alpha$'

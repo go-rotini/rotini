@@ -86,9 +86,7 @@ type layerCore struct {
 // Inputs delegates to [InputReader.Read]; errors are [*ParseError] and [*InputError] values, or
 // a [*WiringError] when a command declares config inputs and the program has no
 // [InputSettings]. On error the returned T is partially filled and must not be used. A command
-// line that doesn't parse is reported before any other channel is read; flags' environment and
-// config fallbacks are read before argv requirements are checked, since they can satisfy them,
-// and environment and config inputs after. Use
+// line that doesn't parse is reported before any other channel is read. Use
 // [Context.InputsWithReport] for a merged value and per-field provenance alongside the error.
 func (rtx *Context) Inputs[T any]() (T, error) {
 	var t T
@@ -305,7 +303,6 @@ func (r InputReport) Fields() []FieldPath {
 // A hand-built layer's fields count as supplied (a required input it supplies passes, and a
 // flag it supplies counts as set for flag groups and dependencies), and the values it won are
 // checked as [Context.CheckInputs] checks them, naming each input by its canonical spelling.
-// Values rotini's own layers won are checked, and reported, exactly as before.
 //
 // A merge of hand-built layers alone has no command to check against, so Validate reports a
 // [ParseKindInternal] error pointing at [Context.CheckInputs], which takes the command from

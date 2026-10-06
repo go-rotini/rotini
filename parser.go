@@ -183,7 +183,7 @@ func (k ParseKind) String() string {
 //	}
 type ParseError struct {
 	Kind       ParseKind // what went wrong, for branching without matching Msg (zero = ParseKindUnspecified)
-	Msg        string    // the human-readable failure, opinion-free
+	Msg        string    // the human-readable failure
 	Command    string    // the command in whose scope parsing failed ("" when not command-scoped)
 	Flag       string    // the flag involved, by the identifier or label used ("" when not flag-related)
 	Token      string    // the offending argv token or value ("" when none)

@@ -26,7 +26,7 @@ func (d Deprecation) Error() string {
 
 // Deprecations returns each deprecated token this invocation used: a command invoked via a
 // deprecated alias or deprecated as a whole, a flag set via a deprecated identifier, or a
-// deprecated argument given a value. rotini prints nothing; the handler decides what to do:
+// deprecated argument given a value. Rotini prints nothing; the handler decides what to do:
 //
 //	for _, d := range rotini.Deprecations(rtx) {
 //		rtx.RecordWarning(fmt.Errorf("%w — use %q instead", d, d.Name))

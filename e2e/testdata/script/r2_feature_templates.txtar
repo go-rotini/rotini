@@ -1,27 +1,19 @@
-# R2b — `template: true`: the author takes ownership of rotini's output.
+# R2 — `template: true`: the author takes ownership of rotini's output.
 #
-# This is the extensibility knob. `embed` decides where rendered content LANDS; `template`
-# decides who OWNS the rendering — rotini's built-in, or an editable *.tmpl seeded into the
-# project. It was the last unexercised quadrant of the feature matrix, and an untried
-# combination is where defects hide: a program with only the completion feature enabled once
-# generated a file that did not compile, because no test had ever enabled it alone.
-#
-# Four things have to hold for the knob to be worth having:
+# `embed` decides where rendered content lands; `template` decides who owns the rendering:
+# rotini's built-in, or an editable *.tmpl seeded into the project. Pinned here:
 #
 #   1. the template is seeded when missing;
-#   2. pages render FROM it, so an edit actually reaches the binary;
+#   2. pages render from it, so an edit actually reaches the binary;
 #   3. an edited template is never clobbered by a later generate — it is the author's file now;
-#   4. a broken template fails at GENERATE time, with a position and in rotini's voice.
-#
-# (4) is the one that matters most: this is the only template a rotini USER ever writes, so it
-# is the only one whose errors they read. text/template's stock wording names the file three
-# times and ends at `codegen.templateHelpData`, an internal Go type nobody can look up.
+#   4. a broken template fails at generate time, with a position and without naming rotini's
+#      internal Go types.
 
 gomodinit example.com/own
 
 exec rotini generate cmd/own/.rotini.spec.yaml --config cmd/own/.rotini.conf.yaml
 
-# 1. seeded, and NOT //go:embed-ed: a template is an input to codegen, not an output of it.
+# 1. seeded, and not //go:embed-ed: a template is an input to codegen, not an output of it.
 exists templates/help.txt.tmpl
 ! grep 'go:embed templates' internal/cmd/own/zz_own.go
 
@@ -43,12 +35,12 @@ exec go build -o own$exe ./cmd/own
 exec ./own$exe
 stdout 'ACME CORP — own'
 stdout 'HOW TO RUN IT:'
-# A heading the author replaced is GONE, not printed alongside.
+# A heading the author replaced is gone, not printed alongside.
 ! stdout 'Usage:'
 # ...and the command tree still renders, so this is customisation rather than replacement.
 stdout 'build'
 
-# 3. A second generate does not clobber the author's file: seed-when-MISSING.
+# 3. A second generate does not clobber the author's file: seed-when-missing.
 exec rotini generate cmd/own/.rotini.spec.yaml --config cmd/own/.rotini.conf.yaml
 grep 'ACME CORP' templates/help.txt.tmpl
 

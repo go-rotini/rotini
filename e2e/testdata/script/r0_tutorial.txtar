@@ -2,12 +2,11 @@
 #
 # docs/content/docs/_index.md walks a reader from an empty directory to a working CLI with a
 # handler they wrote. Every command on that page is run here, in the documented order, with
-# the documented results asserted — so the guide cannot quietly stop being true, which is the
-# usual fate of a tutorial.
+# the documented results asserted, so the guide cannot quietly drift.
 #
 # The only departure is the install: the page says
 # `go get -tool github.com/go-rotini/rotini/cmd/rotini@latest`, and this module is wired to the
-# working tree instead. Installing the PUBLISHED module has its own gate
+# working tree instead. Installing the published module has its own gate
 # (.github/workflows/release-fidelity.yml) because it needs a release to install.
 
 # ── Install: Go module setup ─────────────────────────────────────────────────

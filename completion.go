@@ -619,7 +619,7 @@ type CompletionCandidate struct {
 }
 
 // CompletionFormat writes a [CompletionResult] to w in one completion protocol, the wire shape
-// a completing host expects. rotini computes the answer; the format only encodes it.
+// a completing host expects. Rotini computes the answer; the format only encodes it.
 // [PluginCompletion] is the built-in for the plugin hosts kubectl, Docker and Flux.
 //
 // A format is called once per request and must write only the answer, since the host parses
@@ -792,12 +792,10 @@ const pluginMessageMarker = "_activeHelp_ "
 // the format carries as the candidates; and kind file or no hint at all to 0, whose fallback is
 // file completion. The hosts read the candidates of the filtering directives as their
 // arguments, so a file or directory hint applies only when there are no candidates. The
-// directive line is always written, since the hosts read the last line as the directive
-// unconditionally. The format is the hosts', and follows them.
+// directive line is always written, since the hosts read the last line as the directive.
 //
-// Each message is written as a candidate line carrying the hosts' message marker, after the
-// regular candidates, which the hosts' completion scripts show as a message where the shell
-// can.
+// Each message is written after the regular candidates as a candidate line carrying the hosts'
+// message marker, which the hosts' completion scripts show as a message where the shell can.
 func PluginCompletion(w io.Writer, result CompletionResult) error {
 	lines := candidateLines(result.Candidates)
 
@@ -828,7 +826,7 @@ func PluginCompletion(w io.Writer, result CompletionResult) error {
 //
 //	cmd.Program.WithCompletion(rotini.PluginCompletion).Execute()
 //
-// rotini's generated completion scripts read rotini's own format, so a standalone CLI leaves
+// Rotini's generated completion scripts read rotini's own format, so a standalone CLI leaves
 // this unset. A host that runs a separately named completer without a __complete word, such
 // as kubectl's kubectl_complete-<name>, is served by calling [Program.Complete] from main.
 //

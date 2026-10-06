@@ -119,7 +119,7 @@ func setCompletionMessage(schema **InputSchema, msg string) {
 }
 
 // completionMessagesLiteral renders the Definition's CompletionMessages field, or "" when
-// messages are off, so a CLI without them generates the same code as before.
+// messages are off, so a CLI without them omits the field.
 func completionMessagesLiteral(conf *Conf) string {
 	mode, env := completionMessages(conf)
 	if mode == "" {

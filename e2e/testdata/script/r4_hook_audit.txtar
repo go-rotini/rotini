@@ -1,16 +1,10 @@
 # R4 — a misspelled lifecycle hook is reported at generate time.
 #
-# A handler embeds the No* no-ops and overrides the hooks it wants. A hook is implemented by
-# declaring a method with the same name, and nothing says to remove the embed it replaces,
-# because there is no reason to: a method at depth 0 wins over a promoted one. That is what makes a misspelled name SILENT. The embed keeps satisfying
-# Handler, so the `var _ rotini.Handler` assertion holds, the package compiles, vet is clean,
-# and the author's hook is dead code that never runs.
-#
-# The assertion catches the other two ways a hook goes wrong — a missing one (no method at all)
-# and a drifted signature (the embed is shadowed by something that does not implement the
-# interface). It structurally cannot catch this one. So generate reports it, the way rotini
-# reports every other "you wrote something that will not do what you meant" problem: with a
-# file:line, as a warning, because an unused method is legal Go.
+# A handler embeds the No* no-ops and overrides the hooks it wants by declaring methods with
+# the same names. A misspelled name is silent: the embed keeps satisfying Handler, so the
+# `var _ rotini.Handler` assertion holds, the package compiles, vet is clean, and the hook
+# never runs. generate reports it with a file:line, as a warning, since an unused method is
+# legal Go. (A missing hook or a drifted signature is a compile error already.)
 
 gomodinit example.com/demo
 

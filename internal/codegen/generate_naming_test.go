@@ -20,7 +20,7 @@ func TestGeneratedNamesKeepGoInitialisms(t *testing.T) {
 		"user_id":       "UserID",
 		"http-get":      "HTTPGet",
 		"generate":      "Generate",
-		"idle":          "Idle", // a word that merely STARTS like one is left alone
+		"idle":          "Idle", // a word that merely starts like one is left alone
 		"urls":          "Urls", // plurals are not in the list, as in Go's linters
 		"port-forward":  "PortForward",
 	} {

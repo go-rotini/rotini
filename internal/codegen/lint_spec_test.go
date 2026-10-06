@@ -96,7 +96,7 @@ func TestLintSchemaTypes_accepts(t *testing.T) {
 // TestLintSchemaTypes_rejectsNonTypes pins that values which are not Go types are rejected.
 func TestLintSchemaTypes_rejectsNonTypes(t *testing.T) {
 	for _, typ := range []string{
-		"not-a-type", // parses as an EXPRESSION (two subtractions) but is not a type
+		"not-a-type", // parses as an expression (two subtractions) but is not a type
 		"1",
 		"a+b",
 		"func()x",

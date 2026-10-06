@@ -505,7 +505,7 @@ func writeHandlerStubs(gp *program, lay layout) error {
 			return err
 		}
 		if exists && stubDisabled(body) {
-			// Its command left the spec and has come back: take it out of retirement.
+			// Its command left the spec and has come back: re-enable it.
 			if err := gp.plan.write(path, enableStub(body)); err != nil {
 				return err
 			}
@@ -609,10 +609,10 @@ func helpFlagFor(gp *program, c genCommand) (field, frame string) {
 }
 
 // seedHelpAndVersion decides who answers --help and --version in a stub. The root's
-// short-circuit flags are answered once, by the root's CascadingPreRun. In the full shape (the
-// root's --help short_circuit and cascading) a command relying on the root's --help carries no
-// check of its own; a command declaring its own help flag shadows the root's, so it still
-// answers it. Otherwise each stub answers its --help and --version itself, as before.
+// short-circuit flags are answered once, by the root's CascadingPreRun. When the root's --help
+// is short_circuit and cascading, a command relying on it carries no check of its own; a
+// command declaring its own help flag shadows the root's, so it still answers it. Otherwise
+// each stub answers its own --help and --version.
 func seedHelpAndVersion(gp *program, c genCommand, d *templateHandlerData, isRoot, helpOn bool) {
 	rootHelp := ""
 	if helpOn {

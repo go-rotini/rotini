@@ -1,7 +1,6 @@
 # R2 — the declarative completion hint, over the real __complete wire.
 #
-# Between a static `enum` and writing a Go FlagValueCompleter sits the commonest value shape
-# there is — "this is a file" — and until this key it was expressible only in code. The hint
+# A `complete:` hint declares a value's shape ("this is a file") without a Go completer. It
 # rides the last line of __complete's output as a directive each generated script translates
 # into that shell's own path completion.
 
@@ -23,7 +22,7 @@ stdout '^:rotini:file yaml yml$'
 exec ./hints$exe __complete --out ''
 stdout '^:rotini:directory$'
 
-# An opaque value suppresses the shell's file fallback — which is NOT the same as
+# An opaque value suppresses the shell's file fallback — which is not the same as
 # declaring no hint, where the shell applies its own default.
 exec ./hints$exe __complete --id ''
 stdout '^:rotini:none$'

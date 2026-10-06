@@ -1,26 +1,17 @@
 # R2 — the generated completion scripts, actually executed by the shells they target.
 #
 # The description-after-tab wire format differs per shell, and nothing else in the project
-# runs the scripts in a real shell. Checking them by hand is done once and then forgotten; this
-# runs on every change.
+# runs the scripts in a real shell.
 #
 # Each shell sources the script rotini generated and invokes the completion function directly,
 # which is what pressing TAB does. A script with a syntax error, a stray directive line leaking
 # through as a candidate, or a shell-specific quoting mistake fails here.
 #
-# PowerShell is included deliberately: rotini SHIPS a powershell script, so it is either tested
-# or it should not be shipped.
+# Multi-token completion is asserted by the candidates it returns, not only by the absence of
+# a leaked directive: a script that drops tokens returns nothing, which an absence check passes.
 #
-# MULTI-TOKEN completion is asserted POSITIVELY here, and that is the point. This script used
-# to drive `app --config <TAB>` and assert only that no ":rotini:" directive leaked into the
-# candidates. All three shell scripts were meanwhile truncating the tokens they sent the
-# binary, so the candidate list came back EMPTY — nothing leaked, the test passed, and
-# completion was broken for every word after the first in bash, zsh and fish alike. An
-# assertion that something is absent is satisfied by a script that produces nothing at all.
-#
-# Each shell's block is conditional on that shell existing, so this rig degrades rather than
-# failing on a machine without fish. CI installs all four on ubuntu and macos (see the e2e job
-# in .github/workflows/ci.yml), so the coverage there is real rather than skipped.
+# Each shell's block runs only if that shell is installed. CI installs all four on ubuntu and
+# macos (see the e2e job in .github/workflows/ci.yml).
 
 gomodinit example.com/shells
 

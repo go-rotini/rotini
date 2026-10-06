@@ -81,7 +81,7 @@ func TestInputReader_fillsEnvAndConfig(t *testing.T) {
 // config fallbacks, through Read and the per-channel surface alike.
 func TestInputReader_customSources(t *testing.T) {
 	vault := func() recon.Source {
-		// MapSource takes the NESTED shape a config decoder produces.
+		// MapSource takes the nested shape a config decoder produces.
 		return recon.NewMapSource("vault", map[string]any{
 			"api": map[string]any{
 				"endpoint": "vault-endpoint",
@@ -423,7 +423,7 @@ func TestInputReader_explicitEnvVar(t *testing.T) {
 	}
 }
 
-// Pinned-config shapes (spec file:): an input read from ONE named
+// Pinned-config shapes (spec file:): an input read from one named
 // configuration_files entry, not the merged precedence chain.
 func TestInputReader_configFilePinned(t *testing.T) {
 	system := writeConfig(t, "api:\n  endpoint: from-system\n  token: sys-token\n")
@@ -438,7 +438,7 @@ func TestInputReader_configFilePinned(t *testing.T) {
 			Flags     struct{}
 			Arguments struct{}
 			Config    struct {
-				// Pinned to "user": must NOT see system's value despite precedence.
+				// Pinned to "user": must not see system's value despite precedence.
 				Endpoint string `rotini:"endpoint" recon:"api.endpoint" cfgfile:"user"`
 			}
 		}
@@ -451,7 +451,7 @@ func TestInputReader_configFilePinned(t *testing.T) {
 		t.Errorf("Endpoint = %q, want from-user — file: pins the source", in.App.Config.Endpoint)
 	}
 
-	// A pinned required key is judged against ITS file: present elsewhere
+	// A pinned required key is judged against its file: present elsewhere
 	// doesn't count.
 	type pinnedReq struct {
 		App struct {
@@ -1059,7 +1059,7 @@ func TestInputError_envCoercion_isCleanUsage(t *testing.T) {
 		t.Errorf("InputError = {Channel:%q Input:%q}, want {env loud}", be.Channel, be.Input)
 	}
 
-	// Categorized as usage (errors.Is AND CategoryOf), not internal.
+	// Categorized as usage (errors.Is and CategoryOf), not internal.
 	if !errors.Is(err, ErrUsage) || errors.Is(err, ErrInternal) {
 		t.Errorf("Is(ErrUsage)=%v Is(ErrInternal)=%v, want true/false", errors.Is(err, ErrUsage), errors.Is(err, ErrInternal))
 	}

@@ -216,7 +216,7 @@ func TestWithSignals_withContext_parentCancelStillHalts(t *testing.T) {
 	parent, cancel := context.WithCancel(context.Background())
 	var log []string
 	h := sigRec{log: &log, fire: func(ctx context.Context) {
-		cancel() // cancel the PARENT; must reach rotini's derived child
+		cancel() // cancel the parent; must reach rotini's derived child
 		select {
 		case <-ctx.Done():
 		case <-time.After(2 * time.Second):

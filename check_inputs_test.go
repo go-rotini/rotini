@@ -183,7 +183,7 @@ func TestPresenceOf(t *testing.T) {
 	}
 }
 
-// TestInputReport_validatesHandBuiltLayers covers the fixed merge: a hand-built layer's values
+// TestInputReport_validatesHandBuiltLayers pins that a hand-built layer's values
 // are checked, its fields count as supplied, and a hand-built-only merge points at CheckInputs.
 func TestInputReport_validatesHandBuiltLayers(t *testing.T) {
 	t.Setenv("REGION", "us")

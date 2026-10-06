@@ -331,7 +331,7 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 // TestGenerateGolden pins the emitted output: every emitted .go file is byte-compared against
 // testdata/golden. Run with -update to refresh.
 func TestGenerateGolden(t *testing.T) {
-	// Resolve the golden dir to absolute BEFORE emitInModule chdirs into the temp module.
+	// Resolve the golden dir to absolute before emitInModule chdirs into the temp module.
 	goldenDir, err := filepath.Abs(filepath.Join("testdata", "golden", "demo"))
 	if err != nil {
 		t.Fatal(err)

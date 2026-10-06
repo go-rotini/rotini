@@ -93,7 +93,7 @@ func TestCollect(t *testing.T) {
 		t.Errorf("Winner(Endpoint) = %+v ok=%v, want the files layer", win, ok)
 	}
 
-	// Validation parity: a required config value missing errors in BOTH forms.
+	// Validation parity: a required config value missing errors in both forms.
 	bare := writeConfig(t, "api:\n  endpoint: only\n") // api.token (required) absent
 	bareMeta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: bare, Format: "yaml"}}}
 	rtx := NewContextFor(tbDef(), nil)
@@ -269,7 +269,7 @@ func TestOverlay_handBuiltLayer(t *testing.T) {
 
 	var custom ovInputs
 	custom.App.Flags.Color = "teal"
-	custom.App.Flags.Out = "ignored.txt" // present in Values but NOT in Set
+	custom.App.Flags.Out = "ignored.txt" // present in Values but not in Set
 	override := InputLayer[ovInputs]{
 		Name:   "test-override",
 		Values: custom,
@@ -894,8 +894,8 @@ func TestReport_validateChecksWhatWasSupplied(t *testing.T) {
 // (an ordinary CLI) or only itself (a composed child).
 func TestCollect_isCorrectInACascadingHookAtEveryDepth(t *testing.T) {
 	for _, argv := range [][]string{
-		{"mid", "--midonly"},         // mid IS the leaf
-		{"mid", "--midonly", "leaf"}, // mid is a MIDDLE frame
+		{"mid", "--midonly"},         // mid is the leaf
+		{"mid", "--midonly", "leaf"}, // mid is a middle frame
 	} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			runF(t, argv, func(rtx *Context) {

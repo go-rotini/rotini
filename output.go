@@ -50,9 +50,10 @@ var machineFormats = []string{"json", "yaml", "toml"}
 // yaml or toml by rotini, any other format by render, which may be nil when the handler only
 // ever passes those three. An empty format means json.
 //
-// It returns an internal error when v is not the type the command declares as its output, when no renderer is passed for a format rotini does not
-// write, or, with [Program.WithOutputChecks], when v does not match the declared shape. Nothing
-// is written then. A renderer's error is returned unwrapped. A command that declares no output may still use it; nothing is checked.
+// It returns an internal error, and writes nothing, when v is not the type the command declares
+// as its output, when no renderer is passed for a format rotini does not write, or, with
+// [Program.WithOutputChecks], when v does not match the declared shape. A renderer's error is
+// returned unwrapped. A command that declares no output may still use it; nothing is checked.
 func (rtx *Context) WriteOutput[T any](v T, format string, render func(io.Writer, string, T) error) error {
 	return writeOutput(rtx, v, format, render, false)
 }

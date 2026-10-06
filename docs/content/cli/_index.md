@@ -121,8 +121,8 @@ Use "rotini help <command>" for more information about a command.
 Turns a spec and conf into Go code: the command tree, the typed inputs for each command, the table
 that maps each command to its handler, the outputs of any features the conf turns on (help, man
 pages and so on), and a handler file for each new command. A handler file whose command has left
-the spec is disabled with `//go:build ignore`, then deleted by the next `generate`. See [generated code](/generated) for what each file holds and which ones
-are yours.
+the spec is disabled with `//go:build ignore`, then deleted by the next `generate`. See
+[generated code](/generated) for what each file holds and which ones are yours.
 
 With no arguments, `generate` reads the `.rotini.spec.*` in the working directory and the
 `.rotini.conf.*` beside it; with no conf there, the conf defaults apply. It prints the two paths
@@ -154,8 +154,7 @@ That makes it a check for CI that the committed code matches the spec. Run
 an environment variable, and every `generate` dry-runs while that variable is 1, true, yes or on.
 With `dry_run_env: CI`, `go generate ./...` checks every CLI in the module on most CI systems,
 which set `CI=true`. `--no-dry-run` runs a real generate whatever the variable says, and
-`--dry-run` can't be combined with `--watch`. Regenerating in CI instead is just as valid; it's
-your choice.
+`--dry-run` can't be combined with `--watch`.
 
 {{< code title="$ rotini help generate" language="text" open="true" collapsible="false" copy="false" >}}
 Generate a cli program from a rotini spec file and its conf.
@@ -242,9 +241,8 @@ Use "rotini help <command>" for more information about a command.
 
 ## rotini completion
 
-Prints the shell completion script for bash, zsh, fish or PowerShell. It is the companion's own
-generated `Completion(shell)`: the same function any rotini CLI gets with the `completion`
-feature on.
+Prints the shell completion script for bash, zsh, fish or PowerShell, using the same generated
+`Completion(shell)` function any rotini CLI gets with the `completion` feature on.
 
 {{< code title="$ rotini help completion" language="text" open="true" collapsible="false" copy="false" >}}
 Print the completion script for a shell. Load it once per session, or install it so
@@ -277,9 +275,9 @@ Use "rotini help <command>" for more information about a command.
 ## rotini man
 
 Prints a command's man page, or with `--dir` writes every page into a directory, named
-`rotini.1`, `rotini-generate.1` and so on. It is built on the companion's own generated `Man`,
-`ManPages()` and `ManSection`, the functions any rotini CLI gets with the `man` feature on, so
-its `--dir` is a working example of shipping every page of your own CLI.
+`rotini.1`, `rotini-generate.1` and so on. It uses the generated `Man`, `ManPages()` and
+`ManSection` that any rotini CLI gets with the `man` feature on, so you can ship your own CLI's
+pages the same way.
 
 {{< code title="$ rotini help man" language="text" open="true" collapsible="false" copy="false" >}}
 Print a command's man page as roff, the markup the man program reads, or write every
@@ -326,7 +324,7 @@ not know keys they use, and a different major version:
 | any | a development build with no version | not checked |
 
 {{< alert type="info" title="WHERE THE VERSION COMES FROM:" >}}
-When rotini is installed through the module graph — `go get -tool`, then `go tool rotini` — the version is the one in your `go.mod`, read from the binary's build info. That is what makes the tool version and your `require` line the same fact. A build from source may stamp one in with `-ldflags "-X main.version=…"`, which applies only when build info carries no release version (a development build, or a pseudo-version); a real module version always wins.
+When rotini is installed through the module graph — `go get -tool`, then `go tool rotini` — the version is the one your `go.mod` requires, read from the binary's build info. A build from source can stamp one with `-ldflags "-X main.version=…"`, which applies only when build info carries no release version (a development build or a pseudo-version); a real module version always wins.
 {{< /alert >}}
 
 {{< code title="$ rotini help version" language="text" open="true" collapsible="false" copy="false" >}}

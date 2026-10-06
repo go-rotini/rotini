@@ -1,10 +1,5 @@
-# R0 — the seed path. The highest-value script in the suite: does a brand-new user get a
-# WORKING binary from `rotini init` alone, with no edits?
-#
-# It guards a real regression: `rotini init` once produced a module that
-# compiled, that TestInitialize_endToEnd verified compiled, and whose --help answered
-#   Error: unknown flag "--help"
-# and exited 1. Every tier stopped at `go build`, so nothing saw it.
+# R0 — the seed path: a new user gets a working binary from `rotini init` alone, with no
+# edits. Compiling is not enough; the built binary has to answer --help and friends.
 
 gomodinit example.com/demo
 

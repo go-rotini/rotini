@@ -22,8 +22,7 @@
 // dispatch.
 //
 // `rotini validate` checks the spec: the JSON Schema rejects what it can express and lint rules
-// reject the rest, each problem reported at file:line:col. Every schema-accepted key has a
-// consumer.
+// reject the rest, each problem reported at file:line:col.
 //
 // # Generate
 //
@@ -31,8 +30,8 @@
 // per-command input structs, embedded help, man and markdown pages, and completion scripts —
 // plus one handler stub per command, created once and then owned by the program. `rotini init`
 // scaffolds a working CLI: a spec declaring -h/--help, -v/--version and the help and version
-// commands, a conf with the help feature on and the other three off, an entrypoint, and a stub
-// per command wired to the generated help pages and the program's version. All of it may be edited or deleted.
+// commands, a conf, an entrypoint, and a stub per command wired to the generated help pages
+// and the program's version. All of it may be edited or deleted.
 //
 // # Composition
 //
@@ -173,8 +172,8 @@
 //
 // Every failure class is errors.Is-able against the [ErrUsage] or [ErrInternal] sentinel, so
 // [CategoryOf] classifies it (except a plugin timeout, which is [CategoryNone]), and
-// errors.As-able to a typed value with structured fields. rotini's own messages expose no
-// recon, decode or OS internals and no secret values:
+// errors.As-able to a typed value with structured fields. Rotini's own messages expose no
+// decoder or OS internals and no secret values:
 //
 //   - [*ParseError] — the argv channel. [ParseError.Kind] identifies the failure; Token and
 //     Candidates are the facts a "did you mean" needs.
@@ -189,7 +188,7 @@
 //     program's wiring. [Context.Inputs] returns one [*WiringError] as an error instead: config
 //     inputs requested on a program built without an [InputSettings].
 //
-// rotini prints no "did you mean" suggestions and no help on error. A program that wants
+// Rotini prints no "did you mean" suggestions and no help on error. A program that wants
 // either branches on the error in its handler (errors.As to the type, then its Kind or
 // [CategoryOf]) or writes its own reporter. A value a flag's environment or config fallback
 // supplied is named with its source in a value error, so the user can find it.
@@ -225,13 +224,10 @@
 // # Opt-in services
 //
 // Everything else is a function or type a handler calls when it needs it, with nothing to
-// register. Dependencies ([Program.WithDependency], [Context.GetDependency],
-// [Context.MustGetDependency]) hold only the program's own values.
-//
-// rotini's own seams are typed options, not dependencies: [Program.WithInputSettings],
-// [Program.WithInputReader], [Program.WithParser], [Program.WithVersion] and [Program.WithHelp]
-// set them; [Context.Parser], [Context.Version] and [Context.Help] read them. A dependency name
-// or type can therefore never shadow one.
+// register. Rotini's own settings are typed options, not dependencies, so a dependency can
+// never shadow one: [Program.WithInputSettings], [Program.WithInputReader], [Program.WithParser],
+// [Program.WithVersion] and [Program.WithHelp] set them; [Context.Parser], [Context.Version] and
+// [Context.Help] read them.
 //
 //   - [Context.Inputs] reads every declared channel, reconciled and validated, into the
 //     command's generated inputs type:
@@ -279,10 +275,9 @@
 //
 // # Batteries
 //
-// rotini does nothing on import, starts no background goroutine and touches no terminal. It
+// Rotini does nothing on import, starts no background goroutine and touches no terminal. It
 // ships no styler, table, spinner, prompt, pager, terminal probe or process runner; use
-// golang.org/x/term, os/exec and similar libraries. The one text helper it keeps is needed by
-// its own generated pages:
+// golang.org/x/term, os/exec and similar libraries. Its one text helper:
 //
 //   - [StripANSI] removes ANSI escape sequences, making a styled string safe for a man page, a
 //     markdown page or a completion description.
@@ -295,7 +290,7 @@
 // concurrent use once configuration is complete; the handlers value and the program's streams
 // remain shared, so a concurrent host synchronizes those. See [Program.Run].
 //
-// rotini ships no loop. A host calls [Program.RunContext] once per line or request; supplying
+// Rotini ships no loop. A host calls [Program.RunContext] once per line or request; supplying
 // the context leaves signal handling to the host.
 //
 // # What rotini does not ship
@@ -305,8 +300,4 @@
 //   - watching files — go-rotini/fs, fs.NewWatcher
 //   - a single-instance lock — go-rotini/fs, fs.PIDLock
 //   - caching in a long-running program — go-rotini/memcache
-//
-// Styling, tables, spinners, prompts, forms and paging are left to the program and to libraries
-// built for them. rotini turns a spec into a parsed, validated, dispatched invocation and hands
-// the handler a [Context]; what the handler prints, and how, is the program's.
 package rotini

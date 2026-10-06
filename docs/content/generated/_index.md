@@ -5,8 +5,8 @@ title: "generated"
 # zz_rotini.go
 
 `go generate ./...` turns your spec into one Go file, `internal/cmd/<name>/zz_rotini.go`. It is
-rewritten on every run, so you never edit it, and you rarely need to read it. This page explains
-what is in it and which files around it are yours.
+rewritten on every run, so never edit it. This page explains what is in it and which files around
+it are yours.
 
 ## From spec to code
 
@@ -67,8 +67,8 @@ func Handlers() ProgramHandlers {
 
 A handler reads its own values from `in.TodoAdd` and a parent's flags from `in.Todo`. The types
 generated from `schemas:` are ordinary Go types, so your own code, such as a store that saves
-tasks, can use them too. Because
-`NewProgram` takes a `ProgramHandlers`, the compiler reports a command that has no handler.
+tasks, can use them too. Because `NewProgram` takes a `ProgramHandlers`, the compiler reports a
+command that has no handler.
 
 To put the input and output types in a package of their own, for example so a handler in
 another package can import them, declare a `models` target under the conf's
