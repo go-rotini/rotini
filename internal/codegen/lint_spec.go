@@ -65,6 +65,7 @@ var specLints = []func(*Spec) []error{
 	lintSchemaTypes,
 	lintVariable,
 	lintNegatable,
+	lintShortCircuit,
 	lintStdinFormat,
 	lintComplete,
 	lintDefaultScalar,
@@ -949,6 +950,69 @@ func lintNegatable(spec *Spec) []error {
 		}
 	})
 	return problems
+}
+
+// lintShortCircuit keeps a short_circuit flag to what the waiver can mean: a bool switch set
+// only on the command line, never a requirement itself. Being required, defaulting to true,
+// or reading an environment variable or config key would waive every run; negating it has no
+// meaning; and a flag group or dependency is a requirement the flag would waive.
+func lintShortCircuit(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		grouped := map[string]bool{}
+		for _, g := range c.FlagGroups {
+			for _, name := range g.Flags {
+				grouped[name] = true
+			}
+		}
+		dependent := map[string]bool{}
+		for _, dep := range c.FlagDependencies {
+			dependent[dep.When] = true
+			for _, name := range dep.Requires {
+				dependent[name] = true
+			}
+		}
+		for i, f := range c.Flags {
+			if !f.ShortCircuit {
+				continue
+			}
+			for _, msg := range shortCircuitFlagProblems(f, grouped[f.Name], dependent[f.Name]) {
+				problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name, msg))
+			}
+		}
+	})
+	return problems
+}
+
+// shortCircuitFlagProblems lists what is wrong with one short_circuit flag's declaration.
+func shortCircuitFlagProblems(f FlagInput, grouped, dependent bool) []string {
+	s := f.Schema
+	if s == nil {
+		s = &InputSchema{}
+	}
+	var msgs []string
+	if s.Type != "bool" && s.Type != "boolean" {
+		msgs = append(msgs, fmt.Sprintf("sets `short_circuit` but its type is %s; a short-circuit flag is a bool switch", displayType(s.Type)))
+	}
+	if s.Required {
+		msgs = append(msgs, "sets `short_circuit` and `required`; a short-circuit flag replaces the run, so it can't also be required")
+	}
+	if defaultString(s.Default) == "true" {
+		msgs = append(msgs, "sets `short_circuit` with a default of true, which would short-circuit every run")
+	}
+	if s.Key != "" || len(variables(s)) > 0 {
+		msgs = append(msgs, "sets `short_circuit` and reads an environment variable or config key (`key` / `variable`); only the command line sets a short-circuit flag, or every run with that value set would be short-circuited")
+	}
+	if s.Negatable {
+		msgs = append(msgs, "sets `short_circuit` and `negatable`; a negated short-circuit flag has no meaning")
+	}
+	if grouped {
+		msgs = append(msgs, "sets `short_circuit` but is listed in `flag_groups`; a short-circuit flag waives flag groups, so the group could never apply to it")
+	}
+	if dependent {
+		msgs = append(msgs, "sets `short_circuit` but is listed in `flag_dependencies`; a short-circuit flag waives flag dependencies, so the rule could never apply to it")
+	}
+	return msgs
 }
 
 // displayType renders a declared type for a message, describing an omitted type explicitly.

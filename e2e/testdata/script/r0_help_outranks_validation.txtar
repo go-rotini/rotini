@@ -1,14 +1,16 @@
-# R0 — a command's own --help outranks its own required inputs.
+# R0 — a command's own --help outranks its own required inputs (the per-stub shape).
 #
-# `mycli grab --help` used to answer
+# `mycli grab --help` once answered
 #   Error: missing required input: <what>
 # because the seeded stub called Inputs — which validates — and returned on its error before
-# it reached the `if inputs.…Flags.Help` branch three lines below. The user asked NOT to run
-# the command and was told off for not supplying what running it would need.
+# it reached the `if inputs.…Flags.Help` branch. The user asked NOT to run the command and was
+# told off for not supplying what running it would need.
 #
-# The stub now answers help from ArgvInputs, which applies no required or enum validation, and
-# does it BEFORE Inputs. This script is that ordering, from outside the binary, on a command
-# that has a required argument — the only shape where the two orders differ.
+# A spec whose --help is NOT short_circuit (every project seeded before v1.3.0, and any command
+# that declares its own --help, as grab does here) still gets the per-stub answer: the stub
+# reads --help from ArgvInputs, which applies no required or enum validation, BEFORE Inputs.
+# This script keeps that shape working. The short-circuit shape `rotini init` seeds today
+# (one root CascadingPreRun, the flag marked short_circuit) is r0_short_circuit.txtar.
 
 gomodinit example.com/helped
 

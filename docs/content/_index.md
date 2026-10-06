@@ -89,17 +89,12 @@ Add a `hello` command, with an optional argument and a flag, under `commands:` i
 ### 3. Generate, then implement the handler
 
 `go generate ./...` writes `internal/cmd/helloworld/helloworld_hello.go`. Its `Run` method already
-answers `--help` and reads the typed, validated inputs. Replace the line that prints them with the
-greeting code, and add `"strings"` to the imports:
+reads the typed, validated inputs; `--help` is answered for every command by the root handler
+`init` wrote. Replace the line that prints the inputs with the greeting code, and add `"strings"`
+to the imports:
 
 {{< code title="internal/cmd/helloworld/helloworld_hello.go" language="go" open="true" collapsible="false" copy="true" >}}
 func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if argv, err := rtx.ArgvInputs[HelloworldHelloInputs](); err == nil && argv.Values.Helloworld.Flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
-
 	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
 	if err != nil {
 		rtx.HaltWith(err)

@@ -86,7 +86,9 @@
 // validated when a handler calls [Context.Inputs] (or the per-channel [Context.ArgvInputs],
 // [Context.EnvInputs], [Context.FileInputs] and [Context.StdinInputs]), which the generated
 // stubs do first. A handler that never calls it reads the raw [Context.Argv] and gets no
-// validation.
+// validation; [Context.CheckInputs] checks inputs it collects another way. A flag marked
+// short_circuit in the spec ([FlagDef.ShortCircuit]), such as --help, waives every declared
+// requirement when it is set on the command line, so the handler can act on it.
 //
 // The runtime's only built-in behaviors are a default SIGINT/SIGTERM trap (see
 // [Program.WithoutSignalHandling] and [Program.WithSignals]), the hidden __complete entry the
@@ -185,8 +187,10 @@
 //     program's wiring. [Context.Inputs] returns one [*WiringError] as an error instead: config
 //     inputs requested on a program built without an [InputSettings].
 //
-// rotini prints no "did you mean" suggestions and no help on error; a program that wants
-// either writes its own reporter.
+// rotini prints no "did you mean" suggestions and no help on error. A program that wants
+// either branches on the error in its handler (errors.As to the type, then its Kind or
+// [CategoryOf]) or writes its own reporter. A value a flag's environment or config fallback
+// supplied is named with its source in a value error, so the user can find it.
 //
 // # Sharing dependencies between handlers
 //
@@ -252,6 +256,11 @@
 //     [Context.FileInputs], [Context.StdinInputs], [Context.DefaultInputs], merged by
 //     [MergeInputs] or [MergeInputsWithReport]) read channels one at a time, for programs
 //     with custom precedence.
+//
+//   - [Context.CheckInputs] checks inputs the program collected itself (a prompt, a secrets
+//     service, a test) against the spec, with [PresenceOf] marking which fields were supplied;
+//     a hand-built [InputLayer] merged with rotini's is checked the same way by
+//     [InputReport.Validate].
 //
 //   - [Suggestor] turns a [*ParseError]'s rejected token and candidates into "did you mean"
 //     suggestions; [Suggestor.For] does it in one call.

@@ -68,6 +68,8 @@ command:
     - name: help
       summary: print help
       identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
       schema: { type: bool }
     - name: config
       summary: a config file to read instead of discovering one

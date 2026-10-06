@@ -21,10 +21,6 @@ type rotiniManHandler struct {
 }
 
 func (*rotiniManHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if answerHelp(rtx, func(in RotiniManInputs) bool { return in.RotiniMan.Flags.Help }) {
-		return
-	}
-
 	inputs, err := rtx.Inputs[RotiniManInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)

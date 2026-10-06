@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -64,6 +65,9 @@ type completionContext struct {
 	positionals     int
 	afterTerminator bool
 	plugin          bool // a plugin token was hit: the rest belongs to the dispatched binary
+	// shortCircuit records a short-circuit flag ([FlagDef.ShortCircuit]) already on the line:
+	// the run it starts replaces the command's, so nothing further is offered.
+	shortCircuit bool
 }
 
 // complete returns the candidates for the word currently being typed — the last element of
@@ -80,6 +84,9 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 	cc := walkContext(def, context)
 	if cc.plugin {
 		return nil // the plugin binary owns its own argument surface
+	}
+	if cc.shortCircuit {
+		return nil // a short-circuit flag replaces the run; nothing more belongs on the line
 	}
 	cur := cc.chain[len(cc.chain)-1]
 	if cur.Passthrough {
@@ -204,6 +211,12 @@ func walkContext(def Definition, context []string) completionContext {
 			continue
 		}
 		if isFlag(tok) {
+			if name, val, inline := splitFlag(tok); !cc.shortCircuit {
+				if fd, _, ok := findFlag(cc.chain, name); ok && fd.ShortCircuit {
+					on, err := strconv.ParseBool(val)
+					cc.shortCircuit = !inline || (err == nil && on)
+				}
+			}
 			// Skip a separate value word so it is not mistaken for a command — unless it is
 			// the "=" glue, which the next iteration handles.
 			if i+1 < len(context) && context[i+1] != "=" {
@@ -490,6 +503,9 @@ func completionHintFor(def Definition, words []string) Completion {
 	cc := walkContext(def, context)
 	if cc.plugin {
 		return Completion{} // the plugin binary owns its own argument surface
+	}
+	if cc.shortCircuit {
+		return Completion{Kind: "none"} // offer nothing, not even the shell's file fallback
 	}
 	cur := cc.chain[len(cc.chain)-1]
 	if cur.Passthrough || cc.afterTerminator {

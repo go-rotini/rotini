@@ -18,10 +18,6 @@ type rotiniHelpHandler struct {
 }
 
 func (*rotiniHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if answerHelp(rtx, func(in RotiniHelpInputs) bool { return in.RotiniHelp.Flags.Help }) {
-		return
-	}
-
 	inputs, err := rtx.Inputs[RotiniHelpInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)

@@ -23,8 +23,8 @@ var definition = rotini.Definition{
 	Name:    "rotini",
 	Handler: "Rotini",
 	Flags: []rotini.FlagDef{
-		{Name: "version", Identifiers: []string{"-v", "--version"}, Summary: "print version", Type: "bool"},
-		{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
+		{Name: "version", Identifiers: []string{"-v", "--version"}, Summary: "print version", Type: "bool", ShortCircuit: true},
+		{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool", ShortCircuit: true},
 	},
 	Commands: []rotini.CommandDef{
 		{Name: "initialize",
@@ -34,7 +34,6 @@ var definition = rotini.Definition{
 			Flags: []rotini.FlagDef{
 				{Name: "format", Identifiers: []string{"--format"}, Summary: "the created rotini spec file format", Type: "string", Default: "yaml", Enum: []string{"yaml", "yml", "json", "jsonc", "toml"}},
 				{Name: "force", Identifiers: []string{"--force"}, Summary: "replace an existing spec and conf with the seed (never deletes a file)", Type: "bool"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "name", Type: "string", Required: true},
@@ -47,7 +46,6 @@ var definition = rotini.Definition{
 			Flags: []rotini.FlagDef{
 				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Summary: "path to the rotini conf file (default the .rotini.conf.* beside the spec)", Type: "string"},
 				{Name: "watch", Identifiers: []string{"-w", "--watch"}, Summary: "watch the spec and conf for changes and re-generate", Type: "bool"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string"},
@@ -61,7 +59,6 @@ var definition = rotini.Definition{
 				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Summary: "path to the rotini conf file (default the .rotini.conf.* beside the spec)", Type: "string"},
 				{Name: "fail", Identifiers: []string{"--fail"}, Summary: "failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect", Type: "string", Enum: []string{"fast", "collect"}},
 				{Name: "watch", Identifiers: []string{"-w", "--watch"}, Summary: "watch the spec and conf for changes and re-validate", Type: "bool"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string"},
@@ -70,9 +67,6 @@ var definition = rotini.Definition{
 		{Name: "help",
 			Handler: "RotiniHelp",
 			Summary: "print help",
-			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
-			},
 			Arguments: []rotini.ArgDef{
 				{Name: "command", Type: "[]string", Variadic: true},
 			},
@@ -80,16 +74,10 @@ var definition = rotini.Definition{
 		{Name: "version",
 			Handler: "RotiniVersion",
 			Summary: "print version",
-			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
-			},
 		},
 		{Name: "completion",
 			Handler: "RotiniCompletion",
 			Summary: "print a shell completion script",
-			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
-			},
 			Arguments: []rotini.ArgDef{
 				{Name: "shell", Type: "string", Required: true, Enum: []string{"bash", "zsh", "fish", "powershell"}},
 			},
@@ -99,7 +87,6 @@ var definition = rotini.Definition{
 			Summary: "print or install the man pages",
 			Flags: []rotini.FlagDef{
 				{Name: "dir", Identifiers: []string{"--dir"}, Summary: "write every page into this directory instead of printing one", Type: "string"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "command", Type: "[]string", Variadic: true},
@@ -124,9 +111,7 @@ type RotiniInputs struct {
 	Rotini RotiniCommandInputs
 }
 
-type RotiniCompletionFlags struct {
-	Help bool `rotini:"help"`
-}
+type RotiniCompletionFlags struct{}
 
 type RotiniCompletionArguments struct {
 	Shell string `rotini:"shell"`
@@ -145,7 +130,6 @@ type RotiniCompletionInputs struct {
 type RotiniGenerateFlags struct {
 	ConfFilePath string `rotini:"conf_file_path"`
 	Watch        bool   `rotini:"watch"`
-	Help         bool   `rotini:"help"`
 }
 
 type RotiniGenerateArguments struct {
@@ -162,9 +146,7 @@ type RotiniGenerateInputs struct {
 	RotiniGenerate RotiniGenerateCommandInputs
 }
 
-type RotiniHelpFlags struct {
-	Help bool `rotini:"help"`
-}
+type RotiniHelpFlags struct{}
 
 type RotiniHelpArguments struct {
 	Command []string `rotini:"command"`
@@ -183,7 +165,6 @@ type RotiniHelpInputs struct {
 type RotiniInitializeFlags struct {
 	Format string `rotini:"format"`
 	Force  bool   `rotini:"force"`
-	Help   bool   `rotini:"help"`
 }
 
 type RotiniInitializeArguments struct {
@@ -201,8 +182,7 @@ type RotiniInitializeInputs struct {
 }
 
 type RotiniManFlags struct {
-	Dir  string `rotini:"dir"`
-	Help bool   `rotini:"help"`
+	Dir string `rotini:"dir"`
 }
 
 type RotiniManArguments struct {
@@ -223,7 +203,6 @@ type RotiniValidateFlags struct {
 	ConfFilePath string `rotini:"conf_file_path"`
 	Fail         string `rotini:"fail"`
 	Watch        bool   `rotini:"watch"`
-	Help         bool   `rotini:"help"`
 }
 
 type RotiniValidateArguments struct {
@@ -240,9 +219,7 @@ type RotiniValidateInputs struct {
 	RotiniValidate RotiniValidateCommandInputs
 }
 
-type RotiniVersionFlags struct {
-	Help bool `rotini:"help"`
-}
+type RotiniVersionFlags struct{}
 
 type RotiniVersionArguments struct{}
 
@@ -315,19 +292,19 @@ func (*handlers) RotiniVersion() rotini.Handler {
 
 var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize, init    scaffold a cli program\n  generate, gen       generate a cli program\n  validate, val       validate a spec and conf\n  help                print help\n  version             print version\n  completion          print a shell completion script\n  man                 print or install the man pages\n\nFlags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniInitialize = "Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize <name> [flags]\n\nArguments:\n  <name>    the root command name written to the created spec file (expected binary name)\n\nFlags:\n  --format string    the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n  --force            replace an existing spec and conf with the seed (never deletes a file)\n  -h, --help         print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniInitialize = "Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize <name> [flags]\n\nArguments:\n  <name>    the root command name written to the created spec file (expected binary name)\n\nFlags:\n  --format string    the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n  --force            replace an existing spec and conf with the seed (never deletes a file)\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniGenerate = "Generate a cli program from a rotini spec file and its conf.\n\nUsage:\n  rotini generate [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n  -w, --watch            watch the spec and conf for changes and re-generate\n  -h, --help             print help\n\nExamples:\n  rotini generate\n  rotini generate ./path/to/.rotini.spec.json --watch\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniGenerate = "Generate a cli program from a rotini spec file and its conf.\n\nUsage:\n  rotini generate [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n  -w, --watch            watch the spec and conf for changes and re-generate\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini generate\n  rotini generate ./path/to/.rotini.spec.json --watch\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniValidate = "Validate a rotini spec file and its conf for correctness.\n\nUsage:\n  rotini validate [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n  --fail string          failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]\n  -w, --watch            watch the spec and conf for changes and re-validate\n  -h, --help             print help\n\nExamples:\n  rotini validate\n  rotini val ./path/to/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniValidate = "Validate a rotini spec file and its conf for correctness.\n\nUsage:\n  rotini validate [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n  --fail string          failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]\n  -w, --watch            watch the spec and conf for changes and re-validate\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini validate\n  rotini val ./path/to/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniHelp = "Print help for a specific command.\n\nUsage:\n  rotini help [command...] [flags]\n\nArguments:\n  [command...]    name of the command to print help for\n\nFlags:\n  -h, --help    print help\n\nExamples:\n  rotini help\n  rotini help generate\n  rotini help init\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniHelp = "Print help for a specific command.\n\nUsage:\n  rotini help [command...]\n\nArguments:\n  [command...]    name of the command to print help for\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini help\n  rotini help generate\n  rotini help init\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniVersion = "Print the rotini cli version.\n\nUsage:\n  rotini version [flags]\n\nFlags:\n  -h, --help    print help\n\nExamples:\n  rotini version\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniVersion = "Print the rotini cli version.\n\nUsage:\n  rotini version\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini version\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniCompletion = "Print the completion script for a shell. Load it once per session, or install it so\nevery new shell has it:\n\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out-String | Invoke-Expression\n              add that line to $PROFILE to load it in every session\n\nUsage:\n  rotini completion <shell> [flags]\n\nArguments:\n  <shell>    the shell to print the script for [bash|zsh|fish|powershell]\n\nFlags:\n  -h, --help    print help\n\nExamples:\n  rotini completion bash\n  rotini completion zsh > \"${fpath[1]}/_rotini\"\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniCompletion = "Print the completion script for a shell. Load it once per session, or install it so\nevery new shell has it:\n\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out-String | Invoke-Expression\n              add that line to $PROFILE to load it in every session\n\nUsage:\n  rotini completion <shell>\n\nArguments:\n  <shell>    the shell to print the script for [bash|zsh|fish|powershell]\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini completion bash\n  rotini completion zsh > \"${fpath[1]}/_rotini\"\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniMan = "Print a command's man page as roff, the markup the man program reads, or write every\npage into a directory with --dir. With no command, it prints the page for rotini itself.\n\nThe pages are named after the command path, rotini-generate.1, so a directory written\nwith --dir can be added to MANPATH or copied into a man1 directory.\n\nUsage:\n  rotini man [command...] [flags]\n\nArguments:\n  [command...]    the command whose page to print (default rotini itself)\n\nFlags:\n  --dir string    write every page into this directory instead of printing one\n  -h, --help      print help\n\nExamples:\n  rotini man generate > rotini-generate.1\n  rotini man --dir ~/.local/share/man/man1\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniMan = "Print a command's man page as roff, the markup the man program reads, or write every\npage into a directory with --dir. With no command, it prints the page for rotini itself.\n\nThe pages are named after the command path, rotini-generate.1, so a directory written\nwith --dir can be added to MANPATH or copied into a man1 directory.\n\nUsage:\n  rotini man [command...] [flags]\n\nArguments:\n  [command...]    the command whose page to print (default rotini itself)\n\nFlags:\n  --dir string    write every page into this directory instead of printing one\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini man generate > rotini-generate.1\n  rotini man --dir ~/.local/share/man/man1\n\nUse \"rotini help <command>\" for more information about a command."
 
 // Help returns the generated help text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
@@ -357,19 +334,19 @@ func Help(path ...string) (string, error) {
 
 var ManRotini = ".TH \"ROTINI\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\n.SH SYNOPSIS\n.nf\nrotini <command> <arguments> [flags]\n      [\\-v | \\-\\-version] [\\-h | \\-\\-help]\n.fi\n.SH DESCRIPTION\nThe rotini cli framework companion cli.\n.PP\nFind more information at: https://rotini.dev\n.SH \"COMMANDS\"\n.TP\n\\fBinitialize\\fR, \\fBinit\\fR\nscaffold a cli program\n.TP\n\\fBgenerate\\fR, \\fBgen\\fR\ngenerate a cli program\n.TP\n\\fBvalidate\\fR, \\fBval\\fR\nvalidate a spec and conf\n.TP\n\\fBhelp\\fR\nprint help\n.TP\n\\fBversion\\fR\nprint version\n.TP\n\\fBcompletion\\fR\nprint a shell completion script\n.TP\n\\fBman\\fR\nprint or install the man pages\n.SH \"OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini init mycli\n.sp\nrotini validate .rotini.spec.yaml\n.sp\nrotini generate ./path/to/.rotini.spec.json\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-initialize\\fR(1), \\fBrotini\\-generate\\fR(1),\n\\fBrotini\\-validate\\fR(1), \\fBrotini\\-help\\fR(1), \\fBrotini\\-version\\fR(1),\n\\fBrotini\\-completion\\fR(1), \\fBrotini\\-man\\fR(1)\n"
 
-var ManRotiniInitialize = ".TH \"ROTINI\\-INITIALIZE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-initialize \\- scaffold a cli program\n.SH SYNOPSIS\n\\fBrotini initialize\\fR <name> [flags]\n.SH DESCRIPTION\nScaffold a new rotini cli \\[u2014] write the spec + conf, then run the first\ngenerate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n.SH ARGUMENTS\n.TP\n\\fI<name>\\fR\nthe root command name written to the created spec file (expected binary name)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf with the seed (never deletes a file)\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini initialize mycli\n.sp\nrotini init mycli \\-\\-format json\n.sp\nrotini init mycli \\-\\-force\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniInitialize = ".TH \"ROTINI\\-INITIALIZE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-initialize \\- scaffold a cli program\n.SH SYNOPSIS\n\\fBrotini initialize\\fR <name> [flags]\n.SH DESCRIPTION\nScaffold a new rotini cli \\[u2014] write the spec + conf, then run the first\ngenerate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n.SH ARGUMENTS\n.TP\n\\fI<name>\\fR\nthe root command name written to the created spec file (expected binary name)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf with the seed (never deletes a file)\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini initialize mycli\n.sp\nrotini init mycli \\-\\-format json\n.sp\nrotini init mycli \\-\\-force\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniGenerate = ".TH \"ROTINI\\-GENERATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-generate \\- generate a cli program\n.SH SYNOPSIS\n\\fBrotini generate\\fR [spec_file_path] [flags]\n.SH DESCRIPTION\nGenerate a cli program from a rotini spec file and its conf.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-generate\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini generate\n.sp\nrotini generate ./path/to/.rotini.spec.json \\-\\-watch\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniGenerate = ".TH \"ROTINI\\-GENERATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-generate \\- generate a cli program\n.SH SYNOPSIS\n\\fBrotini generate\\fR [spec_file_path] [flags]\n.SH DESCRIPTION\nGenerate a cli program from a rotini spec file and its conf.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-generate\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini generate\n.sp\nrotini generate ./path/to/.rotini.spec.json \\-\\-watch\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniValidate = ".TH \"ROTINI\\-VALIDATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-validate \\- validate a spec and conf\n.SH SYNOPSIS\n\\fBrotini validate\\fR [spec_file_path] [flags]\n.SH DESCRIPTION\nValidate a rotini spec file and its conf for correctness.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-\\-fail\\fR \\fIstring\\fR\nfailure reporting \\[u2014] fast (first problem) or collect (all); defaults to\nvalidate.fail in the conf, else collect [fast|collect]\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-validate\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini validate\n.sp\nrotini val ./path/to/.rotini.spec.yaml\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniValidate = ".TH \"ROTINI\\-VALIDATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-validate \\- validate a spec and conf\n.SH SYNOPSIS\n\\fBrotini validate\\fR [spec_file_path] [flags]\n.SH DESCRIPTION\nValidate a rotini spec file and its conf for correctness.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-\\-fail\\fR \\fIstring\\fR\nfailure reporting \\[u2014] fast (first problem) or collect (all); defaults to\nvalidate.fail in the conf, else collect [fast|collect]\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-validate\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini validate\n.sp\nrotini val ./path/to/.rotini.spec.yaml\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniHelp = ".TH \"ROTINI\\-HELP\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-help \\- print help\n.SH SYNOPSIS\n\\fBrotini help\\fR [command...] [flags]\n.SH DESCRIPTION\nPrint help for a specific command.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nname of the command to print help for\n.SH \"OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini help\n.sp\nrotini help generate\n.sp\nrotini help init\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniHelp = ".TH \"ROTINI\\-HELP\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-help \\- print help\n.SH SYNOPSIS\n\\fBrotini help\\fR [command...]\n.SH DESCRIPTION\nPrint help for a specific command.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nname of the command to print help for\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini help\n.sp\nrotini help generate\n.sp\nrotini help init\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniVersion = ".TH \"ROTINI\\-VERSION\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-version \\- print version\n.SH SYNOPSIS\n\\fBrotini version\\fR [flags]\n.SH DESCRIPTION\nPrint the rotini cli version.\n.SH \"OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini version\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniVersion = ".TH \"ROTINI\\-VERSION\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-version \\- print version\n.SH SYNOPSIS\n\\fBrotini version\\fR\n.SH DESCRIPTION\nPrint the rotini cli version.\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini version\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniCompletion = ".TH \"ROTINI\\-COMPLETION\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-completion \\- print a shell completion script\n.SH SYNOPSIS\n\\fBrotini completion\\fR <shell> [flags]\n.SH DESCRIPTION\nPrint the completion script for a shell. Load it once per session, or install it\nso\nevery new shell has it:\n.PP\n.nf\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash\\-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out\\-String | Invoke\\-Expression\n              add that line to $PROFILE to load it in every session\n.fi\n.SH ARGUMENTS\n.TP\n\\fI<shell>\\fR\nthe shell to print the script for [bash|zsh|fish|powershell]\n.SH \"OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini completion bash\n.sp\nrotini completion zsh > \"${fpath[1]}/_rotini\"\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniCompletion = ".TH \"ROTINI\\-COMPLETION\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-completion \\- print a shell completion script\n.SH SYNOPSIS\n\\fBrotini completion\\fR <shell>\n.SH DESCRIPTION\nPrint the completion script for a shell. Load it once per session, or install it\nso\nevery new shell has it:\n.PP\n.nf\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash\\-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out\\-String | Invoke\\-Expression\n              add that line to $PROFILE to load it in every session\n.fi\n.SH ARGUMENTS\n.TP\n\\fI<shell>\\fR\nthe shell to print the script for [bash|zsh|fish|powershell]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini completion bash\n.sp\nrotini completion zsh > \"${fpath[1]}/_rotini\"\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniMan = ".TH \"ROTINI\\-MAN\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-man \\- print or install the man pages\n.SH SYNOPSIS\n\\fBrotini man\\fR [command...] [flags]\n.SH DESCRIPTION\nPrint a command\\(aqs man page as roff, the markup the man program reads, or\nwrite every\npage into a directory with \\-\\-dir. With no command, it prints the page for\nrotini itself.\n.PP\nThe pages are named after the command path, rotini\\-generate.1, so a directory\nwritten\nwith \\-\\-dir can be added to MANPATH or copied into a man1 directory.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nthe command whose page to print (default rotini itself)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-dir\\fR \\fIstring\\fR\nwrite every page into this directory instead of printing one\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini man generate > rotini\\-generate.1\n.sp\nrotini man \\-\\-dir ~/.local/share/man/man1\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniMan = ".TH \"ROTINI\\-MAN\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-man \\- print or install the man pages\n.SH SYNOPSIS\n\\fBrotini man\\fR [command...] [flags]\n.SH DESCRIPTION\nPrint a command\\(aqs man page as roff, the markup the man program reads, or\nwrite every\npage into a directory with \\-\\-dir. With no command, it prints the page for\nrotini itself.\n.PP\nThe pages are named after the command path, rotini\\-generate.1, so a directory\nwritten\nwith \\-\\-dir can be added to MANPATH or copied into a man1 directory.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nthe command whose page to print (default rotini itself)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-dir\\fR \\fIstring\\fR\nwrite every page into this directory instead of printing one\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini man generate > rotini\\-generate.1\n.sp\nrotini man \\-\\-dir ~/.local/share/man/man1\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 // ManSection is the man section these pages were generated for: the number after the dot in a
 // page's file name (<page-name>.1) and in the cross-references between pages.

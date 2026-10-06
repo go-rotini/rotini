@@ -37,10 +37,43 @@ func releaseVersion(v string) string {
 var _ rotini.Handler = (*rotiniHandler)(nil)
 
 type rotiniHandler struct {
-	rotini.NoCascadingPreRun
 	rotini.NoPreRun
 	rotini.NoPostRun
 	rotini.NoCascadingPostRun
+}
+
+// CascadingPreRun answers --help and --version for every command in the tree. Both are
+// short_circuit in the spec, so reading the inputs succeeds even when the invoked command's
+// own requirements are not met.
+func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[RotiniInputs]()
+	if err != nil {
+		haltWithInputError(rtx, err)
+		return
+	}
+
+	if inputs.Rotini.Flags.Help {
+		var path []string
+		for _, c := range rtx.CommandChain()[1:] {
+			path = append(path, c.Name)
+		}
+
+		page, err := Help(path...)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+		return
+	}
+
+	if inputs.Rotini.Flags.Version {
+		fmt.Fprintf(rtx.Stdout, "v%s\n", rtx.Version())
+		rtx.HaltWithCode(0)
+		return
+	}
 }
 
 // ResolveVersion returns the version the binary reports. The build info's module version wins
@@ -59,22 +92,6 @@ func ResolveVersion(ldflagVersion string) string {
 }
 
 func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if answerHelp(rtx, func(in RotiniInputs) bool { return in.Rotini.Flags.Help }) {
-		return
-	}
-
-	inputs, err := rtx.Inputs[RotiniInputs]()
-	if err != nil {
-		haltWithInputError(rtx, err)
-		return
-	}
-
-	if inputs.Rotini.Flags.Version {
-		fmt.Fprintf(rtx.Stdout, "v%s\n", rtx.Version())
-		rtx.HaltWithCode(0)
-		return
-	}
-
 	// A bare `rotini` prints help and exits 1, since nothing ran.
 	fmt.Fprintln(rtx.Stdout, rtx.Help())
 	rtx.HaltWithCode(1)

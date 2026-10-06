@@ -25,7 +25,8 @@ import (
 //   - inputs — [Context.Inputs] returns the command's validated inputs,
 //     [Context.InputsWithReport] adds where each value came from, and the per-channel
 //     [Context.ArgvInputs], [Context.EnvInputs], [Context.FileInputs],
-//     [Context.StdinInputs] and [Context.DefaultInputs] read one channel each
+//     [Context.StdinInputs] and [Context.DefaultInputs] read one channel each;
+//     [Context.CheckInputs] checks inputs the program collected itself against the spec
 //   - output — [Context.WriteOutput] writes the command's declared output to stdout,
 //     [Context.WriteOutputItem] one item of a stream, and [Context.CheckOutput] checks a value
 //     against the declared shape without writing it

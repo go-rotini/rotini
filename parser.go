@@ -71,6 +71,37 @@ type scopeInputs struct {
 	// used is every identifier each flag was set through, in order; [Deprecations] reports
 	// from it.
 	used map[string][]string
+	// origin names where a flag's value came from when its env or config fallback supplied it
+	// ("environment variable APP_PORT", `configuration file "app"`), so an error about the
+	// value says where to look. A value typed on the command line has none.
+	origin map[string]string
+	// presenceOnly marks flags present only to satisfy presence rules: a hand-built layer
+	// supplied them (see [InputReport.Validate]), and their values are checked elsewhere.
+	presenceOnly map[string]bool
+	// placeholderArgs counts trailing args that stand in for hand-built positionals the same
+	// way: they satisfy the required check, and their values are not read here.
+	placeholderArgs int
+}
+
+// fromSource is the suffix an error about a fallback value carries, naming its origin; "" for
+// a value typed on the command line.
+func fromSource(origin string) string {
+	if origin == "" {
+		return ""
+	}
+	return " (from " + origin + ")"
+}
+
+// withSource appends a fallback value's origin to a value error, so the user can find a value
+// they never typed. A non-*ParseError, or an empty origin, is returned unchanged.
+func withSource(err error, origin string) error {
+	pe, ok := err.(*ParseError) //nolint:errorlint // the value checks return a bare *ParseError
+	if !ok || origin == "" {
+		return err
+	}
+	cp := *pe
+	cp.Msg += fromSource(origin)
+	return &cp
 }
 
 // label is how an error names flag fd: as the user typed it, else by its preferred identifier.
@@ -208,13 +239,7 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 	if err != nil {
 		return err
 	}
-	if err := validate(chain, store); err != nil {
-		return err
-	}
-	if err := validateFlagGroups(chain, store); err != nil {
-		return err
-	}
-	return validateFlagDependencies(chain, store)
+	return validateStore(chain, store)
 }
 
 // parseBind parses argv into a store and binds it into out without validating — that is
@@ -491,6 +516,51 @@ func noteDetached(store *parsedInputs, chain []Command, tok string, argv []strin
 	store.detached = &[2]string{tok, next}
 }
 
+// shortCircuited reports whether a short-circuit flag ([FlagDef.ShortCircuit]) is set to true
+// on the command line anywhere on the resolved chain. Such a flag replaces the command's normal
+// run, so every declared requirement of the chain is waived: required inputs, enums, bounds,
+// patterns, path checks, flag groups and dependencies. What cannot be read at all (an unknown
+// flag or command, an uncoercible value, extra positionals, a malformed map) is still an
+// error. A default or fallback never sets a short-circuit flag.
+func shortCircuited(chain []Command, store *parsedInputs) bool {
+	if store == nil {
+		return false
+	}
+	for i, f := range chain {
+		if i >= len(store.scopes) {
+			break
+		}
+		for _, fd := range f.Flags {
+			if !fd.ShortCircuit || !store.setOnArgv(i, fd.Name) {
+				continue
+			}
+			vals := store.scopes[i].flags[fd.Name]
+			if len(vals) == 0 {
+				continue
+			}
+			if on, err := strconv.ParseBool(vals[len(vals)-1]); err == nil && on {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// checkFlagShape is the part of [checkFlagValues] a short-circuited run keeps: a map value
+// must be key=value pairs, which is a matter of reading the value, not of meeting a
+// requirement.
+func checkFlagShape(fd FlagDef, label string, vals []string) error {
+	if !isMapType(fd.Type) {
+		return nil
+	}
+	for _, v := range vals {
+		if !strings.Contains(v, "=") {
+			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, fd.Secret)), Flag: label}
+		}
+	}
+	return nil
+}
+
 // checkFlagValues checks one flag's argv values against its enum, its key=value shape when it
 // is a map, and its constraints. label is the flag as the user typed it.
 func checkFlagValues(fd FlagDef, label string, vals []string) error {
@@ -549,6 +619,7 @@ func validate(chain []Command, store *parsedInputs) error {
 	leaf := chain[len(chain)-1]
 	si := store.scopes[len(chain)-1]
 	leafCovered := store.covers(len(chain) - 1)
+	waived := shortCircuited(chain, store)
 
 	if leafCovered {
 		if err := strayCommand(leaf, si, store); err != nil {
@@ -556,8 +627,10 @@ func validate(chain []Command, store *parsedInputs) error {
 		}
 	}
 
-	if err := requiredErrors(chain, store); err != nil {
-		return err
+	if !waived {
+		if err := requiredErrors(chain, store); err != nil {
+			return err
+		}
 	}
 
 	for i, f := range chain {
@@ -566,8 +639,15 @@ func validate(chain []Command, store *parsedInputs) error {
 		}
 		fsi := store.scopes[i]
 		for _, fd := range f.Flags {
-			if err := checkFlagValues(fd, fsi.label(fd), fsi.flags[fd.Name]); err != nil {
-				return err
+			if fsi.presenceOnly[fd.Name] {
+				continue
+			}
+			check := checkFlagValues
+			if waived {
+				check = checkFlagShape
+			}
+			if err := check(fd, fsi.label(fd), fsi.flags[fd.Name]); err != nil {
+				return withSource(err, fsi.origin[fd.Name])
 			}
 		}
 	}
@@ -578,16 +658,23 @@ func validate(chain []Command, store *parsedInputs) error {
 	if err := extraPositionals(leaf, si, store); err != nil {
 		return err
 	}
+	if waived {
+		return nil
+	}
 
+	args := si.args[:len(si.args)-si.placeholderArgs] // only values this store actually read
 	for i, ad := range leaf.Arguments {
+		if i >= len(args) && i < len(si.args) {
+			continue // a hand-built positional: its value is checked with the typed rules
+		}
 		var vals []string
 		switch {
 		case ad.Variadic:
-			if i < len(si.args) {
-				vals = si.args[i:]
+			if i < len(args) {
+				vals = args[i:]
 			} // an absent variadic still gets a MinItems check below
-		case i < len(si.args):
-			vals = si.args[i : i+1]
+		case i < len(args):
+			vals = args[i : i+1]
 		default:
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		}
@@ -725,7 +812,13 @@ func checkNumericBounds(label string, c Constraints, v string, secret bool, pars
 	if !numeric {
 		return nil
 	}
-	got := redactValue(v, secret)
+	return checkNumberBounds(label, c, n, redactValue(v, secret), format)
+}
+
+// checkNumberBounds is the numeric rule core shared by the command-line path and
+// [Context.CheckInputs]: n is the value, got the text an error shows for it (already redacted
+// for a secret input), and format renders a bound.
+func checkNumberBounds(label string, c Constraints, n float64, got string, format func(float64) string) error {
 	switch {
 	case c.Minimum != nil && n < *c.Minimum:
 		return constraintViolation("%s must be >= %s (got %s)", label, format(*c.Minimum), got)

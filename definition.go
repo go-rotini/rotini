@@ -172,10 +172,15 @@ type FlagDef struct {
 	Deprecated string
 	// Negatable adds a "--no-<x>" form for every long identifier of a bool flag, which sets
 	// it false, overriding a true default, config value or environment variable.
-	Negatable  bool
-	DottedKeys bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
-	KeyPaths   []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
-	From       []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
+	Negatable bool
+	// ShortCircuit marks a flag that replaces the command's normal run (--help, --version):
+	// when it is set on the command line, every declared requirement of the chain is waived,
+	// so [Context.Inputs] succeeds and the handler decides what to do. Errors reading the
+	// command line are still reported.
+	ShortCircuit bool
+	DottedKeys   bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
+	KeyPaths     []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
+	From         []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
 	// Complete is the declarative shell-completion hint for this flag's value (spec
 	// complete:). The zero value means no hint.
 	Complete Completion

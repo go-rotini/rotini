@@ -130,4 +130,5 @@ func TestAdd(t *testing.T) {
 Build a fresh program per test with `NewProgram(Handlers())`. The `With*` methods change the
 program they are called on, so configuring the shared `Program` in one test would leak into the
 others. `Run` never calls `os.Exit`, and the error it returns joins every recorded error, so
-`errors.Is` and `errors.As` reach each one.
+`errors.Is` and `errors.As` reach each one; see
+[handling errors in a handler](/docs#handling-errors-in-a-handler) for branching on them.

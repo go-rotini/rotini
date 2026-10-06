@@ -98,7 +98,9 @@ Arguments:
 Flags:
   --format string    the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
   --force            replace an existing spec and conf with the seed (never deletes a file)
-  -h, --help         print help
+
+Global Flags:
+  -h, --help    print help
 
 Examples:
   rotini initialize mycli
@@ -136,7 +138,9 @@ Arguments:
 Flags:
   -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)
   -w, --watch            watch the spec and conf for changes and re-generate
-  -h, --help             print help
+
+Global Flags:
+  -h, --help    print help
 
 Examples:
   rotini generate
@@ -168,7 +172,9 @@ Flags:
   -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)
   --fail string          failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]
   -w, --watch            watch the spec and conf for changes and re-validate
-  -h, --help             print help
+
+Global Flags:
+  -h, --help    print help
 
 Examples:
   rotini validate
@@ -185,12 +191,12 @@ Prints help for any command.
 Print help for a specific command.
 
 Usage:
-  rotini help [command...] [flags]
+  rotini help [command...]
 
 Arguments:
   [command...]    name of the command to print help for
 
-Flags:
+Global Flags:
   -h, --help    print help
 
 Examples:
@@ -220,12 +226,12 @@ every new shell has it:
               add that line to $PROFILE to load it in every session
 
 Usage:
-  rotini completion <shell> [flags]
+  rotini completion <shell>
 
 Arguments:
   <shell>    the shell to print the script for [bash|zsh|fish|powershell]
 
-Flags:
+Global Flags:
   -h, --help    print help
 
 Examples:
@@ -257,7 +263,9 @@ Arguments:
 
 Flags:
   --dir string    write every page into this directory instead of printing one
-  -h, --help      print help
+
+Global Flags:
+  -h, --help    print help
 
 Examples:
   rotini man generate > rotini-generate.1
@@ -285,9 +293,9 @@ When rotini is installed through the module graph — `go get -tool`, then `go t
 Print the rotini cli version.
 
 Usage:
-  rotini version [flags]
+  rotini version
 
-Flags:
+Global Flags:
   -h, --help    print help
 
 Examples:

@@ -72,7 +72,46 @@ func (p *program) auditHooks() error {
 
 	expected, known := p.inputsTypeExpectations()
 	p.auditWarnings = append(p.auditWarnings, wrongInputsTypes(fset, files, expected, known, p.module.root)...)
+
+	if featureEnabled(p.conf, "help") && rootShortCircuitFlag(p, "help", true) != "" {
+		p.auditWarnings = append(p.auditWarnings, missingRootHook(fset, files, p.root.handler, p.module.root)...)
+	}
 	return nil
+}
+
+// missingRootHook warns when the root's --help is short_circuit and cascading but the root
+// handler type has no CascadingPreRun. In that shape, new command stubs leave --help to the
+// root's hook, so without it they would not answer --help at all. A root handler type not
+// found in the audited files (defined elsewhere) is not judged.
+func missingRootHook(fset *token.FileSet, files map[string]*ast.File, rootHandler, moduleRoot string) []error {
+	var typePos token.Pos
+	hasHook := false
+	for _, f := range files {
+		for _, d := range f.Decls {
+			switch decl := d.(type) {
+			case *ast.GenDecl:
+				for _, s := range decl.Specs {
+					if ts, ok := s.(*ast.TypeSpec); ok && ts.Name.Name == rootHandler {
+						typePos = ts.Name.Pos()
+					}
+				}
+			case *ast.FuncDecl:
+				if decl.Recv != nil && len(decl.Recv.List) > 0 && decl.Name.Name == "CascadingPreRun" &&
+					receiverTypeName(decl.Recv.List[0].Type) == rootHandler {
+					hasHook = true
+				}
+			}
+		}
+	}
+	if !typePos.IsValid() || hasHook {
+		return nil
+	}
+	at := findingAt(fset, typePos, moduleRoot)
+	at.msg = fmt.Sprintf(
+		"%s:%d: the root's --help is short_circuit and cascading, so new command stubs leave --help to the root handler's CascadingPreRun, but %s has none; add it (a fresh `rotini init` shows the hook)",
+		at.file, at.line, rootHandler,
+	)
+	return sortedWarnings([]auditFinding{at})
 }
 
 // noteHandlerImport records a Go import path a spec's `handler:` block names, for auditHooks.

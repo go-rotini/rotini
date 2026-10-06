@@ -299,6 +299,8 @@ type FlagInput struct {
 	Name string `json:"name"`
 	// Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 	Schema *InputSchema `json:"schema,omitempty"`
+	// When true, setting this flag on the command line waives every declared requirement of the invoked command chain: required inputs, enums, bounds, patterns, flag groups and flag dependencies are not checked, and rtx.Inputs succeeds. Use it for flags that replace the command's normal run, such as --help, --version or --print-schema. Errors in reading the command line (an unknown flag or command, a value of the wrong type, too many arguments) are still reported. rotini takes no action of its own: your handler checks the flag and decides what to do. Only the command line sets it, never an environment variable, a configuration file or a default. Must be a bool, and can't be required, negatable, given a default of true, read from the environment or a configuration file (key, variable), or listed in a flag group or flag dependency.
+	ShortCircuit bool `json:"short_circuit,omitempty"`
 	// Short one-liner shown next to this flag in the Flags section of generated help.
 	Summary string `json:"summary,omitempty"`
 }

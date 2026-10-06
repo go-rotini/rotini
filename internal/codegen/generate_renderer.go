@@ -305,6 +305,12 @@ type templateHandlerData struct {
 	VersionOnly       bool   // a command named `version` whose whole job is to print it
 	PrintHelpWhenBare bool   // a dispatcher root: sub-commands, no own arguments, help feature on
 	NeedsInputs       bool   // the body calls Inputs (for its result or its validation)
+
+	// The root's CascadingPreRun, which answers the root's short-circuit --help and --version
+	// for every command in the tree (spec short_circuit). Set on the root stub only.
+	RootHook        bool   // emit the hook (and drop the NoCascadingPreRun embed)
+	RootHelpFlag    string // Go field of the root's short-circuit `help` flag; "" when none or the help feature is off
+	RootVersionFlag string // Go field of the root's short-circuit `version` flag; "" when none
 }
 
 func renderHandlerStubFile(data templateHandlerData) ([]byte, error) {

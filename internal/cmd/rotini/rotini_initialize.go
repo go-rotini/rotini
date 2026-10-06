@@ -21,10 +21,6 @@ type rotiniInitializeHandler struct {
 }
 
 func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if answerHelp(rtx, func(in RotiniInitializeInputs) bool { return in.RotiniInitialize.Flags.Help }) {
-		return
-	}
-
 	inputs, err := rtx.Inputs[RotiniInitializeInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)

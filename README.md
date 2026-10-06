@@ -111,8 +111,9 @@ internal/cmd/helloworld/*.go         one handler per command; yours to edit
 ```
 
 **4. Generate, then implement the handler.** `go generate ./...` writes
-`internal/cmd/helloworld/helloworld_hello.go`. Its `Run` method already answers `--help` and reads
-the typed, validated inputs. Replace the line that prints them with the greeting code:
+`internal/cmd/helloworld/helloworld_hello.go`. Its `Run` method already reads the typed,
+validated inputs (`--help` is answered once, for every command, by the root handler `init`
+wrote). Replace the line that prints them with the greeting code:
 
 ```go
 package helloworld
@@ -135,12 +136,6 @@ type helloworldHelloHandler struct {
 }
 
 func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if argv, err := rtx.ArgvInputs[HelloworldHelloInputs](); err == nil && argv.Values.Helloworld.Flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
-
 	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
 	if err != nil {
 		rtx.HaltWith(err)

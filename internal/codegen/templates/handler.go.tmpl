@@ -10,11 +10,55 @@ import (
 var _ rotini.Handler = (*{{.HandlerType}})(nil)
 
 type {{.HandlerType}} struct {
+{{- if not .RootHook}}
 	rotini.NoCascadingPreRun
+{{- end}}
 	rotini.NoPreRun
 	rotini.NoPostRun
 	rotini.NoCascadingPostRun
 }
+{{- if .RootHook}}
+
+func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[{{.InputsType}}]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+{{- if .RootHelpFlag}}
+
+	if inputs.{{.Prefix}}.Flags.{{.RootHelpFlag}} {
+		var path []string
+		for _, c := range rtx.CommandChain()[1:] {
+			path = append(path, c.Name)
+		}
+
+		page, err := Help(path...)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+		return
+	}
+{{- end}}
+{{- if .RootVersionFlag}}
+
+	if inputs.{{.Prefix}}.Flags.{{.RootVersionFlag}} {
+		version := rtx.Version()
+		if version == "" {
+			version = "unknown"
+		}
+
+		fmt.Fprintln(rtx.Stdout, version)
+		rtx.HaltWithCode(0)
+		return
+	}
+{{- end}}
+}
+{{- end}}
 
 func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 {{- if and .HelpFlag .VersionFlag}}

@@ -137,6 +137,7 @@ field FlagDef.ObjectSchema
 field FlagDef.Required
 field FlagDef.Secret
 field FlagDef.Separator
+field FlagDef.ShortCircuit
 field FlagDef.Summary
 field FlagDef.Type
 field FlagDependency.Requires
@@ -223,6 +224,7 @@ func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
 func NewSuggestor() *Suggestor
 func PluginCompletion(w io.Writer, result CompletionResult) error
+func PresenceOf[T any](v T) Presence
 func Ptr[T any](v T) *T
 func StripANSI(text string) string
 func StructuredReporter(structured func(rtx *Context) bool) Reporter
@@ -240,6 +242,7 @@ method Command.DiscoveredPlugins() []DiscoveredPlugin
 method Command.PluginBinary(name string) (string, bool)
 method Command.PluginDiscoveryErrors() []error
 method Context.ArgvInputs[T any]() (InputLayer[T], error)
+method Context.CheckInputs[T any](v T, set Presence) error
 method Context.CheckOutput(v any) error
 method Context.Command() Command
 method Context.CommandChain() []Command

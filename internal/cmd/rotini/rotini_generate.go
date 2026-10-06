@@ -17,10 +17,6 @@ type rotiniGenerateHandler struct {
 }
 
 func (*rotiniGenerateHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if answerHelp(rtx, func(in RotiniGenerateInputs) bool { return in.RotiniGenerate.Flags.Help }) {
-		return
-	}
-
 	inputs, err := rtx.Inputs[RotiniGenerateInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)

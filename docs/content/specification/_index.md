@@ -361,6 +361,12 @@ CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is d
 
 Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 
+### `short_circuit`
+
+`boolean` · default `false`
+
+When true, setting this flag on the command line waives every declared requirement of the invoked command chain: required inputs, enums, bounds, patterns, flag groups and flag dependencies are not checked, and rtx.Inputs succeeds. Use it for flags that replace the command's normal run, such as --help, --version or --print-schema. Errors in reading the command line (an unknown flag or command, a value of the wrong type, too many arguments) are still reported. rotini takes no action of its own: your handler checks the flag and decides what to do. Only the command line sets it, never an environment variable, a configuration file or a default. Must be a bool, and can't be required, negatable, given a default of true, read from the environment or a configuration file (key, variable), or listed in a flag group or flag dependency.
+
 ### `summary`
 
 `string`
@@ -985,7 +991,7 @@ Maximum allowed value (inclusive). Same applicability rules as 'minimum' (number
 
 `integer`
 
-Minimum number of values for a repeatable (array or map) input — rejected on scalar types.
+Minimum number of values for a repeatable (array or map) input — rejected on scalar types. A list flag or variadic argument that is left out has zero values, so minItems also applies to it unless it has a default (add required for the message to say the input is missing). An env or config list is checked only when it is set.
 
 ### `minLength`
 

@@ -194,13 +194,6 @@ type todoAddHandler struct {
 }
 
 func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	// Answer --help before reading inputs, so help works even with a required argument missing.
-	if argv, err := rtx.ArgvInputs[TodoAddInputs](); err == nil && argv.Values.Todo.Flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
-
 	// One call reads every declared source (command line, environment, config files, stdin
 	// and defaults) in precedence order, and validates the result.
 	inputs, err := rtx.Inputs[TodoAddInputs]()
@@ -227,8 +220,9 @@ func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
 The runtime itself only works out which command was invoked. Flags and arguments are parsed and
 validated when a handler calls `rtx.Inputs[T]()`, or one of the per-source methods
 `rtx.ArgvInputs`, `EnvInputs`, `FileInputs`, `StdinInputs` and `DefaultInputs`. The generated
-handlers call it first. A handler that never calls it gets the raw `rtx.Argv` and no validation:
-useful when you bring your own parser, and a trap if you delete the call by accident.
+handlers call it first. A handler that never calls it gets the raw `rtx.Argv` and no validation,
+so you can bring your own parser or collect inputs another way, and check what you collect with
+[`rtx.CheckInputs`](#checking-inputs-you-collected-yourself).
 
 A dependency the handlers share, such as a database or an API client, is registered once in
 `main.go` and read in any hook:
@@ -238,6 +232,93 @@ var Store = rotini.NewDependency[*store.Store]("todo.store") // in the cmd packa
 
 cmd.Program.WithDependency(cmd.Store, openStore())          // in main.go
 s := rtx.MustGetDependency(Store)                            // in a handler
+{{< /code >}}
+
+### Flags that skip the run
+
+Some flags replace a command's run instead of changing it: `--help`, `--version`, or a flag of
+your own such as `--print-plan`. Mark one `short_circuit: true` in the spec. When it is set on
+the command line, Rotini waives every requirement the spec declares for the command chain
+(required inputs, enums, bounds, patterns, flag groups and flag dependencies), so `rtx.Inputs`
+succeeds and your handler can act on the flag. Input that can't be read is still an error: an
+unknown flag or command, a value of the wrong type, or too many arguments. Rotini takes no action
+of its own; your handler checks the flag and decides what to do.
+
+`rotini init` marks `--help` and `--version` this way, makes `--help` cascading so every command's
+page lists it, and writes one `CascadingPreRun` in the root handler that answers both for every
+command. So a command's handler needs no help code, and `todo add --help` works even with the
+title missing.
+
+A short-circuit flag can belong to one command, too:
+
+{{< code title="a command-local short circuit" language="golang" open="true" collapsible="false" copy="true" >}}
+// spec, under the deploy command:
+//   - name: print-plan
+//     summary: print what would be deployed, and deploy nothing
+//     short_circuit: true
+//     schema: { type: bool }
+
+func (*deployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DeployInputs]() // succeeds even with <service> missing
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Deploy.Flags.PrintPlan {
+		fmt.Fprintf(rtx.Stdout, "%+v\n", in.Deploy)
+		return
+	}
+	// … deploy
+}
+{{< /code >}}
+
+A short-circuit flag must be a `bool`, can't be `required`, can't default to `true`, and can't be
+read from an environment variable or config key; `rotini validate` reports any of these.
+Completion offers nothing more once one is on the line.
+
+### Checking inputs you collected yourself
+
+When values come from somewhere rotini didn't read, such as a prompt, a secrets service or a
+test, check them against the spec with `rtx.CheckInputs`. It applies the same rules `rtx.Inputs`
+applies (required inputs, enums, bounds, patterns, flag groups and dependencies) and returns the
+same errors:
+
+{{< code title="checking prompted answers" language="golang" open="true" collapsible="false" copy="true" >}}
+argv, err := rtx.ArgvInputs[TodoAddInputs]()
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+
+in := askForMissing(rtx, argv.Values) // your own prompting code
+
+if err := rtx.CheckInputs(in, rotini.PresenceOf(in)); err != nil {
+	rtx.HaltWith(err)
+	return
+}
+{{< /code >}}
+
+The second argument says which fields were supplied. `rotini.PresenceOf(in)` treats every
+non-zero field as supplied; when a zero value (`false`, `0`, `""`) must count as supplied, build
+the `rotini.Presence` yourself. A value's rules are checked only when it was supplied, with one
+exception that matches the command line: a list flag or variadic argument left out has zero
+items, so a `minItems` still applies to it unless it has a default. `CheckInputs` reads nothing,
+applies no defaults and never changes the value, and it names each input by its usual spelling
+(`--priority`, `<title>`).
+
+A layer you build yourself can also join rotini's own in a merge. Its values are checked too when
+you validate the merged report:
+
+{{< code title="mixing your own source with rotini's" language="golang" open="true" collapsible="false" copy="true" >}}
+argv, _ := rtx.ArgvInputs[TodoAddInputs]()
+env, _ := rtx.EnvInputs[TodoAddInputs]()
+vault := rotini.InputLayer[TodoAddInputs]{Name: "vault", Values: fromVault(), Set: vaultSet}
+
+merged, report := rotini.MergeInputsWithReport(env, vault, argv)
+if err := report.Validate(); err != nil {
+	rtx.HaltWith(err)
+	return
+}
 {{< /code >}}
 
 ## Errors and exit codes
@@ -251,6 +332,61 @@ Every error carries a category, which `rotini.CategoryOf(err)` returns: `rotini.
 for a mistake the user can fix, `rotini.CategoryInternal` for a fault in the program, and
 `rotini.CategoryNone` for an error nobody classified. Parse and validation failures are already
 usage errors. Mark your own with `rotini.UsageError(err)` or `rotini.InternalError(err)`.
+
+### Handling errors in a handler
+
+An error from `rtx.Inputs`, the per-source methods, `rtx.CheckInputs` or `report.Validate` is one
+of two types:
+
+- **`*rotini.ParseError`**: the command line, and validation of any value. Its `Kind` says what
+  went wrong, `Token` holds the value at fault and `Candidates` what it could have been.
+- **`*rotini.InputError`**: reading an environment variable, a config file or stdin. `Channel`
+  and `Input` say which.
+
+Branch on the type, the kind or the category, never on the message text, which can improve
+between releases:
+
+{{< code title="branching on an error" language="golang" open="true" collapsible="false" copy="true" >}}
+inputs, err := rtx.Inputs[TodoAddInputs]()
+if err != nil {
+	var pe *rotini.ParseError
+	switch {
+	case errors.As(err, &pe) && pe.Kind == rotini.ParseKindMissingRequired:
+		fmt.Fprintf(rtx.Stderr, "%s\nRun '%s --help' for usage.\n", err, rtx.CommandPath())
+		rtx.HaltWithCode(2)
+	case rotini.CategoryOf(err) == rotini.CategoryUsage:
+		rtx.RecordError(err)
+		rtx.HaltWithCode(2)
+	default:
+		rtx.HaltWith(err)
+	}
+	return
+}
+{{< /code >}}
+
+The kinds are `ParseKindUnknownFlag`, `ParseKindUnknownCommand`, `ParseKindNeedsValue`,
+`ParseKindInvalidValue`, `ParseKindEnumViolation`, `ParseKindConstraintViolation`,
+`ParseKindMissingRequired`, `ParseKindNoArguments`, `ParseKindTooManyArguments` and
+`ParseKindInternal`.
+
+Each response is one call:
+
+- **Point at help**: print a hint built from `rtx.CommandPath()`, or the whole page with
+  `rtx.Help()`.
+- **Suggest a correction**: `rotini.NewSuggestor().For(err)` ranks the `Token` against the
+  `Candidates` and returns the nearest. Rotini never prints a suggestion itself.
+- **Choose the exit code**: `rtx.HaltWithCode(n)`. The first non-zero code wins, and the default
+  reporter keeps it. `rtx.HaltWithCode` records no error, so print the error yourself (as the
+  first branch does) or record it with `rtx.RecordError` for the reporter to print.
+- **Or just stop**: `rtx.HaltWith(err)` records the error and leaves the code to the reporter.
+
+Three patterns cover most handlers. To fail with an error, use `rtx.HaltWith(err)`. To record an
+error and carry on, collecting several, use `rtx.RecordError(err)` and decide later with
+`rtx.Failed()`. When an exit code means something, use `rtx.HaltWithCode(n)` and list `n` under
+the command's `exit_status:`.
+
+Handle an error in the handler when the response depends on the command. For one policy across
+the whole program, handle it in a reporter.
 
 To give each category its own exit code, write a reporter. A reporter replaces the default
 entirely: it prints only what it prints, and the exit code is only what it sets with `rtx.Exit`,
@@ -266,8 +402,9 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-// Report prints warnings and errors to stderr and sets the exit code from the first error's
-// category: 2 for a usage error, 70 for an internal one, 1 for anything else.
+// Report prints warnings and errors to stderr, points at help after a usage error, and sets the
+// exit code from the first error's category: 2 for a usage error, 70 for an internal one, 1 for
+// anything else.
 func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 	for _, w := range out.Warnings {
 		fmt.Fprintln(rtx.Stderr, "Warning:", w)
@@ -277,6 +414,9 @@ func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 	}
 	for _, p := range out.Panics {
 		fmt.Fprintln(rtx.Stderr, "Error:", p)
+	}
+	if len(out.Errors) > 0 && rotini.CategoryOf(out.Errors[0]) == rotini.CategoryUsage {
+		fmt.Fprintf(rtx.Stderr, "Run '%s --help' for usage.\n", rtx.CommandPath())
 	}
 	if !out.Failed() {
 		return
@@ -375,12 +515,6 @@ writes json (indented), yaml and toml itself, and hands any other format to your
 
 {{< code title="internal/cmd/todo/todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
 func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if argv, err := rtx.ArgvInputs[TodoListInputs](); err == nil && argv.Values.Todo.Flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
-
 	in, err := rtx.Inputs[TodoListInputs]()
 	if err != nil {
 		rtx.HaltWith(err)

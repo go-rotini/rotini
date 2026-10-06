@@ -249,6 +249,9 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if f.Schema != nil && f.Schema.Negatable {
 			b.WriteString(", Negatable: true")
 		}
+		if f.ShortCircuit {
+			b.WriteString(", ShortCircuit: true")
+		}
 		if f.Schema != nil && f.Schema.ImplicitValue != nil {
 			b.WriteString(", ImplicitValue: " + strconv.Quote(defaultString(f.Schema.ImplicitValue)))
 		}

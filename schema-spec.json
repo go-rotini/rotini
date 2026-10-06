@@ -447,7 +447,7 @@
         "minItems": {
           "type": "integer",
           "minimum": 0,
-          "description": "Minimum number of values for a repeatable (array or map) input \u2014 rejected on scalar types."
+          "description": "Minimum number of values for a repeatable (array or map) input \u2014 rejected on scalar types. A list flag or variadic argument that is left out has zero values, so minItems also applies to it unless it has a default (add required for the message to say the input is missing). An env or config list is checked only when it is set."
         },
         "maxItems": {
           "type": "integer",
@@ -674,6 +674,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: at run time a flag may be written anywhere after the name of the command that declares it \u2014 after its sub-commands' names too \u2014 regardless of this setting, but never before that name (a flag written before a sub-command's name belongs to an ancestor, which is how two commands may declare the same flag). cascading controls whether descendants document it."
+        },
+        "short_circuit": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, setting this flag on the command line waives every declared requirement of the invoked command chain: required inputs, enums, bounds, patterns, flag groups and flag dependencies are not checked, and rtx.Inputs succeeds. Use it for flags that replace the command's normal run, such as --help, --version or --print-schema. Errors in reading the command line (an unknown flag or command, a value of the wrong type, too many arguments) are still reported. rotini takes no action of its own: your handler checks the flag and decides what to do. Only the command line sets it, never an environment variable, a configuration file or a default. Must be a bool, and can't be required, negatable, given a default of true, read from the environment or a configuration file (key, variable), or listed in a flag group or flag dependency."
         },
         "deprecated": {
           "type": "string",

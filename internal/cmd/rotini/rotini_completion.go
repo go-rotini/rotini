@@ -17,10 +17,6 @@ type rotiniCompletionHandler struct {
 }
 
 func (*rotiniCompletionHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if answerHelp(rtx, func(in RotiniCompletionInputs) bool { return in.RotiniCompletion.Flags.Help }) {
-		return
-	}
-
 	inputs, err := rtx.Inputs[RotiniCompletionInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)

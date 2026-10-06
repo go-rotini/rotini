@@ -85,6 +85,64 @@ Expect, in a minor upgrade:
   renders from your copy afterwards.
 - **no changes to your handler files or `main.go`.** If you see one, something is wrong — file it.
 
+## Adopting short-circuit flags (1.3)
+
+A project made by `rotini init` before 1.3 answers `--help` in every handler, before it reads
+its inputs, because reading them first would fail on a missing required value. From 1.3 a flag
+can be marked `short_circuit: true`: when it is set on the command line, every declared
+requirement is waived, so `rtx.Inputs` succeeds and the handler can act on the flag. Parse
+errors (an unknown flag, a value that is not a number) are still reported.
+
+Nothing changes until you opt in; a project left as it is regenerates exactly as before. To
+move to the shape a fresh `rotini init` writes:
+
+1. In the spec, mark the root's help flag `cascading: true` and `short_circuit: true`, and its
+   version flag `short_circuit: true`. Raise `version:` to 1.3.0.
+2. Add a `CascadingPreRun` to the root handler that answers both flags. The root handler is
+   never rewritten, so this is yours to add; `rotini generate` warns until it is there. A fresh
+   `rotini init` in a scratch directory shows the hook to copy:
+
+   ```go
+   func (*todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+   	inputs, err := rtx.Inputs[TodoInputs]()
+   	if err != nil {
+   		rtx.HaltWith(err)
+   		return
+   	}
+
+   	if inputs.Todo.Flags.Help {
+   		var path []string
+   		for _, c := range rtx.CommandChain()[1:] {
+   			path = append(path, c.Name)
+   		}
+
+   		page, err := Help(path...)
+   		if err != nil {
+   			rtx.HaltWith(err)
+   			return
+   		}
+
+   		fmt.Fprintln(rtx.Stdout, page)
+   		rtx.HaltWithCode(0)
+   		return
+   	}
+
+   	if inputs.Todo.Flags.Version {
+   		fmt.Fprintln(rtx.Stdout, rtx.Version())
+   		rtx.HaltWithCode(0)
+   		return
+   	}
+   }
+   ```
+
+   Remove the `rotini.NoCascadingPreRun` line from the root handler's struct, since it now
+   declares the hook itself.
+3. Remove the per-command `help` flags the cascading one replaces, then run `rotini validate`.
+4. Optionally delete the help check at the top of each existing handler. It no longer runs,
+   because the root answers first, but it does no harm. New handler stubs are written without it.
+
+A command that declares its own help flag keeps its own check, in both shapes.
+
 ## Upgrading across a major version
 
 A major release may remove things that were deprecated in the release line before it. The

@@ -590,6 +590,48 @@ func helpFlagFor(gp *program, c genCommand) (field, frame string) {
 	return "", ""
 }
 
+// seedHelpAndVersion decides who answers --help and --version in a stub. The root's
+// short-circuit flags are answered once, by the root's CascadingPreRun. In the full shape (the
+// root's --help short_circuit and cascading) a command relying on the root's --help carries no
+// check of its own; a command declaring its own help flag shadows the root's, so it still
+// answers it. Otherwise each stub answers its --help and --version itself, as before.
+func seedHelpAndVersion(gp *program, c genCommand, d *templateHandlerData, isRoot, helpOn bool) {
+	rootHelp := ""
+	if helpOn {
+		rootHelp = rootShortCircuitFlag(gp, "help", false)
+	}
+	rootVersion := rootShortCircuitFlag(gp, "version", false)
+	newShape := helpOn && rootShortCircuitFlag(gp, "help", true) != ""
+
+	if helpOn {
+		d.HelpFlag, d.HelpFrame = helpFlagFor(gp, c)
+		if (isRoot && rootHelp != "") || (newShape && d.HelpFrame != c.prefix) {
+			d.HelpFlag, d.HelpFrame = "", ""
+		}
+	}
+	d.VersionFlag = boolFlagField(c, "version")
+	if isRoot && rootVersion != "" {
+		d.VersionFlag = ""
+	}
+	if isRoot && (rootHelp != "" || rootVersion != "") {
+		d.RootHook, d.RootHelpFlag, d.RootVersionFlag = true, rootHelp, rootVersion
+	}
+}
+
+// rootShortCircuitFlag returns the Go field of the root's bool flag named logical when the
+// spec marks it short_circuit (and cascading, when requireCascading), else "".
+func rootShortCircuitFlag(gp *program, logical string, requireCascading bool) string {
+	if gp.rootInputs == nil {
+		return ""
+	}
+	for _, f := range gp.rootInputs.Flags {
+		if f.Name == logical && f.ShortCircuit && (!requireCascading || f.Cascading) {
+			return boolFlagField(gp.root, logical)
+		}
+	}
+	return ""
+}
+
 // stubBody assembles the handler stub's template data, choosing the seeded body from the
 // command's declarations. A --help flag is wired only when the help feature is enabled. A
 // non-root `help` command with help enabled prints the page for its variadic path argument;
@@ -605,12 +647,9 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		RuntimeImport: runtimeImport,
 		Header:        cmdHeader,
 	}
-	if helpOn {
-		d.HelpFlag, d.HelpFrame = helpFlagFor(gp, c)
-	}
-	d.VersionFlag = boolFlagField(c, "version")
-
 	isRoot := c.prefix == gp.root.prefix
+	seedHelpAndVersion(gp, c, &d, isRoot, helpOn)
+
 	switch name := commandName(c.invocation); {
 	case name == "help" && !isRoot && helpOn:
 		d.HelpPathArg = variadicStringArgField(c)
