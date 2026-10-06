@@ -39,6 +39,11 @@ command:
         - name: help
           identifiers: [-h, --help]
           schema: { type: bool }
+      commands:
+        - name: sub
+          arguments:
+            - name: what
+              schema: { type: string, required: true }
 `
 }
 
@@ -62,6 +67,11 @@ func TestStubs_shortCircuitShape(t *testing.T) {
 	}
 	if own := files["internal/cmd/demo/demo_own.go"]; !strings.Contains(own, "ArgvInputs") {
 		t.Errorf("a command declaring its own --help lost its per-stub answer:\n%s", own)
+	}
+	// own sub resolves --help to own's flag, which isn't short_circuit, so the root's hook
+	// never answers it: the stub must.
+	if sub := files["internal/cmd/demo/demo_own_sub.go"]; !strings.Contains(sub, "ArgvInputs") {
+		t.Errorf("a command under one declaring its own --help lost its per-stub answer:\n%s", sub)
 	}
 }
 

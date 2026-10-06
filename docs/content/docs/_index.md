@@ -186,7 +186,8 @@ land in the same generated inputs struct.
 
 `go generate` creates one handler file per command, once, and never overwrites it: it is yours.
 When its command leaves the spec, the next `go generate` disables the file (adding
-`//go:build ignore`), and the one after deletes it, reporting each step. To keep it, delete its
+`//go:build ignore`), and the one after deletes it, reporting each step. If the command comes
+back before then, the file is put back in the build as it was. To keep it, delete its
 `var _ rotini.Handler` line or list it under the conf's [`keep:`](/configuration#keep). Fill in
 `Run`:
 
@@ -288,8 +289,9 @@ func (*deployHandler) Run(ctx context.Context, rtx *rotini.Context) {
 }
 {{< /code >}}
 
-A short-circuit flag must be a `bool`, can't be `required`, can't default to `true`, and can't be
-read from an environment variable or config key; `rotini validate` reports any of these.
+A short-circuit flag must be a `bool`. It can't be `required`, default to `true`, be `negatable`,
+be read from an environment variable or config key, or be named in a flag group or dependency,
+since it waives those; `rotini validate` reports any of these.
 Completion offers nothing more once one is on the line.
 
 ### Checking inputs you collected yourself
@@ -351,13 +353,17 @@ usage errors. Mark your own with `rotini.UsageError(err)` or `rotini.InternalErr
 
 ### Handling errors in a handler
 
-An error from `rtx.Inputs`, the per-source methods, `rtx.CheckInputs` or `report.Validate` is one
-of two types:
+An error about the user's input, from `rtx.Inputs`, the per-source methods, `rtx.CheckInputs` or
+`report.Validate`, is one of two types:
 
 - **`*rotini.ParseError`**: the command line, and validation of any value. Its `Kind` says what
   went wrong, `Token` holds the value at fault and `Candidates` what it could have been.
 - **`*rotini.InputError`**: reading an environment variable, a config file or stdin. `Channel`
   and `Input` say which.
+
+(`rtx.Inputs` can also return a `*rotini.WiringError`, for a fault in the program's own setup
+rather than the input.) Wrapping an error with `rotini.UsageError` or `rotini.InternalError`
+changes only its category: `errors.Is` and `errors.As` still reach the original.
 
 Branch on the type, the kind or the category, never on the message text, which can improve
 between releases:
@@ -499,8 +505,10 @@ Once a command declares `exit_status:`, `rotini generate` checks its handler aga
 the handler passes to `rtx.HaltWithCode` or `rtx.Exit` as a number or a constant, and that the
 list leaves out, is reported as a warning with its file and line. Code 0 needs no entry. A
 command that prints its help when called without a sub-command exits 1, so list 1 for it. The
-check can't see a code computed at run time, set in another function or package, or set by a
-reporter. `rotini validate` also reports a code listed twice, and warns about a code above
+check reads the methods of the command's handler type. It can't see a code computed at run
+time, set in a function that isn't one of those methods, set in another package, or set by a
+reporter, and it skips a command whose handler lives in another package (`handler:`). `rotini
+validate` also reports a code listed twice, and warns about a code above
 128, which a process stopped by a signal exits with too.
 
 ## Structured output
@@ -745,7 +753,7 @@ value the typed prefix rules out, the shell can show a line of guidance instead:
 
 {{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
 $ todo add <TAB>
-<title>: the task title
+a short title; quote it if it has spaces
 {{< /code >}}
 
 Turn messages on with `messages:` on the completion feature. `declared` shows only the lines you
@@ -1100,3 +1108,6 @@ What to expect in the diff:
   saved copy, update it, or keep the layout fixed with the feature's `template: true`.
 - **your handler files and `main.go` don't change.** They are created once and never
   rewritten; see [what stays yours](/generated#what-stays-yours).
+
+If an upgrade breaks something, check the release notes: a breaking change is listed there with
+how to migrate. If it isn't listed, open an issue with both versions and the diff.

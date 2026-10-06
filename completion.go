@@ -215,6 +215,8 @@ func walkContext(def Definition, context []string) completionContext {
 				if fd, _, ok := findFlag(cc.chain, name); ok && fd.ShortCircuit {
 					on, err := strconv.ParseBool(val)
 					cc.shortCircuit = !inline || (err == nil && on)
+				} else if !ok {
+					cc.shortCircuit = bundledShortCircuit(cc.chain, tok)
 				}
 			}
 			// Skip a separate value word so it is not mistaken for a command — unless it is
@@ -238,6 +240,28 @@ func walkContext(def Definition, context []string) completionContext {
 		cc.positionals++
 	}
 	return cc
+}
+
+// bundledShortCircuit reports whether a bundle of short flags (-xh) sets a short-circuit flag,
+// reading it as the parser does: each letter a flag, until one that takes a value, whose rest
+// is that value.
+func bundledShortCircuit(chain []Command, tok string) bool {
+	if len(tok) < 3 || tok[0] != '-' || tok[1] == '-' || strings.Contains(tok, "=") {
+		return false
+	}
+	for _, r := range tok[1:] {
+		fd, _, ok := findFlag(chain, "-"+string(r))
+		if !ok {
+			return false
+		}
+		if fd.ShortCircuit {
+			return true
+		}
+		if takesValue(fd) {
+			return false
+		}
+	}
+	return false
 }
 
 // pendingValueFlag reports the flag whose value the next word supplies, when the context ends
@@ -769,18 +793,15 @@ const pluginMessageMarker = "_activeHelp_ "
 // file completion. The hosts read the candidates of the filtering directives as their
 // arguments, so a file or directory hint applies only when there are no candidates. The
 // directive line is always written, since the hosts read the last line as the directive
-// unconditionally. The format belongs to the hosts and is covered by rotini's compatibility
-// promise.
+// unconditionally. The format is the hosts', and follows them.
 //
 // Each message is written as a candidate line carrying the hosts' message marker, after the
 // regular candidates, which the hosts' completion scripts show as a message where the shell
 // can.
 func PluginCompletion(w io.Writer, result CompletionResult) error {
 	lines := candidateLines(result.Candidates)
-	for _, m := range result.Messages {
-		lines = append(lines, pluginMessageMarker+m)
-	}
 
+	// Messages are not candidates, so they don't stand in the way of a file or directory hint.
 	directive := pluginDirectiveDefault
 	switch hint := result.Hint; {
 	case hint.Kind == "none":
@@ -791,6 +812,9 @@ func PluginCompletion(w io.Writer, result CompletionResult) error {
 	case hint.Kind == "file" && len(hint.Extensions) > 0:
 		directive = pluginDirectiveFilterFileExt
 		lines = append(lines, hint.Extensions...)
+	}
+	for _, m := range result.Messages {
+		lines = append(lines, pluginMessageMarker+m)
 	}
 
 	return writeLines(w, append(lines, fmt.Sprintf(":%d", directive)))

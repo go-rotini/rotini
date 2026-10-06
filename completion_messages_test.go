@@ -169,3 +169,24 @@ func TestCompletionMessages_noFeatureIsUnchanged(t *testing.T) {
 		t.Errorf("out = %q, want only the directive", out.String())
 	}
 }
+
+// TestPluginCompletion_messagesKeepTheHint pins that a message doesn't stand in for a candidate:
+// a directory or file-extension hint still sets its directive.
+func TestPluginCompletion_messagesKeepTheHint(t *testing.T) {
+	for _, tt := range []struct {
+		hint Completion
+		want string
+	}{
+		{Completion{Kind: "directory"}, "_activeHelp_ pick a folder\n:16\n"},
+		{Completion{Kind: "file", Extensions: []string{"yaml"}}, "yaml\n_activeHelp_ pick a folder\n:8\n"},
+		{Completion{Kind: "none"}, "_activeHelp_ pick a folder\n:4\n"},
+	} {
+		var out bytes.Buffer
+		if err := PluginCompletion(&out, CompletionResult{Hint: tt.hint, Messages: []string{"pick a folder"}}); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != tt.want {
+			t.Errorf("%+v: %q, want %q", tt.hint, out.String(), tt.want)
+		}
+	}
+}

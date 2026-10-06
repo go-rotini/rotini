@@ -52,9 +52,6 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
 			},
-			FlagGroups: []rotini.FlagGroup{
-				{Kind: "mutually_exclusive", Flags: []string{"dry-run", "watch"}},
-			},
 		},
 		{Name: "validate",
 			Handler: "RotiniValidate",

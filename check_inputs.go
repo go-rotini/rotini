@@ -213,7 +213,14 @@ func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anch
 		}
 		for i, ad := range chain[scope].Arguments {
 			path, ok := argPath(ci, top, ad.Name)
-			if !ok || !handBuilt[path] || i < len(si.args) {
+			if !ok || !handBuilt[path] {
+				continue
+			}
+			if i < len(si.args) {
+				if si.handBuiltArgs == nil {
+					si.handBuiltArgs = map[int]bool{}
+				}
+				si.handBuiltArgs[i] = true
 				continue
 			}
 			for len(si.args) <= i {

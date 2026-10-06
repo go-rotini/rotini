@@ -62,7 +62,6 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 		{"help", "--help"},
 		{"initialize", "--format", "xml", "--help"},
 		{"validate", "--fail", "slow", "--help"},
-		{"version", "extra", "--help"},
 		{"completion", "--help"},
 		{"completion", "tcsh", "--help"},
 		{"man", "--help"},
@@ -91,6 +90,18 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 				t.Errorf("help output has no usage section:\n%s", out.String())
 			}
 		})
+	}
+}
+
+// --help waives what a command requires, but not input that can't be read: an extra
+// positional is still an error.
+func TestCLI_helpKeepsUnreadableInput(t *testing.T) {
+	p, _, errb := newTestCLI(t)
+	if code, _ := p.Run([]string{"version", "extra", "--help"}); code == 0 {
+		t.Error("version extra --help exited 0")
+	}
+	if !strings.Contains(errb.String(), "takes no arguments") {
+		t.Errorf("stderr = %q, want the extra-argument error", errb.String())
 	}
 }
 

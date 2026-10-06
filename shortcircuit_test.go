@@ -235,3 +235,32 @@ func TestShortCircuit_completionStops(t *testing.T) {
 		t.Error("complete after --help=false offered nothing, want the usual candidates")
 	}
 }
+
+// TestShortCircuit_completionReadsBundles pins that a short-circuit flag inside a bundle of
+// short flags (-xh) stops completion, as the parser reads it as set.
+func TestShortCircuit_completionReadsBundles(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", ShortCircuit: true},
+			{Name: "x", Identifiers: []string{"-x"}, Type: "bool"},
+			{Name: "out", Identifiers: []string{"-o"}, Type: "string"},
+		},
+		Commands: []CommandDef{{Name: "run", Handler: "AppRun"}},
+	}
+	for _, tt := range []struct {
+		words []string
+		stop  bool
+	}{
+		{[]string{"-xh", ""}, true},
+		{[]string{"-hx", ""}, true},
+		{[]string{"-x", ""}, false},
+		{[]string{"-oh", ""}, false}, // h is -o's value here
+	} {
+		got := complete(def, tt.words, nil, nil)
+		stopped := len(got) == 0 && completionHintFor(def, tt.words).Kind == "none"
+		if stopped != tt.stop {
+			t.Errorf("%q: candidates %q, stopped %v; want stopped %v", tt.words, got, stopped, tt.stop)
+		}
+	}
+}

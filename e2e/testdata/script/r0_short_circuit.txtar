@@ -53,6 +53,13 @@ stderr 'unknown flag "--bogus"'
 wantexit 1 ./sc$exe --bogus
 stderr 'unknown flag "--bogus"'
 
+# Input that can't be read is still an error with --help: a value that isn't a number, and
+# more positionals than the command takes.
+wantexit 1 ./sc$exe grab --help --count abc
+stderr '--count'
+wantexit 1 ./sc$exe grab one two --help
+stderr 'accepts at most 1 argument'
+
 # --help=false is not a short circuit.
 wantexit 1 ./sc$exe grab --help=false
 stderr 'missing required input'
@@ -91,6 +98,10 @@ command:
           summary: how to grab it
           identifiers: [--tone]
           schema: { type: string, enum: [soft, firm] }
+        - name: count
+          summary: how many
+          identifiers: [--count]
+          schema: { type: int }
 -- cmd/sc/.rotini.conf.yaml --
 version: 0.0.0
 generate:

@@ -246,3 +246,18 @@ func TestContract_flagSources(t *testing.T) {
 		}
 	}
 }
+
+// TestContract_shortCircuit pins that the contract marks a short-circuit flag.
+func TestContract_shortCircuit(t *testing.T) {
+	gp, err := resolveTree(decodeSpecYAML(t, "version: 0.0.0\ncommand:\n  name: app\n  flags:\n    - name: help\n      identifiers: [--help]\n      short_circuit: true\n      schema: { type: bool }\n"), filepath.Join(t.TempDir(), ".rotini.spec.yaml"), "example.com/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := gp.contract(gp.contractNodes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), `"short_circuit": true`) {
+		t.Errorf("contract doesn't mark --help short-circuit:\n%s", doc)
+	}
+}

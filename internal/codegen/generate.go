@@ -36,6 +36,10 @@ type program struct {
 	// pruned names the orphaned generated files this pass removed, reported as notices.
 	pruned []string
 
+	// restored names the stubs this pass re-enabled: disabled when their command left the
+	// spec, and back in the build now that it has returned. Reported as notices.
+	restored []string
+
 	// skipPrune leaves orphaned files in place. `rotini init` sets it: init never deletes a file.
 	skipPrune bool
 
@@ -496,9 +500,19 @@ func writeHandlerStubs(gp *program, lay layout) error {
 			continue
 		}
 		path := filepath.Join(lay.cmdDir, stubFileFor(lay.cmdDir, c))
-		if exists, err := gp.plan.exists(path); err != nil {
+		body, _, exists, err := gp.plan.read(path)
+		if err != nil {
 			return err
-		} else if exists {
+		}
+		if exists && stubDisabled(body) {
+			// Its command left the spec and has come back: take it out of retirement.
+			if err := gp.plan.write(path, enableStub(body)); err != nil {
+				return err
+			}
+			gp.restored = append(gp.restored, filepath.Base(path))
+			continue
+		}
+		if exists {
 			continue
 		}
 		content, err := renderHandlerStubFile(stubBody(gp, c, lay.cmdPkgName, lay.cmdHeader, helpOn))
@@ -609,7 +623,9 @@ func seedHelpAndVersion(gp *program, c genCommand, d *templateHandlerData, isRoo
 
 	if helpOn {
 		d.HelpFlag, d.HelpFrame = helpFlagFor(gp, c)
-		if (isRoot && rootHelp != "") || (newShape && d.HelpFrame != c.prefix) {
+		// Only the root's cascading help is answered by its hook; a help flag a command declares
+		// itself, and the commands beneath it that inherit that one, keep their own check.
+		if (isRoot && rootHelp != "") || (newShape && d.HelpFrame == gp.root.prefix) {
 			d.HelpFlag, d.HelpFrame = "", ""
 		}
 	}

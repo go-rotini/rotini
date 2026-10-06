@@ -289,3 +289,54 @@ func TestAbsentListItemCount(t *testing.T) {
 		t.Fatalf("Validate: %v, want --tags at least 1", err)
 	}
 }
+
+// TestInputReport_handBuiltArgumentOverridesArgv pins that an argument a hand-built layer
+// overrode is checked by the value that won, not by the string the command line supplied.
+func TestInputReport_handBuiltArgumentOverridesArgv(t *testing.T) {
+	type in struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct {
+				Target string `rotini:"target"`
+			}
+		}
+	}
+	def := Definition{Name: "app", Handler: "App", Arguments: []ArgDef{{Name: "target", Type: "string", Enum: []string{"prod", "dev"}}}}
+	rtx := NewContextFor(def, []string{"bogus"})
+	argv, err := rtx.ArgvInputs[in]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hand in
+	hand.App.Arguments.Target = "prod"
+	merged, report := MergeInputsWithReport(argv, InputLayer[in]{Name: "fix", Values: hand, Set: PresenceOf(hand)})
+	if merged.App.Arguments.Target != "prod" {
+		t.Fatalf("merged = %q, want prod", merged.App.Arguments.Target)
+	}
+	if err := report.Validate(); err != nil {
+		t.Errorf("Validate = %v, want nil: the hand-built prod won", err)
+	}
+
+	hand.App.Arguments.Target = "staging"
+	_, report = MergeInputsWithReport(argv, InputLayer[in]{Name: "fix", Values: hand, Set: PresenceOf(hand)})
+	if err := report.Validate(); err == nil || !strings.Contains(err.Error(), `"staging"`) {
+		t.Errorf("Validate = %v, want the hand-built value's violation", err)
+	}
+}
+
+// TestInputReport_handBuiltShortCircuitWaives pins that a short-circuit flag a hand-built layer
+// sets waives the rules in Validate, as it does in CheckInputs.
+func TestInputReport_handBuiltShortCircuitWaives(t *testing.T) {
+	t.Setenv("REGION", "us")
+	rtx := NewContextFor(ciDef(), nil)
+	argv, err := rtx.ArgvInputs[ciInputs]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hand ciInputs
+	hand.App.Flags.Help = true
+	_, report := MergeInputsWithReport(argv, InputLayer[ciInputs]{Name: "fix", Values: hand, Set: PresenceOf(hand)})
+	if err := report.Validate(); err != nil {
+		t.Errorf("Validate = %v, want nil: a hand-built --help waives the missing --name and <target>", err)
+	}
+}

@@ -60,13 +60,18 @@ type layerCore struct {
 	// report can check hand-built values against the right commands; anchored says it is set.
 	anchor   int
 	anchored bool
+	// stdinSchemas are the program's stdin payload schemas, so a merged report can check a
+	// hand-built stdin document as Context.CheckInputs does.
+	stdinSchemas map[string]string
 }
 
 // ── the one-liner ────────────────────────────────────────────────────────────.
 
 // Inputs acquires every declared channel (argv, environment, configuration files, the stdin
 // payload, defaults), reconciles them in the standard precedence defaults < files < env < argv,
-// validates the result, and returns it:
+// validates the result, and returns it. When a short-circuit flag ([FlagDef.ShortCircuit]) is
+// set on the command line, the declared requirements are waived, so the handler gets the
+// values read so far and can act on the flag; input that can't be read is still an error.
 //
 //	inputs, err := rtx.Inputs[MycliDeployInputs]()
 //
@@ -181,7 +186,9 @@ func MergeInputs[T any](layers ...InputLayer[T]) T {
 }
 
 // MergeInputsWithReport is [MergeInputs] plus the merged [InputReport]: which layer won
-// each field, the full per-field history, and Validate over the merged result.
+// each field, the full per-field history, and Validate over the merged result. A field a
+// hand-built [InputLayer] won is validated by the value it supplied, as [Context.CheckInputs]
+// checks it.
 func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport) {
 	var out T
 	dst := reflect.ValueOf(&out).Elem()
@@ -256,6 +263,8 @@ type InputReport struct {
 	handBuilt map[FieldPath]bool
 	anchor    int // chain index of the inputs type's first field, from a rotini layer
 	anchored  bool
+	// stdinSchemas check a hand-built stdin document; nil when no rotini layer supplied them.
+	stdinSchemas map[string]string
 }
 
 // Winner returns the provenance of the layer that supplied path's final value.
@@ -313,6 +322,14 @@ func (r InputReport) Validate() error {
 	if !r.anchored {
 		anchor = frameAnchor(r.merged, r.chain, -1)
 	}
+	// A short-circuit flag a hand-built layer set waives the rules, as it does in CheckInputs.
+	handSet := Presence{}
+	for p := range r.handBuilt {
+		handSet[p] = InputSource{Layer: "custom"}
+	}
+	if typedShortCircuited(r.merged, r.chain, anchor, handSet) {
+		return nil
+	}
 	store := r.store.withHandBuilt(r.merged, r.chain, anchor, r.handBuilt)
 	if err := validateStore(r.chain, store); err != nil {
 		return err
@@ -320,7 +337,7 @@ func (r InputReport) Validate() error {
 	if shortCircuited(r.chain, store) {
 		return nil
 	}
-	return checkTypedValues(r.merged, r.chain, anchor, func(p FieldPath) bool { return r.handBuilt[p] }, nil)
+	return checkTypedValues(r.merged, r.chain, anchor, func(p FieldPath) bool { return r.handBuilt[p] }, r.stdinSchemas)
 }
 
 // absorb folds one layer's validation core into the report: later layers' flag values replace
@@ -342,6 +359,9 @@ func (r *InputReport) absorb(core *layerCore) {
 	}
 	if core.anchored {
 		r.anchor, r.anchored = core.anchor, true
+	}
+	if core.stdinSchemas != nil {
+		r.stdinSchemas = core.stdinSchemas
 	}
 	if core.store == nil || len(core.store.scopes) != len(r.store.scopes) {
 		return
@@ -441,7 +461,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 		})
 		argPresence(set, "argv", topName, ci, frame, si.args)
 	})
-	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true}, nil
+	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas}, nil
 }
 
 // defaultsLayer synthesizes declared defaults into v and records presence.
@@ -520,7 +540,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 			})
 		}
 	})
-	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults, anchor: anchor, anchored: true}, nil
+	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas}, nil
 }
 
 // envLayer acquires the env channel (Env structs + flag env-fallbacks) into v.

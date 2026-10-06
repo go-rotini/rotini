@@ -135,6 +135,12 @@ func disableStub(body []byte) []byte {
 	return []byte(disabledHeader + strings.TrimLeft(strings.Join(kept, ""), "\n"))
 }
 
+// enableStub undoes disableStub: the author's code, back in the build. An author's own build
+// constraint, which disabling replaced, is not restored.
+func enableStub(body []byte) []byte {
+	return []byte(strings.TrimPrefix(string(body), disabledHeader))
+}
+
 // stubDisabled reports whether body is a stub rotini disabled: build-ignored, with rotini's
 // note. An author who removed the note, or turned the build back on, has a live file again.
 func stubDisabled(body []byte) bool {

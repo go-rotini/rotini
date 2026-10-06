@@ -34,13 +34,18 @@ func (*rotiniGenerateHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	dryRun, err := resolveDryRun(rtx, flags.DryRun, spec, conf)
+	dryRun, fromArgv, err := resolveDryRun(rtx, flags.DryRun, spec, conf)
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
+	// A dry run writes nothing, so there is nothing to watch. --no-dry-run --watch is fine.
 	if dryRun && flags.Watch {
-		rtx.HaltWith(rotini.UsageError(errors.New("--watch can't be used with a dry run (set by generate.dry_run_env in the conf); pass --no-dry-run to watch")))
+		msg := "--dry-run and --watch can't be used together"
+		if !fromArgv {
+			msg = "--watch can't be used with a dry run (set by generate.dry_run_env in the conf); pass --no-dry-run to watch"
+		}
+		rtx.HaltWith(rotini.UsageError(errors.New(msg)))
 		return
 	}
 
@@ -70,17 +75,17 @@ func (*rotiniGenerateHandler) Run(ctx context.Context, rtx *rotini.Context) {
 
 // resolveDryRun decides whether generate dry-runs: --dry-run or --no-dry-run when given on the
 // command line, else the conf's generate.dry_run_env when that variable is set to a true
-// value, else not.
-func resolveDryRun(rtx *rotini.Context, flag bool, spec, conf string) (bool, error) {
+// value, else not. fromArgv reports that the command line decided.
+func resolveDryRun(rtx *rotini.Context, flag bool, spec, conf string) (dryRun, fromArgv bool, err error) {
 	argv, err := rtx.ArgvInputs[RotiniGenerateInputs]()
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if _, given := argv.Set["RotiniGenerate.Flags.DryRun"]; given {
-		return flag, nil
+		return flag, true, nil
 	}
 	name := codegen.DryRunEnv(spec, conf)
-	return name != "" && envTrue(os.Getenv(name)), nil
+	return name != "" && envTrue(os.Getenv(name)), false, nil
 }
 
 // envTrue reports whether an environment variable's value turns a switch on: 1, true, yes or

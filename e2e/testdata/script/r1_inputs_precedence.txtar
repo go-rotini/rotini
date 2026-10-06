@@ -45,6 +45,13 @@ env APP_REGION=
 stderr 'port'
 ! stdout 'port=99999'
 
+# The same violation from the flag's environment variable names where the value came from, so
+# the user can find it.
+env APP_SERVER_PORT=99999
+! exec ./app$exe
+stderr '\(from environment variable APP_SERVER_PORT\)'
+env APP_SERVER_PORT=
+
 # A flag can name its own environment variable (schema `variable:`) instead of taking the
 # SNAKE_UPPER of a config key it does not otherwise want. The named variable is EXEMPT from
 # env_prefix — it is already exact — so this is GITHUB_TOKEN, not APP_GITHUB_TOKEN.

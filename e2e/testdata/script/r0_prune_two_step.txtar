@@ -24,6 +24,19 @@ grep 'var _ rotini\.Handler' internal/cmd/hello/hello_greet.go
 exec go build ./...
 exec go vet ./...
 
+# ── putting the command back re-enables the disabled file, code intact ──────
+cp with-greet.yaml cmd/hello/.rotini.spec.yaml
+exec go generate ./...
+stderr 'restored hello_greet\.go; its command is back in the spec'
+! grep 'go:build ignore' internal/cmd/hello/hello_greet.go
+grep 'var _ rotini\.Handler' internal/cmd/hello/hello_greet.go
+exec go build ./...
+
+# ── remove it again: disabled, then ──────────────────────────────────────────
+cp without-greet.yaml cmd/hello/.rotini.spec.yaml
+exec go generate ./...
+stderr 'pruned hello_greet\.go \(disabled'
+
 # ── the next generate deletes it ─────────────────────────────────────────────
 exec go generate ./...
 stderr 'pruned hello_greet\.go;'

@@ -112,9 +112,6 @@ command:
           schema:
             type: bool
             negatable: true
-      flag_groups:
-        - kind: mutually_exclusive
-          flags: [dry-run, watch]
     - name: validate
       aliases:
         - val

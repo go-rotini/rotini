@@ -81,6 +81,9 @@ type scopeInputs struct {
 	// placeholderArgs counts trailing args that stand in for hand-built positionals the same
 	// way: they satisfy the required check, and their values are not read here.
 	placeholderArgs int
+	// handBuiltArgs marks argument indexes the command line supplied but a hand-built layer
+	// overrode: the value that won is checked with the typed rules, not the string read here.
+	handBuiltArgs map[int]bool
 }
 
 // fromSource is the suffix an error about a fallback value carries, naming its origin; "" for
@@ -551,11 +554,38 @@ func shortCircuited(chain []Command, store *parsedInputs) bool {
 // requirement.
 func checkFlagShape(fd FlagDef, label string, vals []string) error {
 	if !isMapType(fd.Type) {
-		return nil
+		return checkValueShape(fd.Type, label, label, vals, fd.Secret)
 	}
 	for _, v := range vals {
 		if !strings.Contains(v, "=") {
 			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, fd.Secret)), Flag: label}
+		}
+	}
+	return nil
+}
+
+// shapeTypes are the declared types whose values a short-circuited run still converts. Such a
+// run may never bind the command that declares an input, so this is where a value that is not
+// a number, a duration or a bool is still reported, as the command line always reports one.
+var shapeTypes = map[string]reflect.Type{
+	"int": reflect.TypeFor[int](), "int8": reflect.TypeFor[int8](), "int16": reflect.TypeFor[int16](),
+	"int32": reflect.TypeFor[int32](), "int64": reflect.TypeFor[int64](),
+	"uint": reflect.TypeFor[uint](), "uint8": reflect.TypeFor[uint8](), "uint16": reflect.TypeFor[uint16](),
+	"uint32": reflect.TypeFor[uint32](), "uint64": reflect.TypeFor[uint64](),
+	"float32": reflect.TypeFor[float32](), "float64": reflect.TypeFor[float64](),
+	"bool": reflect.TypeFor[bool](), "time.Duration": durationType,
+}
+
+// checkValueShape reports the first of vals that does not convert to typ (or, for a list, its
+// element type), as binding would. Types outside shapeTypes are left to binding.
+func checkValueShape(typ, label, flag string, vals []string, secret bool) error {
+	t, ok := shapeTypes[strings.TrimPrefix(typ, "[]")]
+	if !ok {
+		return nil
+	}
+	for _, v := range vals {
+		if err := coerce(reflect.New(t).Elem(), []string{v}); err != nil {
+			return coerceFailure(label, flag, err, secret)
 		}
 	}
 	return nil
@@ -618,8 +648,11 @@ func extraPositionals(leaf Command, si scopeInputs, store *parsedInputs) error {
 func validate(chain []Command, store *parsedInputs) error {
 	leaf := chain[len(chain)-1]
 	si := store.scopes[len(chain)-1]
-	leafCovered := store.covers(len(chain) - 1)
 	waived := shortCircuited(chain, store)
+	// A short circuit usually stops the run before the commands below the one reading its
+	// inputs check their own, so the input that can't be read is checked for the whole chain.
+	covered := func(i int) bool { return waived || store.covers(i) }
+	leafCovered := covered(len(chain) - 1)
 
 	if leafCovered {
 		if err := strayCommand(leaf, si, store); err != nil {
@@ -634,7 +667,7 @@ func validate(chain []Command, store *parsedInputs) error {
 	}
 
 	for i, f := range chain {
-		if !store.covers(i) {
+		if !covered(i) {
 			continue
 		}
 		fsi := store.scopes[i]
@@ -658,13 +691,34 @@ func validate(chain []Command, store *parsedInputs) error {
 	if err := extraPositionals(leaf, si, store); err != nil {
 		return err
 	}
+	return validateArgs(leaf, si, waived)
+}
+
+// validateArgs checks the leaf's positional values: every rule normally, and only whether each
+// value can be read at all under a short circuit.
+func validateArgs(leaf Command, si scopeInputs, waived bool) error {
+	args := si.args[:len(si.args)-si.placeholderArgs] // only values this store actually read
 	if waived {
+		for i, ad := range leaf.Arguments {
+			if i >= len(args) {
+				break
+			}
+			if si.handBuiltArgs[i] {
+				continue
+			}
+			vals := args[i : i+1]
+			if ad.Variadic {
+				vals = args[i:]
+			}
+			if err := checkValueShape(ad.Type, "<"+ad.Name+">", "", vals, ad.Secret); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 
-	args := si.args[:len(si.args)-si.placeholderArgs] // only values this store actually read
 	for i, ad := range leaf.Arguments {
-		if i >= len(args) && i < len(si.args) {
+		if (i >= len(args) && i < len(si.args)) || si.handBuiltArgs[i] {
 			continue // a hand-built positional: its value is checked with the typed rules
 		}
 		var vals []string

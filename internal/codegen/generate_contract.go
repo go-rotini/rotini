@@ -63,16 +63,17 @@ type contractArgument struct {
 }
 
 type contractFlag struct {
-	Name        string   `json:"name"`
-	Identifiers []string `json:"identifiers"`
-	Summary     string   `json:"summary,omitempty"`
-	Required    bool     `json:"required,omitempty"`
-	Cascading   bool     `json:"cascading,omitempty"`
-	Inherited   bool     `json:"inherited,omitempty"`
-	Env         []string `json:"env,omitempty"`        // fallback variables, in lookup order
-	ConfigKey   string   `json:"config_key,omitempty"` // fallback config key, only when the command reads config files
-	Deprecated  string   `json:"deprecated,omitempty"`
-	Schema      any      `json:"schema"`
+	Name         string   `json:"name"`
+	Identifiers  []string `json:"identifiers"`
+	Summary      string   `json:"summary,omitempty"`
+	Required     bool     `json:"required,omitempty"`
+	Cascading    bool     `json:"cascading,omitempty"`
+	ShortCircuit bool     `json:"short_circuit,omitempty"` // set on the command line, it waives the command's requirements
+	Inherited    bool     `json:"inherited,omitempty"`
+	Env          []string `json:"env,omitempty"`        // fallback variables, in lookup order
+	ConfigKey    string   `json:"config_key,omitempty"` // fallback config key, only when the command reads config files
+	Deprecated   string   `json:"deprecated,omitempty"`
+	Schema       any      `json:"schema"`
 }
 
 type contractEnv struct {
@@ -424,7 +425,8 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 		cf := contractFlag{
 			Name: f.Name, Identifiers: flagIdentifiers(f), Summary: f.Summary, Required: req,
 			Cascading: f.Cascading && !inherited, Inherited: inherited, Deprecated: f.Deprecated,
-			Schema: inputJSONSchema(f.Schema),
+			ShortCircuit: f.ShortCircuit,
+			Schema:       inputJSONSchema(f.Schema),
 		}
 		// The same names help shows, from the same functions as the generated env tags.
 		row := withConfigKeys([]templateDocFlagRow{flagRow(f, p.envPrefix)}, readsConfig)[0]

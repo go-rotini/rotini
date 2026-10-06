@@ -88,7 +88,7 @@ A module that added the tool with `go get -tool` already requires the package, s
 does not appear there.
 
 `--dry-run` (`-n`) shows what `init` would write and writes nothing. It prints the spec and conf
-lines, lists each file it would create on stderr, and exits 2.
+lines, lists each file it would create (or, with `--force`, replace) on stderr, and exits 2.
 
 {{< code title="$ rotini help initialize" language="text" open="true" collapsible="false" copy="false" >}}
 Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.

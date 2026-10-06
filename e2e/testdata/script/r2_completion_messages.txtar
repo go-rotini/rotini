@@ -85,6 +85,16 @@ for c in "${COMPREPLY[@]}"; do
         *message*) echo "OLD: leaked $c"; exit 1 ;;
     esac
 done
+# A message with no directive line after it: the old script must not take it for one.
+COMP_WORDS=(app --format x)
+COMP_CWORD=2
+COMPREPLY=()
+_app_complete
+for c in "${COMPREPLY[@]}"; do
+    case "$c" in
+        *message*) echo "OLD: leaked $c"; exit 1 ;;
+    esac
+done
 echo "OLD: ok"
 -- drive-fish.sh --
 set -x PATH $PWD $PATH

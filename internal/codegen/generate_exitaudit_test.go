@@ -92,3 +92,27 @@ func (*demoHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
 		}
 	}
 }
+
+// TestExitAudit_aliasedImportAndLine pins that the audit follows an aliased rotini import and
+// reports the exact line of the call.
+func TestExitAudit_aliasedImportAndLine(t *testing.T) {
+	cmdDir, gen := exitAuditFixture(t)
+	writeTestFile(t, cmdDir, "extra.go", `package demo
+
+import r "github.com/go-rotini/rotini"
+
+func (*demoBuildHandler) bail(c *r.Context) {
+	c.Exit(9)
+}
+`)
+	var got []string
+	for _, n := range gen(t) {
+		if strings.Contains(n.Error(), "exit_status") {
+			got = append(got, n.Error())
+		}
+	}
+	want := `internal/cmd/demo/extra.go:6: "demo build" exits with 9, which its exit_status doesn't list`
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("warnings = %q, want [%q]", got, want)
+	}
+}
