@@ -315,8 +315,15 @@ spec and conf.
 That key is a minimum, not an exact match: it names the rotini your files were written for, and
 any rotini of the same major version at or beyond it accepts them, so a patch or minor upgrade
 never requires editing your spec. Two cases are errors: a rotini older than your files, which may
-not know keys they use, and a different major version. See
-[the version guard](https://github.com/go-rotini/rotini/blob/main/UPGRADING.md#the-version-guard).
+not know keys they use, and a different major version:
+
+| document `version:` | rotini | result |
+|---|---|---|
+| `1.2.0` | `1.2.0` | ok |
+| `1.2.0` | `1.4.1` | ok: newer, same major |
+| `1.4.0` | `1.2.0` | error: this rotini may not know keys the document uses |
+| `1.x` | `2.x` | error: a different major version |
+| any | a development build with no version | not checked |
 
 {{< alert type="info" title="WHERE THE VERSION COMES FROM:" >}}
 When rotini is installed through the module graph — `go get -tool`, then `go tool rotini` — the version is the one in your `go.mod`, read from the binary's build info. That is what makes the tool version and your `require` line the same fact. A build from source may stamp one in with `-ldflags "-X main.version=…"`, which applies only when build info carries no release version (a development build, or a pseudo-version); a real module version always wins.

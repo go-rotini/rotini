@@ -1053,6 +1053,10 @@ depends on, use `$ref: mod://<module>@<version>/<path>`; it is read from the mod
 verified by `go.sum`. Keys set next to the `$ref`, such as a new `name`, `summary` or `group`, adjust
 it for its new parent; see [`$ref`](/specification#ref).
 
+A `mod://` child stays at the version `go.sum` pins, so upgrading rotini doesn't move it. Upgrade
+the child's module on its own, then regenerate; its own `version:` check reports it if it needs
+a newer rotini than you have. A local `$ref` is rebuilt whenever you regenerate the parent.
+
 ## Versions
 
 `main.go` passes `version` to `WithVersion`. Stamp it at build time:
@@ -1064,3 +1068,35 @@ go build -ldflags "-X main.version=1.2.3" ./cmd/todo
 
 The `version:` key at the top of your spec and conf is the minimum rotini version they need. An
 older rotini, or a different major version, refuses to generate from them.
+
+## Upgrading
+
+Rotini is still evolving, so a minor release can include breaking changes. Every release lists
+them in its release notes, with how to migrate.
+
+The tool and the runtime are one module, so upgrade them together, then regenerate and read the
+diff:
+
+{{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
+go get -u github.com/go-rotini/rotini
+go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
+go generate ./...
+git diff
+go build ./... && go test ./...
+{{< /code >}}
+
+To see what an upgrade would change before it writes anything, run
+`go tool rotini generate --dry-run <spec>` first.
+
+You don't need to edit your spec or conf to upgrade: their `version:` is the oldest rotini they
+need, not the one they must use (see [the version check](/cli#rotini-version)). Raise it when you
+start using a key that needs a newer one; validation tells you which.
+
+What to expect in the diff:
+
+- **the generated file changes**: new glue, reordered literals, new helpers. A change to a name
+  your handlers use is listed in the release notes.
+- **rendered help, man and markdown pages may change layout.** If you test `--help` against a
+  saved copy, update it, or keep the layout fixed with the feature's `template: true`.
+- **your handler files and `main.go` don't change.** They are created once and never
+  rewritten; see [what stays yours](/generated#what-stays-yours).

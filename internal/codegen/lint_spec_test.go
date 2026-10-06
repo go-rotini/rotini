@@ -185,7 +185,7 @@ func TestDocsQuoteNoLintRuleCount(t *testing.T) {
 func publishedMarkdown(t *testing.T, root string) []string {
 	t.Helper()
 	var out []string
-	for _, name := range []string{"README.md", "UPGRADING.md", "CONTRIBUTING.md"} {
+	for _, name := range []string{"README.md", "CONTRIBUTING.md"} {
 		out = append(out, filepath.Join(root, name))
 	}
 	content := filepath.Join(root, "docs", "content")
