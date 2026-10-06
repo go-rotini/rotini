@@ -799,7 +799,8 @@ the contract document and at the top of each completion script. To decide some o
 your own rule to `Program.WithCompletionMessages`, which replaces the variable check. Without
 `messages_env` or a rule, messages always show when the conf turns them on.
 
-zsh and bash 4.4 or later show messages. fish, PowerShell and older bash, including the
+zsh and bash 4.4 or later show messages; bash shows them on the second TAB, the one that lists
+the candidates. fish, PowerShell and older bash, including the
 `/bin/bash` macOS ships, skip them. A plugin for kubectl, Docker or Flux shows them the way the
 host's completion does.
 

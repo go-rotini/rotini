@@ -45,7 +45,7 @@ const bashCompletionTemplate = `# bash completion for PROG
 # than offered as a candidate.
 #
 # A ":rotini:message <text>" line is a message to show, never a candidate. bash 4.4 and
-# later print it below the prompt and redraw the line; older bash, including macOS's
+# later print it on the second TAB, above the candidates; older bash, including macOS's
 # /bin/bash 3.2, skips it.
 
 # compopt does not exist in bash 3.2, which is /bin/bash on every macOS, and where it does exist
@@ -60,27 +60,38 @@ _PROG_compopt() {
     return 0
 }
 
-# _PROG_show_messages prints the messages the last completion collected, below the prompt,
-# then has readline redraw the line being edited. It needs a terminal and bash 4.4 or later.
+# _PROG_show_messages prints the messages the last completion collected on the second TAB,
+# the press where bash lists the candidates, so the first TAB still completes as usual. When
+# there are candidates, a "--" line separates the messages from the list bash prints next;
+# when there are none, bash prints nothing more, so the prompt and the line being edited are
+# printed again here. $1 is the directive: unless it is "none", bash's own file fallback
+# would list files after that reprint, so they are listed as candidates instead.
 _PROG_show_messages() {
     (( ${#__PROG_messages[@]} )) || return 0
+    [[ $COMP_TYPE == 63 ]] || return 0
     _PROG_messages_supported || return 0
-    { : >/dev/tty; } 2>/dev/null || return 0
-    _PROG_print_messages >/dev/tty
-    bind '"\e[0n": redraw-current-line' 2>/dev/null || true
-    printf '\e[5n' >/dev/tty
+    if (( ! ${#COMPREPLY[@]} )) && [[ $1 != none ]]; then
+        _PROG_compopt -o filenames
+        COMPREPLY=($(compgen -f -- "${COMP_WORDS[$COMP_CWORD]}")) || true
+    fi
+    _PROG_print_messages
+    if (( ${#COMPREPLY[@]} )); then
+        printf -- '--'
+    else
+        printf '%s' "${PS1@P}${COMP_LINE}"
+    fi
     return 0
 }
 
-# Redrawing the line after printing needs bash 4.4 or later.
+# Reprinting the prompt after the messages (${PS1@P}) needs bash 4.4 or later.
 _PROG_messages_supported() {
     (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) ))
 }
 
 # Each message on its own line, below the line being edited.
 _PROG_print_messages() {
-    printf '\n%s' "${__PROG_messages[@]}"
     printf '\n'
+    printf '%s\n' "${__PROG_messages[@]}"
 }
 
 _PROG_complete() {
@@ -102,7 +113,6 @@ _PROG_complete() {
             *) COMPREPLY+=("${line%%$'\t'*}") ;;
         esac
     done
-    _PROG_show_messages
 
     case "$directive" in
         none)
@@ -110,7 +120,7 @@ _PROG_complete() {
             _PROG_compopt +o default
             ;;
         directory)
-            _PROG_compopt -o dirnames
+            _PROG_compopt -o filenames
             COMPREPLY+=($(compgen -d -- "${COMP_WORDS[$COMP_CWORD]}")) || true
             ;;
         file)
@@ -128,6 +138,7 @@ _PROG_complete() {
             done
             ;;
     esac
+    _PROG_show_messages "$directive"
 }
 complete -o default -F _PROG_complete PROG
 `
@@ -225,8 +236,14 @@ function __PROG_files
         case directory
             __fish_complete_directories (commandline -ct)
         case 'file *'
+            # Directories, to descend into, and the files with a listed extension. fish's
+            # __fish_complete_suffix only sorts matches first and lists every other file too.
+            set -l cur (commandline -ct)
+            __fish_complete_directories $cur
             for ext in (string split ' ' -- (string replace 'file ' '' -- $__PROG_directive))
-                __fish_complete_suffix ".$ext"
+                for f in $cur*.$ext
+                    test -f $f; and echo $f
+                end
             end
         case '*'
             __fish_complete_path (commandline -ct)
@@ -274,12 +291,16 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
     if ($directive) {
         $hint = $directive -replace '^:rotini:', ''
         switch -Wildcard ($hint) {
-            'none' { return }
+            # PowerShell lists files when a completer returns nothing; one empty string stops
+            # that. CompletionResult refuses an empty text, so it is a plain string.
+            'none' { if (-not $candidates) { '' }; return }
             'directory' {
                 Get-ChildItem -Directory -Filter "$wordToComplete*" -ErrorAction SilentlyContinue |
                     ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderContainer', $_.FullName) }
             }
             'file *' {
+                Get-ChildItem -Directory -Filter "$wordToComplete*" -ErrorAction SilentlyContinue |
+                    ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderContainer', $_.FullName) }
                 foreach ($ext in ($hint -replace '^file ', '') -split ' ') {
                     Get-ChildItem -File -Filter "$wordToComplete*.$ext" -ErrorAction SilentlyContinue |
                         ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderItem', $_.FullName) }

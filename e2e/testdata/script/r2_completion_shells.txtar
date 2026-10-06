@@ -59,6 +59,8 @@ stdout '^:rotini:file yaml yml$'
 [exec:fish] stdout 'ENUM: .*text'
 [exec:fish] ! stdout ':rotini:'
 [exec:fish] stdout 'CONFIG: .*a\.yaml'
+[exec:fish] stdout 'CONFIG: .*b\.yml'
+[exec:fish] ! stdout 'CONFIG: .*c\.txt'
 
 # PowerShell reads a config file under the user's home at startup, and testscript hands every
 # script a home that does not exist: $HOME, and on Windows $USERPROFILE. It also expects the
