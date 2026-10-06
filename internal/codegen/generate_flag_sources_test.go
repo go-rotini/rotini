@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -259,5 +260,78 @@ func TestContract_shortCircuit(t *testing.T) {
 	}
 	if !strings.Contains(string(doc), `"short_circuit": true`) {
 		t.Errorf("contract doesn't mark --help short-circuit:\n%s", doc)
+	}
+}
+
+// TestFlagRows_composedChildPrefix pins that a $ref'd child's flag shows the variable its own
+// env_prefix derives, the same name the generated field's env tag binds.
+func TestFlagRows_composedChildPrefix(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "kid.yaml", `version: 0.0.0
+command:
+  name: kid
+  env_prefix: KID
+  flags:
+    - name: depth
+      summary: how deep
+      identifiers: [--depth]
+      schema: { type: int, key: depth }
+`)
+	spec := decodeSpecYAML(t, "version: 0.0.0\ncommand:\n  name: app\n  commands:\n    - $ref: ./kid.yaml\n")
+	gp, err := resolveTree(spec, filepath.Join(dir, ".rotini.spec.yaml"), "example.com/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row templateDocFlagRow
+	for _, n := range flattenFeature(gp, helpFeatureDesc) {
+		if strings.Join(n.path, " ") == "kid" {
+			row = rowFor(t, n.data.Flags, "--depth")
+		}
+	}
+	tag := flagFields(gp.tree[0].inputs, gp.envPrefix)[0].EnvVar
+	if strings.Join(row.Env, ",") != "KID_DEPTH" || tag != "KID_DEPTH" {
+		t.Errorf("help shows %v, the env tag binds %q; want KID_DEPTH for both", row.Env, tag)
+	}
+}
+
+// TestFlagSources_golden pins the whole help, man and markdown page for a command whose flags
+// have fallbacks, so the line under each flag and its alignment can't drift. Refresh with
+// `go test ./internal/codegen -run FlagSources_golden -update`.
+func TestFlagSources_golden(t *testing.T) {
+	_, pages := flagSourcesProgram(t)
+	data := pages["deploy"]
+	data.Headings = resolveHeadings(cmdHelp{})
+	for _, tt := range []struct {
+		file, name, text string
+		man              bool
+	}{
+		{"deploy.help.txt", "help", templateHelp, false},
+		{"deploy.man.1", "man", templateMan, true},
+		{"deploy.markdown.md", "markdown", templateMarkdown, false},
+	} {
+		tmpl, err := parseDocTemplate(tt.name, tt.text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		render := renderDocText
+		if tt.man {
+			render = renderManText
+		}
+		got, err := render(tmpl, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join("testdata", "flagsources", tt.file)
+		if *updateGolden {
+			writeTestFile(t, filepath.Dir(path), tt.file, got)
+			continue
+		}
+		want, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%v (run with -update)", err)
+		}
+		if got != string(want) {
+			t.Errorf("%s differs from the golden file:\n--- got ---\n%s\n--- want ---\n%s", tt.file, got, want)
+		}
 	}
 }

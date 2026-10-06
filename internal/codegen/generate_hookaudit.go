@@ -55,7 +55,7 @@ func (p *program) auditHooks() error {
 				continue
 			}
 			src, err := os.ReadFile(filepath.Join(dir, name))
-			if err != nil || strings.HasPrefix(string(src), "//go:build ignore\n") {
+			if err != nil || buildIgnored(src) {
 				continue // unreadable, or out of the build, as a stub rotini disabled is
 			}
 			f, err := parser.ParseFile(fset, filepath.Join(dir, name), src, parser.SkipObjectResolution)

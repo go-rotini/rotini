@@ -1,0 +1,14 @@
+# Only --help, cascading and short_circuit: the root hook answers help alone.
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: build
+      summary: build it

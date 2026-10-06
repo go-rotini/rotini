@@ -1,0 +1,51 @@
+# R0 — generate.dry_run_env reaches every generate that `go generate ./...` runs.
+#
+# A //go:generate line can't take extra flags at CI time, so the conf names an environment
+# variable instead. With it set, the directive's generate dry-runs: it writes nothing and
+# exits 2 when the files are stale, which go generate reports as a failed directive.
+
+gomodinit example.com/gen
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+grep 'go:generate' cmd/app/main.go
+
+# Up to date: the dry run passes.
+env CI=true
+exec go generate ./...
+
+# A new command makes the files stale: the dry run fails and writes nothing.
+cp with-ship.yaml cmd/app/.rotini.spec.yaml
+! exec go generate ./...
+stderr 'create \.\./\.\./internal/cmd/app/app_ship\.go'
+stderr 'dry run: \d+ changes? not written'
+! exists internal/cmd/app/app_ship.go
+
+# Without the variable, the same go generate really generates.
+env CI=
+exec go generate ./...
+exists internal/cmd/app/app_ship.go
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+-- with-ship.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+  commands:
+    - name: ship
+      summary: ship it
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  dry_run_env: CI
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app

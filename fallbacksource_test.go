@@ -108,3 +108,66 @@ func TestFallbackSource_reportMatchesInputs(t *testing.T) {
 		t.Fatalf("Inputs = %v, InputsWithReport = %v; want the same error", inputsErr, reportErr)
 	}
 }
+
+// fsRuleInputs carries one flag per value rule, each with an environment fallback.
+type fsRuleInputs struct {
+	App struct {
+		Flags struct {
+			Step  int      `rotini:"step" recon:"step" env:"STEP"`
+			Name  string   `rotini:"name" recon:"name" env:"NAME"`
+			Code  string   `rotini:"code" recon:"code" env:"CODE"`
+			Sku   string   `rotini:"sku" recon:"sku" env:"SKU"`
+			Tags  []string `rotini:"tags" recon:"tags" env:"TAGS"`
+			Token string   `rotini:"token" recon:"token" env:"TOKEN"`
+		}
+		Arguments struct{}
+	}
+}
+
+func fsRuleDef() Definition {
+	five := 5.0
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "step", Identifiers: []string{"--step"}, Type: "int", Constraints: Constraints{MultipleOf: &five}},
+			{Name: "name", Identifiers: []string{"--name"}, Type: "string", Constraints: Constraints{MinLength: 3}},
+			{Name: "code", Identifiers: []string{"--code"}, Type: "string", Constraints: Constraints{Pattern: "^[a-z]+$"}},
+			{Name: "sku", Identifiers: []string{"--sku"}, Type: "string", Constraints: Constraints{Pattern: "^[A-Z]{3}$", PatternMessage: "three capital letters"}},
+			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Separator: ",", Constraints: Constraints{MaxItems: 1}},
+			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true},
+		},
+	}
+}
+
+// TestFallbackSource_everyValueRule pins the suffix on each kind of value rule, and its
+// absence on a missing required input, which no source supplied.
+func TestFallbackSource_everyValueRule(t *testing.T) {
+	tests := []struct {
+		env, value string
+		want       string // a substring of the message
+	}{
+		{"STEP", "7", "(from environment variable STEP)"},
+		{"NAME", "ab", "(from environment variable NAME)"},
+		{"CODE", "ABC", "(from environment variable CODE)"},
+		{"SKU", "abc", `three capital letters (got "abc") (from environment variable SKU)`},
+		{"TAGS", "a,b", "(from environment variable TAGS)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.env, func(t *testing.T) {
+			t.Setenv("TOKEN", "t")
+			t.Setenv(tt.env, tt.value)
+			var in fsRuleInputs
+			err := NewInputReader(InputSettings{}).Read(NewContextFor(fsRuleDef(), nil), &in)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Read = %v, want a message containing %q", err, tt.want)
+			}
+		})
+	}
+	t.Run("missing required carries no source", func(t *testing.T) {
+		var in fsRuleInputs
+		err := NewInputReader(InputSettings{}).Read(NewContextFor(fsRuleDef(), nil), &in)
+		if err == nil || !strings.Contains(err.Error(), "--token") || strings.Contains(err.Error(), "(from") {
+			t.Fatalf("Read = %v, want a missing --token without a source", err)
+		}
+	})
+}

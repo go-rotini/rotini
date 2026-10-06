@@ -116,3 +116,53 @@ func (*demoBuildHandler) bail(c *r.Context) {
 		t.Errorf("warnings = %q, want [%q]", got, want)
 	}
 }
+
+// TestExitAudit_cascadingHookIsTheDeclarersCommand pins that a code set in a cascading hook is
+// attributed to the command whose handler declares it, though the hook also runs for that
+// command's descendants.
+func TestExitAudit_cascadingHookIsTheDeclarersCommand(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, ".rotini.spec.yaml", `version: 0.0.0
+command:
+  name: demo
+  exit_status:
+    - { code: 0, summary: ok }
+  commands:
+    - name: build
+      exit_status:
+        - { code: 0, summary: built }
+        - { code: 4, summary: partly built }
+`)
+	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
+	t.Chdir(dir)
+	gen := func() []error {
+		var notices []error
+		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil, func(n []error) { notices = append(notices, n...) }); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return notices
+	}
+	gen()
+	writeTestFile(t, filepath.Join(dir, "internal", "cmd", "demo"), "hooks.go", `package demo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+func (*demoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	rtx.HaltWithCode(4)
+}
+`)
+	var got []string
+	for _, n := range gen() {
+		if strings.Contains(n.Error(), "exit_status") {
+			got = append(got, n.Error())
+		}
+	}
+	if len(got) != 1 || !strings.Contains(got[0], `"demo" exits with 4`) {
+		t.Errorf("warnings = %q, want one attributing 4 to \"demo\", which doesn't list it", got)
+	}
+}

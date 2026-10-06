@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/go-rotini/jsonschema"
 )
 
 // TestSuggestionFacts_inputError pins the facts on an env-only and a config-only enum
@@ -78,7 +82,7 @@ func TestSuggestionFacts_pluginError(t *testing.T) {
 	p, _, _ := pluginProgram(def, []string{"gnerate"})
 	_, err := p.Run(p.args)
 	var pe *PluginError
-	want := []string{"generate", "gen", "deploy"}
+	want := []string{"generate", "gen", "deploy"} // the hidden "secret" is not offered
 	if !errors.As(err, &pe) || pe.Name != "gnerate" || !slices.Equal(pe.Candidates, want) {
 		t.Fatalf("err = %#v, want a *PluginError for gnerate with Candidates %v", err, want)
 	}
@@ -157,6 +161,42 @@ func TestStructuredReporter_tokenFromFacts(t *testing.T) {
 	}
 	if line.Error["token"] != "gnerate" {
 		t.Errorf("token = %v, want gnerate (line %v)", line.Error["token"], line.Error)
+	}
+
+	raw, err := os.ReadFile("schema-error.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := jsonschema.Compile(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := schema.Validate(bytes.TrimSpace(errb.Bytes())); err != nil || !res.Valid {
+		t.Errorf("line does not match schema-error.json: %s (%v %+v)", errb, err, res)
+	}
+}
+
+// TestSuggestionFacts_pluginFailuresThatAreNotTypos pins that a plugin that was found but timed
+// out or could not start carries no candidates: nothing was mistyped.
+func TestSuggestionFacts_pluginFailuresThatAreNotTypos(t *testing.T) {
+	writeFakeBinary(t, "acme-slow", "#!/bin/sh\nsleep 5\n")
+	writeFakeBinary(t, "acme-broken", "#!/no/such/interpreter\n")
+	def := Definition{
+		Name: "acme", Handler: "App",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"},
+		Commands:        []CommandDef{{Name: "generate", Handler: "Gen"}},
+		Plugins:         []PluginDef{{Name: "slow", Binary: "acme-slow", Timeout: 50 * time.Millisecond}},
+	}
+	for word, kind := range map[string]PluginErrorKind{"slow": PluginTimeout, "broken": PluginStartFailed} {
+		p, _, _ := pluginProgram(def, []string{word})
+		_, err := p.Run(p.args)
+		var pe *PluginError
+		if !errors.As(err, &pe) || pe.Kind != kind || pe.Candidates != nil {
+			t.Errorf("%s: err = %#v, want a %v *PluginError without candidates", word, err, kind)
+		}
+		if _, _, ok := SuggestionFacts(err); ok {
+			t.Errorf("%s: SuggestionFacts found facts", word)
+		}
 	}
 }
 

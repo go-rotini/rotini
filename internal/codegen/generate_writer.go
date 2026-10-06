@@ -122,18 +122,32 @@ func (pl *planner) apply(op fs.PlanOp) error {
 }
 
 // Changes lists the planned operations one per line, in [fs.Plan.Diff]'s format, with each
-// path shown relative to the working directory.
+// path shown relative to the working directory, climbing out of it with ../ when needed (as
+// under go generate, which runs in the entrypoint's directory).
 func (pl *planner) Changes() []string {
 	if len(pl.plan.Ops) == 0 {
 		return nil
 	}
 	shown := &fs.Plan{Ops: make([]fs.PlanOp, len(pl.plan.Ops))}
 	for i, op := range pl.plan.Ops {
-		op.Path = filepath.ToSlash(displayPath(op.Path))
+		op.Path = relToWorkdir(op.Path)
 		if op.Source != "" {
-			op.Source = filepath.ToSlash(displayPath(op.Source))
+			op.Source = relToWorkdir(op.Source)
 		}
 		shown.Ops[i] = op
 	}
 	return strings.Split(strings.TrimSuffix(shown.Diff(), "\n"), "\n")
+}
+
+// relToWorkdir is path relative to the working directory, or as given when it can't be.
+func relToWorkdir(path string) string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	rel, err := filepath.Rel(wd, path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
 }

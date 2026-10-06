@@ -1,0 +1,8 @@
+# No root flags at all: no hook, and a dispatch-only root prints its help when called bare.
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  commands:
+    - name: build
+      summary: build it

@@ -192,3 +192,74 @@ func Example_unopinionated() {
 	// hi, ada! (command "greet")
 	// exit: 0
 }
+
+// ── branching on an error in a handler ──────────────────────.
+
+// branchingAdd is the guide's "Handling errors in a handler" sample: a missing required input
+// gets a usage hint and exit 2, any other usage error exit 2 through the reporter, and
+// everything else is left to the reporter's default.
+type branchingAdd struct{ NoHooks }
+
+func (branchingAdd) Run(_ context.Context, rtx *Context) {
+	var in struct {
+		Todo struct {
+			Flags     struct{}
+			Arguments struct{}
+		}
+		TodoAdd struct {
+			Flags     struct{}
+			Arguments struct {
+				Title string `rotini:"title"`
+			}
+		}
+	}
+	if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
+		var pe *ParseError
+		switch {
+		case errors.As(err, &pe) && pe.Kind == ParseKindMissingRequired:
+			fmt.Fprintf(rtx.Stdout, "%s\nRun '%s --help' for usage.\n", err, rtx.CommandPath())
+			rtx.HaltWithCode(2)
+		case CategoryOf(err) == CategoryUsage:
+			rtx.RecordError(err)
+			rtx.HaltWithCode(2)
+		default:
+			rtx.HaltWith(err)
+		}
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "added %q\n", in.TodoAdd.Arguments.Title)
+}
+
+type branchingRoot struct{ NoHooks }
+
+func (branchingRoot) Run(context.Context, *Context) {}
+
+type branchingApp struct{}
+
+func (branchingApp) Todo() Handler    { return branchingRoot{} }
+func (branchingApp) TodoAdd() Handler { return branchingAdd{} }
+
+// Example_branchingOnErrors branches on the typed error a missing input produces: the handler
+// chooses the message and the exit code, and rotini's reporter is left with nothing to add.
+func Example_branchingOnErrors() {
+	def := Definition{
+		Name: "todo", Handler: "Todo",
+		Commands: []CommandDef{{
+			Name: "add", Handler: "TodoAdd",
+			Arguments: []ArgDef{{Name: "title", Type: "string", Required: true}},
+		}},
+	}
+	for _, argv := range [][]string{{"add", "buy milk"}, {"add"}} {
+		code, _ := NewProgram(def, branchingApp{}).
+			WithStdout(os.Stdout).
+			WithoutSignalHandling().
+			Run(argv)
+		fmt.Println("exit:", code)
+	}
+	// Output:
+	// added "buy milk"
+	// exit: 0
+	// missing required input: <title>
+	// Run 'todo add --help' for usage.
+	// exit: 2
+}

@@ -113,3 +113,39 @@ func (*demoBuildHandler) Prerun(ctx context.Context, rtx *rotini.Context) {
 		}
 	}
 }
+
+// TestBuildIgnored pins which files count as out of the build: a constraint needing the
+// ignore tag, wherever it sits above the package clause and whatever the line endings.
+func TestBuildIgnored(t *testing.T) {
+	for src, want := range map[string]bool{
+		"//go:build ignore\n\npackage demo\n":                          true,
+		"// Copyright 2026 me.\n\n//go:build ignore\n\npackage demo\n": true,
+		"//go:build ignore\r\n\r\npackage demo\r\n":                    true,
+		"//go:build ignore && linux\n\npackage demo\n":                 true,
+		"//go:build linux\n\npackage demo\n":                           false,
+		"//go:build !ignore\n\npackage demo\n":                         false,
+		"package demo\n\n//go:build ignore\n":                          false,
+	} {
+		if got := buildIgnored([]byte(src)); got != want {
+			t.Errorf("buildIgnored(%q) = %v, want %v", src, got, want)
+		}
+	}
+}
+
+// TestStubDisabled_noteMustFollowTheConstraint pins that rotini's note counts only where
+// rotini put it, so a quoted copy elsewhere doesn't mark a file for deletion.
+func TestStubDisabled_noteMustFollowTheConstraint(t *testing.T) {
+	if !stubDisabled(disableStub([]byte(orphanStub))) {
+		t.Error("a stub rotini disabled is not recognized")
+	}
+	moved := "//go:build ignore\n\n// mine\n" + disabledNote + "\n" + orphanStub
+	if stubDisabled([]byte(moved)) {
+		t.Error("a note away from the constraint was recognized")
+	}
+}
+
+func TestBuildIgnored_negatedPlatformStillBuilds(t *testing.T) {
+	if buildIgnored([]byte("//go:build !linux\n\npackage demo\n")) {
+		t.Error("a !linux file was treated as out of every build")
+	}
+}

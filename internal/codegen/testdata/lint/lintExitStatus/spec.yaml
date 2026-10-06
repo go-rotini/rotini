@@ -19,3 +19,5 @@ command:
         - { code: 130, summary: interrupted }
         - { code: 143, summary: terminated }
         - { code: 200, summary: something else }
+    # A composed child: its duplicate is reported in its own file.
+    - $ref: ./kid.yaml

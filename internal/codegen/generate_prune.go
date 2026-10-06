@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"go/build/constraint"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,10 +143,33 @@ func enableStub(body []byte) []byte {
 }
 
 // stubDisabled reports whether body is a stub rotini disabled: build-ignored, with rotini's
-// note. An author who removed the note, or turned the build back on, has a live file again.
+// note directly below. An author who removed the note, or turned the build back on, has a
+// live file again.
 func stubDisabled(body []byte) bool {
-	s := string(body)
-	return strings.HasPrefix(s, "//go:build ignore\n") && strings.Contains(s, disabledNote)
+	return strings.HasPrefix(string(body), "//go:build ignore\n\n"+disabledNote)
+}
+
+// buildIgnored reports whether src is kept out of every build by a //go:build constraint
+// that needs the ignore tag, wherever it sits among the comments above the package clause.
+func buildIgnored(src []byte) bool {
+	for line := range strings.SplitSeq(string(src), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "package ") {
+			return false
+		}
+		if !constraint.IsGoBuild(line) {
+			continue
+		}
+		expr, err := constraint.Parse(line)
+		if err != nil {
+			return false
+		}
+		// Without the ignore tag it can't build, whatever else is set: no build includes it.
+		allOn := expr.Eval(func(tag string) bool { return tag != "ignore" })
+		allOff := expr.Eval(func(string) bool { return false })
+		return !allOn && !allOff
+	}
+	return false
 }
 
 // stubMarker is the line every generated handler stub carries (templates/handler.go.tmpl). It

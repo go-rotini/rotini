@@ -64,13 +64,23 @@ _PROG_compopt() {
 # then has readline redraw the line being edited. It needs a terminal and bash 4.4 or later.
 _PROG_show_messages() {
     (( ${#__PROG_messages[@]} )) || return 0
-    (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )) || return 0
+    _PROG_messages_supported || return 0
     { : >/dev/tty; } 2>/dev/null || return 0
-    printf '\n%s' "${__PROG_messages[@]}" >/dev/tty
-    printf '\n' >/dev/tty
+    _PROG_print_messages >/dev/tty
     bind '"\e[0n": redraw-current-line' 2>/dev/null || true
     printf '\e[5n' >/dev/tty
     return 0
+}
+
+# Redrawing the line after printing needs bash 4.4 or later.
+_PROG_messages_supported() {
+    (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) ))
+}
+
+# Each message on its own line, below the line being edited.
+_PROG_print_messages() {
+    printf '\n%s' "${__PROG_messages[@]}"
+    printf '\n'
 }
 
 _PROG_complete() {

@@ -1,0 +1,28 @@
+.TH "APP\-DEPLOY" 1 "" "app" "User Commands"
+.SH NAME
+app\-deploy \- deploy it
+.SH SYNOPSIS
+\fBapp deploy\fR <command> [flags]
+.SH "COMMANDS"
+.TP
+\fBcanary\fR
+a canary deploy
+.SH "OPTIONS"
+.TP
+\fB\-r\fR, \fB\-\-replicas\fR \fIint\fR
+how many (default 1)
+.br
+env: \fBAPP_DEPLOY_REPLICAS\fR \(md config: \fBdeploy.replicas\fR
+.TP
+\fB\-\-region\fR \fIstring\fR
+where
+.br
+env: \fBDEPLOY_REGION\fR \(md config: \fBregion\fR
+.SH "GLOBAL OPTIONS"
+.TP
+\fB\-\-verbose\fR
+say more
+.br
+env: \fBAPP_LOG_VERBOSE\fR \(md config: \fBlog.verbose\fR
+.SH "SEE ALSO"
+\fBapp\fR(1), \fBapp\-deploy\-canary\fR(1)

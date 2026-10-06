@@ -1,0 +1,7 @@
+version: 0.0.0
+command:
+  name: kid
+  # A composed child's own exit_status is checked in its own file.
+  exit_status:
+    - { code: 5, summary: one }
+    - { code: 5, summary: the same code }

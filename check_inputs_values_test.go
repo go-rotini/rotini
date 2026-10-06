@@ -156,3 +156,67 @@ func TestInputReport_checksAHandBuiltStdinDocument(t *testing.T) {
 		t.Fatalf("Validate = %v, want nil", err)
 	}
 }
+
+// ruleInputs covers the rules the core CheckInputs table leaves out: case-insensitive enums,
+// secret values, flag dependencies and a required stdin document.
+type ruleInputs struct {
+	App struct {
+		Flags struct {
+			Level string `rotini:"level"`
+			Key   string `rotini:"key"`
+			Cert  string `rotini:"cert"`
+			TLS   bool   `rotini:"tls"`
+		}
+		Arguments struct{}
+		Stdin     *AppStdin `stdin:"json,required"`
+	}
+}
+
+func ruleDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "level", Identifiers: []string{"--level"}, Type: "string", Enum: []string{"low", "high"}, IgnoreCase: true},
+			{Name: "key", Identifiers: []string{"--key"}, Type: "string", Enum: []string{"alpha", "beta"}, Secret: true},
+			{Name: "cert", Identifiers: []string{"--cert"}, Type: "string"},
+			{Name: "tls", Identifiers: []string{"--tls"}, Type: "bool"},
+		},
+		FlagDependencies: []FlagDependency{{When: "tls", Requires: []string{"cert"}}},
+	}
+}
+
+func TestCheckInputs_moreRules(t *testing.T) {
+	ok := func(v *ruleInputs) { v.App.Stdin = &AppStdin{Name: "x"} }
+	tests := []struct {
+		name  string
+		set   func(*ruleInputs)
+		want  string // "" = no error
+		avoid string // must not appear in the message
+	}{
+		{"case-insensitive enum accepts another case", func(v *ruleInputs) { ok(v); v.App.Flags.Level = "HIGH" }, "", ""},
+		{"case-insensitive enum still rejects a non-member", func(v *ruleInputs) { ok(v); v.App.Flags.Level = "mid" }, "--level", ""},
+		{"a secret value is redacted", func(v *ruleInputs) { ok(v); v.App.Flags.Key = "hunter2" }, "[redacted]", "hunter2"},
+		{"a dependency is enforced", func(v *ruleInputs) { ok(v); v.App.Flags.TLS = true }, "--cert", ""},
+		{"a dependency is satisfied", func(v *ruleInputs) { ok(v); v.App.Flags.TLS, v.App.Flags.Cert = true, "c.pem" }, "", ""},
+		{"a required stdin document is missing", func(*ruleInputs) {}, "required stdin payload is missing", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var v ruleInputs
+			tt.set(&v)
+			err := NewContextFor(ruleDef(), nil).CheckInputs(v, PresenceOf(v))
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("CheckInputs = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("CheckInputs = %v, want a message containing %q", err, tt.want)
+			}
+			if tt.avoid != "" && strings.Contains(err.Error(), tt.avoid) {
+				t.Errorf("message %q shows %q", err, tt.avoid)
+			}
+		})
+	}
+}

@@ -1,0 +1,117 @@
+# R1 — rtx.CheckInputs checks values a handler collected itself, in a generated CLI.
+#
+# deploy reads its settings from a JSON file of its own format, not through rotini's channels,
+# then asks rotini to check them against the spec. A bad value is reported as the command line
+# would report the same value given as a flag: a usage error naming the flag.
+
+gomodinit example.com/ci
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+cp deploy.go.txt internal/cmd/app/app_deploy.go
+exec go build -o app$exe ./cmd/app
+
+exec ./app$exe deploy good.json
+stdout 'deploying web to prod with 3 replicas'
+
+! exec ./app$exe deploy too-many.json
+stderr '--replicas must be <= 10 \(got 50\)'
+! stdout 'deploying'
+
+! exec ./app$exe deploy bad-env.json
+stderr 'invalid value "qa" for --env \(one of: dev, prod\)'
+
+! exec ./app$exe deploy no-service.json
+stderr 'missing required input: --service'
+
+-- good.json --
+{"service": "web", "env": "prod", "replicas": 3}
+-- too-many.json --
+{"service": "web", "env": "prod", "replicas": 50}
+-- bad-env.json --
+{"service": "web", "env": "qa", "replicas": 3}
+-- no-service.json --
+{"env": "prod", "replicas": 3}
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  commands:
+    - name: deploy
+      summary: deploy from a plan file
+      arguments:
+        - name: plan
+          summary: the plan file
+          schema: { type: string, required: true }
+      flags:
+        - name: service
+          identifiers: [--service]
+          schema: { type: string, required: true }
+        - name: env
+          identifiers: [--env]
+          schema: { type: string, enum: [dev, prod] }
+        - name: replicas
+          identifiers: [--replicas]
+          schema: { type: int, maximum: 10 }
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- deploy.go.txt --
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appDeployHandler)(nil)
+
+type appDeployHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	args, err := rtx.ArgvInputs[AppDeployInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	data, err := os.ReadFile(args.Values.AppDeploy.Arguments.Plan)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	var plan struct {
+		Service  string `json:"service"`
+		Env      string `json:"env"`
+		Replicas int    `json:"replicas"`
+	}
+	if err := json.Unmarshal(data, &plan); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
+	// The values came from a file, so rotini hasn't seen them: check them against the spec.
+	in := args.Values
+	in.AppDeploy.Flags.Service = plan.Service
+	in.AppDeploy.Flags.Env = plan.Env
+	in.AppDeploy.Flags.Replicas = plan.Replicas
+	if err := rtx.CheckInputs(in, rotini.PresenceOf(in)); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "deploying %s to %s with %d replicas\n", plan.Service, plan.Env, plan.Replicas)
+}
