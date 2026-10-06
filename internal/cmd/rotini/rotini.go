@@ -42,9 +42,6 @@ type rotiniHandler struct {
 	rotini.NoCascadingPostRun
 }
 
-// CascadingPreRun answers --help and --version for every command in the tree. Both are
-// short_circuit in the spec, so reading the inputs succeeds even when the invoked command's
-// own requirements are not met.
 func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rtx.Inputs[RotiniInputs]()
 	if err != nil {
@@ -92,7 +89,6 @@ func ResolveVersion(ldflagVersion string) string {
 }
 
 func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	// A bare `rotini` prints help and exits 1, since nothing ran.
 	fmt.Fprintln(rtx.Stdout, rtx.Help())
 	rtx.HaltWithCode(1)
 }
