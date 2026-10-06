@@ -185,8 +185,9 @@ land in the same generated inputs struct.
 ## Handlers
 
 `go generate` creates one handler file per command, once, and never overwrites it: it is yours.
-If its command leaves the spec, the file is removed and the removal reported. To keep it, delete
-its `var _ rotini.Handler` line or list it under the conf's [`keep:`](/configuration#keep). Fill in
+When its command leaves the spec, the next `go generate` disables the file (adding
+`//go:build ignore`), and the one after deletes it, reporting each step. To keep it, delete its
+`var _ rotini.Handler` line or list it under the conf's [`keep:`](/configuration#keep). Fill in
 `Run`:
 
 {{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
@@ -725,6 +726,10 @@ generated package:
 To expose one, add a command for it to the spec and call the function from its handler; for
 example, a `completion` command whose handler prints the script `Completion(shell)` returns.
 
+The layout of the generated pages can change between releases. If you test your `--help` output
+against a saved copy, expect to update it after upgrading, or keep the layout fixed by setting
+the feature's `template: true` and editing the template it seeds.
+
 Man pages are roff, the markup the `man` program reads, so `man -l todo-add.1` displays one and a
 package installs them like any other. Each page is named after its command path joined with `-`:
 `todo`, `todo-add`. With `embed: true` the pages are also written as files under that name with the
@@ -919,7 +924,10 @@ Each host completes a plugin's arguments by asking the plugin, and all three rea
 completion format: one candidate per line, `value<TAB>description`, then a final `:<number>`
 line with directives such as "don't fall back to file names". Rotini computes the answer from
 the spec, your completers and each input's `complete:` hint, and `rotini.PluginCompletion`
-writes it in that format.
+writes it in that format. The hidden `__complete` command rotini's own scripts call speaks a
+format private to those scripts, which may change between releases; another program reads a
+rotini CLI's completion through `Program.Complete` or `Program.WithCompletion` with a
+`rotini.CompletionFormat`.
 
 **kubectl** runs a separate executable, `kubectl_complete-<name>`, found on `PATH`. Install the
 plugin's binary a second time under that name (a copy or a symlink), and have `main.go` answer

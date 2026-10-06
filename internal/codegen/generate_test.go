@@ -590,11 +590,19 @@ command:
   commands:
     - name: build
 `)
+	// It takes two generates: the first disables it, the second deletes it.
 	notices := gen(t)
+	if body, err := os.ReadFile(filepath.Join(cmdDir, "demo_ship.go")); err != nil || !strings.HasPrefix(string(body), "//go:build ignore\n") {
+		t.Errorf("the stub for a removed command was not disabled: %v\n%s", err, body)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0].Error(), "demo_ship.go (disabled; removed by the next generate)") {
+		t.Errorf("notices = %v, want one naming demo_ship.go as disabled", notices)
+	}
+	notices = gen(t)
 	if _, err := os.Stat(filepath.Join(cmdDir, "demo_ship.go")); !os.IsNotExist(err) {
 		t.Error("the stub for a removed command was not pruned")
 	}
-	if len(notices) != 1 || !strings.Contains(notices[0].Error(), "demo_ship.go") {
+	if len(notices) != 1 || !strings.Contains(notices[0].Error(), "pruned demo_ship.go;") {
 		t.Errorf("notices = %v, want one naming demo_ship.go — deleting a file is not silent", notices)
 	}
 	for name := range helpers {

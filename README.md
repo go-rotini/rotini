@@ -167,7 +167,7 @@ HELLO, ROTINI!
 For more information, see the [rotini](https://rotini.dev) documentation.
 
 - Full API reference is available on [pkg.go.dev](https://pkg.go.dev/github.com/go-rotini/rotini).
-- See [COMPATIBILITY.md](COMPATIBILITY.md) to understand what a version promises and [UPGRADING.md](UPGRADING.md) to understand upgrading versions.
+- Upgrading: breaking changes are listed in each release's notes; see [UPGRADING.md](UPGRADING.md) for how to upgrade.
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to this project.
 - This project follows a code of conduct to ensure a welcoming community. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 - To report a vulnerability, see [SECURITY.md](SECURITY.md).

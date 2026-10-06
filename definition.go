@@ -8,6 +8,12 @@ import (
 // Go literal; the runtime parses argv, dispatches and completes against it. Help pages are
 // rendered at codegen and supplied through [Program.WithHelp]. The Definition types are data
 // only, with no behavior.
+//
+// A Definition is the runtime form of the command tree `rotini generate` produces from your
+// spec. Building one by hand is supported for tests ([NewContextFor]) and for tooling; it is
+// not a way to define a CLI, which the spec is. Fields are added as the spec gains keys,
+// including in minor releases, so construct values with field names
+// (rotini.FlagDef{Name: "verbose"}), not positionally.
 type Definition struct {
 	Name             string
 	Handler          string // ProgramHandlers method for the root command, e.g. "Rotini"

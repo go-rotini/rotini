@@ -3,7 +3,8 @@
 Upgrading is: take the new version, regenerate, read the diff, build. This document says what
 to expect at each step, and what rotini will and will not touch in your repository.
 
-See [COMPATIBILITY.md](COMPATIBILITY.md) for what a version number promises.
+Rotini is still evolving, so a minor release can include breaking changes. Every release lists
+them in its release notes, and this guide shows how to migrate.
 
 ## The short version
 
@@ -16,9 +17,9 @@ go build ./... && go test ./...
 ```
 
 Taking a patch or minor release does **not** require editing your spec or conf: the `version:`
-key in each is a minimum, not a pin (see COMPATIBILITY.md). If validation complains that the
-binary is older than your document, you upgraded the runtime and not the tool, or the other
-way round — they are one module and must be at one version.
+key in each is a minimum, not a pin (see [the version guard](#the-version-guard)). If
+validation complains that the binary is older than your document, you upgraded the runtime and
+not the tool, or the other way round — they are one module and must be at one version.
 
 The version `rotini version` reports comes from the binary's **build info**, which through
 `go tool` is the version in your `go.mod`. So the tool version and your `require` line are the
@@ -26,6 +27,22 @@ same fact, and there is nothing separate to keep aligned. (A build from source m
 in with `-ldflags "-X main.version=…"`; that applies only when build info carries no release
 version — a development build or a pseudo-version — because a real module version is the
 better answer.)
+
+## The version guard
+
+Your spec and conf each declare a `version:`. It is the oldest rotini they need, not the one
+they must use:
+
+| document `version:` | rotini binary | result |
+|---|---|---|
+| `1.2.0` | `1.2.0` | ok |
+| `1.2.0` | `1.4.1` | ok: newer, same major |
+| `1.4.0` | `1.2.0` | **error**: the binary may not know keys the document uses |
+| `1.x` | `2.x` | **error**: different major |
+| any | unstamped dev build | skipped |
+
+So taking a newer release never requires editing a spec or conf file. Raise `version:` when you
+start using a key that needs a newer rotini; validation tells you which, and when.
 
 ## What regenerating touches
 
@@ -52,19 +69,26 @@ in the spec. That is how renaming or deleting a command cleans up after itself.
 `var _ rotini.Handler = (*xHandlers)(nil)` — and that marker is what makes it prunable. It
 survives your edits, so an edited handler file is still pruned when its command goes. A helper
 you put beside your handlers is never touched, whatever it is named. To keep a handler file
-whose command is gone, delete its marker line or list it under `keep:`. Every prune is
-reported:
+whose command is gone, delete its marker line or list it under `keep:`.
+
+**It takes two generates.** The first disables the file: it adds `//go:build ignore` and a
+note at the top, so the file is out of the build but your code is still there. The next one
+deletes it. (Deleting at once would make `go generate ./...` fail, since it lists every
+package's files before running any directive.) To bring the command back, add it to the spec
+and delete the added lines. Each step is reported:
 
 ```
+Warning: pruned demo_ship.go (disabled; removed by the next generate); its command is no longer in the spec
 Warning: pruned demo_ship.go; its command is no longer in the spec
 ```
 
 What can still surprise you:
 
 - **Renaming a command** (or changing its `filename:`) orphans the old handler file.
-  Regenerating deletes it and seeds a new, empty one. **Move your handler body first**, or recover it from
-  git afterwards.
-- **Deleting a command** deletes its handler file, which is usually what you wanted.
+  Regenerating disables it, seeds a new, empty one, and deletes the old one on the next run.
+  **Move your handler body across before that second run**, or recover it from git afterwards.
+- **Deleting a command** deletes its handler file over two runs, which is usually what you
+  wanted.
 
 Anything the pruner must spare goes in that package's `keep:` list. Test files and seeded
 templates are kept automatically.
@@ -77,9 +101,9 @@ your conf names.
 
 Expect, in a minor upgrade:
 
-- **changes inside the generated file** — new glue, a reordered literal, a new helper. Covered
-  API keeps its names (COMPATIBILITY.md §3), so your handlers keep compiling.
-- **changes to rendered help/man/markdown** — layout is not covered by SemVer. If you
+- **changes inside the generated file** — new glue, a reordered literal, a new helper. A
+  change to a name your handlers use is listed in the release notes.
+- **changes to rendered help/man/markdown** — layout changes between releases. If you
   golden-test your own `--help`, re-record it. If you would rather own the layout, turn the
   feature's `template: true` knob on: the template is seeded into your repo once and rotini
   renders from your copy afterwards.
@@ -207,6 +231,5 @@ Validation names the key if it does.
 ## If an upgrade breaks something
 
 1. `git diff` on a clean tree — the change is almost always visible in the generated file.
-2. Check whether what broke is covered (COMPATIBILITY.md). Message text and page layout are
-   not; names and behavior are.
-3. If it is covered, it is a regression. Open an issue with both versions and the diff.
+2. Check the release notes: a breaking change is listed there, with how to migrate.
+3. If it isn't listed, open an issue with both versions and the diff.

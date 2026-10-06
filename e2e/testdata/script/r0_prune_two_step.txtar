@@ -1,0 +1,89 @@
+# R0 — removing a command never fails `go generate ./...`.
+#
+# go generate lists every package's files before it runs any directive. The directive in
+# cmd/hello/main.go runs first and retires the stub of a removed command in
+# internal/cmd/hello; if it deleted the file, go generate would then fail opening it from its
+# stale list ("no such file or directory") and exit 1. So the first generate disables the stub
+# with //go:build ignore, which keeps it out of the build, and the next one deletes it.
+
+gomodinit example.com/hello
+
+exec rotini init hello
+exec go mod tidy
+
+cp with-greet.yaml cmd/hello/.rotini.spec.yaml
+exec go generate ./...
+exists internal/cmd/hello/hello_greet.go
+
+# ── remove the command: generate succeeds and the build is correct ───────────
+cp without-greet.yaml cmd/hello/.rotini.spec.yaml
+exec go generate ./...
+stderr 'pruned hello_greet\.go \(disabled; removed by the next generate\)'
+grep '^//go:build ignore$' internal/cmd/hello/hello_greet.go
+grep 'var _ rotini\.Handler' internal/cmd/hello/hello_greet.go
+exec go build ./...
+exec go vet ./...
+
+# ── the next generate deletes it ─────────────────────────────────────────────
+exec go generate ./...
+stderr 'pruned hello_greet\.go;'
+! exists internal/cmd/hello/hello_greet.go
+
+# ── and then there's nothing left to do ──────────────────────────────────────
+exec go generate ./...
+! stderr 'pruned'
+
+-- with-greet.yaml --
+version: 0.0.0
+command:
+  name: hello
+  summary: say hello
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [-v, --version]
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+    - name: greet
+      summary: greet someone
+-- without-greet.yaml --
+version: 0.0.0
+command:
+  name: hello
+  summary: say hello
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [-v, --version]
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version

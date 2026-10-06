@@ -50,11 +50,14 @@ func pruneEntrypoint(pl *planner, lay layout, keepList []string, onPrune func(st
 	return pruneGoDir(pl, lay.entrypointDir, protected, onPrune)
 }
 
-// pruneGoDir removes the orphaned generated stubs in dir: non-test .go files that are not
-// protected and that stubLooksGenerated identifies as rotini-written. Sub-directories,
-// *_test.go files and hand-written files are never touched. Every removal is reported through
-// onPrune. A directory that doesn't exist yet, as in a dry run before anything is written,
-// has nothing to prune.
+// pruneGoDir retires the orphaned generated stubs in dir: non-test .go files that are not
+// protected and that stubLooksGenerated identifies as rotini-written. It takes two generates:
+// the first disables an orphan (see disableStub), and the next deletes the stub it disabled.
+// go generate lists every package's files before running any directive, so deleting a file
+// another package's directive is about to be handed would fail the run; a build-ignored file is
+// not on that list. Sub-directories, *_test.go files and hand-written files are never touched.
+// Every step is reported through onPrune. A directory that doesn't exist yet, as in a dry run
+// before anything is written, has nothing to prune.
 func pruneGoDir(pl *planner, dir string, protected map[string]bool, onPrune func(string)) error {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -79,14 +82,64 @@ func pruneGoDir(pl *planner, dir string, protected map[string]bool, onPrune func
 		if !generated {
 			continue
 		}
-		if err := pl.remove(path); err != nil {
+		body, _, _, err := pl.read(path)
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(string(body), "//go:build ignore\n") && !stubDisabled(body) {
+			continue // out of the build without rotini's note: the author's to keep
+		}
+		if stubDisabled(body) {
+			if err := pl.remove(path); err != nil {
+				return fmt.Errorf("prune %s: %w", name, err)
+			}
+			if onPrune != nil {
+				onPrune(name)
+			}
+			continue
+		}
+		if err := pl.write(path, disableStub(body)); err != nil {
 			return fmt.Errorf("prune %s: %w", name, err)
 		}
 		if onPrune != nil {
-			onPrune(name)
+			onPrune(name + " (disabled; removed by the next generate)")
 		}
 	}
 	return nil
+}
+
+// disabledHeader is what disableStub puts at the top of an orphaned stub. The next generate
+// recognizes a stub it disabled by these lines, so the text is part of the format.
+const disabledHeader = "//go:build ignore\n\n" + disabledNote + "\n// removed by the next generate. To keep the command, add it back to the spec and delete\n// these lines.\n\n"
+
+// disabledNote is the line that marks a stub rotini disabled.
+const disabledNote = "// rotini: this handler's command is no longer in the spec, so the file is disabled and is"
+
+// disableStub returns an orphaned stub taken out of the build: rotini's header, with
+// //go:build ignore, above the author's code. A build constraint the author added is
+// replaced, since a file can carry only one.
+func disableStub(body []byte) []byte {
+	lines := strings.SplitAfter(string(body), "\n")
+	var kept []string
+	inHeader := true
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "package ") {
+			inHeader = false
+		}
+		if inHeader && (strings.HasPrefix(trimmed, "//go:build") || strings.HasPrefix(trimmed, "// +build")) {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return []byte(disabledHeader + strings.TrimLeft(strings.Join(kept, ""), "\n"))
+}
+
+// stubDisabled reports whether body is a stub rotini disabled: build-ignored, with rotini's
+// note. An author who removed the note, or turned the build back on, has a live file again.
+func stubDisabled(body []byte) bool {
+	s := string(body)
+	return strings.HasPrefix(s, "//go:build ignore\n") && strings.Contains(s, disabledNote)
 }
 
 // stubMarker is the line every generated handler stub carries (templates/handler.go.tmpl). It

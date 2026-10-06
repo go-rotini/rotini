@@ -474,7 +474,7 @@ func withDescription(name, summary string) string {
 // completionDirectivePrefix marks the directive line in __complete's output. It is a word no
 // plausible candidate begins with, since a bare colon could start a value. The protocol is
 // private between a generated script and the binary from the same generate pass, so it may be
-// extended (see COMPATIBILITY.md).
+// extended.
 const completionDirectivePrefix = ":rotini:"
 
 // completionHint returns the directive line for the word being completed, or "" when the input

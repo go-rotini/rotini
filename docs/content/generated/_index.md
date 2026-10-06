@@ -78,9 +78,10 @@ another package can import them, declare a `models` target under the conf's
 
 - **The handler files**, one per command, such as `todo_add.go`. Each is created the first time
   its command appears in the spec and is never overwritten. When you remove a command from the
-  spec, the next `go generate` removes its handler file, edits and all, and prints what it
-  removed. To keep the file, delete its `var _ rotini.Handler` line, or list it under the
-  conf's [`keep`](/configuration#keep).
+  spec, the next `go generate` disables its handler file by adding `//go:build ignore` at the
+  top, so it is out of the build but your code is still there, and the one after deletes it,
+  edits and all. Each step is reported. To keep the file, delete its `var _ rotini.Handler`
+  line, or list it under the conf's [`keep`](/configuration#keep).
 - **`main.go`**, created once and never touched again.
 - **Any other file you add to the package**, such as a test or a file declaring a dependency.
   Rotini only removes files it wrote.

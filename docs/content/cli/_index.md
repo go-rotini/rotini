@@ -121,7 +121,7 @@ Use "rotini help <command>" for more information about a command.
 Turns a spec and conf into Go code: the command tree, the typed inputs for each command, the table
 that maps each command to its handler, the outputs of any features the conf turns on (help, man
 pages and so on), and a handler file for each new command. A handler file whose command has left
-the spec is removed. See [generated code](/generated) for what each file holds and which ones
+the spec is disabled with `//go:build ignore`, then deleted by the next `generate`. See [generated code](/generated) for what each file holds and which ones
 are yours.
 
 With no arguments, `generate` reads the `.rotini.spec.*` in the working directory and the
@@ -316,7 +316,7 @@ That key is a minimum, not an exact match: it names the rotini your files were w
 any rotini of the same major version at or beyond it accepts them, so a patch or minor upgrade
 never requires editing your spec. Two cases are errors: a rotini older than your files, which may
 not know keys they use, and a different major version. See
-[COMPATIBILITY.md](https://github.com/go-rotini/rotini/blob/main/COMPATIBILITY.md).
+[the version guard](https://github.com/go-rotini/rotini/blob/main/UPGRADING.md#the-version-guard).
 
 {{< alert type="info" title="WHERE THE VERSION COMES FROM:" >}}
 When rotini is installed through the module graph — `go get -tool`, then `go tool rotini` — the version is the one in your `go.mod`, read from the binary's build info. That is what makes the tool version and your `require` line the same fact. A build from source may stamp one in with `-ldflags "-X main.version=…"`, which applies only when build info carries no release version (a development build, or a pseudo-version); a real module version always wins.

@@ -63,15 +63,23 @@ env CI=false
 exec rotini generate app/.rotini.spec.yaml
 ! stderr .
 
-# ── removing a command plans a delete, and a real generate prunes it ─────────
+# ── removing a command: its stub is disabled, then deleted ───────────────────
 env CI=
 cp spec.yaml app/.rotini.spec.yaml
+cp internal/cmd/app/app_greet.go greet-before.txt
+wantexit 2 rotini generate app/.rotini.spec.yaml --dry-run
+stderr 'update internal/cmd/app/app_greet\.go'
+! stderr 'pruned'
+cmp internal/cmd/app/app_greet.go greet-before.txt
+exec rotini generate app/.rotini.spec.yaml
+stderr 'pruned app_greet\.go \(disabled; removed by the next generate\)'
+grep '^//go:build ignore$' internal/cmd/app/app_greet.go
+
 wantexit 2 rotini generate app/.rotini.spec.yaml --dry-run
 stderr 'delete internal/cmd/app/app_greet\.go'
-! stderr 'pruned'
 exists internal/cmd/app/app_greet.go
 exec rotini generate app/.rotini.spec.yaml
-stderr 'pruned app_greet\.go'
+stderr 'pruned app_greet\.go;'
 ! exists internal/cmd/app/app_greet.go
 
 -- spec.yaml --
