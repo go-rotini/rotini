@@ -1,8 +1,8 @@
 # R2 — the generated completion scripts, actually executed by the shells they target.
 #
-# The campaign asks for bash, zsh and fish to be driven BY HAND, because the
-# description-after-tab wire format differs per shell and nothing else in the project tests
-# them live. Hand-driving does not survive the campaign; this does.
+# The description-after-tab wire format differs per shell, and nothing else in the project
+# runs the scripts in a real shell. Checking them by hand is done once and then forgotten; this
+# runs on every change.
 #
 # Each shell sources the script rotini generated and invokes the completion function directly,
 # which is what pressing TAB does. A script with a syntax error, a stray directive line leaking

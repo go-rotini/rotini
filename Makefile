@@ -141,7 +141,7 @@ test-race:
 	@go test -race -count=1 -coverprofile=test_race.out ./...
 	@go tool cover -func=test_race.out
 
-# rotini is the verification-chain entry point (see the tracker in the sibling .docs repo).
+# rotini builds and installs the companion CLI from this working tree.
 # Same order as `all`: build the versioned binary, then regenerate and install.
 rotini: rotini-build rotini-install
 

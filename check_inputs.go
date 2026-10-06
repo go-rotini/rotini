@@ -30,11 +30,12 @@ import (
 // It reads no channel, applies no defaults and never changes v. T must describe the running
 // command, as for Context.Inputs. Each input is named by its canonical spelling: a flag's first
 // long identifier, an argument's <name>, an environment variable's name, a config key. A
-// short-circuit flag ([FlagDef.ShortCircuit]) set true in v waives every check.
+// short-circuit flag ([FlagDef.ShortCircuit]) set true in v and named in set waives every check.
 //
 // Failures are the same values [Context.Inputs] returns: a [*ParseError] for flags, arguments
 // and the cross-flag rules, an [*InputError] for environment, config and stdin inputs, both in
-// [CategoryUsage].
+// [CategoryUsage]. A T that does not describe the running command is a [ParseKindInternal]
+// error.
 //
 //	in := askForMissing(rtx, argv.Values)
 //	if err := rtx.CheckInputs(in, rotini.PresenceOf(in)); err != nil {

@@ -1,7 +1,7 @@
 # R3 — the outcome reporter, from outside: which stream, and which exit code.
 #
-# The campaign is right that these are the two rules most likely to be subtly wrong, and they
-# are the two an in-process test can fake. Only a real process shows a real exit code through
+# These are the two rules most likely to be subtly wrong, and the two an in-process test can
+# fake. Only a real process shows a real exit code through
 # os.Exit and the default trap.
 
 gomodinit example.com/out

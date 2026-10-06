@@ -83,9 +83,12 @@ type layerCore struct {
 // the struct is anchored on the running command regardless of how deep the invocation went. A
 // type that cannot be anchored there is an error, not a silent zero value.
 //
-// Inputs delegates to [InputReader.Read]; errors are [*ParseError] and [*InputError] values. On
-// error the returned T is partially filled and must not be used. Inputs stops at the first argv
-// error, before the environment and configuration channels are read; use
+// Inputs delegates to [InputReader.Read]; errors are [*ParseError] and [*InputError] values, or
+// a [*WiringError] when a command declares config inputs and the program has no
+// [InputSettings]. On error the returned T is partially filled and must not be used. A command
+// line that doesn't parse is reported before any other channel is read; flags' environment and
+// config fallbacks are read before argv requirements are checked, since they can satisfy them,
+// and environment and config inputs after. Use
 // [Context.InputsWithReport] for a merged value and per-field provenance alongside the error.
 func (rtx *Context) Inputs[T any]() (T, error) {
 	var t T

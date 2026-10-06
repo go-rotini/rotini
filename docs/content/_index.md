@@ -29,7 +29,7 @@ title: "rotini"
 | **Shell completion** | Scripts for bash, zsh, fish and PowerShell, with completion hints for values such as files and directories. |
 | **Man and markdown pages** | Roff man pages and markdown reference pages, ready to install or publish. |
 | **Structured output** | A JSON Schema for each command's output and a contract document describing the whole CLI, for scripts and agents. |
-| **Errors and exit codes** | Consistent `Error:` messages and a non-zero exit code. Every error carries a usage or internal category you can map to your own exit codes, and errors can be reported as JSON for scripts. |
+| **Errors and exit codes** | Consistent `Error:` messages and a non-zero exit code. Errors carry a usage or internal category you can map to your own exit codes, and errors can be reported as JSON for scripts. |
 | **Deprecation** | Deprecated commands, aliases and flags keep working and are marked in help. Each use is reported to your code, which decides whether to warn. |
 | **Interrupts and panics** | Ctrl+C and SIGTERM stop the program cleanly, running its teardown, and a second Ctrl+C exits at once. A panic is reported as an error rather than a stack trace. |
 | **Suggestions** | "Did you mean" suggestions for a mistyped command, flag or value, opt-in: [suggesting a correction](/docs#suggesting-a-correction). |

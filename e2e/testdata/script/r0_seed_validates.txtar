@@ -1,7 +1,7 @@
 # R0 — the seeded documents must pass rotini's own gate, with no warnings.
 #
 # A scaffold that does not validate teaches a new user that validation is noise. The seeded
-# conf used to carry embed_dir/template_dir on features whose mode ignores them (audit F-12):
+# conf used to carry embed_dir/template_dir on features whose mode ignores them:
 # four lines that did nothing, in the first rotini file anyone reads.
 
 gomodinit example.com/demo

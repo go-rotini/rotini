@@ -131,8 +131,8 @@ func (p *Program) defaultReporter(_ context.Context, rtx *Context, out Outcome) 
 // JSON object per line, and leaves stdout alone, so a partial result there is never
 // interleaved with an error:
 //
-//	{"error":{"message":"missing required input: <title>","category":"usage","kind":"missing-required","command":"taskr add","exit_code":1}}
-//	{"warning":{"message":"the cache is stale","command":"taskr list"}}
+//	{"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"missing required input: <title>"}}
+//	{"warning":{"command":"taskr list","message":"the cache is stale"}}
 //
 // Infos and successes are written the same way, as {"info":{…}} and {"success":{…}}, rather
 // than to stdout. A field is present only when rotini knows it: kind, flag and token come from

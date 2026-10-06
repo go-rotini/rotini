@@ -412,8 +412,8 @@ func (p *Program) Execute() error {
 }
 
 // Run dispatches one invocation of argv and returns its exit code and error (see
-// [Program.Execute]). It resolves the invoked command, executes a declared plugin if one was
-// selected, and otherwise runs the lifecycle; inputs are parsed only when a handler calls
+// [Program.Execute]). It resolves the invoked command, executes a declared or discovered
+// plugin if one was selected, and otherwise runs the lifecycle; inputs are parsed only when a handler calls
 // [Context.Inputs]. Run never ends the process.
 //
 // Each call gets a fresh [Context]. Dependencies registered with [Program.WithDependency] are

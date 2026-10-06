@@ -71,7 +71,7 @@ build. The `name` argument becomes the root command's name and the expected bina
 `main.go` is created once and never overwritten, since it carries your build metadata. `--force`
 replaces an existing spec and conf with the starter ones and nothing else: `init` never deletes a
 file. Handlers for commands the starter spec does not have stay until your next `generate`, which
-removes them and says so.
+disables them with `//go:build ignore`; the one after deletes them. Each step is reported.
 
 On success `init` reports the way `generate` and `validate` do: the spec and conf it wrote, then
 the time and how long it took. In a module that does not yet require the rotini package, it also

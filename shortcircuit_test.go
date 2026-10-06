@@ -34,8 +34,8 @@ func scDef(t *testing.T) Definition {
 	}
 }
 
-// TestShortCircuit_parseWaivesRequirements walks the plan's kept/waived table through
-// Parser.Parse: requirements are waived when a short-circuit flag is set on argv; what cannot
+// TestShortCircuit_parseWaivesRequirements walks what a short-circuit flag waives and what it
+// keeps through Parser.Parse: requirements are waived when a short-circuit flag is set on argv; what cannot
 // be read is still an error.
 func TestShortCircuit_parseWaivesRequirements(t *testing.T) {
 	tests := []struct {

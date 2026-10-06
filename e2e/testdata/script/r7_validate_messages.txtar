@@ -2,7 +2,7 @@
 #
 # The in-repo corpus (internal/codegen/testdata/lint) freezes every rule's text. This script
 # is the other half: it runs `rotini validate` as a USER runs it and checks the three things
-# the campaign says a rejection owes the reader — what is wrong, WHERE, and what to do
+# a rejection owes the reader — what is wrong, WHERE, and what to do
 # instead — plus the exit code and the stream, which the corpus cannot see.
 
 gomodinit example.com/bad

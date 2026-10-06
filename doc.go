@@ -32,7 +32,7 @@
 // plus one handler stub per command, created once and then owned by the program. `rotini init`
 // scaffolds a working CLI: a spec declaring -h/--help, -v/--version and the help and version
 // commands, a conf with the help feature on and the other three off, an entrypoint, and a stub
-// per command wired to the generated pages and services. All of it may be edited or deleted.
+// per command wired to the generated help pages and the program's version. All of it may be edited or deleted.
 //
 // # Composition
 //

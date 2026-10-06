@@ -19,6 +19,22 @@
 //	wantexit 2 ./app --bad     run a command and assert its EXACT exit status
 //
 // wantexit and gomodinit are rotini's own commands; `! exec` only proves a non-zero exit.
+//
+// # Script names
+//
+// A script's name starts with the area it covers, and its first comment line repeats it:
+//
+//	r0   the new-user path: init, generate, validate, regenerate, the setup guide
+//	r1   inputs: flags, arguments, env, config, stdin, and checking them
+//	r2   rendered output: help, man and markdown pages, completion scripts
+//	r3   outcomes and exit codes
+//	r4   the lifecycle: hooks, Halt, and the generate-time audits of handlers
+//	r5   long-running programs and signals
+//	r6   composing one program's spec into another's
+//	r7   rotini validate's messages
+//	r8   the version guard
+//	r9   plugins
+//	r10  structured output
 package e2e
 
 import (

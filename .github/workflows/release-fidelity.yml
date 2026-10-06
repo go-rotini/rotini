@@ -1,4 +1,4 @@
-# The release-fidelity gate — "Mode A" in the e2e campaign.
+# The release-fidelity gate: test the module as it was published, not the working tree.
 #
 # Every other job in this repository tests the WORKING TREE: the e2e tier wires each scratch
 # module to it with a `replace`, and the unit tiers import it directly. None of them can see a
@@ -6,7 +6,8 @@
 # $schema URL that does not resolve at the tag — because none of them ever installs the
 # PUBLISHED module.
 #
-# Mode B can be green while Mode A is broken, so this runs against what was actually published.
+# The working tree can be green while the published module is broken, so this runs against
+# what was actually published.
 name: Release fidelity
 
 on:

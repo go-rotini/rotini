@@ -2,10 +2,9 @@
 #
 # This is the extensibility knob. `embed` decides where rendered content LANDS; `template`
 # decides who OWNS the rendering — rotini's built-in, or an editable *.tmpl seeded into the
-# project. It was the last unexercised quadrant of the feature matrix, and the campaign's own
-# history says an untried combination is where the defect is: F-31 was a program with only the
-# completion feature enabled that generated a file which did not compile, because no test had
-# ever enabled it alone.
+# project. It was the last unexercised quadrant of the feature matrix, and an untried
+# combination is where defects hide: a program with only the completion feature enabled once
+# generated a file that did not compile, because no test had ever enabled it alone.
 #
 # Four things have to hold for the knob to be worth having:
 #

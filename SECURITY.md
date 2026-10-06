@@ -33,9 +33,7 @@ to leak secrets.
 - **`generate` and `validate` are offline, always.** There is no command that
   fetches a spec, so a code-generation pass cannot be influenced by the network.
 - **`git::` and raw `https://` refs are REFUSED.** rotini neither fetches nor pins
-  them; a spec naming one fails validation rather than being retrieved. (Earlier
-  designs pinned them through a `rotini mod` command and a `.rotini.lock` file;
-  both were dropped in favor of not fetching at all.)
+  them; a spec naming one fails validation rather than being retrieved.
 - **`mod://` refs ride Go's integrity.** A spec inside a Go module you depend on is
   read from the module cache, so `go.mod`/`go.sum` are its pins and Go's own
   verification applies. Local relative refs are pinned by the filesystem.
@@ -66,7 +64,7 @@ from.
 
 ## What the Runtime Does NOT Do
 
-Pillar 1 of rotini's design is that the runtime injects nothing you did not ask for:
+The runtime injects nothing you did not ask for:
 
 - **No telemetry.** The runtime emits no logs, metrics, or network calls of its own.
 - **No auto-injected behavior.** No implicit `--help`/`--version`/`--color`/`--no-*`
@@ -90,5 +88,5 @@ Pillar 1 of rotini's design is that the runtime injects nothing you did not ask 
   to an external Go package is checked when you build, not by rotini — rotini cannot
   type-check a foreign package on your behalf.
 
-For the runtime contract, the outcome/error model, and the opt-in service registry,
+For the runtime contract, the outcome/error model, and the dependency and opt-in seams,
 see the package documentation in `doc.go`.

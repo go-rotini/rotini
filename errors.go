@@ -178,9 +178,12 @@ func (e *PanicError) Unwrap() []error {
 
 // WiringError reports that the generated [Definition] and the handler set are out of sync — a
 // resolved command names a handler method that does not exist, or whose return value does not
-// implement [Handler]. It is always [CategoryInternal].
+// implement [Handler] — or that a command declares config inputs but the program was built
+// without [InputSettings] ([Context.Inputs] returns that one as its error). It is always
+// [CategoryInternal].
 //
-// Command and Handler are empty when [NewProgram] was given a nil handlers value.
+// Command and Handler are empty in that second case, and when [NewProgram] was given a nil
+// handlers value.
 type WiringError struct {
 	Command string // the command whose handler wiring is broken
 	Handler string // the handler method name the Definition referenced

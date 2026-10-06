@@ -745,7 +745,7 @@ func conformanceCases() []inputCase {
 				}
 			}},
 		{id: "SEC-02",
-			skip: "DECIDED out of scope (W5-F6, option a): rotini ships no interactive prompt — " +
+			skip: "out of scope: rotini ships no interactive prompt — " +
 				"the secret: schema docs point handlers at rtx.Stdin + any prompt library.",
 			check: func(t *testing.T, rtx *Context, meta InputSettings) {}},
 		{id: "SEC-03", args: []string{"login"}, env: map[string]string{"ACME_TOKEN": "sk_live_leakme"},

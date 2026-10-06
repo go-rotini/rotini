@@ -78,9 +78,6 @@ channel in-process, `test-acceptance` covers what only a real process shows (exi
 codes, pipes, signals), and `test-e2e` covers what only a real *user module* shows —
 that generated code not merely compiles but behaves.
 
-Planning documents live in a sibling repository at `../.docs`, deliberately outside
-this module so they are not published with it.
-
 ## Pull Requests
 
 - Keep PRs focused on a single change.

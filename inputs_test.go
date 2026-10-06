@@ -565,8 +565,8 @@ func TestOverlay_edgeCases(t *testing.T) {
 	})
 }
 
-// ExampleOverlayInputsP shows the merge and provenance contract with two
-// hand-built layers: order is precedence, and the Report names the winner.
+// ExampleMergeInputsWithReport shows the merge and provenance contract with two
+// hand-built layers: order is precedence, and the InputReport names the winner.
 func ExampleMergeInputsWithReport() {
 	type inputs struct {
 		App struct {

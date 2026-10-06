@@ -449,8 +449,9 @@ one must be, from 0 to 1. `Closest(typed, candidates)` returns the single neares
 input's value is never offered for ranking. Rotini never prints a suggestion itself.
 
 To give each category its own exit code, write a reporter. A reporter replaces the default
-entirely: it prints only what it prints, and the exit code is only what it sets with `rtx.Exit`,
-so give it a fallback code for errors with no category, or a failed run exits 0:
+entirely: it prints only what it prints, and it sets the exit code with `rtx.Exit`. If it
+doesn't, the run keeps any code a handler set, and otherwise exits 0, so give it a fallback
+code for errors with no category:
 
 {{< code title="internal/cmd/todo/report.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
@@ -723,7 +724,7 @@ generate:
 
 ## Help, completion and docs
 
-The conf's `features:` turn on output generated from the spec. Each adds functions to the
+The conf's `generate.features:` turn on output generated from the spec. Each adds functions to the
 generated package:
 
 | Feature | What you get |
@@ -763,11 +764,12 @@ write in the spec as `complete.message`; `all` also shows a line made from each 
 argument's summary:
 
 {{< code title="cmd/todo/.rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
-features:
-  - type: completion
-    enabled: true
-    messages: all
-    messages_env: TODO_COMPLETION_MESSAGES
+generate:
+  features:
+    - type: completion
+      enabled: true
+      messages: all
+      messages_env: TODO_COMPLETION_MESSAGES
 {{< /code >}}
 
 {{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
@@ -1097,7 +1099,8 @@ go build ./... && go test ./...
 {{< /code >}}
 
 To see what an upgrade would change before it writes anything, run
-`go tool rotini generate --dry-run <spec>` first.
+`go tool rotini generate --dry-run <spec>` after the `go get` lines and before
+`go generate`.
 
 You don't need to edit your spec or conf to upgrade: their `version:` is the oldest rotini they
 need, not the one they must use (see [the version check](/cli#rotini-version)). Raise it when you

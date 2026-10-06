@@ -87,7 +87,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	}
 	rv := reflect.ValueOf(out)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: Bind out argument must be a non-nil pointer to an inputs struct"}
+		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: Read out argument must be a non-nil pointer to an inputs struct"}
 	}
 
 	// 1. argv → Flags + Arguments, without validation: step 3 checks the reconciled store.

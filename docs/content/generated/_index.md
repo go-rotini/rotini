@@ -24,7 +24,7 @@ For a spec with a `todo` root command and an `add` sub-command, the file holds:
 | the command tree | a `rotini.Definition` the runtime parses against |
 | every command | a method on the `ProgramHandlers` interface, which returns the command's handler (`todoAddHandler`) |
 | configuration files and the env prefix | `InputSettings`, which tells the runtime where values come from |
-| the conf's `features:` | `Help(path...)`, and `Completion(shell)`, `Man(path...)` and `Markdown(path...)` when those features are on |
+| the conf's `generate.features:` | `Help(path...)`, and `Completion(shell)`, `Man(path...)` and `Markdown(path...)` when those features are on |
 
 It ends with what `main.go` and your tests use: `NewProgram`, which builds a program from a set
 of handlers; `Handlers()`, which returns the generated set; and `Program`, a ready-built program.

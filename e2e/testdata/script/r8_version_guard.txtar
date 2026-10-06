@@ -1,6 +1,6 @@
 # R8 — the upgrade path: what the version guard does, and what it deliberately does not.
 #
-# Audit F-05. The guard used to demand EXACT equality between a document's `version:` and the
+# The guard used to demand EXACT equality between a document's `version:` and the
 # binary's, which meant every rotini patch release invalidated every spec and conf in every
 # project until each was hand-edited. This script is the rule that replaced it: `version:` is
 # a MINIMUM, and only a binary that is older, or a different major, is an error.
