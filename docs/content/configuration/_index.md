@@ -29,7 +29,7 @@ The minimum rotini version this conf requires (X.Y.Z): the feature set it was wr
 
 `string`
 
-Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.2.0/schema-conf.json — note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL.
+Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.3.0/schema-conf.json — note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL.
 
 ### `generate`
 
@@ -53,6 +53,12 @@ Controls `rotini generate`: where rotini's JSON Schemas are written ('schemas'),
 [`ContractConfig`](#contractconfig)
 
 Optional: where to write the contract document, a JSON description of every command's inputs, output and exit statuses.
+
+### `dry_run_env`
+
+`string`
+
+The name of an environment variable that makes `rotini generate` do a dry run: when it is set to 1, true, yes or on (any case), generate writes nothing, lists what it would change and exits 2 if anything would, or 0 if nothing would. Set it to CI to dry-run in most CI systems, which set CI=true, so `go generate ./...` checks every CLI in the module. --dry-run and --no-dry-run on the command line take precedence. Unset, the environment never changes what generate does. It doesn't apply to `rotini init`, which has no conf to read before it runs.
 
 ### `features`
 
@@ -123,6 +129,18 @@ Directory (relative to the module root) where this feature's rendered files (hel
 
 When true, rotini generates this feature's outputs into the cmd package, with their variables and lookup function. Off by default.
 
+### `messages`
+
+`string` · one of `declared`, `all`
+
+completion only: turns on completion messages, lines the shell shows while a value is being completed and there is nothing to offer. 'declared' shows the inputs' `complete.message` lines from the spec. 'all' also shows a line derived from the summary of every other flag and argument that has one, such as `--replicas <int>: how many instances`. Either way a completer can add its own with rtx.AddCompletionMessage, which take the place of the static line. Omitted, there are no messages. zsh and bash 4.4 or later show them; fish, PowerShell and older bash skip them, and the plugin hosts kubectl, Docker and Flux show them their own way. Setting it on any other feature is an error.
+
+### `messages_env`
+
+`string`
+
+completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide completion messages; unset or any other value leaves them on. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionMessages replaces this check with a rule of your own. Requires `messages`.
+
 ### `section`
 
 `integer` · default `1`
@@ -176,7 +194,7 @@ array of `string`
 
 Package-relative paths (e.g. 'helpers.go') that rotini must never remove.
 
-You rarely need it: rotini only ever removes files it wrote that no longer match the spec, such as a handler file whose command has left the spec (identified by the generated marker it carries), and it reports each one. A file you wrote is never removed, whatever it is named, and neither are test files or the editable feature templates. Use 'keep' when you have kept a handler file whose command is gone and left its marker in place, or to protect a rendered output file under an embed_dir.
+You rarely need it: rotini only ever removes files it wrote that no longer match the spec, such as a handler file whose command has left the spec (identified by the generated marker it carries), and it reports each one. A handler file goes in two steps: the next generate disables it with `//go:build ignore`, and the one after deletes it. A file you wrote is never removed, whatever it is named, and neither are test files or the editable feature templates. Use 'keep' when you have kept a handler file whose command is gone and left its marker in place, or to protect a rendered output file under an embed_dir.
 
 ### `package`
 

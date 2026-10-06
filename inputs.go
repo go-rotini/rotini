@@ -37,9 +37,11 @@ type Presence map[FieldPath]InputSource
 
 // InputLayer is one input channel's view of the inputs type T: the values it supplied (all
 // other fields are zero) and which fields those are. Layers from rotini's channel
-// parsers also carry unexported data that [InputReport.Validate] uses; a hand-built InputLayer
-// participates in overlay and provenance but contributes nothing to validation. A nil or empty
-// Set means the layer supplied nothing: overlaying it leaves every field as it was.
+// parsers also carry unexported data that [InputReport.Validate] uses. A hand-built InputLayer
+// (one the program builds from its own source, such as a prompt or a secrets service)
+// participates in overlay, provenance and validation: the fields its Set names count as
+// supplied, and their values are checked the way [Context.CheckInputs] checks them. A nil or
+// empty Set means the layer supplied nothing: overlaying it leaves every field as it was.
 type InputLayer[T any] struct {
 	Name   string
 	Values T
@@ -54,13 +56,22 @@ type layerCore struct {
 	chain       []Command
 	store       *parsedInputs
 	argDefaults map[int]string // the defaults layer's per-index argument defaults (sparse)
+	// anchor is the chain index of the inputs type's first field (see frameAnchor), so a merged
+	// report can check hand-built values against the right commands; anchored says it is set.
+	anchor   int
+	anchored bool
+	// stdinSchemas are the program's stdin payload schemas, so a merged report can check a
+	// hand-built stdin document as Context.CheckInputs does.
+	stdinSchemas map[string]string
 }
 
 // ── the one-liner ────────────────────────────────────────────────────────────.
 
 // Inputs acquires every declared channel (argv, environment, configuration files, the stdin
 // payload, defaults), reconciles them in the standard precedence defaults < files < env < argv,
-// validates the result, and returns it:
+// validates the result, and returns it. When a short-circuit flag ([FlagDef.ShortCircuit]) is
+// set on the command line, the declared requirements are waived, so the handler gets the
+// values read so far and can act on the flag; input that can't be read is still an error.
 //
 //	inputs, err := rtx.Inputs[MycliDeployInputs]()
 //
@@ -72,9 +83,10 @@ type layerCore struct {
 // the struct is anchored on the running command regardless of how deep the invocation went. A
 // type that cannot be anchored there is an error, not a silent zero value.
 //
-// Inputs delegates to [InputReader.Read]; errors are [*ParseError] and [*InputError] values. On
-// error the returned T is partially filled and must not be used. Inputs stops at the first argv
-// error, before the environment and configuration channels are read; use
+// Inputs delegates to [InputReader.Read]; errors are [*ParseError] and [*InputError] values, or
+// a [*WiringError] when a command declares config inputs and the program has no
+// [InputSettings]. On error the returned T is partially filled and must not be used. A command
+// line that doesn't parse is reported before any other channel is read. Use
 // [Context.InputsWithReport] for a merged value and per-field provenance alongside the error.
 func (rtx *Context) Inputs[T any]() (T, error) {
 	var t T
@@ -175,7 +187,9 @@ func MergeInputs[T any](layers ...InputLayer[T]) T {
 }
 
 // MergeInputsWithReport is [MergeInputs] plus the merged [InputReport]: which layer won
-// each field, the full per-field history, and Validate over the merged result.
+// each field, the full per-field history, and Validate over the merged result. A field a
+// hand-built [InputLayer] won is validated by the value it supplied, as [Context.CheckInputs]
+// checks it.
 func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport) {
 	var out T
 	dst := reflect.ValueOf(&out).Elem()
@@ -188,10 +202,20 @@ func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport) {
 			prov := l.Set[path]
 			rep.set[path] = prov
 			rep.history[path] = append(rep.history[path], prov)
+			// Track which kind of layer won each field: a later rotini layer takes it back.
+			if l.core == nil {
+				if rep.handBuilt == nil {
+					rep.handBuilt = map[FieldPath]bool{}
+				}
+				rep.handBuilt[path] = true
+			} else {
+				delete(rep.handBuilt, path)
+			}
 		}
 		rep.absorb(l.core)
 	}
 	rep.finalize()
+	rep.merged = reflect.ValueOf(out)
 	return out, rep
 }
 
@@ -233,6 +257,15 @@ type InputReport struct {
 	chain   []Command
 	store   *parsedInputs
 	argDefs map[int]string
+
+	// merged is the overlay's result, and handBuilt the fields whose final value came from a
+	// hand-built layer; Validate checks those values the way CheckInputs does.
+	merged    reflect.Value
+	handBuilt map[FieldPath]bool
+	anchor    int // chain index of the inputs type's first field, from a rotini layer
+	anchored  bool
+	// stdinSchemas check a hand-built stdin document; nil when no rotini layer supplied them.
+	stdinSchemas map[string]string
 }
 
 // Winner returns the provenance of the layer that supplied path's final value.
@@ -260,15 +293,51 @@ func (r InputReport) Fields() []FieldPath {
 //
 //   - Presence rules fire on absence: a required input no layer supplied is an error.
 //   - Value rules fire only on a supplied value: an unsupplied field's zero value is not checked
-//     against its enum or bounds.
+//     against its enum or bounds. Item counts are the exception, as on the command line: a list
+//     flag or variadic argument nobody supplied has zero items, so its minItems applies unless
+//     it has a default. Environment and config lists are counted only when supplied.
 //
 // A merge that omits [Context.DefaultInputs] can therefore yield an enum-constrained flag as ""
-// without error. Hand-built layers contribute values but nothing to validate.
+// without error.
+//
+// A hand-built layer's fields count as supplied (a required input it supplies passes, and a
+// flag it supplies counts as set for flag groups and dependencies), and the values it won are
+// checked as [Context.CheckInputs] checks them, naming each input by its canonical spelling.
+//
+// A merge of hand-built layers alone has no command to check against, so Validate reports a
+// [ParseKindInternal] error pointing at [Context.CheckInputs], which takes the command from
+// the running context.
 func (r InputReport) Validate() error {
 	if r.chain == nil || r.store == nil {
+		if len(r.handBuilt) > 0 {
+			return &ParseError{Kind: ParseKindInternal, Msg: "rotini: InputReport.Validate has no command to check against: " +
+				"every layer is hand-built; check hand-built inputs with Context.CheckInputs"}
+		}
 		return nil
 	}
-	return validateStore(r.chain, r.store)
+	if len(r.handBuilt) == 0 {
+		return validateStore(r.chain, r.store)
+	}
+	anchor := r.anchor
+	if !r.anchored {
+		anchor = frameAnchor(r.merged, r.chain, -1)
+	}
+	// A short-circuit flag a hand-built layer set waives the rules, as it does in CheckInputs.
+	handSet := Presence{}
+	for p := range r.handBuilt {
+		handSet[p] = InputSource{Layer: "custom"}
+	}
+	if typedShortCircuited(r.merged, r.chain, anchor, handSet) {
+		return nil
+	}
+	store := r.store.withHandBuilt(r.merged, r.chain, anchor, r.handBuilt)
+	if err := validateStore(r.chain, store); err != nil {
+		return err
+	}
+	if shortCircuited(r.chain, store) {
+		return nil
+	}
+	return checkTypedValues(r.merged, r.chain, anchor, func(p FieldPath) bool { return r.handBuilt[p] }, r.stdinSchemas)
 }
 
 // absorb folds one layer's validation core into the report: later layers' flag values replace
@@ -288,6 +357,12 @@ func (r *InputReport) absorb(core *layerCore) {
 	if core.argDefaults != nil {
 		r.argDefs = core.argDefaults
 	}
+	if core.anchored {
+		r.anchor, r.anchored = core.anchor, true
+	}
+	if core.stdinSchemas != nil {
+		r.stdinSchemas = core.stdinSchemas
+	}
 	if core.store == nil || len(core.store.scopes) != len(r.store.scopes) {
 		return
 	}
@@ -297,6 +372,9 @@ func (r *InputReport) absorb(core *layerCore) {
 				r.store.scopes[i].flags = map[string][]string{}
 			}
 			r.store.scopes[i].flags[name] = vals
+			// The winning value's origin travels with it: a fallback layer's names its source,
+			// and a later argv value clears it.
+			recordOrigin(r.store, i, name, core.store.scopes[i].origin[name])
 		}
 		if len(core.store.scopes[i].args) > 0 {
 			r.store.scopes[i].args = core.store.scopes[i].args
@@ -383,7 +461,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 		})
 		argPresence(set, "argv", topName, ci, frame, si.args)
 	})
-	return set, &layerCore{chain: chain, store: store}, nil
+	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas}, nil
 }
 
 // defaultsLayer synthesizes declared defaults into v and records presence.
@@ -462,7 +540,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 			})
 		}
 	})
-	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults}, nil
+	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas}, nil
 }
 
 // envLayer acquires the env channel (Env structs + flag env-fallbacks) into v.
@@ -488,7 +566,15 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 	if err != nil {
 		return nil, nil, err
 	}
-	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil)
+	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain))
+}
+
+// argvWaived reports whether the command line short-circuits the run ([shortCircuited]), for a
+// per-channel reader that does not otherwise parse argv. A command line that cannot be parsed
+// waives nothing: [Context.ArgvInputs] owns reporting it.
+func argvWaived(rtx *Context, chain []Command) bool {
+	store, err := parseInto(chain, rtx.Argv, rtx.flagStdin())
+	return err == nil && shortCircuited(chain, store)
 }
 
 // filesLayer acquires the config-files channel into v. config_source paths are honored here
@@ -500,10 +586,12 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 		return nil, nil, err
 	}
 	overrides := map[string]string{}
+	waived := false
 	if store, err := parseInto(chain, rtx.Argv, rtx.flagStdin()); err == nil {
 		overrides = b.pathOverrides(chain, store)
+		waived = shortCircuited(chain, store)
 	}
-	cfg, err := b.configRegs(chain, overrides, v)
+	cfg, err := b.configRegs(chain, overrides, v, waived)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -512,13 +600,13 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 	if err != nil {
 		return nil, nil, err
 	}
-	return channelLayer(v, chain, anchor, "files", "Config", cfg.merged, cfg.merged, cfg)
+	return channelLayer(v, chain, anchor, "files", "Config", cfg.merged, cfg.merged, cfg, waived)
 }
 
 // channelLayer is the shared env/files core: recon-bind each command's channel struct,
 // constraint-check the provided values, fill flag fallbacks, and record presence for
-// everything the channel supplied.
-func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs) (Presence, *layerCore, error) {
+// everything the channel supplied. A short-circuited run (waived) skips the requirement checks.
+func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs, waived bool) (Presence, *layerCore, error) {
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	var bindErr error
@@ -527,7 +615,7 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 		if bindErr != nil {
 			return
 		}
-		if err := fillChannelStruct(set, ci, topName, structName, layerName, reg, cfg); err != nil {
+		if err := fillChannelStruct(set, ci, topName, structName, layerName, reg, cfg, waived); err != nil {
 			bindErr = err
 			return
 		}
@@ -538,21 +626,23 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 	if bindErr != nil {
 		return nil, nil, bindErr
 	}
-	return set, &layerCore{chain: chain, store: store}, nil
+	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true}, nil
 }
 
 // fillChannelStruct binds one command's channel struct from the registry, validates it, and
 // records where each field's value came from.
-func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs) error {
+func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs, waived bool) error {
 	cs := ci.FieldByName(structName)
 	if !cs.IsValid() || cs.Kind() != reflect.Struct {
 		return nil
 	}
-	if err := reg.Bind(cs.Addr().Interface()); err != nil {
+	if err := bindReconWaived(reg, cs.Addr().Interface(), waived); err != nil {
 		return reconBind(channelOf(cfg), err)
 	}
-	if err := validateChannelStruct(cs, reg, cfg); err != nil {
-		return err
+	if !waived {
+		if err := validateChannelStruct(cs, reg, cfg); err != nil {
+			return err
+		}
 	}
 	if cfg != nil {
 		if err := bindPinnedConfig(cs, cfg); err != nil {
@@ -621,11 +711,12 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 			return
 		}
 		fd, _ := findFlagDef(chain[scope].Flags, logical)
-		vals, err := bindFlagFallback(flagReg, f, tag, key, fd, chain, scope)
+		vals, origin, err := bindFlagFallback(flagReg, f, tag, key, fd, chain, scope)
 		if err != nil || vals == nil {
 			bindErr = err
 			return
 		}
+		recordOrigin(store, scope, logical, origin)
 		set[fieldPath(topName, "Flags", fieldName)] = InputSource{
 			Layer: layerName,
 			Raw:   redactValue(strings.Join(vals, ", "), fd.Secret),
@@ -644,7 +735,7 @@ func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := b.fillStdin(rtx, v); err != nil {
+	if err := b.fillStdin(rtx, v, argvWaived(rtx, chain)); err != nil {
 		return nil, nil, err
 	}
 	set := Presence{}

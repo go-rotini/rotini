@@ -4,7 +4,7 @@ package codegen
 
 // The spec describes your CLI: its commands, their inputs and what they write. The document holds a top-level `version` and one root `command` (the program itself), and every sub-command below it has the same shape. `env_prefix` and `schemas` are valid only on the root command, and `$schema` is an optional key for editor tooling.
 type Spec struct {
-	// Optional URI identifying the rotini spec schema, for editor tooling only: rotini never fetches it, and the version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.2.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. `rotini init` seeds this key (`$schema: ./.rotini-schema.spec.json`), and it works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place.
+	// Optional URI identifying the rotini spec schema, for editor tooling only: rotini never fetches it, and the version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.3.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. `rotini init` seeds this key (`$schema: ./.rotini-schema.spec.json`), and it works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place.
 	Schema string `json:"$schema,omitempty"`
 	// The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/arguments/env/config/config_files/stdin) and sub-commands. The root must use 'name' (not '$ref'). The root-command-level keys `env_prefix` and `schemas` live here.
 	Command Command `json:"command"`
@@ -56,7 +56,7 @@ type BaseSchema struct {
 	MaxLength int `json:"maxLength,omitempty"`
 	// Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numbers, durations and sizes, each in its own spelling; per-element for arrays; rejected elsewhere); maximum: 0 is a real, enforced bound.
 	Maximum any `json:"maximum,omitempty"`
-	// Minimum number of values for a repeatable (array or map) input — rejected on scalar types.
+	// Minimum number of values for a repeatable (array or map) input — rejected on scalar types. A list flag or variadic argument that is left out has zero values, so minItems also applies to it unless it has a default (add required for the message to say the input is missing). An env or config list is checked only when it is set.
 	MinItems int `json:"minItems,omitempty"`
 	// Minimum string length in runes (string types only; for []string, each element) — rejected on non-string types.
 	MinLength int `json:"minLength,omitempty"`
@@ -140,13 +140,13 @@ type Command struct {
 	DisplayName string `json:"display_name,omitempty"`
 	// Environment-variable inputs for this command
 	Env []EnvInput `json:"env,omitempty"`
-	// Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section; a flag's environment fallback is not listed, so mention the variable in the flag's summary when users need to know it.
+	// Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
 	//
 	// In a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a parent that declares none adopts the child's, a parent that declares one wins, and two children with different prefixes are rejected.
 	EnvPrefix string `json:"env_prefix,omitempty"`
 	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
 	Examples []string `json:"examples,omitempty"`
-	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. This is documentation only, and rotini does not check it: the runtime sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. Ignored when 'man' (verbatim) is set.
+	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. Ignored when 'man' (verbatim) is set.
 	ExitStatus []ExitStatusEntry `json:"exit_status,omitempty"`
 	// Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
 	Filename string `json:"filename,omitempty"`
@@ -299,6 +299,8 @@ type FlagInput struct {
 	Name string `json:"name"`
 	// Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 	Schema *InputSchema `json:"schema,omitempty"`
+	// When true, setting this flag on the command line waives every declared requirement of the invoked command chain: required inputs, enums, bounds, patterns, flag groups and flag dependencies are not checked, and rtx.Inputs succeeds. Use it for flags that replace the command's normal run, such as --help, --version or --print-schema. Errors in reading the command line (an unknown flag or command, a value of the wrong type, too many arguments) are still reported. rotini takes no action of its own: your handler checks the flag and decides what to do. Only the command line sets it, never an environment variable, a configuration file or a default. Must be a bool, and can't be required, negatable, given a default of true, read from the environment or a configuration file (key, variable), or listed in a flag group or flag dependency.
+	ShortCircuit bool `json:"short_circuit,omitempty"`
 	// Short one-liner shown next to this flag in the Flags section of generated help.
 	Summary string `json:"summary,omitempty"`
 }
@@ -336,7 +338,7 @@ type HelpHeadings struct {
 // Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.
 type InputSchema struct {
 	BaseSchema
-	// Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter).
+	// Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 	//
 	// Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
 	Complete *InputSchemaComplete `json:"complete,omitempty"`
@@ -364,7 +366,7 @@ type InputSchema struct {
 	IgnoreCase bool `json:"ignore_case,omitempty"`
 	// Flags only: the value a flag takes when it is given without one, which makes its value optional (the `--color[=when]` shape). With `implicit_value: always`, a bare `--color` means always, `--color=never` sets never, and a flag left out takes its `default` as usual. Because the value is optional it must be attached: in `--color never`, `never` is the next argument, not the flag's value (a short flag attaches too: `-cnever`, `-c=never`). Help shows the flag as `--color[=<type>]` with `(implicit: always)`. For a scalar flag that is not a bool (a bool already works this way, with true), and the value must satisfy the flag's type, enum and constraints.
 	ImplicitValue any `json:"implicit_value,omitempty"`
-	// Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable).
+	// Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable). Help shows a flag's key under the flag when the command reads configuration files.
 	Key string `json:"key,omitempty"`
 	// Time inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout (the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is: `2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`), or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies wherever the input reads a value, and a `default` must parse under it.
 	Layout string `json:"layout,omitempty"`
@@ -384,7 +386,7 @@ type InputSchema struct {
 	Secret bool `json:"secret,omitempty"`
 	// List and map flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style: an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Without a separator, each occurrence is one value, used as is. Not valid on env and config inputs: an env input's list is always split on commas (TAGS=a,b), and a configuration file writes a list as a list.
 	Separator string `json:"separator,omitempty"`
-	// The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on flags (as a flag's environment fallback); rejected on arguments, config inputs and stdin, which have no environment variable.
+	// The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. For a flag, help shows them under the flag, in lookup order. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on flags (as a flag's environment fallback); rejected on arguments, config inputs and stdin, which have no environment variable.
 	//
 	// A variable named here is never given the `env_prefix`: it is already exact, and prefixing it would silently make it a different variable.
 	//
@@ -392,14 +394,16 @@ type InputSchema struct {
 	Variable any `json:"variable,omitempty"`
 }
 
-// Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter).
+// Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 //
 // Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
 type InputSchemaComplete struct {
 	// Narrows kind 'file' to these suffixes, written without a leading dot ('yaml', 'json'). Omitted, every file is offered. Rejected on the other kinds, which have no extensions to filter.
 	Extensions []string `json:"extensions,omitempty"`
 	// 'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete nothing, which is not the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that is file completion; 'none' turns it off, so for an opaque value (a container id, an API resource name) the shell does not offer the files in the current directory.
-	Kind string `json:"kind"`
+	Kind string `json:"kind,omitempty"`
+	// A line the shell shows while this input's value is being completed and there is nothing to offer, such as `a service name from deploy.yaml`. One line. It shows only when the conf's completion feature sets `messages`, and in zsh and bash 4.4 or later; other shells skip it. A message a completer adds with rtx.AddCompletionMessage takes its place.
+	Message string `json:"message,omitempty"`
 }
 
 // Auto-expose external '<prefix>*' executables as plugin sub-commands (kubectl/git/gh plugin style), alongside any declared plugins. Presence enables discovery; a discovered name that collides with a declared command or plugin is skipped.

@@ -619,7 +619,7 @@ func TestComplete_dynamicArgValue(t *testing.T) {
 
 // TestComplete_descriptions pins the wire shape: a candidate with a summary is
 // "name\tsummary" (aliases share the command's summary; every identifier
-// carries its flag's), one WITHOUT stays bare, the prefix filter matches the
+// carries its flag's), one without stays bare, the prefix filter matches the
 // name part only, and enum values ride bare.
 func TestComplete_descriptions(t *testing.T) {
 	def := Definition{
@@ -642,7 +642,7 @@ func TestComplete_descriptions(t *testing.T) {
 		t.Errorf("command candidates = %v, want %v", got, want)
 	}
 
-	// The prefix filter matches the NAME, not the description.
+	// The prefix filter matches the name, not the description.
 	if got := complete(def, []string{"dep"}, nil, nil); !reflect.DeepEqual(got, []string{"dep\tship it", "deploy\tship it"}) {
 		t.Errorf("prefix-filtered = %v, want the dep/deploy pair", got)
 	}
@@ -688,7 +688,7 @@ func TestComplete_pluginOpaque(t *testing.T) {
 	if got := complete(def, []string{"plugin", ""}, nil, nil); got != nil {
 		t.Errorf("complete past a plugin token = %v, want nil", got)
 	}
-	// The plugin NAME itself still completes.
+	// The plugin name itself still completes.
 	if got := complete(def, []string{"plug"}, nil, nil); !reflect.DeepEqual(got, []string{"plugin"}) {
 		t.Errorf("plugin name completion = %v, want [plugin]", got)
 	}
@@ -716,7 +716,7 @@ func TestComplete_nestedPlugin(t *testing.T) {
 }
 
 // completionHintDef declares one input per hint kind, plus the two shapes that must produce
-// none: a bool (no value to complete) and a flag NAME being typed.
+// none: a bool (no value to complete) and a flag name being typed.
 func completionHintDef() Definition {
 	return Definition{
 		Name: "app", Handler: "App",

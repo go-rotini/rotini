@@ -1,6 +1,6 @@
 # Every key the conf accepts, in one valid file. `rotini validate` checks it on every test run.
 $schema: ./.rotini-schema.conf.json
-version: 1.2.0
+version: 1.3.0
 generate:
   schemas:
     spec:
@@ -9,6 +9,7 @@ generate:
       file: cmd/deploy/.rotini-schema.conf.json
     output:
       dir: cmd/deploy/schemas/output
+  dry_run_env: CI
   contract:
     file: cmd/deploy/cli-contract.json
   packages:
@@ -31,6 +32,8 @@ generate:
       template_dir: internal/cmd/deploy/templates
     - type: completion
       enabled: true
+      messages: all
+      messages_env: DEPLOY_COMPLETION_MESSAGES
     - type: man
       enabled: false
       section: 1

@@ -1,17 +1,13 @@
-# R6 — `--help` prints the page of the program being RUN, whoever generated the handler.
+# R6 — `--help` prints the page of the program being run, whoever generated the handler.
 #
-# Two ways the generated stubs used to answer --help wrongly, both driven here through stubs
-# exactly as `rotini generate` seeds them (no handler below is hand-written):
+# Driven through stubs exactly as `rotini generate` seeds them (no handler below is
+# hand-written):
 #
-#   1. A composed child's own --help printed the page baked into the CHILD's package: the path
-#      without its parent (`kid work`) and none of the flags the parent passes down — while
-#      `umbrella help kid work`-style lookups printed the right one. The stub now asks the
-#      running program for the page (rtx.Help), and only the parent knows the full tree.
+#   1. A composed child's --help asks the running program for the page (rtx.Help), so it shows
+#      the full path and the flags the parent passes down, not the page baked into the child.
 #
-#   2. A --help declared once on the root was never answered by a sub-command that did not
-#      declare its own. Flags resolve up the chain, so `kid work --help` SET the root's flag —
-#      and the stub, checking only its own frame, ran the command and failed on the required
-#      argument the user never meant to supply. The stub now checks the nearest --help.
+#   2. A --help declared once on the root is answered by a sub-command that declares none: the
+#      stub checks the nearest --help, before the required argument is demanded.
 
 gomodinit example.com/helppages
 

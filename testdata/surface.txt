@@ -68,10 +68,13 @@ field CommandDef.Plugins
 field CommandDef.Summary
 field Completion.Extensions
 field Completion.Kind
+field Completion.Message
 field CompletionCandidate.Description
 field CompletionCandidate.Value
+field CompletionMessagesDef.Env
 field CompletionResult.Candidates
 field CompletionResult.Hint
+field CompletionResult.Messages
 field ConfigFile.Discover
 field ConfigFile.Format
 field ConfigFile.Name
@@ -96,6 +99,7 @@ field Context.Stdin
 field Context.Stdout
 field Definition.Arguments
 field Definition.Commands
+field Definition.CompletionMessages
 field Definition.FlagDependencies
 field Definition.FlagGroups
 field Definition.Flags
@@ -137,16 +141,19 @@ field FlagDef.ObjectSchema
 field FlagDef.Required
 field FlagDef.Secret
 field FlagDef.Separator
+field FlagDef.ShortCircuit
 field FlagDef.Summary
 field FlagDef.Type
 field FlagDependency.Requires
 field FlagDependency.When
 field FlagGroup.Flags
 field FlagGroup.Kind
+field InputError.Candidates
 field InputError.Cause
 field InputError.Channel
 field InputError.Input
 field InputError.Msg
+field InputError.Token
 field InputLayer.Name
 field InputLayer.Set
 field InputLayer.Values
@@ -195,6 +202,7 @@ field PluginDispatch.Def
 field PluginDispatch.Dir
 field PluginDispatch.Discovered
 field PluginError.Binary
+field PluginError.Candidates
 field PluginError.Cause
 field PluginError.Kind
 field PluginError.Msg
@@ -223,9 +231,11 @@ func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
 func NewSuggestor() *Suggestor
 func PluginCompletion(w io.Writer, result CompletionResult) error
+func PresenceOf[T any](v T) Presence
 func Ptr[T any](v T) *T
 func StripANSI(text string) string
 func StructuredReporter(structured func(rtx *Context) bool) Reporter
+func SuggestionFacts(err error) (token string, candidates []string, ok bool)
 func UsageError(err error) error
 func WithDependency[T any](dep Dependency[T], value T) Option
 method ArgValueCompleter.CompleteArgValue
@@ -239,7 +249,9 @@ method Category.String() string
 method Command.DiscoveredPlugins() []DiscoveredPlugin
 method Command.PluginBinary(name string) (string, bool)
 method Command.PluginDiscoveryErrors() []error
+method Context.AddCompletionMessage(msg string)
 method Context.ArgvInputs[T any]() (InputLayer[T], error)
+method Context.CheckInputs[T any](v T, set Presence) error
 method Context.CheckOutput(v any) error
 method Context.Command() Command
 method Context.CommandChain() []Command
@@ -316,6 +328,7 @@ method Program.RunContext(ctx context.Context, argv []string) (int, error)
 method Program.With(opts ...Option) *Program
 method Program.WithArgs(args []string) *Program
 method Program.WithCompletion(format CompletionFormat) *Program
+method Program.WithCompletionMessages(fn func(rtx *Context) bool) *Program
 method Program.WithContext(ctx context.Context) *Program
 method Program.WithDependency[T any](dep Dependency[T], value T) *Program
 method Program.WithExit(fn func(int)) *Program
@@ -352,6 +365,7 @@ type CommandDef
 type Completion
 type CompletionCandidate
 type CompletionFormat
+type CompletionMessagesDef
 type CompletionResult
 type ConfigFile
 type Constraints

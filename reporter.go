@@ -131,13 +131,14 @@ func (p *Program) defaultReporter(_ context.Context, rtx *Context, out Outcome) 
 // JSON object per line, and leaves stdout alone, so a partial result there is never
 // interleaved with an error:
 //
-//	{"error":{"message":"missing required input: <title>","category":"usage","kind":"missing-required","command":"taskr add","exit_code":1}}
-//	{"warning":{"message":"the cache is stale","command":"taskr list"}}
+//	{"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"missing required input: <title>"}}
+//	{"warning":{"command":"taskr list","message":"the cache is stale"}}
 //
 // Infos and successes are written the same way, as {"info":{…}} and {"success":{…}}, rather
 // than to stdout. A field is present only when rotini knows it: kind, flag and token come from
-// a [*ParseError], kind from a [*PluginError] too. Each line's shape is described by
-// schema-error.json in the rotini repository, and the contract document includes it.
+// a [*ParseError], kind from a [*PluginError] too, and token from any error [SuggestionFacts]
+// reads. Each line's shape is described by schema-error.json in the rotini repository, and
+// the contract document includes it.
 //
 // When structured reports false, or is nil, it reports as the default reporter does. Either way
 // the exit code follows the default reporter's rule.
@@ -160,7 +161,7 @@ func StructuredReporter(structured func(rtx *Context) bool) Reporter {
 
 // reportStructured writes the outcome as JSON lines on stderr.
 func reportStructured(rtx *Context, out Outcome) {
-	// A deliberate handler exit is never downgraded, as in the default reporter.
+	// A non-zero code a handler set is kept, as in the default reporter.
 	exitCode := rtx.applyExitFloor(out.Failed())
 	command := rtx.commandName()
 	lines := make([]map[string]any, 0, len(out.Infos)+len(out.Warnings)+len(out.Errors)+len(out.Panics)+len(out.Successes))
@@ -188,6 +189,11 @@ func reportStructured(rtx *Context, out Outcome) {
 			}
 		} else if pe, ok := errors.AsType[*PluginError](err); ok {
 			body["kind"] = pe.Kind.String()
+		}
+		if _, has := body["token"]; !has {
+			if token, _, ok := SuggestionFacts(err); ok {
+				body["token"] = token
+			}
 		}
 		return line
 	}

@@ -9,10 +9,13 @@ command:
     - name: help
       summary: print help
       identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
       schema: { type: bool }
     - name: version
       summary: print version
       identifiers: [-v, --version]
+      short_circuit: true
       schema: { type: bool }
   commands:
     - name: help
@@ -22,16 +25,6 @@ command:
         - name: command
           summary: the command path to print help for
           schema: { type: '[]string' }
-      flags:
-        - name: help
-          summary: print help
-          identifiers: [-h, --help]
-          schema: { type: bool }
     - name: version
       summary: print version
       description: Print the {{.Package}} version.
-      flags:
-        - name: help
-          summary: print help
-          identifiers: [-h, --help]
-          schema: { type: bool }

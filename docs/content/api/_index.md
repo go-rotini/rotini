@@ -130,4 +130,12 @@ func TestAdd(t *testing.T) {
 Build a fresh program per test with `NewProgram(Handlers())`. The `With*` methods change the
 program they are called on, so configuring the shared `Program` in one test would leak into the
 others. `Run` never calls `os.Exit`, and the error it returns joins every recorded error, so
-`errors.Is` and `errors.As` reach each one.
+`errors.Is` and `errors.As` reach each one; see
+[handling errors in a handler](/docs#handling-errors-in-a-handler) for branching on them.
+
+To test a single hook or the input parsing without the generated program, `rotini.NewContextFor`
+builds a context from a `rotini.Definition` you write in the test. A `Definition` is the runtime
+form of the command tree `rotini generate` produces from your spec. Building one by hand is
+supported for tests and for tooling; it is not a way to define a CLI, which the spec is. Fields
+are added as the spec gains keys, including in minor releases, so write them with field names
+(`rotini.FlagDef{Name: "verbose"}`), not positionally.

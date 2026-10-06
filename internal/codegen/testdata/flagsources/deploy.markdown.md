@@ -1,0 +1,22 @@
+# app deploy
+
+deploy it
+
+## Usage
+
+```
+app deploy <command> [flags]
+```
+
+## Commands
+
+- `canary` — a canary deploy
+
+## Flags
+
+- `-r, --replicas` `int` — how many (default `1`); also set by `APP_DEPLOY_REPLICAS` or config key `deploy.replicas`
+- `--region` `string` — where; also set by `DEPLOY_REGION` or config key `region`
+
+## Global Flags
+
+- `--verbose` — say more; also set by `APP_LOG_VERBOSE` or config key `log.verbose`

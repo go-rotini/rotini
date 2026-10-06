@@ -21,6 +21,14 @@ var (
 	pseudoVersionRe = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(?:\+[0-9A-Za-z.-]+)?$`)
 )
 
+var _ rotini.Handler = (*rotiniHandler)(nil)
+
+type rotiniHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
 // releaseVersion returns v's bare X.Y.Z when v names a release, or "" for an empty string,
 // "(devel)", a Go pseudo-version, or anything else that is not a semantic version.
 func releaseVersion(v string) string {
@@ -32,15 +40,6 @@ func releaseVersion(v string) string {
 		return m[1]
 	}
 	return ""
-}
-
-var _ rotini.Handler = (*rotiniHandler)(nil)
-
-type rotiniHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
 }
 
 // ResolveVersion returns the version the binary reports. The build info's module version wins
@@ -58,14 +57,27 @@ func ResolveVersion(ldflagVersion string) string {
 	return ldflagVersion
 }
 
-func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if answerHelp(rtx, func(in RotiniInputs) bool { return in.Rotini.Flags.Help }) {
-		return
-	}
-
+func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rtx.Inputs[RotiniInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)
+		return
+	}
+
+	if inputs.Rotini.Flags.Help {
+		var path []string
+		for _, c := range rtx.CommandChain()[1:] {
+			path = append(path, c.Name)
+		}
+
+		page, err := Help(path...)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
 		return
 	}
 
@@ -74,8 +86,9 @@ func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.HaltWithCode(0)
 		return
 	}
+}
 
-	// A bare `rotini` prints help and exits 1, since nothing ran.
+func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, rtx.Help())
 	rtx.HaltWithCode(1)
 }

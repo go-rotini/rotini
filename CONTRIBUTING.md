@@ -12,10 +12,9 @@ go mod download -modfile=tools.mod   # the development tools, kept out of go.mod
 make all   # run every project process (lint, the full test suite, build, install)
 ```
 
-`rotini` is two-faced: a spec-driven CLI **code generator** (the `go tool rotini`
-binary — `init`, `generate`, `validate`, …) and the **runtime library** that generated
-CLIs import. Most contributions touch one side or the other; the codegen engine
-lives under `internal/`, the runtime surface in the package root.
+Rotini has two parts: a spec-driven CLI **code generator** (the `go tool rotini` binary:
+`init`, `generate`, `validate`) and the **runtime library** that generated CLIs import. The
+codegen engine lives under `internal/`, the runtime in the package root.
 
 ## Making Changes
 
@@ -25,28 +24,29 @@ lives under `internal/`, the runtime surface in the package root.
 4. Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages (e.g., `feat:`, `fix:`, `test:`, `docs:`).
 
 If your change alters generated output, update the golden fixtures under
-`internal/codegen/testdata/golden/` (`go test ./internal/codegen -run Golden -update`) and
-confirm the diff is intentional. If it changes the spec or conf schema, keep
-`internal/codegen/schema-spec.json` / `internal/codegen/schema-conf.json`, the
-root-level published copies (`schema-spec.json` / `schema-conf.json`, which a release
-tag serves as the `$schema` URL), and the generated reference pages under
-`docs/content/specification/_index.md` and `docs/content/configuration/_index.md`, plus the every-key examples in `docs/assets/examples/`, in sync (`go test ./internal/codegen -run PublishedSchemas -update-schemas`, then
-`go test ./internal/codegen -run SchemaDocs -update-schema-docs`).
-`TestPublishedSchemasInSync` and `TestSchemaDocsInSync` fail until they are.
-
-If you add a lint rule, add its fixture directory under
-`internal/codegen/testdata/lint/<ruleName>/` — `TestLintFixturesComplete` fails until
-every rule in the registry has one, and `TestLintProblemsArePositioned` until the rule
-reports a `file:line:col`.
-
-The docs site's reference pages are GENERATED from the schemas, so a schema description
-is the only place that key is documented. After editing one:
+`internal/codegen/testdata/golden/` and confirm the diff is intentional:
 
 ```bash
+go test ./internal/codegen -run Golden -update
+```
+
+If it changes the spec or conf schema (`internal/codegen/schema-spec.json` /
+`schema-conf.json`), refresh the published copies at the repository root, which a release tag
+serves as the `$schema` URL, and the reference pages generated from them
+(`docs/content/specification/_index.md`, `docs/content/configuration/_index.md`). Those pages
+are built from the schema descriptions and the every-key examples in `docs/assets/examples/`,
+so edit those, not the pages:
+
+```bash
+go test ./internal/codegen -run PublishedSchemas -update-schemas
 go test ./internal/codegen -run SchemaDocs -update-schema-docs
 ```
 
-`TestSchemaDocsInSync` fails until you do.
+`TestPublishedSchemasInSync` and `TestSchemaDocsInSync` fail until you do.
+
+If you add a lint rule, add its fixture directory under
+`internal/codegen/testdata/lint/<ruleName>/`. `TestLintFixturesComplete` fails until every
+rule has one, and `TestLintProblemsArePositioned` until the rule reports a `file:line:col`.
 
 ## Linting
 
@@ -69,25 +69,15 @@ make rotini-build      # build the codegen binary
 make rotini-install    # regenerate (go generate ./...) and install the tool
 ```
 
-`make all` runs the full chain. `test-mutation` is slow; it's usually run on its
-own rather than in a tight edit loop.
-
-The tiers are cumulative, and each proves something the one before it cannot:
-`test` covers units and codegen goldens, `test-conformance` covers every input
-channel in-process, `test-acceptance` covers what only a real process shows (exit
-codes, pipes, signals), and `test-e2e` covers what only a real *user module* shows —
-that generated code not merely compiles but behaves.
-
-Planning documents live in a sibling repository at `../.docs`, deliberately outside
-this module so they are not published with it.
+`make all` runs the full chain. `test-mutation` is slow, so run it on its own rather than in
+a tight edit loop.
 
 ## Pull Requests
 
 - Keep PRs focused on a single change.
-- Include tests that cover the change. Both happy paths and error paths are
-  expected — parse/bind/validation failures and the typed error classes
-  (`ParseError`, `InputError`, `PluginError`, `WiringError`, `DependencyError`,
-  `PanicError`) all have observable, asserted behavior.
+- Include tests for both the success and the error paths, including which typed error
+  (`ParseError`, `InputError`, `PluginError`, `WiringError`, `DependencyError`, `PanicError`)
+  a failure produces.
 - When you change codegen, include the regenerated golden fixtures in the PR.
 - Reference any relevant issues.
 

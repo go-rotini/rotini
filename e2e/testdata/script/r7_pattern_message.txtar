@@ -1,5 +1,5 @@
-# pattern_message — the sentence a user sees when a value fails a `pattern`, in place of the
-# regex. The regex is written for the program; `-o must match ^(json|yaml|wide|...)$` asks the
+# R7 — pattern_message: the sentence a user sees when a value fails a `pattern`, in place of
+# the regex. The regex is written for the program; `-o must match ^(json|yaml|wide|...)$` asks the
 # person at the keyboard to read it. Driven through generated code on every path
 # a pattern is checked: a flag, each element of a list, a named schema the flag refers to, an
 # env input, and a property inside an object-valued flag.
@@ -37,7 +37,7 @@ env APP_REGION=
 stderr 'host: must be a hostname: letters, digits, dots and hyphens'
 ! stderr 'does not match pattern'
 
-# No message declared: the regex is still the answer, as before.
+# No message declared: the error shows the regex.
 ! exec ./app$exe --plain x
 stderr '--plain must match \^y\$'
 

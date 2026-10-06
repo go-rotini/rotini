@@ -209,7 +209,7 @@ func TestManPages_shape(t *testing.T) {
 		".SH DESCRIPTION\nThe acme control cli. It ships \\ebackslashes\\e and \\(aqquotes\\(aq. This sentence\n" +
 			"runs on well past eighty bytes so that the renderer has to wrap it into more\n" +
 			"than one roff text line .with a dot.\n.PP\n\\&.this line starts",
-		`.SH "GLOBAL OPTIONS"`, // no: the root's own cascading flag is an OPTION here
+		`.SH "GLOBAL OPTIONS"`, // no: the root's own cascading flag is an option here
 		".SH ENVIRONMENT\n.TP\n\\fBACME_TOKEN\\fR \\fIstring\\fR\napi token",
 		".SH \"EXIT STATUS\"\n.TP\n\\fB0\\fR\nsuccess",
 		".SH EXAMPLES\n.RS 4\n.nf\nacme deploy web \\-\\-replicas 3\n.sp\n# a two\\-line example\nacme status \\-\\-verbose\n.fi\n.RE",

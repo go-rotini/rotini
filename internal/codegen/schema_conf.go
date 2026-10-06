@@ -4,7 +4,7 @@ package codegen
 
 // The conf controls what `rotini generate` writes and where: the Go packages, the documentation and completion features, the JSON Schemas and the contract document. It also sets how `rotini validate` reports problems.
 type Conf struct {
-	// Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.2.0/schema-conf.json — note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL.
+	// Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.3.0/schema-conf.json — note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL.
 	Schema string `json:"$schema,omitempty"`
 	// Controls `rotini generate`: the generated packages and features. When omitted entirely, the defaults apply: one generated file under internal/cmd/<root>, and every feature off.
 	Generate *GenerateConfig `json:"generate,omitempty"`
@@ -28,6 +28,10 @@ type Feature struct {
 	EmbedDir string `json:"embed_dir,omitempty"`
 	// When true, rotini generates this feature's outputs into the cmd package, with their variables and lookup function. Off by default.
 	Enabled bool `json:"enabled,omitempty"`
+	// completion only: turns on completion messages, lines the shell shows while a value is being completed and there is nothing to offer. 'declared' shows the inputs' `complete.message` lines from the spec. 'all' also shows a line derived from the summary of every other flag and argument that has one, such as `--replicas <int>: how many instances`. Either way a completer can add its own with rtx.AddCompletionMessage, which take the place of the static line. Omitted, there are no messages. zsh and bash 4.4 or later show them; fish, PowerShell and older bash skip them, and the plugin hosts kubectl, Docker and Flux show them their own way. Setting it on any other feature is an error.
+	Messages string `json:"messages,omitempty"`
+	// completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide completion messages; unset or any other value leaves them on. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionMessages replaces this check with a rule of your own. Requires `messages`.
+	MessagesEnv string `json:"messages_env,omitempty"`
 	// man only: the man page section the pages are generated for, a single digit 1-9 (default 1, user commands; 8 is administration tools and daemons). It is the section in each page's header, the extension of each page file (taskr-add.8), and the section in cross-references between pages, and the generated ManSection constant holds it. One value for the whole program. Setting it on any other feature is an error.
 	Section int `json:"section,omitempty"`
 	// Whether the editable template (help.txt.tmpl, man.txt.tmpl or markdown.md.tmpl) is seeded into 'template_dir' for you to customize. true: the template is written when missing, and pages render from it. false (the default): no template is written, and pages render from rotini's built-in one. Has no effect on completion, which has no template; rotini validation warns if you set it there. A template you have edited is never removed: setting this back to false leaves it in place, unused.
@@ -42,6 +46,8 @@ type Feature struct {
 type GenerateConfig struct {
 	// Optional: where to write the contract document, a JSON description of every command's inputs, output and exit statuses.
 	Contract *ContractConfig `json:"contract,omitempty"`
+	// The name of an environment variable that makes `rotini generate` do a dry run: when it is set to 1, true, yes or on (any case), generate writes nothing, lists what it would change and exits 2 if anything would, or 0 if nothing would. Set it to CI to dry-run in most CI systems, which set CI=true, so `go generate ./...` checks every CLI in the module. --dry-run and --no-dry-run on the command line take precedence. Unset, the environment never changes what generate does. It doesn't apply to `rotini init`, which has no conf to read before it runs.
+	DryRunEnv string `json:"dry_run_env,omitempty"`
 	// The generated documentation and completion outputs, one per `type` (help, completion, man, markdown). Each is off unless enabled, with options for how its content is stored and rendered.
 	Features []Feature `json:"features,omitempty"`
 	// The generated code targets, one per `type` (main, cmd, models). 'main' is the program's entrypoint, created once. 'cmd' is the CLI package: the handler files you edit, plus the one generated file (the command tree, the handler wiring and, unless 'models' moves them out, the typed input and output structs). 'models' is optional: declare it to put the typed structs in their own package, which a handler package used through a command's `handler:` can import without an import cycle. The rotini runtime is not generated: it is an ordinary dependency the generated code imports (`go get github.com/go-rotini/rotini`).
@@ -63,7 +69,7 @@ type PackageConfig struct {
 	Header string `json:"header,omitempty"`
 	// Package-relative paths (e.g. 'helpers.go') that rotini must never remove.
 	//
-	// You rarely need it: rotini only ever removes files it wrote that no longer match the spec, such as a handler file whose command has left the spec (identified by the generated marker it carries), and it reports each one. A file you wrote is never removed, whatever it is named, and neither are test files or the editable feature templates. Use 'keep' when you have kept a handler file whose command is gone and left its marker in place, or to protect a rendered output file under an embed_dir.
+	// You rarely need it: rotini only ever removes files it wrote that no longer match the spec, such as a handler file whose command has left the spec (identified by the generated marker it carries), and it reports each one. A handler file goes in two steps: the next generate disables it with `//go:build ignore`, and the one after deletes it. A file you wrote is never removed, whatever it is named, and neither are test files or the editable feature templates. Use 'keep' when you have kept a handler file whose command is gone and left its marker in place, or to protect a rendered output file under an embed_dir.
 	Keep []string `json:"keep,omitempty"`
 	// Go package name written at the top of 'file'. Defaults to the file's parent-directory name (sanitized to a valid Go identifier). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'.
 	Package string `json:"package,omitempty"`

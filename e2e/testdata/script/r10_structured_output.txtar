@@ -1,6 +1,6 @@
 # R10 — structured output: a command declares what it writes, and rtx.WriteOutput writes it.
 #
-# it. json, yaml and toml are written by rotini, a human format by the handler's renderer.
+# json, yaml and toml are written by rotini, a human format by the handler's renderer.
 
 gomodinit example.com/taskr
 

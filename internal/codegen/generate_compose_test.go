@@ -389,7 +389,7 @@ command:
 		`rotini.PluginDiscoveryDef{Prefix: "child-"}`, // its discovery, with the child's default prefix
 		`"./parent-plugins"`,                          // plugin_path on the $ref node overlays the child's
 		`Binary: "child-lint"`,                        // an inline sub-command inside the subtree: the child's name too
-		`Binary: "grand-sync"`,                        // a transitive child's plugins keep ITS name
+		`Binary: "grand-sync"`,                        // a transitive child's plugins keep its name
 		`Passthrough: true`,                           // the child's passthrough command still forwards raw
 	} {
 		if !strings.Contains(root, want) {

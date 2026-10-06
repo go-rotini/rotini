@@ -35,7 +35,7 @@ The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/
 
 `string`
 
-Optional URI identifying the rotini spec schema, for editor tooling only: rotini never fetches it, and the version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.2.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. `rotini init` seeds this key (`$schema: ./.rotini-schema.spec.json`), and it works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place.
+Optional URI identifying the rotini spec schema, for editor tooling only: rotini never fetches it, and the version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.3.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. `rotini init` seeds this key (`$schema: ./.rotini-schema.spec.json`), and it works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place.
 
 
 ## Command
@@ -116,7 +116,7 @@ Configuration files this command reads values from, each at a fixed 'path' or fo
 
 `string`
 
-Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section; a flag's environment fallback is not listed, so mention the variable in the flag's summary when users need to know it.
+Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
 
 In a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a parent that declares none adopts the child's, a parent that declares one wins, and two children with different prefixes are rejected.
 
@@ -236,7 +236,7 @@ Example command-line invocations, rendered one per line. Ignored when 'help' is 
 
 array of [`ExitStatusEntry`](#exitstatusentry)
 
-Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. This is documentation only, and rotini does not check it: the runtime sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. Ignored when 'man' (verbatim) is set.
+Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. Ignored when 'man' (verbatim) is set.
 
 #### `see_also`
 
@@ -360,6 +360,12 @@ CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is d
 [`InputSchema`](#inputschema)
 
 Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
+
+### `short_circuit`
+
+`boolean` · default `false`
+
+When true, setting this flag on the command line waives every declared requirement of the invoked command chain: required inputs, enums, bounds, patterns, flag groups and flag dependencies are not checked, and rtx.Inputs succeeds. Use it for flags that replace the command's normal run, such as --help, --version or --print-schema. Errors in reading the command line (an unknown flag or command, a value of the wrong type, too many arguments) are still reported. rotini takes no action of its own: your handler checks the flag and decides what to do. Only the command line sets it, never an environment variable, a configuration file or a default. Must be a bool, and can't be required, negatable, given a default of true, read from the environment or a configuration file (key, variable), or listed in a flag group or flag dependency.
 
 ### `summary`
 
@@ -766,7 +772,7 @@ document instead; see [StdinSpec](#stdinspec).
 
 `object`
 
-Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter).
+Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 
 Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
 
@@ -828,7 +834,7 @@ Flags only: the value a flag takes when it is given without one, which makes its
 
 `string`
 
-Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable).
+Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable). Help shows a flag's key under the flag when the command reads configuration files.
 
 ### `layout`
 
@@ -880,7 +886,7 @@ List and map flags, and a variadic argument: split each value on this character,
 
 `string` or `array`
 
-The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on flags (as a flag's environment fallback); rejected on arguments, config inputs and stdin, which have no environment variable.
+The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. For a flag, help shows them under the flag, in lookup order. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on flags (as a flag's environment fallback); rejected on arguments, config inputs and stdin, which have no environment variable.
 
 A variable named here is never given the `env_prefix`: it is already exact, and prefixing it would silently make it a different variable.
 
@@ -985,7 +991,7 @@ Maximum allowed value (inclusive). Same applicability rules as 'minimum' (number
 
 `integer`
 
-Minimum number of values for a repeatable (array or map) input — rejected on scalar types.
+Minimum number of values for a repeatable (array or map) input — rejected on scalar types. A list flag or variadic argument that is left out has zero values, so minItems also applies to it unless it has a default (add required for the message to say the input is missing). An env or config list is checked only when it is set.
 
 ### `minLength`
 

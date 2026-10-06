@@ -1,0 +1,50 @@
+# A short-circuit flag waives every requirement when it is set on the command line, so it must
+# be a bool switch that only the command line sets, and never a requirement itself.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Correct: a bool, set only on the command line. No problem.
+    - name: help
+      identifiers: [-h, --help]
+      short_circuit: true
+      schema: { type: bool }
+    # Not a bool.
+    - name: schema
+      identifiers: [--schema]
+      short_circuit: true
+      schema: { type: string }
+    # Required.
+    - name: required
+      identifiers: [--required]
+      short_circuit: true
+      schema: { type: bool, required: true }
+    # Defaults to true: every run would be short-circuited.
+    - name: always
+      identifiers: [--always]
+      short_circuit: true
+      schema: { type: bool, default: true }
+    # Reads an environment variable.
+    - name: version
+      identifiers: [--version]
+      short_circuit: true
+      schema: { type: bool, variable: DEMO_VERSION }
+    # Negatable.
+    - name: plan
+      identifiers: [--plan]
+      short_circuit: true
+      schema: { type: bool, negatable: true }
+    # In a flag group and a flag dependency.
+    - name: dump
+      identifiers: [--dump]
+      short_circuit: true
+      schema: { type: bool }
+    - name: out
+      identifiers: [--out]
+      schema: { type: string }
+  flag_groups:
+    - kind: mutually_exclusive
+      flags: [dump, out]
+  flag_dependencies:
+    - when: out
+      requires: [dump]

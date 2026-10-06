@@ -1,13 +1,7 @@
 # R1 — deprecated aliases and identifiers are reported, and need nothing bound.
 #
-# `Deprecations` used to be a METHOD on Parser. Since it needs no parser state — rotini's own
-# doc said so — the only thing the receiver bought was a reason to pull a *Parser out of the
-# registry, which made `Bind(KeyParser, NewParser())` look mandatory in every entrypoint. A
-# user who deleted that line, reasonably, since nothing else read it, silently lost every
-# deprecation warning: the conventional Get+ok guard just skipped the loop.
-#
-# It is a function now. This program binds NO services at all, which is the point: nothing
-# below depends on the registry, and the reporting still works.
+# Deprecations needs no parser or other registered dependency, so this program binds nothing
+# and the reporting still works.
 
 gomodinit example.com/deprec
 
@@ -23,18 +17,18 @@ exec ./dep$exe compile app --config x
 stdout 'compiled app'
 ! stderr .
 
-# A command reached through a DEPRECATED alias is reported, with the token actually typed.
+# A command reached through a deprecated alias is reported, with the token actually typed.
 exec ./dep$exe build app --config x
 stdout 'compiled app'
 stderr 'deprecated command identifier "build" was used'
 stderr 'use compile'
 
-# A non-deprecated alias of the same command is NOT reported — deprecating a subset is the
-# whole point of listing identifiers rather than flagging the input.
+# A non-deprecated alias of the same command is not reported: listing identifiers deprecates
+# just those spellings, not the whole input.
 exec ./dep$exe cc app --config x
 ! stderr .
 
-# A flag set through a DEPRECATED identifier is reported the same way, and Kind tells the two
+# A flag set through a deprecated identifier is reported the same way, and Kind tells the two
 # apart so the message can spell the replacement correctly.
 exec ./dep$exe compile app --conf x
 stderr 'deprecated flag identifier "--conf" was used'

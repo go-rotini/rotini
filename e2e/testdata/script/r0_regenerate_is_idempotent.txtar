@@ -1,8 +1,8 @@
 # R0 — regenerating changes nothing, and never touches what the author owns.
 #
 # This is the operation every upgrade performs, and the only one that can destroy work.
-# UPGRADING.md promises: the generated file is rewritten every pass, while the handler stub
-# and main.go are created once and then never touched again. This script is that promise.
+# The docs say the generated file is rewritten every pass, while the handler stub
+# and main.go are created once and then never touched again. This script holds them to it.
 
 gomodinit example.com/demo
 

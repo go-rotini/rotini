@@ -65,6 +65,11 @@ type PluginError struct {
 	Cause   error           // the underlying OS/exec error, reachable via errors.As (may be nil)
 	Msg     string          // the human-readable failure
 
+	// Candidates are the names the dispatching command knows (its sub-commands, their aliases
+	// and its declared plugins), set when a discovered token matched no binary, so a mistyped
+	// sub-command can be ranked against them; nil otherwise. Name is the token.
+	Candidates []string
+
 	cat Category // how CategoryOf classifies it (CategoryNone for a timeout)
 }
 
@@ -101,19 +106,24 @@ type PluginDispatch struct {
 }
 
 // execPlugin locates and runs the co-located plugin binary, passing stdio through, honoring
-// the run context and any timeout, and returning the plugin's exit code. rotini's own dispatch
+// the run context and any timeout, and returning the plugin's exit code. Rotini's own dispatch
 // failures are recorded as errors and routed through the reporter; the plugin's non-zero exit
-// passes through unchanged.
-func (p *Program) execPlugin(ctx context.Context, rtx *Context, r *PluginDispatch) (int, error) {
+// passes through unchanged. chain is the resolved path; its last command is the one that dispatched, whose names are a
+// discovered token's candidates.
+func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command, r *PluginDispatch) (int, error) {
 	path, err := resolvePluginBinary(r.Def.Binary, r.Dir)
 	if err != nil {
 		cat := CategoryInternal
+		var candidates []string
 		if r.Discovered {
 			cat = CategoryUsage
+			if len(chain) > 0 {
+				candidates = childCommandNames(chain[len(chain)-1])
+			}
 		}
 		return p.pluginFailure(ctx, rtx, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginNotFound,
-			Cause: err, Msg: err.Error(), cat: cat,
+			Cause: err, Msg: err.Error(), Candidates: candidates, cat: cat,
 		})
 	}
 
@@ -286,7 +296,7 @@ type DiscoveredPlugin struct {
 // DiscoveredPlugins returns each plugin discovered for cmd — an executable "<prefix>foo" found
 // next to the binary, in the plugin path, or on PATH — deduped and sorted by name, with any
 // name colliding with a declared sub-command, declared plugin or alias removed. It returns nil
-// when cmd has no discovery or discovery is hidden. rotini renders nothing; a handler lists
+// when cmd has no discovery or discovery is hidden. Rotini renders nothing; a handler lists
 // the result itself:
 //
 //	chain := rtx.CommandChain()
@@ -306,7 +316,7 @@ func (cmd Command) DiscoveredPlugins() []DiscoveredPlugin {
 // path — typically that it is unreadable or not a directory — and nil when there is no
 // discovery, no plugin path, discovery is hidden, or the path scanned cleanly. A path that
 // does not exist is not a problem. The directory of the binary and the $PATH entries are not
-// reported. rotini prints no warning itself, since that would corrupt completion output. Each
+// reported. Rotini prints no warning itself, since that would corrupt completion output. Each
 // error carries the path and cause, so errors.Is(err, fs.ErrPermission) classifies it.
 func (cmd Command) PluginDiscoveryErrors() []error {
 	_, problems := discoveredFor(cmd)

@@ -74,8 +74,8 @@ func (NoCascadingPostRun) CascadingPostRun(ctx context.Context, rtx *Context) {}
 // A method declared on the outer type takes precedence over the promoted no-op.
 //
 // NoHooks does not supply Run, so a handler with a missing or misspelled Run fails the
-// `var _ rotini.Handler` assertion at compile time. Generated stubs embed the four types
-// individually.
+// `var _ rotini.Handler` assertion at compile time. Generated stubs embed the No* types
+// they need individually.
 type NoHooks struct {
 	NoCascadingPreRun
 	NoPreRun

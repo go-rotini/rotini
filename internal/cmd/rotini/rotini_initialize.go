@@ -21,10 +21,6 @@ type rotiniInitializeHandler struct {
 }
 
 func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if answerHelp(rtx, func(in RotiniInitializeInputs) bool { return in.RotiniInitialize.Flags.Help }) {
-		return
-	}
-
 	inputs, err := rtx.Inputs[RotiniInitializeInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)
@@ -34,6 +30,18 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	flags := inputs.RotiniInitialize.Flags
 
 	version := rtx.Version()
+	if flags.DryRun {
+		rtx.SetDependencyIfAbsent(initializeDryRunDep, codegen.NewProcessor(version).InitializeDryRun)
+		planned, err := rtx.MustGetDependency(initializeDryRunDep)(args.Name, flags.Format, flags.Force)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", planned.Spec, planned.Conf)
+		reportPlanned(rtx, planned.Result, planned.Changes)
+		return
+	}
+
 	rtx.SetDependencyIfAbsent(initializeDep, codegen.NewProcessor(version).Initialize)
 	initialize := rtx.MustGetDependency(initializeDep)
 

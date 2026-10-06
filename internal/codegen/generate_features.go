@@ -164,9 +164,16 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		paths:    []string{""},
 		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix), nil, gp.tree, gp.rootOutput),
+		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix, gp.readsConfig(nil)), nil, gp.tree, gp.rootOutput),
 		listed:   true,
 	}}
+	// The variable that hides completion messages is an input the end user sets, so the root's
+	// man page lists it with the program's other environment variables.
+	if mode, env := completionMessages(gp.conf); feat.manPages && mode != "" && env != "" {
+		out[0].data.Environment = append(out[0].data.Environment, templateDocEnvRow{
+			Var: env, Summary: "set to 0, false or off to hide completion messages",
+		})
+	}
 
 	// cascading accumulates the cascading flags of a node's ancestors.
 	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool)
@@ -182,15 +189,15 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix), childNames, n.children, n.output),
+				data:     withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix, gp.readsConfig(childNames)), childNames, n.children, n.output),
 				path:     childNames,
 				listed:   listed && !n.hidden,
 			})
-			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
+			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs, gp.envPrefix)...)
 			walk(n.children, childChain, childNames, childCascading, listed && !n.hidden)
 		}
 	}
-	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs), true)
+	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs, gp.envPrefix), true)
 	return out
 }
 
@@ -281,8 +288,9 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 
 // buildHelpData assembles the template data for one command from its doc fields, inputs,
 // direct children and plugins. Hidden children and inputs are excluded; plugins are listed
-// with the commands.
-func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, plugins []PluginSpec, ancestorCascading []templateDocFlagRow, envPrefix string) templateHelpData {
+// with the commands. readsConfig says whether the command reads any config file, which decides
+// whether its flags show their config keys.
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, plugins []PluginSpec, ancestorCascading []templateDocFlagRow, envPrefix string, readsConfig bool) templateHelpData {
 	d := templateHelpData{
 		Invocation:  invocation,
 		Headings:    resolveHeadings(h),
@@ -291,7 +299,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Description: h.Description,
 		Usage:       h.Usage,
 		Footer:      h.Footer,
-		Cascading:   ancestorCascading,
+		Cascading:   withConfigKeys(ancestorCascading, readsConfig),
 		Examples:    h.Examples,
 		SeeAlso:     h.SeeAlso,
 	}
@@ -342,7 +350,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if f.Hidden {
 				continue
 			}
-			d.Flags = append(d.Flags, flagRow(f))
+			d.Flags = append(d.Flags, flagRow(f, envPrefix))
 		}
 		for _, e := range inputs.Env {
 			if e.Hidden {
@@ -374,6 +382,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			})
 		}
 	}
+	d.Flags = withConfigKeys(d.Flags, readsConfig)
 	d.FlagGroups = groupFlags(d.Flags)
 	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(plugins) > 0)
 	return d
@@ -491,8 +500,9 @@ func undeprecated(names, deprecatedIDs []string, message string) ([]string, stri
 	return kept, ""
 }
 
-// flagRow builds the help row for a flag, used by both the Flags and Cascading sections.
-func flagRow(f FlagInput) templateDocFlagRow {
+// flagRow builds the help row for a flag, used by both the Flags and Cascading sections. Its
+// env names are the ones the generated field's env tag pins, so help and the runtime agree.
+func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 	ids, deprecated := undeprecated(flagIdentifiers(f), f.DeprecatedIdentifiers, f.Deprecated)
 	row := templateDocFlagRow{
 		Identifiers: negatableIdentifiers(f, ids),
@@ -503,6 +513,10 @@ func flagRow(f FlagInput) templateDocFlagRow {
 		Default:     schemaDefaultString(f.Schema),
 		Enum:        enumOf(f.Schema),
 		Deprecated:  deprecated,
+	}
+	row.key = flagReconKey(f.Name, f.Schema)
+	if env := flagEnvVar(f.Schema, row.key, envPrefix); env != "" {
+		row.Env = strings.Split(env, ",")
 	}
 	// An implicit value must be attached, so the value token moves into brackets on the last
 	// identifier: `-c, --color[=when]`.
@@ -518,7 +532,7 @@ func flagRow(f FlagInput) templateDocFlagRow {
 
 // cascadingFlagsOf returns help rows for a command's visible cascading flags, in declaration
 // order, for its descendants' pages.
-func cascadingFlagsOf(inputs *Inputs) []templateDocFlagRow {
+func cascadingFlagsOf(inputs *Inputs, envPrefix string) []templateDocFlagRow {
 	if inputs == nil {
 		return nil
 	}
@@ -527,9 +541,40 @@ func cascadingFlagsOf(inputs *Inputs) []templateDocFlagRow {
 		if f.Hidden || !f.Cascading {
 			continue
 		}
-		rows = append(rows, flagRow(f))
+		rows = append(rows, flagRow(f, envPrefix))
 	}
 	return rows
+}
+
+// withConfigKeys returns rows with ConfigKey set from each flag's key when the page's command
+// reads config files, and cleared when it reads none: a key no file is read for points nowhere.
+// A cascading flag is judged by the page it appears on, since the runtime reads the invoked
+// command's files.
+func withConfigKeys(rows []templateDocFlagRow, readsConfig bool) []templateDocFlagRow {
+	if rows == nil {
+		return nil
+	}
+	out := slices.Clone(rows)
+	for i := range out {
+		out[i].ConfigKey = ""
+		if readsConfig {
+			out[i].ConfigKey = out[i].key
+		}
+	}
+	return out
+}
+
+// readsConfig reports whether the command at path (below the root) reads any config file: one
+// declared on it or an ancestor, or an unscoped one, as the input reader's chainConfigFiles
+// selects them.
+func (gp *program) readsConfig(path []string) bool {
+	scope := strings.Join(append([]string{gp.rootName}, path...), "/")
+	for _, cf := range gp.configFiles {
+		if cf.Scope == "" || cf.Scope == scope || strings.HasPrefix(scope, cf.Scope+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // deriveUsage builds the default usage line: the invocation, a <command> slot when there are
@@ -752,7 +797,7 @@ func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool
 // page is used as is (ANSI-stripped for strip features); otherwise the page renders through
 // the feature's template. The template is loaded only when some node renders: from template_dir
 // (seeding it when missing) when seedTemplate is set, else from the built-in default.
-func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedTemplate bool) ([]string, error) {
+func docFeatureContents(pl *planner, featDir string, nodes []helpNode, feat docFeature, seedTemplate bool) ([]string, error) {
 	renders := false
 	for _, hn := range nodes {
 		if hn.verbatim == "" {
@@ -765,10 +810,7 @@ func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedT
 	if renders {
 		var err error
 		if seedTemplate {
-			if err = os.MkdirAll(featDir, 0o755); err != nil {
-				return nil, fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
-			}
-			tmpl, err = loadFeatureTemplate(featDir, feat)
+			tmpl, err = loadFeatureTemplate(pl, featDir, feat)
 		} else {
 			tmpl, err = parseDocTemplate(feat.tmplFile, feat.embedded)
 		}
@@ -797,10 +839,10 @@ func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedT
 }
 
 // completionContents returns each node's shell completion script, parallel to nodes.
-func completionContents(prog string, nodes []helpNode) ([]string, error) {
+func completionContents(prog, messagesEnv string, nodes []helpNode) ([]string, error) {
 	contents := make([]string, len(nodes))
 	for i, n := range nodes {
-		script, err := completionScript(prog, n.name)
+		script, err := completionScript(prog, n.name, messagesEnv)
 		if err != nil {
 			return nil, fmt.Errorf("generate %s completion: %w", n.name, err)
 		}
@@ -811,15 +853,12 @@ func completionContents(prog string, nodes []helpNode) ([]string, error) {
 
 // writeFeatureOutputs writes each node's content to its file under featDir. Only embed-mode
 // features write files; inline content lives in the generated Go source.
-func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, feat docFeature) error {
+func writeFeatureOutputs(pl *planner, featDir string, nodes []helpNode, contents []string, feat docFeature) error {
 	if featDir == "" {
 		return fmt.Errorf("generate.features.%s.embed_dir must not be empty", feat.name)
 	}
-	if err := os.MkdirAll(featDir, 0o755); err != nil {
-		return fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
-	}
 	for i, hn := range nodes {
-		if err := writeGeneratedFile(filepath.Join(featDir, hn.file), []byte(contents[i])); err != nil {
+		if err := pl.write(filepath.Join(featDir, hn.file), []byte(contents[i])); err != nil {
 			return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
 		}
 	}
@@ -837,16 +876,17 @@ func stripForFeature(feat docFeature, text string) string {
 
 // loadFeatureTemplate reads the editable template in featDir, seeding it from the built-in
 // default when missing, and parses it with the shared FuncMap.
-func loadFeatureTemplate(featDir string, feat docFeature) (*template.Template, error) {
+func loadFeatureTemplate(pl *planner, featDir string, feat docFeature) (*template.Template, error) {
 	path := filepath.Join(featDir, feat.tmplFile)
-	src, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		if werr := os.WriteFile(path, []byte(feat.embedded), 0o644); werr != nil {
+	src, _, exists, err := pl.read(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s template %s: %w", feat.name, path, err)
+	}
+	if !exists {
+		if werr := pl.createOnce(path, []byte(feat.embedded)); werr != nil {
 			return nil, fmt.Errorf("seed %s template %s: %w", feat.name, path, werr)
 		}
 		src = []byte(feat.embedded)
-	} else if err != nil {
-		return nil, fmt.Errorf("read %s template %s: %w", feat.name, path, err)
 	}
 	tmpl, err := parseDocTemplate(feat.tmplFile, string(src))
 	if err != nil {

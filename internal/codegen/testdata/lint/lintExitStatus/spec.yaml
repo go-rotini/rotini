@@ -1,0 +1,23 @@
+# exit_status documents what each exit code means, so a code is listed once, and a code above
+# 128 is flagged because a process stopped by signal n exits with 128+n.
+version: 0.0.0
+command:
+  name: demo
+  # Correct: distinct codes in the ordinary range. No problem.
+  exit_status:
+    - { code: 0, summary: success }
+    - { code: 1, summary: an error }
+    - { code: 3, summary: some tasks failed }
+    - { code: 128, summary: the highest code no signal uses }
+  commands:
+    - name: run
+      exit_status:
+        # Listed twice.
+        - { code: 3, summary: partial }
+        - { code: 3, summary: also partial }
+        # The codes Ctrl-C and SIGTERM exit with, and another signal's.
+        - { code: 130, summary: interrupted }
+        - { code: 143, summary: terminated }
+        - { code: 200, summary: something else }
+    # A composed child: its duplicate is reported in its own file.
+    - $ref: ./kid.yaml

@@ -335,7 +335,7 @@ func conformanceCases() []inputCase {
 
 		{id: "ARG-09", args: []string{"--verbose", "wrap", "--dry-run", "-x", "--", "literal", "-"},
 			check: func(t *testing.T, rtx *Context, meta InputSettings) {
-				// Passthrough: ancestor flags BEFORE the command parse normally;
+				// Passthrough: ancestor flags before the command parse normally;
 				// everything after it — flag-shaped tokens, "--", bare "-" — is a
 				// raw positional, verbatim and in order.
 				in := bindAs[acWrapInputs](t, rtx, meta)
@@ -452,7 +452,7 @@ func conformanceCases() []inputCase {
 		{id: "STDIN-03", args: []string{"widget", "apply", "-f", "-"},
 			stdin: "apiVersion: acme/v1\nkind: Widget\nmetadata: { name: demo }\n",
 			check: func(t *testing.T, rtx *Context, meta InputSettings) {
-				// A heredoc IS stdin by the time it reaches the process; the
+				// A heredoc is stdin by the time it reaches the process; the
 				// multi-line document arrives intact.
 				in := bindAs[acApplyInputs](t, rtx, meta)
 				if !strings.Contains(in.Apply.Flags.File, "name: demo") {
@@ -519,7 +519,7 @@ func conformanceCases() []inputCase {
 			}},
 		{id: "ENV-05", args: []string{"deploy"}, env: map[string]string{"ACME_REGION": ""},
 			check: func(t *testing.T, rtx *Context, _ InputSettings) {
-				// Presence semantics: an empty-string variable IS set; an
+				// Presence semantics: an empty-string variable is set; an
 				// unset one is not. The env layer's Presence distinguishes them.
 				layer, err := rtx.EnvInputs[acDeployInputs]()
 				if err != nil {
@@ -547,7 +547,7 @@ func conformanceCases() []inputCase {
 				"PLAIN_OTHER": "exempt-value",      // explicit variable: exempt from the prefix
 			},
 			check: func(t *testing.T, rtx *Context, meta InputSettings) {
-				// env_prefix scopes every DERIVED env name under PREFIX_; explicit
+				// env_prefix scopes every derived env name under PREFIX_; explicit
 				// variable: names stay exact.
 				meta.EnvPrefix = "ACME"
 				type envPrefixInputs struct {
@@ -720,7 +720,7 @@ func conformanceCases() []inputCase {
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Output != "from-jsonc" {
 					t.Errorf("output = %q, want from-jsonc through the declared-format jsonc entry", in.Deploy.Flags.Output)
 				}
-				// …while dotenv keys stay VERBATIM (KEY=value lines, no dotted
+				// …while dotenv keys stay verbatim (KEY=value lines, no dotted
 				// projection): the reading input declares the variable name.
 				type dotenvInputs struct {
 					Acme   acRootCmd
@@ -745,12 +745,12 @@ func conformanceCases() []inputCase {
 				}
 			}},
 		{id: "SEC-02",
-			skip: "DECIDED out of scope (W5-F6, option a): rotini ships no interactive prompt — " +
+			skip: "out of scope: rotini ships no interactive prompt — " +
 				"the secret: schema docs point handlers at rtx.Stdin + any prompt library.",
 			check: func(t *testing.T, rtx *Context, meta InputSettings) {}},
 		{id: "SEC-03", args: []string{"login"}, env: map[string]string{"ACME_TOKEN": "sk_live_leakme"},
 			check: func(t *testing.T, rtx *Context, _ InputSettings) {
-				// The redaction sweep: the secret's text must appear in NO
+				// The redaction sweep: the secret's text must appear in no
 				// error or provenance path, across channels.
 				secretDef := Definition{
 					Name: "acme", Handler: "Acme",
@@ -827,7 +827,7 @@ func conformanceCases() []inputCase {
 			env:   map[string]string{"ACME_ENV": "staging"},
 			files: map[string]string{"acme.yaml": "acme:\n  env: test\n"},
 			check: func(t *testing.T, rtx *Context, _ InputSettings) {
-				// Provenance: the Report knows WHICH layer won, and the full
+				// Provenance: the Report knows which layer won, and the full
 				// history beneath it.
 				rtx.WithInputSettings(acmeMeta(filepath.Dir(mustGetwd(t))))
 				defaults, _ := rtx.DefaultInputs[acDeployInputs]()

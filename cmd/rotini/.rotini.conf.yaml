@@ -27,6 +27,9 @@ generate:
       enabled: true
       embed: false
       template: false
+      # Messages for values with nothing to offer, such as the name `rotini init` takes.
+      messages: all
+      messages_env: ROTINI_COMPLETION_MESSAGES
     - type: man
       enabled: true
       embed: false

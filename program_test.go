@@ -71,7 +71,7 @@ func TestProgram_Run_isReentrant(t *testing.T) {
 	var n int
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		n++
-		if n == 1 { // only the FIRST run fails
+		if n == 1 { // only the first run fails
 			rtx.RecordError(errors.New("first run failed"))
 			rtx.HaltWithCode(3)
 		}
@@ -205,7 +205,7 @@ func TestRun_recordInfo_defaultToStdout(t *testing.T) {
 }
 
 // TestRun_recordWarning_defaultNonFatal: a recorded warning reaches the default reporter
-// (stderr) and does NOT fail the run.
+// (stderr) and does not fail the run.
 func TestRun_recordWarning_defaultNonFatal(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordWarning(errors.New("--old is deprecated"))
@@ -793,7 +793,7 @@ func TestRun_exitInRunStillRunsPostRun(t *testing.T) {
 	}
 }
 
-// Hard Exit in Run: forward stops AND all pending teardown is skipped — no PostRun,
+// Hard Exit in Run: forward stops and all pending teardown is skipped — no PostRun,
 // no CascadingPostRun runs (contrast TestRun_exitInRunStillRunsPostRun).
 func TestRun_hardExitInRunSkipsTeardown(t *testing.T) {
 	code, log := runActs(t, []string{"run"}, map[string]act{
@@ -873,7 +873,7 @@ func TestRun_exitInLeafCascadingPreRunSkipsPostRun(t *testing.T) {
 }
 
 // Exit in a non-leaf CascadingPreRun: the leaf's CascadingPreRun never begins, so
-// its CascadingPostRun must NOT run — only begun commands tear down (paired rule).
+// its CascadingPostRun must not run — only begun commands tear down (paired rule).
 func TestRun_exitInRootCascadingPreRunSkipsUnstartedTeardown(t *testing.T) {
 	_, log := runActs(t, []string{"run"}, map[string]act{
 		"app": {at: "CascadingPreRun", do: func(rtx *Context) { rtx.HaltWithCode(1) }},

@@ -1,6 +1,6 @@
 # Every key the spec accepts, in one valid file. `rotini validate` checks it on every test run.
 $schema: ./.rotini-schema.spec.json
-version: 1.2.0
+version: 1.3.0
 command:
   name: deploy
   summary: ship services to environments
@@ -68,6 +68,8 @@ command:
     - name: help
       summary: print help
       identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
       schema: { type: bool }
     - name: config
       summary: a config file to read instead of discovering one
@@ -113,7 +115,7 @@ command:
         - name: env
           summary: the environment
           identifiers: [-e, --env]
-          schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, complete: { kind: none } }
+          schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, complete: { kind: none, message: "one of dev, staging or prod" } }
         - name: target
           summary: where to ship
           identifiers: [--target]

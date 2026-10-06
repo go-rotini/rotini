@@ -1,20 +1,13 @@
 # R4 — the lifecycle, observed from a real three-deep tree.
 #
-# Hook ORDER is the thing a framework is trusted for and the thing no unit test really checks:
-# a test that calls the hooks itself proves nothing about the order the runtime picks. So this
-# builds a tree that records every event it takes part in and asserts the whole transcript.
+# A tree that records every event it takes part in, so the whole transcript asserts the hook
+# order the runtime picks. It also pins:
 #
-# It also pins the two seams that a real CLI (example-lifecycle) found missing:
+#   1. a cascading hook reading its own flags: Inputs anchors on rtx.Command(), the command
+#      whose hook is running, so a root cascading hook reads the root's flags at any depth;
 #
-#   1. A cascading hook reading its OWN flags. The anchor for an inputs struct used to be
-#      inferred from its field count against the chain, so a root CASCADING hook — which runs
-#      for every invocation and cannot name the leaf's type — got zeros: --verbose came back
-#      false in the one hook whose job is to act on it. Inputs now anchors on rtx.Command(), the
-#      command whose hook is running, so the ordinary call is correct here too.
-#
-#   2. Context.Failed. A teardown that owns a transaction has one decision to make and could
-#      not make it: Context had five Record* methods and no reader, while the Outcome that
-#      answers the question reaches the reporter after every teardown has already finished.
+#   2. Context.Failed, which lets a teardown decide to commit or roll back before the
+#      reporter sees the Outcome.
 
 gomodinit example.com/life
 
@@ -23,15 +16,15 @@ exec go mod tidy
 exec go build -o life$exe ./cmd/life
 
 # ── order ────────────────────────────────────────────────────────────────────
-# Cascading hooks bracket every ancestor; the non-cascading ones belong to the LEAF alone.
-# `work` is an ancestor of `run`, so its PreRun must NOT appear.
+# Cascading hooks bracket every ancestor; the non-cascading ones belong to the leaf alone.
+# `work` is an ancestor of `run`, so its PreRun must not appear.
 exec ./life$exe --verbose job work run
 cmp stdout order.txt
 
 # ── PreRun is the leaf's, and only the leaf's ────────────────────────────────
 ! stdout 'work PreRun'
 
-# ── the root's cascading hook read its OWN flag ──────────────────────────────
+# ── the root's cascading hook read its own flag ──────────────────────────────
 # This is the frame-anchoring assertion. Without it the first line reads "root CascadingPreRun
 # verbose=false" while --verbose sits in argv.
 stdout 'root CascadingPreRun verbose=true'
@@ -55,8 +48,8 @@ stdout 'work CascadingPostRun ROLLBACK'
 stdout 'root CascadingPostRun'
 stderr 'panic'
 
-# ── collecting an ancestor's type from a deeper command is now an ERROR ──────
-# It used to bind zeros. `--misaligned` makes the leaf do it deliberately.
+# ── collecting an ancestor's type from a deeper command is an error ──────────
+# `--misaligned` makes the leaf do it deliberately.
 ! exec ./life$exe job work run --misaligned
 stderr 'does not describe the running command "life job work run"'
 stderr 'its Life field maps to "run"'

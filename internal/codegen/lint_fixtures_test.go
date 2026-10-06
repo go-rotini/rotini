@@ -187,8 +187,9 @@ func lintReport(failure error, warnings []error) string {
 	return b.String()
 }
 
-// lineColRe matches a file:line:col position.
-var lineColRe = regexp.MustCompile(`\.rotini\.(spec|conf)\.yaml:\d+:\d+`)
+// lineColRe matches a file:line:col position. A composed child's problem is placed in its own
+// file (kid.yaml:7:7), so any YAML document counts.
+var lineColRe = regexp.MustCompile(`\.ya?ml:\d+:\d+`)
 
 // TestLintProblemsArePositioned pins that every fixture problem names its file and a
 // line:col. A rule that cannot be positioned must be listed in unpositionable; none is.
@@ -213,7 +214,7 @@ func TestLintProblemsArePositioned(t *testing.T) {
 				if line == "" {
 					continue
 				}
-				if !strings.Contains(line, ".rotini.spec.yaml") && !strings.Contains(line, ".rotini.conf.yaml") {
+				if !strings.Contains(line, ".yaml") {
 					t.Errorf("%s names no file at all:\n%s", rule, line)
 				}
 				positioned := lineColRe.MatchString(line)

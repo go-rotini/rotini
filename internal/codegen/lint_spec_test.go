@@ -16,11 +16,11 @@ import (
 // TestLintRegistryCompleteness pins the number of registered spec and conf rules so a
 // dropped rule is noticed.
 func TestLintRegistryCompleteness(t *testing.T) {
-	if got := len(specLints); got != 43 {
-		t.Errorf("len(specLints) = %d, want 43 (a rule was dropped or added — update intentionally)", got)
+	if got := len(specLints); got != 45 {
+		t.Errorf("len(specLints) = %d, want 45 (a rule was dropped or added — update intentionally)", got)
 	}
-	if got := len(confLints); got != 9 {
-		t.Errorf("len(confLints) = %d, want 9", got)
+	if got := len(confLints); got != 10 {
+		t.Errorf("len(confLints) = %d, want 10", got)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestLintSchemaTypes_accepts(t *testing.T) {
 // TestLintSchemaTypes_rejectsNonTypes pins that values which are not Go types are rejected.
 func TestLintSchemaTypes_rejectsNonTypes(t *testing.T) {
 	for _, typ := range []string{
-		"not-a-type", // parses as an EXPRESSION (two subtractions) but is not a type
+		"not-a-type", // parses as an expression (two subtractions) but is not a type
 		"1",
 		"a+b",
 		"func()x",
@@ -185,7 +185,7 @@ func TestDocsQuoteNoLintRuleCount(t *testing.T) {
 func publishedMarkdown(t *testing.T, root string) []string {
 	t.Helper()
 	var out []string
-	for _, name := range []string{"README.md", "COMPATIBILITY.md", "UPGRADING.md", "CONTRIBUTING.md"} {
+	for _, name := range []string{"README.md", "CONTRIBUTING.md"} {
 		out = append(out, filepath.Join(root, name))
 	}
 	content := filepath.Join(root, "docs", "content")

@@ -21,11 +21,17 @@ const contractFormat = "rotini-contract/1"
 
 // contractDoc is the contract document. Its format is described by schema-contract.json.
 type contractDoc struct {
-	Format      string            `json:"format"`
-	Name        string            `json:"name"`
-	Commands    []contractCommand `json:"commands"`
-	Definitions map[string]any    `json:"definitions,omitempty"`
-	Errors      json.RawMessage   `json:"errors"`
+	Format      string              `json:"format"`
+	Name        string              `json:"name"`
+	Commands    []contractCommand   `json:"commands"`
+	Definitions map[string]any      `json:"definitions,omitempty"`
+	Errors      json.RawMessage     `json:"errors"`
+	Completion  *contractCompletion `json:"completion,omitempty"`
+}
+
+// contractCompletion is what the program's shell completion lets its users switch.
+type contractCompletion struct {
+	MessagesEnv string `json:"messages_env,omitempty"` // set to 0, false or off to hide completion messages
 }
 
 // contractCommand is one visible command, or one plugin a command declares.
@@ -57,14 +63,17 @@ type contractArgument struct {
 }
 
 type contractFlag struct {
-	Name        string   `json:"name"`
-	Identifiers []string `json:"identifiers"`
-	Summary     string   `json:"summary,omitempty"`
-	Required    bool     `json:"required,omitempty"`
-	Cascading   bool     `json:"cascading,omitempty"`
-	Inherited   bool     `json:"inherited,omitempty"`
-	Deprecated  string   `json:"deprecated,omitempty"`
-	Schema      any      `json:"schema"`
+	Name         string   `json:"name"`
+	Identifiers  []string `json:"identifiers"`
+	Summary      string   `json:"summary,omitempty"`
+	Required     bool     `json:"required,omitempty"`
+	Cascading    bool     `json:"cascading,omitempty"`
+	ShortCircuit bool     `json:"short_circuit,omitempty"` // set on the command line, it waives the command's requirements
+	Inherited    bool     `json:"inherited,omitempty"`
+	Env          []string `json:"env,omitempty"`        // fallback variables, in lookup order
+	ConfigKey    string   `json:"config_key,omitempty"` // fallback config key, only when the command reads config files
+	Deprecated   string   `json:"deprecated,omitempty"`
+	Schema       any      `json:"schema"`
 }
 
 type contractEnv struct {
@@ -165,7 +174,7 @@ func (p *program) emitContract() error {
 		if err != nil {
 			return err
 		}
-		return writeGeneratedFile(abs, doc)
+		return p.plan.write(abs, doc)
 	}
 	return nil
 }
@@ -215,7 +224,7 @@ func (p *program) writeOutputSchemas(dir string, nodes []contractNode) error {
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(files)) {
-		if err := writeGeneratedFile(filepath.Join(absDir, name), files[name]); err != nil {
+		if err := p.plan.write(filepath.Join(absDir, name), files[name]); err != nil {
 			return err
 		}
 	}
@@ -227,7 +236,7 @@ func (p *program) writeOutputSchemas(dir string, nodes []contractNode) error {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), outputSchemaSuffix) || files[e.Name()] != nil || p.skipPrune {
 			continue
 		}
-		if err := os.Remove(filepath.Join(absDir, e.Name())); err != nil {
+		if err := p.plan.remove(filepath.Join(absDir, e.Name())); err != nil {
 			return fmt.Errorf("remove a stale output schema: %w", err)
 		}
 		p.pruned = append(p.pruned, filepath.Join(absDir, e.Name()))
@@ -343,6 +352,9 @@ func schemaRefs(v any) []string {
 // contract renders the contract document.
 func (p *program) contract(nodes []contractNode) ([]byte, error) {
 	doc := contractDoc{Format: contractFormat, Name: p.rootName, Errors: errorSchemaBytes}
+	if mode, env := completionMessages(p.conf); mode != "" && env != "" {
+		doc.Completion = &contractCompletion{MessagesEnv: env}
+	}
 	if len(p.schemas) > 0 {
 		doc.Definitions = map[string]any{}
 		for name, s := range p.schemas {
@@ -398,6 +410,7 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 	if in == nil {
 		in = &Inputs{}
 	}
+	readsConfig := p.readsConfig(n.path)
 	for _, a := range in.Arguments {
 		if a.Hidden {
 			continue
@@ -412,8 +425,12 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 		cf := contractFlag{
 			Name: f.Name, Identifiers: flagIdentifiers(f), Summary: f.Summary, Required: req,
 			Cascading: f.Cascading && !inherited, Inherited: inherited, Deprecated: f.Deprecated,
-			Schema: inputJSONSchema(f.Schema),
+			ShortCircuit: f.ShortCircuit,
+			Schema:       inputJSONSchema(f.Schema),
 		}
+		// The same names help shows, from the same functions as the generated env tags.
+		row := withConfigKeys([]templateDocFlagRow{flagRow(f, p.envPrefix)}, readsConfig)[0]
+		cf.Env, cf.ConfigKey = row.Env, row.ConfigKey
 		c.Flags = append(c.Flags, cf)
 		param(f.Name, f.Summary, cf.Schema, req)
 	}

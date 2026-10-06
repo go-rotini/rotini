@@ -51,6 +51,7 @@ func renderDefinition(gp *program) string {
 	if dl := discoveryLiteral(gp.rootName, gp.rootDiscovery); dl != "" {
 		b.WriteString("PluginDiscovery: " + dl + ",\n")
 	}
+	b.WriteString(completionMessagesLiteral(gp.conf))
 	if gp.rootPluginPath != "" {
 		b.WriteString("PluginPath: " + strconv.Quote(gp.rootPluginPath) + ",\n")
 	}
@@ -249,6 +250,9 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if f.Schema != nil && f.Schema.Negatable {
 			b.WriteString(", Negatable: true")
 		}
+		if f.ShortCircuit {
+			b.WriteString(", ShortCircuit: true")
+		}
 		if f.Schema != nil && f.Schema.ImplicitValue != nil {
 			b.WriteString(", ImplicitValue: " + strconv.Quote(defaultString(f.Schema.ImplicitValue)))
 		}
@@ -341,14 +345,20 @@ func withObjectDefault(schema *InputSchema) *InputSchema {
 // completionLiteral renders an input's `complete:` hint as the Completion field of its
 // generated FlagDef/ArgDef literal, or "" when it declares none.
 func completionLiteral(schema *InputSchema) string {
-	if schema == nil || schema.Complete == nil || schema.Complete.Kind == "" {
+	if schema == nil || schema.Complete == nil || (schema.Complete.Kind == "" && schema.Complete.Message == "") {
 		return ""
 	}
-	out := ", Complete: " + rotiniPkgName + ".Completion{Kind: " + strconv.Quote(schema.Complete.Kind)
-	if len(schema.Complete.Extensions) > 0 {
-		out += ", Extensions: " + goStringSlice(schema.Complete.Extensions)
+	var fields []string
+	if schema.Complete.Kind != "" {
+		fields = append(fields, "Kind: "+strconv.Quote(schema.Complete.Kind))
 	}
-	return out + "}"
+	if len(schema.Complete.Extensions) > 0 {
+		fields = append(fields, "Extensions: "+goStringSlice(schema.Complete.Extensions))
+	}
+	if schema.Complete.Message != "" {
+		fields = append(fields, "Message: "+strconv.Quote(schema.Complete.Message))
+	}
+	return ", Complete: " + rotiniPkgName + ".Completion{" + strings.Join(fields, ", ") + "}"
 }
 
 // keyPaths lists the sorted keys shell completion offers before a map flag's '=': dotted

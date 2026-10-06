@@ -1,13 +1,8 @@
-# R6c — a composed child's InputSettings travels with its command tree.
+# R6 — a composed child's InputSettings travels with its command tree.
 #
-# Composition's whole claim is that `parent child cmd` runs what `child cmd` runs. It held for
-# argv and broke, silently, for two channels: a child's `config_files` and its `env_prefix`
-# were read from the PARENT's document when the umbrella's descriptor was built, so a child
-# that declared either got neither once composed. `child show` read .apprc.yaml; `parent child
-# show` — the same handler, the same generated package — did not, with no error anywhere.
-#
-# The umbrella below declares NO env_prefix and NO config_files. Everything it binds through
-# those two channels, it adopted from the child it grafted.
+# `parent child cmd` must run what `child cmd` runs, including the child's `config_files` and
+# `env_prefix`. The umbrella below declares neither; everything it binds through those two
+# channels, it adopted from the child it grafted.
 
 gomodinit example.com/bindmeta
 
@@ -29,8 +24,8 @@ stdout 'region=default-region endpoint=https://example.test'
 exec ./root$exe kid show
 stdout 'region=default-region endpoint=https://example.test'
 
-# 2. The configuration file, found by walking up from the working directory. This is the case
-#    that was broken: the child read it and the umbrella did not.
+# 2. The configuration file, found by walking up from the working directory, through either
+#    binary.
 exec ./child$exe show
 stdout 'region=default-region'
 cp apprc.yaml .apprc.yaml
@@ -40,7 +35,7 @@ exec ./root$exe kid show
 stdout 'region=from-the-file'
 rm .apprc.yaml
 
-# 3. The environment, under the prefix the CHILD declared. `endpoint` is an env input that
+# 3. The environment, under the prefix the child declared. `endpoint` is an env input that
 #    names no variable of its own, so APP_ENDPOINT exists only because env_prefix came across
 #    with the graft.
 env APP_ENDPOINT=from-the-env

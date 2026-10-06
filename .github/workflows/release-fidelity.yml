@@ -1,12 +1,9 @@
-# The release-fidelity gate — "Mode A" in the e2e campaign.
+# The release-fidelity gate: test the module as it was published, not the working tree.
 #
-# Every other job in this repository tests the WORKING TREE: the e2e tier wires each scratch
-# module to it with a `replace`, and the unit tiers import it directly. None of them can see a
-# missing //go:embed asset, a template left out of the module, a broken `tool` directive, or a
-# $schema URL that does not resolve at the tag — because none of them ever installs the
-# PUBLISHED module.
-#
-# Mode B can be green while Mode A is broken, so this runs against what was actually published.
+# Every other job tests the working tree: the e2e tier wires each scratch module to it with a
+# `replace`, and the unit tiers import it directly. None of them can see a missing //go:embed
+# asset, a template left out of the module, a broken `tool` directive, or a $schema URL that
+# does not resolve at the tag, because none of them installs the published module.
 name: Release fidelity
 
 on:
@@ -33,7 +30,7 @@ jobs:
         with:
           go-version: stable
 
-      # Deliberately NOT actions/checkout: this job must not have the source tree available,
+      # Deliberately not actions/checkout: this job must not have the source tree available,
       # or a mistake could resolve against it instead of the module cache.
       - name: Scaffold a scratch module and use the published tool
         shell: bash
@@ -71,8 +68,7 @@ jobs:
           go mod tidy
           go build ./...
 
-          # The seeded CLI must be usable, not merely compilable — the failure that
-          # motivated the e2e tier was a scaffold that built and whose --help exited 1.
+          # The seeded CLI must be usable, not merely compilable: --help has to work.
           go build -o fidelity ./cmd/fidelity
           ./fidelity --help
           ./fidelity version

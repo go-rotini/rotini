@@ -24,6 +24,14 @@
     "errors": {
       "$ref": "#/definitions/JSONSchema",
       "description": "The JSON Schema of one line rotini.StructuredReporter writes to stderr: an error, warning, info or success. A program uses that reporter only when its author opts in."
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the program's shell completion lets its users switch. Present only when the cli declares something here.",
+      "properties": {
+        "messages_env": { "type": "string", "description": "The environment variable that hides completion messages when set to 0, false or off." }
+      }
     }
   },
   "definitions": {
@@ -80,6 +88,9 @@
         "required": { "type": "boolean" },
         "cascading": { "type": "boolean", "description": "true when the command declares it and every command beneath it accepts it too." },
         "inherited": { "type": "boolean", "description": "true when an ancestor declares it as cascading." },
+        "short_circuit": { "type": "boolean", "description": "true when setting it on the command line waives the command's required inputs and other rules, as --help does: an agent can pass it without supplying anything else." },
+        "env": { "type": "array", "items": { "type": "string" }, "description": "The environment variables the flag falls back to when it is not on the command line, in lookup order: the first one set wins." },
+        "config_key": { "type": "string", "description": "The config file key the flag falls back to after its environment variables. Present only when the command reads config files." },
         "deprecated": { "type": "string" },
         "schema": { "$ref": "#/definitions/JSONSchema" }
       }

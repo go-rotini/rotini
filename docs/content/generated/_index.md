@@ -5,8 +5,8 @@ title: "generated"
 # zz_rotini.go
 
 `go generate ./...` turns your spec into one Go file, `internal/cmd/<name>/zz_rotini.go`. It is
-rewritten on every run, so you never edit it, and you rarely need to read it. This page explains
-what is in it and which files around it are yours.
+rewritten on every run, so never edit it. This page explains what is in it and which files around
+it are yours.
 
 ## From spec to code
 
@@ -24,7 +24,7 @@ For a spec with a `todo` root command and an `add` sub-command, the file holds:
 | the command tree | a `rotini.Definition` the runtime parses against |
 | every command | a method on the `ProgramHandlers` interface, which returns the command's handler (`todoAddHandler`) |
 | configuration files and the env prefix | `InputSettings`, which tells the runtime where values come from |
-| the conf's `features:` | `Help(path...)`, and `Completion(shell)`, `Man(path...)` and `Markdown(path...)` when those features are on |
+| the conf's `generate.features:` | `Help(path...)`, and `Completion(shell)`, `Man(path...)` and `Markdown(path...)` when those features are on |
 
 It ends with what `main.go` and your tests use: `NewProgram`, which builds a program from a set
 of handlers; `Handlers()`, which returns the generated set; and `Program`, a ready-built program.
@@ -67,8 +67,8 @@ func Handlers() ProgramHandlers {
 
 A handler reads its own values from `in.TodoAdd` and a parent's flags from `in.Todo`. The types
 generated from `schemas:` are ordinary Go types, so your own code, such as a store that saves
-tasks, can use them too. Because
-`NewProgram` takes a `ProgramHandlers`, the compiler reports a command that has no handler.
+tasks, can use them too. Because `NewProgram` takes a `ProgramHandlers`, the compiler reports a
+command that has no handler.
 
 To put the input and output types in a package of their own, for example so a handler in
 another package can import them, declare a `models` target under the conf's
@@ -78,12 +78,28 @@ another package can import them, declare a `models` target under the conf's
 
 - **The handler files**, one per command, such as `todo_add.go`. Each is created the first time
   its command appears in the spec and is never overwritten. When you remove a command from the
-  spec, the next `go generate` removes its handler file, edits and all, and prints what it
-  removed. To keep the file, delete its `var _ rotini.Handler` line, or list it under the
-  conf's [`keep`](/configuration#keep).
+  spec, the next `go generate` disables its handler file by adding `//go:build ignore` at the
+  top, so it is out of the build but your code is still there, and the one after deletes it,
+  edits and all. Each step is reported. To keep the file, delete its `var _ rotini.Handler`
+  line, or list it under the conf's [`keep`](/configuration#keep).
 - **`main.go`**, created once and never touched again.
 - **Any other file you add to the package**, such as a test or a file declaring a dependency.
   Rotini only removes files it wrote.
+- **An editable template** a feature seeds into its `template_dir` with `template: true`,
+  written once when missing and never touched again.
+
+Renaming a command, or changing its `filename:`, is a removal and an addition: the old handler
+file is disabled and then deleted, and a new, empty one is created. Move your code across
+before the second `go generate`, or recover it from git afterwards.
+
+What rotini rewrites on every run, and never asks you to edit:
+
+- the generated file, and the models file when the conf declares one;
+- each feature's rendered pages under its `embed_dir` (removing pages for commands that are
+  gone);
+- the JSON Schema copies named under `generate.schemas`, which are never removed.
+
+Nothing is written outside the paths your conf names.
 
 ## Names
 

@@ -1,0 +1,89 @@
+# R1 — a config-file value outside its enum carries the facts a "did you mean" needs.
+#
+# The error is an *InputError with the rejected value as Token and the allowed values as
+# Candidates, so the program's own reporter can suggest the nearest one. rotini prints no
+# suggestion itself.
+
+gomodinit example.com/cfg
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+! exec ./app$exe
+stderr 'invalid value "gld" for tier \(one of: gold, silver\)'
+stderr '^did you mean "gold"\?$'
+
+-- app.yaml --
+tier: gld
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  config_files:
+    - name: app
+      path: ./app.yaml
+  config:
+    - name: tier
+      schema: { type: string, enum: [gold, silver] }
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- cmd/app/main.go --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	"context"
+	"fmt"
+
+	cmd "example.com/cfg/internal/cmd/app"
+	"github.com/go-rotini/rotini"
+)
+
+var suggestor = rotini.NewSuggestor()
+
+func report(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+		if hits := suggestor.For(err); len(hits) > 0 {
+			fmt.Fprintf(rtx.Stderr, "did you mean %q?\n", hits[0])
+		}
+	}
+	if out.Failed() {
+		rtx.Exit(1)
+	}
+}
+
+func main() {
+	cmd.Program.WithReporter(report).Execute()
+}
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[AppInputs](); err != nil {
+		rtx.HaltWith(err)
+	}
+}

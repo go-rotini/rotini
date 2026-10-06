@@ -1,11 +1,10 @@
 # R2 — verbatim pages. `help:`, `man:` and `markdown:` on a command are the exact page, bypassing
-# the renderer — the escape hatch for when a generated page is not enough, which makes it the
-# path that has to be right when it is used.
+# the renderer — the escape hatch for when a generated page is not enough.
 #
 # The pages below carry everything a renderer would touch: a tab, trailing spaces, a run of blank
 # lines, quotes, backticks, template braces, and ANSI styling. Help keeps all of it byte for byte;
 # man drops the ANSI (a man page carries no terminal styling — the one documented difference);
-# markdown keeps all of it. A command WITHOUT a verbatim page still gets a generated one: a
+# markdown keeps all of it. A command without a verbatim page still gets a generated one: a
 # page is not inherited down the tree.
 
 gomodinit example.com/vb

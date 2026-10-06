@@ -56,9 +56,38 @@ func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate f
 		if err != nil {
 			return nil, err
 		}
-		return p.validateAndEmit(rs, rc, true)
+		return p.validateAndEmit(rs, rc, true, newPlanner(false))
 	}
 	return p.run(specPath, confPath, watch, pass, onGenerate, onNotices)
+}
+
+// GenerateDryRunFn is the signature of [Processor.GenerateDryRun].
+type GenerateDryRunFn = func(specPath, confPath string, onNotices func(notices []error)) (Planned, error)
+
+// Planned reports a dry run: the timing line, and each change the run would make, one per
+// line ("2. create internal/cmd/app/app_add.go (311 bytes, mode 0644)"). No changes means the
+// files on disk are already what the spec generates.
+type Planned struct {
+	Result  string
+	Changes []string
+}
+
+// GenerateDryRun reconciles, validates and plans the program exactly as [Processor.Generate]
+// does, and writes nothing. onNotices (optional) receives validation and hook-audit warnings;
+// a file the run would prune is a change, not a notice.
+func (p *Processor) GenerateDryRun(specPath, confPath string, onNotices func(notices []error)) (Planned, error) {
+	var planned Planned
+	pl := newPlanner(true)
+	pass := func(specPath, confPath string) (warnings []error, err error) {
+		rs, rc, err := p.reconcile(specPath, confPath)
+		if err != nil {
+			return nil, err
+		}
+		return p.validateAndEmit(rs, rc, true, pl)
+	}
+	err := p.run(specPath, confPath, false, pass, func(result string, _ error) { planned.Result = result }, onNotices)
+	planned.Changes = pl.Changes()
+	return planned, err
 }
 
 // Validate reconciles, validates and lints both documents, once or, with watch, on every
@@ -83,16 +112,31 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode str
 // then validates and generates a ready-to-build program. force replaces an existing seed
 // spec and conf. It never deletes files; stale handlers are pruned by the next generate.
 func (p *Processor) Initialize(name, format string, force bool) (Initialized, error) {
+	return p.initializeWith(name, format, force, newPlanner(false))
+}
+
+// InitializeDryRun plans everything [Processor.Initialize] would write, and writes nothing.
+// The result's Changes lists each file it would create or replace.
+func (p *Processor) InitializeDryRun(name, format string, force bool) (Initialized, error) {
+	return p.initializeWith(name, format, force, newPlanner(true))
+}
+
+// initializeWith runs init through pl and reports what it wrote, or in a dry run would write.
+func (p *Processor) initializeWith(name, format string, force bool, pl *planner) (Initialized, error) {
 	start := time.Now()
-	specPath, confPath, err := p.initialize(name, format, force)
+	specPath, confPath, err := p.initialize(name, format, force, pl)
 	if err != nil {
 		return Initialized{}, err
 	}
-	return Initialized{
+	out := Initialized{
 		Spec:   displayPath(specPath),
 		Conf:   displayPath(confPath),
-		Result: fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start))),
-	}, nil
+		Result: reportTiming(start),
+	}
+	if pl.dry {
+		out.Changes = pl.Changes()
+	}
+	return out, nil
 }
 
 // reconcile reads and decodes the required spec and the optional conf, resolving the conf
@@ -242,13 +286,13 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 // validateAndEmit validates both documents and, only if they pass, applies conf defaults and
 // emits the program. prune controls whether orphaned stubs are removed (init passes false).
 // It returns notices: validation warnings, pruned files, and hook-audit warnings.
-func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prune bool) ([]error, error) {
+func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prune bool, pl *planner) ([]error, error) {
 	warnings, err := p.validateDocuments(rs, rc, "")
 	if err != nil {
 		return warnings, err
 	}
 	applyConfDefaults(rc.conf, rs.spec.Command.Name)
-	prog, err := resolveProgram(rs.spec, rc.conf, rs.path)
+	prog, err := resolveProgram(rs.spec, rc.conf, rs.path, pl)
 	if err != nil {
 		return warnings, err
 	}
@@ -256,8 +300,13 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prun
 	err = prog.generate()
 	notices := make([]error, 0, len(warnings)+len(prog.pruned)+len(prog.auditWarnings))
 	notices = append(notices, warnings...)
-	for _, name := range prog.pruned {
-		notices = append(notices, fmt.Errorf("pruned %s; its command is no longer in the spec", name))
+	if !pl.dry { // a dry run lists the removal as a change instead
+		for _, name := range prog.pruned {
+			notices = append(notices, fmt.Errorf("pruned %s; its command is no longer in the spec", name))
+		}
+	}
+	for _, name := range prog.restored {
+		notices = append(notices, fmt.Errorf("restored %s; its command is back in the spec", name))
 	}
 	notices = append(notices, prog.auditWarnings...)
 	return notices, err
@@ -291,7 +340,18 @@ func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPat
 		if onWarnings != nil && len(warnings) > 0 {
 			onWarnings(warnings)
 		}
-		return fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start))), err
+		return reportTiming(start), err
 	}
 	return runOrWatch(resolvedSpec, resolvedConf, watch, timed, onResult)
+}
+
+// DryRunEnv returns the environment variable the conf beside specPath (or at confPath) names
+// in generate.dry_run_env, or "" when it names none. A conf that can't be read names none;
+// generate then reports the problem itself.
+func DryRunEnv(specPath, confPath string) string {
+	rc, err := reconcileConf(specPath, confPath)
+	if err != nil || rc.conf.Generate == nil {
+		return ""
+	}
+	return rc.conf.Generate.DryRunEnv
 }

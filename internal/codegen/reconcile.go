@@ -36,6 +36,11 @@ func reconcileDoc[T any](resolved string) (doc *T, instance []byte, locate sourc
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	return reconcileData[T](resolved, format, data)
+}
+
+// reconcileData is reconcileDoc for a document already in memory, read from resolved.
+func reconcileData[T any](resolved string, format fileFormat, data []byte) (doc *T, instance []byte, locate sourceLocator, err error) {
 	doc, err = decodeData[T](format, data, resolved)
 	if err != nil {
 		return nil, nil, nil, err

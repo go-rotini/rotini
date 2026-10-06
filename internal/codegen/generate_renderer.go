@@ -305,6 +305,12 @@ type templateHandlerData struct {
 	VersionOnly       bool   // a command named `version` whose whole job is to print it
 	PrintHelpWhenBare bool   // a dispatcher root: sub-commands, no own arguments, help feature on
 	NeedsInputs       bool   // the body calls Inputs (for its result or its validation)
+
+	// The root's CascadingPreRun, which answers the root's short-circuit --help and --version
+	// for every command in the tree (spec short_circuit). Set on the root stub only.
+	RootHook        bool   // emit the hook (and drop the NoCascadingPreRun embed)
+	RootHelpFlag    string // Go field of the root's short-circuit `help` flag; "" when none or the help feature is off
+	RootVersionFlag string // Go field of the root's short-circuit `version` flag; "" when none
 }
 
 func renderHandlerStubFile(data templateHandlerData) ([]byte, error) {
@@ -496,7 +502,11 @@ type templateDocFlagRow struct {
 	Implicit    string // the value a bare flag takes (implicit_value); its identifier reads --x[=<type>]
 	Enum        []string
 	Deprecated  string
-	Group       string // the flag's `group` (buckets it in the Flags section)
+	Group       string   // the flag's `group` (buckets it in the Flags section)
+	Env         []string // the env fallback variables, in lookup order (first preferred); nil for an argv-only flag
+	ConfigKey   string   // the config fallback key; "" for an argv-only flag, or when the page's command reads no config files
+
+	key string // the config fallback key whether or not the page reads config files
 }
 
 // templateDocFlagGroup is one bucket of flags in the Flags section. Title is the `group` value;
@@ -776,6 +786,7 @@ func templateFuncMap() template.FuncMap {
 			}
 			return elems[len(elems)-1]
 		},
+		"alsoSetBy": alsoSetBy,
 		// roff escaping, for man page templates (see generate_roff.go).
 		"roff":      roffInline,
 		"roffLines": roffLines,
@@ -835,4 +846,25 @@ func templateFailure(name string, err error) string {
 		return fmt.Sprintf("%s; the fields available to this template are listed in the comment at the top of %s", msg, name)
 	}
 	return msg
+}
+
+// alsoSetBy phrases where else a flag's value can come from, for the line under it in help,
+// man and markdown: "also set by APP_PORT or config key server.port". Each name is wrapped in
+// before and after (bold in roff, code in markdown, nothing in help). Several variable names
+// read as a list, "A, B or C". It returns "" for a flag with neither.
+func alsoSetBy(env []string, configKey, before, after string) string {
+	var names []string
+	for _, e := range env {
+		names = append(names, before+e+after)
+	}
+	if configKey != "" {
+		names = append(names, "config key "+before+configKey+after)
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return "also set by " + names[0]
+	}
+	return "also set by " + strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }

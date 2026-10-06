@@ -121,9 +121,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # The completion rigs source each generated script in the shell it targets, but skip
-      # when that shell is absent — so without this the coverage would be silently
-      # conditional, which is the same as not having it. bash and zsh ship with the runner.
+      # The completion rigs skip a shell that is not installed, so install them all here.
+      # bash and zsh ship with the runner.
       - name: Install the shells the completion rigs drive
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -134,7 +133,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: brew install fish powershell/tap/powershell || brew install fish
 
-      # The outside-in tier: spec -> generate -> build -> RUN the binary, as a user does.
+      # The outside-in tier: spec -> generate -> build -> run the binary, as a user does.
       - name: End-to-end
         run: make test-e2e
 

@@ -1,8 +1,6 @@
 # R3 — the outcome reporter, from outside: which stream, and which exit code.
 #
-# The campaign is right that these are the two rules most likely to be subtly wrong, and they
-# are the two an in-process test can fake. Only a real process shows a real exit code through
-# os.Exit and the default trap.
+# Only a real process shows a real exit code through os.Exit and the default trap.
 
 gomodinit example.com/out
 
@@ -16,7 +14,7 @@ exec ./out$exe quiet
 ! stdout .
 ! stderr .
 
-# Infos and successes go to STDOUT; warnings and errors go to STDERR. A reporter that
+# Infos and successes go to stdout; warnings and errors go to stderr. A reporter that
 # transposed the two would still "work", which is why this is asserted by stream.
 exec ./out$exe note
 stdout 'an informational note'
@@ -35,7 +33,7 @@ wantexit 1 ./out$exe fail
 stderr 'Error: the work did not work'
 ! stdout .
 
-# A handler's deliberate code is never DOWNGRADED by the floor: 3 stays 3.
+# A handler's deliberate code is never lowered by the floor: 3 stays 3.
 wantexit 3 ./out$exe code
 ! exec ./out$exe code
 stderr 'Error: a specific failure'

@@ -1,0 +1,5 @@
+spec: .rotini.spec.yaml:17:11: command demo/run: exit_status lists code 3 twice; give each code one entry
+spec: kid.yaml:7:7: command kid: exit_status lists code 5 twice; give each code one entry
+warning: spec: .rotini.spec.yaml:19:11: command demo/run: exit_status code 130 is also the exit code for signal 2 (Ctrl-C, SIGINT); readers can't tell them apart
+warning: spec: .rotini.spec.yaml:20:11: command demo/run: exit_status code 143 is also the exit code for signal 15 (SIGTERM); readers can't tell them apart
+warning: spec: .rotini.spec.yaml:21:11: command demo/run: exit_status code 200 is also the exit code for signal 72; readers can't tell them apart

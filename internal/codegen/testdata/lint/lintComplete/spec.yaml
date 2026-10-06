@@ -22,6 +22,30 @@ command:
           kind: directory
           extensions:
             - yaml
+    # A message is one line; a shell shows it as a single line.
+    - name: service
+      identifiers:
+        - --service
+      schema:
+        type: string
+        complete:
+          message: "a service name\nfrom deploy.yaml"
+    # Correct: a message alone, no kind. No problem.
+    - name: target
+      identifiers:
+        - --target
+      schema:
+        type: string
+        complete:
+          message: a deploy target
+    # A message on a bool flag has nothing to complete either.
+    - name: dry
+      identifiers:
+        - --dry
+      schema:
+        type: bool
+        complete:
+          message: no value here
   env:
     # No shell is doing the typing here.
     - name: region

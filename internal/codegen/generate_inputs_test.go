@@ -209,12 +209,12 @@ func TestVariables(t *testing.T) {
 // in help with its implicit value, and default_text replaces only the shown default.
 func TestFlagRow_implicitValueAndDefaultText(t *testing.T) {
 	row := flagRow(FlagInput{Name: "color", Identifiers: []string{"-c", "--color"},
-		Schema: &InputSchema{BaseSchema: BaseSchema{Type: "string"}, Default: "auto", ImplicitValue: "always"}})
+		Schema: &InputSchema{BaseSchema: BaseSchema{Type: "string"}, Default: "auto", ImplicitValue: "always"}}, "")
 	if !slices.Equal(row.Identifiers, []string{"-c", "--color[=string]"}) || row.Type != "" || row.Implicit != "always" || row.Default != "auto" {
 		t.Errorf("row = %+v", row)
 	}
 	row = flagRow(FlagInput{Name: "workers", Identifiers: []string{"--workers"},
-		Schema: &InputSchema{BaseSchema: BaseSchema{Type: "int"}, Default: 4, DefaultText: "the number of CPUs"}})
+		Schema: &InputSchema{BaseSchema: BaseSchema{Type: "int"}, Default: 4, DefaultText: "the number of CPUs"}}, "")
 	if row.Default != "the number of CPUs" || row.Implicit != "" {
 		t.Errorf("row = %+v", row)
 	}

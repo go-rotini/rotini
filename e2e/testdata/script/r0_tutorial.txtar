@@ -2,14 +2,12 @@
 #
 # docs/content/docs/_index.md walks a reader from an empty directory to a working CLI with a
 # handler they wrote. Every command on that page is run here, in the documented order, with
-# the documented results asserted — so the guide cannot quietly stop being true, which is the
-# usual fate of a tutorial.
+# the documented results asserted, so the guide cannot quietly drift.
 #
 # The only departure is the install: the page says
 # `go get -tool github.com/go-rotini/rotini/cmd/rotini@latest`, and this module is wired to the
-# working tree instead. Installing the PUBLISHED module is Mode A,
-# and it has its own gate (.github/workflows/release-fidelity.yml) because it needs a release
-# to install.
+# working tree instead. Installing the published module has its own gate
+# (.github/workflows/release-fidelity.yml) because it needs a release to install.
 
 # ── Install: Go module setup ─────────────────────────────────────────────────
 gomodinit github.com/me/todo
@@ -74,6 +72,14 @@ stderr 'missing required input: <title>'
 ! exec ./todo$exe add 'buy milk' --loud
 stderr 'unknown flag "--loud"'
 
+# --help needs no code in the page's handler: the root handler `init` wrote answers it for
+# every command, even with the required title missing.
+exec ./todo$exe add --help
+stdout 'add a task'
+! stderr .
+exec ./todo$exe add --version
+stdout '0\.0\.0'
+
 -- spec-with-add.yaml --
 version: 0.0.0
 command:
@@ -87,6 +93,8 @@ command:
       identifiers:
         - -h
         - --help
+      cascading: true
+      short_circuit: true
       schema:
         type: bool
     - name: version
@@ -94,6 +102,7 @@ command:
       identifiers:
         - -v
         - --version
+      short_circuit: true
       schema:
         type: bool
   commands:
@@ -121,25 +130,9 @@ command:
           summary: the command path to print help for
           schema:
             type: '[]string'
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
     - name: version
       summary: print version
       description: Print the todo version.
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
 -- handler.go.txt --
 package todo
 
@@ -160,13 +153,6 @@ type todoAddHandler struct {
 }
 
 func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	// Answer --help before reading inputs, so help works even with a required argument missing.
-	if argv, err := rtx.ArgvInputs[TodoAddInputs](); err == nil && argv.Values.Todo.Flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
-
 	// One call reads every declared source (command line, environment, config files, stdin
 	// and defaults) in precedence order, and validates the result.
 	inputs, err := rtx.Inputs[TodoAddInputs]()

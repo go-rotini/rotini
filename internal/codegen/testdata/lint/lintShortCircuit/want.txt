@@ -1,0 +1,7 @@
+spec: .rotini.spec.yaml:13:7: command demo: flag "schema": sets `short_circuit` but its type is string; a short-circuit flag is a bool switch
+spec: .rotini.spec.yaml:18:7: command demo: flag "required": sets `short_circuit` and `required`; a short-circuit flag replaces the run, so it can't also be required
+spec: .rotini.spec.yaml:23:7: command demo: flag "always": sets `short_circuit` with a default of true, which would short-circuit every run
+spec: .rotini.spec.yaml:28:7: command demo: flag "version": sets `short_circuit` and reads an environment variable or config key (`key` / `variable`); only the command line sets a short-circuit flag, or every run with that value set would be short-circuited
+spec: .rotini.spec.yaml:33:7: command demo: flag "plan": sets `short_circuit` and `negatable`; a negated short-circuit flag has no meaning
+spec: .rotini.spec.yaml:38:7: command demo: flag "dump": sets `short_circuit` but is listed in `flag_groups`; a short-circuit flag waives flag groups, so the group could never apply to it
+spec: .rotini.spec.yaml:38:7: command demo: flag "dump": sets `short_circuit` but is listed in `flag_dependencies`; a short-circuit flag waives flag dependencies, so the rule could never apply to it

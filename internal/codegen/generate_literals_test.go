@@ -150,6 +150,17 @@ func TestLayoutFor(t *testing.T) {
 
 // TestDefsLiteral_deprecatedMessages pins that `deprecated:` messages reach the flag, argument,
 // and command literals.
+func TestFlagDefsLiteral_shortCircuit(t *testing.T) {
+	in := &Inputs{Flags: []FlagInput{
+		{Name: "help", Identifiers: []string{"--help"}, ShortCircuit: true, Schema: &InputSchema{Type: "bool"}},
+		{Name: "verbose", Identifiers: []string{"--verbose"}, Schema: &InputSchema{Type: "bool"}},
+	}}
+	lit := flagDefsLiteral(in, nil)
+	if n := strings.Count(lit, "ShortCircuit: true"); n != 1 {
+		t.Errorf("literal has %d ShortCircuit: true, want exactly 1 (only --help):\n%s", n, lit)
+	}
+}
+
 func TestDefsLiteral_deprecatedMessages(t *testing.T) {
 	in := &Inputs{
 		Flags:     []FlagInput{{Name: "conf", Identifiers: []string{"--conf"}, Deprecated: "use --config"}},

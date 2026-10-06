@@ -17,6 +17,7 @@ command:
       identifiers:
         - -v
         - --version
+      short_circuit: true
       schema:
         type: bool
     - name: help
@@ -24,6 +25,8 @@ command:
       identifiers:
         - -h
         - --help
+      cascading: true
+      short_circuit: true
       schema:
         type: bool
   commands:
@@ -36,6 +39,7 @@ command:
         - rotini initialize mycli
         - rotini init mycli --format json
         - rotini init mycli --force
+        - rotini init mycli --dry-run
       footer: Use "rotini help <command>" for more information about a command.
       arguments:
         - name: name
@@ -63,11 +67,11 @@ command:
             - --force
           schema:
             type: bool
-        - name: help
-          summary: print help
+        - name: dry-run
+          summary: show what init would write, and change nothing
           identifiers:
-            - -h
-            - --help
+            - -n
+            - --dry-run
           schema:
             type: bool
     - name: generate
@@ -78,6 +82,7 @@ command:
       examples:
         - rotini generate
         - rotini generate ./path/to/.rotini.spec.json --watch
+        - rotini generate --dry-run
       footer: Use "rotini help <command>" for more information about a command.
       arguments:
         - name: spec_file_path
@@ -99,13 +104,14 @@ command:
             - --watch
           schema:
             type: bool
-        - name: help
-          summary: print help
+        - name: dry-run
+          summary: show what would be written, created or removed, and change nothing; exits 2 when something would change
           identifiers:
-            - -h
-            - --help
+            - -n
+            - --dry-run
           schema:
             type: bool
+            negatable: true
     - name: validate
       aliases:
         - val
@@ -144,13 +150,6 @@ command:
             - --watch
           schema:
             type: bool
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
     - name: help
       summary: print help
       description: Print help for a specific command.
@@ -164,28 +163,12 @@ command:
           summary: name of the command to print help for
           schema:
             type: array
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
     - name: version
       summary: print version
       description: Print the rotini cli version.
       examples:
         - rotini version
       footer: Use "rotini help <command>" for more information about a command.
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
     - name: completion
       summary: print a shell completion script
       description: |-
@@ -214,14 +197,6 @@ command:
               - zsh
               - fish
               - powershell
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
     - name: man
       summary: print or install the man pages
       description: |-
@@ -246,10 +221,3 @@ command:
             - --dir
           schema:
             type: string
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool

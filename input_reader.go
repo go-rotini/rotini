@@ -87,7 +87,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	}
 	rv := reflect.ValueOf(out)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: Bind out argument must be a non-nil pointer to an inputs struct"}
+		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: Read out argument must be a non-nil pointer to an inputs struct"}
 	}
 
 	// 1. argv → Flags + Arguments, without validation: step 3 checks the reconciled store.
@@ -97,13 +97,17 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	}
 	v := rv.Elem()
 
+	// A short-circuit flag set on argv waives every declared requirement below; reading each
+	// channel still happens, so input that cannot be read is still an error.
+	waived := shortCircuited(chain, store)
+
 	// 1b. Two-phase bootstrap: a config_source flag or env names the file step 4 reads.
 	overrides := b.pathOverrides(chain, store)
 
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
 	anchor := frameAnchor(v, chain, rtx.frameIndex())
-	if err := b.reconcileFlags(v, chain, rtx.Argv, store, overrides, anchor); err != nil {
+	if err := b.reconcileFlags(v, chain, rtx.Argv, store, overrides, anchor, waived); err != nil {
 		return err
 	}
 
@@ -133,30 +137,37 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		return err
 	}
 
-	cfgRegs, err := b.configRegs(chain, overrides, v)
+	cfgRegs, err := b.configRegs(chain, overrides, v, waived)
 	if err != nil {
 		return err
 	}
 	defer cfgRegs.Close()
 
-	if err := fillChannels(v, envReg, cfgRegs); err != nil {
+	if err := fillChannels(v, envReg, cfgRegs, waived); err != nil {
 		return err
 	}
 
 	// 4b. The same constraint checks argv gets, over the values actually provided.
-	if err := validateChannels(v, envReg, cfgRegs); err != nil {
-		return err
+	if !waived {
+		if err := validateChannels(v, envReg, cfgRegs); err != nil {
+			return err
+		}
 	}
 
 	// 5. stdin → the leaf command's typed payload, its only consumer.
-	return b.fillStdin(rtx, v)
+	return b.fillStdin(rtx, v, waived)
 }
 
 // validateStore runs the argv channel's declarative checks over a reconciled store — required,
 // enum and constraints, then flag groups, then flag dependencies — returning the first failure.
+// A short-circuited run ([shortCircuited]) skips every requirement and keeps only what reading
+// the command line needs.
 func validateStore(chain []Command, store *parsedInputs) error {
 	if err := validate(chain, store); err != nil {
 		return err
+	}
+	if shortCircuited(chain, store) {
+		return nil
 	}
 	if err := validateFlagGroups(chain, store); err != nil {
 		return err
@@ -167,8 +178,9 @@ func validateStore(chain []Command, store *parsedInputs) error {
 // fillStdin decodes piped stdin into the leaf command's Stdin payload field, per its
 // `stdin:"<format>[,required]"` tag, validating a decoded document against the command's stdin
 // schema before binding. With nothing piped the field stays nil, or a required payload is a
-// usage error.
-func (b *InputReader) fillStdin(rtx *Context, v reflect.Value) error {
+// usage error. A short-circuited run (waived) still decodes what was piped but skips the
+// required and schema checks.
+func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool) error {
 	if v.Kind() != reflect.Struct || v.NumField() == 0 {
 		return nil
 	}
@@ -192,7 +204,7 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value) error {
 		return internalBind(channelStdin, "", "could not read stdin", err)
 	}
 	if len(data) == 0 {
-		if required {
+		if required && !waived {
 			noun := "document"
 			if isRawStdinFormat(format) {
 				noun = "payload"
@@ -216,7 +228,7 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value) error {
 		return usageBind(channelStdin, "", fmt.Sprintf("could not decode stdin as %s", format), err)
 	}
 
-	if js := b.stdinSchemas[sf.Type().Elem().Name()]; js != "" {
+	if js := b.stdinSchemas[sf.Type().Elem().Name()]; js != "" && !waived {
 		validator, err := recon.NewJSONSchemaValidator([]byte(js))
 		if err != nil {
 			return internalBind(channelStdin, "", "invalid stdin schema", err)
@@ -234,7 +246,7 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value) error {
 	defer reg.Close()
 
 	ptr := reflect.New(sf.Type().Elem()) // *<Prefix>Stdin
-	if err := reg.Bind(ptr.Interface()); err != nil {
+	if err := bindReconWaived(reg, ptr.Interface(), waived); err != nil {
 		return reconBind(channelStdin, err)
 	}
 	sf.Set(ptr)
@@ -314,11 +326,11 @@ func readStdin(r io.Reader) ([]byte, error) {
 // config files. A flag present in no source keeps what the Parser bound, and argv-only flags
 // are untouched. Each reconciled value is written back into store so the deferred validate
 // pass sees it as present.
-func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, argv []string, store *parsedInputs, overrides map[string]string, anchor int) error {
+func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, argv []string, store *parsedInputs, overrides map[string]string, anchor int, waived bool) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
-	files, err := b.fileSources(b.chainConfigFiles(chain), overrides)
+	files, err := b.fileSources(b.chainConfigFiles(chain), overrides, waived)
 	if err != nil {
 		return err
 	}
@@ -393,11 +405,12 @@ func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructFi
 	if store != nil && idx < len(store.argvSet) && store.argvSet[idx][name] {
 		return nil
 	}
-	vals, err := bindFlagFallback(reg, field, sf.Tag, key, def, chain, idx)
+	vals, origin, err := bindFlagFallback(reg, field, sf.Tag, key, def, chain, idx)
 	if err != nil || vals == nil {
 		return err
 	}
 	recordFlag(store, idx, name, vals)
+	recordOrigin(store, idx, name, origin)
 	return nil
 }
 
@@ -406,25 +419,24 @@ func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructFi
 // overlay's env and files layers share it: a list binds item by item, a map from its leaves, a
 // string splits on the flag's separator, a case-insensitive enum binds its declared spelling,
 // and a value the type cannot hold is an error naming where it came from.
-func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.StructTag, key string, def FlagDef, chain []Command, idx int) ([]string, error) {
+func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.StructTag, key string, def FlagDef, chain []Command, idx int) (vals []string, origin string, err error) {
 	name := tag.Get("rotini")
 	val, found, err := reg.Get(key)
 	if err != nil {
-		return nil, reconBind(channelFlag, err)
+		return nil, "", reconBind(channelFlag, err)
 	}
-	var vals []string
 	source := val.Source()
 	switch {
 	case found:
 		if vals, err = fallbackValues(val, def.Separator); err != nil {
-			return nil, fallbackCoerceError(chain, idx, name, fallbackOrigin(source, tag.Get("env")), err)
+			return nil, "", fallbackCoerceError(chain, idx, name, fallbackOrigin(source, tag.Get("env")), err)
 		}
 	case field.Kind() == reflect.Map || (isObjectFlag(def) && field.Kind() != reflect.Slice):
 		// recon keeps a config map — or an object flag's config block — as its leaves
 		// (labels.k, labels.x), not at the map's key. For an object each leaf is one
 		// key=value occurrence, and the occurrences merge.
 		if vals, source, err = mapLeaves(reg, key); err != nil {
-			return nil, reconBind(channelFlag, err)
+			return nil, "", reconBind(channelFlag, err)
 		}
 		if isObjectFlag(def) {
 			for i, leaf := range vals {
@@ -433,22 +445,23 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 			}
 		}
 		if len(vals) == 0 {
-			return nil, nil
+			return nil, "", nil
 		}
 	default:
-		return nil, nil
+		return nil, "", nil
 	}
+	origin = fallbackOrigin(source, tag.Get("env"))
 	if def.IgnoreCase {
 		vals = canonicalEnum(def.Enum, vals)
 	}
 	// A fallback value the flag's type cannot hold is a user error, as a bad argv value is.
 	if err := coerceFlagValues(field, def, vals); err != nil {
-		return nil, fallbackCoerceError(chain, idx, name, fallbackOrigin(source, tag.Get("env")), err)
+		return nil, "", fallbackCoerceError(chain, idx, name, origin, err)
 	}
 	if vals == nil {
 		vals = []string{} // supplied, and empty: still present
 	}
-	return vals, nil
+	return vals, origin, nil
 }
 
 // mapLeaves collects the registry's leaf keys under key as sorted key=value entries relative
@@ -579,11 +592,24 @@ func fallbackCoerceError(chain []Command, idx int, name, source string, err erro
 	if mistake, ok := errors.AsType[authorMistake](err); ok {
 		return internalBind(channelFlag, name, fmt.Sprintf("%s: %s", label, mistake), err)
 	}
-	msg := fmt.Sprintf("%s: %s", label, coerceMessage(err, secret))
-	if source != "" {
-		msg += " (from " + source + ")"
-	}
+	msg := fmt.Sprintf("%s: %s", label, coerceMessage(err, secret)) + fromSource(source)
 	return usageBind(channelFlag, name, msg, err)
+}
+
+// recordOrigin notes where a reconciled fallback value came from (see scopeInputs.origin), so a
+// later error about the value names it. An empty origin clears any earlier note.
+func recordOrigin(store *parsedInputs, idx int, name, origin string) {
+	if store == nil || idx < 0 || idx >= len(store.scopes) {
+		return
+	}
+	if origin == "" {
+		delete(store.scopes[idx].origin, name)
+		return
+	}
+	if store.scopes[idx].origin == nil {
+		store.scopes[idx].origin = map[string]string{}
+	}
+	store.scopes[idx].origin[name] = origin
 }
 
 // recordFlag writes a reconciled flag value into the parsed store at its chain frame, so
@@ -749,8 +775,8 @@ func hasConfigChannel(v reflect.Value) bool {
 
 // configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. overrides carries any config_source-supplied paths.
-func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys) (*recon.Registry, error) {
-	srcs, err := b.fileSources(files, overrides)
+func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys, waived bool) (*recon.Registry, error) {
+	srcs, err := b.fileSources(files, overrides, waived)
 	if err != nil {
 		return nil, err
 	}
@@ -773,18 +799,20 @@ type cfgRegs struct {
 	keys      valueKeys // how config fields' text is read; see spellings
 	merged    *recon.Registry
 	perFile   map[string]*recon.Registry
+	waived    bool // a short-circuited run: files are read but not schema-checked
 }
 
 // configRegs builds the merged config registry and the lazy per-file cache over the sources in
-// scope for chain.
-func (b *InputReader) configRegs(chain []Command, overrides map[string]string, v reflect.Value) (*cfgRegs, error) {
+// scope for chain. waived marks a short-circuited run ([shortCircuited]): each file is still
+// read, so one that cannot be parsed is an error, but it is not checked against its schema.
+func (b *InputReader) configRegs(chain []Command, overrides map[string]string, v reflect.Value, waived bool) (*cfgRegs, error) {
 	files := b.chainConfigFiles(chain)
 	keys := channelValueKeys(v, "Config")
-	merged, err := b.configRegistry(files, overrides, keys)
+	merged, err := b.configRegistry(files, overrides, keys, waived)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{reader: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}}, nil
+	return &cfgRegs{reader: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
@@ -826,7 +854,7 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		if f.Name != name {
 			continue
 		}
-		src, err := c.reader.fileSource(f, c.overrides)
+		src, err := c.reader.readFileSource(f, c.overrides, c.waived)
 		if err != nil {
 			return nil, err
 		}
@@ -846,6 +874,42 @@ func (c *cfgRegs) Close() {
 	for _, r := range c.perFile {
 		r.Close()
 	}
+}
+
+// bindReconWaived binds target from reg. In a short-circuited run (waived) it drops recon's
+// requirement errors (a missing required key, an empty notEmpty key, a schema rule) and keeps
+// those about reading a value, such as one of the wrong type. recon collects every field's
+// error, so the fields that did resolve are still bound.
+func bindReconWaived(reg *recon.Registry, target any, waived bool) error {
+	err := reg.Bind(target)
+	if err == nil || !waived {
+		return err
+	}
+	if me, ok := err.(*recon.MultiError); ok { //nolint:errorlint // only recon's top-level aggregate is split
+		var kept []error
+		for _, e := range me.Errors {
+			if !isRequirementError(e) {
+				kept = append(kept, e)
+			}
+		}
+		if len(kept) == 0 {
+			return nil
+		}
+		return &recon.MultiError{Errors: kept}
+	}
+	if isRequirementError(err) {
+		return nil
+	}
+	return err
+}
+
+// isRequirementError reports whether a recon error is about a requirement rather than reading
+// a value: a missing required key, an empty notEmpty key, or a schema rule.
+func isRequirementError(err error) bool {
+	var mre *recon.MissingRequiredError
+	var eve *recon.EmptyValueError
+	var ve *recon.ValidationError
+	return errors.As(err, &mre) || errors.As(err, &eve) || errors.As(err, &ve)
 }
 
 // bindPinnedConfig re-binds each pinned field of one Config struct against only its own
@@ -870,7 +934,7 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 			fields = append(fields, reflect.StructField{Name: f.Name, Type: f.Type, Tag: f.Tag})
 		}
 		tmp := reflect.New(reflect.StructOf(fields))
-		if err := reg.Bind(tmp.Interface()); err != nil {
+		if err := bindReconWaived(reg, tmp.Interface(), regs.waived); err != nil {
 			return reconBind(channelConfig, err)
 		}
 		for i, j := range idxs {
@@ -885,10 +949,10 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 // resolves its search directories now, the first directory containing the file winning. A path
 // supplied through config_source is not optional, so a missing one is an error. Custom
 // InputSettings.Sources follow the declared files and so rank below them.
-func (b *InputReader) fileSources(files []ConfigFile, overrides map[string]string) ([]recon.Source, error) {
+func (b *InputReader) fileSources(files []ConfigFile, overrides map[string]string, waived bool) ([]recon.Source, error) {
 	srcs := make([]recon.Source, 0, len(files)+len(b.sources))
 	for _, f := range files {
-		src, err := b.fileSource(f, overrides)
+		src, err := b.readFileSource(f, overrides, waived)
 		if err != nil {
 			return nil, err
 		}
@@ -908,8 +972,14 @@ type namedSource struct {
 
 func (s namedSource) Name() string { return s.name }
 
-// fileSource builds the recon source for one config_files entry.
+// fileSource builds the recon source for one config_files entry, schema-checked.
 func (b *InputReader) fileSource(f ConfigFile, overrides map[string]string) (recon.Source, error) {
+	return b.readFileSource(f, overrides, false)
+}
+
+// readFileSource is [InputReader.fileSource] with the short-circuit waiver: a waived run still
+// reads and parses the file but skips its schema check.
+func (b *InputReader) readFileSource(f ConfigFile, overrides map[string]string, waived bool) (recon.Source, error) {
 	opts := []recon.FileOption{recon.WithPathExpansion(true)}
 	if f.Format != "" {
 		opts = append(opts, recon.WithFileFormat(f.Format))
@@ -934,8 +1004,10 @@ func (b *InputReader) fileSource(f ConfigFile, overrides map[string]string) (rec
 		// The file's content or path is the user's to fix.
 		return nil, usageBind(channelConfig, f.Name, fmt.Sprintf("could not open configuration file %q (%s)", f.Name, path), err)
 	}
-	if err := validateConfigFile(f, src); err != nil {
-		return nil, err
+	if !waived {
+		if err := validateConfigFile(f, src); err != nil {
+			return nil, err
+		}
 	}
 	return namedSource{Source: src, name: f.Name}, nil
 }
@@ -1273,8 +1345,9 @@ func envExplicit(v reflect.Value) map[string]string {
 }
 
 // fillChannels walks a <Cmd>Inputs struct and recon-binds each command's Env struct from
-// envReg and its Config struct from cfgReg.
-func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs) error {
+// envReg and its Config struct from cfgReg. A short-circuited run (waived) binds what resolves
+// and ignores missing required values.
+func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived bool) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1286,14 +1359,14 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs) error {
 		for j := range ci.NumField() {
 			switch t.Field(j).Name {
 			case "Env":
-				if err := envReg.Bind(ci.Field(j).Addr().Interface()); err != nil {
+				if err := bindReconWaived(envReg, ci.Field(j).Addr().Interface(), waived); err != nil {
 					return reconBind(channelEnv, err)
 				}
 				if _, err := fillEnvNested(ci.Field(j)); err != nil {
 					return err
 				}
 			case "Config":
-				if err := cfg.merged.Bind(ci.Field(j).Addr().Interface()); err != nil {
+				if err := bindReconWaived(cfg.merged, ci.Field(j).Addr().Interface(), waived); err != nil {
 					return reconBind(channelConfig, err)
 				}
 				if err := bindPinnedConfig(ci.Field(j), cfg); err != nil {
@@ -1415,8 +1488,10 @@ func checkChannelEnum(channel, label string, enum []string, ignoreCase bool, val
 	}
 	for _, v := range vals {
 		if !enumHas(enum, v, ignoreCase) {
-			return usageBind(channel, label, fmt.Sprintf("invalid value %q for %s (one of: %s)",
+			e := usageBind(channel, label, fmt.Sprintf("invalid value %q for %s (one of: %s)",
 				redactValue(v, secret), label, strings.Join(enum, ", ")), nil)
+			e.Token, e.Candidates = redactValue(v, secret), enum
+			return e
 		}
 	}
 	return nil
@@ -1452,8 +1527,7 @@ func canonicalizeField(f reflect.Value, enum []string) {
 }
 
 // channelConstraints reads the validation struct-tags codegen emits on a channel field into a
-// [Constraints]. Tag presence carries a numeric bound's declaredness, so min:"0" is a real,
-// enforced >= 0.
+// [Constraints]. A numeric bound is set whenever its tag is present, so min:"0" enforces >= 0.
 func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 	var c Constraints
 	has := false
@@ -1561,8 +1635,14 @@ const (
 type InputError struct {
 	Channel string // one of "env", "config", "stdin", "flag"
 	Input   string // the offending input key/path, when a single one is known (else "")
-	Msg     string // a clean, non-leaky, rotini-owned message
+	Msg     string // the message Error returns; it never includes Cause's text
 	Cause   error  // the underlying recon/decode/OS error, reachable via errors.As (may be nil)
+
+	// Token and Candidates are set when a value is not one of an env or config input's enum:
+	// the rejected value ("[redacted]" for a secret input) and the allowed values. They are
+	// empty for any other failure. [SuggestionFacts] reads them.
+	Token      string
+	Candidates []string
 
 	usage bool // true → CategoryUsage (ErrUsage); false → CategoryInternal
 }

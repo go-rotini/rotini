@@ -1,6 +1,6 @@
-# R5b — Program.RunContext re-entrancy, from a real binary.
+# R5 — Program.RunContext re-entrancy, from a real binary.
 #
-# rotini ships no interactive loop; a host builds one by dispatching each line through the SAME
+# rotini ships no interactive loop; a host builds one by dispatching each line through the same
 # Program the binary uses. That only works if a dispatch is re-entrant: each line needs a fresh
 # Context, so one command's recorded outcomes and exit code cannot leak into the next, while
 # services bound on the Program are seeded into every line. State persists; failures do not.
@@ -23,15 +23,15 @@ stdout 'count=2'
 stdout 'line exited 1'
 stdout 'count=3'
 
-# The failure was reported EXACTLY once, by the reporter, on stderr.
+# The failure was reported exactly once, by the reporter, on stderr.
 stderr 'boom'
 ! stdout 'boom'
 
-# ── ^C cancels the LINE, not the session ─────────────────────────────────────
+# ── ^C cancels the line, not the session ─────────────────────────────────────
 #
 # Supplying the context to RunContext hands signal handling to the host, so the host decides
 # what an interrupt means. Here it cancels the running line only. What must survive is the
-# line AFTER it: if the session had died, "count=1" would never print.
+# line after it: if the session had died, "count=1" would never print.
 [unix] stdin interrupt.txt
 [unix] exec ./loop$exe
 [unix] stdout 'blocking: canceled'

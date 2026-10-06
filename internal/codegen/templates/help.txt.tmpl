@@ -10,7 +10,7 @@
        at its last line (no trailing newline) — so you don't have to fight template
        whitespace to get clean output.
 
-       DATA (see helpData):
+       DATA:
          .Header .Summary .Description .Footer   strings
          .Invocation     full command path, e.g. "rotini generate"
          .Usage          spec declarative (may be empty)
@@ -19,7 +19,11 @@
                        resolved heading text, colon included (override is verbatim)
          .CommandGroups[] {.Title .Commands[]} — Title "" = default heading
          .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .Deprecated}
-         .Flags[]         {.Identifiers .Summary .Type .Required .Default .Implicit .Enum .Deprecated}
+         .Flags[]         {.Identifiers .Summary .Type .Required .Default .Implicit .Enum .Deprecated
+                          .Env .ConfigKey} — .Env: the flag's environment variables, in
+                          lookup order; .ConfigKey: its config key, set only when the command
+                          reads config files. Both are empty for a flag with no fallback.
+                          alsoSetBy .Env .ConfigKey "" "" renders them as "also set by ...".
          .Environment[]   {.Var .Summary .Type .Required .Default .Enum .Deprecated}
          .Configuration[] {.Name .Location .Summary .Type .Required .Default .Enum .Deprecated}
          .Cascading[]     same shape as .Flags — cascading flags inherited from ancestors
@@ -27,15 +31,14 @@
                           the command declares no output; .Fields[] {.Name .Type .Description .Required}
          .Examples[]      strings
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
-                indent, repeat, default, contains, hasPrefix, hasSuffix, first, last.
+                indent, repeat, default, contains, hasPrefix, hasSuffix, first, last,
+                alsoSetBy.
                 All deterministic (no clock/entropy) to keep rendering byte-stable. */ -}}
 {{- with .Header}}{{.}}
 
 {{end -}}
-{{- /* Prose: the description, or the summary when there is no description. Without the
-       fallback a command declaring only a summary renders a page that never says what it
-       does — the summary appears in its PARENT's command list and nowhere on its own page.
-       man carries it in NAME and markdown renders it outright; help was the odd one out. */ -}}
+{{- /* Prose: the description, or the summary when there is no description, so a command
+       that declares only a summary still says what it does on its own page. */ -}}
 {{- $prose := .Description}}{{if not $prose}}{{$prose = .Summary}}{{end -}}
 {{- with $prose}}{{.}}
 
@@ -55,7 +58,8 @@
 {{end -}}
 {{- range .FlagGroups}}{{if .Title}}{{.Title}}:{{else}}{{$.Headings.Flags}}{{end}}
 {{range .Flags}}  {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
-{{end}}
+{{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
+{{end}}{{end}}
 {{end -}}
 {{- with .Environment}}{{$.Headings.Environment}}
 {{range .}}  {{.Var}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
@@ -67,7 +71,8 @@
 {{end -}}
 {{- with .Cascading}}{{$.Headings.Cascading}}
 {{range .}}  {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
-{{end}}
+{{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
+{{end}}{{end}}
 {{end -}}
 {{- with .Output}}{{$.Headings.Output}}
 {{with .Description}}  {{.}}

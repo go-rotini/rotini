@@ -7,23 +7,10 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-// Shared helpers for answering --help, announcing resolved inputs and reporting pass results,
-// so every command's output has the same shape.
+// Shared helpers for announcing resolved inputs and reporting pass results, so every command's
+// output has the same shape.
 
-// answerHelp prints the command's help page and halts with code 0 when argv sets the help flag.
-// It reads argv alone, without defaults or validation, so --help works beside a missing
-// argument or an invalid value.
-func answerHelp[T any](rtx *rotini.Context, help func(T) bool) bool {
-	argv, err := rtx.ArgvInputs[T]()
-	if err != nil || !help(argv.Values) {
-		return false
-	}
-	fmt.Fprintln(rtx.Stdout, rtx.Help())
-	rtx.HaltWithCode(0)
-	return true
-}
-
-// suggestor ranks a mistyped command, flag or value against what the companion cli accepts.
+// suggestor ranks a mistyped command, flag or value against what the rotini CLI accepts.
 // The framework suggests nothing by default; this program opts in.
 var suggestor = rotini.NewSuggestor()
 

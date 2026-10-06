@@ -17,10 +17,6 @@ type rotiniVersionHandler struct {
 }
 
 func (*rotiniVersionHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if answerHelp(rtx, func(in RotiniVersionInputs) bool { return in.RotiniVersion.Flags.Help }) {
-		return
-	}
-
 	if _, err := rtx.Inputs[RotiniVersionInputs](); err != nil {
 		haltWithInputError(rtx, err)
 		return

@@ -1,0 +1,351 @@
+# R2 — completion messages, through the binary and the shells that show them.
+#
+# A message is a line the shell shows while a value is being completed, never a candidate. The
+# binary writes ":rotini:message <text>" lines between the candidates and the directive; bash
+# 4.4+ and zsh show them, fish and PowerShell drop them, and none may offer one as a value.
+# The conf's messages_env names the variable users set to hide them.
+
+gomodinit example.com/msgs
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+cp internal/cmd/app/renders/completion_bash.txt completion_bash.sh
+cp internal/cmd/app/renders/completion_zsh.txt completion_zsh.sh
+cp internal/cmd/app/renders/completion_fish.txt completion_fish.fish
+cp internal/cmd/app/renders/completion_powershell.txt completion_powershell.ps1
+
+# The script tells the users who install it how to hide messages.
+grep '^# Set APP_COMPLETION_MESSAGES=off to hide completion messages\.$' completion_bash.sh
+
+# ── the binary ───────────────────────────────────────────────────────────────
+# A free-text argument with nothing to offer: its declared message, then the directive.
+exec ./app$exe __complete deploy ''
+cmp stdout want-deploy.txt
+
+# Under messages: all, a flag's message is derived from its summary, shown once the enum
+# filters to nothing, and not while there are candidates.
+exec ./app$exe __complete --format x
+stdout '^:rotini:message --format string: how to print$'
+exec ./app$exe __complete --format j
+stdout '^json$'
+! stdout 'message'
+
+# Completer messages come first, beside its candidates.
+env APP_SERVICES=api,web
+exec ./app$exe __complete deploy ''
+cmp stdout want-dynamic.txt
+env APP_SERVICES=
+
+# The declared switch hides them.
+env APP_COMPLETION_MESSAGES=off
+exec ./app$exe __complete deploy ''
+! stdout 'message'
+env APP_COMPLETION_MESSAGES=
+
+# ── the shells ───────────────────────────────────────────────────────────────
+[exec:bash] exec bash drive-bash.sh
+[exec:bash] stdout 'MESSAGES: a service name from deploy\.yaml'
+[exec:bash] stdout 'CANDIDATES: $'
+[exec:bash] stdout 'OLD: ok'
+[exec:bash] stdout 'PRINTED: \|a service name from deploy\.yaml\|'
+[exec:bash] stdout 'GATE: ok'
+[exec:bash] stdout 'FIRST: \[\]'
+[exec:bash] stdout '^SECOND: (\|a service name from deploy\.yaml\|\$ app deploy |skipped)$'
+[exec:bash] stdout '^SECOND-LISTED: (\|showing 2 services\|--|skipped)$'
+
+# macOS ships bash 3.2 as /bin/bash: messages are collected but never shown there, since it
+# can't redraw the line afterwards.
+[darwin] exec /bin/bash drive-bash32.sh
+[darwin] stdout 'MESSAGES: a service name from deploy\.yaml'
+[darwin] stdout 'SUPPORTED: no'
+[darwin] stdout 'CANDIDATES: $'
+
+# zsh shows a message with its own _message; the driver stands in for the completion system's
+# functions, so the script's own logic runs and reports what it asks zsh to show.
+[exec:zsh] exec zsh -n completion_zsh.sh
+[exec:zsh] exec zsh drive-zsh.sh
+[exec:zsh] stdout 'MSG: a service name from deploy\.yaml'
+[exec:zsh] ! stdout 'DESCRIBE'
+[exec:zsh] exec zsh drive-zsh-candidates.sh
+[exec:zsh] stdout 'MSG: showing 2 services'
+[exec:zsh] stdout 'DESCRIBE'
+
+# PowerShell has nowhere to show a message, so it must not offer one as a completion, and an
+# opaque value must not fall back to PowerShell's own file names.
+[exec:pwsh] env HOME=$WORK
+[exec:pwsh] env USERPROFILE=$WORK
+[exec:pwsh] env APPDATA=$WORK
+[exec:pwsh] env LOCALAPPDATA=$WORK
+[exec:pwsh] env DOTNET_CLI_HOME=$WORK
+[exec:pwsh] env POWERSHELL_TELEMETRY_OPTOUT=1
+[exec:pwsh] exec pwsh -NoProfile -File drive-pwsh.ps1
+[exec:pwsh] stdout 'COMPLETIONS: '
+[exec:pwsh] ! stdout 'service name'
+[exec:pwsh] ! stdout 'message'
+[exec:pwsh] ! stdout 'completion_'
+
+[exec:fish] exec fish drive-fish.sh
+[exec:fish] stdout 'CANDIDATES: $'
+
+-- want-deploy.txt --
+:rotini:message a service name from deploy.yaml
+:rotini:none
+-- want-dynamic.txt --
+api
+web
+:rotini:message showing 2 services
+:rotini:none
+-- drive-bash.sh --
+set -e
+export PATH="$PWD:$PATH"
+source ./completion_bash.sh
+
+# The message is collected, not offered. The first TAB prints nothing.
+COMP_WORDS=(app deploy "")
+COMP_CWORD=2
+COMP_LINE="app deploy "
+COMP_TYPE=9
+COMPREPLY=()
+echo "FIRST: [$(_app_complete)]"
+_app_complete
+echo "MESSAGES: ${__app_messages[@]}"
+echo "CANDIDATES: ${COMPREPLY[@]}"
+echo "PRINTED: $(_app_print_messages | tr '\n' '|')"
+# The second TAB prints the message. With nothing to list, bash prints nothing more, so the
+# script prints the prompt and the line again; with candidates, a "--" line comes before them.
+if _app_messages_supported; then
+    PS1='$ '
+    COMP_TYPE=63
+    echo "SECOND: $(_app_complete | tr '\n' '|')"
+    echo "SECOND-LISTED: $(APP_SERVICES=api,web _app_complete | tr '\n' '|')"
+else
+    echo "SECOND: skipped"
+    echo "SECOND-LISTED: skipped"
+fi
+COMP_TYPE=9
+# Shown only on bash 4.4 or later, whichever bash runs this.
+want=no
+if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then want=yes; fi
+got=no
+if _app_messages_supported; then got=yes; fi
+if [ "$want" = "$got" ]; then echo "GATE: ok"; else echo "GATE: wrong ($got on bash $BASH_VERSION)"; fi
+
+# A script generated before messages existed, run against this binary: the message line must
+# not become a candidate.
+source ./old-bash.sh
+COMPREPLY=()
+_app_complete
+for c in "${COMPREPLY[@]}"; do
+    case "$c" in
+        *message*) echo "OLD: leaked $c"; exit 1 ;;
+    esac
+done
+# A message with no directive line after it: the old script must not take it for one.
+COMP_WORDS=(app --format x)
+COMP_CWORD=2
+COMPREPLY=()
+_app_complete
+for c in "${COMPREPLY[@]}"; do
+    case "$c" in
+        *message*) echo "OLD: leaked $c"; exit 1 ;;
+    esac
+done
+echo "OLD: ok"
+-- drive-bash32.sh --
+export PATH="$PWD:$PATH"
+source ./completion_bash.sh
+COMP_WORDS=(app deploy "")
+COMP_CWORD=2
+COMPREPLY=()
+_app_complete
+echo "MESSAGES: ${__app_messages[@]}"
+if _app_messages_supported; then echo "SUPPORTED: yes"; else echo "SUPPORTED: no"; fi
+echo "CANDIDATES: ${COMPREPLY[@]}"
+-- drive-zsh.sh --
+export PATH="$PWD:$PATH"
+_message() { print -r -- "MSG: $2" }
+_describe() { print -r -- "DESCRIBE" }
+_files() { print -r -- "FILES" }
+compdef() { : }
+source ./completion_zsh.sh
+words=(app deploy "")
+CURRENT=3
+_app
+-- drive-zsh-candidates.sh --
+export PATH="$PWD:$PATH"
+export APP_SERVICES=api,web
+_message() { print -r -- "MSG: $2" }
+_describe() { print -r -- "DESCRIBE" }
+_files() { print -r -- "FILES" }
+compdef() { : }
+source ./completion_zsh.sh
+words=(app deploy "")
+CURRENT=3
+_app
+-- drive-pwsh.ps1 --
+$ErrorActionPreference = 'Stop'
+$env:PATH = "$PWD" + [IO.Path]::PathSeparator + $env:PATH
+. (Join-Path $PWD 'completion_powershell.ps1')
+# An opaque value answers with one empty string, which PowerShell refuses as a result. The
+# interactive shell swallows that refusal and offers nothing, not even file names; called
+# directly, TabExpansion2 throws it.
+try {
+    $r = TabExpansion2 -inputScript 'app deploy ' -cursorColumn 11
+    $texts = @($r.CompletionMatches | ForEach-Object { $_.CompletionText })
+    Write-Output ("COMPLETIONS: [" + ($texts -join ' ') + "]")
+} catch {
+    if ("$_" -notmatch 'completionText') { throw }
+    Write-Output "COMPLETIONS: [] (refused)"
+}
+-- drive-fish.sh --
+set -x PATH $PWD $PATH
+source ./completion_fish.fish
+set -l out (complete -C "app deploy ")
+set -l joined (string join " " $out)
+echo "CANDIDATES: $joined"
+-- old-bash.sh --
+# bash completion for app
+# Candidates arrive as "name<TAB>description"; bash cannot render descriptions,
+# so everything from the first tab is stripped.
+#
+# A final ":rotini:<directive>" line is the spec's declarative completion hint
+# for the value being typed — file, directory, or none. It is handled here rather
+# than offered as a candidate.
+
+# compopt does not exist in bash 3.2, which is /bin/bash on every macOS, and where it does exist
+# it fails when called outside a live completion. Either failure must stay inside this
+# function: under 'set -e' a failing compopt would end the whole shell before any 'return 0'
+# could run, so its status is absorbed on the spot. The directives still work without it; only
+# bash's own file fallback stays on for a "none" value, which is the most a 3.2 user can get.
+_app_compopt() {
+    if type compopt >/dev/null 2>&1; then
+        compopt "$@" 2>/dev/null || true
+    fi
+    return 0
+}
+
+_app_complete() {
+    local args line directive="" ext exts
+    # Slice COMP_WORDS BEFORE narrowing IFS. bash 3.2 — which is /bin/bash on every macOS —
+    # collapses "${array[@]:offset:length}" into ONE IFS-joined element whenever IFS does not
+    # contain a space, so with IFS=$'\n' set first this produced a single argument and every
+    # completion past the first word silently offered nothing.
+    args=("${COMP_WORDS[@]:1:$COMP_CWORD}")
+    COMPREPLY=()
+    # Now narrow it: the binary separates candidates by newline, and a candidate (a file name,
+    # a summary) may contain spaces.
+    local IFS=$'\n'
+    for line in $(app __complete "${args[@]}" 2>/dev/null); do
+        case "$line" in
+            ":rotini:"*) directive="${line#:rotini:}" ;;
+            *) COMPREPLY+=("${line%%$'\t'*}") ;;
+        esac
+    done
+
+    case "$directive" in
+        none)
+            # An opaque value: suppress bash's default file fallback entirely.
+            _app_compopt +o default
+            ;;
+        directory)
+            _app_compopt -o dirnames
+            COMPREPLY+=($(compgen -d -- "${COMP_WORDS[$COMP_CWORD]}")) || true
+            ;;
+        file)
+            _app_compopt -o filenames
+            COMPREPLY+=($(compgen -f -- "${COMP_WORDS[$COMP_CWORD]}")) || true
+            ;;
+        file\ *)
+            _app_compopt -o filenames
+            exts="${directive#file }"
+            COMPREPLY+=($(compgen -d -- "${COMP_WORDS[$COMP_CWORD]}")) || true
+            # IFS is narrowed to newline above, so the space-separated list is re-separated
+            # by newline; a plain $exts would arrive as ONE extension, "yaml yml".
+            for ext in ${exts// /$'\n'}; do
+                COMPREPLY+=($(compgen -f -X "!*.$ext" -- "${COMP_WORDS[$COMP_CWORD]}")) || true
+            done
+            ;;
+    esac
+}
+complete -o default -F _app_complete app
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a CLI with completion messages
+  flags:
+    - name: format
+      summary: how to print
+      identifiers: [--format]
+      schema: { type: string, enum: [json, text] }
+  commands:
+    - name: deploy
+      summary: deploy a service
+      arguments:
+        - name: service
+          summary: the service
+          schema:
+            type: string
+            complete: { kind: none, message: a service name from deploy.yaml }
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: completion
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/renders
+      messages: all
+      messages_env: APP_COMPLETION_MESSAGES
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+type appHandler struct{ base }
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/app/app_deploy.go --
+package app
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type appDeployHandler struct{ base }
+
+func (*appDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+func (*appDeployHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
+	services := os.Getenv("APP_SERVICES")
+	if services == "" {
+		return nil
+	}
+	list := strings.Split(services, ",")
+	rtx.AddCompletionMessage(fmt.Sprintf("showing %d services", len(list)))
+	return list
+}

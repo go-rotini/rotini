@@ -78,7 +78,7 @@ func WithDependency[T any](dep Dependency[T], value T) Option {
 //	p.WithDependency(Store, store.Store(store.NewMem()))
 //	p.WithDependency[store.Store](Store, store.NewMem())
 //
-// The dependency namespace belongs to the application. rotini's own seams (input reader,
+// The dependency namespace belongs to the application. Rotini's own settings (input reader,
 // parser, version, help) are typed Program options, so no dependency name can shadow them.
 func (p *Program) WithDependency[T any](dep Dependency[T], value T) *Program {
 	p.rtx.setDependency(dep.name, value)

@@ -78,9 +78,8 @@ func TestSchemaDocsInSync(t *testing.T) {
 	}
 }
 
-// TestSchemaDocsHaveNoRawTags pins that no description reaches a page as HTML. The site
-// renders raw HTML, so a placeholder like '<code>' left unescaped opened an element that never
-// closed and broke the page's layout, and '<root>' vanished from the text.
+// TestSchemaDocsHaveNoRawTags pins that no description reaches a page as HTML: the site renders
+// raw HTML, so an unescaped placeholder like '<code>' would break the layout or vanish.
 func TestSchemaDocsHaveNoRawTags(t *testing.T) {
 	codeSpan := regexp.MustCompile("`[^`]*`")
 	tag := regexp.MustCompile(`<[A-Za-z/][^>]*>`)

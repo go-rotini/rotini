@@ -40,7 +40,7 @@ const (
 )
 
 // Program is a rotini CLI ready to run: the compiled command tree ([Definition]), the
-// handlers that implement it, and the seams around them. The generated entrypoint builds one
+// handlers that implement it, and the settings around them. The generated entrypoint builds one
 // with [NewProgram] and calls [Program.Execute]. Every With method returns the receiver, so
 // calls chain.
 //
@@ -51,13 +51,14 @@ const (
 //     [CompletionFormat]
 //   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr]
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
-//     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion]
+//     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion],
+//     [Program.WithCompletionMessages]
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
 //   - the program's dependencies — [Program.WithDependency], or [Program.With] with the
 //     [WithDependency] option to register several at once
-//   - rotini's own seams — [Program.WithVersion], [Program.WithParser], [Program.WithInputReader],
+//   - rotini's own settings — [Program.WithVersion], [Program.WithParser], [Program.WithInputReader],
 //     and the two the generated code sets, [Program.WithInputSettings] and [Program.WithHelp]
 //   - phase replacement — [Program.WithResolver], [Program.WithLifecycle]
 //
@@ -93,7 +94,11 @@ type Program struct {
 	signalSet       []os.Signal      // signals trapped when on; empty → trapSignals
 	completion      CompletionFormat // the format __complete answers in; nil → rotini's own. See WithCompletion.
 
-	// rotini's own seams, kept out of the dependency store so a program's dependency can
+	// completionMessages decides whether completion messages show; nil reads the declared
+	// environment variable. See WithCompletionMessages.
+	completionMessages func(rtx *Context) bool
+
+	// rotini's own settings, kept out of the dependency store so a program's dependency can
 	// never shadow them.
 	meta     *InputSettings                   // WithInputSettings: the generated descriptor; nil → none
 	readerFn func(InputSettings) *InputReader // WithInputReader: nil → NewInputReader
@@ -229,10 +234,10 @@ func (p *Program) WithContext(ctx context.Context) *Program {
 }
 
 // WithoutSignalHandling disables rotini's signal trap; of it and [Program.WithSignals], the
-// later call wins. rotini still owns the run context but calls no signal.Notify, so the
+// later call wins. Rotini still owns the run context but calls no signal.Notify, so the
 // program's own handling is the only one (signal.Notify registrations are additive).
 //
-// rotini exposes no cancel in this mode, so the program's signal handler cannot halt the run
+// Rotini exposes no cancel in this mode, so the program's signal handler cannot halt the run
 // gracefully; for that, use [Program.WithContext] with [signal.NotifyContext].
 func (p *Program) WithoutSignalHandling() *Program {
 	p.signalMode = signalOff
@@ -281,7 +286,7 @@ func (p *Program) With(opts ...Option) *Program {
 	return p
 }
 
-// ── rotini's own seams ──────────────────────────────────────────────────────.
+// ── rotini's own settings ───────────────────────────────────────────────────.
 
 // WithInputSettings supplies the generated input descriptor: the configuration sources, the
 // env prefix and the stdin schemas [Context.Inputs] reads from. The generated NewProgram calls
@@ -326,7 +331,7 @@ type HelpFunc func(path ...string) (string, error)
 // WithHelp sets where [Context.Help] finds a command's help page. The generated NewProgram
 // passes its own Help function. A nil help is ignored.
 //
-// Help is a program-level seam so that a command composed from another spec prints the page
+// Help is a program-level setting so that a command composed from another spec prints the page
 // of the program it runs in, with that program's full command path and inherited flags.
 func (p *Program) WithHelp(help HelpFunc) *Program {
 	if help != nil {
@@ -346,7 +351,7 @@ func (p *Program) WithParser(parser *Parser) *Program {
 }
 
 // newRunContext builds a fresh per-invocation [Context] seeded with a copy of the program's
-// dependencies, its streams and its seams.
+// dependencies, its streams and its settings.
 func (p *Program) newRunContext() *Context {
 	rtx := newContext()
 	if p.rtx != nil {
@@ -407,9 +412,9 @@ func (p *Program) Execute() error {
 }
 
 // Run dispatches one invocation of argv and returns its exit code and error (see
-// [Program.Execute]). It resolves the invoked command, executes a declared plugin if one was
-// selected, and otherwise runs the lifecycle; inputs are parsed only when a handler calls
-// [Context.Inputs]. Run never ends the process.
+// [Program.Execute]). It resolves the invoked command, executes a declared or discovered
+// plugin if one was selected, and otherwise runs the lifecycle; inputs are parsed only when a
+// handler calls [Context.Inputs]. Run never ends the process.
 //
 // Each call gets a fresh [Context]. Dependencies registered with [Program.WithDependency] are
 // seeded into every run; one set with [Context.SetDependency] stays local to its run.
@@ -490,7 +495,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		return p.settle(ctx, rtx)
 	}
 	if res.Plugin != nil {
-		return p.execPlugin(ctx, rtx, res.Plugin)
+		return p.execPlugin(ctx, rtx, res.Chain, res.Plugin)
 	}
 	if len(res.Chain) == 0 {
 		// An empty chain violates the resolver contract.

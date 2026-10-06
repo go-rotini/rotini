@@ -22,8 +22,7 @@
 // dispatch.
 //
 // `rotini validate` checks the spec: the JSON Schema rejects what it can express and lint rules
-// reject the rest, each problem reported at file:line:col. Every schema-accepted key has a
-// consumer.
+// reject the rest, each problem reported at file:line:col.
 //
 // # Generate
 //
@@ -31,8 +30,8 @@
 // per-command input structs, embedded help, man and markdown pages, and completion scripts —
 // plus one handler stub per command, created once and then owned by the program. `rotini init`
 // scaffolds a working CLI: a spec declaring -h/--help, -v/--version and the help and version
-// commands, a conf with the help feature on and the other three off, an entrypoint, and a stub
-// per command wired to the generated pages and services. All of it may be edited or deleted.
+// commands, a conf, an entrypoint, and a stub per command wired to the generated help pages
+// and the program's version. All of it may be edited or deleted.
 //
 // # Composition
 //
@@ -86,7 +85,9 @@
 // validated when a handler calls [Context.Inputs] (or the per-channel [Context.ArgvInputs],
 // [Context.EnvInputs], [Context.FileInputs] and [Context.StdinInputs]), which the generated
 // stubs do first. A handler that never calls it reads the raw [Context.Argv] and gets no
-// validation.
+// validation; [Context.CheckInputs] checks inputs it collects another way. A flag marked
+// short_circuit in the spec ([FlagDef.ShortCircuit]), such as --help, waives every declared
+// requirement when it is set on the command line, so the handler can act on it.
 //
 // The runtime's only built-in behaviors are a default SIGINT/SIGTERM trap (see
 // [Program.WithoutSignalHandling] and [Program.WithSignals]), the hidden __complete entry the
@@ -171,22 +172,26 @@
 //
 // Every failure class is errors.Is-able against the [ErrUsage] or [ErrInternal] sentinel, so
 // [CategoryOf] classifies it (except a plugin timeout, which is [CategoryNone]), and
-// errors.As-able to a typed value with structured fields. rotini's own messages expose no
-// recon, decode or OS internals and no secret values:
+// errors.As-able to a typed value with structured fields. Rotini's own messages expose no
+// decoder or OS internals and no secret values:
 //
 //   - [*ParseError] — the argv channel. [ParseError.Kind] identifies the failure; Token and
-//     Candidates are what a [Suggestor] turns into "did you mean".
+//     Candidates are the facts a "did you mean" needs.
 //   - [*InputError] — the env, config, stdin and flag-fallback channels, carrying the channel,
-//     the input and a message, with the recon cause reachable via errors.As.
+//     the input and a message, with the recon cause reachable via errors.As. An env or config
+//     value outside its enum also carries Token and Candidates.
 //   - [*PluginError] — a plugin dispatch, recorded as an error. A missing discovered plugin is
 //     a usage error; a missing declared plugin, or a plugin that cannot start, is internal; a
-//     timeout is neither.
+//     timeout is neither. A missing discovered plugin carries Candidates: the names the
+//     command knows, to rank its Name against.
 //   - [*DependencyError] and [*PanicError] arrive as panics, as does a [*WiringError] from the
 //     program's wiring. [Context.Inputs] returns one [*WiringError] as an error instead: config
 //     inputs requested on a program built without an [InputSettings].
 //
-// rotini prints no "did you mean" suggestions and no help on error; a program that wants
-// either writes its own reporter.
+// Rotini prints no "did you mean" suggestions and no help on error. A program that wants
+// either branches on the error in its handler (errors.As to the type, then its Kind or
+// [CategoryOf]) or writes its own reporter. A value a flag's environment or config fallback
+// supplied is named with its source in a value error, so the user can find it.
 //
 // # Sharing dependencies between handlers
 //
@@ -219,13 +224,10 @@
 // # Opt-in services
 //
 // Everything else is a function or type a handler calls when it needs it, with nothing to
-// register. Dependencies ([Program.WithDependency], [Context.GetDependency],
-// [Context.MustGetDependency]) hold only the program's own values.
-//
-// rotini's own seams are typed options, not dependencies: [Program.WithInputSettings],
-// [Program.WithInputReader], [Program.WithParser], [Program.WithVersion] and [Program.WithHelp]
-// set them; [Context.Parser], [Context.Version] and [Context.Help] read them. A dependency name
-// or type can therefore never shadow one.
+// register. Rotini's own settings are typed options, not dependencies, so a dependency can
+// never shadow one: [Program.WithInputSettings], [Program.WithInputReader], [Program.WithParser],
+// [Program.WithVersion] and [Program.WithHelp] set them; [Context.Parser], [Context.Version] and
+// [Context.Help] read them.
 //
 //   - [Context.Inputs] reads every declared channel, reconciled and validated, into the
 //     command's generated inputs type:
@@ -253,21 +255,29 @@
 //     [MergeInputs] or [MergeInputsWithReport]) read channels one at a time, for programs
 //     with custom precedence.
 //
-//   - [Suggestor] turns a [*ParseError]'s rejected token and candidates into "did you mean"
-//     suggestions; [Suggestor.For] does it in one call.
+//   - [Context.CheckInputs] checks inputs the program collected itself (a prompt, a secrets
+//     service, a test) against the spec, with [PresenceOf] marking which fields were supplied;
+//     a hand-built [InputLayer] merged with rotini's is checked the same way by
+//     [InputReport.Validate].
+//
+//   - [SuggestionFacts] reads the rejected token and its candidates from any error that carries
+//     them, and [Suggestor] ranks them into "did you mean" suggestions; [Suggestor.For] does
+//     both in one call.
 //
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve and run phases.
 //     [FlagValueCompleter] and [ArgValueCompleter] supply dynamic completion, and
 //     [Program.Complete] answers it in a host's [CompletionFormat]: [PluginCompletion] for a
 //     plugin host such as kubectl completing a rotini plugin. [Program.WithCompletion] makes
-//     __complete answer in that format, for hosts that call it (Docker, Flux).
+//     __complete answer in that format, for hosts that call it (Docker, Flux). When the conf
+//     turns completion messages on, a completer adds its own with
+//     [Context.AddCompletionMessage], and [Program.WithCompletionMessages] decides when they
+//     show.
 //
 // # Batteries
 //
-// rotini does nothing on import, starts no background goroutine and touches no terminal. It
+// Rotini does nothing on import, starts no background goroutine and touches no terminal. It
 // ships no styler, table, spinner, prompt, pager, terminal probe or process runner; use
-// golang.org/x/term, os/exec and similar libraries. The one text helper it keeps is needed by
-// its own generated pages:
+// golang.org/x/term, os/exec and similar libraries. Its one text helper:
 //
 //   - [StripANSI] removes ANSI escape sequences, making a styled string safe for a man page, a
 //     markdown page or a completion description.
@@ -280,7 +290,7 @@
 // concurrent use once configuration is complete; the handlers value and the program's streams
 // remain shared, so a concurrent host synchronizes those. See [Program.Run].
 //
-// rotini ships no loop. A host calls [Program.RunContext] once per line or request; supplying
+// Rotini ships no loop. A host calls [Program.RunContext] once per line or request; supplying
 // the context leaves signal handling to the host.
 //
 // # What rotini does not ship
@@ -290,8 +300,4 @@
 //   - watching files — go-rotini/fs, fs.NewWatcher
 //   - a single-instance lock — go-rotini/fs, fs.PIDLock
 //   - caching in a long-running program — go-rotini/memcache
-//
-// Styling, tables, spinners, prompts, forms and paging are left to the program and to libraries
-// built for them. rotini turns a spec into a parsed, validated, dispatched invocation and hands
-// the handler a [Context]; what the handler prints, and how, is the program's.
 package rotini

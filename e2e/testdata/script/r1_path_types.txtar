@@ -1,23 +1,15 @@
-# R1 — existingfile/existingdir, END TO END through codegen.
+# R1 — existingfile/existingdir, end to end through codegen.
 #
-# This script exists because the feature shipped BROKEN and every unit test passed. parser_test
-# hand-builds a Definition with Type "existingfile" and asserts the check fires; it does. But
-# codegen ran every declared type name through jsonSchemaTypeToGo, which maps both path types
-# to "string" — so the emitted Definition said "string", the parser's isPathType never matched,
-# and no generated CLI ever performed the check. A real CLI (example-txt) surfaced it in one
-# command: a missing directory produced a raw *os.PathError from three frames inside a handler
-# instead of a usage error naming the argument.
-#
-# The seam is narrow and easy to re-collapse — "why does the Definition say `count` when the
-# field is an int?" is a reasonable-sounding question — so the assertion that the DECLARED name
-# survives generation is written here, against the generated file, and not only in a unit test.
+# The parser checks a path type only when the emitted Definition keeps the declared type name
+# ("existingfile"), while the generated struct field is a plain string. Unit tests build the
+# Definition by hand, so only a generated CLI shows that codegen keeps the two apart.
 
 gomodinit example.com/paths
 
 exec rotini generate cmd/paths/.rotini.spec.yaml --config cmd/paths/.rotini.conf.yaml
 
-# The regression anchor: the declared names reach the emitted Definition intact. The generated
-# STRUCT FIELDS stay Go types — that split is the whole point.
+# The declared names reach the emitted Definition intact, while the generated struct fields
+# stay Go types.
 grep 'Type: "existingdir"' internal/cmd/paths/zz_paths.go
 grep 'Type: "existingfile"' internal/cmd/paths/zz_paths.go
 grep 'Type: "count"' internal/cmd/paths/zz_paths.go
@@ -33,7 +25,7 @@ exec go build -o paths$exe ./cmd/paths
 exec ./paths$exe scan . --config conf.yaml
 stdout 'dir=\. config=conf\.yaml verbose=0'
 
-# A missing directory is a USAGE error naming the argument, raised at parse time — before the
+# A missing directory is a usage error naming the argument, raised at parse time — before the
 # handler runs, so no partial work happens and the message points at what the user typed.
 ! exec ./paths$exe scan ./nope
 stderr '<dir>: no such directory: "\./nope"'
@@ -46,7 +38,7 @@ stderr '<dir>: "conf\.yaml" is not a directory'
 ! exec ./paths$exe scan . --config missing.yaml
 stderr '--config: no such file: "missing\.yaml"'
 
-# ...and a directory is not a file. The name has to satisfy the pattern for the KIND check to
+# ...and a directory is not a file. The name has to satisfy the pattern for the kind check to
 # be what fails, since shape is checked first — see below.
 mkdir adir.yaml
 ! exec ./paths$exe scan . --config adir.yaml
@@ -55,9 +47,8 @@ stderr '--config: "adir\.yaml" is a directory, not a file'
 ! exec ./paths$exe scan . -c adir.yaml
 stderr '^Error: -c: "adir\.yaml" is a directory, not a file'
 
-# A path type is still a string, so a declared pattern applies to it — and applies FIRST, so a
-# path that could never be valid is rejected on its shape rather than on its absence. Skipping
-# string bounds for path types would silently drop a declared constraint.
+# A path type is still a string, so a declared pattern applies to it, and applies first, so a
+# path that could never be valid is rejected on its shape rather than on its absence.
 ! exec ./paths$exe scan . --config conf.txt
 stderr 'must match'
 ! stderr 'no such file'

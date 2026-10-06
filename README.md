@@ -9,15 +9,11 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-007d9c?labelColor=5c5c5c&style=flat-square"></a>
 </p>
 
-Rotini lets you describe a command-line program in a JSON schema specification format and generates
-a Go program around it. You provide the implementation for what each command does, and rotini
-handles the CLI program plumbing. Rather than investing time into writing the plumbing that supports
-a Go CLI program, you can focus on writing your program-specific logic. However, rotini does not
-enforce its structure and was written with inversion of control and dependency injection in mind;
-you can adopt as much or as little of rotini as you want. If you buy in to the lightest commitment
-of the framework — the spec-driven codegen model — you can bring your own command routing, parsing,
-input handling, help and error reporting, while rotini still generates the command tree, typed
-inputs, documentation and shell completion from your spec.
+Rotini lets you describe a command-line program in a spec file (YAML, JSON, JSONC or TOML) and
+generates the Go program around it. You write what each command does; rotini handles the
+plumbing. You can adopt as much or as little of it as you want: bring your own command routing,
+parsing, input handling, help or error reporting, and rotini still generates the command tree,
+typed inputs, documentation and shell completion from your spec.
 
 ## Rotini in a GIF
 
@@ -47,10 +43,10 @@ the handler, build and run.
 | **Shell completion** | Scripts for bash, zsh, fish and PowerShell, with completion hints for values such as files and directories. |
 | **Man and markdown pages** | Roff man pages and markdown reference pages, ready to install or publish. |
 | **Structured output** | A JSON Schema for each command's output and a contract document describing the whole CLI, for scripts and agents. |
-| **Errors and exit codes** | Consistent `Error:` messages and a non-zero exit code. Every error carries a usage or internal category you can map to your own exit codes, and errors can be reported as JSON for scripts. |
+| **Errors and exit codes** | Consistent `Error:` messages and a non-zero exit code. Errors carry a usage or internal category you can map to your own exit codes, and errors can be reported as JSON for scripts. |
 | **Deprecation** | Deprecated commands, aliases and flags keep working and are marked in help. Each use is reported to your code, which decides whether to warn. |
 | **Interrupts and panics** | Ctrl+C and SIGTERM stop the program cleanly, running its teardown, and a second Ctrl+C exits at once. A panic is reported as an error rather than a stack trace. |
-| **Suggestions** | "Did you mean" suggestions for a mistyped command or flag, opt-in. |
+| **Suggestions** | "Did you mean" suggestions for a mistyped command, flag or value, opt-in. |
 | **Plugins** | Run separate `<app>-<name>` programs as sub-commands, declared or discovered. A rotini program can also be a plugin for kubectl, Docker or Flux, completing and showing help the way the host does. |
 | **Wrapper commands** | A command that forwards everything after its name untouched to another program. |
 | **Composed CLIs** | Mount one CLI inside another as a sub-command, from the same module or another, while it still builds and ships on its own. |
@@ -59,13 +55,10 @@ the handler, build and run.
 
 Requires Go 1.27 or later.
 
-Create a Go module and add the rotini tool to it. `go tool rotini init <name>` then sets up a
-working program: a spec and a conf, an entrypoint, a handler for each command, and the generated
-code; `go mod tidy` records rotini as a direct dependency, since that code imports it. From there,
-development is a loop:
-describe a change in the spec (a command, a flag, an input, an output), run `go generate ./...` to
-regenerate the typed code, pages and completion, implement the handler for any new command, and
-build.
+Create a Go module and add the rotini tool to it. `go tool rotini init <name>` sets up a working
+program: a spec and a conf, an entrypoint, a handler for each command, and the generated code.
+From there, development is a loop: change the spec, run `go generate ./...`, implement the
+handler for any new command, and build.
 
 <details>
 <summary><strong>Example</strong></summary>
@@ -78,7 +71,8 @@ go mod init github.com/me/helloworld
 go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
 ```
 
-**2. Set up the program.**
+**2. Set up the program.** `go mod tidy` records rotini as a direct dependency, since the
+generated code imports it.
 
 ```bash
 go tool rotini init helloworld
@@ -111,8 +105,9 @@ internal/cmd/helloworld/*.go         one handler per command; yours to edit
 ```
 
 **4. Generate, then implement the handler.** `go generate ./...` writes
-`internal/cmd/helloworld/helloworld_hello.go`. Its `Run` method already answers `--help` and reads
-the typed, validated inputs. Replace the line that prints them with the greeting code:
+`internal/cmd/helloworld/helloworld_hello.go`. Its `Run` method already reads the typed,
+validated inputs (`--help` is answered once, for every command, by the root handler `init`
+wrote). Replace the line that prints them with the greeting code:
 
 ```go
 package helloworld
@@ -135,12 +130,6 @@ type helloworldHelloHandler struct {
 }
 
 func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	if argv, err := rtx.ArgvInputs[HelloworldHelloInputs](); err == nil && argv.Values.Helloworld.Flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
-
 	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
@@ -169,10 +158,9 @@ HELLO, ROTINI!
 
 ## Documentation
 
-For more information, see the [rotini](https://rotini.dev) documentation.
-
-- Full API reference is available on [pkg.go.dev](https://pkg.go.dev/github.com/go-rotini/rotini).
-- See [COMPATIBILITY.md](COMPATIBILITY.md) to understand what a version promises and [UPGRADING.md](UPGRADING.md) to understand upgrading versions.
+- The guide and references are at [rotini.dev](https://rotini.dev).
+- The full API reference is on [pkg.go.dev](https://pkg.go.dev/github.com/go-rotini/rotini).
+- Breaking changes are listed in each release's notes; see [upgrading](https://rotini.dev/docs#upgrading).
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to this project.
 - This project follows a code of conduct to ensure a welcoming community. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 - To report a vulnerability, see [SECURITY.md](SECURITY.md).

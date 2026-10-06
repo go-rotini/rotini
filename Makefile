@@ -3,9 +3,10 @@
 #
 #   FuzzParse          the argv grammar
 #   FuzzSuggest        the suggestion ranking
+#   FuzzSuggestionFacts reading a token and candidates from any error tree
 #   FuzzValidateSpec   the spec loader: four codecs, schema, lint rules, source locator
 #   FuzzValidateConf   the same for the conf
-FUZZ_TARGETS := .:FuzzParse .:FuzzSuggest ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf
+FUZZ_TARGETS := .:FuzzParse .:FuzzSuggest .:FuzzSuggestionFacts ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf
 
 # The version `rotini-build` stamps into the dogfood binary: the checkout's own, from git.
 # v1.2.0 on a tagged commit; v1.2.0-3-gabc1234 between tags, which rotini reads as the last
@@ -46,6 +47,8 @@ check-generated:
 	@$(GENERATED_FINGERPRINT) > /tmp/rotini-generated.before
 	@cp internal/codegen/schema-spec.json schema-spec.json
 	@cp internal/codegen/schema-conf.json schema-conf.json
+	@go run ./cmd/rotini generate --dry-run ./cmd/rotini/.rotini.spec.yaml --config ./cmd/rotini/.rotini.conf.yaml > /dev/null || \
+		(echo "the companion cli's generated files are stale (listed above); run go generate ./cmd/rotini"; exit 1)
 	@go generate ./cmd/rotini > /dev/null
 	@go mod tidy
 	@$(GENERATED_FINGERPRINT) > /tmp/rotini-generated.after
@@ -138,7 +141,7 @@ test-race:
 	@go test -race -count=1 -coverprofile=test_race.out ./...
 	@go tool cover -func=test_race.out
 
-# rotini is the verification-chain entry point (see the tracker in the sibling .docs repo).
+# rotini builds and installs the companion CLI from this working tree.
 # Same order as `all`: build the versioned binary, then regenerate and install.
 rotini: rotini-build rotini-install
 

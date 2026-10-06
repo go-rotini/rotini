@@ -25,17 +25,19 @@ import (
 //   - inputs — [Context.Inputs] returns the command's validated inputs,
 //     [Context.InputsWithReport] adds where each value came from, and the per-channel
 //     [Context.ArgvInputs], [Context.EnvInputs], [Context.FileInputs],
-//     [Context.StdinInputs] and [Context.DefaultInputs] read one channel each
+//     [Context.StdinInputs] and [Context.DefaultInputs] read one channel each;
+//     [Context.CheckInputs] checks inputs the program collected itself against the spec
 //   - output — [Context.WriteOutput] writes the command's declared output to stdout,
 //     [Context.WriteOutputItem] one item of a stream, and [Context.CheckOutput] checks a value
 //     against the declared shape without writing it
 //   - dependencies — [Context.GetDependency] and [Context.MustGetDependency] read one;
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
-//     [Context.RecordError], and [Context.Failed]
+//     [Context.RecordError], and [Context.Failed]; during completion,
+//     [Context.AddCompletionMessage]
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
-//   - rotini's own seams — [Context.Version], [Context.Help] and [Context.Parser] read them;
+//   - rotini's own settings — [Context.Version], [Context.Help] and [Context.Parser] read them;
 //     [Context.WithVersion], [Context.WithHelp], [Context.WithParser],
 //     [Context.WithInputSettings] and [Context.WithInputReader] set them on a standalone Context
 //
@@ -84,7 +86,7 @@ type Context struct {
 	// and the inputs methods anchor on it.
 	frame int
 
-	// rotini's own seams, seeded from the Program each run and kept out of services so a
+	// rotini's own settings, seeded from the Program each run and kept out of services so a
 	// dependency can never shadow them.
 	meta     *InputSettings
 	readerFn func(InputSettings) *InputReader
@@ -96,10 +98,35 @@ type Context struct {
 	// output schema before writing it. See [Program.WithOutputChecks].
 	outputChecks bool
 
+	// completionMessages collects what [Context.AddCompletionMessage] adds. It is non-nil only
+	// while a completion request runs with completion messages on.
+	completionMessages *[]string
+
 	// flagStdinMemo holds stdin as read for a `from: [stdin]` flag's "-" value. Argv can be
 	// parsed several times in one run (a --help check, a parent's inputs, the leaf's inputs)
 	// but stdin can be read only once, so the first read is replayed to every later parse.
 	flagStdinMemo *stdinMemo
+}
+
+// AddCompletionMessage adds a line for the shell to show while it completes, from a
+// [FlagValueCompleter] or [ArgValueCompleter]: why there is nothing to offer, or how to narrow
+// a long list. Messages show in the order added, alongside any candidates, and in place of the
+// input's static message. Each is reduced to one plain line.
+//
+//	services, err := loadServices()
+//	if err != nil {
+//		rtx.AddCompletionMessage("could not read deploy.yaml: " + err.Error())
+//		return nil
+//	}
+//
+// It does nothing outside a completion request, or when the conf's completion feature doesn't
+// turn messages on. zsh and bash 4.4 or later show messages; other shells skip them.
+func (rtx *Context) AddCompletionMessage(msg string) {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	if rtx.completionMessages != nil {
+		*rtx.completionMessages = append(*rtx.completionMessages, msg)
+	}
 }
 
 // stdinMemo reads a stream to EOF once and replays it.
@@ -162,7 +189,7 @@ func newContext() *Context {
 }
 
 // NewContextFor builds a [Context] with argv resolved against def, as the runtime does before
-// dispatch, using the os streams and no seams. It serves tests of the [Parser], the
+// dispatch, using the os streams and no program settings. It serves tests of the [Parser], the
 // [Context.Inputs] family, or a single hook:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
@@ -566,10 +593,7 @@ func (rtx *Context) recordFault(pe *PanicError) {
 	rtx.faults = append(rtx.faults, pe)
 }
 
-// ── rotini's own seams, set on a standalone Context ─────────────────────────.
-//
-// A dispatched Context is seeded from the Program; these setters serve a Context built by
-// [NewContextFor]. Called during a run, a change applies to the rest of that run only.
+// ── rotini's own settings, set on a standalone Context ──────────────────────.
 
 // WithInputSettings supplies the generated descriptor [Context.Inputs] reads from. See
 // [Program.WithInputSettings]. It is for a Context built with [NewContextFor]; during a run,
@@ -630,7 +654,7 @@ func (rtx *Context) WithParser(parser *Parser) *Context {
 	return rtx
 }
 
-// ── rotini's own seams, as the handler sees them ────────────────────────────.
+// ── rotini's own settings, as the handler sees them ─────────────────────────.
 
 // Help returns the help page of [Context.Command] from [Program.WithHelp], as a generated
 // --help prints it, or "" when there is none. A cascading hook gets its own command's page.

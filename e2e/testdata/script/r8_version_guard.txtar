@@ -1,15 +1,11 @@
 # R8 — the upgrade path: what the version guard does, and what it deliberately does not.
 #
-# Audit F-05. The guard used to demand EXACT equality between a document's `version:` and the
-# binary's, which meant every rotini patch release invalidated every spec and conf in every
-# project until each was hand-edited. This script is the rule that replaced it: `version:` is
-# a MINIMUM, and only a binary that is older, or a different major, is an error.
+# A document's `version:` is a minimum: only a binary that is older, or of a different major,
+# is an error.
 #
-# This module requires rotini at 1.2.3, so a rotini built through it REPORTS 1.2.3 — build
-# info names the module version, and that outranks a -ldflags stamp. The harness's shared
-# binary is deliberately versionless (it must agree with what `go tool rotini` reports), and
-# this script's whole subject is the relationship between two version numbers, so it asks for
-# one it can reason about.
+# This module requires rotini at 1.2.3, so a rotini built through it reports 1.2.3 (build info
+# names the module version, and that outranks a -ldflags stamp). The harness's shared binary
+# is versionless, so this script builds its own.
 
 gomodinit example.com/ver v1.2.3
 exec go build -o rotini123$exe github.com/go-rotini/rotini/cmd/rotini
@@ -21,12 +17,12 @@ stdout '1\.2\.3'
 # Exactly the binary's version: accepted, the obvious case.
 exec ./rotini123$exe validate same.spec.yaml --config same.conf.yaml
 
-# OLDER than the binary, same major: accepted. This is the whole point — a project pinned at
+# Older than the binary, same major: accepted, so a project pinned at
 # 1.0.0 keeps working when the tool moves to 1.2.3, with no edit to any document.
 exec ./rotini123$exe validate older.spec.yaml --config older.conf.yaml
 ! stderr .
 
-# NEWER than the binary: rejected, because this rotini may not know the keys the document
+# Newer than the binary: rejected, because this rotini may not know the keys the document
 # uses, and a schema error about an "unknown property" would blame the wrong thing.
 ! exec ./rotini123$exe validate newer.spec.yaml --config same.conf.yaml
 stderr 'older than the document requires'

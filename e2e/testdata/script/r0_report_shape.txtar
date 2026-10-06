@@ -1,0 +1,21 @@
+# R0 — init, generate and validate report success the same way.
+#
+# Each prints the spec it read, the conf beside it, and a timing line, and nothing else on
+# success. A "next steps" block or a count added to one of them would drift the three apart;
+# this script holds them to one shape. init prints the paths it wrote; generate and validate
+# print the ones they were given, so a leading ./ is kept. Paths are the OS's own, so the
+# separator is \ on Windows.
+
+gomodinit example.com/demo
+
+exec rotini init demo
+stdout '\Aspec: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.spec\.yaml\nconf: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.conf\.yaml\n\[\d\d:\d\d:\d\d\] \S+\n\z'
+! stderr .
+
+exec rotini generate ./cmd/demo/.rotini.spec.yaml --config ./cmd/demo/.rotini.conf.yaml
+stdout '\Aspec: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.spec\.yaml\nconf: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.conf\.yaml\n\[\d\d:\d\d:\d\d\] \S+\n\z'
+! stderr .
+
+exec rotini validate ./cmd/demo/.rotini.spec.yaml --config ./cmd/demo/.rotini.conf.yaml
+stdout '\Aspec: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.spec\.yaml\nconf: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.conf\.yaml\n\[\d\d:\d\d:\d\d\] \S+\n\z'
+! stderr .

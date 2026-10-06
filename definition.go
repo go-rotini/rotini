@@ -8,6 +8,12 @@ import (
 // Go literal; the runtime parses argv, dispatches and completes against it. Help pages are
 // rendered at codegen and supplied through [Program.WithHelp]. The Definition types are data
 // only, with no behavior.
+//
+// A Definition is the runtime form of the command tree `rotini generate` produces from your
+// spec. Building one by hand is supported for tests ([NewContextFor]) and for tooling; it is
+// not a way to define a CLI, which the spec is. Fields are added as the spec gains keys,
+// including in minor releases, so construct values with field names
+// (rotini.FlagDef{Name: "verbose"}), not positionally.
 type Definition struct {
 	Name             string
 	Handler          string // ProgramHandlers method for the root command, e.g. "Rotini"
@@ -21,6 +27,19 @@ type Definition struct {
 	PluginPath       string              // extra directory searched for BOTH declared and discovered plugins
 	Passthrough      bool                // every token after the program name is a raw positional (no flag parsing)
 	Output           *OutputDef          // what the root command writes to stdout (nil = not declared)
+
+	// CompletionMessages turns on completion messages, when the conf's completion feature
+	// declares `messages`; nil leaves them off. See [Context.AddCompletionMessage].
+	CompletionMessages *CompletionMessagesDef
+}
+
+// CompletionMessagesDef is how completion messages are switched at run time, from the conf's
+// completion feature.
+type CompletionMessagesDef struct {
+	// Env is the environment variable the conf's `messages_env` names, "" for none. Set to
+	// 0, false or off, in any case, it hides every message. [Program.WithCompletionMessages]
+	// replaces this check.
+	Env string
 }
 
 // FlagGroupKind names a cross-flag presence rule. The value is the spec's `kind`.
@@ -96,9 +115,8 @@ type CommandDef struct {
 
 // Constraints carries the validation bounds a spec may declare on a flag or argument. The
 // parser enforces them after reconciliation, so a value supplied via env or config is checked
-// too. The numeric bounds are presence-carrying pointers — nil is unset, so `minimum: 0` is a
-// real, enforced bound. The length and count bounds keep the zero-sentinel convention: a 0
-// minimum is vacuous and a 0 maximum is not expressible.
+// too. The numeric bounds are pointers, nil meaning unset, so `minimum: 0` is an enforced bound.
+// For the length and count bounds 0 means unset, so a maximum of 0 cannot be expressed.
 type Constraints struct {
 	Minimum          *float64 // inclusive numeric lower bound; nil = unset
 	Maximum          *float64 // inclusive numeric upper bound; nil = unset
@@ -113,7 +131,7 @@ type Constraints struct {
 	PatternMessage   string   // what a Pattern failure tells the user, in place of the regex; "" = show the regex
 }
 
-// Ptr returns a pointer to v, for the presence-carrying [Constraints] bounds:
+// Ptr returns a pointer to v, for the numeric [Constraints] bounds:
 // Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0. Prefer the built-in new(v);
 // go fix inlines Ptr to it.
 //
@@ -172,10 +190,15 @@ type FlagDef struct {
 	Deprecated string
 	// Negatable adds a "--no-<x>" form for every long identifier of a bool flag, which sets
 	// it false, overriding a true default, config value or environment variable.
-	Negatable  bool
-	DottedKeys bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
-	KeyPaths   []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
-	From       []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
+	Negatable bool
+	// ShortCircuit marks a flag that replaces the command's normal run (--help, --version):
+	// when it is set on the command line, every declared requirement of the chain is waived,
+	// so [Context.Inputs] succeeds and the handler decides what to do. Errors reading the
+	// command line are still reported.
+	ShortCircuit bool
+	DottedKeys   bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
+	KeyPaths     []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
+	From         []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
 	// Complete is the declarative shell-completion hint for this flag's value (spec
 	// complete:). The zero value means no hint.
 	Complete Completion
@@ -195,6 +218,10 @@ type Completion struct {
 	// Extensions narrows Kind "file" to these suffixes, written without a dot
 	// ("yaml", "json"). Empty offers every file.
 	Extensions []string
+	// Message is a line shown when the input's value is being completed and there is nothing
+	// to offer, written by the author in the spec (`complete.message`) or derived from its
+	// summary. It is set only when completion messages are on.
+	Message string
 }
 
 // ArgDef describes a single positional argument of a command. Variadic is true

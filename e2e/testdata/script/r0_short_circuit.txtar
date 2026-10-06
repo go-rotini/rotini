@@ -1,0 +1,119 @@
+# R0 — short-circuit flags: --help and --version replace the run.
+#
+# The root's --help and --version are short_circuit (and --help cascading), the shape
+# `rotini init` seeds. Setting one on the command line waives every declared requirement of the
+# chain, so `rtx.Inputs` succeeds and the root's single CascadingPreRun answers it for every
+# command; sub-command stubs carry no help code of their own. What cannot be read (an unknown
+# flag) is still an error, and without the flag every requirement still holds.
+
+gomodinit example.com/sc
+
+exec rotini generate cmd/sc/.rotini.spec.yaml --config cmd/sc/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o sc$exe ./cmd/sc
+
+# The root stub answers --help and --version once, in its CascadingPreRun; the sub-command stub
+# reads its inputs and nothing else.
+grep 'func \(\*scHandler\) CascadingPreRun' internal/cmd/sc/sc.go
+! grep 'NoCascadingPreRun' internal/cmd/sc/sc.go
+! grep 'ArgvInputs' internal/cmd/sc/sc_grab.go
+
+# --help wins over a missing required argument and an invalid enum value, in both spellings.
+exec ./sc$exe grab --help
+stdout 'a command with a required argument'
+! stderr .
+exec ./sc$exe grab -h
+stdout 'a command with a required argument'
+exec ./sc$exe grab --tone loud --help
+stdout 'a command with a required argument'
+
+# The cascading -h is listed on the sub-command's page.
+stdout 'Global Flags:'
+stdout '-h, --help'
+
+# --version is answered from any command.
+exec ./sc$exe grab --version
+stdout '^0\.0\.0$'
+exec ./sc$exe --version
+stdout '^0\.0\.0$'
+
+# Without the flag, every requirement still holds.
+wantexit 1 ./sc$exe grab
+stderr 'missing required input: <what>'
+wantexit 1 ./sc$exe grab thing --tone loud
+stderr 'invalid value "loud"'
+
+# The command runs normally when given what it needs.
+exec ./sc$exe grab thing
+stdout 'thing'
+
+# What cannot be read is still an error, --help or not.
+wantexit 1 ./sc$exe grab --help --bogus
+stderr 'unknown flag "--bogus"'
+wantexit 1 ./sc$exe --bogus
+stderr 'unknown flag "--bogus"'
+
+# Input that can't be read is still an error with --help: a value that isn't a number, and
+# more positionals than the command takes.
+wantexit 1 ./sc$exe grab --help --count abc
+stderr '--count'
+wantexit 1 ./sc$exe grab one two --help
+stderr 'accepts at most 1 argument'
+
+# --help=false is not a short circuit.
+wantexit 1 ./sc$exe grab --help=false
+stderr 'missing required input'
+
+# Completion offers nothing after a short-circuit flag, not even file names.
+exec ./sc$exe __complete grab --help ''
+stdout '^:rotini:none$'
+! stdout 'tone'
+
+-- cmd/sc/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: sc
+  summary: short-circuit flags
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [-v, --version]
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: grab
+      summary: a command with a required argument
+      arguments:
+        - name: what
+          summary: what to grab
+          schema: { type: string, required: true }
+      flags:
+        - name: tone
+          summary: how to grab it
+          identifiers: [--tone]
+          schema: { type: string, enum: [soft, firm] }
+        - name: count
+          summary: how many
+          identifiers: [--count]
+          schema: { type: int }
+-- cmd/sc/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/sc/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/sc/zz_sc.go
+      package: sc
+  features:
+    - type: help
+      enabled: true
+validate:
+  fail: collect
