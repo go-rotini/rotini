@@ -4,7 +4,7 @@ package codegen
 
 // The conf controls what `rotini generate` writes and where: the Go packages, the documentation and completion features, the JSON Schemas and the contract document. It also sets how `rotini validate` reports problems.
 type Conf struct {
-	// Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.2.0/schema-conf.json — note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL.
+	// Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.3.0/schema-conf.json — note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL.
 	Schema string `json:"$schema,omitempty"`
 	// Controls `rotini generate`: the generated packages and features. When omitted entirely, the defaults apply: one generated file under internal/cmd/<root>, and every feature off.
 	Generate *GenerateConfig `json:"generate,omitempty"`

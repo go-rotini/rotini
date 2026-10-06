@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Serves this checkout as github.com/go-rotini/rotini@$ROTINI_DEMO_VERSION (default v1.2.0) from a
+# Serves this checkout as github.com/go-rotini/rotini@$ROTINI_DEMO_VERSION (default v1.3.0) from a
 # throwaway file-based module proxy, so the demo tapes can run the real `go get ...@latest`
 # commands before the version is published, and `rotini init` seeds that version. Prints the
 # environment to export; everything lives in one temp dir.
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 src=$(cd "$(dirname "$0")/../.." && pwd)
-version=${ROTINI_DEMO_VERSION:-v1.2.0}
+version=${ROTINI_DEMO_VERSION:-v1.3.0}
 work=$(mktemp -d)
 proxy="$work/proxy/github.com/go-rotini/rotini/@v"
 stage="$work/stage/github.com/go-rotini/rotini@$version"

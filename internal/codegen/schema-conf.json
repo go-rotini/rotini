@@ -8,7 +8,7 @@
   "properties": {
     "$schema": {
       "type": "string",
-      "description": "Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.2.0/schema-conf.json \u2014 note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL."
+      "description": "Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.3.0/schema-conf.json \u2014 note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL."
     },
     "version": {
       "type": "string",

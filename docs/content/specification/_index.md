@@ -35,7 +35,7 @@ The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/
 
 `string`
 
-Optional URI identifying the rotini spec schema, for editor tooling only: rotini never fetches it, and the version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.2.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. `rotini init` seeds this key (`$schema: ./.rotini-schema.spec.json`), and it works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place.
+Optional URI identifying the rotini spec schema, for editor tooling only: rotini never fetches it, and the version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.3.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. `rotini init` seeds this key (`$schema: ./.rotini-schema.spec.json`), and it works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place.
 
 
 ## Command
