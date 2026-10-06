@@ -17,6 +17,8 @@
          .Description .Invocation .Usage/.UsageDerived .CommandGroups[] .Arguments[]
          .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Output .ExitStatus[]
          .Examples[] .SeeAlso[]   (.Output is nil when the command declares no output)
+         A flag row also carries .Env (its environment variables, in lookup order) and
+         .ConfigKey (its config key, set only when the command reads config files).
        HELPERS: roff, roffBlock, roffLines, roffArg, join, upper, lower, title, trim,
                 trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
                 hasPrefix, hasSuffix, first, last. */ -}}
@@ -24,7 +26,9 @@
 {{- define "flag"}}.TP
 {{range $i, $id := .Identifiers}}{{if $i}}, {{end}}\fB{{roff $id}}\fR{{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
-{{end -}}
+{{if or .Env .ConfigKey}}.br
+{{with .Env}}env: {{range $i, $v := .}}{{if $i}}, {{end}}\fB{{roff $v}}\fR{{end}}{{end}}{{if and .Env .ConfigKey}} \(md {{end}}{{with .ConfigKey}}config: \fB{{roff .}}\fR{{end}}
+{{end}}{{end -}}
 .TH {{roffArg (upper .PageName)}} {{.Section}} "{{.Date}}" {{roffArg .Source}} "User Commands"
 .SH NAME
 {{roff .PageName}}{{with .Summary}} \- {{roff .}}{{end}}

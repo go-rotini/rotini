@@ -160,6 +160,18 @@ $ TODO_DEFAULTS_PRIORITY=low ./todo add "buy milk" -p normal
 added "buy milk" (priority normal)
 {{< /code >}}
 
+Help shows both sources on the line under the flag, the variable first because it wins. The
+config key appears only for a command that reads a config file:
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ ./todo add --help
+...
+Flags:
+  -p, --priority string    how urgent (default normal) [low|normal|high]
+                           env: TODO_DEFAULTS_PRIORITY · config: defaults.priority
+  --tag []string           a label (repeatable)
+{{< /code >}}
+
 Use `variable:` to name the environment variable exactly instead of deriving it. Config files can
 also be found by walking up from the working directory (`strategy: walk-up`) or read from a fixed
 `path:`; see [`config_files`](/specification#config_files).
@@ -373,8 +385,8 @@ Each response is one call:
 
 - **Point at help**: print a hint built from `rtx.CommandPath()`, or the whole page with
   `rtx.Help()`.
-- **Suggest a correction**: `rotini.NewSuggestor().For(err)` ranks the `Token` against the
-  `Candidates` and returns the nearest. Rotini never prints a suggestion itself.
+- **Suggest a correction**: `rotini.NewSuggestor().For(err)` returns the nearest candidates; see
+  [suggesting a correction](#suggesting-a-correction).
 - **Choose the exit code**: `rtx.HaltWithCode(n)`. The first non-zero code wins, and the default
   reporter keeps it. `rtx.HaltWithCode` records no error, so print the error yourself (as the
   first branch does) or record it with `rtx.RecordError` for the reporter to print.
@@ -387,6 +399,42 @@ the command's `exit_status:`.
 
 Handle an error in the handler when the response depends on the command. For one policy across
 the whole program, handle it in a reporter.
+
+#### Suggesting a correction
+
+When a user mistypes something from a fixed list, the error carries the word they typed and the
+words it could have been:
+
+- a flag, a command, or a value outside a flag's or argument's `enum`: a `*rotini.ParseError`,
+  in `Token` and `Candidates`;
+- an environment variable or config value outside its `enum`: a `*rotini.InputError`, in
+  `Token` and `Candidates`;
+- a mistyped sub-command at a command with `plugin_discovery`: a `*rotini.PluginError`, in
+  `Name` and `Candidates`. It reaches the reporter, not a handler.
+
+`rotini.NewSuggestor().For(err)` reads them from any of the three and returns the nearest
+candidates, closest first, or nothing when none is close. The wording is yours:
+
+{{< code title="in a handler or reporter" language="golang" open="true" collapsible="false" copy="true" >}}
+if hits := rotini.NewSuggestor().For(err); len(hits) > 0 {
+	fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", hits[0])
+}
+{{< /code >}}
+
+To rank them your own way, read them with `rotini.SuggestionFacts(err)`, which returns the
+typed word, the candidates and whether `err` carried them:
+
+{{< code title="your own ranking" language="golang" open="true" collapsible="false" copy="true" >}}
+if typed, candidates, ok := rotini.SuggestionFacts(err); ok {
+	if best := closest(typed, candidates); best != "" {
+		fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
+	}
+}
+{{< /code >}}
+
+`WithMaxResults(n)` caps how many suggestions `For` returns, and `WithMinScore(s)` sets how close
+one must be, from 0 to 1. `Closest(typed, candidates)` returns the single nearest. A secret
+input's value is never offered for ranking. Rotini never prints a suggestion itself.
 
 To give each category its own exit code, write a reporter. A reporter replaces the default
 entirely: it prints only what it prints, and the exit code is only what it sets with `rtx.Exit`,

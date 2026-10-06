@@ -9,6 +9,8 @@
          .Usage/.UsageDerived .CommandGroups[] .Arguments[] .Flags[] .Environment[]
          .Configuration[] .Cascading[] .Examples[] .Output .ExitStatus[] .SeeAlso[]
          (.Output is nil when the command declares no output)
+         A flag row also carries .Env (its environment variables, in lookup order) and
+         .ConfigKey (its config key, set only when the command reads config files).
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
 # {{.Invocation}}
@@ -39,12 +41,12 @@
 {{end -}}
 {{- range .FlagGroups}}## {{if .Title}}{{.Title}}{{else}}Flags{{end}}
 
-{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
+{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}{{if or .Env .ConfigKey}};{{with .Env}} env {{range $i, $v := .}}{{if $i}}, {{end}}`{{$v}}`{{end}}{{end}}{{if and .Env .ConfigKey}},{{end}}{{with .ConfigKey}} config `{{.}}`{{end}}{{end}}
 {{end}}
 {{end -}}
 {{- with .Cascading}}## Inherited Flags
 
-{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
+{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}{{if or .Env .ConfigKey}};{{with .Env}} env {{range $i, $v := .}}{{if $i}}, {{end}}`{{$v}}`{{end}}{{end}}{{if and .Env .ConfigKey}},{{end}}{{with .ConfigKey}} config `{{.}}`{{end}}{{end}}
 {{end}}
 {{end -}}
 {{- with .Environment}}## Environment

@@ -65,6 +65,11 @@ type PluginError struct {
 	Cause   error           // the underlying OS/exec error, reachable via errors.As (may be nil)
 	Msg     string          // the human-readable failure
 
+	// Candidates are the names the dispatching command knows (its sub-commands, their aliases
+	// and its declared plugins), set when a discovered token matched no binary, so a mistyped
+	// sub-command can be ranked against them; nil otherwise. Name is the token.
+	Candidates []string
+
 	cat Category // how CategoryOf classifies it (CategoryNone for a timeout)
 }
 
@@ -104,16 +109,22 @@ type PluginDispatch struct {
 // the run context and any timeout, and returning the plugin's exit code. rotini's own dispatch
 // failures are recorded as errors and routed through the reporter; the plugin's non-zero exit
 // passes through unchanged.
-func (p *Program) execPlugin(ctx context.Context, rtx *Context, r *PluginDispatch) (int, error) {
+// chain is the resolved path; its last command is the one that dispatched, whose names are a
+// discovered token's candidates.
+func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command, r *PluginDispatch) (int, error) {
 	path, err := resolvePluginBinary(r.Def.Binary, r.Dir)
 	if err != nil {
 		cat := CategoryInternal
+		var candidates []string
 		if r.Discovered {
 			cat = CategoryUsage
+			if len(chain) > 0 {
+				candidates = childCommandNames(chain[len(chain)-1])
+			}
 		}
 		return p.pluginFailure(ctx, rtx, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginNotFound,
-			Cause: err, Msg: err.Error(), cat: cat,
+			Cause: err, Msg: err.Error(), Candidates: candidates, cat: cat,
 		})
 	}
 

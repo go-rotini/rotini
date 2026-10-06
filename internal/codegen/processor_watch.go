@@ -73,6 +73,12 @@ func watchLoop(ctx context.Context, specPath, confPath string, pass func() (stri
 	}
 }
 
+// reportTiming is the last line of every init, generate and validate report: the wall-clock
+// time the run started and how long it took, as "[15:04:05] 2.79ms".
+func reportTiming(start time.Time) string {
+	return fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start)))
+}
+
 // roundDuration rounds d to three significant figures for a compact String() (312ns,
 // 45.7µs, 2.79ms, 1.23s).
 func roundDuration(d time.Duration) time.Duration {

@@ -136,7 +136,8 @@ func (p *Program) defaultReporter(_ context.Context, rtx *Context, out Outcome) 
 //
 // Infos and successes are written the same way, as {"info":{…}} and {"success":{…}}, rather
 // than to stdout. A field is present only when rotini knows it: kind, flag and token come from
-// a [*ParseError], kind from a [*PluginError] too. Each line's shape is described by
+// a [*ParseError], kind from a [*PluginError] too, and token from any error [SuggestionFacts]
+// reads. Each line's shape is described by
 // schema-error.json in the rotini repository, and the contract document includes it.
 //
 // When structured reports false, or is nil, it reports as the default reporter does. Either way
@@ -188,6 +189,11 @@ func reportStructured(rtx *Context, out Outcome) {
 			}
 		} else if pe, ok := errors.AsType[*PluginError](err); ok {
 			body["kind"] = pe.Kind.String()
+		}
+		if _, has := body["token"]; !has {
+			if token, _, ok := SuggestionFacts(err); ok {
+				body["token"] = token
+			}
 		}
 		return line
 	}

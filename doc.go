@@ -177,12 +177,14 @@
 // recon, decode or OS internals and no secret values:
 //
 //   - [*ParseError] — the argv channel. [ParseError.Kind] identifies the failure; Token and
-//     Candidates are what a [Suggestor] turns into "did you mean".
+//     Candidates are the facts a "did you mean" needs.
 //   - [*InputError] — the env, config, stdin and flag-fallback channels, carrying the channel,
-//     the input and a message, with the recon cause reachable via errors.As.
+//     the input and a message, with the recon cause reachable via errors.As. An env or config
+//     value outside its enum also carries Token and Candidates.
 //   - [*PluginError] — a plugin dispatch, recorded as an error. A missing discovered plugin is
 //     a usage error; a missing declared plugin, or a plugin that cannot start, is internal; a
-//     timeout is neither.
+//     timeout is neither. A missing discovered plugin carries Candidates: the names the
+//     command knows, to rank its Name against.
 //   - [*DependencyError] and [*PanicError] arrive as panics, as does a [*WiringError] from the
 //     program's wiring. [Context.Inputs] returns one [*WiringError] as an error instead: config
 //     inputs requested on a program built without an [InputSettings].
@@ -262,8 +264,9 @@
 //     a hand-built [InputLayer] merged with rotini's is checked the same way by
 //     [InputReport.Validate].
 //
-//   - [Suggestor] turns a [*ParseError]'s rejected token and candidates into "did you mean"
-//     suggestions; [Suggestor.For] does it in one call.
+//   - [SuggestionFacts] reads the rejected token and its candidates from any error that carries
+//     them, and [Suggestor] ranks them into "did you mean" suggestions; [Suggestor.For] does
+//     both in one call.
 //
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve and run phases.
 //     [FlagValueCompleter] and [ArgValueCompleter] supply dynamic completion, and

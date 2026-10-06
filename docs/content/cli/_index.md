@@ -25,7 +25,8 @@ Error: unknown command "genrate" for "rotini"; did you mean "generate"?
 {{< /code >}}
 
 The companion CLI opts into these suggestions with rotini's `Suggestor`. A CLI you build with
-rotini suggests nothing unless you opt in the same way.
+rotini suggests nothing unless you opt in the same way; see
+[suggesting a correction](/docs#suggesting-a-correction).
 
 ## rotini
 

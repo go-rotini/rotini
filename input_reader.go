@@ -1488,8 +1488,10 @@ func checkChannelEnum(channel, label string, enum []string, ignoreCase bool, val
 	}
 	for _, v := range vals {
 		if !enumHas(enum, v, ignoreCase) {
-			return usageBind(channel, label, fmt.Sprintf("invalid value %q for %s (one of: %s)",
+			e := usageBind(channel, label, fmt.Sprintf("invalid value %q for %s (one of: %s)",
 				redactValue(v, secret), label, strings.Join(enum, ", ")), nil)
+			e.Token, e.Candidates = redactValue(v, secret), enum
+			return e
 		}
 	}
 	return nil
@@ -1636,6 +1638,12 @@ type InputError struct {
 	Input   string // the offending input key/path, when a single one is known (else "")
 	Msg     string // a clean, non-leaky, rotini-owned message
 	Cause   error  // the underlying recon/decode/OS error, reachable via errors.As (may be nil)
+
+	// Token and Candidates are set when a value is not one of an env or config input's enum:
+	// the rejected value ("[redacted]" for a secret input) and the allowed values. They are
+	// empty for any other failure. [SuggestionFacts] reads them.
+	Token      string
+	Candidates []string
 
 	usage bool // true → CategoryUsage (ErrUsage); false → CategoryInternal
 }

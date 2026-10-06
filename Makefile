@@ -3,9 +3,10 @@
 #
 #   FuzzParse          the argv grammar
 #   FuzzSuggest        the suggestion ranking
+#   FuzzSuggestionFacts reading a token and candidates from any error tree
 #   FuzzValidateSpec   the spec loader: four codecs, schema, lint rules, source locator
 #   FuzzValidateConf   the same for the conf
-FUZZ_TARGETS := .:FuzzParse .:FuzzSuggest ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf
+FUZZ_TARGETS := .:FuzzParse .:FuzzSuggest .:FuzzSuggestionFacts ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf
 
 # The version `rotini-build` stamps into the dogfood binary: the checkout's own, from git.
 # v1.2.0 on a tagged commit; v1.2.0-3-gabc1234 between tags, which rotini reads as the last

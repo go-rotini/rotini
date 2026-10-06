@@ -1,7 +1,6 @@
 package rotini
 
 import (
-	"errors"
 	"slices"
 	"sort"
 	"strings"
@@ -28,6 +27,9 @@ const defaultMinScore = 0.75
 //			}
 //		}
 //	}
+//
+// For reads its token and candidates with [SuggestionFacts]; a program with its own ranking
+// calls SuggestionFacts directly instead.
 //
 // Matching is always case-insensitive. A configured Suggestor is safe for concurrent use;
 // finish configuring it before sharing it across goroutines.
@@ -59,18 +61,57 @@ func (s *Suggestor) WithMaxResults(n int) *Suggestor {
 	return s
 }
 
-// For returns the suggestions for the token a [*ParseError] rejected, ranked against its
-// Candidates, nearest first. It returns nil for an error that is not a [*ParseError], one
-// carrying no Token or no Candidates, and one whose token is near nothing.
+// For returns the suggestions for the token err rejected, ranked against its candidates,
+// nearest first. It reads them with [SuggestionFacts], so it works for a [*ParseError], an
+// [*InputError] and a [*PluginError]. It returns nil when err carries no facts and when the
+// token is near nothing.
 func (s *Suggestor) For(err error) []string {
 	if s == nil {
 		return nil
 	}
-	var pe *ParseError
-	if !errors.As(err, &pe) || pe.Token == "" || len(pe.Candidates) == 0 {
+	token, candidates, ok := SuggestionFacts(err)
+	if !ok {
 		return nil
 	}
-	return s.Suggest(pe.Token, pe.Candidates)
+	return s.Suggest(token, candidates)
+}
+
+// SuggestionFacts returns the token err rejected and the candidates it was checked against: a
+// mistyped flag, command or enum value ([*ParseError]), an env or config value outside its enum
+// ([*InputError]), or a mistyped sub-command at a command with plugin discovery
+// ([*PluginError], whose Name is the token). It searches err's tree in order, through wrapped
+// and joined errors, and returns the first error that carries both. ok is false when none
+// does; an error whose token was redacted, because the input is secret, never counts. It ranks
+// nothing: pass the result to a [Suggestor] or to a ranking of your own.
+//
+//	if token, candidates, ok := rotini.SuggestionFacts(err); ok {
+//		if best := closest(token, candidates); best != "" {
+//			fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
+//		}
+//	}
+func SuggestionFacts(err error) (token string, candidates []string, ok bool) {
+	switch e := err.(type) { //nolint:errorlint // inspects this node; the walk below reaches wrapped ones in order
+	case *ParseError:
+		token, candidates = e.Token, e.Candidates
+	case *InputError:
+		token, candidates = e.Token, e.Candidates
+	case *PluginError:
+		token, candidates = e.Name, e.Candidates
+	}
+	if token != "" && token != redactValue(token, true) && len(candidates) > 0 {
+		return token, candidates, true
+	}
+	switch u := err.(type) { //nolint:errorlint // the unwrap step of that walk
+	case interface{ Unwrap() error }:
+		return SuggestionFacts(u.Unwrap())
+	case interface{ Unwrap() []error }:
+		for _, inner := range u.Unwrap() {
+			if token, candidates, ok := SuggestionFacts(inner); ok {
+				return token, candidates, true
+			}
+		}
+	}
+	return "", nil, false
 }
 
 // Suggest ranks candidates by nearness to input, nearest first, keeping those at or above the

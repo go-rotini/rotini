@@ -91,7 +91,7 @@ func (p *Processor) Initialize(name, format string, force bool) (Initialized, er
 	return Initialized{
 		Spec:   displayPath(specPath),
 		Conf:   displayPath(confPath),
-		Result: fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start))),
+		Result: reportTiming(start),
 	}, nil
 }
 
@@ -291,7 +291,7 @@ func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPat
 		if onWarnings != nil && len(warnings) > 0 {
 			onWarnings(warnings)
 		}
-		return fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start))), err
+		return reportTiming(start), err
 	}
 	return runOrWatch(resolvedSpec, resolvedConf, watch, timed, onResult)
 }

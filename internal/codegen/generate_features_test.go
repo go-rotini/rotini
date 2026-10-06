@@ -560,7 +560,7 @@ func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
 		{name: "old", aliases: []string{"o"}, deprecated: "use new"},
 		{name: "only", aliases: []string{"legacy"}, deprecatedIdentifiers: []string{"legacy"}, deprecated: "use only"},
 	}
-	rows := buildHelpData("app", cmdHelp{}, nil, children, nil, nil, "").CommandGroups[0].Commands
+	rows := buildHelpData("app", cmdHelp{}, nil, children, nil, nil, "", false).CommandGroups[0].Commands
 	want := []templateDocCommandRow{
 		{Name: "api-resources", Aliases: []string{"ar"}},
 		{Name: "old", Aliases: []string{"o"}, Deprecated: "use new"},
@@ -583,7 +583,7 @@ func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
 		// Every spelling deprecated: listed and marked.
 		{FlagInput{Name: "x", Identifiers: []string{"--x"}, DeprecatedIdentifiers: []string{"--x"}, Deprecated: "gone soon"}, "--x", "gone soon"},
 	} {
-		row := flagRow(tt.f)
+		row := flagRow(tt.f, "")
 		if strings.Join(row.Identifiers, ",") != tt.ids || row.Deprecated != tt.message {
 			t.Errorf("flag %s row = %v %q, want %s %q", tt.f.Name, row.Identifiers, row.Deprecated, tt.ids, tt.message)
 		}

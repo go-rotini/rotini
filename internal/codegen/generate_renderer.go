@@ -502,7 +502,11 @@ type templateDocFlagRow struct {
 	Implicit    string // the value a bare flag takes (implicit_value); its identifier reads --x[=<type>]
 	Enum        []string
 	Deprecated  string
-	Group       string // the flag's `group` (buckets it in the Flags section)
+	Group       string   // the flag's `group` (buckets it in the Flags section)
+	Env         []string // the env fallback variables, in lookup order (first preferred); nil for an argv-only flag
+	ConfigKey   string   // the config fallback key; "" for an argv-only flag, or when the page's command reads no config files
+
+	key string // the config fallback key whether or not the page reads config files
 }
 
 // templateDocFlagGroup is one bucket of flags in the Flags section. Title is the `group` value;

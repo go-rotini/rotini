@@ -93,6 +93,15 @@ stderr 'the plugin path'
 stderr 'next to the binary'
 stderr 'the plugin path'
 
+# ── a mistyped command at a discovering command ─────────────────────────────
+# "stauts" is no binary, so it fails as a discovered plugin not found. The error still carries
+# what the host knows (its commands and declared plugins), so the host's reporter can suggest.
+# Rotini printed none of this; the reporter below did.
+wantexit 2 bin/host$exe stauts
+stderr 'host: did you mean "status"\?'
+! exec bin/host$exe nosuchthing
+! stderr 'did you mean'
+
 # ── the timeout ──────────────────────────────────────────────────────────────
 # Found, started, ran long: neither party's fault. CategoryNone, which the host's reporter
 # maps to 75 (EX_TEMPFAIL) because it might work next time.
@@ -154,6 +163,7 @@ package host
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/go-rotini/rotini"
 )
@@ -169,6 +179,8 @@ type hostHandler struct{ base }
 
 func (*hostHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 
+var suggestor = rotini.NewSuggestor()
+
 // Reporter maps rotini's categories onto this host's exit codes. A timeout is CategoryNone, so
 // it is matched on the typed Kind rather than the category.
 func Reporter(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
@@ -176,6 +188,9 @@ func Reporter(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
 	for _, e := range out.Errors {
 		if _, err := rtx.Stderr.Write([]byte("host: " + e.Error() + "\n")); err != nil {
 			continue
+		}
+		if hits := suggestor.For(e); len(hits) > 0 {
+			fmt.Fprintf(rtx.Stderr, "host: did you mean %q?\n", hits[0])
 		}
 		if c := codeFor(e); c > worst {
 			worst = c

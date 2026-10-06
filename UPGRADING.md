@@ -143,6 +143,33 @@ move to the shape a fresh `rotini init` writes:
 
 A command that declares its own help flag keeps its own check, in both shapes.
 
+## Flag sources in help, man and markdown (1.3)
+
+A flag with an environment or config fallback (`key:` or `variable:`) now has a line under it
+naming the variables it reads, in lookup order, and its config key when the command reads a
+config file:
+
+```
+  -r, --replicas int    how many instances (default 1)
+                        env: CFGCTL_DEPLOY_REPLICAS · config: deploy.replicas
+```
+
+Regenerating adds it to every rendered page. If you had named the variable in the flag's
+summary so users could find it, you can drop that now.
+
+A template you seeded with `template: true` is yours and is not changed. Its flag rows already
+carry `.Env` and `.ConfigKey`; to show them, add this after the flag line in the Flags and
+Global Flags sections of `help.txt.tmpl`:
+
+```
+{{if or .Env .ConfigKey}}  	{{with .Env}}env: {{join . ", "}}{{end}}{{if and .Env .ConfigKey}} · {{end}}{{with .ConfigKey}}config: {{.}}{{end}}
+{{end}}
+```
+
+The built-in `man.txt.tmpl` and `markdown.md.tmpl` show the same; a fresh `rotini init` with
+`template: true` in a scratch directory seeds copies to compare against. The contract document's
+flags gain `env` and `config_key` in the same way.
+
 ## Upgrading across a major version
 
 A major release may remove things that were deprecated in the release line before it. The

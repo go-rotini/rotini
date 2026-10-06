@@ -19,7 +19,7 @@
             "kind": { "type": "string", "description": "What went wrong, when rotini's typed error says: a parse failure's kind (unknown-flag, invalid-value, missing-required, …) or a plugin failure's (binary-not-found, spawn-failed, timeout)." },
             "command": { "type": "string", "description": "The command the error happened in, as typed: \"taskr list\"." },
             "flag": { "type": "string", "description": "The flag involved, by the identifier the user typed." },
-            "token": { "type": "string", "description": "The command-line token or value at fault." },
+            "token": { "type": "string", "description": "The token or value at fault: a command-line token, an environment or config value outside its allowed values, or a mistyped plugin command. A secret value is redacted." },
             "exit_code": { "type": "integer", "description": "The code the run exits with, decided as the default reporter decides it." }
           }
         }

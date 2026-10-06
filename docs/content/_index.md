@@ -32,7 +32,7 @@ title: "rotini"
 | **Errors and exit codes** | Consistent `Error:` messages and a non-zero exit code. Every error carries a usage or internal category you can map to your own exit codes, and errors can be reported as JSON for scripts. |
 | **Deprecation** | Deprecated commands, aliases and flags keep working and are marked in help. Each use is reported to your code, which decides whether to warn. |
 | **Interrupts and panics** | Ctrl+C and SIGTERM stop the program cleanly, running its teardown, and a second Ctrl+C exits at once. A panic is reported as an error rather than a stack trace. |
-| **Suggestions** | "Did you mean" suggestions for a mistyped command or flag, opt-in. |
+| **Suggestions** | "Did you mean" suggestions for a mistyped command, flag or value, opt-in: [suggesting a correction](/docs#suggesting-a-correction). |
 | **Plugins** | Run separate `<app>-<name>` programs as sub-commands, declared or discovered. A rotini program can also be a plugin for kubectl, Docker or Flux, completing and showing help the way the host does. |
 | **Wrapper commands** | A command that forwards everything after its name untouched to another program. |
 | **Composed CLIs** | Mount one CLI inside another as a sub-command, from the same module or another, while it still builds and ships on its own. |

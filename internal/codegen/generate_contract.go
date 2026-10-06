@@ -63,6 +63,8 @@ type contractFlag struct {
 	Required    bool     `json:"required,omitempty"`
 	Cascading   bool     `json:"cascading,omitempty"`
 	Inherited   bool     `json:"inherited,omitempty"`
+	Env         []string `json:"env,omitempty"`        // fallback variables, in lookup order
+	ConfigKey   string   `json:"config_key,omitempty"` // fallback config key, only when the command reads config files
 	Deprecated  string   `json:"deprecated,omitempty"`
 	Schema      any      `json:"schema"`
 }
@@ -398,6 +400,7 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 	if in == nil {
 		in = &Inputs{}
 	}
+	readsConfig := p.readsConfig(n.path)
 	for _, a := range in.Arguments {
 		if a.Hidden {
 			continue
@@ -414,6 +417,9 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 			Cascading: f.Cascading && !inherited, Inherited: inherited, Deprecated: f.Deprecated,
 			Schema: inputJSONSchema(f.Schema),
 		}
+		// The same names help shows, from the same functions as the generated env tags.
+		row := withConfigKeys([]templateDocFlagRow{flagRow(f, p.envPrefix)}, readsConfig)[0]
+		cf.Env, cf.ConfigKey = row.Env, row.ConfigKey
 		c.Flags = append(c.Flags, cf)
 		param(f.Name, f.Summary, cf.Schema, req)
 	}

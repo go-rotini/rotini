@@ -490,7 +490,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		return p.settle(ctx, rtx)
 	}
 	if res.Plugin != nil {
-		return p.execPlugin(ctx, rtx, res.Plugin)
+		return p.execPlugin(ctx, rtx, res.Chain, res.Plugin)
 	}
 	if len(res.Chain) == 0 {
 		// An empty chain violates the resolver contract.

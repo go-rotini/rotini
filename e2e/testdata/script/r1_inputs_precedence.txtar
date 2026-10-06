@@ -106,6 +106,14 @@ exec ./app$exe --help
 stdout 'APP_BASE_URL'
 stdout 'APP_API_KEY'
 
+# A flag's fallbacks are on the line under it: the variables it reads, then its config key,
+# since this command reads a config file. These are the names the cases above set.
+stdout '^\s+env: APP_SERVER_PORT · config: server\.port$'
+stdout '^\s+env: GITHUB_TOKEN · config: token$'
+stdout '^\s+env: APP_SERVER_SORT_BY · config: server\.sort_by$'
+# An argv-only flag gets no line.
+stdout '--conf string +path to the config file\n +--\[no-\]color'
+
 # A negatable bool expresses the direction a plain bool cannot: turning something OFF for one
 # run when a default or the environment already turned it on. Both forms appear in help as
 # one row.

@@ -144,10 +144,12 @@ field FlagDependency.Requires
 field FlagDependency.When
 field FlagGroup.Flags
 field FlagGroup.Kind
+field InputError.Candidates
 field InputError.Cause
 field InputError.Channel
 field InputError.Input
 field InputError.Msg
+field InputError.Token
 field InputLayer.Name
 field InputLayer.Set
 field InputLayer.Values
@@ -196,6 +198,7 @@ field PluginDispatch.Def
 field PluginDispatch.Dir
 field PluginDispatch.Discovered
 field PluginError.Binary
+field PluginError.Candidates
 field PluginError.Cause
 field PluginError.Kind
 field PluginError.Msg
@@ -228,6 +231,7 @@ func PresenceOf[T any](v T) Presence
 func Ptr[T any](v T) *T
 func StripANSI(text string) string
 func StructuredReporter(structured func(rtx *Context) bool) Reporter
+func SuggestionFacts(err error) (token string, candidates []string, ok bool)
 func UsageError(err error) error
 func WithDependency[T any](dep Dependency[T], value T) Option
 method ArgValueCompleter.CompleteArgValue
