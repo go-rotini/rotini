@@ -58,6 +58,7 @@ stdout '^:rotini:file yaml yml$'
 [exec:fish] stdout 'ENUM: .*json'
 [exec:fish] stdout 'ENUM: .*text'
 [exec:fish] ! stdout ':rotini:'
+[exec:fish] stdout 'CONFIG: .*a\.yaml'
 
 # PowerShell reads a config file under the user's home at startup, and testscript hands every
 # script a home that does not exist: $HOME, and on Windows $USERPROFILE. It also expects the
@@ -147,6 +148,11 @@ end
 # offer the flag again instead of its values.
 set -l enum (complete -C "app --format ")
 echo "ENUM: "(string join ' ' (for l in $enum; string split -f1 \t -- $l; end))
+
+# The file hint still offers files, narrowed to its extensions.
+set -l cfg (complete -C "app --config ")
+set -l joined (string join ' ' (for l in $cfg; string split -f1 \t -- $l; end))
+echo "CONFIG: $joined"
 
 echo "OK: fish separated the directive"
 -- drive-pwsh.ps1 --

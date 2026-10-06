@@ -87,6 +87,9 @@ Warning: go.mod does not require github.com/go-rotini/rotini yet; run `go get gi
 A module that added the tool with `go get -tool` already requires the package, so this warning
 does not appear there.
 
+`--dry-run` (`-n`) shows what `init` would write and writes nothing. It prints the spec and conf
+lines, lists each file it would create on stderr, and exits 2.
+
 {{< code title="$ rotini help initialize" language="text" open="true" collapsible="false" copy="false" >}}
 Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.
 
@@ -99,6 +102,7 @@ Arguments:
 Flags:
   --format string    the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
   --force            replace an existing spec and conf with the seed (never deletes a file)
+  -n, --dry-run      show what init would write, and change nothing
 
 Global Flags:
   -h, --help    print help
@@ -107,6 +111,7 @@ Examples:
   rotini initialize mycli
   rotini init mycli --format json
   rotini init mycli --force
+  rotini init mycli --dry-run
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
@@ -127,6 +132,31 @@ it read first. A `--config` path that does not exist is an error. It runs the sa
 `--watch` keeps running and regenerates whenever the spec or conf changes. Leave it open in a
 terminal while you edit.
 
+`--dry-run` (`-n`) works out everything `generate` would write, create or remove, and changes
+nothing. The exit code says what it found:
+
+| Exit code | Meaning |
+|---|---|
+| 0 | The files on disk are already what the spec generates. The report is the same as a `generate` that wrote nothing. |
+| 1 | An error, such as an invalid spec, reported as `generate` reports it. |
+| 2 | Something would change. Each change is listed on stderr, then a count. |
+
+{{< code title="rotini generate --dry-run — output" language="text" open="true" collapsible="false" copy="false" >}}
+spec: cmd/mycli/.rotini.spec.yaml
+conf: cmd/mycli/.rotini.conf.yaml
+1. update internal/cmd/mycli/zz_rotini.go (14211 bytes, mode 0644)
+2. create internal/cmd/mycli/mycli_greet.go (311 bytes, mode 0644)
+dry run: 2 changes not written
+{{< /code >}}
+
+That makes it a check for CI that the committed code matches the spec. Run
+`go tool rotini generate --dry-run <spec>` for each CLI, or set `generate.dry_run_env` in the conf to
+an environment variable, and every `generate` dry-runs while that variable is 1, true, yes or on.
+With `dry_run_env: CI`, `go generate ./...` checks every CLI in the module on most CI systems,
+which set `CI=true`. `--no-dry-run` runs a real generate whatever the variable says, and
+`--dry-run` can't be combined with `--watch`. Regenerating in CI instead is just as valid; it's
+your choice.
+
 {{< code title="$ rotini help generate" language="text" open="true" collapsible="false" copy="false" >}}
 Generate a cli program from a rotini spec file and its conf.
 
@@ -139,6 +169,7 @@ Arguments:
 Flags:
   -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)
   -w, --watch            watch the spec and conf for changes and re-generate
+  -n, --[no-]dry-run     show what would be written, created or removed, and change nothing; exits 2 when something would change
 
 Global Flags:
   -h, --help    print help
@@ -146,6 +177,7 @@ Global Flags:
 Examples:
   rotini generate
   rotini generate ./path/to/.rotini.spec.json --watch
+  rotini generate --dry-run
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}

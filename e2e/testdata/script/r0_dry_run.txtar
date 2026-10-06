@@ -1,0 +1,116 @@
+# R0 — `rotini generate --dry-run` and `rotini init --dry-run` change nothing and say what a
+# real run would.
+#
+# The exit code is the CI signal: 0 when the files on disk are already what the spec
+# generates, 2 when something would change, 1 for an error such as an invalid spec. The
+# changes are listed on stderr; the spec and conf lines stay on stdout, as in every report.
+
+gomodinit example.com/demo
+
+# ── init --dry-run writes nothing ────────────────────────────────────────────
+wantexit 2 rotini init demo --dry-run
+stdout '^spec: cmd[/\\]demo[/\\]\.rotini\.spec\.yaml$'
+stderr '^1\. create cmd/demo/\.rotini\.spec\.yaml \(\d+ bytes, mode 0644\)$'
+stderr 'create cmd/demo/main\.go'
+stderr 'create internal/cmd/demo/zz_rotini\.go'
+stderr '^dry run: \d+ changes not written$'
+! exists cmd/demo/.rotini.spec.yaml
+! exists internal/cmd/demo
+
+# ── a generated tree is up to date ───────────────────────────────────────────
+mkdir app
+cp spec.yaml app/.rotini.spec.yaml
+cp conf.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+exec go mod tidy
+exec rotini generate app/.rotini.spec.yaml --dry-run
+stdout '^\[\d\d:\d\d:\d\d\] \S+$'
+! stderr .
+
+# ── a new command would change the generated file and add a stub ────────────
+cp spec-with-greet.yaml app/.rotini.spec.yaml
+cp internal/cmd/app/zz_app.go before.txt
+wantexit 2 rotini generate app/.rotini.spec.yaml -n
+stderr 'update internal/cmd/app/zz_app\.go'
+stderr 'create internal/cmd/app/app_greet\.go'
+stderr '^dry run: 2 changes not written$'
+! exists internal/cmd/app/app_greet.go
+cmp internal/cmd/app/zz_app.go before.txt
+
+# ── an invalid spec is an error, not a change ────────────────────────────────
+cp invalid.yaml app/.rotini.spec.yaml
+wantexit 1 rotini generate app/.rotini.spec.yaml --dry-run
+! stderr 'dry run:'
+
+# ── the conf can turn dry runs on from the environment ───────────────────────
+cp spec-with-greet.yaml app/.rotini.spec.yaml
+cp conf-ci.yaml app/.rotini.conf.yaml
+env CI=true
+wantexit 2 rotini generate app/.rotini.spec.yaml
+stderr 'create internal/cmd/app/app_greet\.go'
+! exists internal/cmd/app/app_greet.go
+
+# --watch with an env-triggered dry run is a conflict, not a silent choice.
+wantexit 1 rotini generate app/.rotini.spec.yaml --watch
+stderr 'pass --no-dry-run to watch'
+
+# --no-dry-run on the command line wins, and really generates.
+exec rotini generate app/.rotini.spec.yaml --no-dry-run
+exists internal/cmd/app/app_greet.go
+
+# Unset or false, the variable changes nothing.
+env CI=false
+exec rotini generate app/.rotini.spec.yaml
+! stderr .
+
+# ── removing a command plans a delete, and a real generate prunes it ─────────
+env CI=
+cp spec.yaml app/.rotini.spec.yaml
+wantexit 2 rotini generate app/.rotini.spec.yaml --dry-run
+stderr 'delete internal/cmd/app/app_greet\.go'
+! stderr 'pruned'
+exists internal/cmd/app/app_greet.go
+exec rotini generate app/.rotini.spec.yaml
+stderr 'pruned app_greet\.go'
+! exists internal/cmd/app/app_greet.go
+
+-- spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+-- spec-with-greet.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+  commands:
+    - name: greet
+      summary: say hello
+-- invalid.yaml --
+version: 0.0.0
+command:
+  name: app
+  flags:
+    - name: x
+      identifiers: [--x]
+      schema: { type: nosuchtype }
+-- conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- conf-ci.yaml --
+version: 0.0.0
+generate:
+  dry_run_env: CI
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app

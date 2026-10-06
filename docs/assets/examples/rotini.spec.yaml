@@ -115,7 +115,7 @@ command:
         - name: env
           summary: the environment
           identifiers: [-e, --env]
-          schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, complete: { kind: none } }
+          schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, complete: { kind: none, message: "one of dev, staging or prod" } }
         - name: target
           summary: where to ship
           identifiers: [--target]

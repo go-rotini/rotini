@@ -3,7 +3,6 @@ package codegen
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -31,6 +30,9 @@ const runtimeImport = `"github.com/go-rotini/rotini"`
 // tree, the output layout, and the module it is written into. resolveProgram builds it;
 // generate runs the emit steps.
 type program struct {
+	// plan is how every file is written and removed; see [planner].
+	plan *planner
+
 	// pruned names the orphaned generated files this pass removed, reported as notices.
 	pruned []string
 
@@ -93,7 +95,7 @@ type module struct {
 // resolveProgram resolves a validated spec and conf into a program ready to emit: it
 // finds the module, resolves the command tree (expanding $ref children), the output
 // layout, and the enabled doc/completion features.
-func resolveProgram(spec *Spec, conf *Conf, specPath string) (*program, error) {
+func resolveProgram(spec *Spec, conf *Conf, specPath string, pl *planner) (*program, error) {
 	root, name, err := findModule()
 	if err != nil {
 		return nil, err
@@ -102,9 +104,10 @@ func resolveProgram(spec *Spec, conf *Conf, specPath string) (*program, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.spec, p.conf, p.specPath = spec, conf, specPath
+	p.spec, p.conf, p.specPath, p.plan = spec, conf, specPath, pl
 	p.module = module{root: root, path: name}
 	p.layout = resolveLayout(conf, root, name)
+	p.resolveCompletionMessages()
 	if err := p.resolveFeatures(); err != nil {
 		return nil, err
 	}
@@ -139,7 +142,7 @@ func (p *program) generate() error {
 
 // emitSchemas writes rotini's embedded JSON Schemas when generate.schemas is set. It runs
 // first so an editor's $schema reference resolves even if a later step fails.
-func (p *program) emitSchemas() error { return writeSchemas(p.conf, p.module.root) }
+func (p *program) emitSchemas() error { return writeSchemas(p.plan, p.conf, p.module.root) }
 
 // emitModelsFile writes the typed input/output structs to their own package when the
 // conf declares a `models` target. Otherwise it is a no-op and the types stay in the
@@ -163,7 +166,7 @@ func (p *program) emitModelsFile() error {
 	if err != nil {
 		return err
 	}
-	return writeGeneratedFile(filepath.Join(p.layout.modelsDir, p.layout.modelsFile), content)
+	return p.plan.write(filepath.Join(p.layout.modelsDir, p.layout.modelsFile), content)
 }
 
 // emitCmdFile renders and writes the generated cmd file.
@@ -172,7 +175,7 @@ func (p *program) emitCmdFile() error {
 	if err != nil {
 		return err
 	}
-	return writeGeneratedFile(filepath.Join(p.layout.cmdDir, p.layout.cmdFile), content)
+	return p.plan.write(filepath.Join(p.layout.cmdDir, p.layout.cmdFile), content)
 }
 
 // emitFeatures writes the per-command pages of each embed-mode feature. Inline features
@@ -182,7 +185,7 @@ func (p *program) emitFeatures() error {
 		if !o.embed {
 			continue
 		}
-		if err := writeFeatureOutputs(o.absEmbedDir, o.nodes, o.contents, o.desc); err != nil {
+		if err := writeFeatureOutputs(p.plan, o.absEmbedDir, o.nodes, o.contents, o.desc); err != nil {
 			return err
 		}
 	}
@@ -195,7 +198,7 @@ func (p *program) emitStubs() error { return writeHandlerStubs(p, p.layout) }
 // emitEntrypoint writes the binary's main.go, create-once, when the conf declares an
 // entrypoint.
 func (p *program) emitEntrypoint() error {
-	return writeEntrypoint(p.layout, string(detectFileFormat(p.specPath)))
+	return writeEntrypoint(p.plan, p.layout, string(detectFileFormat(p.specPath)))
 }
 
 // prune deletes generated stubs and feature pages the spec no longer declares, sparing
@@ -217,10 +220,10 @@ func (p *program) prune() error {
 	if err := pruneStubs(p, p.layout, cmdKeep, note); err != nil {
 		return err
 	}
-	if err := pruneFeatureOutputs(p.layout, p.conf.Generate.cmdTarget().Keep, p.featureOutputs); err != nil {
+	if err := pruneFeatureOutputs(p.plan, p.layout, p.conf.Generate.cmdTarget().Keep, p.featureOutputs); err != nil {
 		return err
 	}
-	return pruneEntrypoint(p.layout, mainKeep, note)
+	return pruneEntrypoint(p.plan, p.layout, mainKeep, note)
 }
 
 // resolveFeatures resolves the enabled doc/completion features into the blocks embedded
@@ -261,9 +264,10 @@ func (p *program) resolveFeatures() error {
 		var contents []string
 		var err error
 		if f.desc.perShell {
-			contents, err = completionContents(p.rootName, nodes)
+			_, messagesEnv := completionMessages(p.conf)
+			contents, err = completionContents(p.rootName, messagesEnv, nodes)
 		} else {
-			contents, err = docFeatureContents(absTemplateDir, nodes, f.desc, f.cfg.Template)
+			contents, err = docFeatureContents(p.plan, absTemplateDir, nodes, f.desc, f.cfg.Template)
 		}
 		if err != nil {
 			return err
@@ -278,7 +282,7 @@ func (p *program) resolveFeatures() error {
 // writeSchemas writes rotini's embedded JSON Schemas verbatim to the module-root-relative
 // paths under generate.schemas, so an editor's `$schema` reference resolves locally. These
 // files are never pruned.
-func writeSchemas(conf *Conf, moduleRoot string) error {
+func writeSchemas(pl *planner, conf *Conf, moduleRoot string) error {
 	if conf.Generate == nil || conf.Generate.Schemas == nil {
 		return nil
 	}
@@ -294,7 +298,7 @@ func writeSchemas(conf *Conf, moduleRoot string) error {
 		if r, err := filepath.Rel(moduleRoot, abs); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("generate.schemas.%s.file %q must resolve under the module root", label, sc.File)
 		}
-		return writeGeneratedFile(abs, content)
+		return pl.write(abs, content)
 	}
 	s := conf.Generate.Schemas
 	if err := write("conf", s.Conf, schemaConfFileBytes); err != nil {
@@ -492,16 +496,16 @@ func writeHandlerStubs(gp *program, lay layout) error {
 			continue
 		}
 		path := filepath.Join(lay.cmdDir, stubFileFor(lay.cmdDir, c))
-		if _, err := os.Stat(path); err == nil {
+		if exists, err := gp.plan.exists(path); err != nil {
+			return err
+		} else if exists {
 			continue
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("stat %s: %w", path, err)
 		}
 		content, err := renderHandlerStubFile(stubBody(gp, c, lay.cmdPkgName, lay.cmdHeader, helpOn))
 		if err != nil {
 			return err
 		}
-		if err := writeGeneratedFile(path, content); err != nil {
+		if err := gp.plan.createOnce(path, content); err != nil {
 			return err
 		}
 	}
@@ -671,22 +675,20 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint package. It
 // is create-once: an existing main.go is never overwritten. extension is the spec/conf
 // file extension used in the //go:generate directive.
-func writeEntrypoint(lay layout, extension string) error {
+func writeEntrypoint(pl *planner, lay layout, extension string) error {
 	if lay.entrypointDir == "" {
 		return nil
 	}
 	path := filepath.Join(lay.entrypointDir, lay.entrypointFile)
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat %s: %w", path, err)
+	if exists, err := pl.exists(path); err != nil || exists {
+		return err
 	}
 	// Alias the generated package as "cmd" so it cannot collide with the rotini runtime.
 	content, err := renderMainFile(lay.mainHeader, lay.cmdImport, "cmd", extension)
 	if err != nil {
 		return err
 	}
-	return writeGeneratedFile(path, content)
+	return pl.createOnce(path, content)
 }
 
 // rollupMethods builds the handlers struct's per-command methods, sorted by name: own

@@ -21,6 +21,19 @@ type Definition struct {
 	PluginPath       string              // extra directory searched for BOTH declared and discovered plugins
 	Passthrough      bool                // every token after the program name is a raw positional (no flag parsing)
 	Output           *OutputDef          // what the root command writes to stdout (nil = not declared)
+
+	// CompletionMessages turns on completion messages, when the conf's completion feature
+	// declares `messages`; nil leaves them off. See [Context.AddCompletionMessage].
+	CompletionMessages *CompletionMessagesDef
+}
+
+// CompletionMessagesDef is how completion messages are switched at run time, from the conf's
+// completion feature.
+type CompletionMessagesDef struct {
+	// Env is the environment variable the conf's `messages_env` names, "" for none. Set to
+	// 0, false or off, in any case, it hides every message. [Program.WithCompletionMessages]
+	// replaces this check.
+	Env string
 }
 
 // FlagGroupKind names a cross-flag presence rule. The value is the spec's `kind`.
@@ -200,6 +213,10 @@ type Completion struct {
 	// Extensions narrows Kind "file" to these suffixes, written without a dot
 	// ("yaml", "json"). Empty offers every file.
 	Extensions []string
+	// Message is a line shown when the input's value is being completed and there is nothing
+	// to offer, written by the author in the spec (`complete.message`) or derived from its
+	// summary. It is set only when completion messages are on.
+	Message string
 }
 
 // ArgDef describes a single positional argument of a command. Variadic is true

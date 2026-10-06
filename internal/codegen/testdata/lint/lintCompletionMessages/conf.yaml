@@ -1,0 +1,18 @@
+# `messages` and `messages_env` switch completion messages, so they belong on the completion
+# feature, and `messages_env` needs `messages` to have anything to switch.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    # A switch with nothing to switch.
+    - type: completion
+      enabled: true
+      messages_env: DEMO_COMPLETION_MESSAGES
+    # Not a completion feature.
+    - type: help
+      enabled: true
+      messages: all
+      messages_env: DEMO_HELP_MESSAGES

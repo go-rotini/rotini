@@ -70,7 +70,10 @@ conf: ./cmd/todo/.rotini.conf.yaml
 Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sumary: unknown key "sumary" on a flag input
 {{< /code >}}
 
-`generate` runs the same checks first, so `validate` is mostly for CI.
+`generate` runs the same checks first, so `validate` is mostly for CI. To also check in CI that
+the committed code matches the spec, run `go tool rotini generate --dry-run`: it writes nothing,
+lists what would change, and exits 2 if anything would. See
+[the companion CLI](/cli#rotini-generate) for its exit codes and the `dry_run_env` conf key.
 
 ## Commands, flags and arguments
 
@@ -491,6 +494,14 @@ For errors that scripts parse, `rotini.StructuredReporter` writes them as JSON l
 [errors scripts can read](#errors-scripts-can-read). Declare `exit_status:` in the spec to
 document a command's codes in its man and markdown pages.
 
+Once a command declares `exit_status:`, `rotini generate` checks its handler against it. A code
+the handler passes to `rtx.HaltWithCode` or `rtx.Exit` as a number or a constant, and that the
+list leaves out, is reported as a warning with its file and line. Code 0 needs no entry. A
+command that prints its help when called without a sub-command exits 1, so list 1 for it. The
+check can't see a code computed at run time, set in another function or package, or set by a
+reporter. `rotini validate` also reports a code listed twice, and warns about a code above
+128, which a process stopped by a signal exits with too.
+
 ## Structured output
 
 A command's inputs are already a contract: the spec says what it accepts, and rotini parses,
@@ -721,6 +732,61 @@ section as the extension (`todo-add.1`), so `cp renders/*.1 /usr/local/share/man
 them. The section is 1 unless the man feature sets `section:` (8 for a daemon or admin tool). The
 header's date stays empty, so regenerating never changes a page, unless `SOURCE_DATE_EPOCH` is set
 when you generate.
+
+### Completion messages
+
+When a user presses TAB on a value with nothing to offer, such as a free-text argument or an enum
+value the typed prefix rules out, the shell can show a line of guidance instead:
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ todo add <TAB>
+<title>: the task title
+{{< /code >}}
+
+Turn messages on with `messages:` on the completion feature. `declared` shows only the lines you
+write in the spec as `complete.message`; `all` also shows a line made from each other flag's and
+argument's summary:
+
+{{< code title="cmd/todo/.rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+features:
+  - type: completion
+    enabled: true
+    messages: all
+    messages_env: TODO_COMPLETION_MESSAGES
+{{< /code >}}
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+arguments:
+  - name: title
+    summary: the task title
+    schema:
+      type: string
+      complete: { kind: none, message: "a short title; quote it if it has spaces" }
+{{< /code >}}
+
+A completer can add its own with `rtx.AddCompletionMessage`. These are shown even beside
+candidates, in the order added, and take the place of the static line:
+
+{{< code title="internal/cmd/todo/todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
+	tasks, err := rtx.MustGetDependency(Store).Open()
+	if err != nil {
+		rtx.AddCompletionMessage("could not read the task list: " + err.Error())
+		return nil
+	}
+	return tasks
+}
+{{< /code >}}
+
+Your users can hide messages by setting the variable `messages_env` names to `0`, `false` or
+`off`. Unset or any other value leaves them on. The variable is listed in the root man page, in
+the contract document and at the top of each completion script. To decide some other way, pass
+your own rule to `Program.WithCompletionMessages`, which replaces the variable check. Without
+`messages_env` or a rule, messages always show when the conf turns them on.
+
+zsh and bash 4.4 or later show messages. fish, PowerShell and older bash, including the
+`/bin/bash` macOS ships, skip them. A plugin for kubectl, Docker or Flux shows them the way the
+host's completion does.
 
 A rotini program can also answer completion requests from another program, such as the host of a
 plugin, in whatever format that host reads. A `rotini.CompletionFormat` writes the answer in the

@@ -8,7 +8,9 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -72,6 +74,7 @@ func (p *program) auditHooks() error {
 
 	expected, known := p.inputsTypeExpectations()
 	p.auditWarnings = append(p.auditWarnings, wrongInputsTypes(fset, files, expected, known, p.module.root)...)
+	p.auditWarnings = append(p.auditWarnings, undocumentedExitCodes(fset, files, p.exitContracts(), p.module.root)...)
 
 	if featureEnabled(p.conf, "help") && rootShortCircuitFlag(p, "help", true) != "" {
 		p.auditWarnings = append(p.auditWarnings, missingRootHook(fset, files, p.root.handler, p.module.root)...)
@@ -465,4 +468,175 @@ func genericCallTypeArg(call *ast.CallExpr) (fn, arg string, ok bool) {
 		return "", "", false
 	}
 	return fn, id.Name, true
+}
+
+// ─── the exit-code audit ────────────────────────────────────────────────────.
+
+// exitCodesOf returns the codes an exit_status list documents.
+func exitCodesOf(entries []ExitStatusEntry) []int {
+	codes := make([]int, 0, len(entries))
+	for _, e := range entries {
+		codes = append(codes, e.Code)
+	}
+	return codes
+}
+
+// exitContract is what a handler type's command documents: how it is typed, and its codes.
+type exitContract struct {
+	invocation string
+	codes      []int
+}
+
+// exitContracts maps each generated handler type whose command declares exit_status to that
+// contract. A command without exit_status documents nothing, so it is not audited.
+func (p *program) exitContracts() map[string]exitContract {
+	out := map[string]exitContract{}
+	for _, c := range p.ownCommands() {
+		if c.handler != "" && len(c.exitCodes) > 0 {
+			out[c.handler] = exitContract{invocation: c.invocation, codes: c.exitCodes}
+		}
+	}
+	return out
+}
+
+// exitMethods are the Context methods that set the exit code from their argument.
+var exitMethods = map[string]bool{"HaltWithCode": true, "Exit": true}
+
+// undocumentedExitCodes warns about each exit code a handler sets directly that its command's
+// exit_status doesn't list: a call to HaltWithCode or Exit on the method's *rotini.Context
+// parameter, with an integer literal or a same-package integer constant. Code 0 is exempt.
+//
+// It is best effort. It doesn't see a code computed at run time, set in a helper or another
+// package, or set by a reporter. A code set in a cascading hook is attributed to the command
+// whose handler declares the hook, though the hook also runs for that command's descendants.
+func undocumentedExitCodes(fset *token.FileSet, files map[string]*ast.File, contracts map[string]exitContract, moduleRoot string) []error {
+	if len(contracts) == 0 {
+		return nil
+	}
+	consts := packageIntConstants(files)
+	var found []auditFinding
+	for path, f := range files {
+		ctxType := rotiniContextSelector(f)
+		if ctxType == "" {
+			continue
+		}
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || len(fd.Recv.List) == 0 || fd.Body == nil {
+				continue
+			}
+			contract, audited := contracts[receiverTypeName(fd.Recv.List[0].Type)]
+			if !audited {
+				continue
+			}
+			params := contextParams(fd, ctxType)
+			if len(params) == 0 {
+				continue
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok || len(call.Args) != 1 {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || !exitMethods[sel.Sel.Name] {
+					return true
+				}
+				if x, ok := sel.X.(*ast.Ident); !ok || !params[x.Name] {
+					return true
+				}
+				code, known := intValue(call.Args[0], consts[filepath.Dir(path)])
+				if !known || code == 0 || slices.Contains(contract.codes, code) {
+					return true
+				}
+				at := findingAt(fset, call.Pos(), moduleRoot)
+				at.msg = fmt.Sprintf("%s:%d: %q exits with %d, which its exit_status doesn't list", at.file, at.line, contract.invocation, code)
+				found = append(found, at)
+				return true
+			})
+		}
+	}
+	return sortedWarnings(found)
+}
+
+// rotiniContextSelector returns how file f spells rotini's Context type's package ("rotini",
+// or its import alias), or "" when f doesn't import rotini.
+func rotiniContextSelector(f *ast.File) string {
+	for _, imp := range f.Imports {
+		if strings.Trim(imp.Path.Value, `"`) != "github.com/go-rotini/rotini" {
+			continue
+		}
+		if imp.Name != nil {
+			return imp.Name.Name
+		}
+		return "rotini"
+	}
+	return ""
+}
+
+// contextParams returns the names of fd's parameters typed *<pkg>.Context.
+func contextParams(fd *ast.FuncDecl, pkg string) map[string]bool {
+	names := map[string]bool{}
+	for _, field := range fd.Type.Params.List {
+		star, ok := field.Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		sel, ok := star.X.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Context" {
+			continue
+		}
+		if x, ok := sel.X.(*ast.Ident); ok && x.Name == pkg {
+			for _, n := range field.Names {
+				names[n.Name] = true
+			}
+		}
+	}
+	return names
+}
+
+// packageIntConstants returns, per package directory, the package-level constants whose value
+// is written as an integer literal.
+func packageIntConstants(files map[string]*ast.File) map[string]map[string]int {
+	out := map[string]map[string]int{}
+	for path, f := range files {
+		dir := filepath.Dir(path)
+		for _, d := range f.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, s := range gd.Specs {
+				vs, ok := s.(*ast.ValueSpec)
+				if !ok || len(vs.Values) != len(vs.Names) {
+					continue
+				}
+				for i, name := range vs.Names {
+					if n, ok := intValue(vs.Values[i], nil); ok {
+						if out[dir] == nil {
+							out[dir] = map[string]int{}
+						}
+						out[dir][name.Name] = n
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// intValue reads e as an integer literal, or as the name of one of consts.
+func intValue(e ast.Expr, consts map[string]int) (int, bool) {
+	switch v := e.(type) {
+	case *ast.BasicLit:
+		if v.Kind != token.INT {
+			return 0, false
+		}
+		n, err := strconv.ParseInt(v.Value, 0, 64)
+		return int(n), err == nil
+	case *ast.Ident:
+		n, ok := consts[v.Name]
+		return n, ok
+	}
+	return 0, false
 }

@@ -68,10 +68,13 @@ field CommandDef.Plugins
 field CommandDef.Summary
 field Completion.Extensions
 field Completion.Kind
+field Completion.Message
 field CompletionCandidate.Description
 field CompletionCandidate.Value
+field CompletionMessagesDef.Env
 field CompletionResult.Candidates
 field CompletionResult.Hint
+field CompletionResult.Messages
 field ConfigFile.Discover
 field ConfigFile.Format
 field ConfigFile.Name
@@ -96,6 +99,7 @@ field Context.Stdin
 field Context.Stdout
 field Definition.Arguments
 field Definition.Commands
+field Definition.CompletionMessages
 field Definition.FlagDependencies
 field Definition.FlagGroups
 field Definition.Flags
@@ -245,6 +249,7 @@ method Category.String() string
 method Command.DiscoveredPlugins() []DiscoveredPlugin
 method Command.PluginBinary(name string) (string, bool)
 method Command.PluginDiscoveryErrors() []error
+method Context.AddCompletionMessage(msg string)
 method Context.ArgvInputs[T any]() (InputLayer[T], error)
 method Context.CheckInputs[T any](v T, set Presence) error
 method Context.CheckOutput(v any) error
@@ -323,6 +328,7 @@ method Program.RunContext(ctx context.Context, argv []string) (int, error)
 method Program.With(opts ...Option) *Program
 method Program.WithArgs(args []string) *Program
 method Program.WithCompletion(format CompletionFormat) *Program
+method Program.WithCompletionMessages(fn func(rtx *Context) bool) *Program
 method Program.WithContext(ctx context.Context) *Program
 method Program.WithDependency[T any](dep Dependency[T], value T) *Program
 method Program.WithExit(fn func(int)) *Program
@@ -359,6 +365,7 @@ type CommandDef
 type Completion
 type CompletionCandidate
 type CompletionFormat
+type CompletionMessagesDef
 type CompletionResult
 type ConfigFile
 type Constraints

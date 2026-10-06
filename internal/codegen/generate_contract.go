@@ -21,11 +21,17 @@ const contractFormat = "rotini-contract/1"
 
 // contractDoc is the contract document. Its format is described by schema-contract.json.
 type contractDoc struct {
-	Format      string            `json:"format"`
-	Name        string            `json:"name"`
-	Commands    []contractCommand `json:"commands"`
-	Definitions map[string]any    `json:"definitions,omitempty"`
-	Errors      json.RawMessage   `json:"errors"`
+	Format      string              `json:"format"`
+	Name        string              `json:"name"`
+	Commands    []contractCommand   `json:"commands"`
+	Definitions map[string]any      `json:"definitions,omitempty"`
+	Errors      json.RawMessage     `json:"errors"`
+	Completion  *contractCompletion `json:"completion,omitempty"`
+}
+
+// contractCompletion is what the program's shell completion lets its users switch.
+type contractCompletion struct {
+	MessagesEnv string `json:"messages_env,omitempty"` // set to 0, false or off to hide completion messages
 }
 
 // contractCommand is one visible command, or one plugin a command declares.
@@ -167,7 +173,7 @@ func (p *program) emitContract() error {
 		if err != nil {
 			return err
 		}
-		return writeGeneratedFile(abs, doc)
+		return p.plan.write(abs, doc)
 	}
 	return nil
 }
@@ -217,7 +223,7 @@ func (p *program) writeOutputSchemas(dir string, nodes []contractNode) error {
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(files)) {
-		if err := writeGeneratedFile(filepath.Join(absDir, name), files[name]); err != nil {
+		if err := p.plan.write(filepath.Join(absDir, name), files[name]); err != nil {
 			return err
 		}
 	}
@@ -229,7 +235,7 @@ func (p *program) writeOutputSchemas(dir string, nodes []contractNode) error {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), outputSchemaSuffix) || files[e.Name()] != nil || p.skipPrune {
 			continue
 		}
-		if err := os.Remove(filepath.Join(absDir, e.Name())); err != nil {
+		if err := p.plan.remove(filepath.Join(absDir, e.Name())); err != nil {
 			return fmt.Errorf("remove a stale output schema: %w", err)
 		}
 		p.pruned = append(p.pruned, filepath.Join(absDir, e.Name()))
@@ -345,6 +351,9 @@ func schemaRefs(v any) []string {
 // contract renders the contract document.
 func (p *program) contract(nodes []contractNode) ([]byte, error) {
 	doc := contractDoc{Format: contractFormat, Name: p.rootName, Errors: errorSchemaBytes}
+	if mode, env := completionMessages(p.conf); mode != "" && env != "" {
+		doc.Completion = &contractCompletion{MessagesEnv: env}
+	}
 	if len(p.schemas) > 0 {
 		doc.Definitions = map[string]any{}
 		for name, s := range p.schemas {

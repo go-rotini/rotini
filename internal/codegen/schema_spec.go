@@ -146,7 +146,7 @@ type Command struct {
 	EnvPrefix string `json:"env_prefix,omitempty"`
 	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
 	Examples []string `json:"examples,omitempty"`
-	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. This is documentation only, and rotini does not check it: the runtime sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. Ignored when 'man' (verbatim) is set.
+	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. Ignored when 'man' (verbatim) is set.
 	ExitStatus []ExitStatusEntry `json:"exit_status,omitempty"`
 	// Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
 	Filename string `json:"filename,omitempty"`
@@ -338,7 +338,7 @@ type HelpHeadings struct {
 // Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.
 type InputSchema struct {
 	BaseSchema
-	// Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter).
+	// Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 	//
 	// Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
 	Complete *InputSchemaComplete `json:"complete,omitempty"`
@@ -394,14 +394,16 @@ type InputSchema struct {
 	Variable any `json:"variable,omitempty"`
 }
 
-// Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter).
+// Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 //
 // Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
 type InputSchemaComplete struct {
 	// Narrows kind 'file' to these suffixes, written without a leading dot ('yaml', 'json'). Omitted, every file is offered. Rejected on the other kinds, which have no extensions to filter.
 	Extensions []string `json:"extensions,omitempty"`
 	// 'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete nothing, which is not the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that is file completion; 'none' turns it off, so for an opaque value (a container id, an API resource name) the shell does not offer the files in the current directory.
-	Kind string `json:"kind"`
+	Kind string `json:"kind,omitempty"`
+	// A line the shell shows while this input's value is being completed and there is nothing to offer, such as `a service name from deploy.yaml`. One line. It shows only when the conf's completion feature sets `messages`, and in zsh and bash 4.4 or later; other shells skip it. A message a completer adds with rtx.AddCompletionMessage takes its place.
+	Message string `json:"message,omitempty"`
 }
 
 // Auto-expose external '<prefix>*' executables as plugin sub-commands (kubectl/git/gh plugin style), alongside any declared plugins. Presence enables discovery; a discovered name that collides with a declared command or plugin is skipped.

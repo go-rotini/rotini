@@ -35,15 +35,22 @@ var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 // dependency so tests can substitute a double (see [GenerateFn]).
 type InitializeFn = func(name, format string, force bool) (Initialized, error)
 
+// InitializeDryRunFn is the signature of [Processor.InitializeDryRun].
+type InitializeDryRunFn = InitializeFn
+
 // Initialized reports what an init wrote: the spec and conf paths (relative to the working
 // directory where possible) and a "[15:04:05] 12.3ms" timing line.
 type Initialized struct {
 	Spec, Conf, Result string
+
+	// Changes is set by a dry run: each file init would create or replace, one per line.
+	Changes []string
 }
 
-// initialize writes the seed spec and conf for a new CLI under cmd/<name>/, then validates
-// and generates without pruning.
-func (p *Processor) initialize(name, format string, force bool) (specPath, confPath string, err error) {
+// initialize plans the seed spec and conf for a new CLI under cmd/<name>/, then validates and
+// generates without pruning, all through pl. The generate step reads the seed from memory, so
+// a dry run, which writes nothing, plans exactly what a real one writes.
+func (p *Processor) initialize(name, format string, force bool, pl *planner) (specPath, confPath string, err error) {
 	if name == "" {
 		return "", "", errors.New("a CLI name is required")
 	}
@@ -85,27 +92,41 @@ func (p *Processor) initialize(name, format string, force bool) (specPath, confP
 	if err != nil {
 		return "", "", err
 	}
-	if err := writeGeneratedFile(specPath, specBytes); err != nil {
+	if err := pl.write(specPath, specBytes); err != nil {
 		return "", "", err
 	}
 	confBytes, err := renderConfFile(version, name, f)
 	if err != nil {
 		return "", "", err
 	}
-	if err := writeGeneratedFile(confPath, confBytes); err != nil {
+	if err := pl.write(confPath, confBytes); err != nil {
 		return "", "", err
 	}
 
-	rs, rc, err := p.reconcile(specPath, confPath)
+	rs, rc, err := p.reconcileSeed(specPath, specBytes, confPath, confBytes, f)
 	if err != nil {
 		return "", "", err
 	}
 	// Never prune: with --force the seed may replace a spec with more commands, whose
 	// (possibly edited) handlers must survive.
-	if _, err := p.validateAndEmit(rs, rc, false); err != nil {
+	if _, err := p.validateAndEmit(rs, rc, false, pl); err != nil {
 		return "", "", err
 	}
 	return specPath, confPath, nil
+}
+
+// reconcileSeed is reconcile for the seed documents init has in memory.
+func (p *Processor) reconcileSeed(specPath string, specBytes []byte, confPath string, confBytes []byte, f fileFormat) (*reconciledSpec, *reconciledConf, error) {
+	spec, specJSON, specLocate, err := reconcileData[Spec](specPath, f, specBytes)
+	if err != nil {
+		return nil, nil, p.explainDecodeFailure("spec", err)
+	}
+	conf, confJSON, confLocate, err := reconcileData[Conf](confPath, f, confBytes)
+	if err != nil {
+		return nil, nil, p.explainDecodeFailure("conf", err)
+	}
+	return &reconciledSpec{path: specPath, spec: spec, json: specJSON, locate: specLocate},
+		&reconciledConf{path: confPath, conf: conf, json: confJSON, locate: confLocate}, nil
 }
 
 // normalizeFormat maps a format name to its fileFormat, defaulting to yaml.

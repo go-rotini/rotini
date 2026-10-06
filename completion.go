@@ -581,6 +581,11 @@ type CompletionResult struct {
 	// fallback for when Candidates is empty, except kind "none", which also means "never offer
 	// files" when there are candidates.
 	Hint Completion
+	// Messages are lines for the shell to show, not offer: what completers added with
+	// [Context.AddCompletionMessage], in order, or else, when there are no candidates, the
+	// input's static message ([Completion.Message]). Empty when completion messages are off or
+	// switched off at run time.
+	Messages []string
 }
 
 // CompletionCandidate is one offered value and its optional one-line description.
@@ -622,10 +627,17 @@ func (p *Program) Complete(words []string, format CompletionFormat) (int, error)
 		words = []string{""}
 	}
 	rtx := p.newRunContext()
+	var added []string
+	if p.def.CompletionMessages != nil {
+		rtx.completionMessages = &added
+	}
 	result := CompletionResult{Hint: completionHintFor(p.def, words)}
 	for _, c := range complete(p.def, words, p.handlers, rtx) {
 		value, desc, _ := strings.Cut(c, "\t")
 		result.Candidates = append(result.Candidates, CompletionCandidate{Value: value, Description: desc})
+	}
+	if p.def.CompletionMessages != nil && p.completionMessagesOn(rtx) {
+		result.Messages = completionMessages(added, result)
 	}
 	if err := format(p.stdout, result); err != nil {
 		return 1, err
@@ -633,12 +645,73 @@ func (p *Program) Complete(words []string, format CompletionFormat) (int, error)
 	return 0, nil
 }
 
+// completionMessages returns the messages a request shows: the ones completers added, in
+// order, else the input's static message when there are no candidates. Each is one plain line;
+// an empty one is dropped.
+func completionMessages(added []string, result CompletionResult) []string {
+	if len(added) == 0 && len(result.Candidates) == 0 && result.Hint.Message != "" {
+		added = []string{result.Hint.Message}
+	}
+	var out []string
+	for _, m := range added {
+		if m = oneLine(m); m != "" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// oneLine makes text a single plain line for a completion message: ANSI styling stripped, and
+// line breaks, tabs and runs of spaces collapsed to one space.
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(StripANSI(text)), " ")
+}
+
+// completionMessagesOn reports whether completion messages show for this request: the
+// program's own rule when it set one with [Program.WithCompletionMessages], else the declared
+// environment variable, which hides them when set to 0, false or off. With neither, they show.
+func (p *Program) completionMessagesOn(rtx *Context) bool {
+	if p.completionMessages != nil {
+		return p.completionMessages(rtx)
+	}
+	if env := p.def.CompletionMessages.Env; env != "" {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv(env))) {
+		case "0", "false", "off":
+			return false
+		}
+	}
+	return true
+}
+
+// WithCompletionMessages sets the program's own rule for whether completion messages show,
+// replacing the check of the environment variable the conf's `messages_env` names. It is
+// asked once per completion request, before anything is written, and applies to every shell
+// and to [PluginCompletion]:
+//
+//	cmd.Program.WithCompletionMessages(func(rtx *rotini.Context) bool {
+//		return !settings.Quiet
+//	}).Execute()
+//
+// It has no effect unless the conf turns completion messages on. A nil fn restores the
+// environment variable check.
+func (p *Program) WithCompletionMessages(fn func(rtx *Context) bool) *Program {
+	p.completionMessages = fn
+	return p
+}
+
+// completionMessagePrefix marks a message line in rotini's own format.
+const completionMessagePrefix = completionDirectivePrefix + "message "
+
 // rotiniCompletion is rotini's own format: what the hidden __complete prints by default, and
-// what the generated shell scripts read. One candidate per line ("value\tdescription"), then the
-// hint's ":rotini:" directive line when the input declares one. It is private between a script
-// and the binary from the same generate, so it may change.
+// what the generated shell scripts read. One candidate per line ("value\tdescription"), then a
+// ":rotini:message <text>" line per message, then the hint's ":rotini:" directive line when the
+// input declares one. It is private between a script and the binary from the same generate, so
+// it may change.
 func rotiniCompletion(w io.Writer, result CompletionResult) error {
 	lines := candidateLines(result.Candidates)
+	for _, m := range result.Messages {
+		lines = append(lines, completionMessagePrefix+m)
+	}
 	if d := directiveFor(result.Hint); d != "" {
 		lines = append(lines, d)
 	}
@@ -681,6 +754,10 @@ const (
 	pluginDirectiveFilterDirs    = 16 // complete directory names only
 )
 
+// pluginMessageMarker starts a candidate line the plugin hosts' completion scripts show as a
+// message instead of offering it.
+const pluginMessageMarker = "_activeHelp_ "
+
 // PluginCompletion is the [CompletionFormat] the plugin hosts kubectl, Docker and Flux read: one
 // candidate per line ("value\tdescription" allowed), then a final ":<directive>" line, a number
 // telling the shell what to do next. kubectl reads it from kubectl_complete-<plugin>, and the
@@ -694,8 +771,15 @@ const (
 // directive line is always written, since the hosts read the last line as the directive
 // unconditionally. The format belongs to the hosts and is covered by rotini's compatibility
 // promise.
+//
+// Each message is written as a candidate line carrying the hosts' message marker, after the
+// regular candidates, which the hosts' completion scripts show as a message where the shell
+// can.
 func PluginCompletion(w io.Writer, result CompletionResult) error {
 	lines := candidateLines(result.Candidates)
+	for _, m := range result.Messages {
+		lines = append(lines, pluginMessageMarker+m)
+	}
 
 	directive := pluginDirectiveDefault
 	switch hint := result.Hint; {

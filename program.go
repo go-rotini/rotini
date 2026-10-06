@@ -51,7 +51,8 @@ const (
 //     [CompletionFormat]
 //   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr]
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
-//     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion]
+//     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion],
+//     [Program.WithCompletionMessages]
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
@@ -92,6 +93,10 @@ type Program struct {
 	signalMode      signalTrapMode   // see WithSignals / WithoutSignalHandling
 	signalSet       []os.Signal      // signals trapped when on; empty → trapSignals
 	completion      CompletionFormat // the format __complete answers in; nil → rotini's own. See WithCompletion.
+
+	// completionMessages decides whether completion messages show; nil reads the declared
+	// environment variable. See WithCompletionMessages.
+	completionMessages func(rtx *Context) bool
 
 	// rotini's own seams, kept out of the dependency store so a program's dependency can
 	// never shadow them.

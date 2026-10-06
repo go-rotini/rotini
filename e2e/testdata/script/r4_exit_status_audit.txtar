@@ -1,0 +1,101 @@
+# R4 — an exit code a handler sets that its command's exit_status doesn't list is reported at
+# generate time.
+#
+# exit_status is what man pages, markdown and the contract tell users each code means. A
+# handler that exits with a code the list leaves out makes that documentation wrong, and
+# nothing at run time says so. generate reads the handler and warns, with a file:line. It
+# exits 0: the warning is about documentation, and the program still builds and runs.
+
+gomodinit example.com/demo
+
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+exec go mod tidy
+cp sync.go.txt internal/cmd/demo/demo_sync.go
+
+# ── 3 is set, but only 0, 1 and 4 are documented ────────────────────────────
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+stderr '^Warning: internal/cmd/demo/demo_sync\.go:\d+: "demo sync" exits with 3, which its exit_status doesn''t list$'
+! stderr 'exits with 4'
+
+exec go build -o demo$exe ./cmd/demo
+wantexit 3 ./demo$exe sync
+
+# ── document it, and generate goes quiet ─────────────────────────────────────
+cp documented.yaml cmd/demo/.rotini.spec.yaml
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+! stderr 'Warning:'
+
+# ── validate reports a code listed twice ─────────────────────────────────────
+cp twice.yaml cmd/demo/.rotini.spec.yaml
+! exec rotini validate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+stderr 'exit_status lists code 3 twice'
+
+-- cmd/demo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: sync
+      summary: sync things
+      exit_status:
+        - { code: 0, summary: synced }
+        - { code: 1, summary: an error }
+        - { code: 4, summary: partly synced }
+-- documented.yaml --
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: sync
+      summary: sync things
+      exit_status:
+        - { code: 0, summary: synced }
+        - { code: 1, summary: an error }
+        - { code: 3, summary: a conflict }
+        - { code: 4, summary: partly synced }
+-- twice.yaml --
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: sync
+      summary: sync things
+      exit_status:
+        - { code: 3, summary: a conflict }
+        - { code: 3, summary: another conflict }
+-- cmd/demo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/demo/main.go
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+-- sync.go.txt --
+package demo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*demoSyncHandler)(nil)
+
+type demoSyncHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+const exitPartial = 4
+
+func (*demoSyncHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if false {
+		rtx.HaltWithCode(exitPartial)
+		return
+	}
+	rtx.HaltWithCode(3)
+}

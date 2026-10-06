@@ -9,8 +9,9 @@ import (
 // completionScript returns the completion script for prog in shell (bash, zsh, fish or
 // powershell). Each script delegates to the binary's hidden __complete command, so completions
 // track the live command tree. The completion feature renders one script per shell at
-// generate time.
-func completionScript(prog, shell string) (string, error) {
+// generate time. messagesEnv, when set, is the variable that hides completion messages, named
+// in the script's header for the users who install it.
+func completionScript(prog, shell, messagesEnv string) (string, error) {
 	var tmpl string
 	switch shell {
 	case "bash":
@@ -26,7 +27,13 @@ func completionScript(prog, shell string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish, powershell)", shell)
 	}
-	return strings.ReplaceAll(tmpl, "PROG", prog), nil
+	script := strings.ReplaceAll(tmpl, "PROG", prog)
+	if messagesEnv != "" {
+		// Every script's comments start with "#"; the first line stays first (zsh's #compdef).
+		first, rest, _ := strings.Cut(script, "\n")
+		script = first + "\n# Set " + messagesEnv + "=off to hide completion messages.\n" + rest
+	}
+	return script, nil
 }
 
 const bashCompletionTemplate = `# bash completion for PROG
@@ -36,6 +43,10 @@ const bashCompletionTemplate = `# bash completion for PROG
 # A final ":rotini:<directive>" line is the spec's declarative completion hint
 # for the value being typed — file, directory, or none. It is handled here rather
 # than offered as a candidate.
+#
+# A ":rotini:message <text>" line is a message to show, never a candidate. bash 4.4 and
+# later print it below the prompt and redraw the line; older bash, including macOS's
+# /bin/bash 3.2, skips it.
 
 # compopt does not exist in bash 3.2, which is /bin/bash on every macOS, and where it does exist
 # it fails when called outside a live completion. Either failure must stay inside this
@@ -49,8 +60,22 @@ _PROG_compopt() {
     return 0
 }
 
+# _PROG_show_messages prints the messages the last completion collected, below the prompt,
+# then has readline redraw the line being edited. It needs a terminal and bash 4.4 or later.
+_PROG_show_messages() {
+    (( ${#__PROG_messages[@]} )) || return 0
+    (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )) || return 0
+    { : >/dev/tty; } 2>/dev/null || return 0
+    printf '\n%s' "${__PROG_messages[@]}" >/dev/tty
+    printf '\n' >/dev/tty
+    bind '"\e[0n": redraw-current-line' 2>/dev/null || true
+    printf '\e[5n' >/dev/tty
+    return 0
+}
+
 _PROG_complete() {
     local args line directive="" ext exts
+    __PROG_messages=()
     # Slice COMP_WORDS BEFORE narrowing IFS. bash 3.2 — which is /bin/bash on every macOS —
     # collapses "${array[@]:offset:length}" into ONE IFS-joined element whenever IFS does not
     # contain a space, so with IFS=$'\n' set first this produced a single argument and every
@@ -62,10 +87,12 @@ _PROG_complete() {
     local IFS=$'\n'
     for line in $(PROG __complete "${args[@]}" 2>/dev/null); do
         case "$line" in
+            ":rotini:message "*) __PROG_messages+=("${line#:rotini:message }") ;;
             ":rotini:"*) directive="${line#:rotini:}" ;;
             *) COMPREPLY+=("${line%%$'\t'*}") ;;
         esac
     done
+    _PROG_show_messages
 
     case "$directive" in
         none)
@@ -99,8 +126,8 @@ const zshCompletionTemplate = `#compdef PROG
 # Candidates arrive as "name<TAB>description"; zsh renders the description
 # beside the name via _describe (colons in either part are escaped).
 _PROG() {
-    local -a lines pairs exts
-    local line name desc directive=""
+    local -a lines pairs exts msgs
+    local line name desc directive="" msg
     # "${(@)words[...]}" — not ${words[...]}. An unquoted slice DROPS the empty element,
     # and the current word is empty in the commonest case of all: the cursor sitting after
     # "PROG hash --algorithm ". The binary would then be asked to complete "--algorithm"
@@ -108,6 +135,11 @@ _PROG() {
     # every element, empties included.
     lines=(${(f)"$(PROG __complete "${(@)words[2,$CURRENT]}" 2>/dev/null)"})
     for line in $lines; do
+        # A ":rotini:message <text>" line is a message to show, never a candidate.
+        if [[ $line == ':rotini:message '* ]]; then
+            msgs+=("${line#:rotini:message }")
+            continue
+        fi
         # A final ":rotini:<directive>" line is the spec's declarative hint for the
         # value being typed — file, directory, or none — not a candidate.
         if [[ $line == ':rotini:'* ]]; then
@@ -121,6 +153,9 @@ _PROG() {
         else
             pairs+=("${line//:/\\:}")
         fi
+    done
+    for msg in $msgs; do
+        _message -r "$msg"
     done
     (( $#pairs )) && _describe 'PROG' pairs
 
@@ -152,7 +187,10 @@ function __PROG_load
     set -g __PROG_results
     set -g __PROG_directive ""
     for line in (__PROG_raw)
-        if string match -q ':rotini:*' -- $line
+        # A ":rotini:message <text>" line is a message, which fish has no place to show.
+        if string match -q ':rotini:message *' -- $line
+            continue
+        else if string match -q ':rotini:*' -- $line
             set -g __PROG_directive (string replace ':rotini:' '' -- $line)
         else
             set -a __PROG_results $line
@@ -185,6 +223,10 @@ function __PROG_files
     end
 end
 
+# fish's own file completion stays off: when it applies, __PROG_files supplies the paths,
+# and a "none" hint must offer nothing at all.
+complete -c PROG -f
+
 # Offer the binary's candidates when it has any; otherwise the paths the hint asks
 # for. Candidates arrive as "name<TAB>description" — fish renders that natively.
 complete -c PROG -f -n '__PROG_has_results' -a '$__PROG_results'
@@ -203,8 +245,10 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
         $tokens += $(if ($legacy) { '""' } else { '' })
     }
     $lines = @(PROG __complete @tokens 2>$null)
-    # A final ":rotini:<directive>" line is the spec's declarative hint for the value
-    # being typed; everything else is a candidate.
+    # A ":rotini:message <text>" line is a message, which PowerShell has no place to show. A
+    # final ":rotini:<directive>" line is the spec's declarative hint for the value being typed;
+    # everything else is a candidate.
+    $lines = @($lines | Where-Object { $_ -notlike ':rotini:message *' })
     $directive = ($lines | Where-Object { $_ -like ':rotini:*' } | Select-Object -Last 1)
     $candidates = $lines | Where-Object { $_ -notlike ':rotini:*' }
 

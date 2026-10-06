@@ -33,7 +33,8 @@ import (
 //   - dependencies — [Context.GetDependency] and [Context.MustGetDependency] read one;
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
-//     [Context.RecordError], and [Context.Failed]
+//     [Context.RecordError], and [Context.Failed]; during completion,
+//     [Context.AddCompletionMessage]
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
 //   - rotini's own seams — [Context.Version], [Context.Help] and [Context.Parser] read them;
@@ -97,10 +98,35 @@ type Context struct {
 	// output schema before writing it. See [Program.WithOutputChecks].
 	outputChecks bool
 
+	// completionMessages collects what [Context.AddCompletionMessage] adds. It is non-nil only
+	// while a completion request runs with completion messages on.
+	completionMessages *[]string
+
 	// flagStdinMemo holds stdin as read for a `from: [stdin]` flag's "-" value. Argv can be
 	// parsed several times in one run (a --help check, a parent's inputs, the leaf's inputs)
 	// but stdin can be read only once, so the first read is replayed to every later parse.
 	flagStdinMemo *stdinMemo
+}
+
+// AddCompletionMessage adds a line for the shell to show while it completes, from a
+// [FlagValueCompleter] or [ArgValueCompleter]: why there is nothing to offer, or how to narrow
+// a long list. Messages show in the order added, alongside any candidates, and in place of the
+// input's static message. Each is reduced to one plain line.
+//
+//	services, err := loadServices()
+//	if err != nil {
+//		rtx.AddCompletionMessage("could not read deploy.yaml: " + err.Error())
+//		return nil
+//	}
+//
+// It does nothing outside a completion request, or when the conf's completion feature doesn't
+// turn messages on. zsh and bash 4.4 or later show messages; other shells skip them.
+func (rtx *Context) AddCompletionMessage(msg string) {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	if rtx.completionMessages != nil {
+		*rtx.completionMessages = append(*rtx.completionMessages, msg)
+	}
 }
 
 // stdinMemo reads a stream to EOF once and replays it.

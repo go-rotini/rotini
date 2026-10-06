@@ -24,6 +24,14 @@
     "errors": {
       "$ref": "#/definitions/JSONSchema",
       "description": "The JSON Schema of one line rotini.StructuredReporter writes to stderr: an error, warning, info or success. A program uses that reporter only when its author opts in."
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the program's shell completion lets its users switch. Present only when the cli declares something here.",
+      "properties": {
+        "messages_env": { "type": "string", "description": "The environment variable that hides completion messages when set to 0, false or off." }
+      }
     }
   },
   "definitions": {

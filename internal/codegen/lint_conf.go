@@ -60,6 +60,7 @@ var confLints = []func(*Conf) []error{
 	lintFeatureDirs,
 	lintFeatureKnobs,
 	lintFeatureSection,
+	lintCompletionMessages,
 	lintSchemaFiles,
 	lintModelsKeep,
 }
@@ -293,6 +294,36 @@ func lintModelsKeep(conf *Conf) []error {
 				kind: "conf", ptr: packagePointer(i) + "/keep", loc: "generate.packages.models.keep",
 				msg: "has no effect; nothing is pruned from the models package, so there is nothing to keep; remove it",
 			})
+		}
+	}
+	return problems
+}
+
+// lintCompletionMessages keeps `messages` and `messages_env` to the completion feature, where
+// they switch completion messages, and requires `messages` for `messages_env`, which would
+// otherwise switch nothing.
+func lintCompletionMessages(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	add := func(i int, f Feature, key, msg string) {
+		problems = append(problems, &problem{
+			kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, msg: msg,
+		})
+	}
+	for i, f := range conf.Generate.Features {
+		if f.Type != "completion" {
+			if f.Messages != "" {
+				add(i, f, "messages", "`messages` turns on completion messages and applies only to the completion feature; move it to the completion entry or remove it")
+			}
+			if f.MessagesEnv != "" {
+				add(i, f, "messages_env", "`messages_env` switches completion messages and applies only to the completion feature; move it to the completion entry or remove it")
+			}
+			continue
+		}
+		if f.MessagesEnv != "" && f.Messages == "" {
+			add(i, f, "messages_env", "is set but `messages` is not, so there are no completion messages for it to switch; set `messages: declared` or `messages: all`, or remove it")
 		}
 	}
 	return problems

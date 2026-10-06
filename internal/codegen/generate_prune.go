@@ -33,13 +33,13 @@ func pruneStubs(gp *program, lay layout, keepList []string, onPrune func(string)
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
-	return pruneGoDir(lay.cmdDir, protected, onPrune)
+	return pruneGoDir(gp.plan, lay.cmdDir, protected, onPrune)
 }
 
 // pruneEntrypoint removes orphaned .go files in the entrypoint directory, honoring its `keep`
 // list; main.go itself is create-once and always protected. It is a no-op when no entrypoint
 // is declared, or when it shares the cmd package directory, which pruneStubs already covers.
-func pruneEntrypoint(lay layout, keepList []string, onPrune func(string)) error {
+func pruneEntrypoint(pl *planner, lay layout, keepList []string, onPrune func(string)) error {
 	if lay.entrypointDir == "" || lay.entrypointDir == lay.cmdDir {
 		return nil
 	}
@@ -47,15 +47,19 @@ func pruneEntrypoint(lay layout, keepList []string, onPrune func(string)) error 
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
-	return pruneGoDir(lay.entrypointDir, protected, onPrune)
+	return pruneGoDir(pl, lay.entrypointDir, protected, onPrune)
 }
 
 // pruneGoDir removes the orphaned generated stubs in dir: non-test .go files that are not
 // protected and that stubLooksGenerated identifies as rotini-written. Sub-directories,
 // *_test.go files and hand-written files are never touched. Every removal is reported through
-// onPrune.
-func pruneGoDir(dir string, protected map[string]bool, onPrune func(string)) error {
+// onPrune. A directory that doesn't exist yet, as in a dry run before anything is written,
+// has nothing to prune.
+func pruneGoDir(pl *planner, dir string, protected map[string]bool, onPrune func(string)) error {
 	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("read dir %s: %w", dir, err)
 	}
@@ -75,7 +79,7 @@ func pruneGoDir(dir string, protected map[string]bool, onPrune func(string)) err
 		if !generated {
 			continue
 		}
-		if err := os.Remove(path); err != nil {
+		if err := pl.remove(path); err != nil {
 			return fmt.Errorf("prune %s: %w", name, err)
 		}
 		if onPrune != nil {
@@ -139,7 +143,7 @@ func (o featureOutput) owns(name string) bool {
 // owns are candidates, so features sharing an embed_dir never prune each other's files.
 // Keep-listed paths are preserved, and the editable template lives in template_dir, outside
 // the scan.
-func pruneFeatureOutputs(lay layout, keepList []string, outputs []featureOutput) error {
+func pruneFeatureOutputs(pl *planner, lay layout, keepList []string, outputs []featureOutput) error {
 	keep := make(map[string]bool, len(keepList))
 	for _, k := range keepList {
 		keep[filepath.ToSlash(k)] = true
@@ -177,7 +181,7 @@ func pruneFeatureOutputs(lay layout, keepList []string, outputs []featureOutput)
 			if keep[rel] {
 				continue
 			}
-			if err := os.Remove(filepath.Join(o.absEmbedDir, name)); err != nil {
+			if err := pl.remove(filepath.Join(o.absEmbedDir, name)); err != nil {
 				return fmt.Errorf("prune %s: %w", rel, err)
 			}
 		}

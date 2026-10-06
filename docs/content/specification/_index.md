@@ -236,7 +236,7 @@ Example command-line invocations, rendered one per line. Ignored when 'help' is 
 
 array of [`ExitStatusEntry`](#exitstatusentry)
 
-Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. This is documentation only, and rotini does not check it: the runtime sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. Ignored when 'man' (verbatim) is set.
+Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. Ignored when 'man' (verbatim) is set.
 
 #### `see_also`
 
@@ -772,7 +772,7 @@ document instead; see [StdinSpec](#stdinspec).
 
 `object`
 
-Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter).
+Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 
 Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
 

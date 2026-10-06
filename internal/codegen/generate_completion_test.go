@@ -44,7 +44,7 @@ func TestCompletionScripts_preserveEveryToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.shell, func(t *testing.T) {
 			t.Parallel()
-			script, err := completionScript("prog", tt.shell)
+			script, err := completionScript("prog", tt.shell, "")
 			if err != nil {
 				t.Fatalf("completionScript(%s): %v", tt.shell, err)
 			}
@@ -60,7 +60,7 @@ func TestCompletionScripts_preserveEveryToken(t *testing.T) {
 // element when IFS lacks a space, so every word after the first would be lost.
 func TestCompletionScript_bashSlicesBeforeNarrowingIFS(t *testing.T) {
 	t.Parallel()
-	script, err := completionScript("prog", "bash")
+	script, err := completionScript("prog", "bash", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestCompletionScripts_parseInTheirOwnShell(t *testing.T) {
 			if err != nil {
 				t.Skipf("%s is not installed", c.bin)
 			}
-			script, err := completionScript("prog", c.shell)
+			script, err := completionScript("prog", c.shell, "")
 			if err != nil {
 				t.Fatal(err)
 			}

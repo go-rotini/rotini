@@ -167,6 +167,13 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix, gp.readsConfig(nil)), nil, gp.tree, gp.rootOutput),
 		listed:   true,
 	}}
+	// The variable that hides completion messages is an input the end user sets, so the root's
+	// man page lists it with the program's other environment variables.
+	if mode, env := completionMessages(gp.conf); feat.manPages && mode != "" && env != "" {
+		out[0].data.Environment = append(out[0].data.Environment, templateDocEnvRow{
+			Var: env, Summary: "set to 0, false or off to hide completion messages",
+		})
+	}
 
 	// cascading accumulates the cascading flags of a node's ancestors.
 	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool)
@@ -790,7 +797,7 @@ func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool
 // page is used as is (ANSI-stripped for strip features); otherwise the page renders through
 // the feature's template. The template is loaded only when some node renders: from template_dir
 // (seeding it when missing) when seedTemplate is set, else from the built-in default.
-func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedTemplate bool) ([]string, error) {
+func docFeatureContents(pl *planner, featDir string, nodes []helpNode, feat docFeature, seedTemplate bool) ([]string, error) {
 	renders := false
 	for _, hn := range nodes {
 		if hn.verbatim == "" {
@@ -803,10 +810,7 @@ func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedT
 	if renders {
 		var err error
 		if seedTemplate {
-			if err = os.MkdirAll(featDir, 0o755); err != nil {
-				return nil, fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
-			}
-			tmpl, err = loadFeatureTemplate(featDir, feat)
+			tmpl, err = loadFeatureTemplate(pl, featDir, feat)
 		} else {
 			tmpl, err = parseDocTemplate(feat.tmplFile, feat.embedded)
 		}
@@ -835,10 +839,10 @@ func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedT
 }
 
 // completionContents returns each node's shell completion script, parallel to nodes.
-func completionContents(prog string, nodes []helpNode) ([]string, error) {
+func completionContents(prog, messagesEnv string, nodes []helpNode) ([]string, error) {
 	contents := make([]string, len(nodes))
 	for i, n := range nodes {
-		script, err := completionScript(prog, n.name)
+		script, err := completionScript(prog, n.name, messagesEnv)
 		if err != nil {
 			return nil, fmt.Errorf("generate %s completion: %w", n.name, err)
 		}
@@ -849,15 +853,12 @@ func completionContents(prog string, nodes []helpNode) ([]string, error) {
 
 // writeFeatureOutputs writes each node's content to its file under featDir. Only embed-mode
 // features write files; inline content lives in the generated Go source.
-func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, feat docFeature) error {
+func writeFeatureOutputs(pl *planner, featDir string, nodes []helpNode, contents []string, feat docFeature) error {
 	if featDir == "" {
 		return fmt.Errorf("generate.features.%s.embed_dir must not be empty", feat.name)
 	}
-	if err := os.MkdirAll(featDir, 0o755); err != nil {
-		return fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
-	}
 	for i, hn := range nodes {
-		if err := writeGeneratedFile(filepath.Join(featDir, hn.file), []byte(contents[i])); err != nil {
+		if err := pl.write(filepath.Join(featDir, hn.file), []byte(contents[i])); err != nil {
 			return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
 		}
 	}
@@ -875,16 +876,17 @@ func stripForFeature(feat docFeature, text string) string {
 
 // loadFeatureTemplate reads the editable template in featDir, seeding it from the built-in
 // default when missing, and parses it with the shared FuncMap.
-func loadFeatureTemplate(featDir string, feat docFeature) (*template.Template, error) {
+func loadFeatureTemplate(pl *planner, featDir string, feat docFeature) (*template.Template, error) {
 	path := filepath.Join(featDir, feat.tmplFile)
-	src, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		if werr := os.WriteFile(path, []byte(feat.embedded), 0o644); werr != nil {
+	src, _, exists, err := pl.read(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s template %s: %w", feat.name, path, err)
+	}
+	if !exists {
+		if werr := pl.createOnce(path, []byte(feat.embedded)); werr != nil {
 			return nil, fmt.Errorf("seed %s template %s: %w", feat.name, path, werr)
 		}
 		src = []byte(feat.embedded)
-	} else if err != nil {
-		return nil, fmt.Errorf("read %s template %s: %w", feat.name, path, err)
 	}
 	tmpl, err := parseDocTemplate(feat.tmplFile, string(src))
 	if err != nil {

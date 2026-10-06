@@ -47,6 +47,8 @@ check-generated:
 	@$(GENERATED_FINGERPRINT) > /tmp/rotini-generated.before
 	@cp internal/codegen/schema-spec.json schema-spec.json
 	@cp internal/codegen/schema-conf.json schema-conf.json
+	@go run ./cmd/rotini generate --dry-run ./cmd/rotini/.rotini.spec.yaml --config ./cmd/rotini/.rotini.conf.yaml > /dev/null || \
+		(echo "the companion cli's generated files are stale (listed above); run go generate ./cmd/rotini"; exit 1)
 	@go generate ./cmd/rotini > /dev/null
 	@go mod tidy
 	@$(GENERATED_FINGERPRINT) > /tmp/rotini-generated.after

@@ -39,6 +39,7 @@ command:
         - rotini initialize mycli
         - rotini init mycli --format json
         - rotini init mycli --force
+        - rotini init mycli --dry-run
       footer: Use "rotini help <command>" for more information about a command.
       arguments:
         - name: name
@@ -66,6 +67,13 @@ command:
             - --force
           schema:
             type: bool
+        - name: dry-run
+          summary: show what init would write, and change nothing
+          identifiers:
+            - -n
+            - --dry-run
+          schema:
+            type: bool
     - name: generate
       aliases:
         - gen
@@ -74,6 +82,7 @@ command:
       examples:
         - rotini generate
         - rotini generate ./path/to/.rotini.spec.json --watch
+        - rotini generate --dry-run
       footer: Use "rotini help <command>" for more information about a command.
       arguments:
         - name: spec_file_path
@@ -95,6 +104,17 @@ command:
             - --watch
           schema:
             type: bool
+        - name: dry-run
+          summary: show what would be written, created or removed, and change nothing; exits 2 when something would change
+          identifiers:
+            - -n
+            - --dry-run
+          schema:
+            type: bool
+            negatable: true
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [dry-run, watch]
     - name: validate
       aliases:
         - val

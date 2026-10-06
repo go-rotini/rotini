@@ -54,6 +54,12 @@ Controls `rotini generate`: where rotini's JSON Schemas are written ('schemas'),
 
 Optional: where to write the contract document, a JSON description of every command's inputs, output and exit statuses.
 
+### `dry_run_env`
+
+`string`
+
+The name of an environment variable that makes `rotini generate` do a dry run: when it is set to 1, true, yes or on (any case), generate writes nothing, lists what it would change and exits 2 if anything would, or 0 if nothing would. Set it to CI to dry-run in most CI systems, which set CI=true, so `go generate ./...` checks every CLI in the module. --dry-run and --no-dry-run on the command line take precedence. Unset, the environment never changes what generate does. It doesn't apply to `rotini init`, which has no conf to read before it runs.
+
 ### `features`
 
 array of [`Feature`](#feature)
@@ -122,6 +128,18 @@ Directory (relative to the module root) where this feature's rendered files (hel
 `boolean` · default `false`
 
 When true, rotini generates this feature's outputs into the cmd package, with their variables and lookup function. Off by default.
+
+### `messages`
+
+`string` · one of `declared`, `all`
+
+completion only: turns on completion messages, lines the shell shows while a value is being completed and there is nothing to offer. 'declared' shows the inputs' `complete.message` lines from the spec. 'all' also shows a line derived from the summary of every other flag and argument that has one, such as `--replicas <int>: how many instances`. Either way a completer can add its own with rtx.AddCompletionMessage, which take the place of the static line. Omitted, there are no messages. zsh and bash 4.4 or later show them; fish, PowerShell and older bash skip them, and the plugin hosts kubectl, Docker and Flux show them their own way. Setting it on any other feature is an error.
+
+### `messages_env`
+
+`string`
+
+completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide completion messages; unset or any other value leaves them on. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionMessages replaces this check with a rule of your own. Requires `messages`.
 
 ### `section`
 

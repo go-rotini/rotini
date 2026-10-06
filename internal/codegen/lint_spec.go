@@ -78,6 +78,7 @@ var specLints = []func(*Spec) []error{
 	lintValuesParse,
 	lintObjectFlags,
 	lintLayout,
+	lintExitStatus,
 }
 
 // lintRootCommand requires the root command, which is the binary itself, to have a
@@ -1059,10 +1060,13 @@ func lintComplete(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
-			if schema == nil || schema.Complete == nil || schema.Complete.Kind == "" {
+			if schema == nil || schema.Complete == nil {
 				return
 			}
 			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			if m := schema.Complete.Message; m != "" && (strings.ContainsAny(m, "\r\n") || strings.TrimSpace(m) == "") {
+				add("sets a `complete.message` that isn't one line of text; a shell shows a message as a single line")
+			}
 			if channel != "flag" && channel != "argument" {
 				add("sets `complete`, which describes a value typed on the command line; only flags and arguments are, so here it would be silently ignored")
 				return
@@ -1820,4 +1824,40 @@ func lintItemConstraints(spec *Spec) []error {
 // floatBoundsDiffer reports whether an items-level bound is set and disagrees with the list's.
 func floatBoundsDiffer(item, list *float64) bool {
 	return item != nil && (list == nil || *item != *list)
+}
+
+// lintExitStatus checks each command's exit_status list as a contract: a code listed twice is
+// an error, and a code above 128 is a warning, since a process killed by signal n exits with
+// 128+n and a reader can't tell the two apart.
+func lintExitStatus(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		seen := map[int]bool{}
+		for i, e := range c.ExitStatus {
+			at := &problem{kind: "spec", ptr: fmt.Sprintf("%s/exit_status/%d", ptr, i), loc: "command " + path}
+			switch {
+			case seen[e.Code]:
+				at.msg = fmt.Sprintf("exit_status lists code %d twice; give each code one entry", e.Code)
+				problems = append(problems, at)
+			case e.Code > 128:
+				at.msg = fmt.Sprintf("exit_status code %d is also the exit code for %s; readers can't tell them apart", e.Code, signalName(e.Code-128))
+				at.sev = severityWarning
+				problems = append(problems, at)
+			}
+			seen[e.Code] = true
+		}
+	})
+	return problems
+}
+
+// signalName names signal n for a lint message, spelling out the two a CLI usually meets.
+func signalName(n int) string {
+	switch n {
+	case 2:
+		return "signal 2 (Ctrl-C, SIGINT)"
+	case 15:
+		return "signal 15 (SIGTERM)"
+	default:
+		return "signal " + strconv.Itoa(n)
+	}
 }

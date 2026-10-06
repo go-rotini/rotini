@@ -12,6 +12,7 @@ func (p *Processor) lintAcross(rs *reconciledSpec, rc *reconciledConf) []error {
 		return nil
 	}
 	problems := lintManPageNames(rs.spec, rc.conf)
+	problems = append(problems, lintUnshownMessages(rs.spec, rc.conf)...)
 	locateProblems(problems, rs.path, rs.locate)
 	return problems
 }
@@ -47,6 +48,29 @@ func lintManPageNames(spec *Spec, conf *Conf) []error {
 			return
 		}
 		first[page] = command
+	})
+	return problems
+}
+
+// lintUnshownMessages warns about each `complete.message` the conf never shows: one the
+// completion feature is off for, or doesn't turn messages on for.
+func lintUnshownMessages(spec *Spec, conf *Conf) []error {
+	if spec == nil || conf == nil {
+		return nil
+	}
+	if mode, _ := completionMessages(conf); mode != "" {
+		return nil
+	}
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
+			if schema == nil || schema.Complete == nil || schema.Complete.Message == "" {
+				return
+			}
+			p := inputProblem(ptr, path, channel, name, "sets `complete.message`, but the conf's completion feature is off or doesn't set `messages`, so it is never shown; enable completion with `messages: declared`, or remove the message")
+			p.sev = severityWarning
+			problems = append(problems, p)
+		})
 	})
 	return problems
 }

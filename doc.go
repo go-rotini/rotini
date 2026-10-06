@@ -272,7 +272,10 @@
 //     [FlagValueCompleter] and [ArgValueCompleter] supply dynamic completion, and
 //     [Program.Complete] answers it in a host's [CompletionFormat]: [PluginCompletion] for a
 //     plugin host such as kubectl completing a rotini plugin. [Program.WithCompletion] makes
-//     __complete answer in that format, for hosts that call it (Docker, Flux).
+//     __complete answer in that format, for hosts that call it (Docker, Flux). When the conf
+//     turns completion messages on, a completer adds its own with
+//     [Context.AddCompletionMessage], and [Program.WithCompletionMessages] decides when they
+//     show.
 //
 // # Batteries
 //
