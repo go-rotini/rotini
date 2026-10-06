@@ -636,7 +636,7 @@ func intValue(e ast.Expr, consts map[string]int) (int, bool) {
 		if v.Kind != token.INT {
 			return 0, false
 		}
-		n, err := strconv.ParseInt(v.Value, 0, 64)
+		n, err := strconv.ParseInt(v.Value, 0, strconv.IntSize)
 		return int(n), err == nil
 	case *ast.Ident:
 		n, ok := consts[v.Name]
