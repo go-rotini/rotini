@@ -182,7 +182,9 @@ func lintReport(failure error, warnings []error) string {
 		}
 	}
 	for _, w := range warnings {
-		b.WriteString("warning: " + w.Error() + "\n")
+		b.WriteString("warning: ")
+		b.WriteString(w.Error())
+		b.WriteString("\n")
 	}
 	return b.String()
 }
@@ -210,7 +212,7 @@ func TestLintProblemsArePositioned(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+			for line := range strings.SplitSeq(strings.TrimSpace(string(body)), "\n") {
 				if line == "" {
 					continue
 				}

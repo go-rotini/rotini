@@ -16,16 +16,16 @@ import (
 // CommandDef literal, omitting empty ones. renderDefinition and rnodesLiteral share it.
 func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Schema) {
 	if fl := flagDefsLiteral(in, schemas); fl != "" {
-		b.WriteString("Flags: " + fl + ",\n")
+		fmt.Fprintf(b, "Flags: %s,\n", fl)
 	}
 	if al := argDefsLiteral(in, schemas); al != "" {
-		b.WriteString("Arguments: " + al + ",\n")
+		fmt.Fprintf(b, "Arguments: %s,\n", al)
 	}
 	if fg := flagGroupsLiteral(in); fg != "" {
-		b.WriteString("FlagGroups: " + fg + ",\n")
+		fmt.Fprintf(b, "FlagGroups: %s,\n", fg)
 	}
 	if fd := flagDependenciesLiteral(in); fd != "" {
-		b.WriteString("FlagDependencies: " + fd + ",\n")
+		fmt.Fprintf(b, "FlagDependencies: %s,\n", fd)
 	}
 }
 
@@ -34,26 +34,26 @@ func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Sc
 // file, so it need only be valid Go.
 func renderDefinition(gp *program) string {
 	var b strings.Builder
-	b.WriteString("var definition = " + rotiniPkgName + ".Definition{\n")
-	b.WriteString("Name: " + strconv.Quote(gp.rootName) + ",\n")
-	b.WriteString("Handler: " + strconv.Quote(gp.rootPascal) + ",\n")
+	fmt.Fprintf(&b, "var definition = %s.Definition{\n", rotiniPkgName)
+	fmt.Fprintf(&b, "Name: %q,\n", gp.rootName)
+	fmt.Fprintf(&b, "Handler: %q,\n", gp.rootPascal)
 	if gp.rootPassthrough {
 		b.WriteString("Passthrough: true,\n")
 	}
 	writeInputDefsLiteral(&b, gp.rootInputs, gp.schemas)
 	b.WriteString(outputDefLiteral(gp.rootPascal+"Output", gp.rootOutput, gp.schemas))
 	if cl := rnodesLiteral(gp.rootName, gp.tree, gp.schemas); cl != "" {
-		b.WriteString("Commands: " + cl + ",\n")
+		fmt.Fprintf(&b, "Commands: %s,\n", cl)
 	}
 	if rl := pluginDefsLiteral(gp.rootName, gp.rootPlugins); rl != "" {
-		b.WriteString("Plugins: " + rl + ",\n")
+		fmt.Fprintf(&b, "Plugins: %s,\n", rl)
 	}
 	if dl := discoveryLiteral(gp.rootName, gp.rootDiscovery); dl != "" {
-		b.WriteString("PluginDiscovery: " + dl + ",\n")
+		fmt.Fprintf(&b, "PluginDiscovery: %s,\n", dl)
 	}
 	b.WriteString(completionMessagesLiteral(gp.conf))
 	if gp.rootPluginPath != "" {
-		b.WriteString("PluginPath: " + strconv.Quote(gp.rootPluginPath) + ",\n")
+		fmt.Fprintf(&b, "PluginPath: %q,\n", gp.rootPluginPath)
 	}
 	b.WriteString("}\n")
 	return b.String()
@@ -67,9 +67,9 @@ func renderInputSettings(gp *program) string {
 	stdinSchemas := collectStdinSchemas(gp)
 	var b strings.Builder
 	b.WriteString("// InputSettings is the generated descriptor the default input reader (rotini.InputReader) reads.\n")
-	b.WriteString("var InputSettings = " + rotiniPkgName + ".InputSettings{\n")
+	fmt.Fprintf(&b, "var InputSettings = %s.InputSettings{\n", rotiniPkgName)
 	if gp.envPrefix != "" {
-		b.WriteString("EnvPrefix: " + strconv.Quote(gp.envPrefix) + ",\n")
+		fmt.Fprintf(&b, "EnvPrefix: %q,\n", gp.envPrefix)
 	}
 	renderConfigFiles(&b, gp, files)
 	renderStdinSchemas(&b, stdinSchemas)
@@ -84,20 +84,20 @@ func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile
 		return
 	}
 	pathFrom := collectPathFrom(gp)
-	b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
+	fmt.Fprintf(b, "ConfigFiles: []%s.ConfigFile{\n", rotiniPkgName)
 	for _, f := range files {
-		b.WriteString("{Name: " + strconv.Quote(f.Name))
-		b.WriteString(", Scope: " + strconv.Quote(f.Scope))
+		fmt.Fprintf(b, "{Name: %q", f.Name)
+		fmt.Fprintf(b, ", Scope: %q", f.Scope)
 		if f.Path != "" {
-			b.WriteString(", Path: " + strconv.Quote(f.Path))
+			fmt.Fprintf(b, ", Path: %q", f.Path)
 		}
 		if f.Format != "" {
-			b.WriteString(", Format: " + strconv.Quote(f.Format))
+			fmt.Fprintf(b, ", Format: %q", f.Format)
 		}
 		renderDiscover(b, f.Discover)
 		if f.Schema != nil {
 			if js := validationSchema(*f.Schema, gp.schemas); js != "" {
-				b.WriteString(", Schema: " + goRawString(js))
+				fmt.Fprintf(b, ", Schema: %s", goRawString(js))
 			}
 		}
 		if c, ok := pathFrom[f.Name]; ok {
@@ -113,9 +113,9 @@ func renderDiscover(b *strings.Builder, d *ConfigurationFileDiscover) {
 	if d == nil {
 		return
 	}
-	b.WriteString(", Discover: &" + rotiniPkgName + ".DiscoverDef{Strategy: " + strconv.Quote(d.Strategy) + ", File: " + strconv.Quote(d.File))
+	fmt.Fprintf(b, ", Discover: &%s.DiscoverDef{Strategy: %q, File: %q", rotiniPkgName, d.Strategy, d.File)
 	if d.App != "" {
-		b.WriteString(", App: " + strconv.Quote(d.App))
+		fmt.Fprintf(b, ", App: %q", d.App)
 	}
 	b.WriteString("}")
 }
@@ -123,15 +123,15 @@ func renderDiscover(b *strings.Builder, d *ConfigurationFileDiscover) {
 // renderPathFrom renders a config file's PathFrom field: the flag and/or env var whose
 // value supplies the file's path at run time.
 func renderPathFrom(b *strings.Builder, c pathFromClaim) {
-	b.WriteString(", PathFrom: &" + rotiniPkgName + ".PathFromDef{")
+	fmt.Fprintf(b, ", PathFrom: &%s.PathFromDef{", rotiniPkgName)
 	if c.flag != "" {
-		b.WriteString("Flag: " + strconv.Quote(c.flag))
+		fmt.Fprintf(b, "Flag: %q", c.flag)
 		if c.env != "" {
 			b.WriteString(", ")
 		}
 	}
 	if c.env != "" {
-		b.WriteString("Env: " + strconv.Quote(c.env))
+		fmt.Fprintf(b, "Env: %q", c.env)
 	}
 	b.WriteString("}")
 }
@@ -149,7 +149,7 @@ func renderStdinSchemas(b *strings.Builder, schemas map[string]string) {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		b.WriteString(strconv.Quote(k) + ": " + goRawString(schemas[k]) + ",\n")
+		fmt.Fprintf(b, "%q: %s,\n", k, goRawString(schemas[k]))
 	}
 	b.WriteString("},\n")
 }
@@ -174,7 +174,7 @@ func discoveryLiteral(host string, d *PluginDiscovery) string {
 		prefix = host + "-"
 	}
 	var b strings.Builder
-	b.WriteString("&" + rotiniPkgName + ".PluginDiscoveryDef{Prefix: " + strconv.Quote(prefix))
+	fmt.Fprintf(&b, "&%s.PluginDiscoveryDef{Prefix: %q", rotiniPkgName, prefix)
 	if d.Hidden {
 		b.WriteString(", Hidden: true")
 	}
@@ -189,7 +189,7 @@ func sliceLiteral[T any](typeName string, items []T, renderItem func(b *strings.
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("[]" + rotiniPkgName + "." + typeName + "{\n")
+	fmt.Fprintf(&b, "[]%s.%s{\n", rotiniPkgName, typeName)
 	for _, it := range items {
 		b.WriteString("{")
 		renderItem(&b, it)
@@ -203,13 +203,13 @@ func sliceLiteral[T any](typeName string, items []T, renderItem func(b *strings.
 // plugins. Each binary is "<host>-<name>"; an invalid or non-positive timeout is omitted.
 func pluginDefsLiteral(host string, rcs []PluginSpec) string {
 	return sliceLiteral("PluginDef", rcs, func(b *strings.Builder, rc PluginSpec) {
-		b.WriteString("Name: " + strconv.Quote(rc.Name))
+		fmt.Fprintf(b, "Name: %q", rc.Name)
 		if rc.Summary != "" {
-			b.WriteString(", Summary: " + strconv.Quote(rc.Summary))
+			fmt.Fprintf(b, ", Summary: %q", rc.Summary)
 		}
-		b.WriteString(", Binary: " + strconv.Quote(host+"-"+rc.Name))
+		fmt.Fprintf(b, ", Binary: %q", host+"-"+rc.Name)
 		if len(rc.Aliases) > 0 {
-			b.WriteString(", Aliases: " + goStringSlice(rc.Aliases))
+			fmt.Fprintf(b, ", Aliases: %s", goStringSlice(rc.Aliases))
 		}
 		if rc.Timeout != "" {
 			if d, err := time.ParseDuration(rc.Timeout); err == nil && d > 0 {
@@ -226,15 +226,15 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		return ""
 	}
 	return sliceLiteral("FlagDef", in.Flags, func(b *strings.Builder, f FlagInput) {
-		b.WriteString("Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(flagIdentifiers(f)))
+		fmt.Fprintf(b, "Name: %q, Identifiers: %s", f.Name, goStringSlice(flagIdentifiers(f)))
 		if f.Summary != "" {
-			b.WriteString(", Summary: " + strconv.Quote(f.Summary))
+			fmt.Fprintf(b, ", Summary: %q", f.Summary)
 		}
-		b.WriteString(", Type: " + strconv.Quote(definitionType(f.Schema, schemas)))
+		fmt.Fprintf(b, ", Type: %q", definitionType(f.Schema, schemas))
 		objectSchema := objectSchemaFor(f.Schema, schemas)
 		if objectSchema != "" {
 			writeSchemaCommon(b, withObjectDefault(f.Schema))
-			b.WriteString(", ObjectSchema: " + goRawString(objectSchema))
+			fmt.Fprintf(b, ", ObjectSchema: %s", goRawString(objectSchema))
 		} else {
 			writeSchemaCommon(b, f.Schema)
 		}
@@ -242,10 +242,10 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 			b.WriteString(", Hidden: true")
 		}
 		if len(f.DeprecatedIdentifiers) > 0 {
-			b.WriteString(", DeprecatedIdentifiers: " + goStringSlice(f.DeprecatedIdentifiers))
+			fmt.Fprintf(b, ", DeprecatedIdentifiers: %s", goStringSlice(f.DeprecatedIdentifiers))
 		}
 		if f.Deprecated != "" {
-			b.WriteString(", Deprecated: " + strconv.Quote(f.Deprecated))
+			fmt.Fprintf(b, ", Deprecated: %q", f.Deprecated)
 		}
 		if f.Schema != nil && f.Schema.Negatable {
 			b.WriteString(", Negatable: true")
@@ -254,16 +254,16 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 			b.WriteString(", ShortCircuit: true")
 		}
 		if f.Schema != nil && f.Schema.ImplicitValue != nil {
-			b.WriteString(", ImplicitValue: " + strconv.Quote(defaultString(f.Schema.ImplicitValue)))
+			fmt.Fprintf(b, ", ImplicitValue: %q", defaultString(f.Schema.ImplicitValue))
 		}
 		if f.Schema != nil && f.Schema.DottedKeys {
 			b.WriteString(", DottedKeys: true")
 		}
 		if kp := keyPaths(f.Schema); len(kp) > 0 {
-			b.WriteString(", KeyPaths: " + goStringSlice(kp))
+			fmt.Fprintf(b, ", KeyPaths: %s", goStringSlice(kp))
 		}
 		if f.Schema != nil && len(f.Schema.From) > 0 {
-			b.WriteString(", From: " + goStringSlice(f.Schema.From))
+			fmt.Fprintf(b, ", From: %s", goStringSlice(f.Schema.From))
 		}
 		b.WriteString(completionLiteral(f.Schema))
 	})
@@ -396,7 +396,7 @@ func argDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 	}
 	return sliceLiteral("ArgDef", in.Arguments, func(b *strings.Builder, a ArgumentInput) {
 		typ := definitionType(a.Schema, schemas)
-		b.WriteString("Name: " + strconv.Quote(a.Name) + ", Type: " + strconv.Quote(typ))
+		fmt.Fprintf(b, "Name: %q, Type: %q", a.Name, typ)
 		if strings.HasPrefix(typ, "[]") {
 			b.WriteString(", Variadic: true")
 		}
@@ -406,7 +406,7 @@ func argDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 			b.WriteString(", Hidden: true")
 		}
 		if a.Deprecated != "" {
-			b.WriteString(", Deprecated: " + strconv.Quote(a.Deprecated))
+			fmt.Fprintf(b, ", Deprecated: %q", a.Deprecated)
 		}
 	})
 }
@@ -418,7 +418,7 @@ func flagGroupsLiteral(in *Inputs) string {
 		return ""
 	}
 	return sliceLiteral("FlagGroup", in.FlagGroups, func(b *strings.Builder, g FlagGroup) {
-		b.WriteString("Kind: " + strconv.Quote(g.Kind) + ", Flags: " + goStringSlice(g.Flags))
+		fmt.Fprintf(b, "Kind: %q, Flags: %s", g.Kind, goStringSlice(g.Flags))
 	})
 }
 
@@ -429,7 +429,7 @@ func flagDependenciesLiteral(in *Inputs) string {
 		return ""
 	}
 	return sliceLiteral("FlagDependency", in.FlagDependencies, func(b *strings.Builder, d FlagDependency) {
-		b.WriteString("When: " + strconv.Quote(d.When) + ", Requires: " + goStringSlice(d.Requires))
+		fmt.Fprintf(b, "When: %q, Requires: %s", d.When, goStringSlice(d.Requires))
 	})
 }
 
@@ -438,10 +438,10 @@ func flagDependenciesLiteral(in *Inputs) string {
 // carries its own pluginHost.
 func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
-		b.WriteString("Name: " + strconv.Quote(n.name) + ",\n")
-		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
+		fmt.Fprintf(b, "Name: %q,\n", n.name)
+		fmt.Fprintf(b, "Handler: %q,\n", n.prefix)
 		if n.help.Summary != "" {
-			b.WriteString("Summary: " + strconv.Quote(n.help.Summary) + ",\n")
+			fmt.Fprintf(b, "Summary: %q,\n", n.help.Summary)
 		}
 		if n.hidden {
 			b.WriteString("Hidden: true,\n")
@@ -450,33 +450,33 @@ func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string
 			b.WriteString("Passthrough: true,\n")
 		}
 		if len(n.aliases) > 0 {
-			b.WriteString("Aliases: " + goStringSlice(n.aliases) + ",\n")
+			fmt.Fprintf(b, "Aliases: %s,\n", goStringSlice(n.aliases))
 		}
 		if len(n.deprecatedIdentifiers) > 0 {
-			b.WriteString("DeprecatedIdentifiers: " + goStringSlice(n.deprecatedIdentifiers) + ",\n")
+			fmt.Fprintf(b, "DeprecatedIdentifiers: %s,\n", goStringSlice(n.deprecatedIdentifiers))
 		}
 		if n.deprecated != "" {
-			b.WriteString("Deprecated: " + strconv.Quote(n.deprecated) + ",\n")
+			fmt.Fprintf(b, "Deprecated: %q,\n", n.deprecated)
 		}
 		writeInputDefsLiteral(b, n.inputs, schemas)
 		if !n.composed { // a composed command's output type lives in its own cli's package
 			b.WriteString(outputDefLiteral(n.prefix+"Output", n.output, schemas))
 		}
 		if cl := rnodesLiteral(host, n.children, schemas); cl != "" {
-			b.WriteString("Commands: " + cl + ",\n")
+			fmt.Fprintf(b, "Commands: %s,\n", cl)
 		}
 		pluginHost := host
 		if n.pluginHost != "" {
 			pluginHost = n.pluginHost
 		}
 		if rl := pluginDefsLiteral(pluginHost, n.plugins); rl != "" {
-			b.WriteString("Plugins: " + rl + ",\n")
+			fmt.Fprintf(b, "Plugins: %s,\n", rl)
 		}
 		if dl := discoveryLiteral(pluginHost, n.discovery); dl != "" {
-			b.WriteString("PluginDiscovery: " + dl + ",\n")
+			fmt.Fprintf(b, "PluginDiscovery: %s,\n", dl)
 		}
 		if n.pluginPath != "" {
-			b.WriteString("PluginPath: " + strconv.Quote(n.pluginPath) + ",\n")
+			fmt.Fprintf(b, "PluginPath: %q,\n", n.pluginPath)
 		}
 	})
 }
@@ -493,12 +493,12 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	// A list or map default emits Defaults (one seeded occurrence each); anything else
 	// emits the single Default.
 	if list := defaultList(schema.Default); len(list) > 0 {
-		b.WriteString(", Defaults: " + goStringSlice(list))
+		fmt.Fprintf(b, ", Defaults: %s", goStringSlice(list))
 	} else if d := defaultString(schema.Default); d != "" {
-		b.WriteString(", Default: " + strconv.Quote(d))
+		fmt.Fprintf(b, ", Default: %q", d)
 	}
 	if len(schema.Enum) > 0 {
-		b.WriteString(", Enum: " + goStringSlice(schema.Enum))
+		fmt.Fprintf(b, ", Enum: %s", goStringSlice(schema.Enum))
 		if schema.IgnoreCase {
 			b.WriteString(", IgnoreCase: true")
 		}
@@ -507,13 +507,13 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 		b.WriteString(", Secret: true")
 	}
 	if schema.Separator != "" {
-		b.WriteString(", Separator: " + strconv.Quote(schema.Separator))
+		fmt.Fprintf(b, ", Separator: %q", schema.Separator)
 	}
 	if l := layoutFor(schema); l != "" {
-		b.WriteString(", Layout: " + strconv.Quote(l))
+		fmt.Fprintf(b, ", Layout: %q", l)
 	}
 	if c := constraintsLiteral(schema); c != "" {
-		b.WriteString(", Constraints: " + c)
+		fmt.Fprintf(b, ", Constraints: %s", c)
 	}
 }
 

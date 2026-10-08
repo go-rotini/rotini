@@ -30,6 +30,10 @@ endif
 # packages and would copy the runtime's dependencies into the tools file.
 TOOL := go tool -modfile=tools.mod
 
+# gopls runs from its own go.mod rather than tools.mod: it pins an exact golang.org/x/tools,
+# which the other tools' shared graph would override. Keep the version in step with editors.
+GOPLS := go run golang.org/x/tools/gopls@v0.23.0
+
 .PHONY: all check-generated clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race tools-upgrade vuln vuln-tools rotini rotini-build rotini-install
 
 all: clean lint test test-conformance test-acceptance test-e2e test-bench test-fuzz test-mutation test-race rotini-build rotini-install
@@ -63,6 +67,8 @@ lint:
 	@go mod verify
 	@go mod verify -modfile=tools.mod
 	@$(TOOL) golangci-lint run ./...
+	@gopls_out=$$($(GOPLS) check -severity=hint $$(git ls-files '*.go' | grep -v 'testdata/')) || exit 1; \
+	test -z "$$gopls_out" || (echo "gopls:" && echo "$$gopls_out" && exit 1)
 	@$(TOOL) go-licenses check ./...
 	@$(MAKE) --no-print-directory vuln
 	@$(MAKE) --no-print-directory vuln-tools

@@ -160,7 +160,7 @@ func validateSpecText(t *testing.T, spec string) []string {
 	failure := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect",
 		func(string, error) {}, func([]error) {})
 	if failure != nil {
-		for _, line := range strings.Split(failure.Error(), "\n") {
+		for line := range strings.SplitSeq(failure.Error(), "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				msgs = append(msgs, line)
 			}

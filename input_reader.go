@@ -107,7 +107,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
 	anchor := frameAnchor(v, chain, rtx.frameIndex())
-	if err := b.reconcileFlags(v, chain, rtx.Argv, store, overrides, anchor, waived); err != nil {
+	if err := b.reconcileFlags(v, chain, store, overrides, anchor, waived); err != nil {
 		return err
 	}
 
@@ -326,7 +326,7 @@ func readStdin(r io.Reader) ([]byte, error) {
 // config files. A flag present in no source keeps what the Parser bound, and argv-only flags
 // are untouched. Each reconciled value is written back into store so the deferred validate
 // pass sees it as present.
-func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, argv []string, store *parsedInputs, overrides map[string]string, anchor int, waived bool) error {
+func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *parsedInputs, overrides map[string]string, anchor int, waived bool) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
@@ -335,7 +335,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, argv []st
 		return err
 	}
 	srcs := make([]recon.Source, 0, 2+len(files))
-	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, argv, anchor)), flagEnvSource(v, b.envPrefix))
+	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, b.envPrefix))
 	srcs = append(srcs, files...)
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
@@ -643,8 +643,9 @@ func hasReconFlags(v reflect.Value) bool {
 }
 
 // flagOverrides maps the canonical key of every fallback flag explicitly set on argv to its
-// value — the highest-precedence reconciliation layer.
-func flagOverrides(v reflect.Value, chain []Command, argv []string, offset int) map[string]any {
+// value — the highest-precedence reconciliation layer. "Set" is what the parser recorded, so
+// an identifier among a passthrough command's raw words doesn't count.
+func flagOverrides(v reflect.Value, chain []Command, store *parsedInputs, offset int) map[string]any {
 	m := map[string]any{}
 	if offset < 0 || offset+v.NumField() > len(chain) {
 		return m
@@ -660,8 +661,7 @@ func flagOverrides(v reflect.Value, chain []Command, argv []string, offset int) 
 			if key == "" {
 				continue
 			}
-			fd, ok := findFlagDef(chain[offset+i].Flags, ft.Field(j).Tag.Get("rotini"))
-			if ok && flagWasSet(argv, fd.Identifiers) {
+			if store.argvSetAt(offset + i)[ft.Field(j).Tag.Get("rotini")] {
 				setNested(m, key, flags.Field(j).Interface())
 			}
 		}
@@ -720,27 +720,6 @@ func findFlagDef(defs []FlagDef, name string) (FlagDef, bool) {
 		}
 	}
 	return FlagDef{}, false
-}
-
-// flagWasSet reports whether any of a flag's identifiers appears as a flag token in argv.
-// Clustered short flags are not detected.
-func flagWasSet(argv, identifiers []string) bool {
-	for _, tok := range argv {
-		if tok == "--" {
-			break
-		}
-		if len(tok) < 2 || tok[0] != '-' {
-			continue
-		}
-		name := tok
-		if before, _, ok := strings.Cut(tok, "="); ok {
-			name = before
-		}
-		if slices.Contains(identifiers, name) {
-			return true
-		}
-	}
-	return false
 }
 
 // checkDescribed returns a [*WiringError] when the inputs struct has a Config channel but the
@@ -1063,7 +1042,7 @@ func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs) map[st
 		if pf == nil {
 			continue
 		}
-		explicit, defaulted := storeFlagValue(chain, store, pf.Flag)
+		explicit, defaulted := storeFlagValue(store, pf.Flag)
 		switch {
 		case explicit != "":
 			out[f.Name] = explicit
@@ -1078,7 +1057,7 @@ func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs) map[st
 
 // storeFlagValue finds a flag's parsed value across the chain, split by whether it was set on
 // argv or filled by its default. The last value wins for a repeated flag.
-func storeFlagValue(chain []Command, store *parsedInputs, name string) (explicit, defaulted string) {
+func storeFlagValue(store *parsedInputs, name string) (explicit, defaulted string) {
 	if name == "" || store == nil {
 		return "", ""
 	}

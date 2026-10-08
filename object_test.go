@@ -23,7 +23,7 @@ type objDB struct {
 	Host string   `json:"host"`
 	Port int      `json:"port,omitempty"`
 	TLS  bool     `json:"tls,omitempty"`
-	Pool objPool  `json:"pool,omitempty"`
+	Pool objPool  `json:"pool"`
 	Tags []string `json:"tags,omitempty"`
 }
 

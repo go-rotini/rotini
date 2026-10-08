@@ -378,13 +378,11 @@ func TestHandlerLifetime_generatedWiringIsRaceFreeUnderConcurrentRuns(t *testing
 
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := p.Run([]string{"run", "x"}); err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

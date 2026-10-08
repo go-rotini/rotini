@@ -829,13 +829,11 @@ func TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame(t *testing.T) {
 	p := NewProgram(testDef(), fgProg{cascading: func(rtx *Context) {
 		var wg sync.WaitGroup
 		for range 4 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				mu.Lock()
 				defer mu.Unlock()
 				seen = append(seen, rtx.Command().Name)
-			}()
+			})
 		}
 		wg.Wait() // the hook does not return until they are done
 	}}).WithStdout(io.Discard).WithStderr(io.Discard)

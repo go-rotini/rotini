@@ -23,7 +23,7 @@ func fsDef(secret bool) Definition {
 	return Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
-			{Name: "port", Identifiers: []string{"--port"}, Type: "int", Secret: secret, Constraints: Constraints{Maximum: &high}},
+			{Name: "port", Identifiers: []string{"--port"}, Type: "int", Secret: secret, Maximum: &high},
 			{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Enum: []string{"fast", "slow"}},
 		},
 	}
@@ -129,11 +129,11 @@ func fsRuleDef() Definition {
 	return Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
-			{Name: "step", Identifiers: []string{"--step"}, Type: "int", Constraints: Constraints{MultipleOf: &five}},
-			{Name: "name", Identifiers: []string{"--name"}, Type: "string", Constraints: Constraints{MinLength: 3}},
-			{Name: "code", Identifiers: []string{"--code"}, Type: "string", Constraints: Constraints{Pattern: "^[a-z]+$"}},
-			{Name: "sku", Identifiers: []string{"--sku"}, Type: "string", Constraints: Constraints{Pattern: "^[A-Z]{3}$", PatternMessage: "three capital letters"}},
-			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Separator: ",", Constraints: Constraints{MaxItems: 1}},
+			{Name: "step", Identifiers: []string{"--step"}, Type: "int", MultipleOf: &five},
+			{Name: "name", Identifiers: []string{"--name"}, Type: "string", MinLength: 3},
+			{Name: "code", Identifiers: []string{"--code"}, Type: "string", Pattern: "^[a-z]+$"},
+			{Name: "sku", Identifiers: []string{"--sku"}, Type: "string", Pattern: "^[A-Z]{3}$", PatternMessage: "three capital letters"},
+			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Separator: ",", MaxItems: 1},
 			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true},
 		},
 	}

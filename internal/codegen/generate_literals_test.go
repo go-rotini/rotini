@@ -95,11 +95,11 @@ func TestFlagDefsLiteral_objectFlags(t *testing.T) {
 		"Label": {BaseSchema: BaseSchema{Type: "string"}}, // a named scalar: not an object flag
 	}
 	in := &Inputs{Flags: []FlagInput{
-		{Name: "db", Identifiers: []string{"--db"}, Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/DB"},
+		{Name: "db", Identifiers: []string{"--db"}, Schema: &InputSchema{Ref: "#/schemas/DB",
 			Default: map[string]any{"host": "a, b", "pool": map[string]any{"max": 3}}}},
-		{Name: "dbs", Identifiers: []string{"--dbs"}, Schema: &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Ref: "#/schemas/DB"}}},
+		{Name: "dbs", Identifiers: []string{"--dbs"}, Schema: &InputSchema{Type: "array", Items: &Schema{Ref: "#/schemas/DB"},
 			Default: []any{map[string]any{"host": "x"}, map[string]any{"host": "y"}}}},
-		{Name: "label", Identifiers: []string{"--label"}, Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/Label"}}},
+		{Name: "label", Identifiers: []string{"--label"}, Schema: &InputSchema{Ref: "#/schemas/Label"}},
 	}}
 	got := flagDefsLiteral(in, schemas)
 	for _, want := range []string{
@@ -124,12 +124,12 @@ func TestLayoutFor(t *testing.T) {
 		schema *InputSchema
 		want   string
 	}{
-		{&InputSchema{BaseSchema: BaseSchema{Type: "date"}}, "2006-01-02"},
-		{&InputSchema{BaseSchema: BaseSchema{Type: "[]date"}}, "2006-01-02"},
-		{&InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Type: "date"}}}}, "2006-01-02"},
-		{&InputSchema{BaseSchema: BaseSchema{Type: "date"}, Layout: "02/01/2006"}, "02/01/2006"},
-		{&InputSchema{BaseSchema: BaseSchema{Type: "datetime"}}, ""},
-		{&InputSchema{BaseSchema: BaseSchema{Type: "time"}, Layout: "unix"}, "unix"},
+		{&InputSchema{Type: "date"}, "2006-01-02"},
+		{&InputSchema{Type: "[]date"}, "2006-01-02"},
+		{&InputSchema{Type: "array", Items: &Schema{Type: "date"}}, "2006-01-02"},
+		{&InputSchema{Type: "date", Layout: "02/01/2006"}, "02/01/2006"},
+		{&InputSchema{Type: "datetime"}, ""},
+		{&InputSchema{Type: "time", Layout: "unix"}, "unix"},
 		{nil, ""},
 	} {
 		if got := layoutFor(tc.schema); got != tc.want {
@@ -137,13 +137,13 @@ func TestLayoutFor(t *testing.T) {
 		}
 	}
 	in := &Inputs{
-		Flags:     []FlagInput{{Name: "due", Identifiers: []string{"--due"}, Schema: &InputSchema{BaseSchema: BaseSchema{Type: "date"}}}},
-		Arguments: []ArgumentInput{{Name: "at", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "time"}, Layout: "unix"}}},
+		Flags:     []FlagInput{{Name: "due", Identifiers: []string{"--due"}, Schema: &InputSchema{Type: "date"}}},
+		Arguments: []ArgumentInput{{Name: "at", Schema: &InputSchema{Type: "time", Layout: "unix"}}},
 	}
 	if lit := flagDefsLiteral(in, nil) + argDefsLiteral(in, nil); !strings.Contains(lit, `Layout: "2006-01-02"`) || !strings.Contains(lit, `Layout: "unix"`) {
 		t.Errorf("literal does not carry the layouts:\n%s", lit)
 	}
-	if tags := constraintTags(&InputSchema{BaseSchema: BaseSchema{Type: "date"}}); tags != `layout:"2006-01-02"` {
+	if tags := constraintTags(&InputSchema{Type: "date"}); tags != `layout:"2006-01-02"` {
 		t.Errorf("channel tags = %q", tags)
 	}
 }

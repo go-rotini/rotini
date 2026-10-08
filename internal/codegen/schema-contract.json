@@ -128,6 +128,7 @@
       "additionalProperties": false,
       "properties": {
         "format": { "type": "string" },
+        "required": { "type": "boolean", "description": "true when an empty stdin is an error." },
         "schema": { "$ref": "#/definitions/JSONSchema" }
       }
     },

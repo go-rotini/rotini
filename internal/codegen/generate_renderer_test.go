@@ -395,7 +395,7 @@ func TestHelpPage_groupedFlagSummaryStaysOnItsRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := &Inputs{Flags: []FlagInput{{Name: "mode", Identifiers: []string{"--mode"}, Summary: "first\tsecond\nthird", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "string"}}}}}
+	in := &Inputs{Flags: []FlagInput{{Name: "mode", Identifiers: []string{"--mode"}, Summary: "first\tsecond\nthird", Schema: &InputSchema{Type: "string"}}}}
 	data := buildHelpData("app", cmdHelp{}, in, nil, nil, nil, "", false)
 	data.Headings.Usage, data.Headings.Flags = "Usage:", "Flags:"
 	page, err := renderDocText(tmpl, data)

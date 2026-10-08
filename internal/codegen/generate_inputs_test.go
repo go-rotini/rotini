@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -119,7 +120,7 @@ func TestValueTypes_generateCompilingCode(t *testing.T) {
 	for _, a := range valueTypeAliases {
 		for i, typ := range []string{a, "[]" + a, "map[string]" + a} {
 			name := a + strconv.Itoa(i)
-			flags.WriteString("    - name: " + name + "\n      identifiers: [--" + name + "]\n      schema: {type: '" + typ + "'}\n")
+			fmt.Fprintf(&flags, "    - name: %s\n      identifiers: [--%s]\n      schema: {type: '%s'}\n", name, name, typ)
 		}
 	}
 	spec := "version: 0.0.0\ncommand:\n  name: vt\n  flags:\n" + flags.String()
@@ -147,10 +148,8 @@ func TestValueTypes_generateCompilingCode(t *testing.T) {
 // with backslashes and quotes, reads back through reflect exactly as declared.
 func TestConstraintTags_readBackThroughReflect(t *testing.T) {
 	schema := &InputSchema{
-		BaseSchema: BaseSchema{
-			Pattern: `^\d+\.\w+ "quoted" ` + "`tick`$",
-			Enum:    []string{"fast", `a "b"`, `c\d`, "e`f"},
-		},
+		Pattern:    `^\d+\.\w+ "quoted" ` + "`tick`$",
+		Enum:       []string{"fast", `a "b"`, `c\d`, "e`f"},
 		IgnoreCase: true,
 	}
 	schema.Minimum = new(1.0)
@@ -174,7 +173,7 @@ func TestConstraintTags_readBackThroughReflect(t *testing.T) {
 		t.Error("ignorecase tag missing")
 	}
 	// The common case keeps the readable raw form.
-	if plain := inputFieldTag(fieldDef{Tag: "x", Constraint: constraintTags(&InputSchema{BaseSchema: BaseSchema{Pattern: `^\d+$`}})}); !strings.HasPrefix(plain, "`") {
+	if plain := inputFieldTag(fieldDef{Tag: "x", Constraint: constraintTags(&InputSchema{Pattern: `^\d+$`})}); !strings.HasPrefix(plain, "`") {
 		t.Errorf("a tag with no backquote should stay a raw literal, got %s", plain)
 	}
 }
@@ -209,12 +208,12 @@ func TestVariables(t *testing.T) {
 // in help with its implicit value, and default_text replaces only the shown default.
 func TestFlagRow_implicitValueAndDefaultText(t *testing.T) {
 	row := flagRow(FlagInput{Name: "color", Identifiers: []string{"-c", "--color"},
-		Schema: &InputSchema{BaseSchema: BaseSchema{Type: "string"}, Default: "auto", ImplicitValue: "always"}}, "")
+		Schema: &InputSchema{Type: "string", Default: "auto", ImplicitValue: "always"}}, "")
 	if !slices.Equal(row.Identifiers, []string{"-c", "--color[=string]"}) || row.Type != "" || row.Implicit != "always" || row.Default != "auto" {
 		t.Errorf("row = %+v", row)
 	}
 	row = flagRow(FlagInput{Name: "workers", Identifiers: []string{"--workers"},
-		Schema: &InputSchema{BaseSchema: BaseSchema{Type: "int"}, Default: 4, DefaultText: "the number of CPUs"}}, "")
+		Schema: &InputSchema{Type: "int", Default: 4, DefaultText: "the number of CPUs"}}, "")
 	if row.Default != "the number of CPUs" || row.Implicit != "" {
 		t.Errorf("row = %+v", row)
 	}

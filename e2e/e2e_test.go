@@ -54,7 +54,7 @@ import (
 
 // TestMain hands control to testscript, which requires it to run scripts.
 func TestMain(m *testing.M) {
-	os.Exit(testscript.RunMain(m, map[string]func() int{}))
+	testscript.Main(m, map[string]func(){})
 }
 
 // rotiniBin builds the codegen binary from this working tree, so a script exercises the

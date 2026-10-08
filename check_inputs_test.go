@@ -36,8 +36,8 @@ func ciDef() Definition {
 			{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", ShortCircuit: true},
 			{Name: "name", Identifiers: []string{"--name"}, Type: "string", Required: true},
 			{Name: "level", Identifiers: []string{"--level"}, Type: "string", Enum: []string{"low", "high"}},
-			{Name: "port", Identifiers: []string{"-p", "--port"}, Type: "int", Constraints: Constraints{Maximum: &high}},
-			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Constraints: Constraints{MinItems: 2}},
+			{Name: "port", Identifiers: []string{"-p", "--port"}, Type: "int", Maximum: &high},
+			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", MinItems: 2},
 			{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Required: true, Default: "fast"},
 			{Name: "a", Identifiers: []string{"--a"}, Type: "bool"},
 			{Name: "b", Identifiers: []string{"--b"}, Type: "bool"},
@@ -253,10 +253,10 @@ func TestAbsentListItemCount(t *testing.T) {
 		return Definition{
 			Name: "app", Handler: "App",
 			Flags: []FlagDef{
-				{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Constraints: Constraints{MinItems: 1}},
-				{Name: "keys", Identifiers: []string{"--keys"}, Type: "[]string", Defaults: []string{"a", "b"}, Constraints: Constraints{MinItems: 2}},
+				{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", MinItems: 1},
+				{Name: "keys", Identifiers: []string{"--keys"}, Type: "[]string", Defaults: []string{"a", "b"}, MinItems: 2},
 			},
-			Arguments: []ArgDef{{Name: "files", Type: "[]string", Variadic: true, Constraints: Constraints{MinItems: files}}},
+			Arguments: []ArgDef{{Name: "files", Type: "[]string", Variadic: true, MinItems: files}},
 		}
 	}
 

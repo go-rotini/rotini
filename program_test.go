@@ -443,7 +443,8 @@ func TestProgram_WithContext_nilIgnored(t *testing.T) {
 	if p.ctx != nil {
 		t.Fatal("a fresh program should have no base context (default signal handling)")
 	}
-	p.WithContext(nil)
+	var none context.Context
+	p.WithContext(none)
 	if p.ctx != nil {
 		t.Error("WithContext(nil) should be a no-op, leaving the default (nil) context")
 	}
@@ -1091,9 +1092,7 @@ func TestRun_concurrentDispatch(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range runs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			code, err := p.RunContext(ctx, []string{"run"})
 			if err != nil {
 				t.Errorf("concurrent run: %v", err)
@@ -1101,7 +1100,7 @@ func TestRun_concurrentDispatch(t *testing.T) {
 			if code != 0 {
 				t.Errorf("concurrent run exited %d, want 0", code)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(seen)
@@ -1165,8 +1164,7 @@ func TestExecute_returnsTheRunsFailure(t *testing.T) {
 		t.Fatal("Execute() = nil, want the error the run recorded")
 	}
 	// errors.As reaches through the join.
-	var pe *ParseError
-	if !errors.As(err, &pe) {
+	if _, ok := errors.AsType[*ParseError](err); !ok {
 		t.Errorf("errors.As(*ParseError) failed on %v — the caller cannot classify the failure", err)
 	}
 	if !errors.Is(err, boom) {
@@ -1342,8 +1340,7 @@ func TestDispatch_nilHandlersIsAWiringFault(t *testing.T) {
 	if code == 0 {
 		t.Error("exit code = 0, want non-zero for a program with no handlers")
 	}
-	var we *WiringError
-	if !errors.As(err, &we) {
+	if _, ok := errors.AsType[*WiringError](err); !ok {
 		t.Errorf("error is %T (%v), want a *WiringError", err, err)
 	}
 	if s := errs.String(); strings.Contains(s, "reflect") || strings.Contains(s, "MethodByName") {

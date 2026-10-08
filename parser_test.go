@@ -239,7 +239,7 @@ func TestParse_numericConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Minimum: Ptr(1.0), Maximum: Ptr(65535.0),
+			Minimum: new(1.0), Maximum: new(65535.0),
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -260,13 +260,13 @@ func TestParse_constraintsExclusiveAndZero(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "delta", Identifiers: []string{"--delta"}, Type: "int",
-				Minimum: Ptr(0.0)}, // a zero bound
+				Minimum: new(0.0)}, // a zero bound
 			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float64",
-				ExclusiveMinimum: Ptr(0.0), ExclusiveMaximum: Ptr(1.0)},
+				ExclusiveMinimum: new(0.0), ExclusiveMaximum: new(1.0)},
 			{Name: "step", Identifiers: []string{"--step"}, Type: "int",
-				MultipleOf: Ptr(5.0)},
+				MultipleOf: new(5.0)},
 			{Name: "ports", Identifiers: []string{"--ports"}, Type: "[]int",
-				MultipleOf: Ptr(2.0)},
+				MultipleOf: new(2.0)},
 		},
 	}
 	cases := []struct {
@@ -315,13 +315,13 @@ func TestParse_constraintsWidenedTypes(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "workers", Identifiers: []string{"--workers"}, Type: "uint",
-				Minimum: Ptr(1.0), Maximum: Ptr(64.0)},
+				Minimum: new(1.0), Maximum: new(64.0)},
 			{Name: "offset", Identifiers: []string{"--offset"}, Type: "int64",
-				Minimum: Ptr(-100.0), Maximum: Ptr(100.0)},
+				Minimum: new(-100.0), Maximum: new(100.0)},
 			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float32",
-				Maximum: Ptr(1.0)},
+				Maximum: new(1.0)},
 			{Name: "port", Identifiers: []string{"--port"}, Type: "[]int",
-				Minimum: Ptr(1.0), Maximum: Ptr(65535.0), MaxItems: 3},
+				Minimum: new(1.0), Maximum: new(65535.0), MaxItems: 3},
 			{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
 				MinLength: 2},
 		},
@@ -1746,7 +1746,7 @@ func TestInputs_missingFlagKeepsZero(t *testing.T) {
 // TestParseError_kindPerPath drives each user-input failure path and pins the
 // ParseKind it carries and that it classifies as CategoryUsage.
 func TestParseError_kindPerPath(t *testing.T) {
-	min1 := Ptr(1.0)
+	min1 := new(1.0)
 	cases := []struct {
 		name string
 		def  Definition
@@ -2092,7 +2092,7 @@ func TestParse_pathTypeKeepsStringBounds(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "config", Identifiers: []string{"--config"}, Type: "existingfile",
-			Constraints: Constraints{Pattern: `\.ya?ml$`},
+			Pattern: `\.ya?ml$`,
 		}},
 	}
 	type inputs struct {
@@ -2275,7 +2275,7 @@ func TestParse_separator(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Separator: ",", Enum: []string{"a", "b", "c"},
-				Constraints: Constraints{MaxItems: 3}},
+				MaxItems: 3},
 			{Name: "raw", Identifiers: []string{"--raw"}, Type: "[]string"},
 		},
 		Arguments: []ArgDef{{Name: "first", Type: "string"}, {Name: "rest", Type: "[]string", Variadic: true, Separator: ","}},
@@ -2396,7 +2396,7 @@ func TestParse_errorsNameTheTypedIdentifier(t *testing.T) {
 		Flags: []FlagDef{
 			{Name: "due", Identifiers: []string{"-d", "--due"}, Type: "time.Time", Layout: "2006-01-02"},
 			{Name: "mode", Identifiers: []string{"-m", "--mode"}, Type: "string", Enum: []string{"fast", "slow"}},
-			{Name: "port", Identifiers: []string{"-p", "--port"}, Type: "int", Constraints: Constraints{Maximum: Ptr(10.0)}},
+			{Name: "port", Identifiers: []string{"-p", "--port"}, Type: "int", Maximum: new(10.0)},
 			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
 			{Name: "name", Identifiers: []string{"-n", "--name"}, Type: "string", Required: true},
 		},
@@ -2440,11 +2440,11 @@ func TestParse_measuredBounds(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "wait", Identifiers: []string{"--wait"}, Type: "time.Duration",
-				Constraints: Constraints{Minimum: Ptr(float64(time.Second)), Maximum: Ptr(float64(90 * time.Minute))}},
+				Minimum: new(float64(time.Second)), Maximum: new(float64(90 * time.Minute))},
 			{Name: "size", Identifiers: []string{"--size"}, Type: "rotini.ByteSize",
-				Constraints: Constraints{Maximum: Ptr(float64(1 << 30))}},
+				Maximum: new(float64(1 << 30))},
 			{Name: "sizes", Identifiers: []string{"--sizes"}, Type: "[]rotini.ByteSize",
-				Constraints: Constraints{Maximum: Ptr(float64(1 << 20))}},
+				Maximum: new(float64(1 << 20))},
 		},
 	}
 	var in struct {
