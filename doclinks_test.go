@@ -79,7 +79,7 @@ func TestDocLinksResolve(t *testing.T) {
 
 	bad := map[string][]string{}
 	check := func(owner, doc string) {
-		for _, line := range strings.Split(doc, "\n") {
+		for line := range strings.SplitSeq(doc, "\n") {
 			// godoc does not linkify inside an indented code block, and generic syntax
 			// (Defaults[MycliInputs]) lives there — scanning it produces only noise.
 			if strings.HasPrefix(line, "\t") || strings.HasPrefix(line, "    ") {
@@ -89,7 +89,7 @@ func TestDocLinksResolve(t *testing.T) {
 				name := m[1]
 				if strings.Contains(name, ".") && !known[name] {
 					// A qualified name may belong to another package (errors.As, os.Exit).
-					if head := strings.Split(name, ".")[0]; !known[head] {
+					if head, _, _ := strings.Cut(name, "."); !known[head] {
 						continue
 					}
 				}

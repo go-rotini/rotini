@@ -97,8 +97,9 @@ type contractConfig struct {
 }
 
 type contractStdin struct {
-	Format string `json:"format,omitempty"`
-	Schema any    `json:"schema,omitempty"`
+	Format   string `json:"format,omitempty"`
+	Required bool   `json:"required,omitempty"`
+	Schema   any    `json:"schema,omitempty"`
 }
 
 type contractExit struct {
@@ -285,10 +286,11 @@ func outputDefLiteral(typeName string, shape *Schema, schemas map[string]Schema)
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("Output: &" + rotiniPkgName + ".OutputDef{Type: reflect.TypeFor[" + typeName + "]()")
+	fmt.Fprintf(&b, "Output: &%s.OutputDef{Type: reflect.TypeFor[%s]()", rotiniPkgName, typeName)
 	if doc, ok := outputSchemaDoc(shape, schemas); ok {
 		if raw, err := json.Marshal(doc); err == nil {
-			b.WriteString(", Schema: " + goRawString(string(raw)))
+			b.WriteString(", Schema: ")
+			b.WriteString(goRawString(string(raw)))
 		}
 	}
 	b.WriteString("},\n")
@@ -494,6 +496,7 @@ func (p *program) contractSources(c *contractCommand, in *Inputs) {
 	if in.Stdin != nil {
 		st := &contractStdin{Format: in.Stdin.Format}
 		if in.Stdin.Schema != nil {
+			st.Required = in.Stdin.Schema.Required
 			st.Schema = standardSchema(schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema}))
 		}
 		c.Stdin = st
@@ -501,13 +504,19 @@ func (p *program) contractSources(c *contractCommand, in *Inputs) {
 }
 
 // inputJSONSchema describes an input's value as standard JSON Schema: its type, constraints,
-// enum, and default. A `secret` input's default is omitted.
+// enum, and default. A `secret` input's default is omitted. A list's or map's per-value
+// constraints sit on its items, where the runtime applies them; only the item counts stay on
+// the list.
 func inputJSONSchema(s *InputSchema) any {
 	base := BaseSchema{}
 	if s != nil {
 		base = s.BaseSchema
 	}
-	base.Type = getSchemaType(s)
+	// The spec's own type name, which standardType reads; a $ref or an untyped input falls
+	// back to its Go type.
+	if base.Type == "" {
+		base.Type = getSchemaType(s)
+	}
 	doc, ok := schemaToDoc(Schema{BaseSchema: base}).(map[string]any)
 	if !ok {
 		return map[string]any{}
@@ -518,7 +527,47 @@ func inputJSONSchema(s *InputSchema) any {
 	if s != nil && s.Default != nil && !s.Secret {
 		doc["default"] = s.Default
 	}
-	return standardSchema(doc)
+	doc, _ = standardSchema(doc).(map[string]any)
+	moveValueConstraints(doc, base.Type)
+	return doc
+}
+
+// valueConstraints are the keys that constrain each value, not the list or map holding them.
+var valueConstraints = []string{
+	"enum", "pattern", "minLength", "maxLength", "minimum", "maximum",
+	"exclusiveMinimum", "exclusiveMaximum", "multipleOf", "format",
+}
+
+// moveValueConstraints moves a list's or map's per-value constraints from doc onto its
+// `items` or `additionalProperties`.
+func moveValueConstraints(doc map[string]any, typ string) {
+	key := ""
+	switch {
+	case strings.HasPrefix(typ, "[]") || typ == "array":
+		key = "items"
+	default:
+		if _, _, ok := splitMapType(typ); ok || typ == "map" {
+			key = "additionalProperties"
+		}
+	}
+	if key == "" {
+		return
+	}
+	elem, _ := doc[key].(map[string]any)
+	if elem == nil {
+		elem = map[string]any{}
+	}
+	moved := false
+	for _, k := range valueConstraints {
+		if v, ok := doc[k]; ok {
+			elem[k] = v
+			delete(doc, k)
+			moved = true
+		}
+	}
+	if moved {
+		doc[key] = elem
+	}
 }
 
 // standardSchema rewrites a spec-vocabulary schema document into standard JSON Schema

@@ -104,7 +104,9 @@ func tomlWithComments(out []byte, comments map[string][]string) []byte {
 			}
 			var block strings.Builder
 			for _, line := range lines {
-				block.WriteString("# " + line + "\n")
+				block.WriteString("# ")
+				block.WriteString(line)
+				block.WriteString("\n")
 			}
 			text = text[:i] + block.String() + text[i:]
 			break

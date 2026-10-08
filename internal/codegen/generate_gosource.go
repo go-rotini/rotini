@@ -53,11 +53,15 @@ func groupImports(src []byte) ([]byte, error) {
 			var block strings.Builder
 			block.WriteString("import (\n")
 			for _, s := range std {
-				block.WriteString("\t" + s + "\n")
+				block.WriteString("\t")
+				block.WriteString(s)
+				block.WriteString("\n")
 			}
 			block.WriteString("\n")
 			for _, s := range third {
-				block.WriteString("\t" + s + "\n")
+				block.WriteString("\t")
+				block.WriteString(s)
+				block.WriteString("\n")
 			}
 			block.WriteString(")")
 

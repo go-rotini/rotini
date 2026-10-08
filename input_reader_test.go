@@ -664,6 +664,59 @@ func TestInputReader_flagFallbackPrecedence(t *testing.T) {
 	})
 }
 
+type tbPassInputs struct {
+	App struct {
+		Flags struct {
+			Region string `rotini:"region" recon:"region"`
+		}
+		Arguments struct{}
+	}
+	Exec struct {
+		Flags     struct{}
+		Arguments struct {
+			Cmd []string `rotini:"cmd"`
+		}
+	}
+}
+
+func tbPassDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "region", Identifiers: []string{"--region"}, Type: "string"}},
+		Commands: []CommandDef{{
+			Name: "exec", Handler: "AppExec", Passthrough: true,
+			Arguments: []ArgDef{{Name: "cmd", Type: "[]string", Variadic: true}},
+		}},
+	}
+}
+
+// TestInputReader_passthroughWordsDontSetAFallbackFlag pins that a flag's identifier among a
+// passthrough command's raw words is not the flag being set: its env value still applies.
+func TestInputReader_passthroughWordsDontSetAFallbackFlag(t *testing.T) {
+	t.Setenv("REGION", "from-env")
+	for _, c := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"exec", "aws", "s3", "ls"}, "from-env"},
+		{[]string{"exec", "aws", "--region", "us-west-2", "s3", "ls"}, "from-env"},
+		{[]string{"exec", "aws", "--region=us-west-2"}, "from-env"},
+		{[]string{"--region", "eu-west-1", "exec", "aws", "--region", "us-west-2"}, "eu-west-1"},
+	} {
+		rtx := NewContextFor(tbPassDef(), c.argv)
+		var in tbPassInputs
+		if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
+			t.Fatalf("%v: %v", c.argv, err)
+		}
+		if in.App.Flags.Region != c.want {
+			t.Errorf("%v: Region = %q, want %q", c.argv, in.App.Flags.Region, c.want)
+		}
+		if got := in.Exec.Arguments.Cmd; len(got) == 0 || got[0] != "aws" {
+			t.Errorf("%v: Cmd = %q, want the raw words", c.argv, got)
+		}
+	}
+}
+
 // Required-fallback shapes: a *required* flag that declares a recon key, with no
 // default, must be satisfiable from env or config, not only from argv.
 type tbReqFlags struct {
@@ -762,7 +815,7 @@ func tbPortDef() Definition {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Minimum: Ptr(1.0), Maximum: Ptr(65535.0),
+			Minimum: new(1.0), Maximum: new(65535.0),
 		}},
 	}
 }
@@ -1352,8 +1405,7 @@ func TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor(t *testing.T) {
 	if err == nil {
 		t.Fatal("Bind succeeded with config: inputs and no InputSettings — the values would be silently zero")
 	}
-	var we *WiringError
-	if !errors.As(err, &we) {
+	if _, ok := errors.AsType[*WiringError](err); !ok {
 		t.Errorf("error is %T (%v), want a *WiringError — this is the program author's mistake, not the user's", err, err)
 	}
 	if !strings.Contains(err.Error(), "WithInputSettings") {

@@ -19,7 +19,7 @@ func scDef(t *testing.T) Definition {
 			{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", ShortCircuit: true},
 			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true},
 			{Name: "level", Identifiers: []string{"--level"}, Type: "string", Enum: []string{"low", "high"}},
-			{Name: "port", Identifiers: []string{"--port"}, Type: "int", Constraints: Constraints{Minimum: &low, Maximum: &high}},
+			{Name: "port", Identifiers: []string{"--port"}, Type: "int", Minimum: &low, Maximum: &high},
 			{Name: "file", Identifiers: []string{"--file"}, Type: "existingfile"},
 			{Name: "labels", Identifiers: []string{"--labels"}, Type: "map[string]string"},
 			{Name: "a", Identifiers: []string{"--a"}, Type: "bool"},

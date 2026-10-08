@@ -36,10 +36,10 @@ func valDef() Definition {
 	return Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
-			{Name: "ratio", Identifiers: []string{"--ratio"}, Type: "float64", Constraints: Constraints{Maximum: &one}},
-			{Name: "workers", Identifiers: []string{"--workers"}, Type: "uint", Constraints: Constraints{Maximum: &ten}},
-			{Name: "wait", Identifiers: []string{"--wait"}, Type: "time.Duration", Constraints: Constraints{Minimum: &second}},
-			{Name: "code", Identifiers: []string{"--code"}, Type: "string", Constraints: Constraints{MinLength: 3, Pattern: "^[a-z]+$"}},
+			{Name: "ratio", Identifiers: []string{"--ratio"}, Type: "float64", Maximum: &one},
+			{Name: "workers", Identifiers: []string{"--workers"}, Type: "uint", Maximum: &ten},
+			{Name: "wait", Identifiers: []string{"--wait"}, Type: "time.Duration", Minimum: &second},
+			{Name: "code", Identifiers: []string{"--code"}, Type: "string", MinLength: 3, Pattern: "^[a-z]+$"},
 			{Name: "db", Identifiers: []string{"--db"}, Type: "DB", ObjectSchema: objDBSchema},
 			{Name: "mount", Identifiers: []string{"--mount"}, Type: "[]Mount", ObjectSchema: objMountSchema},
 		},

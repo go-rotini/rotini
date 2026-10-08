@@ -164,9 +164,9 @@ func TestQualifySchemaRefs(t *testing.T) {
 			"Pool": {BaseSchema: BaseSchema{Type: "object"}},
 		},
 		Flags: []FlagInput{
-			{Name: "db", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "DB"}}},
-			{Name: "dbs", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Ref: "DB"}}}}},
-			{Name: "qualified", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/DB"}}},
+			{Name: "db", Schema: &InputSchema{Ref: "DB"}},
+			{Name: "dbs", Schema: &InputSchema{Type: "array", Items: &Schema{Ref: "DB"}}},
+			{Name: "qualified", Schema: &InputSchema{Ref: "#/schemas/DB"}},
 		},
 		Commands: []Command{{Ref: "./child/.rotini.spec.yaml"}},
 	}}
@@ -188,11 +188,11 @@ func TestQualifySchemaRefs(t *testing.T) {
 // and unparseable text stay text for the lint to reject.
 func TestNormalizeBounds(t *testing.T) {
 	spec := &Spec{Command: Command{Name: "app", Flags: []FlagInput{
-		{Name: "wait", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "duration", Minimum: "1s", Maximum: "1h30m"}}},
-		{Name: "size", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "bytesize", Maximum: "1.5Gi", Minimum: float64(1024)}}},
-		{Name: "bare", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "duration", Minimum: float64(5)}}},
-		{Name: "bad", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "bytesize", Maximum: "lots"}}},
-		{Name: "plain", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "int", Maximum: "1s"}}},
+		{Name: "wait", Schema: &InputSchema{Type: "duration", Minimum: "1s", Maximum: "1h30m"}},
+		{Name: "size", Schema: &InputSchema{Type: "bytesize", Maximum: "1.5Gi", Minimum: float64(1024)}},
+		{Name: "bare", Schema: &InputSchema{Type: "duration", Minimum: float64(5)}},
+		{Name: "bad", Schema: &InputSchema{Type: "bytesize", Maximum: "lots"}},
+		{Name: "plain", Schema: &InputSchema{Type: "int", Maximum: "1s"}},
 	}}}
 	spec.normalize()
 	f := spec.Command.Flags
@@ -221,11 +221,11 @@ func TestInheritScalarRefConstraints(t *testing.T) {
 			"Port": {BaseSchema: BaseSchema{Type: "integer", Minimum: float64(1), Maximum: float64(65535)}},
 			"DB":   {BaseSchema: BaseSchema{Type: "object", Properties: map[string]Schema{"host": {BaseSchema: BaseSchema{Type: "string"}}}}},
 		},
-		Arguments: []ArgumentInput{{Name: "kind", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "Kind"}}}},
+		Arguments: []ArgumentInput{{Name: "kind", Schema: &InputSchema{Ref: "Kind"}}},
 		Flags: []FlagInput{
-			{Name: "port", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "Port", Maximum: float64(1024)}}},
-			{Name: "kinds", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Ref: "Kind"}}}}},
-			{Name: "db", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "DB"}}},
+			{Name: "port", Schema: &InputSchema{Ref: "Port", Maximum: float64(1024)}},
+			{Name: "kinds", Schema: &InputSchema{Type: "array", Items: &Schema{Ref: "Kind"}}},
+			{Name: "db", Schema: &InputSchema{Ref: "DB"}},
 		},
 	}}
 	spec.normalize()
@@ -253,9 +253,9 @@ func TestPatternMessage_travelsWithItsPattern(t *testing.T) {
 			"Kind": {BaseSchema: BaseSchema{Type: "string", Pattern: "^[a-z]+$", PatternMessage: "must be lowercase"}},
 		},
 		Flags: []FlagInput{
-			{Name: "kind", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "Kind"}}},
-			{Name: "mine", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "Kind", PatternMessage: "must be a kind"}}},
-			{Name: "tags", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Type: "string", Pattern: "^t", PatternMessage: "must start with t"}}}}},
+			{Name: "kind", Schema: &InputSchema{Ref: "Kind"}},
+			{Name: "mine", Schema: &InputSchema{Ref: "Kind", PatternMessage: "must be a kind"}},
+			{Name: "tags", Schema: &InputSchema{Type: "array", Items: &Schema{Type: "string", Pattern: "^t", PatternMessage: "must start with t"}}},
 		},
 	}}
 	spec.normalize()
@@ -279,11 +279,11 @@ func TestDefinitionType_namedScalarSchema(t *testing.T) {
 		schema *InputSchema
 		want   string
 	}{
-		{&InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/Kind"}}, "string"},
-		{&InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/Port"}}, "int"},
-		{&InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/Cfg"}}, "existingfile"},
-		{&InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Ref: "#/schemas/Kind"}}}}, "[]string"},
-		{&InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/DB"}}, "DB"}, // an object keeps its name: it is decoded, not checked
+		{&InputSchema{Ref: "#/schemas/Kind"}, "string"},
+		{&InputSchema{Ref: "#/schemas/Port"}, "int"},
+		{&InputSchema{Ref: "#/schemas/Cfg"}, "existingfile"},
+		{&InputSchema{Type: "array", Items: &Schema{Ref: "#/schemas/Kind"}}, "[]string"},
+		{&InputSchema{Ref: "#/schemas/DB"}, "DB"}, // an object keeps its name: it is decoded, not checked
 	} {
 		if got := definitionType(tt.schema, schemas); got != tt.want {
 			t.Errorf("definitionType(%+v) = %q, want %q", tt.schema.BaseSchema, got, tt.want)

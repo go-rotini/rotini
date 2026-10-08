@@ -273,7 +273,7 @@ func TestManPages_lintClean(t *testing.T) {
 		if !ok {
 			t.Skip("neither mandoc nor groff is installed")
 		}
-		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 			if line == "" || strings.Contains(line, "missing date") {
 				continue
 			}

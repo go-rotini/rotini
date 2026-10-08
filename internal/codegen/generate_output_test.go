@@ -241,11 +241,11 @@ func TestContractDocument(t *testing.T) {
 // contract while other defaults are kept.
 func TestInputJSONSchema_secretDefault(t *testing.T) {
 	t.Parallel()
-	secret, _ := json.Marshal(inputJSONSchema(&InputSchema{BaseSchema: BaseSchema{Type: "string"}, Default: "hunter2", Secret: true}))
+	secret, _ := json.Marshal(inputJSONSchema(&InputSchema{Type: "string", Default: "hunter2", Secret: true}))
 	if strings.Contains(string(secret), "hunter2") {
 		t.Errorf("a secret default leaked: %s", secret)
 	}
-	plain, _ := json.Marshal(inputJSONSchema(&InputSchema{BaseSchema: BaseSchema{Type: "int"}, Default: 3}))
+	plain, _ := json.Marshal(inputJSONSchema(&InputSchema{Type: "int", Default: 3}))
 	if string(plain) != `{"default":3,"type":"integer"}` {
 		t.Errorf("plain input = %s", plain)
 	}

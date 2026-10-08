@@ -513,8 +513,8 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		Default:     schemaDefaultString(f.Schema),
 		Enum:        enumOf(f.Schema),
 		Deprecated:  deprecated,
+		key:         flagReconKey(f.Name, f.Schema),
 	}
-	row.key = flagReconKey(f.Name, f.Schema)
 	if env := flagEnvVar(f.Schema, row.key, envPrefix); env != "" {
 		row.Env = strings.Split(env, ",")
 	}
@@ -599,9 +599,13 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 				name += "..."
 			}
 			if a.Schema != nil && a.Schema.Required {
-				b.WriteString(" <" + name + ">")
+				b.WriteString(" <")
+				b.WriteString(name)
+				b.WriteString(">")
 			} else {
-				b.WriteString(" [" + name + "]")
+				b.WriteString(" [")
+				b.WriteString(name)
+				b.WriteString("]")
 			}
 		}
 	}
