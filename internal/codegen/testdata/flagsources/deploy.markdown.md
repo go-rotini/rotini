@@ -5,7 +5,7 @@ deploy it
 ## Usage
 
 ```
-app deploy <command> [flags]
+app deploy [flags] <command>
 ```
 
 ## Commands

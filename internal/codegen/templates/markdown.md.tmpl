@@ -5,12 +5,18 @@
        collapses blank-line runs, and drops the trailing newline.
 
        DATA: .Header .Summary .Description .Footer .Invocation
-         .Usage/.UsageDerived .CommandGroups[] .Arguments[] .Flags[] .Environment[]
-         .Configuration[] .Cascading[] .Examples[] .Output .ExitStatus[] .SeeAlso[]
-         (.Output is nil when the command declares no output)
+         .Usage/.UsageDerived .Passthrough .CommandGroups[] .Arguments[] .FlagGroups[]
+         .Environment[] .Configuration[] .Cascading[] .Examples[] .Stdin .Output
+         .ExitStatus[] .SeeAlso[]   (.Stdin and .Output are nil when the command declares
+         none). .Passthrough is the command's name when every word after it is passed
+         through unparsed, else "". A command or flag group carries .Description, the
+         paragraph the command's `groups` gives it.
          A flag row also carries .Env (its environment variables, in lookup order) and
          .ConfigKey (its config key, set only when the command reads config files);
          alsoSetBy .Env .ConfigKey "`" "`" renders them as "also set by ...".
+         Argument, flag, env and config rows carry .Constraints (the declared bounds, lengths,
+         item counts and repeatability as a short note) and .Rules (the same as sentences,
+         plus pattern and separator).
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last,
                 alsoSetBy. */ -}}
@@ -30,34 +36,41 @@
 ```
 
 {{end -}}
+{{- with .Passthrough}}Every word after `{{.}}` is passed through as written, so flags go before `{{.}}`.
+
+{{end -}}
 {{- range .CommandGroups}}## {{if .Title}}{{title .Title}} Commands{{else}}Commands{{end}}
 
-{{range .Commands}}- `{{.Name}}`{{with .Aliases}} (alias {{join . ", "}}){{end}} — {{.Summary}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
+{{with .Description}}{{.}}
+
+{{end}}{{range .Commands}}- `{{.Name}}`{{with .Aliases}} (alias {{join . ", "}}){{end}} — {{.Summary}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
 {{end}}
 {{end -}}
 {{- with .Arguments}}## Arguments
 
-{{range .}}- {{if .Required}}`<{{.Name}}{{if .Variadic}}...{{end}}>`{{else}}`[{{.Name}}{{if .Variadic}}...{{end}}]`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
+{{range .}}- {{if .Required}}`<{{.Name}}{{if .Variadic}}...{{end}}>`{{else}}`[{{.Name}}{{if .Variadic}}...{{end}}]`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
 {{end}}
 {{end -}}
 {{- range .FlagGroups}}## {{if .Title}}{{.Title}}{{else}}Flags{{end}}
 
-{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{with .Description}}{{.}}
+
+{{end}}{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
 {{end}}
 {{end -}}
 {{- with .Cascading}}## Global Flags
 
-{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
 {{end}}
 {{end -}}
 {{- with .Environment}}## Environment
 
-{{range .}}- `{{.Var}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
+{{range .}}- `{{.Var}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
 {{end}}
 {{end -}}
 {{- with .Configuration}}## Configuration
 
-{{range .}}- `{{.Name}}`{{with .Location}} ({{.}}){{end}}{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
+{{range .}}- `{{.Name}}`{{with .Location}} ({{.}}){{end}}{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
 {{end}}
 {{end -}}
 {{- with .Examples}}## Examples
@@ -66,6 +79,16 @@
 {{range .}}{{.}}
 {{end}}```
 
+{{end -}}
+{{- with .Stdin}}## Stdin
+
+{{with .Description}}{{.}}
+
+{{end -}}
+Reads {{if eq .Format "text"}}text{{else if eq .Format "lines"}}lines of text{{else}}a `{{.Format}}` document{{with .Type}} (`{{.}}`){{end}}{{end}} from stdin.{{if .Required}} Required.{{end}}
+
+{{range .Fields}}- `{{.Name}}`{{with .Type}} `{{.}}`{{end}}{{with .Description}} — {{.}}{{end}}{{if .Required}} (required){{end}}
+{{end}}
 {{end -}}
 {{- with .Output}}## Output
 

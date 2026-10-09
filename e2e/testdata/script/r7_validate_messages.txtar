@@ -64,6 +64,10 @@ stderr '^Warning: .*has only a short identifier \(-v\)'
 stderr '^Error: spec: dupkey\.spec\.yaml:7:7: /command/flags/0/schema: duplicate key "schema" \(first at line 6\)'
 ! stderr 'rotini bug'
 
+# A schema key written beside schema: says where it belongs.
+! exec rotini validate placement.spec.yaml --config ok.conf.yaml
+stderr '/command/flags/0/key: unknown key "key" on a flag input; "key" belongs under schema: \(schema: \{key: …\}\)'
+
 # And the valid document passes, silently, with exit 0 — the control case that proves the
 # rejections above are about the documents and not about the harness.
 exec rotini validate ok.spec.yaml --config ok.conf.yaml
@@ -163,3 +167,11 @@ command:
     - name: debug
       schema: { type: bool }
       schema: { type: string, default: x }
+-- placement.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  flags:
+    - name: port
+      key: port
+      schema: { type: int }

@@ -51,7 +51,7 @@ stdout 'alpha did 1 \(prod\)'
 # ── the overlay rename ───────────────────────────────────────────────────────
 # The child names itself after its binary, so its help is truthful...
 exec ./my-alpha$exe --help
-stdout 'my-alpha <command>'
+stdout 'my-alpha \[flags\] <command>'
 # ...and the parent lists it short.
 exec ./parent$exe --help
 stdout '  alpha '

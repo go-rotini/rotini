@@ -1,1 +1,2 @@
 spec: .rotini.spec.yaml:9:9: command demo: $ref "./child.spec.yaml": sets `flags` on a `$ref` node; a composed command delegates to the child's handler (built against the child's own inputs and output), so `flags` cannot be overlaid here; declare it in the child spec instead
+spec: .rotini.spec.yaml:12:22: command demo: $ref "./child.spec.yaml": sets `options_first` on a `$ref` node; a composed command delegates to the child's handler (built against the child's own inputs and output), so `options_first` cannot be overlaid here; declare it in the child spec instead

@@ -1,0 +1,188 @@
+# R12 — the lazy dependency recipe: a store registered in the root's CascadingPreRun is opened
+# only by a command that asks for it, once, and a test's own registration wins. The handler
+# files are the ones the recipes page shows.
+
+gomodinit example.com/lazydemo
+
+exec rotini generate cmd/lazydemo/.rotini.spec.yaml --config cmd/lazydemo/.rotini.conf.yaml
+cp store.go.txt internal/cmd/lazydemo/store.go
+cp get.go.txt internal/cmd/lazydemo/lazydemo_get.go
+cp root.go.txt internal/cmd/lazydemo/lazydemo.go
+exec go mod tidy
+exec go build -o lazydemo$exe ./cmd/lazydemo
+
+# hello never asks for the store, so it runs without one.
+exec ./lazydemo$exe hello
+stdout '^hello$'
+
+# get opens it, and fails when it can't.
+wantexit 1 ./lazydemo$exe get region
+stderr 'store.txt'
+
+cp data.txt store.txt
+exec ./lazydemo$exe get region
+stdout '^eu-1$'
+
+-- data.txt --
+region=eu-1
+-- store.go.txt --
+package lazydemo
+
+import (
+	"os"
+	"strings"
+	"sync"
+
+	"github.com/go-rotini/rotini"
+)
+
+// Store is costly to open, so only the commands that use it open it.
+type Store struct{ values map[string]string }
+
+// storeDep holds a function that opens the store on its first call and returns the same
+// store, or the same error, on every later call.
+var storeDep = rotini.NewDependency[func() (*Store, error)]("lazydemo.store")
+
+// registerStore makes the store available without opening it. A test that registered its own
+// opener first keeps it.
+func registerStore(rtx *rotini.Context) {
+	rtx.SetDependencyIfAbsent(storeDep, sync.OnceValues(openStore))
+}
+
+func openStore() (*Store, error) {
+	data, err := os.ReadFile("store.txt")
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{values: map[string]string{}}
+	for line := range strings.Lines(string(data)) {
+		if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
+			s.values[k] = v
+		}
+	}
+	return s, nil
+}
+-- get.go.txt --
+package lazydemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*lazydemoGetHandler)(nil)
+
+type lazydemoGetHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*lazydemoGetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[LazydemoGetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	store, err := rtx.MustGetDependency(storeDep)()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, store.values[inputs.LazydemoGet.Arguments.Key])
+}
+-- root.go.txt --
+package lazydemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*lazydemoHandler)(nil)
+
+type lazydemoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*lazydemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	registerStore(rtx)
+
+	inputs, err := rtx.Inputs[LazydemoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if inputs.Lazydemo.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		rtx.HaltWithCode(0)
+	}
+}
+
+func (*lazydemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+-- internal/cmd/lazydemo/lazydemo_hello.go --
+package lazydemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*lazydemoHelloHandler)(nil)
+
+type lazydemoHelloHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*lazydemoHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "hello")
+}
+-- cmd/lazydemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: lazydemo
+  summary: open the store only when a command needs it
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: get
+      summary: print a value from the store
+      arguments:
+        - name: key
+          summary: the key to read
+          schema: { type: string, required: true }
+    - name: hello
+      summary: print a greeting, without the store
+-- cmd/lazydemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/lazydemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/lazydemo/zz_lazydemo.go
+      package: lazydemo
+  features:
+    - type: help
+      enabled: true

@@ -1,0 +1,23 @@
+.TH "OPS\-IMPORT" 1 "" "ops" "User Commands"
+.SH NAME
+ops\-import \- import tasks
+.SH SYNOPSIS
+\fBops import\fR
+.SH "GLOBAL OPTIONS"
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+print help
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+say more (repeatable)
+.br
+repeat to count: \-vvv
+.TP
+\fB\-\-color\fR \fIstring\fR
+when to color (default auto) [auto|always|never]
+.SH STDIN
+The tasks to import.
+.PP
+Reads a \fByaml\fR document (\fBTaskList\fR) from standard input. Required.
+.SH "SEE ALSO"
+\fBops\fR(1)

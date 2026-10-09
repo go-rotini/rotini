@@ -66,6 +66,11 @@ type completionContext struct {
 	// shortCircuit records a short-circuit flag ([FlagDef.ShortCircuit]) already on the line:
 	// the run it starts replaces the command's, so nothing further is offered.
 	shortCircuit bool
+	// operands records that flags have stopped without a "--": the leaf takes options first and
+	// its first argument was typed, or its passthrough argument has started. Every later word is
+	// an argument, so no flag, flag value or sub-command is offered; the argument's own
+	// completer, enum and hint still apply.
+	operands bool
 }
 
 // complete returns the candidates for the word currently being typed — the last element of
@@ -102,7 +107,7 @@ func complete(def Definition, words []string, lookup HandlerLookup, rtx *Context
 	// Until the first positional is consumed the word may also be a sub-command, plugin
 	// command or discovered plugin; afterwards dispatch no longer descends.
 	var names []string
-	if !cc.afterTerminator && cc.positionals == 0 {
+	if !cc.afterTerminator && !cc.operands && cc.positionals == 0 {
 		names = dispatchableNames(cur)
 	}
 	names = append(names, argValueCandidates(lookup, rtx, cc, words, partial)...)
@@ -114,10 +119,10 @@ func complete(def Definition, words []string, lookup HandlerLookup, rtx *Context
 // empty result falls back to the shell's file completion, never to sub-command names, which
 // dispatch would read as this flag's value.
 func completePendingFlagValue(cc completionContext, context, words []string, partial string, lookup HandlerLookup, rtx *Context) ([]string, bool) {
-	if cc.afterTerminator {
+	if cc.afterTerminator || cc.operands {
 		return nil, false
 	}
-	name, ok := pendingValueFlag(context)
+	name, ok := pendingValueFlag(cc.chain, context)
 	if !ok {
 		return nil, false
 	}
@@ -132,7 +137,7 @@ func completePendingFlagValue(cc completionContext, context, words []string, par
 // the inline "--flag=value" form. Only declared, non-hidden flags are offered, and the whole
 // chain contributes, since ancestor flags resolve on descendants.
 func completeFlagWord(cc completionContext, words []string, partial string, lookup HandlerLookup, rtx *Context) ([]string, bool) {
-	if cc.afterTerminator || !strings.HasPrefix(partial, "-") {
+	if cc.afterTerminator || cc.operands || !strings.HasPrefix(partial, "-") {
 		return nil, false
 	}
 
@@ -190,12 +195,14 @@ func dispatchableNames(cur Command) []string {
 
 // walkContext resolves the words preceding the completed one with dispatch's semantics,
 // leniently: unknown tokens are positionals, not errors. bash splits "--flag=value" into three
-// words, so the literal "=" token glues such a value back onto its flag.
+// words, so the literal "=" token glues such a value back onto its flag. Flags stop where the
+// parser stops them: at "--", at an options_first leaf's first argument, and at the leaf's
+// passthrough argument (see completionContext.operands).
 func walkContext(def Definition, context []string) completionContext {
 	cc := completionContext{chain: []Command{rootFrame(def)}}
 	for i := 0; i < len(context); i++ {
 		tok := context[i]
-		if cc.afterTerminator {
+		if cc.afterTerminator || cc.operands {
 			cc.positionals++
 			continue
 		}
@@ -204,12 +211,12 @@ func walkContext(def Definition, context []string) completionContext {
 			continue
 		}
 		if tok == "=" {
-			if i > 0 && isFlag(context[i-1]) {
+			if i > 0 && isFlag(cc.chain, context[i-1]) {
 				i++ // the glued value (when present) belongs to the preceding flag
 			}
 			continue
 		}
-		if isFlag(tok) {
+		if isFlag(cc.chain, tok) {
 			if name, val, inline := splitFlag(tok); !cc.shortCircuit {
 				if fd, _, ok := findFlag(cc.chain, name); ok && fd.ShortCircuit {
 					on, err := strconv.ParseBool(val)
@@ -236,6 +243,7 @@ func walkContext(def Definition, context []string) completionContext {
 				return cc
 			}
 		}
+		cc.operands = cur.OptionsFirst || cc.positionals == passthroughArg(cur.Arguments)
 		cc.positionals++
 	}
 	return cc
@@ -265,16 +273,16 @@ func bundledShortCircuit(chain []Command, tok string) bool {
 
 // pendingValueFlag reports the flag whose value the next word supplies, when the context ends
 // with one awaiting a value.
-func pendingValueFlag(context []string) (string, bool) {
+func pendingValueFlag(chain []Command, context []string) (string, bool) {
 	if len(context) == 0 {
 		return "", false
 	}
 	last := context[len(context)-1]
-	if last == "=" && len(context) >= 2 && isFlag(context[len(context)-2]) {
+	if last == "=" && len(context) >= 2 && isFlag(chain, context[len(context)-2]) {
 		name, _, _ := splitFlag(context[len(context)-2])
 		return name, true
 	}
-	if isFlag(last) {
+	if isFlag(chain, last) {
 		if name, _, hasInline := splitFlag(last); !hasInline {
 			return name, true
 		}
@@ -308,16 +316,8 @@ func flagValueCandidates(lookup HandlerLookup, rtx *Context, chain []Command, wo
 // The leaf handler's dynamic completer wins when it answers, else the static enum.
 func argValueCandidates(lookup HandlerLookup, rtx *Context, cc completionContext, words []string, partial string) []string {
 	cur := cc.chain[len(cc.chain)-1]
-	args := cur.Arguments
-	idx := cc.positionals
-	if idx >= len(args) {
-		if len(args) == 0 || !args[len(args)-1].Variadic {
-			return nil
-		}
-		idx = len(args) - 1
-	}
-	ad := args[idx]
-	if ad.Hidden {
+	ad, ok := positionalAt(cur.Arguments, cc.positionals)
+	if !ok || ad.Hidden {
 		return nil
 	}
 	if cands, dyn := dynamicArgValues(lookup, rtx, cc.chain, words, ad.Name, partial); dyn {
@@ -534,9 +534,16 @@ func completionHintFor(def Definition, words []string) Completion {
 	if cur.Passthrough || cc.afterTerminator {
 		return Completion{}
 	}
+	if cc.operands {
+		// Flags have stopped: the word is an argument, whatever it looks like.
+		if ad, ok := positionalAt(cur.Arguments, cc.positionals); ok {
+			return ad.Complete
+		}
+		return Completion{}
+	}
 
 	// "--flag <TAB>": the word is the preceding flag's value.
-	if name, ok := pendingValueFlag(context); ok {
+	if name, ok := pendingValueFlag(cc.chain, context); ok {
 		if fd, _, found := findFlag(cc.chain, name); found && takesSeparateValue(fd) {
 			return fd.Complete
 		}
@@ -564,14 +571,15 @@ func completionHintFor(def Definition, words []string) Completion {
 	return Completion{}
 }
 
-// positionalAt returns the argument the next positional binds to, a trailing variadic
-// absorbing everything past the declared end.
+// positionalAt returns the argument the next positional binds to, a variadic absorbing
+// everything past its start: how many words follow is unknown while completing, so the fixed
+// arguments after a variadic are never the target.
 func positionalAt(args []ArgDef, idx int) (ArgDef, bool) {
+	if v := variadicIndex(args); v >= 0 && idx >= v {
+		return args[v], true
+	}
 	if idx < len(args) {
 		return args[idx], true
-	}
-	if len(args) > 0 && args[len(args)-1].Variadic {
-		return args[len(args)-1], true
 	}
 	return ArgDef{}, false
 }
@@ -650,6 +658,16 @@ func (p *Program) Complete(words []string, format CompletionFormat) (int, error)
 		words = []string{""}
 	}
 	rtx := p.newRunContext()
+	if rf := p.def.ResponseFiles; rf != nil {
+		var fileWord bool
+		if words, fileWord = completionWords(words, rf.Prefix, rtx.view); fileWord {
+			// A response file's name is being typed: nothing to offer but the shell's files.
+			if err := format(p.stdout, CompletionResult{}); err != nil {
+				return 1, err
+			}
+			return 0, nil
+		}
+	}
 	var added []string
 	if p.def.CompletionMessages != nil {
 		rtx.completionMessages = &added

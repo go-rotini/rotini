@@ -26,11 +26,32 @@ type Definition struct {
 	PluginDiscovery  *PluginDiscoveryDef // plugin auto-discovery on the root command (nil = off)
 	PluginPath       string              // extra directory searched for BOTH declared and discovered plugins
 	Passthrough      bool                // every token after the program name is a raw positional (no flag parsing)
+	OptionsFirst     bool                // flags stop at the root's first argument; see [CommandDef.OptionsFirst]
 	Output           *OutputDef          // what the root command writes to stdout (nil = not declared)
 
 	// CompletionMessages turns on completion messages, when the conf's completion feature
 	// declares `messages`; nil leaves them off. See [Context.AddCompletionMessage].
 	CompletionMessages *CompletionMessagesDef
+
+	// ResponseFiles turns on response files: a word starting with the prefix names a file whose
+	// lines are read as more words. nil leaves them off.
+	ResponseFiles *ResponseFilesDef
+}
+
+// ResponseFilesDef is how a program reads response files (the spec's root `response_files`).
+// Before the first "--", a word starting with Prefix (`@args.rsp`) is replaced by the file's
+// lines, one word per line; a doubled prefix (`@@x`) stands for the literal word with one
+// prefix (`@x`). Expansion happens once, before command resolution, so every parse sees the
+// expanded words, and [Context.Argv] holds them. [NewContextFor] doesn't expand.
+type ResponseFilesDef struct {
+	Prefix string // one character, such as "@"
+}
+
+// EnumValue describes one declared value of an enum input beyond its spelling: the spec's
+// `{value, summary}` form of an enum item.
+type EnumValue struct {
+	Value   string
+	Summary string // one line saying what the value means; "" when none
 }
 
 // CompletionMessagesDef is how completion messages are switched at run time, from the conf's
@@ -111,6 +132,11 @@ type CommandDef struct {
 	PluginPath       string              // extra directory searched for BOTH this command's declared plugins and its discovered plugins
 	Passthrough      bool                // every token after this command is a raw positional (no flag parsing)
 	Output           *OutputDef          // what the command writes to stdout (nil = not declared)
+
+	// OptionsFirst stops flag parsing at this command's first argument when it is the invoked
+	// command: every later word is an argument, flag-shaped words and "--" included. Words
+	// before that argument parse as usual. Sub-commands don't inherit it.
+	OptionsFirst bool
 }
 
 // Constraints carries the validation bounds a spec may declare on a flag or argument. The
@@ -162,6 +188,9 @@ type FlagDef struct {
 	// every channel — a default never merges with a supplied value.
 	Defaults []string
 	Enum     []string
+	// EnumValues lists every Enum value, in order, with what it declares beyond its spelling (a
+	// summary); nil when no value declares more than its spelling.
+	EnumValues []EnumValue
 	// IgnoreCase matches a value against Enum without regard to case (`--mode FAST` against
 	// fast/slow) and binds the declared spelling, so a handler compares against one form.
 	IgnoreCase bool
@@ -233,6 +262,8 @@ type ArgDef struct {
 	Variadic bool
 	Default  string
 	Enum     []string
+	// EnumValues describes the Enum values; see [FlagDef.EnumValues].
+	EnumValues []EnumValue
 	// IgnoreCase matches a value against Enum without regard to case and binds the declared
 	// spelling; see [FlagDef.IgnoreCase].
 	IgnoreCase bool
@@ -247,5 +278,9 @@ type ArgDef struct {
 	Complete Completion
 	Secret   bool // when true, the value is redacted in usage/validation error output
 	Hidden   bool // omitted from completion candidates (it still parses); help omission happens at codegen
+	// Passthrough marks the last argument as where raw words start: flags before it parse as
+	// usual, and it and every word after it are taken as typed, flag-shaped words and "--"
+	// included. It is a variadic []string. See [Context.DashIndex].
+	Passthrough bool
 	Constraints
 }

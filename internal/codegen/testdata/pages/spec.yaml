@@ -1,0 +1,120 @@
+# Every page section that comes from declared data: group descriptions in the declared order,
+# long-only flags aligned with the long column, constraints on each input kind, a stdin
+# section for each format, and a passthrough command.
+version: 0.0.0
+command:
+  name: ops
+  summary: run the fleet
+  env_prefix: OPS
+  config_files:
+    - name: user
+      path: ~/.ops.yaml
+  groups:
+    - name: Data
+      description: Commands that read a document from standard input.
+    - name: Deploying
+      description: |-
+        Commands that change what runs where.
+        Each one asks before it acts.
+    - name: Output
+      description: Flags that shape what ops prints.
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help, -h]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+    - name: verbose
+      summary: say more
+      identifiers: [-v, --verbose]
+      cascading: true
+      group: Output
+      schema: {type: count}
+    - name: color
+      summary: when to color
+      identifiers: [--color]
+      cascading: true
+      group: Output
+      schema: {type: string, enum: [auto, always, never], default: auto}
+  env:
+    - name: token
+      summary: the API token
+      schema: {type: string, minLength: 20}
+  config:
+    - name: region
+      summary: the default region
+      schema: {type: string, key: region, pattern: '^[a-z]+-[0-9]$', pattern_message: 'must look like eu-1'}
+  schemas:
+    Task:
+      type: object
+      description: One task to import.
+      required: [title]
+      properties:
+        title: {type: string, description: what to do}
+        due: {type: string, description: when it is due}
+    TaskList:
+      type: array
+      description: The tasks to import.
+      items: {$ref: Task}
+  commands:
+    - name: deploy
+      summary: ship a service
+      group: Deploying
+      arguments:
+        - name: service
+          summary: the service to ship
+          schema: {type: string, required: true, minLength: 2, maxLength: 63, pattern: '^[a-z][a-z0-9-]*$'}
+        - name: replicas
+          summary: how many copies
+          schema: {type: int, minimum: 1}
+      flags:
+        - name: port
+          summary: listen port
+          identifiers: [--port, -p]
+          schema: {type: int, default: 8080, minimum: 1, maximum: 65535}
+        - name: ratio
+          summary: traffic share
+          identifiers: [--ratio]
+          schema: {type: float64, exclusiveMinimum: 0, maximum: 1}
+        - name: step
+          summary: rollout step
+          identifiers: [--step]
+          schema: {type: int, multipleOf: 5}
+        - name: tag
+          summary: a label
+          identifiers: [--tag]
+          schema: {type: '[]string', minItems: 1, maxItems: 5, separator: ",", maxLength: 10}
+        - name: timeout
+          summary: how long to wait
+          identifiers: [--timeout]
+          schema: {type: duration, minimum: 1s, exclusiveMaximum: 1h}
+        - name: env
+          summary: extra environment
+          identifiers: [--env, -e]
+          schema: {type: 'map[string]string', maxItems: 8}
+    - name: import
+      summary: import tasks
+      group: Data
+      stdin:
+        format: yaml
+        schema: {$ref: TaskList, required: true}
+    - name: upper
+      summary: upper-case lines
+      group: Data
+      stdin:
+        format: lines
+    - name: note
+      summary: add a note
+      stdin:
+        schema:
+          type: object
+          properties:
+            text: {type: string, description: the note}
+    - name: exec
+      summary: run a command
+      passthrough: true
+      arguments:
+        - name: argv
+          summary: the command and its arguments
+          schema: {type: '[]string', required: true}

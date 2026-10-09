@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -158,25 +159,45 @@ func presenceStore(v reflect.Value, chain []Command, anchor int, set Presence) *
 		}
 		// Positionals fill in order, so the leading run of supplied (or defaulted) arguments is
 		// what counts toward the required check.
-		n := 0
-		for _, ad := range frame.Arguments {
+		present := func(ad ArgDef) bool {
 			path, ok := argPath(ci, top, ad.Name)
 			_, given := set[path]
-			if (!ok || !given) && ad.Default == "" {
-				break
-			}
-			n++
+			return (ok && given) || ad.Default != ""
 		}
-		store.scopes[scope].args = make([]string, n)
+		store.scopes[scope].args = make([]string, suppliedArgs(frame.Arguments, present))
 	})
 	return store
+}
+
+// suppliedArgs counts the positionals that stand for the present arguments: the leading run
+// of present ones, since positionals fill in order. Fixed arguments after a variadic bind from
+// the end, so they count only when all are present, behind the leading run and the variadic.
+func suppliedArgs(args []ArgDef, present func(ArgDef) bool) int {
+	n := 0
+	v := variadicIndex(args)
+	for i, ad := range args {
+		if !present(ad) || (i == v && hasArgTail(args)) {
+			break
+		}
+		n++
+	}
+	if hasArgTail(args) && n == v {
+		tail := args[v+1:]
+		if !slices.ContainsFunc(tail, func(ad ArgDef) bool { return !present(ad) }) {
+			if present(args[v]) {
+				n++
+			}
+			n += len(tail)
+		}
+	}
+	return n
 }
 
 // withHandBuilt returns a copy of the store in which every input a hand-built layer supplied
 // is present for the presence rules (and set, for flag groups and dependencies) without
 // adding a value the value rules would read.
 func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anchor int, handBuilt map[FieldPath]bool) *parsedInputs {
-	out := &parsedInputs{scopes: make([]scopeInputs, len(p.scopes)), argvSet: make([]map[string]bool, len(p.argvSet)), span: p.span, detached: p.detached, dashedFirst: p.dashedFirst}
+	out := &parsedInputs{scopes: make([]scopeInputs, len(p.scopes)), argvSet: make([]map[string]bool, len(p.argvSet)), span: p.span, detached: p.detached, dashedFirst: p.dashedFirst, lateFlag: p.lateFlag}
 	for i, si := range p.scopes {
 		cp := si
 		cp.flags = maps.Clone(si.flags)

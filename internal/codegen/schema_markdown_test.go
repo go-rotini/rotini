@@ -214,9 +214,9 @@ var commandKeyGroups = []struct {
 	keys  []string
 }{
 	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers"}},
-	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies"}},
-	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "plugins", "plugin_discovery", "plugin_path", "timeout"}},
-	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "header", "footer", "headings", "help", "man", "markdown"}},
+	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies", "response_files"}},
+	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "options_first", "plugins", "plugin_discovery", "plugin_path", "timeout"}},
+	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "groups", "header", "footer", "headings", "help", "man", "markdown"}},
 	{"Output and shared types", []string{"output", "schemas"}},
 	{"Generated code", []string{"filename"}},
 }
@@ -610,6 +610,9 @@ func TestEveryKeyExamplesAreValidAndComplete(t *testing.T) {
 	var warnings []error
 	err := NewProcessor("0.0.0").Validate(filepath.Join(mod, "cmd/deploy/.rotini.spec.yaml"), filepath.Join(mod, "cmd/deploy/.rotini.conf.yaml"),
 		false, "collect", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
+	// The examples turn on response files beside passthrough and plugins, which is worth a
+	// warning in a real spec.
+	warnings = slices.DeleteFunc(warnings, func(w error) bool { return strings.Contains(w.Error(), "turns on response files") })
 	if err != nil || len(warnings) > 0 {
 		t.Errorf("the every-key examples do not validate cleanly: %v %v", err, warnings)
 	}

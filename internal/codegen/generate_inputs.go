@@ -110,7 +110,7 @@ func constraintTags(schema *InputSchema) string {
 		parts = append(parts, "layout:"+strconv.Quote(l))
 	}
 	if schema != nil && len(schema.Enum) > 0 {
-		if members, err := json.Marshal(schema.Enum); err == nil { // a []string always marshals
+		if members, err := json.Marshal(enumStrings(schema.Enum)); err == nil { // a []string always marshals
 			parts = append(parts, "enum:"+strconv.Quote(string(members)))
 		}
 		if schema.IgnoreCase {

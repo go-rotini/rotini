@@ -1,0 +1,21 @@
+ship a service
+
+Usage:
+  ops deploy [flags] <service> [replicas]
+
+Arguments:
+  <service>     the service to ship (length 2..63)
+  [replicas]    how many copies (>= 1)
+
+Flags:
+  -p, --port int                 listen port (default 8080) (1..65535)
+      --ratio float64            traffic share (> 0, <= 1)
+      --step int                 rollout step (multiple of 5)
+      --tag []string             a label (1..5 values, length <= 10, repeatable)
+      --timeout duration         how long to wait (>= 1s, < 1h)
+  -e, --env map[string]string    extra environment (<= 8 values, repeatable)
+
+Global Flags:
+  -h, --help            print help
+  -v, --verbose         say more (repeatable)
+      --color string    when to color (default auto) [auto|always|never]

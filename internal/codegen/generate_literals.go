@@ -27,6 +27,9 @@ func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Sc
 	if fd := flagDependenciesLiteral(in); fd != "" {
 		fmt.Fprintf(b, "FlagDependencies: %s,\n", fd)
 	}
+	if in != nil && in.OptionsFirst {
+		b.WriteString("OptionsFirst: true,\n")
+	}
 }
 
 // renderDefinition renders the unexported `var definition = rotini.Definition{…}` literal,
@@ -52,6 +55,9 @@ func renderDefinition(gp *program) string {
 		fmt.Fprintf(&b, "PluginDiscovery: %s,\n", dl)
 	}
 	b.WriteString(completionMessagesLiteral(gp.conf))
+	if rf := gp.responseFiles(); rf != nil {
+		fmt.Fprintf(&b, "ResponseFiles: &%s.ResponseFilesDef{Prefix: %q},\n", rotiniPkgName, rf.Prefix)
+	}
 	if gp.rootPluginPath != "" {
 		fmt.Fprintf(&b, "PluginPath: %q,\n", gp.rootPluginPath)
 	}
@@ -408,6 +414,9 @@ func argDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if a.Deprecated != "" {
 			fmt.Fprintf(b, ", Deprecated: %q", a.Deprecated)
 		}
+		if a.Passthrough {
+			b.WriteString(", Passthrough: true")
+		}
 	})
 }
 
@@ -498,7 +507,10 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 		fmt.Fprintf(b, ", Default: %q", d)
 	}
 	if len(schema.Enum) > 0 {
-		fmt.Fprintf(b, ", Enum: %s", goStringSlice(schema.Enum))
+		fmt.Fprintf(b, ", Enum: %s", goStringSlice(enumStrings(schema.Enum)))
+		if enumDescribed(schema.Enum) {
+			fmt.Fprintf(b, ", EnumValues: %s", enumValuesLiteral(schema.Enum))
+		}
 		if schema.IgnoreCase {
 			b.WriteString(", IgnoreCase: true")
 		}
@@ -677,4 +689,23 @@ func defaultString(v any) string {
 	default:
 		return fmt.Sprintf("%v", x)
 	}
+}
+
+// enumValuesLiteral renders the []rotini.EnumValue literal for enum members, each with its
+// summary.
+func enumValuesLiteral(members []any) string {
+	return sliceLiteral("EnumValue", enumValues(members), func(b *strings.Builder, v enumValue) {
+		fmt.Fprintf(b, "Value: %q", v.Value)
+		if v.Summary != "" {
+			fmt.Fprintf(b, ", Summary: %q", v.Summary)
+		}
+	})
+}
+
+// responseFiles is the root's response-file setting, nil when off.
+func (gp *program) responseFiles() *ResponseFiles {
+	if gp.spec == nil {
+		return nil
+	}
+	return gp.spec.Command.ResponseFiles
 }

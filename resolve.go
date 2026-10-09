@@ -37,6 +37,10 @@ type Command struct {
 	Passthrough bool       // every token after this command is a raw positional (no flag parsing)
 	Output      *OutputDef // what the command writes to stdout (nil = not declared); see [Context.WriteOutput]
 
+	// OptionsFirst stops flags at this command's first argument when it is the invoked one; see
+	// [CommandDef.OptionsFirst].
+	OptionsFirst bool
+
 	// Invoked reports whether this is the command the user invoked: the last command in the
 	// chain. Exactly one entry of [Context.CommandChain] has it set; in a cascading hook,
 	// rtx.Command().Invoked distinguishes the invoked command from its ancestors.
@@ -64,7 +68,7 @@ func rootFrame(def Definition) Command {
 		Flags: def.Flags, Arguments: def.Arguments,
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Plugins: def.Plugins, PluginDiscovery: def.PluginDiscovery,
-		PluginPath: expandPluginPath(def.PluginPath), pluginPathRaw: def.PluginPath, Passthrough: def.Passthrough,
+		PluginPath: expandPluginPath(def.PluginPath), pluginPathRaw: def.PluginPath, Passthrough: def.Passthrough, OptionsFirst: def.OptionsFirst,
 		Output: def.Output,
 	}
 }
@@ -76,7 +80,7 @@ func cmdFrame(c CommandDef) Command {
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Plugins: c.Plugins, PluginDiscovery: c.PluginDiscovery,
-		PluginPath: expandPluginPath(c.PluginPath), pluginPathRaw: c.PluginPath, Passthrough: c.Passthrough,
+		PluginPath: expandPluginPath(c.PluginPath), pluginPathRaw: c.PluginPath, Passthrough: c.Passthrough, OptionsFirst: c.OptionsFirst,
 		Output: c.Output,
 	}
 }
@@ -97,7 +101,7 @@ func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
 		if tok == "--" {
 			break // the rest are positional; no further command descent
 		}
-		if isFlag(tok) {
+		if isFlag(chain, tok) {
 			// Skip a separate value word so it is not mistaken for a command.
 			i += flagTokenWidth(chain, argv, i)
 			continue
@@ -144,25 +148,27 @@ func findPlugin(f Command, tok string) (PluginDef, bool) {
 	return PluginDef{}, false
 }
 
-// isFlag reports whether tok is a flag token. Every argv walker (the resolver, the parser and
-// completion) decides with it, so they agree on where flags are. Bare "-" and "--" are not
-// flags, and neither is a negative number: "-" followed by a digit ("-5", "-1e3", "-5s"), or by
-// "." and a digit ("-.5"). Any other word starting with "-" is a flag, so a declared -I wins
-// over "-Inf".
-func isFlag(tok string) bool {
+// isFlag reports whether tok is a flag token, given chain, the commands reached so far. Every
+// argv walker (the resolver, the parser, completion and the deprecation and plugin-host parses)
+// decides with it, so they agree on where flags are. Bare "-" and "--" are not flags, and
+// neither is a negative number: "-" followed by a digit ("-5", "-1e3", "-5s"), or by "." and a
+// digit ("-.5"). The exception is a declared digit option: "-4…" is a flag when -4 is an
+// identifier on chain. Any other word starting with "-" is a flag, so a declared -I wins over
+// "-Inf".
+func isFlag(chain []Command, tok string) bool {
 	if len(tok) <= 1 || tok[0] != '-' || tok == "--" {
 		return false
 	}
-	return !isNegativeNumber(tok)
+	if isDigit(tok[1]) {
+		_, _, declared := findFlag(chain, tok[:2])
+		return declared
+	}
+	return len(tok) < 3 || tok[1] != '.' || !isDigit(tok[2])
 }
 
-// isNegativeNumber reports whether tok, which starts with "-", reads as a negative number:
-// "-" then a digit, or "-." then a digit.
-func isNegativeNumber(tok string) bool {
-	if len(tok) >= 2 && isDigit(tok[1]) {
-		return true
-	}
-	return len(tok) >= 3 && tok[1] == '.' && isDigit(tok[2])
+// flagIn returns isFlag bound to chain, for a walker that tests words one at a time.
+func flagIn(chain []Command) func(string) bool {
+	return func(tok string) bool { return isFlag(chain, tok) }
 }
 
 func isDigit(b byte) bool { return '0' <= b && b <= '9' }
@@ -254,7 +260,7 @@ func DefaultResolver(def Definition, argv []string) (Resolution, error) {
 // they resolved. It reports whether a short-circuit flag set there replaces the dispatch, and
 // fails on any other flag, which the plugin would never receive.
 func pluginHostFlags(chain []Command, before []string, plugin string) (answer bool, err error) {
-	first := slices.IndexFunc(before, isFlag)
+	first := slices.IndexFunc(before, flagIn(chain))
 	if first < 0 {
 		return false, nil
 	}

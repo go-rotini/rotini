@@ -39,7 +39,7 @@ func TestHoistItemConstraints_everyPerValueConstraintReachesTheList(t *testing.T
 `)
 	s := spec.Command.Flags[0].Schema
 	switch {
-	case !slices.Equal(s.Enum, []string{"10", "20"}):
+	case !slices.Equal(enumStrings(s.Enum), []string{"10", "20"}):
 		t.Errorf("enum = %v", s.Enum)
 	case s.Pattern != "^[0-9]+$":
 		t.Errorf("pattern = %q", s.Pattern)
@@ -74,7 +74,7 @@ func TestHoistItemConstraints_appliesToFlagsArgumentsEnvAndConfig(t *testing.T) 
 		"env":      spec.Command.Env[0].Schema,
 		"config":   spec.Command.Config[0].Schema,
 	} {
-		if !slices.Equal(s.Enum, []string{"a", "b"}) {
+		if !slices.Equal(enumStrings(s.Enum), []string{"a", "b"}) {
 			t.Errorf("%s: enum = %v, want the items enum hoisted", name, s.Enum)
 		}
 	}
@@ -89,7 +89,7 @@ func TestHoistItemConstraints_neverOverwritesTheList(t *testing.T) {
       schema: { type: array, enum: [a], minimum: 5, items: { type: string, enum: [x], minimum: 9 } }
 `)
 	s := spec.Command.Flags[0].Schema
-	if !slices.Equal(s.Enum, []string{"a"}) || *bound(s.Minimum) != 5 {
+	if !slices.Equal(enumStrings(s.Enum), []string{"a"}) || *bound(s.Minimum) != 5 {
 		t.Errorf("list-level values overwritten: enum=%v minimum=%v", s.Enum, *bound(s.Minimum))
 	}
 }
@@ -135,7 +135,7 @@ func TestHoistItemConstraints_reachesComposedSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := spec.Command.Flags[0].Schema; !slices.Equal(s.Enum, []string{"a", "b"}) {
+	if s := spec.Command.Flags[0].Schema; !slices.Equal(enumStrings(s.Enum), []string{"a", "b"}) {
 		t.Errorf("composed spec not normalized: enum = %v", s.Enum)
 	}
 }
@@ -217,7 +217,7 @@ func TestInheritScalarRefConstraints(t *testing.T) {
 	spec := &Spec{Command: Command{
 		Name: "app",
 		Schemas: map[string]Schema{
-			"Kind": {BaseSchema: BaseSchema{Type: "string", Enum: []string{"pods", "services"}, Pattern: "^[a-z]+$"}},
+			"Kind": {BaseSchema: BaseSchema{Type: "string", Enum: []any{"pods", "services"}, Pattern: "^[a-z]+$"}},
 			"Port": {BaseSchema: BaseSchema{Type: "integer", Minimum: float64(1), Maximum: float64(65535)}},
 			"DB":   {BaseSchema: BaseSchema{Type: "object", Properties: map[string]Schema{"host": {BaseSchema: BaseSchema{Type: "string"}}}}},
 		},
@@ -230,13 +230,13 @@ func TestInheritScalarRefConstraints(t *testing.T) {
 	}}
 	spec.normalize()
 	c := spec.Command
-	if got := c.Arguments[0].Schema.Enum; !slices.Equal(got, []string{"pods", "services"}) || c.Arguments[0].Schema.Pattern != "^[a-z]+$" {
+	if got := c.Arguments[0].Schema.Enum; !slices.Equal(enumStrings(got), []string{"pods", "services"}) || c.Arguments[0].Schema.Pattern != "^[a-z]+$" {
 		t.Errorf("argument enum = %v, pattern = %q", got, c.Arguments[0].Schema.Pattern)
 	}
 	if p := c.Flags[0].Schema; *bound(p.Minimum) != 1 || *bound(p.Maximum) != 1024 {
 		t.Errorf("port bounds = %v..%v, want 1..1024 (the input's own maximum wins)", p.Minimum, p.Maximum)
 	}
-	if got := c.Flags[1].Schema.Enum; !slices.Equal(got, []string{"pods", "services"}) {
+	if got := c.Flags[1].Schema.Enum; !slices.Equal(enumStrings(got), []string{"pods", "services"}) {
 		t.Errorf("list items did not inherit (hoisted) the enum: %v", got)
 	}
 	if len(c.Flags[2].Schema.Enum) != 0 || c.Flags[2].Schema.Pattern != "" {

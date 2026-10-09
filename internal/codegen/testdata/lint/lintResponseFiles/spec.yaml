@@ -1,0 +1,25 @@
+# The response-file prefix @ would take a from: [file] flag's @path, and raw words starting
+# with the prefix are expanded unless written after --.
+version: 0.0.0
+command:
+  name: demo
+  response_files:
+    prefix: '@'
+  commands:
+    - name: login
+      flags:
+        - name: token
+          schema:
+            type: string
+            from: [file]
+    - name: exec
+      passthrough: true
+      arguments:
+        - name: argv
+          schema:
+            type: '[]string'
+    - name: sub
+      commands:
+        - name: deep
+          response_files:
+            prefix: '+'

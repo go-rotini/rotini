@@ -293,7 +293,7 @@ func lintEnumValues(spec *Spec) []error {
 	var problems []error
 	check := func(schema *InputSchema, typ string) (errs []string, dup string) {
 		seen := map[string]bool{}
-		for _, m := range schema.Enum {
+		for _, m := range enumStrings(schema.Enum) {
 			if seen[m] && dup == "" {
 				dup = m
 			}
@@ -306,7 +306,7 @@ func lintEnumValues(spec *Spec) []error {
 		probe := *schema
 		probe.Ref, probe.Items, probe.Type = "", nil, typ
 		probe.Minimum, probe.Maximum, probe.ExclusiveMinimum, probe.ExclusiveMaximum, probe.MultipleOf = nil, nil, nil, nil, nil
-		for _, m := range schema.Enum {
+		for _, m := range enumStrings(schema.Enum) {
 			complaint := runtimeRejects(&probe, []string{m})
 			if complaint == "" {
 				continue
@@ -345,7 +345,7 @@ func lintEnumValues(spec *Spec) []error {
 			if channel == "stdin" || schema == nil || len(schema.Enum) == 0 || schema.Type == "count" || objectRef(schema, schemas) != "" {
 				return // count: lintCountFlags; an object input: lintObjectFlags
 			}
-			if ref := inheritedScalarRef(schema, schemas); ref != "" && slices.Equal(schema.Enum, schemas[ref].Enum) {
+			if ref := inheritedScalarRef(schema, schemas); ref != "" && slices.Equal(enumStrings(schema.Enum), enumStrings(schemas[ref].Enum)) {
 				return // reported on the named schema
 			}
 			typ, _ := inputValueType(schema, schemas)

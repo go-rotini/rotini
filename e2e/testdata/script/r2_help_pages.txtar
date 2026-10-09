@@ -1,0 +1,153 @@
+# R2 — what a generated help page shows from the spec alone: the usage line with flags first,
+# group headings with their descriptions in the declared order, long-only flags lined up with
+# the long column, declared constraints, the stdin a command reads, and the note on a
+# passthrough command that its flags go before its name.
+
+gomodinit example.com/ops
+
+exec rotini generate cmd/ops/.rotini.spec.yaml --config cmd/ops/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o ops$exe ./cmd/ops
+
+# Flags come first in a derived usage line; the declared groups follow the ungrouped commands,
+# in the order `groups` lists them, each with its description.
+exec ./ops$exe --help
+stdout '^  ops \[flags\] <command>$'
+cmp stdout root.txt
+
+# Each constraint is a short note on its row; a long-only flag lines up with the long forms.
+exec ./ops$exe deploy --help
+cmp stdout deploy.txt
+
+# A declared stdin has its own section.
+exec ./ops$exe import --help
+stdout '^Stdin:$'
+stdout '^  The tasks to import\.$'
+stdout '^  yaml TaskList \(required\)$'
+
+# Every word after a passthrough command's name goes to it, --help included, so its page says
+# its flags go first, and --help before the name shows it.
+exec ./ops$exe --help exec
+stdout '^  ops exec <argv\.\.\.>$'
+stdout '^Every word after "exec" is passed through as written, so flags go before "exec"\.$'
+
+-- root.txt --
+run the fleet
+
+Usage:
+  ops [flags] <command>
+
+Commands:
+  exec    run a command
+
+Data:
+  Commands that read a document from standard input.
+  import    import tasks
+
+Deploying:
+  Commands that change what runs where.
+  deploy    ship a service
+
+Flags:
+  -h, --help    print help
+
+Output:
+  Flags that shape what ops prints.
+  -v, --verbose         say more (repeatable)
+      --color string    when to color (default auto) [auto|always|never]
+-- deploy.txt --
+ship a service
+
+Usage:
+  ops deploy [flags] <service>
+
+Arguments:
+  <service>    the service to ship (length 2..63)
+
+Flags:
+  -p, --port int        listen port (default 8080) (1..65535)
+      --tag []string    a label (1..5 values, repeatable)
+
+Global Flags:
+  -h, --help            print help
+  -v, --verbose         say more (repeatable)
+      --color string    when to color (default auto) [auto|always|never]
+-- cmd/ops/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: ops
+  summary: run the fleet
+  groups:
+    - name: Data
+      description: Commands that read a document from standard input.
+    - name: Deploying
+      description: Commands that change what runs where.
+    - name: Output
+      description: Flags that shape what ops prints.
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help, -h]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+    - name: verbose
+      summary: say more
+      identifiers: [-v, --verbose]
+      cascading: true
+      group: Output
+      schema: {type: count}
+    - name: color
+      summary: when to color
+      identifiers: [--color]
+      cascading: true
+      group: Output
+      schema: {type: string, enum: [auto, always, never], default: auto}
+  schemas:
+    TaskList:
+      type: array
+      description: The tasks to import.
+      items: {type: string}
+  commands:
+    - name: deploy
+      summary: ship a service
+      group: Deploying
+      arguments:
+        - name: service
+          summary: the service to ship
+          schema: {type: string, required: true, minLength: 2, maxLength: 63}
+      flags:
+        - name: port
+          summary: listen port
+          identifiers: [--port, -p]
+          schema: {type: int, default: 8080, minimum: 1, maximum: 65535}
+        - name: tag
+          summary: a label
+          identifiers: [--tag]
+          schema: {type: '[]string', minItems: 1, maxItems: 5}
+    - name: import
+      summary: import tasks
+      group: Data
+      stdin:
+        format: yaml
+        schema: {$ref: TaskList, required: true}
+    - name: exec
+      summary: run a command
+      passthrough: true
+      arguments:
+        - name: argv
+          summary: the command and its arguments
+          schema: {type: '[]string', required: true}
+-- cmd/ops/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/ops/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/ops/zz_ops.go
+      package: ops
+  features:
+    - type: help
+      enabled: true

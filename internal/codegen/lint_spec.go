@@ -48,6 +48,7 @@ var specLints = []func(*Spec) []error{
 	lintShadowedIdentifiers,
 	lintSingleDashIdentifiers,
 	lintShortOnlyFlags,
+	lintDigitIdentifiers,
 	lintSchemaRefs,
 	lintHandlerFilenames,
 	lintSiblingCollisions,
@@ -57,6 +58,7 @@ var specLints = []func(*Spec) []error{
 	lintPluginTimeouts,
 	lintDottedKeys,
 	lintFrom,
+	lintResponseFiles,
 	lintConfigurationFiles,
 	lintConfigFilesScope,
 	lintConfigSource,
@@ -66,6 +68,8 @@ var specLints = []func(*Spec) []error{
 	lintConstraintApplicability,
 	lintCountFlags,
 	lintPassthrough,
+	lintPassthroughArgument,
+	lintOptionsFirst,
 	lintPatternCompiles,
 	lintSchemaTypes,
 	lintVariable,
@@ -75,6 +79,7 @@ var specLints = []func(*Spec) []error{
 	lintComplete,
 	lintBoundsSatisfiable,
 	lintEnumValues,
+	lintEnumSummaries,
 	lintRequiredDefault,
 	lintDefaultScalar,
 	lintDefaultConstraints,
@@ -89,6 +94,7 @@ var specLints = []func(*Spec) []error{
 	lintLayout,
 	lintExitStatus,
 	lintStdinSchema,
+	lintGroups,
 }
 
 // lintRootCommand requires the root command, which is the binary itself, to have a
@@ -136,6 +142,9 @@ func lintDocLevelKeys(spec *Spec) []error {
 		}
 		if c.DisplayName != "" {
 			add("display_name")
+		}
+		if c.ResponseFiles != nil {
+			add("response_files")
 		}
 	})
 	return problems
@@ -198,6 +207,9 @@ func lintRefNodeKeys(spec *Spec) []error {
 		}
 		if c.Passthrough {
 			reject("passthrough")
+		}
+		if c.OptionsFirst {
+			reject("options_first")
 		}
 	})
 	return problems
@@ -297,27 +309,6 @@ func lintDuplicateInputNames(spec *Spec) []error {
 	return problems
 }
 
-// lintVariadicArguments rejects a variadic (slice-typed) argument anywhere but last: it
-// absorbs the remaining positionals, so later arguments could never bind.
-func lintVariadicArguments(spec *Spec) []error {
-	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		if c.inputs() == nil {
-			return
-		}
-		for i, a := range c.inputs().Arguments {
-			if i == len(c.inputs().Arguments)-1 {
-				break
-			}
-			if strings.HasPrefix(getSchemaType(a.Schema), "[]") {
-				problems = append(problems, inputProblem(fmt.Sprintf("%s/arguments/%d", ptr, i), path, "argument", a.Name,
-					"variadic but not last; it would absorb every remaining positional, so later arguments could never bind"))
-			}
-		}
-	})
-	return problems
-}
-
 // lintRequiredArgumentOrder rejects a required positional argument declared after an
 // optional one. Positionals fill in order, so the first value always lands in the optional
 // argument, which therefore can never be omitted. A variadic with minItems > 0 counts as
@@ -331,6 +322,9 @@ func lintRequiredArgumentOrder(spec *Spec) []error {
 		}
 		firstOptional := ""
 		for i, a := range in.Arguments {
+			if i > 0 && strings.HasPrefix(getSchemaType(in.Arguments[i-1].Schema), "[]") {
+				break // arguments after a variadic bind from the end: lintVariadicArguments
+			}
 			if !argumentRequired(a) {
 				if firstOptional == "" {
 					firstOptional = a.Name
@@ -362,7 +356,7 @@ func lintIgnoreCase(spec *Spec) []error {
 				return
 			}
 			seen := map[string]string{}
-			for _, m := range schema.Enum {
+			for _, m := range enumStrings(schema.Enum) {
 				if prev, ok := seen[strings.ToLower(m)]; ok && prev != m {
 					add(fmt.Sprintf("sets `ignore_case` but enum members %q and %q differ only in case; a value matching both could bind either", prev, m))
 					return
@@ -409,9 +403,9 @@ func lintSeparator(spec *Spec) []error {
 // exactly, or regardless of case under ignore_case.
 func enumMember(schema *InputSchema, v string) bool {
 	if schema.IgnoreCase {
-		return slices.ContainsFunc(schema.Enum, func(m string) bool { return strings.EqualFold(m, v) })
+		return slices.ContainsFunc(enumStrings(schema.Enum), func(m string) bool { return strings.EqualFold(m, v) })
 	}
-	return slices.Contains(schema.Enum, v)
+	return slices.Contains(enumStrings(schema.Enum), v)
 }
 
 // lintImplicitValue restricts implicit_value to single-valued flags (not bool, count, list
@@ -1749,7 +1743,7 @@ const defaultFails = "every run that leaves it unset would fail"
 func defaultViolation(schema *InputSchema, label, v string) string {
 	if len(schema.Enum) > 0 && !enumMember(schema, v) {
 		return fmt.Sprintf("%s %q is not one of the declared `enum` values (%s)",
-			label, v, strings.Join(schema.Enum, ", "))
+			label, v, strings.Join(enumStrings(schema.Enum), ", "))
 	}
 
 	if n, err := strconv.ParseFloat(v, 64); err == nil {
@@ -1830,7 +1824,7 @@ func lintItemConstraints(spec *Spec) []error {
 						"they mean the same thing (a rule every element must pass), so declare it once", key))
 				}
 			}
-			conflict("enum", len(it.Enum) > 0 && !slices.Equal(it.Enum, schema.Enum))
+			conflict("enum", len(it.Enum) > 0 && !slices.Equal(enumStrings(it.Enum), enumStrings(schema.Enum)))
 			conflict("pattern", it.Pattern != "" && it.Pattern != schema.Pattern)
 			conflict("minimum", floatBoundsDiffer(bound(it.Minimum), bound(schema.Minimum)))
 			conflict("maximum", floatBoundsDiffer(bound(it.Maximum), bound(schema.Maximum)))

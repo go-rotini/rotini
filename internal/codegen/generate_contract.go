@@ -21,12 +21,19 @@ const contractFormat = "rotini-contract/1"
 
 // contractDoc is the contract document. Its format is described by schema-contract.json.
 type contractDoc struct {
-	Format      string              `json:"format"`
-	Name        string              `json:"name"`
-	Commands    []contractCommand   `json:"commands"`
-	Definitions map[string]any      `json:"definitions,omitempty"`
-	Errors      json.RawMessage     `json:"errors"`
-	Completion  *contractCompletion `json:"completion,omitempty"`
+	Format        string                 `json:"format"`
+	Name          string                 `json:"name"`
+	Commands      []contractCommand      `json:"commands"`
+	Definitions   map[string]any         `json:"definitions,omitempty"`
+	Errors        json.RawMessage        `json:"errors"`
+	Completion    *contractCompletion    `json:"completion,omitempty"`
+	ResponseFiles *contractResponseFiles `json:"response_files,omitempty"`
+}
+
+// contractResponseFiles is how the program reads response files: a word starting with Prefix
+// before the first "--" is replaced by the named file's lines.
+type contractResponseFiles struct {
+	Prefix string `json:"prefix"`
 }
 
 // contractCompletion is what the program's shell completion lets its users switch.
@@ -36,64 +43,88 @@ type contractCompletion struct {
 
 // contractCommand is one visible command, or one plugin a command declares.
 type contractCommand struct {
-	Name        string             `json:"name"`
-	Path        []string           `json:"path"`
-	Summary     string             `json:"summary,omitempty"`
-	Description string             `json:"description,omitempty"`
-	Aliases     []string           `json:"aliases,omitempty"`
-	Deprecated  string             `json:"deprecated,omitempty"`
-	Plugin      bool               `json:"plugin,omitempty"`
-	Arguments   []contractArgument `json:"arguments,omitempty"`
-	Flags       []contractFlag     `json:"flags,omitempty"`
-	Env         []contractEnv      `json:"env,omitempty"`
-	Config      []contractConfig   `json:"config,omitempty"`
-	Stdin       *contractStdin     `json:"stdin,omitempty"`
-	Parameters  map[string]any     `json:"parameters,omitempty"`
-	Output      any                `json:"output,omitempty"`
-	ExitStatus  []contractExit     `json:"exit_status,omitempty"`
+	Name         string             `json:"name"`
+	Path         []string           `json:"path"`
+	Summary      string             `json:"summary,omitempty"`
+	Description  string             `json:"description,omitempty"`
+	Aliases      []string           `json:"aliases,omitempty"`
+	Deprecated   string             `json:"deprecated,omitempty"`
+	Plugin       bool               `json:"plugin,omitempty"`
+	OptionsFirst bool               `json:"options_first,omitempty"` // flags stop at the command's first argument
+	Arguments    []contractArgument `json:"arguments,omitempty"`
+	Flags        []contractFlag     `json:"flags,omitempty"`
+	Env          []contractEnv      `json:"env,omitempty"`
+	Config       []contractConfig   `json:"config,omitempty"`
+	Stdin        *contractStdin     `json:"stdin,omitempty"`
+	Parameters   map[string]any     `json:"parameters,omitempty"`
+	Output       any                `json:"output,omitempty"`
+	ExitStatus   []contractExit     `json:"exit_status,omitempty"`
 }
 
 type contractArgument struct {
-	Name       string `json:"name"`
-	Summary    string `json:"summary,omitempty"`
-	Required   bool   `json:"required,omitempty"`
-	Variadic   bool   `json:"variadic,omitempty"`
-	Deprecated string `json:"deprecated,omitempty"`
-	Schema     any    `json:"schema"`
+	Name        string                       `json:"name"`
+	Summary     string                       `json:"summary,omitempty"`
+	Required    bool                         `json:"required,omitempty"`
+	Variadic    bool                         `json:"variadic,omitempty"`
+	Passthrough bool                         `json:"passthrough,omitempty"` // raw words start here: every later word is taken as typed
+	EnumValues  map[string]contractEnumValue `json:"enum_values,omitempty"`
+	Deprecated  string                       `json:"deprecated,omitempty"`
+	Schema      any                          `json:"schema"`
 }
 
 type contractFlag struct {
-	Name         string   `json:"name"`
-	Identifiers  []string `json:"identifiers"`
-	Summary      string   `json:"summary,omitempty"`
-	Required     bool     `json:"required,omitempty"`
-	Cascading    bool     `json:"cascading,omitempty"`
-	ShortCircuit bool     `json:"short_circuit,omitempty"` // set on the command line, it waives the command's requirements
-	Inherited    bool     `json:"inherited,omitempty"`
-	Env          []string `json:"env,omitempty"`        // fallback variables, in lookup order
-	ConfigKey    string   `json:"config_key,omitempty"` // fallback config key, only when the command reads config files
-	Deprecated   string   `json:"deprecated,omitempty"`
-	Schema       any      `json:"schema"`
+	Name         string                       `json:"name"`
+	Identifiers  []string                     `json:"identifiers"`
+	Summary      string                       `json:"summary,omitempty"`
+	Required     bool                         `json:"required,omitempty"`
+	Cascading    bool                         `json:"cascading,omitempty"`
+	ShortCircuit bool                         `json:"short_circuit,omitempty"` // set on the command line, it waives the command's requirements
+	Inherited    bool                         `json:"inherited,omitempty"`
+	Env          []string                     `json:"env,omitempty"`        // fallback variables, in lookup order
+	ConfigKey    string                       `json:"config_key,omitempty"` // fallback config key, only when the command reads config files
+	Deprecated   string                       `json:"deprecated,omitempty"`
+	EnumValues   map[string]contractEnumValue `json:"enum_values,omitempty"`
+	Schema       any                          `json:"schema"`
 }
 
 type contractEnv struct {
-	Name       string   `json:"name"`
-	Variables  []string `json:"variables"`
-	Summary    string   `json:"summary,omitempty"`
-	Required   bool     `json:"required,omitempty"`
-	Secret     bool     `json:"secret,omitempty"`
-	Deprecated string   `json:"deprecated,omitempty"`
-	Schema     any      `json:"schema"`
+	Name       string                       `json:"name"`
+	Variables  []string                     `json:"variables"`
+	Summary    string                       `json:"summary,omitempty"`
+	Required   bool                         `json:"required,omitempty"`
+	Secret     bool                         `json:"secret,omitempty"`
+	Deprecated string                       `json:"deprecated,omitempty"`
+	EnumValues map[string]contractEnumValue `json:"enum_values,omitempty"`
+	Schema     any                          `json:"schema"`
 }
 
 type contractConfig struct {
-	Name       string `json:"name"`
-	Key        string `json:"key"`
-	File       string `json:"file,omitempty"`
-	Summary    string `json:"summary,omitempty"`
-	Required   bool   `json:"required,omitempty"`
-	Deprecated string `json:"deprecated,omitempty"`
-	Schema     any    `json:"schema"`
+	Name       string                       `json:"name"`
+	Key        string                       `json:"key"`
+	File       string                       `json:"file,omitempty"`
+	Summary    string                       `json:"summary,omitempty"`
+	Required   bool                         `json:"required,omitempty"`
+	Deprecated string                       `json:"deprecated,omitempty"`
+	EnumValues map[string]contractEnumValue `json:"enum_values,omitempty"`
+	Schema     any                          `json:"schema"`
+}
+
+// contractEnumValue is what one enum value of an input declares beyond its spelling.
+type contractEnumValue struct {
+	Summary string `json:"summary,omitempty"`
+}
+
+// contractEnumValues maps each value of an input's enum to what it declares beyond its
+// spelling, or nil when no value declares more.
+func contractEnumValues(schema *InputSchema) map[string]contractEnumValue {
+	if schema == nil || !enumDescribed(schema.Enum) {
+		return nil
+	}
+	out := map[string]contractEnumValue{}
+	for _, v := range enumValues(schema.Enum) {
+		out[v.Value] = contractEnumValue{Summary: v.Summary}
+	}
+	return out
 }
 
 type contractStdin struct {
@@ -357,6 +388,9 @@ func (p *program) contract(nodes []contractNode) ([]byte, error) {
 	if mode, env := completionMessages(p.conf); mode != "" && env != "" {
 		doc.Completion = &contractCompletion{MessagesEnv: env}
 	}
+	if rf := p.responseFiles(); rf != nil {
+		doc.ResponseFiles = &contractResponseFiles{Prefix: rf.Prefix}
+	}
 	if len(p.schemas) > 0 {
 		doc.Definitions = map[string]any{}
 		for name, s := range p.schemas {
@@ -392,6 +426,9 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 		Aliases:     n.aliases,
 		Deprecated:  n.deprecate,
 	}
+	if n.inputs != nil {
+		c.OptionsFirst = n.inputs.OptionsFirst
+	}
 	params := map[string]any{}
 	var required []string
 	param := func(name, summary string, schema any, req bool) {
@@ -418,7 +455,7 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 			continue
 		}
 		req := a.Schema != nil && a.Schema.Required
-		arg := contractArgument{Name: a.Name, Summary: a.Summary, Required: req, Variadic: isVariadicSchema(a.Schema), Deprecated: a.Deprecated, Schema: inputJSONSchema(a.Schema)}
+		arg := contractArgument{Name: a.Name, Summary: a.Summary, Required: req, Variadic: isVariadicSchema(a.Schema), Passthrough: a.Passthrough, EnumValues: contractEnumValues(a.Schema), Deprecated: a.Deprecated, Schema: inputJSONSchema(a.Schema)}
 		c.Arguments = append(c.Arguments, arg)
 		param(a.Name, a.Summary, arg.Schema, req)
 	}
@@ -427,8 +464,8 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 		cf := contractFlag{
 			Name: f.Name, Identifiers: flagIdentifiers(f), Summary: f.Summary, Required: req,
 			Cascading: f.Cascading && !inherited, Inherited: inherited, Deprecated: f.Deprecated,
-			ShortCircuit: f.ShortCircuit,
-			Schema:       inputJSONSchema(f.Schema),
+			ShortCircuit: f.ShortCircuit, EnumValues: contractEnumValues(f.Schema),
+			Schema: inputJSONSchema(f.Schema),
 		}
 		// The same names help shows, from the same functions as the generated env tags.
 		row := withConfigKeys([]templateDocFlagRow{flagRow(f, p.envPrefix)}, readsConfig)[0]
@@ -472,7 +509,7 @@ func (p *program) contractSources(c *contractCommand, in *Inputs) {
 		secret := e.Schema != nil && e.Schema.Secret
 		c.Env = append(c.Env, contractEnv{
 			Name: e.Name, Variables: strings.Split(envVarName(e, p.envPrefix), ","), Summary: e.Summary,
-			Required: e.Schema != nil && e.Schema.Required, Secret: secret, Deprecated: e.Deprecated,
+			Required: e.Schema != nil && e.Schema.Required, Secret: secret, Deprecated: e.Deprecated, EnumValues: contractEnumValues(e.Schema),
 			Schema: inputJSONSchema(e.Schema),
 		})
 	}
@@ -489,7 +526,7 @@ func (p *program) contractSources(c *contractCommand, in *Inputs) {
 		}
 		c.Config = append(c.Config, contractConfig{
 			Name: cfg.Name, Key: key, File: file, Summary: cfg.Summary,
-			Required: cfg.Schema != nil && cfg.Schema.Required, Deprecated: cfg.Deprecated,
+			Required: cfg.Schema != nil && cfg.Schema.Required, Deprecated: cfg.Deprecated, EnumValues: contractEnumValues(cfg.Schema),
 			Schema: inputJSONSchema(cfg.Schema),
 		})
 	}

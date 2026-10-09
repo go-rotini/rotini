@@ -38,6 +38,17 @@ type parsedInputs struct {
 	// command lookup there, so a sub-command's name after it is a positional.
 	dashedFirst bool
 
+	// dashSeen records that argv ended flags with a "--" the parser consumed, and dashAt how many
+	// positional words the leaf had been given before it. A "--" taken as an argument (after
+	// flags stopped, or as a raw word) is not recorded. See [Context.DashIndex].
+	dashSeen bool
+	dashAt   int
+
+	// lateFlag records the first word after an options_first command's first argument that
+	// would have been a flag of the chain: [0] is the word, [1] the command's name. A resulting
+	// too-many-arguments error says flags go first. nil when none.
+	lateFlag *[2]string
+
 	// dir is the run's injected working directory, which relative existingfile and existingdir
 	// values are checked against; "" is the process's.
 	dir string
@@ -58,6 +69,15 @@ func (p *parsedInputs) detachedHint(extra []string) string {
 		return ""
 	}
 	return fmt.Sprintf("; %s takes its value attached: %s=%s", p.detached[0], p.detached[0], p.detached[1])
+}
+
+// lateFlagHint is the hint a too-many-arguments error carries when one of the extra words is
+// a flag typed after an options_first command's first argument, else "".
+func (p *parsedInputs) lateFlagHint(extra []string) string {
+	if p == nil || p.lateFlag == nil || !slices.Contains(extra, p.lateFlag[0]) {
+		return ""
+	}
+	return fmt.Sprintf("; flags go before the first argument of %q (it takes options first): %s", p.lateFlag[1], p.lateFlag[0])
 }
 
 // covers reports whether chain frame i is one this validation pass judges.
@@ -435,10 +455,11 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, 
 }
 
 // recordArg records one positional of the leaf command, split on the separator of the variadic
-// argument it lands in, if that declares one.
+// argument it lands in, if that declares one. A variadic followed by fixed arguments splits
+// nothing, since where it ends is known only once every word is in.
 func (p *parsedInputs) recordArg(leaf Command, idx int, value string) error {
 	values := []string{value}
-	if def, ok := variadicAt(leaf.Arguments, len(p.scopes[idx].args)); ok && def.Separator != "" {
+	if def, ok := variadicAt(leaf.Arguments, len(p.scopes[idx].args)); ok && def.Separator != "" && !hasArgTail(leaf.Arguments) {
 		var err error
 		if values, err = splitValue(value, def.Separator); err != nil {
 			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("<%s>: %v", def.Name, err)}
@@ -461,7 +482,18 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 	leaf := len(chain) - 1 // chain index of the leaf command
 	depth := 1             // index of the next chain frame we might descend into
 	startedArgs := false   // a positional has been seen: command descent is over
-	terminated := false    // "--" has been seen: flag parsing is over too
+	leafWords := 0         // positional words given to the leaf so far (words, not split values)
+	pt := passthroughArg(chain[leaf].Arguments)
+
+	// Where flags stop. Three states, and every argv walker reads them the same way:
+	//   - terminated: no more flags, and a later "--" is an argument. A consumed "--" sets it,
+	//     and so does the first argument of an options_first leaf.
+	//   - raw: the leaf's passthrough argument has started; every word is kept as typed, not
+	//     split on a separator.
+	//   - passthrough(): a passthrough command was entered; every word after its name is raw.
+	terminated := false
+	optionsDone := false // terminated by an options_first leaf's first argument, not by "--"
+	raw := false
 
 	addFlag := func(idx int, fd FlagDef, value, typed string) error {
 		return store.recordArgvFlag(idx, fd, value, typed, acq)
@@ -469,30 +501,27 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 	addArg := func(value string) error {
 		return store.recordArg(chain[leaf], leaf, value)
 	}
-
-	// Once a passthrough leaf has been entered, every remaining token is a raw positional.
 	passthrough := func() bool {
-		return chain[len(chain)-1].Passthrough && depth == len(chain)
+		return chain[leaf].Passthrough && depth == len(chain)
 	}
 
 	for i := 0; i < len(argv); i++ {
 		tok := argv[i]
 
-		if passthrough() {
-			if err := addArg(tok); err != nil {
-				return nil, err
-			}
+		if raw || passthrough() {
+			store.scopes[leaf].args = append(store.scopes[leaf].args, tok)
 			continue
 		}
 
-		if !terminated && tok == "--" { // explicit end of flags; the rest are
+		if !terminated && tok == "--" {
 			store.dashedFirst = !startedArgs
-			terminated = true  // positional, even flag-looking tokens (and any
-			startedArgs = true // further "--" is a literal positional)
+			store.dashSeen, store.dashAt = true, leafWords
+			terminated = true
+			startedArgs = true
 			continue
 		}
 
-		if !terminated && isFlag(tok) {
+		if !terminated && isFlag(chain[:depth], tok) {
 			// Only the commands reached so far are eligible: a flag typed before a sub-command's
 			// name belongs to one of its ancestors, never to it.
 			extra, err := consumeFlagToken(chain[:depth], tok, argv, i, addFlag)
@@ -513,12 +542,48 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 			}
 		}
 		startedArgs = true
+		if depth == len(chain) && leafWords == pt {
+			raw = true // the passthrough argument's first word
+			store.scopes[leaf].args = append(store.scopes[leaf].args, tok)
+			continue
+		}
+		if optionsDone && store.lateFlag == nil && isFlag(chain[:depth], tok) {
+			if name, _, _ := splitFlag(tok); flagNamed(chain[:depth], name) {
+				store.lateFlag = &[2]string{tok, chain[leaf].Name}
+			}
+		}
 		if err := addArg(tok); err != nil {
 			return nil, err
+		}
+		leafWords++
+		if chain[leaf].OptionsFirst && depth == len(chain) && !terminated {
+			terminated, optionsDone = true, true
 		}
 	}
 
 	return store, nil
+}
+
+// passthroughArg returns the index of args' passthrough argument, which lint keeps last, or
+// -1 when there is none.
+func passthroughArg(args []ArgDef) int {
+	if n := len(args); n > 0 && args[n-1].Passthrough {
+		return n - 1
+	}
+	return -1
+}
+
+// flagNamed reports whether name is an identifier (or negated form) of a flag on chain, or a
+// short cluster whose first letter is one.
+func flagNamed(chain []Command, name string) bool {
+	if _, _, _, ok := findFlagMatch(chain, name); ok {
+		return true
+	}
+	if isShortCluster(name) {
+		_, _, ok := findFlag(chain, name[:2])
+		return ok
+	}
+	return false
 }
 
 // noteDetached records the first bare optional-value flag followed by a word that would have
@@ -530,7 +595,7 @@ func noteDetached(store *parsedInputs, chain []Command, tok string, argv []strin
 	}
 	fd, _, ok := findFlagIndex(chain, tok)
 	next := argv[i+1]
-	if !ok || fd.ImplicitValue == "" || isFlag(next) || next == "--" {
+	if !ok || fd.ImplicitValue == "" || isFlag(chain, next) || next == "--" {
 		return
 	}
 	if len(fd.Enum) > 0 && !enumHas(fd.Enum, next, fd.IgnoreCase) {
@@ -681,7 +746,7 @@ func extraPositionals(leaf Command, si scopeInputs, store *parsedInputs) error {
 	if hasVariadicArg(leaf.Arguments) || len(si.args) <= n {
 		return nil
 	}
-	hint := store.detachedHint(si.args[n:]) // only a word that is one too many
+	hint := store.detachedHint(si.args[n:]) + store.lateFlagHint(si.args[n:]) // only a word that is one too many
 	if n == 0 {
 		return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args)) + hint, Command: leaf.Name}
 	}
@@ -747,40 +812,28 @@ func validate(chain []Command, store *parsedInputs) error {
 // value can be read at all under a short circuit.
 func validateArgs(leaf Command, si scopeInputs, waived bool, dir string) error {
 	args := si.args[:len(si.args)-si.placeholderArgs] // only values this store actually read
-	if waived {
-		for i, ad := range leaf.Arguments {
-			if i >= len(args) {
-				break
-			}
-			if si.handBuiltArgs[i] {
+	spans := argSpans(leaf.Arguments, len(si.args))
+	for i, ad := range leaf.Arguments {
+		s := spans[i]
+		if (s[0] < s[1] && s[1] > len(args)) || si.handBuiltArgs[i] {
+			continue // a hand-built positional: its value is checked with the typed rules
+		}
+		var vals []string
+		if s[0] < s[1] {
+			vals = args[s[0]:s[1]]
+		}
+		if waived {
+			if len(vals) == 0 {
 				continue
-			}
-			vals := args[i : i+1]
-			if ad.Variadic {
-				vals = args[i:]
 			}
 			if err := checkValueShape(ad.Type, "<"+ad.Name+">", "", vals, ad.Secret); err != nil {
 				return err
 			}
+			continue
 		}
-		return nil
-	}
-
-	for i, ad := range leaf.Arguments {
-		if (i >= len(args) && i < len(si.args)) || si.handBuiltArgs[i] {
-			continue // a hand-built positional: its value is checked with the typed rules
-		}
-		var vals []string
-		switch {
-		case ad.Variadic:
-			if i < len(args) {
-				vals = args[i:]
-			} // an absent variadic still gets a MinItems check below
-		case i < len(args):
-			vals = args[i : i+1]
-		default:
+		if len(vals) == 0 && !ad.Variadic {
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
-		}
+		} // an absent variadic still gets a MinItems check
 		if err := checkArgValues(ad, vals, dir); err != nil {
 			return err
 		}
@@ -1191,6 +1244,9 @@ func applyDefaults(chain []Command, store *parsedInputs) {
 
 	leaf := len(chain) - 1
 	args := chain[leaf].Arguments
+	if hasArgTail(args) {
+		return // arguments after a variadic take no default, so there is no trailing gap to fill
+	}
 	for i := len(store.scopes[leaf].args); i < len(args); i++ {
 		if args[i].Default == "" {
 			break // can't fill a gap before a defaultless argument
@@ -1218,8 +1274,9 @@ func requiredErrors(chain []Command, store *parsedInputs) error {
 	}
 	leaf := chain[len(chain)-1]
 	si := store.scopes[len(chain)-1]
+	spans := argSpans(leaf.Arguments, len(si.args))
 	for i, ad := range leaf.Arguments {
-		if store.covers(len(chain)-1) && ad.Required && i >= len(si.args) {
+		if store.covers(len(chain)-1) && ad.Required && spans[i][0] >= spans[i][1] {
 			missing = append(missing, "<"+ad.Name+">")
 		}
 	}
@@ -1251,14 +1308,17 @@ func plural(word string, n int) string {
 }
 
 // resolveFlagValue applies a flag's declared acquisition modes to one argv-supplied value.
-// With "file", a value starting with '@' becomes the named file's contents; with "stdin", a
-// value of exactly "-" becomes the piped stdin, which must not be empty. Resolved text has one
+// With "file", a value starting with '@' becomes the named file's contents, and one starting
+// with "@@" is the value with one '@' removed, read from no file; with "stdin", a value of
+// exactly "-" becomes the piped stdin, which must not be empty. Resolved text has one
 // trailing line ending removed (trimAcquiredPayload, as the stdin channel does) and is then
 // coerced and validated like a literal value. Without the matching mode, '@' and '-' are
 // ordinary characters. Sentinels are argv grammar only: defaults and fallbacks never resolve.
 // A relative `@file` path resolves against acq.dir; the error names it as typed.
 func resolveFlagValue(fd FlagDef, label, value string, acq argvAcq) (string, error) {
 	switch {
+	case strings.HasPrefix(value, "@@") && slices.Contains(fd.From, "file"):
+		return value[1:], nil // a doubled @ is one literal @: @@alice is the value @alice
 	case strings.HasPrefix(value, "@") && slices.Contains(fd.From, "file"):
 		path := joinDir(acq.dir, value[1:])
 		data, err := os.ReadFile(path)
@@ -1678,14 +1738,14 @@ func labelForFlag(defs []FlagDef, name string) string {
 	return name
 }
 
-// bindArgs fills a <Cmd>Arguments struct positionally; a trailing []string field is variadic
-// and absorbs the remaining positionals.
+// bindArgs fills a <Cmd>Arguments struct positionally; a []string field is variadic and
+// absorbs what the fields around it leave (see argSpans).
 func bindArgs(v reflect.Value, args []string, defs []ArgDef) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
 	t := v.Type()
-	idx := 0
+	spans := argSpans(fieldArgDefs(v, defs), len(args))
 	for i := range v.NumField() {
 		f := v.Field(i)
 		label := "<" + t.Field(i).Tag.Get("rotini") + ">"
@@ -1693,21 +1753,28 @@ func bindArgs(v reflect.Value, args []string, defs []ArgDef) error {
 		if i < len(defs) {
 			def = defs[i]
 		}
-		if f.Kind() == reflect.Slice { // a slice argument is variadic, whatever its element type
-			if err := coerceWithLayout(f, canonicalFor(def, args[min(idx, len(args)):]), def.Layout); err != nil {
-				return coerceFailure(label, "", err, argSecret(defs, i))
-			}
-			idx = len(args)
+		s := spans[i]
+		if f.Kind() != reflect.Slice && s[0] >= s[1] {
 			continue
 		}
-		if idx < len(args) {
-			if err := coerceWithLayout(f, canonicalFor(def, args[idx:idx+1]), def.Layout); err != nil {
-				return coerceFailure(label, "", err, argSecret(defs, i))
-			}
-			idx++
+		if err := coerceWithLayout(f, canonicalFor(def, args[s[0]:s[1]]), def.Layout); err != nil {
+			return coerceFailure(label, "", err, argSecret(defs, i))
 		}
 	}
 	return nil
+}
+
+// fieldArgDefs pairs each field of an Arguments struct with its declaration, reading a slice
+// field as variadic (whatever its element type) where defs doesn't reach.
+func fieldArgDefs(v reflect.Value, defs []ArgDef) []ArgDef {
+	out := make([]ArgDef, v.NumField())
+	for i := range out {
+		if i < len(defs) {
+			out[i] = defs[i]
+		}
+		out[i].Variadic = v.Field(i).Kind() == reflect.Slice
+	}
+	return out
 }
 
 // splitValue splits one value on a list input's separator, CSV-style: an item in double quotes

@@ -25,10 +25,12 @@ field ArgDef.Constraints
 field ArgDef.Default
 field ArgDef.Deprecated
 field ArgDef.Enum
+field ArgDef.EnumValues
 field ArgDef.Hidden
 field ArgDef.IgnoreCase
 field ArgDef.Layout
 field ArgDef.Name
+field ArgDef.Passthrough
 field ArgDef.Required
 field ArgDef.Secret
 field ArgDef.Separator
@@ -45,6 +47,7 @@ field Command.Handler
 field Command.Invoked
 field Command.Matched
 field Command.Name
+field Command.OptionsFirst
 field Command.Output
 field Command.Passthrough
 field Command.PluginDiscovery
@@ -61,6 +64,7 @@ field CommandDef.Flags
 field CommandDef.Handler
 field CommandDef.Hidden
 field CommandDef.Name
+field CommandDef.OptionsFirst
 field CommandDef.Output
 field CommandDef.Passthrough
 field CommandDef.PluginDiscovery
@@ -106,11 +110,13 @@ field Definition.FlagGroups
 field Definition.Flags
 field Definition.Handler
 field Definition.Name
+field Definition.OptionsFirst
 field Definition.Output
 field Definition.Passthrough
 field Definition.PluginDiscovery
 field Definition.PluginPath
 field Definition.Plugins
+field Definition.ResponseFiles
 field DependencyError.Name
 field Deprecation.Identifier
 field Deprecation.Kind
@@ -121,6 +127,8 @@ field DiscoverDef.File
 field DiscoverDef.Strategy
 field DiscoveredPlugin.Name
 field DiscoveredPlugin.Path
+field EnumValue.Summary
+field EnumValue.Value
 field FlagDef.Complete
 field FlagDef.Constraints
 field FlagDef.Default
@@ -129,6 +137,7 @@ field FlagDef.Deprecated
 field FlagDef.DeprecatedIdentifiers
 field FlagDef.DottedKeys
 field FlagDef.Enum
+field FlagDef.EnumValues
 field FlagDef.From
 field FlagDef.Hidden
 field FlagDef.Identifiers
@@ -212,6 +221,7 @@ field PluginError.Timeout
 field Resolution.Argv
 field Resolution.Chain
 field Resolution.Plugin
+field ResponseFilesDef.Prefix
 field WiringError.Command
 field WiringError.Handler
 field WiringError.Msg
@@ -258,6 +268,7 @@ method Context.CheckOutput(v any) error
 method Context.Command() Command
 method Context.CommandChain() []Command
 method Context.CommandPath() string
+method Context.DashIndex() (int, bool)
 method Context.DefaultInputs[T any]() (InputLayer[T], error)
 method Context.Dir() string
 method Context.EnvInputs[T any]() (InputLayer[T], error)
@@ -389,6 +400,7 @@ type DependencyError
 type Deprecation
 type DiscoverDef
 type DiscoveredPlugin
+type EnumValue
 type FieldPath
 type FlagDef
 type FlagDependency
@@ -431,6 +443,7 @@ type Program
 type Reporter
 type Resolution
 type Resolver
+type ResponseFilesDef
 type Suggestor
 type WiringError
 var ErrDependencyNotFound

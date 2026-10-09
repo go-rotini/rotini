@@ -1,0 +1,7 @@
+spec: .rotini.spec.yaml:23:11: command demo/notlast: argument "after": follows variadic argument "command", so it must be required: arguments after a variadic bind from the end
+spec: .rotini.spec.yaml:20:24: command demo/notlast: argument "command": is a passthrough argument but not the last argument; raw words run to the end of the command line, so it must be last
+spec: .rotini.spec.yaml:29:24: command demo/wrongtype: argument "command": is a passthrough argument, so its type must be []string, which receives the raw words
+spec: .rotini.spec.yaml:38:24: command demo/rules: argument "command": is a passthrough argument, whose words are passed on as typed, so it can't set `separator`
+spec: .rotini.spec.yaml:39:19: command demo/rules: argument "command": is a passthrough argument, whose words are passed on as typed, so it can't set `enum`
+spec: .rotini.spec.yaml:40:22: command demo/rules: argument "command": is a passthrough argument, whose words are passed on as typed, so it can't set `pattern`
+spec: .rotini.spec.yaml:46:24: command demo/group: argument "command": is a passthrough argument on a command with `commands`; a word naming a sub-command would be ambiguous, so declare one or the other

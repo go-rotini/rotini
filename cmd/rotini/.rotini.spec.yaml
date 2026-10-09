@@ -4,7 +4,7 @@ command:
   name: rotini
   description: "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev"
   usage: |
-    rotini <command> <arguments> [flags]
+    rotini [flags] <command> <arguments>
           [-v | --version] [-h | --help]
   examples:
     - rotini init mycli

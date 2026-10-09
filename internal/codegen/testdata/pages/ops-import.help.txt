@@ -1,0 +1,13 @@
+import tasks
+
+Usage:
+  ops import
+
+Global Flags:
+  -h, --help            print help
+  -v, --verbose         say more (repeatable)
+      --color string    when to color (default auto) [auto|always|never]
+
+Stdin:
+  The tasks to import.
+  yaml TaskList (required)

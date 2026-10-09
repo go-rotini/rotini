@@ -1,5 +1,6 @@
-# R1 — how argv words are read: numbers versus flags, "--", words before a plugin's name, and
-# the values a declared type or bound refuses.
+# R1 — how argv words are read: numbers versus flags, "--", words before a plugin's name, the
+# values a declared type or bound refuses, and where flags stop (options_first, a passthrough
+# argument), digit options, the @@ escape, a variadic before a fixed argument, response files.
 
 gomodinit example.com/demo
 
@@ -67,11 +68,95 @@ stderr 'a host and port need a scheme, as in http://localhost:8080'
 exec bin/demo$exe run --url http://localhost:8080 s
 stdout 'url=http://localhost:8080 '
 
+
+# ── grouping, attached and separate values, permutation, "--" ──────────────────
+exec bin/demo$exe opt -abx s
+stdout '^opt all=true brief=true x=true file= output= lines=0 args=\[s\]$'
+exec bin/demo$exe opt -ofile s
+stdout 'output=file lines=0 args=\[s\]'
+exec bin/demo$exe opt -o=file s
+stdout 'output=file lines=0 args=\[s\]'
+exec bin/demo$exe opt -xvf file s
+stdout 'x=true file=file .*args=\[s\]'
+exec bin/demo$exe opt -n5 s
+stdout 'lines=5 args=\[s\]'
+exec bin/demo$exe opt s d -a r1 -n 3 r2
+stdout 'all=true .*lines=3 args=\[s d r1 r2\]'
+exec bin/demo$exe opt s -- -a -b
+stdout 'all=false .*args=\[s -a -b\]'
+exec bin/demo$exe opt s -- --
+stdout 'args=\[s --\]'
+exec bin/demo$exe opt -o -x s
+stdout 'x=false .*output=-x lines=0 args=\[s\]'
+exec bin/demo$exe opt --file=-x s
+stdout 'file=-x '
+# Without options_first a command permutes, whatever the environment says.
+env POSIXLY_CORRECT=1
+exec bin/demo$exe opt s -a
+stdout 'all=true .*args=\[s\]'
+env POSIXLY_CORRECT=
+
+# ── a literal @ for a from: [file] flag ──────────────────────────────────────
+exec bin/demo$exe opt -o @@x s
+stdout 'output=@x lines=0 args=\[s\]'
+exec bin/demo$exe opt --output=@@@x s
+stdout 'output=@@x '
+wantexit 1 bin/demo$exe opt -o @nofile s
+stderr '-o: no such file: "nofile"'
+
+# ── options_first: flags stop at the first argument ──────────────────────────
+exec bin/demo$exe ssh -p 22 host -v ls
+stdout '^ssh port=22 ipv4=false ipv6=false host=host cmd=\[-v ls\]$'
+exec bin/demo$exe ssh host -- x
+stdout 'cmd=\[-- x\]'
+exec bin/demo$exe ssh -- -host x
+stdout 'host=-host cmd=\[x\]'
+# --help after the first argument is an argument, so it does not print help.
+exec bin/demo$exe ssh host --help
+stdout 'cmd=\[--help\]'
+
+# ── declared digit options ───────────────────────────────────────────────────
+exec bin/demo$exe ssh -4 h
+stdout 'ipv4=true ipv6=false host=h'
+exec bin/demo$exe ssh -46 h
+stdout 'ipv4=true ipv6=true host=h'
+exec bin/demo$exe ssh -p -4 h
+stdout 'port=-4 ipv4=false'
+# Without a declared digit option, -4 is a number.
+exec bin/demo$exe calc -4 -.5
+stdout 'nums=\[-4 -0.5\]'
+
+# ── a passthrough argument ───────────────────────────────────────────────────
+exec bin/demo$exe exec --region eu ls -la --help -- --region x
+stdout '^exec region=eu command=\[ls -la --help -- --region x\] dash=-1$'
+exec bin/demo$exe exec -- -x
+stdout 'command=\[-x\] dash=0'
+# --help before the boundary is a flag.
+exec bin/demo$exe exec --help ls
+stdout 'a passthrough argument'
+
+# ── a variadic argument before a fixed one ───────────────────────────────────
+exec bin/demo$exe cp a b dst
+stdout '^cp src=\[a b\] dst=dst$'
+wantexit 1 bin/demo$exe cp dst
+stderr '<src> needs at least 1 value \(got 0\)'
+
+# ── response files ───────────────────────────────────────────────────────────
+exec bin/demo$exe +args.rsp ls
+stdout '^exec region=us command=\[ls\] dash=-1$'
+exec bin/demo$exe exec ++word
+stdout 'command=\[\+word\]'
+exec bin/demo$exe exec -- +args.rsp
+stdout 'command=\[\+args.rsp\] dash=0'
+wantexit 1 bin/demo$exe --help +nofile
+stderr 'could not read response file "nofile": no such file'
+
 -- cmd/demo/.rotini.spec.yaml --
 version: 0.0.0
 command:
   name: demo
   summary: argument syntax demo
+  response_files: { prefix: "+" }
   flags:
     - name: help
       summary: print help
@@ -115,6 +200,70 @@ command:
         - name: args
           summary: the words
           schema: { type: '[]string' }
+    - name: opt
+      summary: grouped and valued flags
+      flags:
+        - name: all
+          identifiers: [-a, --all]
+          schema: { type: bool }
+        - name: brief
+          identifiers: [-b, --brief]
+          schema: { type: bool }
+        - name: x
+          identifiers: [-x, --x]
+          schema: { type: bool }
+        - name: file
+          identifiers: [-f, --file]
+          schema: { type: string }
+        - name: output
+          identifiers: [-o, --output]
+          schema: { type: string, from: [file] }
+        - name: lines
+          identifiers: [-n, --lines]
+          schema: { type: int }
+      arguments:
+        - name: args
+          schema: { type: '[]string' }
+    - name: ssh
+      summary: options first, with digit options
+      options_first: true
+      flags:
+        - name: port
+          identifiers: [-p, --port]
+          schema: { type: int }
+        - name: ipv4
+          identifiers: ['-4', --ipv4]
+          schema: { type: bool }
+        - name: ipv6
+          identifiers: ['-6', --ipv6]
+          schema: { type: bool }
+      arguments:
+        - name: host
+          schema: { type: string, required: true }
+        - name: cmd
+          schema: { type: '[]string' }
+    - name: calc
+      summary: negative numbers
+      arguments:
+        - name: nums
+          schema: { type: '[]float64' }
+    - name: exec
+      summary: a passthrough argument
+      flags:
+        - name: region
+          identifiers: [--region]
+          schema: { type: string }
+      arguments:
+        - name: command
+          passthrough: true
+          schema: { type: '[]string' }
+    - name: cp
+      summary: a variadic before a fixed argument
+      arguments:
+        - name: src
+          schema: { type: '[]string', minItems: 1 }
+        - name: dst
+          schema: { type: string, required: true }
 -- cmd/demo/.rotini.conf.yaml --
 version: 0.0.0
 generate:
@@ -168,3 +317,114 @@ import (
 )
 
 func main() { fmt.Printf("sig got: %s\n", strings.Join(os.Args[1:], " ")) }
+-- args.rsp --
+# a response file: one word per line
+exec
+--region
+us
+-- internal/cmd/demo/demo_opt.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoOptHandler struct{ rotini.NoHooks }
+
+func (*demoOptHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoOptInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := in.DemoOpt.Flags
+	fmt.Fprintf(rtx.Stdout, "opt all=%v brief=%v x=%v file=%s output=%s lines=%d args=%v\n", f.All, f.Brief, f.X, f.File, f.Output, f.Lines, in.DemoOpt.Arguments.Args)
+}
+-- internal/cmd/demo/demo_ssh.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoSSHHandler struct{ rotini.NoHooks }
+
+func (*demoSSHHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoSSHInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f, a := in.DemoSSH.Flags, in.DemoSSH.Arguments
+	fmt.Fprintf(rtx.Stdout, "ssh port=%d ipv4=%v ipv6=%v host=%s cmd=%v\n", f.Port, f.Ipv4, f.Ipv6, a.Host, a.Cmd)
+}
+-- internal/cmd/demo/demo_calc.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoCalcHandler struct{ rotini.NoHooks }
+
+func (*demoCalcHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoCalcInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "calc nums=%v\n", in.DemoCalc.Arguments.Nums)
+}
+-- internal/cmd/demo/demo_exec.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoExecHandler struct{ rotini.NoHooks }
+
+func (*demoExecHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoExecInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	dash, ok := rtx.DashIndex()
+	if !ok {
+		dash = -1
+	}
+	fmt.Fprintf(rtx.Stdout, "exec region=%s command=%v dash=%d\n", in.DemoExec.Flags.Region, in.DemoExec.Arguments.Command, dash)
+}
+-- internal/cmd/demo/demo_cp.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoCpHandler struct{ rotini.NoHooks }
+
+func (*demoCpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoCpInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "cp src=%v dst=%s\n", in.DemoCp.Arguments.Src, in.DemoCp.Arguments.Dst)
+}

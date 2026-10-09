@@ -951,6 +951,107 @@ func conformanceCases() []inputCase {
 					}
 				}
 			}},
+
+		// ── where flags stop: options_first, a passthrough argument, digit options ──
+		{id: "ARG-10", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// options_first: flags stop at the command's first argument.
+				in, err := bdParse[bdSSHInputs](t, "ssh", "-p", "22", "host", "-v", "-p", "1")
+				if err != nil || in.Ssh.Flags.Port != 22 || in.App.Flags.Verbose || !slices.Equal(in.Ssh.Arguments.Cmd, []string{"-v", "-p", "1"}) {
+					t.Errorf("got %+v (verbose %v), %v; want flags after the host passed on", in.Ssh, in.App.Flags.Verbose, err)
+				}
+			}},
+		{id: "ARG-11", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// After an options_first command's first argument, "--" is an argument; before
+				// it, "--" is consumed.
+				in, err := bdParse[bdSSHInputs](t, "ssh", "host", "--", "x")
+				if err != nil || !slices.Equal(in.Ssh.Arguments.Cmd, []string{"--", "x"}) {
+					t.Errorf("ssh host -- x: cmd %q, %v; want the -- kept", in.Ssh.Arguments.Cmd, err)
+				}
+				in, err = bdParse[bdSSHInputs](t, "ssh", "--", "-host", "x")
+				if err != nil || in.Ssh.Arguments.Host != "-host" || !slices.Equal(in.Ssh.Arguments.Cmd, []string{"x"}) {
+					t.Errorf("ssh -- -host x: %+v, %v", in.Ssh.Arguments, err)
+				}
+			}},
+		{id: "ARG-12", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A cascading short-circuit flag after the boundary is an argument and waives
+				// nothing.
+				for _, argv := range [][]string{{"ssh", "host", "--help"}, {"exec", "ls", "--help"}} {
+					rtx := bdContext(t, argv...)
+					if store := quietParse(rtx.CommandChain(), argv); store == nil || shortCircuited(rtx.CommandChain(), store) {
+						t.Errorf("%q: short-circuited, want --help passed on", argv)
+					}
+				}
+			}},
+		{id: "ARG-15", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A passthrough argument: flags before it parse, every word from it on is raw.
+				in, err := bdParse[bdExecInputs](t, "--verbose", "exec", "--region", "eu", "ls", "-la", "--", "--region", "x")
+				if err != nil || !in.App.Flags.Verbose || in.Exec.Flags.Region != "eu" ||
+					!slices.Equal(in.Exec.Arguments.Command, []string{"ls", "-la", "--", "--region", "x"}) {
+					t.Errorf("got %+v, %v", in.Exec, err)
+				}
+			}},
+		{id: "ARG-16", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A variadic before a fixed argument: the fixed one binds from the end.
+				in, err := bdParse[bdCpInputs](t, "cp", "a", "b", "dst")
+				if err != nil || !slices.Equal(in.Cp.Arguments.Src, []string{"a", "b"}) || in.Cp.Arguments.Dst != "dst" {
+					t.Errorf("cp a b dst: %+v, %v", in.Cp.Arguments, err)
+				}
+			}},
+		{id: "FLAG-13", args: []string{"widget", "create", "--spec", "@@literal"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// A doubled @ on a from: [file] flag is one literal @, read from no file.
+				if in := bindAs[acCreateInputs](t, rtx, meta); in.Create.Flags.Spec != "@literal" {
+					t.Errorf("spec = %q, want @literal", in.Create.Flags.Spec)
+				}
+			}},
+		{id: "FLAG-14", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A declared digit option is a flag, clustering like a letter; other negative
+				// numbers stay numbers.
+				in, err := bdParse[bdSSHInputs](t, "ssh", "-46", "host", "-5")
+				if err != nil || !in.Ssh.Flags.IPv4 || !in.Ssh.Flags.IPv6 || !slices.Equal(in.Ssh.Arguments.Cmd, []string{"-5"}) {
+					t.Errorf("got %+v, %v", in.Ssh, err)
+				}
+			}},
+
+		// ── response files ──
+		{id: "RSP-01", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A response file's lines are words, and can name the command.
+				got := runResponse(t, map[string]string{"a.rsp": "exec\n--region\neu\n"}, "@a.rsp", "ls")
+				if want := []string{"exec", "--region", "eu", "ls"}; !slices.Equal(got, want) {
+					t.Errorf("argv = %q, want %q", got, want)
+				}
+			}},
+		{id: "RSP-02", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// "--" stops expansion.
+				got := runResponse(t, map[string]string{"a.rsp": "x\n"}, "exec", "--", "@a.rsp")
+				if want := []string{"exec", "--", "@a.rsp"}; !slices.Equal(got, want) {
+					t.Errorf("argv = %q, want %q", got, want)
+				}
+			}},
+		{id: "RSP-03", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A doubled prefix is the literal word with one prefix.
+				got := runResponse(t, nil, "exec", "@@a.rsp")
+				if want := []string{"exec", "@a.rsp"}; !slices.Equal(got, want) {
+					t.Errorf("argv = %q, want %q", got, want)
+				}
+			}},
+		{id: "RSP-04", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// Words read from a file are not expanded again.
+				got := runResponse(t, map[string]string{"a.rsp": "exec\n@b.rsp\n", "b.rsp": "never\n"}, "@a.rsp")
+				if want := []string{"exec", "@b.rsp"}; !slices.Equal(got, want) {
+					t.Errorf("argv = %q, want %q", got, want)
+				}
+			}},
 	}
 }
 
@@ -1008,6 +1109,8 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"PREC-01", "PREC-02", "PREC-03", "PREC-04",
 		"INJ-01", "INJ-02", "INJ-03",
 		"ARG-13", "ARG-14", "FLAG-15", "FLAG-16",
+		"ARG-10", "ARG-11", "ARG-12", "ARG-15", "ARG-16", "FLAG-13", "FLAG-14",
+		"RSP-01", "RSP-02", "RSP-03", "RSP-04",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {
@@ -1025,4 +1128,24 @@ func TestConformance_matrixComplete(t *testing.T) {
 	for id, n := range seen {
 		t.Errorf("unexpected matrix ID %s (×%d) — extend the canonical list", id, n)
 	}
+}
+
+// runResponse runs boundaryDef with response files on, in a directory holding files, and
+// returns the argv its handler saw.
+func runResponse(t *testing.T, files map[string]string, argv ...string) []string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	def := boundaryDef()
+	def.ResponseFiles = &ResponseFilesDef{Prefix: "@"}
+	var out strings.Builder
+	var seen []string
+	if code, err := bdProgram(def, dir, &out, &seen).Run(argv); code != 0 {
+		t.Fatalf("Run(%q) = %d, %v: %s", argv, code, err, out.String())
+	}
+	return seen
 }

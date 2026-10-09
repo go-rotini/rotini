@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:9:7: command demo: lists group "Inspect" twice in `groups`; list each group once
+warning: spec: .rotini.spec.yaml:10:7: command demo: lists group "Inspct" in `groups`, but no sub-command or flag of this command has `group: Inspct`; check the spelling, or remove the entry

@@ -1,1 +1,4 @@
-spec: .rotini.spec.yaml:6:7: command demo: argument "paths": variadic but not last; it would absorb every remaining positional, so later arguments could never bind
+spec: .rotini.spec.yaml:12:24: command demo/cp: argument "src": is variadic and followed by other arguments, so it can't set `separator`: where its values end is known only once every word is in
+spec: .rotini.spec.yaml:26:11: command demo/bad: argument "target": follows variadic argument "paths", so it must be required: arguments after a variadic bind from the end
+spec: .rotini.spec.yaml:29:11: command demo/bad: argument "more": is a second variadic argument after "paths"; only one argument can take a variable number of words
+warning: spec: .rotini.spec.yaml:15:11: command demo/cp: argument "dst": completes differently from variadic argument "src" before it; completion can't tell which of the two a word is for, so it offers "src"'s

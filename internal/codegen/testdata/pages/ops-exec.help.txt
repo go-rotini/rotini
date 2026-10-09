@@ -1,0 +1,14 @@
+run a command
+
+Usage:
+  ops exec <argv...>
+
+Every word after "exec" is passed through as written, so flags go before "exec".
+
+Arguments:
+  <argv...>    the command and its arguments
+
+Global Flags:
+  -h, --help            print help
+  -v, --verbose         say more (repeatable)
+      --color string    when to color (default auto) [auto|always|never]

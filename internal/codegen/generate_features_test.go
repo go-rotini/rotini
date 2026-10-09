@@ -252,7 +252,7 @@ func TestGenerateFeatures_inline(t *testing.T) {
 		"the acme control cli",
 		"acme <command> [flags]",
 		"deploy, dep",           // name + alias
-		"--config, -c string",   // typed flag row
+		"-c, --config string",   // typed flag row
 		"ACME_TOKEN string",     // env input row
 		"https://api.acme.test", // config default
 		"acme deploy web",       // example
@@ -354,7 +354,7 @@ func TestFlagGroups(t *testing.T) {
 		{Identifiers: []string{"--key"}, Group: "TLS"},
 		{Identifiers: []string{"--quiet"}},
 	}
-	groups := groupFlags(rows)
+	groups := groupFlags(rows, nil)
 
 	if len(groups) != 3 {
 		t.Fatalf("got %d buckets, want 3 (ungrouped, TLS, Output)", len(groups))
@@ -382,12 +382,12 @@ func TestFlagGroups(t *testing.T) {
 
 	plain := groupFlags([]templateDocFlagRow{
 		{Identifiers: []string{"--a"}}, {Identifiers: []string{"--b"}},
-	})
+	}, nil)
 	if len(plain) != 1 || plain[0].Title != "" || len(plain[0].Flags) != 2 {
 		t.Errorf("an ungrouped command should render one untitled bucket, got %+v", plain)
 	}
 
-	if groupFlags(nil) != nil {
+	if groupFlags(nil, nil) != nil {
 		t.Error("no flags should yield no buckets, so the section is omitted entirely")
 	}
 }

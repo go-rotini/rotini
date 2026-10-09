@@ -1,0 +1,32 @@
+run the fleet
+
+Usage:
+  ops [flags] <command>
+
+Commands:
+  note    add a note
+  exec    run a command
+
+Data:
+  Commands that read a document from standard input.
+  import    import tasks
+  upper     upper-case lines
+
+Deploying:
+  Commands that change what runs where.
+  Each one asks before it acts.
+  deploy    ship a service
+
+Flags:
+  -h, --help    print help
+
+Output:
+  Flags that shape what ops prints.
+  -v, --verbose         say more (repeatable)
+      --color string    when to color (default auto) [auto|always|never]
+
+Environment:
+  OPS_TOKEN string    the API token (length >= 20)
+
+Configuration:
+  region (region) string    the default region

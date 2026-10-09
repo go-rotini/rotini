@@ -17,7 +17,7 @@ func TestIsFlag_negativeNumbers(t *testing.T) {
 		"-0x1p3": false, "-.": true, "-.x": true, "-v": true, "--5": true, "--verbose": true,
 		"-": false, "--": false, "": false, "5": false, "x": false,
 	} {
-		if got := isFlag(tok); got != want {
+		if got := isFlag(nil, tok); got != want {
 			t.Errorf("isFlag(%q) = %v, want %v", tok, got, want)
 		}
 	}
@@ -107,7 +107,7 @@ func TestWalkers_agreeOnFloatWords(t *testing.T) {
 	if cc := walkContext(def, []string{"-Inf", "x", "sub"}); len(cc.chain) != 2 || cc.positionals != 0 {
 		t.Errorf("walk -Inf x sub: chain %d, positionals %d; want 2, 0", len(cc.chain), cc.positionals)
 	}
-	if name, ok := pendingValueFlag([]string{"sub", "-Inf"}); !ok || name != "-Inf" {
+	if name, ok := pendingValueFlag(nil, []string{"sub", "-Inf"}); !ok || name != "-Inf" {
 		t.Errorf("pendingValueFlag(-Inf) = %q, %v; want -Inf awaiting a value", name, ok)
 	}
 }

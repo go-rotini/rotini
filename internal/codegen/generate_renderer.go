@@ -472,14 +472,16 @@ func renderModelsFile(data templateModelsData) ([]byte, error) {
 // templateDocHeadings holds the resolved section headings, each rendered verbatim (the trailing
 // ":" is part of the value).
 type templateDocHeadings struct {
-	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples, Output string
+	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples, Output, Stdin string
 }
 
 // templateDocCommandGroup is one bucket of sub-commands in the Commands section. Title is the
-// `group` value; "" is the ungrouped bucket, headed with the template's default.
+// `group` value; "" is the ungrouped bucket, headed with the template's default. Description
+// is the paragraph the command's `groups` gives the group; "" for none.
 type templateDocCommandGroup struct {
-	Title    string
-	Commands []templateDocCommandRow
+	Title       string
+	Description string
+	Commands    []templateDocCommandRow
 }
 
 type templateDocCommandRow struct {
@@ -491,17 +493,22 @@ type templateDocCommandRow struct {
 }
 
 type templateDocArgumentRow struct {
-	Name       string
-	Summary    string
-	Required   bool
-	Variadic   bool
-	Default    string
-	Enum       []string
-	Deprecated string
+	Name        string
+	Summary     string
+	Required    bool
+	Variadic    bool
+	Default     string
+	Enum        []string
+	Deprecated  string
+	Constraints string   // the declared constraints as a short note (1..65535); "" for none
+	Rules       []string // the declared constraints as sentences, for man and markdown
 }
 
 type templateDocFlagRow struct {
 	Identifiers []string
+	// Label is the identifiers as help shows them: joined with ", ", and indented to the long
+	// column when the flag has no short identifier but another flag on the page does.
+	Label       string
 	Summary     string
 	Type        string // "" for bool and count flags, and when the token moved into an identifier
 	Required    bool
@@ -512,36 +519,44 @@ type templateDocFlagRow struct {
 	Group       string   // the flag's `group` (buckets it in the Flags section)
 	Env         []string // the env fallback variables, in lookup order (first preferred); nil for an argv-only flag
 	ConfigKey   string   // the config fallback key; "" for an argv-only flag, or when the page's command reads no config files
+	Constraints string   // the declared constraints as a short note (1..65535, repeatable); "" for none
+	Rules       []string // the declared constraints as sentences, for man and markdown
 
 	key string // the config fallback key whether or not the page reads config files
 }
 
 // templateDocFlagGroup is one bucket of flags in the Flags section. Title is the `group` value;
-// "" is the ungrouped bucket, headed with the template's default.
+// "" is the ungrouped bucket, headed with the template's default. Description is the paragraph
+// the command's `groups` gives the group; "" for none.
 type templateDocFlagGroup struct {
-	Title string
-	Flags []templateDocFlagRow
+	Title       string
+	Description string
+	Flags       []templateDocFlagRow
 }
 
 type templateDocEnvRow struct {
-	Var        string
-	Summary    string
-	Type       string
-	Required   bool
-	Default    string
-	Enum       []string
-	Deprecated string
+	Var         string
+	Summary     string
+	Type        string
+	Required    bool
+	Default     string
+	Enum        []string
+	Deprecated  string
+	Constraints string   // the declared constraints as a short note; "" for none
+	Rules       []string // the declared constraints as sentences, for man and markdown
 }
 
 type templateDocConfigRow struct {
-	Name       string
-	Location   string // where the value is read from: "<file>.<key>", "<key>" or ""
-	Summary    string
-	Type       string
-	Required   bool
-	Default    string
-	Enum       []string
-	Deprecated string
+	Name        string
+	Location    string // where the value is read from: "<file>.<key>", "<key>" or ""
+	Summary     string
+	Type        string
+	Required    bool
+	Default     string
+	Enum        []string
+	Deprecated  string
+	Constraints string   // the declared constraints as a short note; "" for none
+	Rules       []string // the declared constraints as sentences, for man and markdown
 }
 
 type templateDocExitRow struct {
@@ -580,6 +595,11 @@ type templateHelpData struct {
 
 	// Output documents the command's `output:` schema; nil when it declares none.
 	Output *templateDocOutput
+	// Stdin documents the command's `stdin:`; nil when it declares none.
+	Stdin *templateDocStdin
+	// Passthrough is the command's name when every word after it is passed through unparsed
+	// (`passthrough: true`), so flags must come before it; "" otherwise.
+	Passthrough string
 }
 
 // parseDocTemplate parses doc-template text with the shared FuncMap.
@@ -675,22 +695,32 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 	}
 	d.CommandGroups = append([]templateDocCommandGroup(nil), d.CommandGroups...)
 	for i := range d.CommandGroups {
+		d.CommandGroups[i].Description = untab(d.CommandGroups[i].Description)
 		d.CommandGroups[i].Commands = append([]templateDocCommandRow(nil), d.CommandGroups[i].Commands...)
 		for j := range d.CommandGroups[i].Commands {
 			d.CommandGroups[i].Commands[j].Summary = clean(d.CommandGroups[i].Commands[j].Summary)
 			d.CommandGroups[i].Commands[j].Deprecated = clean(d.CommandGroups[i].Commands[j].Deprecated)
 		}
 	}
+	cleanAll := func(rules []string) []string {
+		out := make([]string, len(rules))
+		for i, r := range rules {
+			out[i] = clean(r)
+		}
+		return out
+	}
 	d.Arguments = append([]templateDocArgumentRow(nil), d.Arguments...)
 	for i := range d.Arguments {
 		d.Arguments[i].Summary = clean(d.Arguments[i].Summary)
 		d.Arguments[i].Deprecated = clean(d.Arguments[i].Deprecated)
+		d.Arguments[i].Rules = cleanAll(d.Arguments[i].Rules)
 	}
 	cleanFlags := func(rows []templateDocFlagRow) []templateDocFlagRow {
 		rows = append([]templateDocFlagRow(nil), rows...)
 		for i := range rows {
 			rows[i].Summary = clean(rows[i].Summary)
 			rows[i].Deprecated = clean(rows[i].Deprecated)
+			rows[i].Rules = cleanAll(rows[i].Rules)
 		}
 		return rows
 	}
@@ -700,16 +730,19 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 	d.FlagGroups = append([]templateDocFlagGroup(nil), d.FlagGroups...)
 	for i := range d.FlagGroups {
 		d.FlagGroups[i].Flags = cleanFlags(d.FlagGroups[i].Flags)
+		d.FlagGroups[i].Description = untab(d.FlagGroups[i].Description)
 	}
 	d.Environment = append([]templateDocEnvRow(nil), d.Environment...)
 	for i := range d.Environment {
 		d.Environment[i].Summary = clean(d.Environment[i].Summary)
 		d.Environment[i].Deprecated = clean(d.Environment[i].Deprecated)
+		d.Environment[i].Rules = cleanAll(d.Environment[i].Rules)
 	}
 	d.Configuration = append([]templateDocConfigRow(nil), d.Configuration...)
 	for i := range d.Configuration {
 		d.Configuration[i].Summary = clean(d.Configuration[i].Summary)
 		d.Configuration[i].Deprecated = clean(d.Configuration[i].Deprecated)
+		d.Configuration[i].Rules = cleanAll(d.Configuration[i].Rules)
 	}
 	d.ExitStatus = append([]templateDocExitRow(nil), d.ExitStatus...)
 	for i := range d.ExitStatus {
@@ -724,12 +757,25 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 		}
 		d.Output = &out
 	}
+	if d.Stdin != nil {
+		in := *d.Stdin
+		in.Description = clean(in.Description)
+		in.Fields = append([]templateDocOutputField(nil), in.Fields...)
+		for i := range in.Fields {
+			in.Fields[i].Description = clean(in.Fields[i].Description)
+		}
+		d.Stdin = &in
+	}
 	d.SeeAlso = append([]string(nil), d.SeeAlso...)
 	for i := range d.SeeAlso {
 		d.SeeAlso[i] = clean(d.SeeAlso[i])
 	}
 	return d
 }
+
+// untab replaces tabs with spaces in a paragraph that sits beside aligned rows, keeping its
+// line breaks.
+func untab(s string) string { return strings.ReplaceAll(s, "\t", " ") }
 
 // tabAlign aligns each contiguous block of tab-separated lines with tabwriter.
 func tabAlign(s string) string {

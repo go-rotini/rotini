@@ -229,7 +229,7 @@ func validationSchema(schema Schema, docSchemas map[string]Schema) string {
 }
 
 // schemaToDoc marshals a spec Schema to a generic JSON-schema value and rewrites
-// its "#/schemas/" refs to "#/definitions/".
+// its "#/schemas/" refs to "#/definitions/", with every enum flattened to plain values.
 func schemaToDoc(s Schema) any {
 	raw, err := json.Marshal(s)
 	if err != nil {
@@ -240,6 +240,7 @@ func schemaToDoc(s Schema) any {
 		return map[string]any{}
 	}
 	rewriteSchemaRefs(v)
+	flattenEnums(v)
 	return v
 }
 

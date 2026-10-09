@@ -857,22 +857,9 @@ func argPresence(set Presence, layerName, topName string, ci reflect.Value, fram
 		return
 	}
 	st := s.Type()
-	idx := 0
+	spans := argSpans(fieldArgDefs(s, frame.Arguments), len(args))
 	for j := range s.NumField() {
-		fieldName := st.Field(j).Name
-		f := s.Field(j)
-		variadic := f.Kind() == reflect.Slice // a slice argument is variadic, whatever its element type
-		var vals []string
-		switch {
-		case variadic:
-			vals = args[min(idx, len(args)):]
-			idx = len(args)
-		case idx < len(args):
-			vals = args[idx : idx+1]
-			idx++
-		default:
-			continue
-		}
+		vals := args[spans[j][0]:spans[j][1]]
 		if len(vals) == 0 {
 			continue
 		}
@@ -880,7 +867,7 @@ func argPresence(set Presence, layerName, topName string, ci reflect.Value, fram
 		if j < len(frame.Arguments) {
 			secret = frame.Arguments[j].Secret
 		}
-		set[fieldPath(topName, "Arguments", fieldName)] = InputSource{
+		set[fieldPath(topName, "Arguments", st.Field(j).Name)] = InputSource{
 			Layer: layerName,
 			Raw:   redactValue(strings.Join(vals, ", "), secret),
 		}

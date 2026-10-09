@@ -1,0 +1,72 @@
+# R12 — the single-page man recipe: a declared man command writes every page from ManPages as
+# one roff stream, which man reads as one document. The handler is the one the recipes page
+# shows.
+
+gomodinit example.com/mandemo
+
+exec rotini generate cmd/mandemo/.rotini.spec.yaml --config cmd/mandemo/.rotini.conf.yaml
+cp man.go.txt internal/cmd/mandemo/mandemo_man.go
+exec go mod tidy
+exec go build -o mandemo$exe ./cmd/mandemo
+
+# Every page, root first, in one stream.
+exec ./mandemo$exe man
+stdout '^\.TH "MANDEMO" 1 '
+stdout '^\.TH "MANDEMO\\-SYNC" 1 '
+stdout '^\.TH "MANDEMO\\-MAN" 1 '
+
+[exec:mandoc] exec ./mandemo$exe man
+[exec:mandoc] cp stdout all.1
+[exec:mandoc] exec mandoc -Tascii all.1
+[exec:mandoc] stdout 'mandemo-sync - copy what changed'
+
+-- man.go.txt --
+package mandemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*mandemoManHandler)(nil)
+
+type mandemoManHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*mandemoManHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	for _, page := range ManPages() {
+		if _, err := fmt.Fprint(rtx.Stdout, page.Content); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+}
+-- cmd/mandemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: mandemo
+  summary: sync files
+  commands:
+    - name: sync
+      summary: copy what changed
+    - name: man
+      summary: print every man page as one document
+-- cmd/mandemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/mandemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/mandemo/zz_mandemo.go
+      package: mandemo
+  features:
+    - type: man
+      enabled: true

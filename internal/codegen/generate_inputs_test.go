@@ -149,7 +149,7 @@ func TestValueTypes_generateCompilingCode(t *testing.T) {
 func TestConstraintTags_readBackThroughReflect(t *testing.T) {
 	schema := &InputSchema{
 		Pattern:    `^\d+\.\w+ "quoted" ` + "`tick`$",
-		Enum:       []string{"fast", `a "b"`, `c\d`, "e`f"},
+		Enum:       []any{"fast", `a "b"`, `c\d`, "e`f"},
 		IgnoreCase: true,
 	}
 	schema.Minimum = new(1.0)
@@ -166,7 +166,7 @@ func TestConstraintTags_readBackThroughReflect(t *testing.T) {
 		t.Errorf("min read back as %q", got)
 	}
 	var enum []string
-	if err := json.Unmarshal([]byte(st.Get("enum")), &enum); err != nil || !slices.Equal(enum, schema.Enum) {
+	if err := json.Unmarshal([]byte(st.Get("enum")), &enum); err != nil || !slices.Equal(enum, enumStrings(schema.Enum)) {
 		t.Errorf("enum read back as %v (%v), want %v", enum, err, schema.Enum)
 	}
 	if st.Get("ignorecase") != "true" {

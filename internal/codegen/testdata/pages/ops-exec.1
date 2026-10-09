@@ -1,0 +1,26 @@
+.TH "OPS\-EXEC" 1 "" "ops" "User Commands"
+.SH NAME
+ops\-exec \- run a command
+.SH SYNOPSIS
+\fBops exec\fR <argv...>
+.PP
+Every word after \fBexec\fR is passed through as written, so options go before
+\fBexec\fR.
+.SH ARGUMENTS
+.TP
+\fI<argv...>\fR
+the command and its arguments
+.SH "GLOBAL OPTIONS"
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+print help
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+say more (repeatable)
+.br
+repeat to count: \-vvv
+.TP
+\fB\-\-color\fR \fIstring\fR
+when to color (default auto) [auto|always|never]
+.SH "SEE ALSO"
+\fBops\fR(1)

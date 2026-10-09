@@ -14,20 +14,29 @@
        paragraph breaks) and trailing whitespace, and ends the page with a newline.
 
        DATA: .PageName .Section .Source .Date .RelatedPages .Summary
-         .Description .Invocation .Usage/.UsageDerived .CommandGroups[] .Arguments[]
-         .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Output .ExitStatus[]
-         .Examples[] .SeeAlso[]   (.Output is nil when the command declares no output)
+         .Description .Invocation .Usage/.UsageDerived .Passthrough .CommandGroups[]
+         .Arguments[] .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Stdin
+         .Output .ExitStatus[] .Examples[] .SeeAlso[]   (.Stdin and .Output are nil when the
+         command declares none). .Passthrough is the command's name when every word after it
+         is passed through unparsed, else "". A command or flag group carries .Description,
+         the paragraph the command's `groups` gives it.
          A flag row also carries .Env (its environment variables, in lookup order) and
          .ConfigKey (its config key, set only when the command reads config files);
          alsoSetBy .Env .ConfigKey "\\fB" "\\fR" renders them as "also set by ...".
+         Argument, flag, env and config rows carry .Constraints (the declared bounds, lengths,
+         item counts and repeatability as a short note) and .Rules (the same as sentences,
+         plus pattern and separator).
        HELPERS: roff, roffBlock, roffLines, roffArg, join, upper, lower, title, trim,
                 trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
                 hasPrefix, hasSuffix, first, last, alsoSetBy. */ -}}
-{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}{{end -}}
+{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}{{end -}}
+{{- define "rules"}}{{with .Rules}}.br
+{{roff (join . "; ")}}
+{{end}}{{end -}}
 {{- define "flag"}}.TP
 {{range $i, $id := .Identifiers}}{{if $i}}, {{end}}\fB{{roff $id}}\fR{{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
-{{if or .Env .ConfigKey}}.br
+{{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
 {{end}}{{end -}}
 .TH {{roffArg (upper .PageName)}} {{.Section}} "{{.Date}}" {{roffArg .Source}} "User Commands"
@@ -38,33 +47,45 @@
 {{roffLines .Usage}}
 .fi
 {{else}}\fB{{roff .Invocation}}\fR {{roff (trimPrefix .Invocation .UsageDerived)}}
+{{end}}{{with .Passthrough}}.PP
+Every word after \fB{{roff .}}\fR is passed through as written, so options go before \fB{{roff .}}\fR.
 {{end}}
 {{with .Description}}.SH DESCRIPTION
 {{roffBlock .}}
 {{end}}
 {{range .CommandGroups}}.SH {{roffArg (upper (default "Commands" .Title))}}
-{{range .Commands}}.TP
+{{with .Description}}{{roffBlock .}}
+{{end}}{{range .Commands}}.TP
 \fB{{roff .Name}}\fR{{range .Aliases}}, \fB{{roff .}}\fR{{end}}
 {{roff .Summary}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}
 {{end}}{{end}}
 {{with .Arguments}}.SH ARGUMENTS
 {{range .}}.TP
 \fI{{if .Required}}<{{roff .Name}}{{if .Variadic}}...{{end}}>{{else}}[{{roff .Name}}{{if .Variadic}}...{{end}}]{{end}}\fR
-{{roff .Summary}}{{with .Default}} (default {{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}
-{{end}}{{end}}
+{{roff .Summary}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}
+{{template "rules" .}}{{end}}{{end}}
 {{range .FlagGroups}}.SH {{roffArg (upper (default "Options" .Title))}}
-{{range .Flags}}{{template "flag" .}}{{end}}{{end}}
+{{with .Description}}{{roffBlock .}}
+{{end}}{{range .Flags}}{{template "flag" .}}{{end}}{{end}}
 {{with .Cascading}}.SH "GLOBAL OPTIONS"
 {{range .}}{{template "flag" .}}{{end}}{{end}}
 {{with .Environment}}.SH ENVIRONMENT
 {{range .}}.TP
 \fB{{roff .Var}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}
-{{end}}{{end}}
+{{template "rules" .}}{{end}}{{end}}
 {{with .Configuration}}.SH CONFIGURATION
 {{range .}}.TP
 \fB{{roff .Name}}\fR{{with .Location}} ({{roff .}}){{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}
+{{template "rules" .}}{{end}}{{end}}
+{{with .Stdin}}.SH STDIN
+{{with .Description}}{{roffBlock .}}
+.PP
+{{end}}Reads {{if eq .Format "text" "lines"}}{{if eq .Format "text"}}text{{else}}lines of text{{end}}{{else}}a \fB{{roff .Format}}\fR document{{with .Type}} (\fB{{roff .}}\fR){{end}}{{end}} from standard input.{{if .Required}} Required.{{end}}
+{{range .Fields}}.TP
+\fB{{roff .Name}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
+{{roff .Description}}{{if .Required}} (required){{end}}
 {{end}}{{end}}
 {{with .Output}}.SH OUTPUT
 {{with .Description}}{{roffBlock .}}

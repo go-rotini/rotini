@@ -1,0 +1,48 @@
+# A passthrough argument is the last argument, a []string that judges and splits nothing, on
+# a command where nothing else reads the words after it.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: exec
+      flags:
+        - name: region
+          schema:
+            type: string
+      arguments:
+        - name: command
+          passthrough: true
+          schema:
+            type: '[]string'
+    - name: notlast
+      arguments:
+        - name: command
+          passthrough: true
+          schema:
+            type: '[]string'
+        - name: after
+          schema:
+            type: string
+    - name: wrongtype
+      arguments:
+        - name: command
+          passthrough: true
+          schema:
+            type: '[]int'
+    - name: rules
+      arguments:
+        - name: command
+          passthrough: true
+          schema:
+            type: '[]string'
+            separator: ','
+            enum: [ls, cat]
+            pattern: '^[a-z]+$'
+    - name: group
+      commands:
+        - name: child
+      arguments:
+        - name: command
+          passthrough: true
+          schema:
+            type: '[]string'

@@ -5,7 +5,7 @@ command:
   name: deploy
   summary: ship services to environments
   description: Deploy builds, ships and rolls back services.
-  usage: deploy <command> [flags]
+  usage: deploy [flags] <command>
   display_name: acme deploy
   header: deploy — internal tooling
   footer: Use "deploy help <command>" for more about a command.
@@ -20,8 +20,13 @@ command:
     cascading: "Global Flags:"
     environment: "Environment:"
     configuration: "Configuration:"
+    stdin: "Stdin:"
     output: "Output:"
     examples: "Examples:"
+  groups:
+    - name: Deploying
+      description: Commands that change what runs where.
+    - name: Output
   exit_status:
     - code: 0
       summary: success
@@ -31,6 +36,7 @@ command:
       summary: some targets failed; stdout lists the ones that shipped
       output: { type: array, items: { $ref: "#/schemas/Target" } }
   env_prefix: DEPLOY
+  response_files: { prefix: "+" }
   plugin_path: ~/.deploy/plugins
   plugin_discovery:
     prefix: deploy-
@@ -123,7 +129,7 @@ command:
         - name: color
           summary: color output
           identifiers: [--color]
-          schema: { type: string, implicit_value: always, enum: [always, never, auto] }
+          schema: { type: string, implicit_value: always, enum: [always, never, { value: auto, summary: color when stdout is a terminal }] }
         - name: cache
           summary: use the build cache
           identifiers: [--cache]
@@ -198,6 +204,22 @@ command:
       arguments:
         - name: argv
           summary: the command and its arguments
+          schema: { type: '[]string' }
+    - name: run
+      summary: run a one-off task in a service
+      options_first: true
+      flags:
+        - name: ipv4
+          summary: connect over IPv4
+          identifiers: ['-4', --ipv4]
+          schema: { type: bool }
+      arguments:
+        - name: service
+          summary: the service to run in
+          schema: { type: string, required: true }
+        - name: command
+          summary: the command to run, and its arguments
+          passthrough: true
           schema: { type: '[]string' }
     - name: status
       summary: show what is deployed

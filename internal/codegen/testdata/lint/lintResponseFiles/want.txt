@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:25:13: command demo/sub/deep: sets `response_files`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)
+spec: .rotini.spec.yaml:7:13: command demo: uses the response-file prefix "@", which flag "token" of command demo/login also reads with `from: [file]`; `--token @x` would expand a response file instead of reading x. Choose another prefix, such as "+"
+warning: spec: .rotini.spec.yaml:7:5: command demo: turns on response files, which also expand the words passed on raw by demo/exec (a passthrough or a plugin); a raw word starting with "@" is expanded unless it is written after `--` or with the prefix doubled

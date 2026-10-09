@@ -325,6 +325,9 @@ func overlayCommand(child, parent Command) Command {
 	if parent.Headings != nil {
 		m.Headings = parent.Headings
 	}
+	if len(parent.Groups) > 0 {
+		m.Groups = parent.Groups
+	}
 	if len(parent.Examples) > 0 {
 		m.Examples = parent.Examples
 	}

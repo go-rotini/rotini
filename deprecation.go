@@ -120,8 +120,9 @@ func quietTokens(chain []Command, argv []string) (*parsedInputs, error) {
 // for, by position: supplied is how many positionals argv gave the leaf.
 func argumentDeprecations(leaf Command, supplied int) []Deprecation {
 	var out []Deprecation
+	spans := argSpans(leaf.Arguments, supplied)
 	for i, ad := range leaf.Arguments {
-		if ad.Deprecated != "" && i < supplied {
+		if ad.Deprecated != "" && spans[i][0] < spans[i][1] {
 			out = append(out, Deprecation{Kind: "argument", Name: ad.Name, Identifier: "<" + ad.Name + ">", Message: ad.Deprecated})
 		}
 	}

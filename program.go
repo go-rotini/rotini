@@ -516,6 +516,15 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	rtx := p.newRunContext()
 	rtx.bindRun(ctx)
 
+	if rf := p.def.ResponseFiles; rf != nil {
+		expanded, err := expandResponseFiles(argv, rf.Prefix, rtx.view, false)
+		if err != nil {
+			rtx.RecordError(err)
+			return p.settle(ctx, rtx)
+		}
+		argv = expanded
+	}
+
 	res, err := resolve(p.def, argv)
 	if err != nil {
 		// A usage error is the user's to fix (a flag before a plugin's name); anything else

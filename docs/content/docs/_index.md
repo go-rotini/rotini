@@ -105,7 +105,7 @@ rules:
           identifiers: [-p, --priority]
           schema: { type: string, default: normal, enum: [low, normal, high] }
         - name: tag
-          summary: a label (repeatable)
+          summary: a label
           identifiers: [--tag]
           schema: { type: '[]string' }
 {{< /code >}}
@@ -136,6 +136,43 @@ Error: missing required input: <title>
 $ ./todo add "buy milk" --loud
 Error: unknown flag "--loud"
 {{< /code >}}
+
+### Where flags stop
+
+A flag works anywhere after its command until a `--`, which makes every later word an argument.
+A command can move that point earlier:
+
+- **`options_first: true`** stops flags at the command's first argument, as POSIX utilities do,
+  so `app ssh host -v ls` passes `-v ls` on. A `--` after that argument is an argument too, and so
+  is a `--help` there. Sub-commands don't inherit it.
+- **`passthrough: true` on the last argument** (a `[]string`) takes every word from that argument
+  on as typed. The command's own flags still parse before it: `app exec --region eu ls -la --help`
+  sets `--region` and passes `ls -la --help` on. A first word that starts with `-` goes after `--`
+  (`app exec -- -x`). `rtx.DashIndex()` says how many arguments came before a `--` the user typed,
+  for a handler that forwards them. `passthrough: true` on the command itself takes every word
+  after its name raw, with no flags at all.
+
+Other argument shapes:
+
+- **A digit option**, `identifiers: ['-4', --ipv4]` on a bool or count flag, makes `-4` (and
+  `-46`, clustered) a flag, while other negative numbers stay numbers. Quote it in YAML.
+  `validate` rejects one where an argument of the command, or of a command below it, takes
+  negative numbers.
+- **A variadic argument before fixed ones**, `<src...> <dst>`: the fixed arguments after it must
+  be required, and take the last words.
+- **A literal `@`** for a `from: [file]` flag is doubled: `--to @@alice` gives `@alice`, and
+  `--to @./@name` reads a file whose name starts with `@`.
+- **Enum values with summaries**, `enum: [json, {value: yaml, summary: human-friendly}]`, are
+  described in help and completion; the value is still what the user types.
+
+### Response files
+
+`response_files: {prefix: "@"}` on the root reads arguments from a file: before the first `--`,
+`@args.rsp` is replaced by the file's lines, one argument per line, with blank lines and `#`
+comment lines skipped. Words read from a file aren't expanded again, and `@@x` is the literal
+argument `@x`. Expansion happens before anything else reads the command line, so a file can hold
+the command's name, and `rtx.Argv` holds the expanded words. Choose a prefix other than `@` when a
+flag reads `from: [file]`.
 
 ## Where values come from
 
@@ -182,7 +219,7 @@ $ ./todo add --help
 Flags:
   -p, --priority string    how urgent (default normal) [low|normal|high]
                            also set by TODO_DEFAULTS_PRIORITY or config key defaults.priority
-  --tag []string           a label (repeatable)
+      --tag []string       a label (repeatable)
 {{< /code >}}
 
 Use `variable:` to name the environment variable exactly instead of deriving it. Config files can
@@ -711,6 +748,9 @@ described by
 - **An OUTPUT section** in help, man and markdown pages: the shape's description, its type, and
   its top-level fields with their types and descriptions. An exit status that writes output
   says so. Its help heading is `headings.output`.
+- **A STDIN section** in help, man and markdown pages for a command that declares `stdin:`: the
+  format, whether it is required, and for a document its type, description and top-level
+  fields. Its help heading is `headings.stdin`.
 - **One JSON Schema per output**, with `generate.schemas.output.dir` in the conf:
   `todo-list.output.json` for a command, and `todo.exit-3.output.json` for an exit status.
   Each is standard JSON Schema (draft-07), with the named schemas it uses included.
@@ -744,6 +784,30 @@ generated package:
 
 To expose one, add a command for it to the spec and call the function from its handler; for
 example, a `completion` command whose handler prints the script `Completion(shell)` returns.
+
+Pages show what the spec declares, so they stay accurate without editing:
+
+- **Usage lines** put flags first: `todo add [flags] <title>`.
+- **Constraints** follow each row's summary: bounds (`1..65535`, `>= 1`), lengths, item counts
+  and `repeatable` in help, and as sentences in man and markdown, which also give patterns and
+  separators.
+- **Groups**: commands and flags that share a `group` appear under its heading. List the groups
+  in the command's `groups` to give each a description, shown under its heading, and to set
+  their order (the example below).
+- **A passthrough command's** page says that every word after its name is passed through, so
+  flags go before it.
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: todo
+  groups:
+    - name: Maintenance
+      description: Commands that tidy the task list.
+  commands:
+    - name: prune
+      summary: remove finished tasks
+      group: Maintenance
+{{< /code >}}
 
 Man pages are roff, the markup the `man` program reads, so `man -l todo-add.1` displays one and a
 package installs them like any other. Each page is named after its command path joined with `-`:

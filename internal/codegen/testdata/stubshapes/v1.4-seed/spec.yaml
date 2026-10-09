@@ -5,8 +5,8 @@ $schema: ./.rotini-schema.spec.json
 version: 0.0.0
 command:
   name: demo
-  summary: TODO — what demo does, in one line
-  description: TODO — the paragraph at the top of `demo --help`
+  summary: what demo does, in one line (replace this)
+  description: Describe demo here; this paragraph opens demo --help.
   footer: Use "demo help <command>" for more information about a command.
   flags:
     - name: help

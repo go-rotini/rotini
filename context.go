@@ -18,7 +18,7 @@ import (
 //
 //   - invocation — the [Context.Argv], [Context.Stdin], [Context.Stdout] and [Context.Stderr]
 //     fields, and the run's environment and working directory: [Context.LookupEnv],
-//     [Context.Environ] and [Context.Dir]
+//     [Context.Environ] and [Context.Dir]; [Context.DashIndex] says where a "--" was typed
 //   - command — [Context.Command] is the command whose hook is running (its Invoked field
 //     reports whether the user ran it), [Context.CommandPath] names it, and
 //     [Context.CommandChain] lists every command from the root to the invoked one

@@ -9,3 +9,4 @@ command:
         - name: force
           schema:
             type: bool
+      options_first: true

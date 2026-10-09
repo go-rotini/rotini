@@ -1,0 +1,63 @@
+# R12 — the debugging-completion recipe: the hidden __complete command prints what the shell
+# script reads, one candidate per line, and :rotini: lines for messages and file completion.
+# The outputs are the ones the recipes page shows.
+
+gomodinit example.com/taskr
+
+exec rotini generate cmd/taskr/.rotini.spec.yaml --config cmd/taskr/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o taskr$exe ./cmd/taskr
+
+exec ./taskr$exe __complete list --status ''
+cmp stdout status.txt
+exec ./taskr$exe __complete add ''
+cmp stdout title.txt
+exec ./taskr$exe __complete list --out ''
+cmp stdout out.txt
+
+-- status.txt --
+all
+done
+open
+-- title.txt --
+:rotini:message a short title, in quotes
+-- out.txt --
+:rotini:message --out string: write the list to a file
+:rotini:file txt
+-- cmd/taskr/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: taskr
+  summary: track tasks
+  commands:
+    - name: list
+      summary: list tasks
+      flags:
+        - name: status
+          summary: which tasks to list
+          identifiers: [--status]
+          schema: { type: string, enum: [all, done, open] }
+        - name: out
+          summary: write the list to a file
+          identifiers: [--out]
+          schema: { type: string, complete: { kind: file, extensions: [txt] } }
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          summary: the task title
+          schema: { type: string, required: true, complete: { message: "a short title, in quotes" } }
+-- cmd/taskr/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/taskr/zz_taskr.go
+      package: taskr
+  features:
+    - type: completion
+      enabled: true
+      messages: all

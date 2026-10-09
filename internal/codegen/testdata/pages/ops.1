@@ -1,0 +1,55 @@
+.TH "OPS" 1 "" "ops" "User Commands"
+.SH NAME
+ops \- run the fleet
+.SH SYNOPSIS
+\fBops\fR [flags] <command>
+.SH "COMMANDS"
+.TP
+\fBnote\fR
+add a note
+.TP
+\fBexec\fR
+run a command
+.SH "DATA"
+Commands that read a document from standard input.
+.TP
+\fBimport\fR
+import tasks
+.TP
+\fBupper\fR
+upper\-case lines
+.SH "DEPLOYING"
+Commands that change what runs where.
+Each one asks before it acts.
+.TP
+\fBdeploy\fR
+ship a service
+.SH "OPTIONS"
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+print help
+.SH "OUTPUT"
+Flags that shape what ops prints.
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+say more (repeatable)
+.br
+repeat to count: \-vvv
+.TP
+\fB\-\-color\fR \fIstring\fR
+when to color (default auto) [auto|always|never]
+.SH ENVIRONMENT
+.TP
+\fBOPS_TOKEN\fR \fIstring\fR
+the API token (length >= 20)
+.br
+at least 20 characters
+.SH CONFIGURATION
+.TP
+\fBregion\fR (region) \fIstring\fR
+the default region
+.br
+must look like eu\-1
+.SH "SEE ALSO"
+\fBops\-deploy\fR(1), \fBops\-import\fR(1), \fBops\-upper\fR(1),
+\fBops\-note\fR(1), \fBops\-exec\fR(1)

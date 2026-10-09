@@ -165,9 +165,9 @@ func TestFlagSources_render(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"  -r, --replicas int    how many (default 1)\n                        also set by APP_DEPLOY_REPLICAS or config key deploy.replicas\n",
-		"  --region string       where\n                        also set by DEPLOY_REGION or config key region\n",
-		"  --verbose    say more\n               also set by APP_LOG_VERBOSE or config key log.verbose",
+		"  -r, --replicas int     how many (default 1)\n                         also set by APP_DEPLOY_REPLICAS or config key deploy.replicas\n",
+		"      --region string    where\n                         also set by DEPLOY_REGION or config key region\n",
+		"      --verbose    say more\n                   also set by APP_LOG_VERBOSE or config key log.verbose",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("help is missing\n%s\n--- page ---\n%s", want, page)

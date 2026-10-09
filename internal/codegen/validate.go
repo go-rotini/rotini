@@ -168,7 +168,11 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 			break
 		}
 		if noun := definitionNoun(ve.KeywordLocation); noun != "" {
-			return fmt.Sprintf("unknown key %q on %s", key, noun)
+			msg := fmt.Sprintf("unknown key %q on %s", key, noun)
+			if hint := schemaPlacementHint(definitionName(ve.KeywordLocation), key); hint != "" {
+				msg += "; " + hint
+			}
+			return msg
 		}
 		return fmt.Sprintf("unknown key %q", key)
 	case "type":
@@ -193,8 +197,12 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 			return msg
 		}
 	case "anyOf":
-		// In rotini's schemas an anyOf is a choice between required keys, so the failed
-		// branches' causes name the choices.
+		// A choice between forms of one value says what the forms are in its `x-hint`.
+		if hint := schemaHint(strings.TrimSuffix(ve.KeywordLocation, "/anyOf")); hint != "" {
+			return patternSubject(ve.InstanceLocation) + " " + hint
+		}
+		// Otherwise, in rotini's schemas an anyOf is a choice between required keys, so the
+		// failed branches' causes name the choices.
 		keys := requiredChoices(ve.Causes)
 		if len(keys) < 2 {
 			break
@@ -301,14 +309,24 @@ func pointerLeaf(pointer string) string {
 // definitionNoun returns the English noun for the definition a keyword location falls in
 // ("#/definitions/Command/anyOf" -> "a command"), or "" when it names none.
 func definitionNoun(keywordLocation string) string {
+	name := definitionName(keywordLocation)
+	if name == "" {
+		return ""
+	}
+	noun := splitCamel(name)
+	if strings.ContainsRune("aeiou", rune(noun[0])) {
+		return "an " + noun
+	}
+	return "a " + noun
+}
+
+// definitionName returns the schema definition a keyword location falls in
+// ("#/definitions/FlagInput/additionalProperties" -> "FlagInput"), or "" when it names none.
+func definitionName(keywordLocation string) string {
 	segs := strings.Split(strings.TrimPrefix(keywordLocation, "#/"), "/")
 	for i, seg := range segs {
-		if (seg == "definitions" || seg == "$defs") && i+1 < len(segs) {
-			noun := splitCamel(segs[i+1])
-			if strings.ContainsRune("aeiou", rune(noun[0])) {
-				return "an " + noun
-			}
-			return "a " + noun
+		if (seg == "definitions" || seg == "$defs") && i+1 < len(segs) && segs[i+1] != "" {
+			return segs[i+1]
 		}
 	}
 	return ""
@@ -458,9 +476,9 @@ type schemaBlockWalker struct {
 }
 
 // inputChannels are the command keys whose entries each carry an InputSchema under `schema`.
-var inputChannels = []struct{ key, noun string }{
-	{"flags", "a flag schema"}, {"arguments", "an argument schema"},
-	{"env", "an env schema"}, {"config", "a config schema"},
+var inputChannels = []struct{ key, noun, channel string }{
+	{"flags", "a flag schema", "flag"}, {"arguments", "an argument schema", "argument"},
+	{"env", "an env schema", "env"}, {"config", "a config schema", "config"},
 }
 
 // command checks every schema block one command owns, then its sub-commands.
@@ -470,29 +488,29 @@ func (w *schemaBlockWalker) command(node any, ptr string) {
 		return
 	}
 	for _, ch := range inputChannels {
-		w.entrySchemas(c[ch.key], true, ptr+"/"+ch.key, ch.noun)
+		w.entrySchemas(c[ch.key], true, ptr+"/"+ch.key, ch.noun, ch.channel)
 	}
-	w.entrySchemas(c["config_files"], false, ptr+"/config_files", "a config file schema")
+	w.entrySchemas(c["config_files"], false, ptr+"/config_files", "a config file schema", "")
 	if stdin, ok := c["stdin"].(map[string]any); ok {
 		if s, ok := stdin["schema"]; ok {
-			w.block(s, true, ptr+"/stdin/schema", "the stdin schema")
+			w.block(s, true, ptr+"/stdin/schema", "the stdin schema", "stdin")
 		}
 	}
 	if out, ok := c["output"]; ok {
-		w.block(out, false, ptr+"/output", "the output schema")
+		w.block(out, false, ptr+"/output", "the output schema", "")
 	}
 	if statuses, ok := c["exit_status"].([]any); ok {
 		for i, s := range statuses {
 			if e, ok := s.(map[string]any); ok {
 				if out, ok := e["output"]; ok {
-					w.block(out, false, fmt.Sprintf("%s/exit_status/%d/output", ptr, i), "an exit status output schema")
+					w.block(out, false, fmt.Sprintf("%s/exit_status/%d/output", ptr, i), "an exit status output schema", "")
 				}
 			}
 		}
 	}
 	if named, ok := c["schemas"].(map[string]any); ok {
 		for _, n := range slices.Sorted(maps.Keys(named)) {
-			w.block(named[n], false, ptr+"/schemas/"+escapePointer(n), "a named schema")
+			w.block(named[n], false, ptr+"/schemas/"+escapePointer(n), "a named schema", "")
 		}
 	}
 	subs, _ := c["commands"].([]any)
@@ -502,20 +520,21 @@ func (w *schemaBlockWalker) command(node any, ptr string) {
 }
 
 // entrySchemas checks the `schema` of each entry in a list such as flags or config_files.
-func (w *schemaBlockWalker) entrySchemas(list any, input bool, ptr, noun string) {
+func (w *schemaBlockWalker) entrySchemas(list any, input bool, ptr, noun, channel string) {
 	entries, _ := list.([]any)
 	for i, entry := range entries {
 		if e, ok := entry.(map[string]any); ok {
 			if s, ok := e["schema"]; ok {
-				w.block(s, input, fmt.Sprintf("%s/%d/schema", ptr, i), noun)
+				w.block(s, input, fmt.Sprintf("%s/%d/schema", ptr, i), noun, channel)
 			}
 		}
 	}
 }
 
 // block checks one schema block's keys, then recurses into its properties and items, which
-// are always object schemas regardless of the containing block's kind.
-func (w *schemaBlockWalker) block(node any, input bool, ptr, noun string) {
+// are always object schemas regardless of the containing block's kind. channel names the input
+// channel whose entry holds the block ("flag", "stdin"), or "" for any other block.
+func (w *schemaBlockWalker) block(node any, input bool, ptr, noun, channel string) {
 	m, ok := node.(map[string]any)
 	if !ok {
 		return
@@ -526,23 +545,27 @@ func (w *schemaBlockWalker) block(node any, input bool, ptr, noun string) {
 	}
 	for _, k := range slices.Sorted(maps.Keys(m)) {
 		if !allowed[k] {
-			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + escapePointer(k), msg: unknownSchemaKey(k, noun)})
+			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + escapePointer(k), msg: unknownSchemaKey(k, noun, channel)})
 		}
 	}
 	if props, ok := m["properties"].(map[string]any); ok {
 		for _, k := range slices.Sorted(maps.Keys(props)) {
-			w.block(props[k], false, ptr+"/properties/"+escapePointer(k), "a property schema")
+			w.block(props[k], false, ptr+"/properties/"+escapePointer(k), "a property schema", "")
 		}
 	}
 	if items, ok := m["items"].(map[string]any); ok {
-		w.block(items, false, ptr+"/items", "an items schema")
+		w.block(items, false, ptr+"/items", "an items schema", "")
 	}
 }
 
-// unknownSchemaKey renders the unknown-key message, noting when the key is an unimplemented
-// JSON Schema keyword.
-func unknownSchemaKey(key, noun string) string {
+// unknownSchemaKey renders the unknown-key message. A key that belongs on the input entry
+// beside the block says so; otherwise the message notes when the key is an unimplemented JSON
+// Schema keyword.
+func unknownSchemaKey(key, noun, channel string) string {
 	msg := fmt.Sprintf("unknown key %q in %s", key, noun)
+	if hint := entryPlacementHint(channel, key); hint != "" {
+		return msg + "; " + hint
+	}
 	if jsonSchemaOnlyKeywords[key] {
 		msg += fmt.Sprintf("; %q is a JSON Schema keyword rotini's schema blocks do not implement, so it would have done nothing", key)
 	}

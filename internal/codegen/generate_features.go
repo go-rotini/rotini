@@ -109,6 +109,7 @@ type cmdHelp struct {
 	Examples    []string
 	ExitStatus  []ExitStatusEntry // command.exit_status (man EXIT STATUS section)
 	SeeAlso     []string          // command.see_also (man SEE ALSO section)
+	Groups      []HelpGroup       // command.groups: descriptions and order of its pages' group headings
 	Help        string            // verbatim help page (command.help)
 	Man         string            // verbatim man page (command.man)
 	Markdown    string            // verbatim markdown reference page (command.markdown)
@@ -119,7 +120,7 @@ func commandHelp(c Command) cmdHelp {
 	return cmdHelp{
 		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
 		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
-		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso,
+		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso, Groups: c.Groups,
 		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
 	}
 }
@@ -139,10 +140,13 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		}
 		return feat.filePrefix + gp.rootName + "_" + strings.Join(names, "_") + feat.ext
 	}
-	// withPage fills the output doc and man page fields: the page's name, section, source and
-	// date, and its cross-references (the parent's page, then each visible child's).
-	withPage := func(d templateHelpData, names []string, children []rnode, output *Schema) templateHelpData {
+	// withPage fills the output and stdin docs and man page fields: the page's name, section,
+	// source and date, and its cross-references (the parent's page, then each visible child's).
+	withPage := func(d templateHelpData, names []string, children []rnode, output *Schema, inputs *Inputs) templateHelpData {
 		d.Output = outputDoc(output, gp.schemas)
+		if inputs != nil {
+			d.Stdin = stdinDoc(inputs.Stdin, gp.schemas)
+		}
 		d.PageName = manPageName(gp.rootName, names)
 		d.Section = section
 		d.Source = gp.rootDisplay
@@ -164,7 +168,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		paths:    []string{""},
 		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix, gp.readsConfig(nil)), nil, gp.tree, gp.rootOutput),
+		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix, gp.readsConfig(nil)), nil, gp.tree, gp.rootOutput, gp.rootInputs),
 		listed:   true,
 	}}
 	// The variable that hides completion messages is an input the end user sets, so the root's
@@ -183,13 +187,17 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			childChain := append(append([][]string{}, identChain...), seg)
 			childNames := append(append([]string{}, names...), n.name)
 			invocation := gp.rootDisplay + " " + strings.Join(childNames, " ")
+			data := withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix, gp.readsConfig(childNames)), childNames, n.children, n.output, n.inputs)
+			if n.passthrough {
+				data.Passthrough = n.name
+			}
 			out = append(out, helpNode{
 				prefix:   n.prefix,
 				file:     file(childNames),
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix, gp.readsConfig(childNames)), childNames, n.children, n.output),
+				data:     data,
 				path:     childNames,
 				listed:   listed && !n.hidden,
 			})
@@ -264,7 +272,7 @@ func completionNodes() []helpNode {
 // resolveHeadings returns the default section headings, overridden by any set in the spec.
 func resolveHeadings(h cmdHelp) templateDocHeadings {
 	// Defaults carry the trailing ":" so an override renders verbatim, colon or not.
-	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:"}
+	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:", Stdin: "Stdin:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -283,6 +291,7 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 	override(&hd.Cascading, o.Cascading)
 	override(&hd.Examples, o.Examples)
 	override(&hd.Output, o.Output)
+	override(&hd.Stdin, o.Stdin)
 	return hd
 }
 
@@ -330,20 +339,23 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			Aliases: r.Aliases,
 		})
 	}
-	d.CommandGroups = groupCommands(cmds)
+	d.CommandGroups = groupCommands(cmds, h.Groups)
 	if inputs != nil {
 		for _, a := range inputs.Arguments {
 			if a.Hidden {
 				continue
 			}
+			constraints, rules := constraintText(a.Schema, "argument")
 			d.Arguments = append(d.Arguments, templateDocArgumentRow{
-				Name:       a.Name,
-				Summary:    a.Summary,
-				Required:   a.Schema != nil && a.Schema.Required,
-				Variadic:   isVariadicSchema(a.Schema),
-				Default:    schemaDefaultString(a.Schema),
-				Enum:       enumOf(a.Schema),
-				Deprecated: a.Deprecated,
+				Name:        a.Name,
+				Summary:     a.Summary,
+				Required:    a.Schema != nil && a.Schema.Required,
+				Variadic:    isVariadicSchema(a.Schema),
+				Default:     schemaDefaultString(a.Schema),
+				Enum:        enumOf(a.Schema),
+				Deprecated:  a.Deprecated,
+				Constraints: constraints,
+				Rules:       rules,
 			})
 		}
 		for _, f := range inputs.Flags {
@@ -356,34 +368,41 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if e.Hidden {
 				continue
 			}
+			constraints, rules := constraintText(e.Schema, "env")
 			d.Environment = append(d.Environment, templateDocEnvRow{
-				Var:        envVarLabel(e, envPrefix),
-				Summary:    e.Summary,
-				Type:       flagDisplayType(e.Schema),
-				Required:   e.Schema != nil && e.Schema.Required,
-				Default:    schemaDefaultString(e.Schema),
-				Enum:       enumOf(e.Schema),
-				Deprecated: e.Deprecated,
+				Var:         envVarLabel(e, envPrefix),
+				Summary:     e.Summary,
+				Type:        flagDisplayType(e.Schema),
+				Required:    e.Schema != nil && e.Schema.Required,
+				Default:     schemaDefaultString(e.Schema),
+				Enum:        enumOf(e.Schema),
+				Deprecated:  e.Deprecated,
+				Constraints: constraints,
+				Rules:       rules,
 			})
 		}
 		for _, c := range inputs.Config {
 			if c.Hidden {
 				continue
 			}
+			constraints, rules := constraintText(c.Schema, "config")
 			d.Configuration = append(d.Configuration, templateDocConfigRow{
-				Name:       c.Name,
-				Location:   configLocation(c),
-				Summary:    c.Summary,
-				Type:       flagDisplayType(c.Schema),
-				Required:   c.Schema != nil && c.Schema.Required,
-				Default:    schemaDefaultString(c.Schema),
-				Enum:       enumOf(c.Schema),
-				Deprecated: c.Deprecated,
+				Name:        c.Name,
+				Location:    configLocation(c),
+				Summary:     c.Summary,
+				Type:        flagDisplayType(c.Schema),
+				Required:    c.Schema != nil && c.Schema.Required,
+				Default:     schemaDefaultString(c.Schema),
+				Enum:        enumOf(c.Schema),
+				Deprecated:  c.Deprecated,
+				Constraints: constraints,
+				Rules:       rules,
 			})
 		}
 	}
 	d.Flags = withConfigKeys(d.Flags, readsConfig)
-	d.FlagGroups = groupFlags(d.Flags)
+	labelFlags(d.Flags, d.Cascading)
+	d.FlagGroups = groupFlags(d.Flags, h.Groups)
 	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(plugins) > 0)
 	return d
 }
@@ -415,23 +434,56 @@ func configLocation(c ConfigInput) string {
 	}
 }
 
-// groupCommands buckets command rows by Group in first-appearance order. Ungrouped rows form a
-// bucket with an empty Title, which templates head with their default heading.
-func groupCommands(rows []templateDocCommandRow) []templateDocCommandGroup {
+// groupCommands buckets command rows by Group (see groupOrder for the order). Ungrouped rows
+// form a bucket with an empty Title, which templates head with their default heading. A bucket
+// whose group the command's `groups` describes carries that description.
+func groupCommands(rows []templateDocCommandRow, declared []HelpGroup) []templateDocCommandGroup {
 	var groups []templateDocCommandGroup
 	for title, members := range groupByTitle(rows, func(r templateDocCommandRow) string { return r.Group }) {
-		groups = append(groups, templateDocCommandGroup{Title: title, Commands: members})
+		groups = append(groups, templateDocCommandGroup{Title: title, Description: groupDescription(declared, title), Commands: members})
 	}
+	slices.SortStableFunc(groups, func(a, b templateDocCommandGroup) int {
+		return groupOrder(declared, a.Title) - groupOrder(declared, b.Title)
+	})
 	return groups
 }
 
 // groupFlags buckets flag rows by Group the same way groupCommands buckets commands.
-func groupFlags(rows []templateDocFlagRow) []templateDocFlagGroup {
+func groupFlags(rows []templateDocFlagRow, declared []HelpGroup) []templateDocFlagGroup {
 	var groups []templateDocFlagGroup
 	for title, members := range groupByTitle(rows, func(r templateDocFlagRow) string { return r.Group }) {
-		groups = append(groups, templateDocFlagGroup{Title: title, Flags: members})
+		groups = append(groups, templateDocFlagGroup{Title: title, Description: groupDescription(declared, title), Flags: members})
 	}
+	slices.SortStableFunc(groups, func(a, b templateDocFlagGroup) int {
+		return groupOrder(declared, a.Title) - groupOrder(declared, b.Title)
+	})
 	return groups
+}
+
+// groupOrder ranks a bucket for sorting buckets that are already in first-appearance order.
+// Without declared groups every bucket ranks the same, so that order stands. With them, the
+// ungrouped bucket comes first, then the declared groups in their order, then any others.
+func groupOrder(declared []HelpGroup, title string) int {
+	if len(declared) == 0 {
+		return 0
+	}
+	if title == "" {
+		return -1
+	}
+	if i := slices.IndexFunc(declared, func(g HelpGroup) bool { return g.Name == title }); i >= 0 {
+		return i
+	}
+	return len(declared)
+}
+
+// groupDescription returns the description declared gives the group titled title, or "".
+func groupDescription(declared []HelpGroup, title string) string {
+	for _, g := range declared {
+		if g.Name == title && title != "" {
+			return g.Description
+		}
+	}
+	return ""
 }
 
 // groupByTitle buckets rows by the title group returns, yielding each bucket once in the order
@@ -504,8 +556,9 @@ func undeprecated(names, deprecatedIDs []string, message string) ([]string, stri
 // env names are the ones the generated field's env tag pins, so help and the runtime agree.
 func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 	ids, deprecated := undeprecated(flagIdentifiers(f), f.DeprecatedIdentifiers, f.Deprecated)
+	constraints, rules := constraintText(f.Schema, "flag")
 	row := templateDocFlagRow{
-		Identifiers: negatableIdentifiers(f, ids),
+		Identifiers: shortFirst(negatableIdentifiers(f, ids)),
 		Summary:     f.Summary,
 		Group:       f.Group,
 		Type:        flagDisplayType(f.Schema),
@@ -513,7 +566,19 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		Default:     schemaDefaultString(f.Schema),
 		Enum:        enumOf(f.Schema),
 		Deprecated:  deprecated,
+		Constraints: constraints,
+		Rules:       rules,
 		key:         flagReconKey(f.Name, f.Schema),
+	}
+	// A count flag's rule shows the repetition with its short form: repeat to count: -vvv.
+	if f.Schema != nil && f.Schema.Type == "count" {
+		if short := shortIdentifier(row.Identifiers); short != "" {
+			for i, r := range row.Rules {
+				if r == "repeat to count" {
+					row.Rules[i] += ": " + short + strings.Repeat(short[1:], 2)
+				}
+			}
+		}
 	}
 	if env := flagEnvVar(f.Schema, row.key, envPrefix); env != "" {
 		row.Env = strings.Split(env, ",")
@@ -528,6 +593,59 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		}
 	}
 	return row
+}
+
+// shortFirst returns identifiers with the short ones (-v) before the long ones (--verbose),
+// each kind in declared order, so every page reads the same way whatever order the spec used.
+func shortFirst(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !strings.HasPrefix(id, "--") {
+			out = append(out, id)
+		}
+	}
+	for _, id := range ids {
+		if strings.HasPrefix(id, "--") {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// shortIdentifier returns a flag's first short identifier (-v), or "".
+func shortIdentifier(ids []string) string {
+	for _, id := range ids {
+		if !strings.HasPrefix(id, "--") {
+			return id
+		}
+	}
+	return ""
+}
+
+// longOnlyPad indents a long-only flag's identifiers to the column where long forms start on
+// rows with a short one: the width of "-v, ".
+const longOnlyPad = "    "
+
+// labelFlags sets the Label of every flag row on one page (its own flags and the cascading
+// flags it inherits). When any row has a short identifier, a row without one is indented so
+// long forms line up in one column.
+func labelFlags(pages ...[]templateDocFlagRow) {
+	anyShort := false
+	for _, rows := range pages {
+		for _, r := range rows {
+			if shortIdentifier(r.Identifiers) != "" {
+				anyShort = true
+			}
+		}
+	}
+	for _, rows := range pages {
+		for i := range rows {
+			rows[i].Label = strings.Join(rows[i].Identifiers, ", ")
+			if anyShort && shortIdentifier(rows[i].Identifiers) == "" {
+				rows[i].Label = longOnlyPad + rows[i].Label
+			}
+		}
+	}
 }
 
 // cascadingFlagsOf returns help rows for a command's visible cascading flags, in declaration
@@ -577,12 +695,16 @@ func (gp *program) readsConfig(path []string) bool {
 	return false
 }
 
-// deriveUsage builds the default usage line: the invocation, a <command> slot when there are
-// visible children, each visible argument (<required> or [optional], "..." when variadic), then
-// [flags] when there are visible flags.
+// deriveUsage builds the default usage line: the invocation, [flags] when there are visible
+// flags, a <command> slot when there are visible children, then each visible argument
+// (<required> or [optional], "..." when variadic). A command's flags are accepted anywhere
+// after its name, so before its arguments is always right.
 func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 	var b strings.Builder
 	b.WriteString(invocation)
+	if hasVisibleFlags(inputs) {
+		b.WriteString(" [flags]")
+	}
 	if hasChildren {
 		b.WriteString(" <command>")
 	}
@@ -608,9 +730,6 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 				b.WriteString("]")
 			}
 		}
-	}
-	if hasVisibleFlags(inputs) {
-		b.WriteString(" [flags]")
 	}
 	return b.String()
 }
@@ -685,7 +804,7 @@ func enumOf(schema *InputSchema) []string {
 	if schema == nil {
 		return nil
 	}
-	return schema.Enum
+	return enumStrings(schema.Enum)
 }
 
 // negatableIdentifiers returns a flag's identifiers as docs show them. A negatable flag's long

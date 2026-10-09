@@ -132,6 +132,12 @@ array of [`FlagDependency`](#flagdependency)
 
 Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).
 
+#### `response_files`
+
+[`ResponseFiles`](#responsefiles)
+
+Root only: read response files. A word starting with the prefix (`@args.rsp`) is replaced by the file's lines, one argument per line, before the command line is parsed.
+
 ### Sub-commands and composition
 
 #### `commands`
@@ -153,12 +159,12 @@ Git and https URLs are not accepted. Either way, the mounted command uses the ha
 
 The composed spec is the base, and the parent can adjust it where it is mounted:
 
-- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
+- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
 - A 'commands:' list next to the $ref is added to the child's own sub-commands: its inline entries get their own handler files, and its $ref entries are mounted as further children.
 - `handler:` on a $ref command points it at a different handler package.
-- Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
+- Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough, options_first) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
 
-The child's own plugins, plugin_discovery and passthrough travel with it. `rotini validate` and `generate` on the parent also check every spec composed by a relative path as its own document, reporting problems at their position in that file. A spec composed with mod:// is not checked that way: it belongs to its own module, which validates it.
+The child's own plugins, plugin_discovery, passthrough and options_first travel with it. `rotini validate` and `generate` on the parent also check every spec composed by a relative path as its own document, reporting problems at their position in that file. A spec composed with mod:// is not checked that way: it belongs to its own module, which validates it.
 
 #### `handler`
 
@@ -174,7 +180,13 @@ The package must export a constructor '&lt;convention&gt;() rotini.Handler' for 
 
 `boolean`
 
-When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no declared plugins or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
+When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no declared plugins or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion. To parse the command's own flags first and take the raw words only from one argument on, mark that argument `passthrough: true` instead.
+
+#### `options_first`
+
+`boolean` · default `false`
+
+When true, flags must come before this command's first argument: from that word on, every word is an argument, including flag-shaped words and a later `--`, as POSIX utilities parse (`ssh host -v` passes `-v` on). Words before the command's name (ancestor flags) and a `--` typed before the first argument work as usual, and a short-circuit flag such as `--help` after the first argument is an argument too. It applies when this command is the one invoked; sub-commands don't inherit it. A command whose last argument is a passthrough argument already stops at that argument. Can't be combined with `passthrough: true`, which parses no flags at all.
 
 #### `plugins`
 
@@ -218,13 +230,13 @@ Long description block shown atop this command's generated help page. Ignored wh
 
 `string`
 
-Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set.
+Usage-line override. When omitted, rotini derives `<command path> [flags] <command> <arguments>` from the command's shape. Ignored when 'help' is set.
 
 #### `display_name`
 
 `string`
 
-Root only: the name the generated help, man and markdown pages show for the program, in place of the root's 'name'. For a plugin, which a host runs as `<host>-<name>` but the user types as `<host> <name>`: with name: kubectl-ctx and display_name: "kubectl ctx", every derived usage line reads `kubectl ctx use <name> [flags]`, the man page's SYNOPSIS `kubectl ctx use …` and the markdown title `# kubectl ctx use`. It may contain spaces. It changes presentation only: 'name' still matches the binary and names the generated page files and man pages (kubectl-ctx-use.1), completion scripts still register for 'name' (the shell completes the binary), and routing, handler names and Context.CommandPath() are unaffected. Text the author writes verbatim (usage, footer, examples, a verbatim help/man/markdown page) is not rewritten. A composed child's display_name is ignored; the composing parent's root decides.
+Root only: the name the generated help, man and markdown pages show for the program, in place of the root's 'name'. For a plugin, which a host runs as `<host>-<name>` but the user types as `<host> <name>`: with name: kubectl-ctx and display_name: "kubectl ctx", every derived usage line reads `kubectl ctx use [flags] <name>`, the man page's SYNOPSIS `kubectl ctx use …` and the markdown title `# kubectl ctx use`. It may contain spaces. It changes presentation only: 'name' still matches the binary and names the generated page files and man pages (kubectl-ctx-use.1), completion scripts still register for 'name' (the shell completes the binary), and routing, handler names and Context.CommandPath() are unaffected. Text the author writes verbatim (usage, footer, examples, a verbatim help/man/markdown page) is not rewritten. A composed child's display_name is ignored; the composing parent's root decides.
 
 #### `examples`
 
@@ -248,7 +260,13 @@ Cross-references rendered as a SEE ALSO section in the man page (e.g. related co
 
 `string`
 
-Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only.
+Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together, and ungrouped commands fall under the default Commands heading. Groups appear in the order their first member is declared, unless the parent declares `groups`: then the ungrouped commands come first, then the groups it lists, in its order, then any others. Presentation-only.
+
+#### `groups`
+
+array of [`HelpGroup`](#helpgroup)
+
+Describes the group headings on this command's own pages: the groups its sub-commands' `group` and its flags' `group` name. Each entry gives a group a description, shown under its heading in help, man and markdown, and the list's order is the order the groups appear. A label used by both a sub-command and a flag shares one entry. Presentation only, and not the same as 'flag_groups', which validates combinations of flags. `rotini validate` warns about an entry no sub-command or flag uses.
 
 #### `header`
 
@@ -339,7 +357,7 @@ CLI tokens for this input that are deprecated — a subset of its identifiers (f
 
 `string`
 
-Group label that puts this flag under its own heading in generated help, the way a command's 'group' does in the Commands list: flags sharing a group appear together, groups appear in the order their first member is declared, and ungrouped flags fall under the default Flags heading.
+Group label that puts this flag under its own heading in generated help, the way a command's 'group' does in the Commands list: flags sharing a group appear together, and ungrouped flags fall under the default Flags heading. Groups appear in the order their first member is declared, unless the command declares `groups`: then the ungrouped flags come first, then the groups it lists, in its order, then any others.
 
 Presentation only: parsing, precedence and the generated field are unchanged. Use it on a command with many flags, so its help page is easy to scan. Not to be confused with 'flag_groups', which validates combinations of flags.
 
@@ -354,6 +372,8 @@ When true, the flag is omitted from generated help (it still parses on the comma
 array of `string`
 
 CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle, and an identifier that hides one of a cascading or short-circuit ancestor flag's.
+
+A single dash and one digit (`-4`) declares a digit option, on a bool or count flag (`identifiers: ['-4', --ipv4]`; quoted, since a bare -4 is a number in YAML). A word starting with that dash and digit is then the flag, on this command and every command below it, while other negative numbers still parse as numbers. `rotini validate` rejects it when an argument of this command or one below it takes negative numbers.
 
 ### `schema`
 
@@ -393,6 +413,12 @@ Deprecation message. The argument is annotated as deprecated in generated help, 
 `boolean` · default `false`
 
 When true, the argument is omitted from generated help (it still parses on the command line).
+
+### `passthrough`
+
+`boolean` · default `false`
+
+When true, raw words start at this argument: flags before it parse as usual, and it and every word after it are taken as typed, flag-shaped words and `--` included (`app exec --region eu ls -la --help` gives the command's `--region` and passes `ls -la --help` on). A word starting with `-` that should be the first raw word goes after `--` (`app exec -- -x`). It must be the command's last argument, a variadic `[]string` without a separator, enum, pattern or bounds, on a command with no sub-commands, plugins or command-level `passthrough`. A handler reads where a `--` was typed with rtx.DashIndex(). Shell completion offers no flags or sub-commands past the boundary; the argument's own completer, enum or hint still applies.
 
 ### `schema`
 
@@ -483,7 +509,7 @@ How the piped stdin payload is read.
 
 The four document formats (json, yaml, jsonc, toml) decode it into the generated &lt;Prefix&gt;Stdin struct, validated against the declared schema. The default is json.
 
-The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and is implied when left out; neither generates a &lt;Prefix&gt;Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
+The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and is implied when left out; neither generates a &lt;Prefix&gt;Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help, man and markdown pages and the contract.
 
 One leading UTF-8 byte-order mark is removed before the payload is read, in every format.
 
@@ -559,6 +585,17 @@ The flag whose presence triggers the requirement.
 array of `string` · **required**
 
 Flags that must also be set when 'when' is set.
+
+
+## ResponseFiles
+
+Response files: arguments kept in a file and named on the command line. Before the first `--`, a word starting with the prefix names a file, read relative to the working directory, whose lines become arguments: one argument per line, kept exactly (spaces included), with a trailing carriage return removed. Empty and blank lines and lines starting with `#` are skipped. Words read from a file are not expanded again, and a `--` in a file ends expansion like one typed. To pass a word that starts with the prefix, double it: `@@x` is the argument `@x`. Words after `--` are never expanded. A file that can't be read is a usage error, even beside `--help`. Plugins and passthrough arguments receive the expanded words.
+
+### `prefix`
+
+`string` · **required**
+
+The one character that starts a response-file word, such as `@`. Not a letter, digit, `-` or space.
 
 
 ## HandlerSource
@@ -643,6 +680,23 @@ The shape stdout still carries when the command exits with this code, for an out
 What this exit code means.
 
 
+## HelpGroup
+
+A group heading on a command's pages, with an optional description.
+
+### `name`
+
+`string` · **required**
+
+The group's label, as the sub-commands' or flags' `group` writes it.
+
+### `description`
+
+`string`
+
+A paragraph shown under the group's heading in help, man and markdown.
+
+
 ## HelpHeadings
 
 Section heading overrides for generated help pages.
@@ -694,6 +748,12 @@ Heading rendered above the flags section of the generated help page. Rendered ve
 `string`
 
 Heading rendered above the Output section, which describes what the command writes when it declares `output:`. Rendered verbatim — include any trailing ':' you want. Default: "Output:".
+
+### `stdin`
+
+`string`
+
+Heading rendered above the Stdin section, which describes what the command reads from standard input when it declares `stdin:`. Rendered verbatim — include any trailing ':' you want. Default: "Stdin:".
 
 ### `usage`
 
@@ -812,7 +872,7 @@ array of `string`
 
 Flag inputs only: where this flag's value may come from, besides the text on the command line.
 
-- 'file' — a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file)
+- 'file' — a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file). To pass a literal value that starts with `@`, double it: `--to @@alice` gives `@alice`, and `@./@name` reads a file whose name starts with `@`
 - 'stdin' — a value of exactly '-' is replaced by what is piped on stdin (`-f -`); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: input, since stdin can be read only once
 - 'value' — always allowed; listing it is documentation only. Any value that does not match an enabled marker stays literal
 
@@ -943,9 +1003,11 @@ Every spelling is validated against the named schema, with the same validator a 
 
 ### `enum`
 
-array of `string`
+array of `object`
 
 Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.
+
+Each member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.
 
 ### `exclusiveMaximum`
 

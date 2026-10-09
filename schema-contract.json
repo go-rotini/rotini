@@ -32,6 +32,15 @@
       "properties": {
         "messages_env": { "type": "string", "description": "The environment variable that hides completion messages when set to 0, false or off." }
       }
+    },
+    "response_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prefix"],
+      "description": "How the program reads response files: before the first `--`, a word starting with the prefix is replaced by the named file's lines, one argument per line. A caller passing an argument that starts with the prefix writes it after `--`, or doubles the prefix (`@@x` is the argument `@x`). Present only when the cli reads response files.",
+      "properties": {
+        "prefix": { "type": "string", "description": "The character that starts a response-file word, such as @." }
+      }
     }
   },
   "definitions": {
@@ -51,6 +60,7 @@
         "aliases": { "type": "array", "items": { "type": "string" } },
         "deprecated": { "type": "string", "description": "Why the command is deprecated, when it is." },
         "plugin": { "type": "boolean", "description": "true for a plugin: a separate program the command runs, whose inputs and output this document does not describe." },
+        "options_first": { "type": "boolean", "description": "true when flags must come before the command's first argument: every word after that argument is an argument, flag-shaped words and `--` included." },
         "arguments": { "type": "array", "items": { "$ref": "#/definitions/Argument" } },
         "flags": { "type": "array", "items": { "$ref": "#/definitions/Flag" }, "description": "The command's own flags, then the cascading flags it inherits from its ancestors." },
         "env": { "type": "array", "items": { "$ref": "#/definitions/Env" } },
@@ -72,7 +82,9 @@
         "name": { "type": "string" },
         "summary": { "type": "string" },
         "required": { "type": "boolean" },
-        "variadic": { "type": "boolean", "description": "true when it takes every remaining positional." },
+        "variadic": { "type": "boolean", "description": "true when it takes every remaining positional. When arguments follow it, they take the last positionals and it takes the ones in between." },
+        "passthrough": { "type": "boolean", "description": "true when raw words start at this argument: it and every word after it are taken as typed, flag-shaped words and `--` included. A word starting with - that should be its first word is written after `--`." },
+        "enum_values": { "$ref": "#/definitions/EnumValues" },
         "deprecated": { "type": "string" },
         "schema": { "$ref": "#/definitions/JSONSchema" }
       }
@@ -92,6 +104,7 @@
         "env": { "type": "array", "items": { "type": "string" }, "description": "The environment variables the flag falls back to when it is not on the command line, in lookup order: the first one set wins." },
         "config_key": { "type": "string", "description": "The config file key the flag falls back to after its environment variables. Present only when the command reads config files." },
         "deprecated": { "type": "string" },
+        "enum_values": { "$ref": "#/definitions/EnumValues" },
         "schema": { "$ref": "#/definitions/JSONSchema" }
       }
     },
@@ -106,6 +119,7 @@
         "required": { "type": "boolean" },
         "secret": { "type": "boolean", "description": "true when the value is a secret; its default is then left out." },
         "deprecated": { "type": "string" },
+        "enum_values": { "$ref": "#/definitions/EnumValues" },
         "schema": { "$ref": "#/definitions/JSONSchema" }
       }
     },
@@ -120,6 +134,7 @@
         "summary": { "type": "string" },
         "required": { "type": "boolean" },
         "deprecated": { "type": "string" },
+        "enum_values": { "$ref": "#/definitions/EnumValues" },
         "schema": { "$ref": "#/definitions/JSONSchema" }
       }
     },
@@ -140,6 +155,17 @@
         "code": { "type": "integer" },
         "summary": { "type": "string" },
         "output": { "$ref": "#/definitions/JSONSchema", "description": "What the command still writes to stdout when it exits with this code." }
+      }
+    },
+    "EnumValues": {
+      "type": "object",
+      "description": "What each of the input's enum values declares beyond its spelling, by value. Present only when some value has a summary. The schema's own `enum` lists the values only.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "summary": { "type": "string", "description": "One line saying what the value means." }
+        }
       }
     }
   }

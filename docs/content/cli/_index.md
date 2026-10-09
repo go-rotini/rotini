@@ -36,7 +36,7 @@ The rotini cli framework companion cli.
 Find more information at: https://rotini.dev
 
 Usage:
-  rotini <command> <arguments> [flags]
+  rotini [flags] <command> <arguments>
         [-v | --version] [-h | --help]
 
 Commands:
@@ -94,15 +94,15 @@ lines, lists each file it would create (or, with `--force`, replace) on stderr, 
 Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.
 
 Usage:
-  rotini initialize <name> [flags]
+  rotini initialize [flags] <name>
 
 Arguments:
   <name>    the root command name written to the created spec file (expected binary name)
 
 Flags:
-  --format string    the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
-  --force            replace an existing spec and conf with the seed (never deletes a file)
-  -n, --dry-run      show what init would write, and change nothing
+      --format string    the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
+      --force            replace an existing spec and conf with the seed (never deletes a file)
+  -n, --dry-run          show what init would write, and change nothing
 
 Global Flags:
   -h, --help    print help
@@ -160,7 +160,7 @@ which set `CI=true`. `--no-dry-run` runs a real generate whatever the variable s
 Generate a cli program from a rotini spec file and its conf.
 
 Usage:
-  rotini generate [spec_file_path] [flags]
+  rotini generate [flags] [spec_file_path]
 
 Arguments:
   [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)
@@ -195,14 +195,14 @@ problem; `--fail collect` reports every problem at once, and is the default unle
 Validate a rotini spec file and its conf for correctness.
 
 Usage:
-  rotini validate [spec_file_path] [flags]
+  rotini validate [flags] [spec_file_path]
 
 Arguments:
   [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)
 
 Flags:
   -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)
-  --fail string          failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]
+      --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]
   -w, --watch            watch the spec and conf for changes and re-validate
 
 Global Flags:
@@ -287,13 +287,13 @@ The pages are named after the command path, rotini-generate.1, so a directory wr
 with --dir can be added to MANPATH or copied into a man1 directory.
 
 Usage:
-  rotini man [command...] [flags]
+  rotini man [flags] [command...]
 
 Arguments:
   [command...]    the command whose page to print (default rotini itself)
 
 Flags:
-  --dir string    write every page into this directory instead of printing one
+      --dir string    write every page into this directory instead of printing one
 
 Global Flags:
   -h, --help    print help

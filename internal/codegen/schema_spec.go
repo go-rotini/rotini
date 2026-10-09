@@ -19,6 +19,8 @@ type ArgumentInput struct {
 	Hidden bool `json:"hidden,omitempty"`
 	// Logical name for the argument
 	Name string `json:"name"`
+	// When true, raw words start at this argument: flags before it parse as usual, and it and every word after it are taken as typed, flag-shaped words and `--` included (`app exec --region eu ls -la --help` gives the command's `--region` and passes `ls -la --help` on). A word starting with `-` that should be the first raw word goes after `--` (`app exec -- -x`). It must be the command's last argument, a variadic `[]string` without a separator, enum, pattern or bounds, on a command with no sub-commands, plugins or command-level `passthrough`. A handler reads where a `--` was typed with rtx.DashIndex(). Shell completion offers no flags or sub-commands past the boundary; the argument's own completer, enum or hint still applies.
+	Passthrough bool `json:"passthrough,omitempty"`
 	// Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 	Schema *InputSchema `json:"schema,omitempty"`
 	// Short one-liner shown next to this argument in the Arguments section of generated help.
@@ -41,7 +43,9 @@ type BaseSchema struct {
 	// Every spelling is validated against the named schema, with the same validator a stdin payload of that shape meets, and errors name the flag and the key (`--db: port: value must be >= 1`, `unknown key "bogus"`). A `default` is written as a mapping (a list of mappings for a list) and is checked against the schema by `rotini validate`; a supplied value replaces it rather than merging. Keys that shape a scalar value (enum, separator, ignore_case, implicit_value, negatable, dotted_keys, bounds, pattern) do not apply: an object's rules live in its schema. Arguments cannot be object-valued.
 	Ref string `json:"$ref,omitempty"`
 	// Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.
-	Enum []string `json:"enum,omitempty"`
+	//
+	// Each member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.
+	Enum []any `json:"enum,omitempty"`
 	// Exclusive upper bound: the value must be strictly less. Same applicability rules as 'maximum'.
 	ExclusiveMaximum any `json:"exclusiveMaximum,omitempty"`
 	// Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numbers, durations and sizes; per-element for arrays; rejected elsewhere). exclusiveMinimum: 0 expresses "positive" exactly.
@@ -113,12 +117,12 @@ type Command struct {
 	//
 	// The composed spec is the base, and the parent can adjust it where it is mounted:
 	//
-	// - Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
+	// - Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
 	// - A 'commands:' list next to the $ref is added to the child's own sub-commands: its inline entries get their own handler files, and its $ref entries are mounted as further children.
 	// - `handler:` on a $ref command points it at a different handler package.
-	// - Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
+	// - Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough, options_first) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
 	//
-	// The child's own plugins, plugin_discovery and passthrough travel with it. `rotini validate` and `generate` on the parent also check every spec composed by a relative path as its own document, reporting problems at their position in that file. A spec composed with mod:// is not checked that way: it belongs to its own module, which validates it.
+	// The child's own plugins, plugin_discovery, passthrough and options_first travel with it. `rotini validate` and `generate` on the parent also check every spec composed by a relative path as its own document, reporting problems at their position in that file. A spec composed with mod:// is not checked that way: it belongs to its own module, which validates it.
 	Ref string `json:"$ref,omitempty"`
 	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases. Sub-commands only: the root command is reached by invoking the binary (argv[0] is not a routing token), so rotini validation rejects aliases there.
 	Aliases []string `json:"aliases,omitempty"`
@@ -136,7 +140,7 @@ type Command struct {
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
 	// Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set.
 	Description string `json:"description,omitempty"`
-	// Root only: the name the generated help, man and markdown pages show for the program, in place of the root's 'name'. For a plugin, which a host runs as `<host>-<name>` but the user types as `<host> <name>`: with name: kubectl-ctx and display_name: "kubectl ctx", every derived usage line reads `kubectl ctx use <name> [flags]`, the man page's SYNOPSIS `kubectl ctx use …` and the markdown title `# kubectl ctx use`. It may contain spaces. It changes presentation only: 'name' still matches the binary and names the generated page files and man pages (kubectl-ctx-use.1), completion scripts still register for 'name' (the shell completes the binary), and routing, handler names and Context.CommandPath() are unaffected. Text the author writes verbatim (usage, footer, examples, a verbatim help/man/markdown page) is not rewritten. A composed child's display_name is ignored; the composing parent's root decides.
+	// Root only: the name the generated help, man and markdown pages show for the program, in place of the root's 'name'. For a plugin, which a host runs as `<host>-<name>` but the user types as `<host> <name>`: with name: kubectl-ctx and display_name: "kubectl ctx", every derived usage line reads `kubectl ctx use [flags] <name>`, the man page's SYNOPSIS `kubectl ctx use …` and the markdown title `# kubectl ctx use`. It may contain spaces. It changes presentation only: 'name' still matches the binary and names the generated page files and man pages (kubectl-ctx-use.1), completion scripts still register for 'name' (the shell completes the binary), and routing, handler names and Context.CommandPath() are unaffected. Text the author writes verbatim (usage, footer, examples, a verbatim help/man/markdown page) is not rewritten. A composed child's display_name is ignored; the composing parent's root decides.
 	DisplayName string `json:"display_name,omitempty"`
 	// Environment-variable inputs for this command
 	Env []EnvInput `json:"env,omitempty"`
@@ -158,8 +162,10 @@ type Command struct {
 	Flags []FlagInput `json:"flags,omitempty"`
 	// Text rendered at the bottom of the page. Ignored when 'help' is set.
 	Footer string `json:"footer,omitempty"`
-	// Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only.
+	// Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together, and ungrouped commands fall under the default Commands heading. Groups appear in the order their first member is declared, unless the parent declares `groups`: then the ungrouped commands come first, then the groups it lists, in its order, then any others. Presentation-only.
 	Group string `json:"group,omitempty"`
+	// Describes the group headings on this command's own pages: the groups its sub-commands' `group` and its flags' `group` name. Each entry gives a group a description, shown under its heading in help, man and markdown, and the list's order is the order the groups appear. A label used by both a sub-command and a flag shares one entry. Presentation only, and not the same as 'flag_groups', which validates combinations of flags. `rotini validate` warns about an entry no sub-command or flag uses.
+	Groups []HelpGroup `json:"groups,omitempty"`
 	// Use a handler from another Go package for this command instead of a generated handler file. Valid on any sub-command, not the root.
 	//
 	// On a '$ref' command it replaces the default: a composed local or mod:// spec normally uses the handlers of its own generated package, and this points the command at a different package. On an inline command, the command's tree and typed inputs are still generated here, but its handler comes from the package and no handler file is written. It applies to this command only: an inline sub-command without its own 'handler:' still gets a generated handler file.
@@ -180,9 +186,11 @@ type Command struct {
 	Markdown string `json:"markdown,omitempty"`
 	// Command name used in routing. As the root command (the document itself) this is the binary name and must be set — the root cannot use '$ref'.
 	Name string `json:"name,omitempty"`
+	// When true, flags must come before this command's first argument: from that word on, every word is an argument, including flag-shaped words and a later `--`, as POSIX utilities parse (`ssh host -v` passes `-v` on). Words before the command's name (ancestor flags) and a `--` typed before the first argument work as usual, and a short-circuit flag such as `--help` after the first argument is an argument too. It applies when this command is the one invoked; sub-commands don't inherit it. A command whose last argument is a passthrough argument already stops at that argument. Can't be combined with `passthrough: true`, which parses no flags at all.
+	OptionsFirst bool `json:"options_first,omitempty"`
 	// The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '<Prefix>Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type <Prefix>Output Task', so convert a value with <Prefix>Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
 	Output *Schema `json:"output,omitempty"`
-	// When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no declared plugins or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
+	// When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no declared plugins or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion. To parse the command's own flags first and take the raw words only from one argument on, mark that argument `passthrough: true` instead.
 	Passthrough bool `json:"passthrough,omitempty"`
 	// Auto-expose external '<prefix>*' executables as plugin sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared plugins. Presence enables discovery.
 	PluginDiscovery *PluginDiscovery `json:"plugin_discovery,omitempty"`
@@ -190,6 +198,8 @@ type Command struct {
 	PluginPath string `json:"plugin_path,omitempty"`
 	// Declared plugins: separate executables dispatched as first-class sub-commands of this command.
 	Plugins []PluginSpec `json:"plugins,omitempty"`
+	// Root only: read response files. A word starting with the prefix (`@args.rsp`) is replaced by the file's lines, one argument per line, before the command line is parsed.
+	ResponseFiles *ResponseFiles `json:"response_files,omitempty"`
 	// Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
 	Schemas map[string]Schema `json:"schemas,omitempty"`
 	// Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.
@@ -200,7 +210,7 @@ type Command struct {
 	Summary string `json:"summary,omitempty"`
 	// Not supported on a local command and rejected by rotini validation: a timeout is a plugin-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a plugins[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)
 	Timeout string `json:"timeout,omitempty"`
-	// Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set.
+	// Usage-line override. When omitted, rotini derives `<command path> [flags] <command> <arguments>` from the command's shape. Ignored when 'help' is set.
 	Usage string `json:"usage,omitempty"`
 }
 
@@ -287,13 +297,15 @@ type FlagInput struct {
 	Deprecated string `json:"deprecated,omitempty"`
 	// CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. Pair it with `deprecated:` to give the report a message; `deprecated:` alone deprecates every spelling
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
-	// Group label that puts this flag under its own heading in generated help, the way a command's 'group' does in the Commands list: flags sharing a group appear together, groups appear in the order their first member is declared, and ungrouped flags fall under the default Flags heading.
+	// Group label that puts this flag under its own heading in generated help, the way a command's 'group' does in the Commands list: flags sharing a group appear together, and ungrouped flags fall under the default Flags heading. Groups appear in the order their first member is declared, unless the command declares `groups`: then the ungrouped flags come first, then the groups it lists, in its order, then any others.
 	//
 	// Presentation only: parsing, precedence and the generated field are unchanged. Use it on a command with many flags, so its help page is easy to scan. Not to be confused with 'flag_groups', which validates combinations of flags.
 	Group string `json:"group,omitempty"`
 	// When true, the flag is omitted from generated help (it still parses on the command line).
 	Hidden bool `json:"hidden,omitempty"`
 	// CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle, and an identifier that hides one of a cascading or short-circuit ancestor flag's.
+	//
+	// A single dash and one digit (`-4`) declares a digit option, on a bool or count flag (`identifiers: ['-4', --ipv4]`; quoted, since a bare -4 is a number in YAML). A word starting with that dash and digit is then the flag, on this command and every command below it, while other negative numbers still parse as numbers. `rotini validate` rejects it when an argument of this command or one below it takes negative numbers.
 	Identifiers []string `json:"identifiers,omitempty"`
 	// Logical name for the flag
 	Name string `json:"name"`
@@ -311,6 +323,14 @@ type HandlerSource struct {
 	Convention string `json:"convention"`
 	// Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deployhandlers github.com/acme/clis/deploy/handlers'); identical imports are merged. A bare path takes its alias from the last path segment. The generated code calls '<alias>.<convention>()'.
 	Import string `json:"import"`
+}
+
+// A group heading on a command's pages, with an optional description.
+type HelpGroup struct {
+	// A paragraph shown under the group's heading in help, man and markdown.
+	Description string `json:"description,omitempty"`
+	// The group's label, as the sub-commands' or flags' `group` writes it.
+	Name string `json:"name"`
 }
 
 // Section heading overrides for generated help pages.
@@ -331,6 +351,8 @@ type HelpHeadings struct {
 	Flags string `json:"flags,omitempty"`
 	// Heading rendered above the Output section, which describes what the command writes when it declares `output:`. Rendered verbatim — include any trailing ':' you want. Default: "Output:".
 	Output string `json:"output,omitempty"`
+	// Heading rendered above the Stdin section, which describes what the command reads from standard input when it declares `stdin:`. Rendered verbatim — include any trailing ':' you want. Default: "Stdin:".
+	Stdin string `json:"stdin,omitempty"`
 	// Heading rendered above the usage section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Usage:".
 	Usage string `json:"usage,omitempty"`
 }
@@ -354,7 +376,7 @@ type InputSchema struct {
 	File string `json:"file,omitempty"`
 	// Flag inputs only: where this flag's value may come from, besides the text on the command line.
 	//
-	// - 'file' — a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file)
+	// - 'file' — a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file). To pass a literal value that starts with `@`, double it: `--to @@alice` gives `@alice`, and `@./@name` reads a file whose name starts with `@`
 	// - 'stdin' — a value of exactly '-' is replaced by what is piped on stdin (`-f -`); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: input, since stdin can be read only once
 	// - 'value' — always allowed; listing it is documentation only. Any value that does not match an enabled marker stays literal
 	//
@@ -425,6 +447,12 @@ type PluginSpec struct {
 	Timeout string `json:"timeout,omitempty"`
 }
 
+// Response files: arguments kept in a file and named on the command line. Before the first `--`, a word starting with the prefix names a file, read relative to the working directory, whose lines become arguments: one argument per line, kept exactly (spaces included), with a trailing carriage return removed. Empty and blank lines and lines starting with `#` are skipped. Words read from a file are not expanded again, and a `--` in a file ends expansion like one typed. To pass a word that starts with the prefix, double it: `@@x` is the argument `@x`. Words after `--` are never expanded. A file that can't be read is a usage error, even beside `--help`. Plugins and passthrough arguments receive the expanded words.
+type ResponseFiles struct {
+	// The one character that starts a response-file word, such as `@`. Not a letter, digit, `-` or space.
+	Prefix string `json:"prefix"`
+}
+
 // JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.
 type Schema struct {
 	BaseSchema
@@ -439,7 +467,7 @@ type StdinSpec struct {
 	//
 	// The four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin struct, validated against the declared schema. The default is json.
 	//
-	// The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and is implied when left out; neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
+	// The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and is implied when left out; neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help, man and markdown pages and the contract.
 	//
 	// One leading UTF-8 byte-order mark is removed before the payload is read, in every format.
 	Format string `json:"format,omitempty"`

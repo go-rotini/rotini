@@ -232,10 +232,10 @@ func TestManPages_shape(t *testing.T) {
 
 	deploy := pages["acme-deploy.1"]
 	for _, want := range []string{
-		".SH SYNOPSIS\n\\fBacme deploy\\fR <service> [rest...] [flags]",
+		".SH SYNOPSIS\n\\fBacme deploy\\fR [flags] <service> [rest...]",
 		".SH ARGUMENTS\n.TP\n\\fI<service>\\fR\nservice to deploy [web|api]",
-		".SH \"TUNING\"\n.TP\n\\fB\\-\\-replicas\\fR, \\fB\\-r\\fR \\fIint\\fR\nreplica count (default 1)",
-		".SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-\\-verbose\\fR, \\fB\\-v\\fR\nverbose output",
+		".SH \"TUNING\"\n.TP\n\\fB\\-r\\fR, \\fB\\-\\-replicas\\fR \\fIint\\fR\nreplica count (default 1)",
+		".SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-verbose\\fR\nverbose output",
 		".SH \"SEE ALSO\"\n\\fBacme\\fR(1)",
 	} {
 		if !strings.Contains(deploy, want) {
