@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"reflect"
 	"runtime/debug"
 	"slices"
 	"syscall"
@@ -41,7 +40,7 @@ const (
 
 // Program is a rotini CLI ready to run: the compiled command tree ([Definition]), the
 // handlers that implement it, and the settings around them. The generated entrypoint builds one
-// with [NewProgram] and calls [Program.Execute]. Every With method returns the receiver, so
+// with [NewProgramFunc] and calls [Program.Execute]. Every With method returns the receiver, so
 // calls chain.
 //
 // The surface groups into eight jobs:
@@ -52,7 +51,8 @@ const (
 //   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr]
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
 //     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion],
-//     [Program.WithCompletionMessages]
+//     [Program.WithCompletionMessages], and the environment and working directory a run reads,
+//     [Program.WithEnviron] and [Program.WithDir]
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
@@ -73,12 +73,11 @@ const (
 // sequential runs, they take effect on the next one.
 //
 // Methods do not check for a nil receiver. The zero value is not usable; start from
-// [NewProgram].
+// [NewProgram] or [NewProgramFunc].
 type Program struct {
 	ctx        context.Context
 	args       []string
 	def        Definition
-	handlers   any
 	rtx        *Context  // seed dependencies: Program.WithDependency lands here; each run's Context clones them
 	reporterFn Reporter  // nil → defaultReporter
 	resolver   Resolver  // nil → DefaultResolver
@@ -87,6 +86,9 @@ type Program struct {
 	stdout     io.Writer
 	stderr     io.Writer
 	exit       func(int) // terminal action for Execute; defaults to os.Exit
+
+	lookup     HandlerLookup // finds each command's handler; nil → dispatch fails with noHandlers
+	noHandlers string        // the wiring message for a nil lookup, naming the constructor
 
 	teardownOnPanic bool             // does teardown run after a panic? See WithTeardownOnPanic.
 	panicRecover    bool             // is a panic reported or re-raised? See WithPanicRecover.
@@ -105,19 +107,33 @@ type Program struct {
 	version  string                           // WithVersion
 	help     HelpFunc                         // WithHelp: nil → no pages
 	parser   *Parser                          // WithParser: nil → a default, built per run
+	view     *osView                          // WithEnviron, WithDir: nil → the process environment and directory
 
 	outputChecks bool // WithOutputChecks: check every written output against its schema
 }
 
-// NewProgram wires a generated command tree and its aggregate handler set to the runtime.
-// Dispatch calls the method of handlers named by each [Command.Handler] in def to obtain that
+// NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
+// calls the method of handlers named by each [Command.Handler] in def to obtain that
 // command's [Handler]. A nil handlers value is accepted here; a run that reaches dispatch then
 // fails with a [*WiringError].
+//
+// NewProgram finds the methods by reflection, which keeps every exported method of the
+// program's types in the binary. Generated code uses [NewProgramFunc] instead, and so can a
+// hand-written handler set, for a smaller binary.
 func NewProgram(def Definition, handlers any) *Program {
+	p := newProgram(def, reflectLookup(handlers))
+	if p.lookup == nil {
+		p.noHandlers = "no handlers: NewProgram was given a nil handlers value"
+	}
+	return p
+}
+
+// newProgram builds a Program with its defaults; the exported constructors choose the lookup.
+func newProgram(def Definition, lookup HandlerLookup) *Program {
 	return &Program{
 		args:            os.Args[1:],
 		def:             def,
-		handlers:        handlers,
+		lookup:          lookup,
 		rtx:             newContext(),
 		stdin:           os.Stdin,
 		stdout:          os.Stdout,
@@ -363,6 +379,7 @@ func (p *Program) newRunContext() *Context {
 	rtx.meta, rtx.readerFn = p.meta, p.readerFn
 	rtx.version, rtx.parser, rtx.help = p.version, p.parser, p.help
 	rtx.outputChecks = p.outputChecks
+	rtx.view = p.view.resolved()
 	return rtx
 }
 
@@ -495,7 +512,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		return p.settle(ctx, rtx)
 	}
 	if res.Plugin != nil {
-		return p.execPlugin(ctx, rtx, res.Chain, res.Plugin)
+		return p.execPlugin(ctx, rtx, res.Chain, pluginDispatchFor(res.Chain, res.Plugin, rtx.view))
 	}
 	if len(res.Chain) == 0 {
 		// An empty chain violates the resolver contract.
@@ -511,6 +528,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	// share between runs.
 	chain := slices.Clone(res.Chain)
 	markInvoked(chain)
+	bindChainView(chain, rtx.view)
 	rtx.chain = chain
 	return p.dispatch(ctx, chain, rtx)
 }
@@ -559,28 +577,22 @@ func internalUnlessTagged(err error) error {
 // asFault wraps a rotini-detected fault for the panics channel, with no stack.
 func asFault(err error) *PanicError { return &PanicError{Value: err} }
 
-// resolveHandlers obtains each command's [Handler] by calling the handler-set method named by
+// resolveHandlers obtains each command's [Handler] from the program's lookup, by the name in
 // its Handler field. A wiring failure is returned, never panicked.
 func (p *Program) resolveHandlers(chain []Command) ([]Handler, *WiringError) {
-	hv := reflect.ValueOf(p.handlers)
-	if !hv.IsValid() {
-		// MethodByName on the zero Value panics; report a nil handler set as wiring instead.
-		return nil, &WiringError{
-			Msg: "no handlers: NewProgram was given a nil handlers value",
-		}
+	if p.lookup == nil {
+		return nil, &WiringError{Msg: p.noHandlers}
 	}
 	handlers := make([]Handler, len(chain))
 	for i, f := range chain {
-		m := hv.MethodByName(f.Handler)
-		if !m.IsValid() {
+		h, ok := p.lookup(f.Handler)
+		if !ok {
 			return nil, &WiringError{
 				Command: f.Name, Handler: f.Handler,
 				Msg: fmt.Sprintf("no handler for command %q (missing method %q)", f.Name, f.Handler),
 			}
 		}
-		out := m.Call(nil)
-		h, ok := reflect.TypeAssert[Handler](out[0])
-		if !ok || h == nil {
+		if h == nil {
 			return nil, &WiringError{
 				Command: f.Name, Handler: f.Handler,
 				Msg: fmt.Sprintf("handler %q does not implement Handler", f.Handler),

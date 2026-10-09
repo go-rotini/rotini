@@ -53,7 +53,15 @@ type TodoAddInputs struct {
 }
 
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	return rotini.NewProgram(definition, handlers).
+	return rotini.NewProgramFunc(definition, func(name string) (rotini.Handler, bool) {
+		switch name {
+		case "Todo":
+			return handlers.Todo(), true
+		case "TodoAdd":
+			return handlers.TodoAdd(), true
+		}
+		return nil, false
+	}).
 		WithInputSettings(InputSettings).
 		WithHelp(Help)
 }
@@ -68,7 +76,9 @@ func Handlers() ProgramHandlers {
 A handler reads its own values from `in.TodoAdd` and a parent's flags from `in.Todo`. The types
 generated from `schemas:` are ordinary Go types, so your own code, such as a store that saves
 tasks, can use them too. Because `NewProgram` takes a `ProgramHandlers`, the compiler reports a
-command that has no handler.
+command that has no handler. Its switch finds each command's handler by name without
+reflection, which keeps the binary smaller. A hand-written handler set can do the same with
+`rotini.NewProgramFunc`; `rotini.NewProgram(def, handlers)` finds the methods by reflection.
 
 To put the input and output types in a package of their own, for example so a handler in
 another package can import them, declare a `models` target under the conf's

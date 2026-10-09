@@ -181,8 +181,8 @@ func (e *PanicError) Unwrap() []error {
 // implement [Handler] — or that a command declares config inputs but the program has no
 // [InputSettings]. It is always [CategoryInternal].
 //
-// Command and Handler are empty for a missing InputSettings and for a nil handlers value
-// passed to [NewProgram].
+// Command and Handler are empty for a missing InputSettings, a nil handlers value passed to
+// [NewProgram] and a nil lookup passed to [NewProgramFunc].
 type WiringError struct {
 	Command string // the command whose handler wiring is broken
 	Handler string // the handler method name the Definition referenced

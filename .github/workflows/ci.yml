@@ -117,9 +117,16 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      # The scripts run with GOTOOLCHAIN=local, and r11_lean_runtime checks the linker's output
+      # and the binary's size only with the toolchain go.mod names, so install exactly that one.
+      - name: Read the go.mod toolchain
+        id: toolchain
+        shell: bash
+        run: echo "version=$(awk '/^toolchain /{sub(/^go/, "", $2); print $2}' go.mod)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.toolchain.outputs.version }}
 
       # The completion rigs skip a shell that is not installed, so install them all here.
       # bash and zsh ship with the runner.
@@ -132,6 +139,10 @@ jobs:
       - name: Install the shells the completion rigs drive
         if: matrix.os == 'macos-latest'
         run: brew install fish powershell/tap/powershell || brew install fish
+
+      - name: The e2e tier runs the go.mod toolchain
+        if: matrix.os == 'ubuntu-latest'
+        run: test "$(GOTOOLCHAIN=local go env GOVERSION)" = "$(awk '/^toolchain /{print $2}' go.mod)"
 
       # The outside-in tier: spec -> generate -> build -> run the binary, as a user does.
       - name: End-to-end

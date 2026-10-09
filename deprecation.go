@@ -104,7 +104,7 @@ func quietParse(chain []Command, argv []string) *parsedInputs {
 		frame.Flags = flags
 		quiet[i] = frame
 	}
-	store, err := parseArgvTokens(quiet, argv, nil)
+	store, err := parseArgvTokens(quiet, argv, argvAcq{})
 	if err != nil {
 		return nil
 	}

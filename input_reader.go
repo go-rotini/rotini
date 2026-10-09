@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-rotini/fs"
 	"github.com/go-rotini/recon"
 )
 
@@ -97,17 +96,19 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	}
 	v := rv.Elem()
 
-	// A short-circuit flag set on argv waives every declared requirement below; reading each
-	// channel still happens, so input that cannot be read is still an error.
+	// A short-circuit flag set on argv waives every declared requirement below. Each channel
+	// is still read, so an env value or a command line that cannot be read is still an error;
+	// a configuration file that cannot be read or holds a value of the wrong type is skipped.
 	waived := shortCircuited(chain, store)
+	view := rtx.osView()
 
 	// 1b. Two-phase bootstrap: a config_source flag or env names the file step 4 reads.
-	overrides := b.pathOverrides(chain, store)
+	overrides := b.pathOverrides(chain, store, view)
 
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
 	anchor := frameAnchor(v, chain, rtx.frameIndex())
-	if err := b.reconcileFlags(v, chain, store, overrides, anchor, waived); err != nil {
+	if err := b.reconcileFlags(v, chain, store, overrides, anchor, waived, view); err != nil {
 		return err
 	}
 
@@ -126,30 +127,35 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		return err
 	}
 
-	// 4. env + config → the Env/Config sub-structs, from independent registries.
-	envReg, err := recon.New(recon.WithSources(envSources(v, b.envPrefix)...))
-	if err != nil {
-		return internalBind(channelEnv, "", "could not build the environment registry", err)
+	// 4. env + config → the Env/Config sub-structs, from independent registries. A registry
+	//    is built only when out describes inputs of that channel.
+	var envReg *recon.Registry
+	if hasChannel(v, "Env") {
+		if envReg, err = recon.New(recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
+			return internalBind(channelEnv, "", "could not build the environment registry", err)
+		}
+		defer envReg.Close()
 	}
-	defer envReg.Close()
 
 	if err := b.checkDescribed(v); err != nil {
 		return err
 	}
 
-	cfgRegs, err := b.configRegs(chain, overrides, v, waived)
-	if err != nil {
-		return err
+	var cfg *cfgRegs
+	if hasConfigChannel(v) {
+		if cfg, err = b.configRegs(chain, overrides, v, waived, view); err != nil {
+			return err
+		}
+		defer cfg.Close()
 	}
-	defer cfgRegs.Close()
 
-	if err := fillChannels(v, envReg, cfgRegs, waived); err != nil {
+	if err := fillChannels(v, envReg, cfg, waived, view); err != nil {
 		return err
 	}
 
 	// 4b. The same constraint checks argv gets, over the values actually provided.
 	if !waived {
-		if err := validateChannels(v, envReg, cfgRegs); err != nil {
+		if err := validateChannels(v, envReg, cfg, view); err != nil {
 			return err
 		}
 	}
@@ -229,7 +235,7 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool) erro
 	}
 
 	if js := b.stdinSchemas[sf.Type().Elem().Name()]; js != "" && !waived {
-		validator, err := recon.NewJSONSchemaValidator([]byte(js))
+		validator, err := schemaValidator(js)
 		if err != nil {
 			return internalBind(channelStdin, "", "invalid stdin schema", err)
 		}
@@ -326,16 +332,16 @@ func readStdin(r io.Reader) ([]byte, error) {
 // config files. A flag present in no source keeps what the Parser bound, and argv-only flags
 // are untouched. Each reconciled value is written back into store so the deferred validate
 // pass sees it as present.
-func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *parsedInputs, overrides map[string]string, anchor int, waived bool) error {
+func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *parsedInputs, overrides map[string]string, anchor int, waived bool, view *osView) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
-	files, err := b.fileSources(b.chainConfigFiles(chain), overrides, waived)
+	files, err := b.fileSources(b.chainConfigFiles(chain), overrides, waived, view)
 	if err != nil {
 		return err
 	}
 	srcs := make([]recon.Source, 0, 2+len(files))
-	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, b.envPrefix))
+	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, b.envPrefix, view))
 	srcs = append(srcs, files...)
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
@@ -353,7 +359,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 		}
 		ft := flags.Type()
 		for j := range flags.NumField() {
-			if err := reconcileFlag(reg, flags.Field(j), ft.Field(j), chain, store, anchor+i); err != nil {
+			if err := reconcileFlag(reg, flags.Field(j), ft.Field(j), chain, store, anchor+i, fallbackRead{view: view, waiveFiles: waived}); err != nil {
 				return err
 			}
 		}
@@ -362,12 +368,12 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 }
 
 // firstSetEnv returns the first of an env tag's comma-separated variable names that is set
-// (non-empty) in the environment, or "" when none is. `variable: [GH_TOKEN, GITHUB_TOKEN]`
+// (non-empty) in the run's environment, or "" when none is. `variable: [GH_TOKEN, GITHUB_TOKEN]`
 // generates env:"GH_TOKEN,GITHUB_TOKEN": the first name is preferred, the rest are the
 // spellings other tools use for the same thing.
-func firstSetEnv(names string) string {
+func firstSetEnv(view *osView, names string) string {
 	for name := range strings.SplitSeq(names, ",") {
-		if name != "" && os.Getenv(name) != "" {
+		if name != "" && view.getenv(name) != "" {
 			return name
 		}
 	}
@@ -376,21 +382,25 @@ func firstSetEnv(names string) string {
 
 // chosenEnv is the one variable an env tag binds to: the first of its names that is set, else
 // the first name — so an unset input still reports the preferred spelling.
-func chosenEnv(names string) string {
-	if set := firstSetEnv(names); set != "" {
+func chosenEnv(view *osView, names string) string {
+	if set := firstSetEnv(view, names); set != "" {
 		return set
 	}
 	first, _, _ := strings.Cut(names, ",")
 	return first
 }
 
-// osEnvSourceName is what recon's OS environment source calls itself (a fixed name it exports
-// no constant for).
-const osEnvSourceName = "osenv"
+// fallbackRead is how a flag's fallback is read: the run's view, which names the variable an
+// error reports, and whether a short-circuited run skips a configuration file's value that the
+// flag's type cannot hold.
+type fallbackRead struct {
+	view       *osView
+	waiveFiles bool
+}
 
 // reconcileFlag binds one fallback flag, at chain frame idx, from the registry: argv > env >
 // config. A flag the user set on the command line is left as the Parser bound it.
-func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructField, chain []Command, store *parsedInputs, idx int) error {
+func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructField, chain []Command, store *parsedInputs, idx int, rd fallbackRead) error {
 	key := reconKey(sf.Tag.Get("recon"))
 	if key == "" {
 		return nil
@@ -405,7 +415,7 @@ func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructFi
 	if store != nil && idx < len(store.argvSet) && store.argvSet[idx][name] {
 		return nil
 	}
-	vals, origin, err := bindFlagFallback(reg, field, sf.Tag, key, def, chain, idx)
+	vals, origin, err := bindFlagFallback(reg, field, sf.Tag, key, def, chain, idx, rd)
 	if err != nil || vals == nil {
 		return err
 	}
@@ -418,8 +428,9 @@ func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructFi
 // argv-shaped values it bound, or nil when no source supplies one. The InputReader and the
 // overlay's env and files layers share it: a list binds item by item, a map from its leaves, a
 // string splits on the flag's separator, a case-insensitive enum binds its declared spelling,
-// and a value the type cannot hold is an error naming where it came from.
-func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.StructTag, key string, def FlagDef, chain []Command, idx int) (vals []string, origin string, err error) {
+// and a value the type cannot hold is an error naming where it came from. With rd.waiveFiles,
+// such a value from a configuration file is skipped instead, and the field keeps what it held.
+func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.StructTag, key string, def FlagDef, chain []Command, idx int, rd fallbackRead) (vals []string, origin string, err error) {
 	name := tag.Get("rotini")
 	val, found, err := reg.Get(key)
 	if err != nil {
@@ -429,7 +440,10 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 	switch {
 	case found:
 		if vals, err = fallbackValues(val, def.Separator); err != nil {
-			return nil, "", fallbackCoerceError(chain, idx, name, fallbackOrigin(source, tag.Get("env")), err)
+			if rd.waiveFiles && source != osEnvSourceName {
+				return nil, "", nil
+			}
+			return nil, "", fallbackCoerceError(chain, idx, name, fallbackOrigin(rd.view, source, tag.Get("env")), err)
 		}
 	case field.Kind() == reflect.Map || (isObjectFlag(def) && field.Kind() != reflect.Slice):
 		// recon keeps a config map — or an object flag's config block — as its leaves
@@ -450,12 +464,22 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 	default:
 		return nil, "", nil
 	}
-	origin = fallbackOrigin(source, tag.Get("env"))
+	origin = fallbackOrigin(rd.view, source, tag.Get("env"))
 	if def.IgnoreCase {
 		vals = canonicalEnum(def.Enum, vals)
 	}
+	waivable := rd.waiveFiles && source != osEnvSourceName
+	var prev reflect.Value
+	if waivable {
+		prev = reflect.New(field.Type()).Elem()
+		prev.Set(field)
+	}
 	// A fallback value the flag's type cannot hold is a user error, as a bad argv value is.
 	if err := coerceFlagValues(field, def, vals); err != nil {
+		if waivable {
+			field.Set(prev)
+			return nil, "", nil
+		}
 		return nil, "", fallbackCoerceError(chain, idx, name, origin, err)
 	}
 	if vals == nil {
@@ -565,7 +589,7 @@ func coerceFlagValues(f reflect.Value, def FlagDef, vals []string) error {
 // fallbackOrigin names where a flag's fallback value came from in the user's terms: the
 // environment variable they set, or the configuration file by its declared name. recon's own
 // source names ("osenv") mean nothing to them.
-func fallbackOrigin(source, envVar string) string {
+func fallbackOrigin(view *osView, source, envVar string) string {
 	switch source {
 	case "":
 		return ""
@@ -573,7 +597,7 @@ func fallbackOrigin(source, envVar string) string {
 		if envVar == "" {
 			return "the environment"
 		}
-		return "environment variable " + chosenEnv(envVar)
+		return "environment variable " + chosenEnv(view, envVar)
 	}
 	return fmt.Sprintf("configuration file %q", source)
 }
@@ -754,8 +778,8 @@ func hasConfigChannel(v reflect.Value) bool {
 
 // configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. overrides carries any config_source-supplied paths.
-func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys, waived bool) (*recon.Registry, error) {
-	srcs, err := b.fileSources(files, overrides, waived)
+func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys, waived bool, view *osView) (*recon.Registry, error) {
+	srcs, err := b.fileSources(files, overrides, waived, view)
 	if err != nil {
 		return nil, err
 	}
@@ -778,20 +802,21 @@ type cfgRegs struct {
 	keys      valueKeys // how config fields' text is read; see spellings
 	merged    *recon.Registry
 	perFile   map[string]*recon.Registry
-	waived    bool // a short-circuited run: files are read but not schema-checked
+	waived    bool // a short-circuited run: a file that cannot be read, or a bad value, is skipped
+	view      *osView
 }
 
 // configRegs builds the merged config registry and the lazy per-file cache over the sources in
-// scope for chain. waived marks a short-circuited run ([shortCircuited]): each file is still
-// read, so one that cannot be parsed is an error, but it is not checked against its schema.
-func (b *InputReader) configRegs(chain []Command, overrides map[string]string, v reflect.Value, waived bool) (*cfgRegs, error) {
+// scope for chain. waived marks a short-circuited run ([shortCircuited]): a file that cannot be
+// read or parsed is skipped, and none is checked against its schema.
+func (b *InputReader) configRegs(chain []Command, overrides map[string]string, v reflect.Value, waived bool, view *osView) (*cfgRegs, error) {
 	files := b.chainConfigFiles(chain)
 	keys := channelValueKeys(v, "Config")
-	merged, err := b.configRegistry(files, overrides, keys, waived)
+	merged, err := b.configRegistry(files, overrides, keys, waived, view)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{reader: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived}, nil
+	return &cfgRegs{reader: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived, view: view}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
@@ -833,7 +858,7 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		if f.Name != name {
 			continue
 		}
-		src, err := c.reader.readFileSource(f, c.overrides, c.waived)
+		src, err := c.reader.readFileSource(f, c.overrides, c.waived, c.view)
 		if err != nil {
 			return nil, err
 		}
@@ -849,6 +874,9 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 
 // Close closes the merged registry and every per-file registry built so far.
 func (c *cfgRegs) Close() {
+	if c == nil {
+		return
+	}
 	c.merged.Close()
 	for _, r := range c.perFile {
 		r.Close()
@@ -882,6 +910,16 @@ func bindReconWaived(reg *recon.Registry, target any, waived bool) error {
 	return err
 }
 
+// bindConfigWaived binds a Config struct from reg. A short-circuited run (waived) skips every
+// failure, a value of the wrong type included: a configuration file never blocks --help.
+// recon collects every field's error, so the fields that did resolve are still bound.
+func bindConfigWaived(reg *recon.Registry, target any, waived bool) error {
+	if err := reg.Bind(target); err != nil && !waived {
+		return err
+	}
+	return nil
+}
+
 // isRequirementError reports whether a recon error is about a requirement rather than reading
 // a value: a missing required key, an empty notEmpty key, or a schema rule.
 func isRequirementError(err error) bool {
@@ -913,7 +951,7 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 			fields = append(fields, reflect.StructField{Name: f.Name, Type: f.Type, Tag: f.Tag})
 		}
 		tmp := reflect.New(reflect.StructOf(fields))
-		if err := bindReconWaived(reg, tmp.Interface(), regs.waived); err != nil {
+		if err := bindConfigWaived(reg, tmp.Interface(), regs.waived); err != nil {
 			return reconBind(channelConfig, err)
 		}
 		for i, j := range idxs {
@@ -924,14 +962,15 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 }
 
 // fileSources builds one recon file source per config_files entry, in declared
-// precedence order. Missing files are tolerated and ~ is expanded. A Discover strategy
-// resolves its search directories now, the first directory containing the file winning. A path
-// supplied through config_source is not optional, so a missing one is an error. Custom
-// InputSettings.Sources follow the declared files and so rank below them.
-func (b *InputReader) fileSources(files []ConfigFile, overrides map[string]string, waived bool) ([]recon.Source, error) {
+// precedence order. Missing files are tolerated, and ~ and $VAR are expanded from the run's
+// environment. A Discover strategy resolves its search directories now, the first directory
+// containing the file winning. A path supplied through config_source is not optional, so a
+// missing one is an error. Custom InputSettings.Sources follow the declared files and so rank
+// below them.
+func (b *InputReader) fileSources(files []ConfigFile, overrides map[string]string, waived bool, view *osView) ([]recon.Source, error) {
 	srcs := make([]recon.Source, 0, len(files)+len(b.sources))
 	for _, f := range files {
-		src, err := b.readFileSource(f, overrides, waived)
+		src, err := b.readFileSource(f, overrides, waived, view)
 		if err != nil {
 			return nil, err
 		}
@@ -951,15 +990,36 @@ type namedSource struct {
 
 func (s namedSource) Name() string { return s.name }
 
-// fileSource builds the recon source for one config_files entry, schema-checked.
+// fileSource builds the recon source for one config_files entry, schema-checked, reading the
+// process environment and working directory.
 func (b *InputReader) fileSource(f ConfigFile, overrides map[string]string) (recon.Source, error) {
-	return b.readFileSource(f, overrides, false)
+	return b.readFileSource(f, overrides, false, nil)
 }
 
-// readFileSource is [InputReader.fileSource] with the short-circuit waiver: a waived run still
-// reads and parses the file but skips its schema check.
-func (b *InputReader) readFileSource(f ConfigFile, overrides map[string]string, waived bool) (recon.Source, error) {
-	opts := []recon.FileOption{recon.WithPathExpansion(true)}
+// readFileSource is [InputReader.fileSource] for a run: paths are expanded and made absolute
+// with the run's view. In a short-circuited run (waived) a file that cannot be located, read or
+// parsed is skipped, standing in as an empty source under its own name so precedence holds,
+// and no file is checked against its schema.
+func (b *InputReader) readFileSource(f ConfigFile, overrides map[string]string, waived bool, view *osView) (recon.Source, error) {
+	src, err := b.openFileSource(f, overrides, view)
+	if err != nil {
+		if waived {
+			return namedSource{Source: recon.NewMapSource(f.Name, nil), name: f.Name}, nil
+		}
+		return nil, err
+	}
+	if !waived {
+		if err := validateConfigFile(f, src); err != nil {
+			return nil, err
+		}
+	}
+	return namedSource{Source: src, name: f.Name}, nil
+}
+
+// openFileSource locates and parses one config_files entry. rotini expands the path itself,
+// from the run's view, so recon reads exactly the absolute path it is given.
+func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]string, view *osView) (recon.Source, error) {
+	opts := []recon.FileOption{recon.WithPathExpansion(false)}
 	if f.Format != "" {
 		opts = append(opts, recon.WithFileFormat(f.Format))
 	}
@@ -968,7 +1028,7 @@ func (b *InputReader) readFileSource(f ConfigFile, overrides map[string]string, 
 	case overridden:
 		opts = append(opts, recon.WithOptional(false))
 	case f.Discover != nil:
-		dirs, err := discoverDirs(f.Discover)
+		dirs, err := discoverDirs(f.Discover, view)
 		if err != nil {
 			return nil, internalBind(channelConfig, f.Name, fmt.Sprintf("could not resolve the search path for configuration file %q", f.Name), err)
 		}
@@ -978,17 +1038,27 @@ func (b *InputReader) readFileSource(f ConfigFile, overrides map[string]string, 
 		path = f.Path
 		opts = append(opts, recon.WithOptional(true))
 	}
-	src, err := recon.NewFileSource(path, opts...)
-	if err != nil {
-		// The file's content or path is the user's to fix.
-		return nil, usageBind(channelConfig, f.Name, fmt.Sprintf("could not open configuration file %q (%s)", f.Name, path), err)
+	resolved, err := view.expandPath(path)
+	if err == nil {
+		resolved, err = absPath(view, resolved)
 	}
-	if !waived {
-		if err := validateConfigFile(f, src); err != nil {
-			return nil, err
+	if err == nil {
+		var src recon.Source
+		if src, err = recon.NewFileSource(resolved, opts...); err == nil {
+			return src, nil
 		}
 	}
-	return namedSource{Source: src, name: f.Name}, nil
+	// The file's content or path is the user's to fix.
+	return nil, usageBind(channelConfig, f.Name, fmt.Sprintf("could not open configuration file %q (%s)", f.Name, path), err)
+}
+
+// absPath makes p absolute against the run's directory, or the process working directory when
+// none was injected.
+func absPath(view *osView, p string) (string, error) {
+	if p == "" {
+		return "", nil
+	}
+	return filepath.Abs(view.abs(p))
 }
 
 // validateConfigFile checks one config_files entry's loaded document against its
@@ -1020,7 +1090,7 @@ func validateConfigFile(f ConfigFile, src recon.Source) error {
 	if err != nil {
 		return usageBind(channelConfig, f.Name, fmt.Sprintf("configuration file %q (%s) is not valid %s", f.Name, path, fs.Format()), err)
 	}
-	validator, err := recon.NewJSONSchemaValidator([]byte(f.Schema))
+	validator, err := schemaValidator(f.Schema)
 	if err != nil {
 		return internalBind(channelConfig, f.Name, fmt.Sprintf("invalid schema for configuration file %q", f.Name), err)
 	}
@@ -1035,7 +1105,7 @@ func validateConfigFile(f ConfigFile, src recon.Source) error {
 // pathOverrides resolves each ConfigFile's config_source inputs to the path they supply: the
 // flag explicitly set on argv, then the env variable, then the flag's default. An entry none
 // of them supplies keeps its own path or discover strategy.
-func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs) map[string]string {
+func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *osView) map[string]string {
 	out := map[string]string{}
 	for _, f := range b.chainConfigFiles(chain) {
 		pf := f.PathFrom
@@ -1046,8 +1116,8 @@ func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs) map[st
 		switch {
 		case explicit != "":
 			out[f.Name] = explicit
-		case firstSetEnv(pf.Env) != "":
-			out[f.Name] = os.Getenv(firstSetEnv(pf.Env))
+		case firstSetEnv(view, pf.Env) != "":
+			out[f.Name] = view.getenv(firstSetEnv(view, pf.Env))
 		case defaulted != "":
 			out[f.Name] = defaulted
 		}
@@ -1076,12 +1146,12 @@ func storeFlagValue(store *parsedInputs, name string) (explicit, defaulted strin
 }
 
 // discoverDirs resolves a Discover strategy to the ordered directories searched: "walk-up" is
-// the working directory up to the filesystem root, "xdg" is $XDG_CONFIG_HOME/<app>, defaulting
-// to ~/.config/<app>.
-func discoverDirs(d *DiscoverDef) ([]string, error) {
+// the run's working directory up to the filesystem root, "xdg" is $XDG_CONFIG_HOME/<app>,
+// defaulting to ~/.config/<app>, from the run's environment.
+func discoverDirs(d *DiscoverDef, view *osView) ([]string, error) {
 	switch d.Strategy {
 	case "walk-up":
-		dir, err := os.Getwd()
+		dir, err := view.getwd()
 		if err != nil {
 			return nil, fmt.Errorf("walk-up discovery: %w", err)
 		}
@@ -1095,8 +1165,12 @@ func discoverDirs(d *DiscoverDef) ([]string, error) {
 			dir = parent
 		}
 	case "xdg":
-		// fs.XDGConfigDir is XDG-literal on every platform.
-		dir, err := fs.XDGConfigDir(d.App)
+		// XDG-literal on every platform.
+		dir, err := view.xdgConfigDir(d.App)
+		if err != nil {
+			return nil, fmt.Errorf("xdg discovery: %w", err)
+		}
+		dir, err = absPath(view, dir)
 		if err != nil {
 			return nil, fmt.Errorf("xdg discovery: %w", err)
 		}
@@ -1106,17 +1180,12 @@ func discoverDirs(d *DiscoverDef) ([]string, error) {
 	}
 }
 
-// envSources builds the env channel's recon sources: the process environment, with per-input
-// explicit variable names pinned in both directions (recon's enumeration needs the inverse
-// parser too) and the optional env prefix scoping the convention-named rest. Nested env
-// families are not registry data — recon resolves leaf keys only, so fillEnvNested sets those
-// fields directly.
-func envSources(v reflect.Value, envPrefix string) []recon.Source {
-	opts := []recon.EnvOption{recon.WithEnvVars(envExplicit(v))}
-	if envPrefix != "" {
-		opts = append(opts, recon.WithEnvPrefix(envPrefix+"_"))
-	}
-	return []recon.Source{spellings{Source: recon.NewOSEnvSource(opts...), keys: channelValueKeys(v, "Env")}}
+// envSources builds the env channel's recon source: each Env input's declared variable, read
+// through the run's view, by its explicit name or the SNAKE_UPPER projection of its key under
+// the optional env prefix. Nested env families are not registry data — recon resolves leaf
+// keys only, so fillEnvNested sets those fields directly.
+func envSources(v reflect.Value, envPrefix string, view *osView) []recon.Source {
+	return []recon.Source{spellings{Source: newDeclaredEnv(v, "Env", envPrefix, view), keys: channelValueKeys(v, "Env")}}
 }
 
 // spellings gives env and config inputs the value spellings flags accept and recon's decode
@@ -1200,55 +1269,19 @@ func channelValueKeys(v reflect.Value, structName string) valueKeys {
 // flagEnvSource is the env source flag fallbacks read: the SNAKE_UPPER projection of each
 // recon key, scoped under env_prefix when one is declared, except that a flag naming its own
 // variable (schema `variable:`) reads that exact name. As with env inputs, an explicitly named
-// variable is exempt from env_prefix.
-func flagEnvSource(v reflect.Value, envPrefix string) recon.Source {
-	opts := []recon.EnvOption{recon.WithEnvVars(flagExplicitEnv(v))}
-	if envPrefix != "" {
-		opts = append(opts, recon.WithEnvPrefix(envPrefix+"_"))
-	}
-	return setEnvOnly{recon.NewOSEnvSource(opts...)}
-}
-
-// setEnvOnly reports an environment variable that is set but EMPTY as absent, so a flag's
-// fallback falls through to its configuration file and default, matching [firstSetEnv].
-type setEnvOnly struct{ recon.Source }
-
-func (s setEnvOnly) Get(path recon.Path) (recon.Value, bool, error) {
-	v, found, err := s.Source.Get(path)
-	if found && err == nil && v.Kind() == recon.StringKind && v.String() == "" {
-		return recon.Value{}, false, nil
-	}
-	return v, found, err
-}
-
-// flagExplicitEnv collects the recon-key → explicit-variable mapping from every Flags field
-// carrying an `env:"<VAR>"` tag, the flag-channel counterpart of [envExplicit].
-func flagExplicitEnv(v reflect.Value) map[string]string {
-	m := map[string]string{}
-	if v.Kind() != reflect.Struct {
-		return m
-	}
-	for _, ci := range v.Fields() {
-		flags := commandFlags(ci)
-		if !flags.IsValid() {
-			continue
-		}
-		ft := flags.Type()
-		for j := range flags.NumField() {
-			vr := ft.Field(j).Tag.Get("env")
-			if key := reconKey(ft.Field(j).Tag.Get("recon")); vr != "" && key != "" {
-				m[key] = chosenEnv(vr)
-			}
-		}
-	}
-	return m
+// variable is exempt from env_prefix. A variable that is set but empty counts as unset, so the
+// fallback falls through to the configuration file and default, matching [firstSetEnv].
+func flagEnvSource(v reflect.Value, envPrefix string, view *osView) recon.Source {
+	src := newDeclaredEnv(v, "Flags", envPrefix, view)
+	src.emptyAbsent = true
+	return src
 }
 
 // fillEnvNested fills each nested env input of one Env struct from its variable family: with
 // BASE=ACME_HTTP and sep=__, ACME_HTTP__RETRY__MAX=9 binds {retry: {max: "9"}}. Segments are
 // lowercased and values stay strings. It returns the recon keys it filled and errors on a
 // required family with no variables.
-func fillEnvNested(env reflect.Value) (map[string]bool, error) {
+func fillEnvNested(env reflect.Value, view *osView) (map[string]bool, error) {
 	filled := map[string]bool{}
 	if env.Kind() != reflect.Struct {
 		return filled, nil
@@ -1260,7 +1293,7 @@ func fillEnvNested(env reflect.Value) (map[string]bool, error) {
 			continue
 		}
 		sep, opt, _ := strings.Cut(rest, ",")
-		fam := envFamily(base, sep)
+		fam := envFamily(view, base, sep)
 		if len(fam) == 0 {
 			if opt == "required" {
 				name := et.Field(j).Tag.Get("rotini")
@@ -1278,14 +1311,14 @@ func fillEnvNested(env reflect.Value) (map[string]bool, error) {
 	return filled, nil
 }
 
-// envFamily collects the BASE<sep>… environment variables into a nested map.
-func envFamily(base, sep string) map[string]any {
+// envFamily collects the BASE<sep>… variables of the run's environment into a nested map.
+func envFamily(view *osView, base, sep string) map[string]any {
 	out := map[string]any{}
 	if sep == "" {
 		return out
 	}
 	prefix := base + sep
-	for _, kv := range os.Environ() {
+	for _, kv := range view.environ() {
 		name, val, ok := strings.Cut(kv, "=")
 		if !ok || !strings.HasPrefix(name, prefix) || len(name) == len(prefix) {
 			continue
@@ -1296,37 +1329,11 @@ func envFamily(base, sep string) map[string]any {
 	return out
 }
 
-// envExplicit collects the recon-key → explicit-variable mapping from every Env field
-// carrying an `env:"<VAR>"` tag, so the env source reads that exact variable instead of the
-// SNAKE_UPPER default.
-func envExplicit(v reflect.Value) map[string]string {
-	m := map[string]string{}
-	if v.Kind() != reflect.Struct {
-		return m
-	}
-	for _, ci := range v.Fields() {
-		if ci.Kind() != reflect.Struct {
-			continue
-		}
-		env := ci.FieldByName("Env")
-		if !env.IsValid() || env.Kind() != reflect.Struct {
-			continue
-		}
-		et := env.Type()
-		for j := range env.NumField() {
-			vr := et.Field(j).Tag.Get("env")
-			if key := reconKey(et.Field(j).Tag.Get("recon")); vr != "" && key != "" {
-				m[key] = chosenEnv(vr)
-			}
-		}
-	}
-	return m
-}
-
 // fillChannels walks a <Cmd>Inputs struct and recon-binds each command's Env struct from
-// envReg and its Config struct from cfgReg. A short-circuited run (waived) binds what resolves
-// and ignores missing required values.
-func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived bool) error {
+// envReg and its Config struct from cfg. A short-circuited run (waived) binds what resolves and
+// ignores missing required values, and skips a configuration value of the wrong type. A nil
+// registry belongs to a channel the struct describes no inputs of.
+func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived bool, view *osView) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1338,14 +1345,20 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 		for j := range ci.NumField() {
 			switch t.Field(j).Name {
 			case "Env":
+				if envReg == nil {
+					continue
+				}
 				if err := bindReconWaived(envReg, ci.Field(j).Addr().Interface(), waived); err != nil {
 					return reconBind(channelEnv, err)
 				}
-				if _, err := fillEnvNested(ci.Field(j)); err != nil {
+				if _, err := fillEnvNested(ci.Field(j), view); err != nil {
 					return err
 				}
 			case "Config":
-				if err := bindReconWaived(cfg.merged, ci.Field(j).Addr().Interface(), waived); err != nil {
+				if cfg == nil {
+					continue
+				}
+				if err := bindConfigWaived(cfg.merged, ci.Field(j).Addr().Interface(), waived); err != nil {
 					return reconBind(channelConfig, err)
 				}
 				if err := bindPinnedConfig(ci.Field(j), cfg); err != nil {
@@ -1360,7 +1373,7 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 // validateChannels enforces the declared constraints on each command's Env and Config fields,
 // reusing the argv channel's [checkConstraints]. It is presence-aware: a field is checked only
 // when its source provided a value, so absence stays the required marker's concern.
-func validateChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs) error {
+func validateChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, view *osView) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1372,11 +1385,17 @@ func validateChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs) err
 		for j := range ci.NumField() {
 			switch t.Field(j).Name {
 			case "Env":
-				if err := validateChannelStruct(ci.Field(j), envReg, nil); err != nil {
+				if envReg == nil {
+					continue
+				}
+				if err := validateChannelStruct(ci.Field(j), envReg, nil, view); err != nil {
 					return err
 				}
 			case "Config":
-				if err := validateChannelStruct(ci.Field(j), cfg.merged, cfg); err != nil {
+				if cfg == nil {
+					continue
+				}
+				if err := validateChannelStruct(ci.Field(j), cfg.merged, cfg, view); err != nil {
 					return err
 				}
 			}
@@ -1387,7 +1406,7 @@ func validateChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs) err
 
 // validateChannelStruct checks every constrained field of an Env or Config sub-struct against
 // the value its registry resolved. A pinned field is judged against its own file's registry.
-func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs) error {
+func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, view *osView) error {
 	if s.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1424,7 +1443,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs) e
 		}
 		// The user set a variable, not an input: name what they typed.
 		if v := f.Tag.Get("env"); v != "" && cfg == nil {
-			label = chosenEnv(v)
+			label = chosenEnv(view, v)
 		}
 		secret := reconHasSecret(f.Tag.Get("recon"))
 		vals := channelValues(val, typ)
@@ -1434,7 +1453,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs) e
 		if ignoreCase {
 			canonicalizeField(s.Field(j), enum)
 		}
-		if err := checkConstraints(label, typ, c, vals, secret); err != nil {
+		if err := checkConstraints(label, typ, c, vals, secret, view.base()); err != nil {
 			return err
 		}
 	}

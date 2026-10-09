@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -69,7 +70,9 @@ func (b ByteSize) String() string {
 	return strconv.FormatInt(n, 10)
 }
 
-var byteSizeSyntax = regexp.MustCompile(`^\s*(\d*\.?\d+)\s*([a-zA-Z]*)\s*$`)
+var byteSizeSyntax = sync.OnceValue(func() *regexp.Regexp {
+	return regexp.MustCompile(`^\s*(\d*\.?\d+)\s*([a-zA-Z]*)\s*$`)
+})
 
 // byteSizeUnits maps a lowercased suffix to its multiplier. The trailing `b` is optional.
 var byteSizeUnits = map[string]float64{
@@ -81,7 +84,7 @@ var byteSizeUnits = map[string]float64{
 }
 
 func parseByteSize(s string) (int64, error) {
-	m := byteSizeSyntax.FindStringSubmatch(s)
+	m := byteSizeSyntax().FindStringSubmatch(s)
 	if m == nil {
 		return 0, fmt.Errorf("%q is not a size; write a number with an optional unit, e.g. 512Mi, 10MB, 1.5GiB", s)
 	}
@@ -311,7 +314,9 @@ func coerceWithLayout(f reflect.Value, raw []string, layout string) error {
 }
 
 // durationDays matches a day or week component of a duration: `7d`, `1.5w`.
-var durationDays = regexp.MustCompile(`(\d*\.?\d+)([dw])`)
+var durationDays = sync.OnceValue(func() *regexp.Regexp {
+	return regexp.MustCompile(`(\d*\.?\d+)([dw])`)
+})
 
 // parseDuration is [time.ParseDuration] plus days (`d`, 24h) and weeks (`w`, 168h).
 // Components combine as usual: `1d12h`, `2w3d`, `1.5d`.
@@ -359,8 +364,8 @@ func formatDuration(d time.Duration) string {
 // expandDays rewrites each day and week component of a duration as hours.
 func expandDays(s string) (string, error) {
 	var convErr error
-	expanded := durationDays.ReplaceAllStringFunc(s, func(part string) string {
-		m := durationDays.FindStringSubmatch(part)
+	expanded := durationDays().ReplaceAllStringFunc(s, func(part string) string {
+		m := durationDays().FindStringSubmatch(part)
 		n, err := strconv.ParseFloat(m[1], 64)
 		if err != nil {
 			convErr = err

@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-rotini/recon"
 )
 
 // CheckInputs reports whether v satisfies the spec for the running command: required inputs,
@@ -65,7 +63,7 @@ func (rtx *Context) CheckInputs[T any](v T, set Presence) error {
 	if err := requiredErrors(chain, store); err != nil {
 		return err
 	}
-	if err := checkTypedValues(rv, chain, anchor, func(p FieldPath) bool { _, ok := set[p]; return ok }, readerFor(rtx).stdinSchemas); err != nil {
+	if err := checkTypedValues(rv, chain, anchor, func(p FieldPath) bool { _, ok := set[p]; return ok }, readerFor(rtx).stdinSchemas, rtx.osView()); err != nil {
 		return err
 	}
 	if err := checkAbsentItemCounts(rv, chain, anchor, set); err != nil {
@@ -257,7 +255,8 @@ func findArgDef(defs []ArgDef, name string) (ArgDef, bool) {
 // lengths, patterns, path checks, item counts and object schemas for flags and arguments, the
 // tag-declared enum and constraints for environment and config fields, and the stdin schema
 // (when stdinSchemas is given). It is the typed half of the rule core the command line shares.
-func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func(FieldPath) bool, stdinSchemas map[string]string) error {
+// view names environment variables and resolves relative paths.
+func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func(FieldPath) bool, stdinSchemas map[string]string, view *osView) error {
 	var err error
 	walkCommandStructs(v, chain, anchor, func(top string, scope int, ci reflect.Value) {
 		if err != nil {
@@ -269,7 +268,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 				return
 			}
 			if fd, ok := findFlagDef(frame.Flags, logical); ok {
-				err = checkTypedFlag(fd, f)
+				err = checkTypedFlag(fd, f, view.base())
 			}
 		})
 		if err == nil && scope == len(chain)-1 {
@@ -278,7 +277,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 					return
 				}
 				if ad, ok := findArgDef(frame.Arguments, logical); ok {
-					err = checkTypedArg(ad, f)
+					err = checkTypedArg(ad, f, view.base())
 				}
 			})
 		}
@@ -287,7 +286,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 				if err != nil || !include(fieldPath(top, channel, fieldName)) {
 					return
 				}
-				err = checkTypedChannelField(channel, tag, f)
+				err = checkTypedChannelField(channel, tag, f, view)
 			})
 		}
 		if err == nil && stdinSchemas != nil && scope == len(chain)-1 && include(fieldPath(top, "Stdin")) {
@@ -326,7 +325,7 @@ func checkAbsentItemCounts(v reflect.Value, chain []Command, anchor int, set Pre
 }
 
 // checkTypedFlag applies a flag's value rules to its typed field, naming the flag canonically.
-func checkTypedFlag(fd FlagDef, f reflect.Value) error {
+func checkTypedFlag(fd FlagDef, f reflect.Value, dir string) error {
 	label := flagLabel(fd)
 	elems, count, ok := typedElems(f)
 	if !ok {
@@ -346,11 +345,11 @@ func checkTypedFlag(fd FlagDef, f reflect.Value) error {
 			}
 		}
 	}
-	return checkTypedConstraints(label, fd.Type, fd.Constraints, count, elems, fd.Secret)
+	return checkTypedConstraints(label, fd.Type, fd.Constraints, count, elems, fd.Secret, dir)
 }
 
 // checkTypedArg applies an argument's value rules to its typed field.
-func checkTypedArg(ad ArgDef, f reflect.Value) error {
+func checkTypedArg(ad ArgDef, f reflect.Value, dir string) error {
 	label := "<" + ad.Name + ">"
 	elems, count, ok := typedElems(f)
 	if !ok {
@@ -366,12 +365,12 @@ func checkTypedArg(ad ArgDef, f reflect.Value) error {
 			}
 		}
 	}
-	return checkTypedConstraints(label, ad.Type, ad.Constraints, count, elems, ad.Secret)
+	return checkTypedConstraints(label, ad.Type, ad.Constraints, count, elems, ad.Secret, dir)
 }
 
 // checkTypedChannelField applies an environment or config field's tag-declared enum and
 // constraints, labeled as the channel validation labels it.
-func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Value) error {
+func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Value, view *osView) error {
 	c, has := channelConstraints(tag)
 	enum, ignoreCase := channelEnum(tag)
 	if !has && len(enum) == 0 {
@@ -387,7 +386,7 @@ func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Val
 	if channel == "Env" {
 		ch = channelEnv
 		if env := tag.Get("env"); env != "" {
-			label = chosenEnv(env)
+			label = chosenEnv(view, env)
 		}
 	}
 	elems, count, ok := typedElems(f)
@@ -398,7 +397,7 @@ func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Val
 	if err := checkChannelEnum(ch, label, enum, ignoreCase, typedTexts(elems), secret); err != nil {
 		return err
 	}
-	return checkTypedConstraints(label, channelGoType(f.Type()), c, count, elems, secret)
+	return checkTypedConstraints(label, channelGoType(f.Type()), c, count, elems, secret, view.base())
 }
 
 // checkTypedChannelPresence reports a required environment, config or stdin input the
@@ -466,7 +465,7 @@ func checkTypedStdin(ci reflect.Value, schemas map[string]string) error {
 	if err != nil {
 		return internalBind(channelStdin, "", "could not encode the stdin payload", err)
 	}
-	validator, err := recon.NewJSONSchemaValidator([]byte(js))
+	validator, err := schemaValidator(js)
 	if err != nil {
 		return internalBind(channelStdin, "", "invalid stdin schema", err)
 	}
@@ -506,7 +505,7 @@ func toDocument(v any) (map[string]any, error) {
 
 // checkTypedConstraints is [checkConstraints] over typed values: count is the collection's
 // size (for item-count bounds) and elems its values, each checked by the input's element type.
-func checkTypedConstraints(label, typ string, c Constraints, count int, elems []reflect.Value, secret bool) error {
+func checkTypedConstraints(label, typ string, c Constraints, count int, elems []reflect.Value, secret bool, dir string) error {
 	if isArrayType(typ) || isMapType(typ) {
 		if err := checkItemCount(label, c, count); err != nil {
 			return err
@@ -528,7 +527,7 @@ func checkTypedConstraints(label, typ string, c Constraints, count int, elems []
 		case isPathType(elem):
 			s := typedText(e)
 			if err = checkStringBounds(label, c, s, secret); err == nil {
-				err = checkPathExists(label, elem, s)
+				err = checkPathExists(label, elem, s, dir)
 			}
 		case elem == "string":
 			err = checkStringBounds(label, c, typedText(e), secret)

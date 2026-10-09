@@ -10,7 +10,6 @@ import (
 	"math"
 	"os"
 	"reflect"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,6 +33,18 @@ type parsedInputs struct {
 	// been a valid value for it (`--dry-run server` for `--dry-run=server`), the likely cause
 	// of an unexpected positional. [0] is the flag as typed, [1] the word; nil when none.
 	detached *[2]string
+
+	// dir is the run's injected working directory, which relative existingfile and existingdir
+	// values are checked against; "" is the process's.
+	dir string
+}
+
+// argvAcq is what reading argv values may consult: stdin for a `from: [stdin]` flag's "-",
+// and the run's injected directory for a relative `@file` ("" is the process working
+// directory).
+type argvAcq struct {
+	stdin io.Reader
+	dir   string
 }
 
 // detachedHint is the hint an unexpected-positional error carries when one of the extra
@@ -264,7 +275,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []Command, err
 	if len(chain) == 0 {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}
-	store, err := parseInto(chain, rtx.Argv, rtx.flagStdin())
+	store, err := parseInto(chain, rtx.Argv, rtx.argvAcq())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -278,8 +289,8 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []Command, err
 // missing its value, is a [*ParseError]. Chain command tokens are consumed, and everything
 // after the leaf command and after "--" is a positional of the leaf. Declared defaults are
 // applied; required and enum checks are [validate]'s job.
-func parseInto(chain []Command, argv []string, stdin io.Reader) (*parsedInputs, error) {
-	store, err := parseArgvTokens(chain, argv, stdin)
+func parseInto(chain []Command, argv []string, acq argvAcq) (*parsedInputs, error) {
+	store, err := parseArgvTokens(chain, argv, acq)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +396,7 @@ func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag
 // recordArgvFlag records one argv occurrence of flag fd at chain frame idx: the identifier the
 // user typed (for error labels), the value resolved through the flag's acquisition modes and
 // split on its separator, and the fact that argv set it.
-func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, stdin io.Reader) error {
+func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, acq argvAcq) error {
 	si := &p.scopes[idx]
 	if si.typed == nil {
 		si.typed = map[string]string{}
@@ -397,7 +408,7 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, 
 	if !slices.Contains(si.used[fd.Name], typed) {
 		si.used[fd.Name] = append(si.used[fd.Name], typed)
 	}
-	value, err := resolveFlagValue(fd, typed, value, stdin)
+	value, err := resolveFlagValue(fd, typed, value, acq)
 	if err != nil {
 		return err
 	}
@@ -432,12 +443,13 @@ func (p *parsedInputs) recordArg(leaf Command, idx int, value string) error {
 
 // parseArgvTokens is parseInto without defaults: exactly what argv supplied. It records each
 // explicitly set flag in the store's argvSet, the single source of truth for "set on the
-// command line". stdin backs the from:stdin sentinel and is read only when a "-" value appears
-// on an opted-in flag.
-func parseArgvTokens(chain []Command, argv []string, stdin io.Reader) (*parsedInputs, error) {
+// command line". acq.stdin backs the from:stdin sentinel and is read only when a "-" value
+// appears on an opted-in flag; acq.dir is where relative `@file` and existingfile paths resolve.
+func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs, error) {
 	store := &parsedInputs{
 		scopes:  make([]scopeInputs, len(chain)),
 		argvSet: make([]map[string]bool, len(chain)),
+		dir:     acq.dir,
 	}
 	leaf := len(chain) - 1 // chain index of the leaf command
 	depth := 1             // index of the next chain frame we might descend into
@@ -445,7 +457,7 @@ func parseArgvTokens(chain []Command, argv []string, stdin io.Reader) (*parsedIn
 	terminated := false    // "--" has been seen: flag parsing is over too
 
 	addFlag := func(idx int, fd FlagDef, value, typed string) error {
-		return store.recordArgvFlag(idx, fd, value, typed, stdin)
+		return store.recordArgvFlag(idx, fd, value, typed, acq)
 	}
 	addArg := func(value string) error {
 		return store.recordArg(chain[leaf], leaf, value)
@@ -524,7 +536,8 @@ func noteDetached(store *parsedInputs, chain []Command, tok string, argv []strin
 // run, so every declared requirement of the chain is waived: required inputs, enums, bounds,
 // patterns, path checks, flag groups and dependencies. What cannot be read at all (an unknown
 // flag or command, an uncoercible value, extra positionals, a malformed map) is still an
-// error. A default or fallback never sets a short-circuit flag.
+// error, except in a configuration file, which the input reader skips. A default or fallback
+// never sets a short-circuit flag.
 func shortCircuited(chain []Command, store *parsedInputs) bool {
 	if store == nil {
 		return false
@@ -593,7 +606,7 @@ func checkValueShape(typ, label, flag string, vals []string, secret bool) error 
 
 // checkFlagValues checks one flag's argv values against its enum, its key=value shape when it
 // is a map, and its constraints. label is the flag as the user typed it.
-func checkFlagValues(fd FlagDef, label string, vals []string) error {
+func checkFlagValues(fd FlagDef, label string, vals []string, dir string) error {
 	for _, v := range vals {
 		if len(fd.Enum) > 0 && !enumHas(fd.Enum, v, fd.IgnoreCase) {
 			return &ParseError{
@@ -608,7 +621,7 @@ func checkFlagValues(fd FlagDef, label string, vals []string) error {
 			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, fd.Secret)), Flag: label}
 		}
 	}
-	return checkConstraints(label, fd.Type, fd.Constraints, vals, fd.Secret)
+	return checkConstraints(label, fd.Type, fd.Constraints, vals, fd.Secret, dir)
 }
 
 // strayCommand reports a positional on a command that branches but takes no arguments: a
@@ -675,11 +688,13 @@ func validate(chain []Command, store *parsedInputs) error {
 			if fsi.presenceOnly[fd.Name] {
 				continue
 			}
-			check := checkFlagValues
+			var err error
 			if waived {
-				check = checkFlagShape
+				err = checkFlagShape(fd, fsi.label(fd), fsi.flags[fd.Name])
+			} else {
+				err = checkFlagValues(fd, fsi.label(fd), fsi.flags[fd.Name], store.dir)
 			}
-			if err := check(fd, fsi.label(fd), fsi.flags[fd.Name]); err != nil {
+			if err != nil {
 				return withSource(err, fsi.origin[fd.Name])
 			}
 		}
@@ -691,12 +706,12 @@ func validate(chain []Command, store *parsedInputs) error {
 	if err := extraPositionals(leaf, si, store); err != nil {
 		return err
 	}
-	return validateArgs(leaf, si, waived)
+	return validateArgs(leaf, si, waived, store.dir)
 }
 
 // validateArgs checks the leaf's positional values: every rule normally, and only whether each
 // value can be read at all under a short circuit.
-func validateArgs(leaf Command, si scopeInputs, waived bool) error {
+func validateArgs(leaf Command, si scopeInputs, waived bool, dir string) error {
 	args := si.args[:len(si.args)-si.placeholderArgs] // only values this store actually read
 	if waived {
 		for i, ad := range leaf.Arguments {
@@ -732,7 +747,7 @@ func validateArgs(leaf Command, si scopeInputs, waived bool) error {
 		default:
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		}
-		if err := checkArgValues(ad, vals); err != nil {
+		if err := checkArgValues(ad, vals, dir); err != nil {
 			return err
 		}
 	}
@@ -741,7 +756,7 @@ func validateArgs(leaf Command, si scopeInputs, waived bool) error {
 
 // checkArgValues checks one argument's values against its enum and its constraints; the
 // positional counterpart of [checkFlagValues].
-func checkArgValues(ad ArgDef, vals []string) error {
+func checkArgValues(ad ArgDef, vals []string, dir string) error {
 	for _, v := range vals {
 		if len(ad.Enum) > 0 && !enumHas(ad.Enum, v, ad.IgnoreCase) {
 			return &ParseError{
@@ -752,7 +767,7 @@ func checkArgValues(ad ArgDef, vals []string) error {
 			}
 		}
 	}
-	return checkConstraints("<"+ad.Name+">", ad.Type, ad.Constraints, vals, ad.Secret)
+	return checkConstraints("<"+ad.Name+">", ad.Type, ad.Constraints, vals, ad.Secret, dir)
 }
 
 // hasVariadicArg reports whether any of a command's arguments is variadic.
@@ -770,7 +785,7 @@ func hasVariadicArg(args []ArgDef) bool {
 // numeric and measured types, length and pattern to strings and paths, item counts to arrays
 // and maps; per-value checks apply to each element. A constraint on any other type, which a
 // valid spec cannot produce, is skipped. A secret input's value and length are redacted.
-func checkConstraints(label, typ string, c Constraints, values []string, secret bool) error {
+func checkConstraints(label, typ string, c Constraints, values []string, secret bool, dir string) error {
 	if isArrayType(typ) || isMapType(typ) {
 		if err := checkItemCount(label, c, len(values)); err != nil {
 			return err
@@ -788,7 +803,7 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 		case isPathType(elem):
 			// A path is a string, so its length and pattern bounds apply too.
 			if err = checkStringBounds(label, c, v, secret); err == nil {
-				err = checkPathExists(label, elem, v)
+				err = checkPathExists(label, elem, v, dir)
 			}
 		case elem == "string":
 			err = checkStringBounds(label, c, v, secret)
@@ -806,9 +821,10 @@ func isPathType(typ string) bool { return typ == "existingfile" || typ == "exist
 
 // checkPathExists enforces an existingfile/existingdir type at parse time, so the error names
 // the flag the user typed. It checks only existence and kind; expanding "~", cleaning,
-// resolving symlinks and creating missing files are left to the handler.
-func checkPathExists(label, typ, value string) error {
-	info, err := os.Stat(value)
+// resolving symlinks and creating missing files are left to the handler. A relative value is
+// checked against dir, the run's injected directory ("" is the process working directory).
+func checkPathExists(label, typ, value, dir string) error {
+	info, err := os.Stat(joinDir(dir, value))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		noun := "file"
@@ -909,7 +925,7 @@ func checkStringBounds(label string, c Constraints, v string, secret bool) error
 		return constraintViolation("%s must be at most %d %s long (got %s)", label, c.MaxLength, plural("character", c.MaxLength), gotLen)
 	}
 	if c.Pattern != "" {
-		if ok, err := regexp.MatchString(c.Pattern, v); err == nil && !ok {
+		if re, err := compiledPattern(c.Pattern); err == nil && !re.MatchString(v) {
 			if c.PatternMessage != "" {
 				return constraintViolation("%s %s (got %q)", label, c.PatternMessage, redactValue(v, secret))
 			}
@@ -1198,20 +1214,22 @@ func plural(word string, n int) string {
 // trailing line ending removed (trimAcquiredPayload, as the stdin channel does) and is then
 // coerced and validated like a literal value. Without the matching mode, '@' and '-' are
 // ordinary characters. Sentinels are argv grammar only: defaults and fallbacks never resolve.
-func resolveFlagValue(fd FlagDef, label, value string, stdin io.Reader) (string, error) {
+// A relative `@file` path resolves against acq.dir; the error names it as typed.
+func resolveFlagValue(fd FlagDef, label, value string, acq argvAcq) (string, error) {
 	switch {
 	case strings.HasPrefix(value, "@") && slices.Contains(fd.From, "file"):
-		data, err := os.ReadFile(value[1:])
+		path := joinDir(acq.dir, value[1:])
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
-				Msg:  label + ": " + unreadableFile(value[1:], err),
+				Msg:  label + ": " + unreadableFile(value[1:], path, err),
 				Flag: label, Token: value,
 			}
 		}
 		return trimAcquiredPayload(string(data)), nil
 	case value == "-" && slices.Contains(fd.From, "stdin"):
-		data, err := readStdin(stdin)
+		data, err := readStdin(acq.stdin)
 		if err != nil {
 			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: label + ": could not read stdin", Flag: label}
 		}
@@ -1228,18 +1246,19 @@ func resolveFlagValue(fd FlagDef, label, value string, stdin io.Reader) (string,
 }
 
 // unreadableFile says why an `@file` value could not be read in rotini's words rather than the
-// platform-specific OS error text, as checkPathExists does.
-func unreadableFile(path string, err error) string {
+// platform-specific OS error text, as checkPathExists does. typed is the path as the user wrote
+// it, path where it resolved.
+func unreadableFile(typed, path string, err error) string {
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return fmt.Sprintf("no such file: %q", path)
+		return fmt.Sprintf("no such file: %q", typed)
 	case errors.Is(err, fs.ErrPermission):
-		return fmt.Sprintf("permission denied reading %q", path)
+		return fmt.Sprintf("permission denied reading %q", typed)
 	}
 	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
-		return fmt.Sprintf("%q is a directory, not a file", path)
+		return fmt.Sprintf("%q is a directory, not a file", typed)
 	}
-	return fmt.Sprintf("cannot read %q", path)
+	return fmt.Sprintf("cannot read %q", typed)
 }
 
 // isShortCluster reports whether name is a candidate POSIX short-flag cluster: a single-dash

@@ -256,8 +256,12 @@ your own such as `--print-plan`. Mark one `short_circuit: true` in the spec. Whe
 the command line, Rotini waives every requirement the spec declares for the command chain
 (required inputs, enums, bounds, patterns, flag groups and flag dependencies), so `rtx.Inputs`
 succeeds and your handler can act on the flag. Input that can't be read is still an error: an
-unknown flag or command, a value of the wrong type, or too many arguments. Rotini takes no action
-of its own; your handler checks the flag and decides what to do.
+unknown flag or command, a value of the wrong type, or too many arguments. A configuration file
+that can't be parsed, or holds a value of the wrong type, is skipped for that run, so `--help`
+works in a broken directory; a normal run still reports it. Each hook reads only the channels its
+inputs type describes: a hook whose inputs have no configuration values or fallbacks opens no
+configuration file. Rotini takes no action of its own; your handler checks the flag and decides
+what to do.
 
 `rotini init` marks `--help` and `--version` this way, makes `--help` cascading so every command's
 page lists it, and writes one `CascadingPreRun` in the root handler that answers both for every
@@ -1037,10 +1041,28 @@ Keep two things in mind:
   a reporter, a version or dependencies, are missing until the test adds them too. With the
   [reporter above](#errors-and-exit-codes), the second test would call
   `NewProgram(Handlers()).WithReporter(Report)` and expect exit code 2.
-- **Environment variables and config files come from the process.** Rotini reads them from the
-  real environment, so isolate a test with `t.Setenv`, for example
-  `t.Setenv("TODO_DEFAULTS_PRIORITY", "high")`, and point the XDG config directory somewhere empty
-  with `t.Setenv("XDG_CONFIG_HOME", t.TempDir())`.
+- **Environment variables and config files come from the process,** unless the test gives the
+  run its own. `WithEnviron` sets the whole environment a run reads (env inputs, flag fallbacks,
+  `HOME` and `XDG_CONFIG_HOME` for config discovery, plugin lookup), and `WithDir` sets the
+  directory walk-up discovery, relative config paths and `@file` values start from. A test that
+  sets both doesn't touch the process, so it can run in parallel:
+
+{{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func TestAddDefaultPriority(t *testing.T) {
+	t.Parallel()
+	code, err := NewProgram(Handlers()).
+		WithEnviron([]string{"HOME=" + t.TempDir(), "TODO_DEFAULTS_PRIORITY=high"}).
+		WithDir(t.TempDir()).
+		Run([]string{"add", "buy milk"})
+	if err != nil || code != 0 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+}
+{{< /code >}}
+
+A handler reads the same environment with `rtx.LookupEnv`. It still runs in the process's working
+directory, so it opens a relative path with `filepath.Join(rtx.Dir(), path)`, including the value
+of an `existingfile` input, which Rotini checks against the run's directory but binds as typed.
 
 ## Composing CLIs
 

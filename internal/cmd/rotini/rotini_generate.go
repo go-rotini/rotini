@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/go-rotini/rotini"
@@ -85,7 +84,11 @@ func resolveDryRun(rtx *rotini.Context, flag bool, spec, conf string) (dryRun, f
 		return flag, true, nil
 	}
 	name := codegen.DryRunEnv(spec, conf)
-	return name != "" && envTrue(os.Getenv(name)), false, nil
+	if name == "" {
+		return false, false, nil
+	}
+	value, _ := rtx.LookupEnv(name)
+	return envTrue(value), false, nil
 }
 
 // envTrue reports whether an environment variable's value turns a switch on: 1, true, yes or

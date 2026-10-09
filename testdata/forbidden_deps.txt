@@ -1,0 +1,14 @@
+# Packages a rotini program must not link: network and TLS code, Go source tooling, archive
+# formats, templates, and the go-rotini/fs module that brings the last two. Checked against
+# rotini's own package (deps_test.go) and a generated program (e2e r11_lean_runtime).
+net/http
+crypto/tls
+crypto/x509
+go/ast
+go/parser
+go/format
+archive/zip
+archive/tar
+compress/gzip
+text/template
+github.com/go-rotini/fs

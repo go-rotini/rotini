@@ -847,6 +847,61 @@ func conformanceCases() []inputCase {
 					t.Errorf("history = %v, want %v", layers, want)
 				}
 			}},
+
+		// ── INJ — an injected environment and directory ──
+		{id: "INJ-01", args: []string{"deploy"},
+			env: map[string]string{"ACME_REGION": "from-process", "ACME_ENV": "from-process"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// The run's environment replaces the process's for every env read. It is the whole
+				// environment, so it names the config home too.
+				xdg, _ := os.LookupEnv("XDG_CONFIG_HOME")
+				rtx.WithEnviron([]string{"ACME_REGION=from-run", "ACME_ENV=from-run", "XDG_CONFIG_HOME=" + xdg})
+				in := bindAs[acDeployInputs](t, rtx, meta)
+				if in.Deploy.Env.Region != "from-run" || in.Deploy.Flags.Env != "from-run" {
+					t.Errorf("region=%q env=%q, want both from the injected environment", in.Deploy.Env.Region, in.Deploy.Flags.Env)
+				}
+			}},
+		{id: "INJ-02", args: []string{"deploy"},
+			files: map[string]string{
+				".acme.yaml":           "acme:\n  output: from-process-cwd\n",
+				"other/.acme.yaml":     "acme:\n  output: from-run-dir\n",
+				"other/sub/.gitkeep":   "",
+				"xdg/acme/config.yaml": "acme:\n  env: from-process-xdg\n",
+			},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// Walk-up starts at the run's directory, and xdg follows the run's environment.
+				caseDir := filepath.Dir(mustGetwd(t))
+				rtx.WithDir(filepath.Join(caseDir, "other", "sub")).WithEnviron([]string{"XDG_CONFIG_HOME=" + filepath.Join(caseDir, "nowhere")})
+				in := bindAs[acDeployInputs](t, rtx, meta)
+				if in.Deploy.Flags.Output != "from-run-dir" || in.Deploy.Flags.Env == "from-process-xdg" {
+					t.Errorf("output=%q env=%q, want the run directory's file and no process xdg file", in.Deploy.Flags.Output, in.Deploy.Flags.Env)
+				}
+			}},
+		{id: "INJ-03", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A plugin is found on the run's PATH and runs with the run's environment and
+				// directory.
+				if runtime.GOOS == "windows" {
+					t.Skip("a shell-script stand-in for a plugin cannot run on Windows; see e2e r9_plugins")
+				}
+				bin, work := t.TempDir(), t.TempDir()
+				if err := os.WriteFile(filepath.Join(bin, "acme-ext"), []byte("#!/bin/sh\necho \"$ACME_MARK\"\npwd\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				def := Definition{Name: "acme", Handler: "Acme", Plugins: []PluginDef{{Name: "ext", Binary: "acme-ext"}}}
+				var out strings.Builder
+				p := NewProgram(def, nil).WithEnviron([]string{"PATH=" + bin, "ACME_MARK=from-run"}).WithDir(work).
+					WithStdout(&out).WithStderr(&out).WithoutSignalHandling()
+				if code, err := p.Run([]string{"ext"}); code != 0 {
+					t.Fatalf("Run = %d, %v: %s", code, err, out.String())
+				}
+				lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+				gotDir, _ := filepath.EvalSymlinks(lines[len(lines)-1])
+				wantDir, _ := filepath.EvalSymlinks(work)
+				if lines[0] != "from-run" || gotDir != wantDir {
+					t.Errorf("plugin printed %q, want from-run and %s", lines, wantDir)
+				}
+			}},
 	}
 }
 
@@ -878,6 +933,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"CFG-01", "CFG-02", "CFG-03", "CFG-04", "CFG-05", "CFG-06", "CFG-07", "CFG-08",
 		"SEC-01", "SEC-02", "SEC-03",
 		"PREC-01", "PREC-02", "PREC-03", "PREC-04",
+		"INJ-01", "INJ-02", "INJ-03",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {

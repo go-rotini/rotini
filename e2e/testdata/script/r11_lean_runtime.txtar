@@ -1,0 +1,391 @@
+# R11 — a lean runtime: a generated program links no networking, Go source tooling, archive or
+# template packages, finds its handlers without reflective method lookup, and stays under a size
+# budget. The fixture is a 13-command CLI with help and completion on; its handlers are the
+# generated stubs.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+
+# The forbidden packages (testdata/forbidden_deps.txt), on every platform.
+exec go list -deps ./cmd/app
+[leandeps] nodeps
+
+exec go build -o app$exe ./cmd/app
+exec ./app$exe build --name x --count 2 --timeout 5s --tag a tgt
+stdout 'Target:tgt'
+exec ./app$exe --help
+stdout 'Usage:'
+
+# The linker's dependency dump: no reachable function may look methods up by a name known only
+# at run time, which would keep every exported method of every reachable type in the binary.
+# The dump's format belongs to the linker, so this runs on linux with the go.mod toolchain only,
+# and first proves the dump has the expected shape.
+[linux] [pinnedgo] exec go build -ldflags=-dumpdep -o app-dumpdep ./cmd/app
+[linux] [pinnedgo] stderr ' -> '
+[linux] [pinnedgo] ! stderr '<ReflectMethod> ->'
+
+# The stripped linux/amd64 binary stays under its budget, which belongs to the go.mod toolchain.
+[linux] [pinnedgo] env GOOS=linux GOARCH=amd64
+[linux] [pinnedgo] exec go build -ldflags '-s -w' -o app-stripped ./cmd/app
+[linux] [pinnedgo] [!leandeps] sizebelow app-stripped 10000000
+[linux] [pinnedgo] [leandeps] sizebelow app-stripped 6500000
+
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_rotini.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a build tool
+  description: Build, test and ship targets.
+  footer: Use "app help <command>" for more information about a command.
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [-v, --version]
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+      description: Print the app version.
+    - name: completion
+      summary: print a shell completion script
+      description: Print the completion script for a shell.
+      arguments:
+        - name: shell
+          summary: the shell to print the script for
+          schema:
+            type: string
+            required: true
+            enum: [bash, zsh, fish, powershell]
+    - name: build
+      summary: build a target
+      description: Run build against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: deploy
+      summary: deploy a target
+      description: Run deploy against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: test
+      summary: test a target
+      description: Run test against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: lint
+      summary: lint a target
+      description: Run lint against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: format
+      summary: format a target
+      description: Run format against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: run
+      summary: run a target
+      description: Run run against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: serve
+      summary: serve a target
+      description: Run serve against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: clean
+      summary: clean a target
+      description: Run clean against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: publish
+      summary: publish a target
+      description: Run publish against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: status
+      summary: status a target
+      description: Run status against a target.
+      flags:
+        - name: name
+          summary: the name to use
+          schema: { type: 'string' }
+        - name: count
+          summary: how many times
+          schema: { type: 'int' }
+        - name: force
+          summary: skip safety checks
+          schema: { type: 'bool' }
+        - name: timeout
+          summary: how long to wait
+          schema: { type: 'duration' }
+        - name: tag
+          summary: a tag to apply (repeatable)
+          schema: { type: '[]string' }
+      arguments:
+        - name: target
+          summary: the target
+          schema: { type: string, required: true }
+    - name: remote
+      summary: manage remotes
+      description: Manage remotes.
+      commands:
+        - name: add
+          summary: add a target
+          description: Run add against a target.
+          flags:
+            - name: name
+              summary: the name to use
+              schema: { type: 'string' }
+            - name: count
+              summary: how many times
+              schema: { type: 'int' }
+            - name: force
+              summary: skip safety checks
+              schema: { type: 'bool' }
+            - name: timeout
+              summary: how long to wait
+              schema: { type: 'duration' }
+            - name: tag
+              summary: a tag to apply (repeatable)
+              schema: { type: '[]string' }
+          arguments:
+            - name: target
+              summary: the target
+              schema: { type: string, required: true }
+        - name: remove
+          summary: remove a target
+          description: Run remove against a target.
+          flags:
+            - name: name
+              summary: the name to use
+              schema: { type: 'string' }
+            - name: count
+              summary: how many times
+              schema: { type: 'int' }
+            - name: force
+              summary: skip safety checks
+              schema: { type: 'bool' }
+            - name: timeout
+              summary: how long to wait
+              schema: { type: 'duration' }
+            - name: tag
+              summary: a tag to apply (repeatable)
+              schema: { type: '[]string' }
+          arguments:
+            - name: target
+              summary: the target
+              schema: { type: string, required: true }
+        - name: list
+          summary: list a target
+          description: Run list against a target.
+          flags:
+            - name: name
+              summary: the name to use
+              schema: { type: 'string' }
+            - name: count
+              summary: how many times
+              schema: { type: 'int' }
+            - name: force
+              summary: skip safety checks
+              schema: { type: 'bool' }
+            - name: timeout
+              summary: how long to wait
+              schema: { type: 'duration' }
+            - name: tag
+              summary: a tag to apply (repeatable)
+              schema: { type: '[]string' }
+          arguments:
+            - name: target
+              summary: the target
+              schema: { type: string, required: true }

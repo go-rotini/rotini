@@ -63,6 +63,9 @@ type layerCore struct {
 	// stdinSchemas are the program's stdin payload schemas, so a merged report can check a
 	// hand-built stdin document as Context.CheckInputs does.
 	stdinSchemas map[string]string
+	// view is the run's environment and directory, which a merged report checks hand-built
+	// values against.
+	view *osView
 }
 
 // ── the one-liner ────────────────────────────────────────────────────────────.
@@ -71,7 +74,8 @@ type layerCore struct {
 // payload, defaults), reconciles them in the standard precedence defaults < files < env < argv,
 // validates the result, and returns it. When a short-circuit flag ([FlagDef.ShortCircuit]) is
 // set on the command line, the declared requirements are waived, so the handler gets the
-// values read so far and can act on the flag; input that can't be read is still an error.
+// values read so far and can act on the flag. A command line or environment value that can't be
+// read is still an error; a configuration file that can't be read is skipped for that call.
 //
 //	inputs, err := rtx.Inputs[MycliDeployInputs]()
 //
@@ -266,6 +270,7 @@ type InputReport struct {
 	anchored  bool
 	// stdinSchemas check a hand-built stdin document; nil when no rotini layer supplied them.
 	stdinSchemas map[string]string
+	view         *osView // the run's environment and directory, from a rotini layer
 }
 
 // Winner returns the provenance of the layer that supplied path's final value.
@@ -337,7 +342,7 @@ func (r InputReport) Validate() error {
 	if shortCircuited(r.chain, store) {
 		return nil
 	}
-	return checkTypedValues(r.merged, r.chain, anchor, func(p FieldPath) bool { return r.handBuilt[p] }, r.stdinSchemas)
+	return checkTypedValues(r.merged, r.chain, anchor, func(p FieldPath) bool { return r.handBuilt[p] }, r.stdinSchemas, r.view)
 }
 
 // absorb folds one layer's validation core into the report: later layers' flag values replace
@@ -362,6 +367,10 @@ func (r *InputReport) absorb(core *layerCore) {
 	}
 	if core.stdinSchemas != nil {
 		r.stdinSchemas = core.stdinSchemas
+	}
+	if core.view != nil {
+		r.view = core.view
+		r.store.dir = core.view.base()
 	}
 	if core.store == nil || len(core.store.scopes) != len(r.store.scopes) {
 		return
@@ -432,7 +441,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := parseArgvTokens(chain, rtx.Argv, rtx.flagStdin())
+	store, err := parseArgvTokens(chain, rtx.Argv, rtx.argvAcq())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -461,7 +470,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 		})
 		argPresence(set, "argv", topName, ci, frame, si.args)
 	})
-	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas}, nil
+	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas, view: rtx.osView()}, nil
 }
 
 // defaultsLayer synthesizes declared defaults into v and records presence.
@@ -540,73 +549,85 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 			})
 		}
 	})
-	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas}, nil
+	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas, view: rtx.osView()}, nil
 }
 
-// envLayer acquires the env channel (Env structs + flag env-fallbacks) into v.
+// envLayer acquires the env channel (Env structs + flag env-fallbacks) into v. A registry is
+// built only for the inputs v describes.
 func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
 	if err != nil {
 		return nil, nil, err
 	}
-	envReg, err := recon.New(recon.WithSources(envSources(v, b.envPrefix)...))
-	if err != nil {
-		return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
+	view := rtx.osView()
+	var envReg, flagReg *recon.Registry
+	if hasChannel(v, "Env") {
+		if envReg, err = recon.New(recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
+			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
+		}
+		defer envReg.Close()
 	}
-	defer envReg.Close()
 
 	// Flag env fallbacks read the env projection of the recon key, as in reconcileFlags.
-	flagReg, err := recon.New(recon.WithSource(flagEnvSource(v, b.envPrefix)))
-	if err != nil {
-		return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
+	if v.Kind() == reflect.Struct && hasReconFlags(v) {
+		if flagReg, err = recon.New(recon.WithSource(flagEnvSource(v, b.envPrefix, view))); err != nil {
+			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
+		}
+		defer flagReg.Close()
 	}
-	defer flagReg.Close()
 
 	anchor, err := layerAnchor(rtx, v, chain)
 	if err != nil {
 		return nil, nil, err
 	}
-	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain))
+	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), view)
 }
 
 // argvWaived reports whether the command line short-circuits the run ([shortCircuited]), for a
 // per-channel reader that does not otherwise parse argv. A command line that cannot be parsed
 // waives nothing: [Context.ArgvInputs] owns reporting it.
 func argvWaived(rtx *Context, chain []Command) bool {
-	store, err := parseInto(chain, rtx.Argv, rtx.flagStdin())
+	store, err := parseInto(chain, rtx.Argv, rtx.argvAcq())
 	return err == nil && shortCircuited(chain, store)
 }
 
 // filesLayer acquires the config-files channel into v. config_source paths are honored here
 // too: argv and env are re-read best-effort to learn where the files channel should look, and
-// a malformed argv contributes nothing — [Context.ArgvInputs] owns reporting it.
+// a malformed argv contributes nothing — [Context.ArgvInputs] owns reporting it. No file is
+// read when v describes no config inputs and no flag with a fallback.
 func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
 	if err != nil {
 		return nil, nil, err
 	}
+	view := rtx.osView()
 	overrides := map[string]string{}
 	waived := false
-	if store, err := parseInto(chain, rtx.Argv, rtx.flagStdin()); err == nil {
-		overrides = b.pathOverrides(chain, store)
+	if store, err := parseInto(chain, rtx.Argv, rtx.argvAcq()); err == nil {
+		overrides = b.pathOverrides(chain, store, view)
 		waived = shortCircuited(chain, store)
 	}
-	cfg, err := b.configRegs(chain, overrides, v, waived)
-	if err != nil {
-		return nil, nil, err
+	var reg *recon.Registry
+	var cfg *cfgRegs
+	if hasConfigChannel(v) || (v.Kind() == reflect.Struct && hasReconFlags(v)) {
+		if cfg, err = b.configRegs(chain, overrides, v, waived, view); err != nil {
+			return nil, nil, err
+		}
+		defer cfg.Close()
+		reg = cfg.merged
 	}
-	defer cfg.Close()
 	anchor, err := layerAnchor(rtx, v, chain)
 	if err != nil {
 		return nil, nil, err
 	}
-	return channelLayer(v, chain, anchor, "files", "Config", cfg.merged, cfg.merged, cfg, waived)
+	return channelLayer(v, chain, anchor, "files", "Config", reg, reg, cfg, waived, view)
 }
 
 // channelLayer is the shared env/files core: recon-bind each command's channel struct,
 // constraint-check the provided values, fill flag fallbacks, and record presence for
-// everything the channel supplied. A short-circuited run (waived) skips the requirement checks.
-func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs, waived bool) (Presence, *layerCore, error) {
+// everything the channel supplied. A short-circuited run (waived) skips the requirement checks
+// and a configuration value of the wrong type. A nil registry reads nothing.
+func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs, waived bool, view *osView) (Presence, *layerCore, error) {
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	var bindErr error
@@ -615,32 +636,41 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 		if bindErr != nil {
 			return
 		}
-		if err := fillChannelStruct(set, ci, topName, structName, layerName, reg, cfg, waived); err != nil {
-			bindErr = err
-			return
+		if reg != nil {
+			if err := fillChannelStruct(set, ci, topName, structName, layerName, reg, cfg, waived, view); err != nil {
+				bindErr = err
+				return
+			}
 		}
-		if err := recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg); err != nil {
-			bindErr = err
+		if flagReg != nil {
+			rd := fallbackRead{view: view, waiveFiles: waived}
+			if err := recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg, rd); err != nil {
+				bindErr = err
+			}
 		}
 	})
 	if bindErr != nil {
 		return nil, nil, bindErr
 	}
-	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true}, nil
+	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, view: view}, nil
 }
 
 // fillChannelStruct binds one command's channel struct from the registry, validates it, and
 // records where each field's value came from.
-func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs, waived bool) error {
+func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs, waived bool, view *osView) error {
 	cs := ci.FieldByName(structName)
 	if !cs.IsValid() || cs.Kind() != reflect.Struct {
 		return nil
 	}
-	if err := bindReconWaived(reg, cs.Addr().Interface(), waived); err != nil {
+	bind := bindReconWaived
+	if cfg != nil {
+		bind = bindConfigWaived
+	}
+	if err := bind(reg, cs.Addr().Interface(), waived); err != nil {
 		return reconBind(channelOf(cfg), err)
 	}
 	if !waived {
-		if err := validateChannelStruct(cs, reg, cfg); err != nil {
+		if err := validateChannelStruct(cs, reg, cfg, view); err != nil {
 			return err
 		}
 	}
@@ -655,7 +685,7 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 	nested := map[string]bool{}
 	if structName == "Env" {
 		var err error
-		if nested, err = fillEnvNested(cs); err != nil {
+		if nested, err = fillEnvNested(cs, view); err != nil {
 			return err
 		}
 	}
@@ -700,7 +730,7 @@ func recordChannelField(set Presence, tag reflect.StructTag, topName, structName
 
 // recordFlagFallbacks fills the flags that declare a recon key and records their provenance
 // and raw text, so a later argv layer can still override them.
-func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []Command, scope int, topName, layerName string, flagReg *recon.Registry) error {
+func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []Command, scope int, topName, layerName string, flagReg *recon.Registry, rd fallbackRead) error {
 	var bindErr error
 	eachTaggedField(ci, "Flags", func(fieldName, logical string, tag reflect.StructTag, f reflect.Value) {
 		if bindErr != nil {
@@ -711,7 +741,7 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 			return
 		}
 		fd, _ := findFlagDef(chain[scope].Flags, logical)
-		vals, origin, err := bindFlagFallback(flagReg, f, tag, key, fd, chain, scope)
+		vals, origin, err := bindFlagFallback(flagReg, f, tag, key, fd, chain, scope, rd)
 		if err != nil || vals == nil {
 			bindErr = err
 			return
@@ -747,7 +777,7 @@ func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 			}
 		}
 	}
-	return set, &layerCore{chain: chain}, nil
+	return set, &layerCore{chain: chain, view: rtx.osView()}, nil
 }
 
 // ── shared walking helpers ───────────────────────────────────────────────────.

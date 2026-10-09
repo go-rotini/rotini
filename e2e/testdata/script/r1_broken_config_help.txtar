@@ -1,0 +1,91 @@
+# R1 — a broken configuration file doesn't block --help or --version.
+#
+# Under a short-circuit flag a configuration file that can't be parsed, or that holds a value of
+# the wrong type for a flag's fallback, is skipped for that run. A normal run still reports it.
+
+gomodinit example.com/bc
+
+exec rotini generate cmd/bc/.rotini.spec.yaml --config cmd/bc/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o bc$exe ./cmd/bc
+
+# No file: everything runs.
+exec ./bc$exe sub
+stdout 'Limit:5'
+
+# A file that can't be parsed.
+cp unparseable.yaml .bc.yaml
+exec ./bc$exe --help
+stdout 'broken config'
+! stderr .
+exec ./bc$exe sub --help
+stdout 'a sub-command'
+exec ./bc$exe --version
+stdout '0\.0\.0'
+! exec ./bc$exe sub
+stderr 'configuration file "project"'
+
+# A file whose value the fallback flag's type can't hold.
+cp badvalue.yaml .bc.yaml
+exec ./bc$exe sub --help
+stdout 'a sub-command'
+! stderr .
+! exec ./bc$exe sub
+stderr '--limit'
+
+# An environment value of the wrong type is still an error, --help or not.
+rm .bc.yaml
+env BC_LIST_LIMIT=abc
+! exec ./bc$exe sub --help
+stderr '--limit'
+
+-- unparseable.yaml --
+defaults: [
+-- badvalue.yaml --
+list:
+  limit: abc
+-- cmd/bc/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: bc
+  summary: broken config
+  config_files:
+    - name: project
+      discover:
+        strategy: walk-up
+        file: .bc.yaml
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [-v, --version]
+      short_circuit: true
+      schema: { type: bool }
+    - name: limit
+      summary: how many
+      identifiers: [--limit]
+      cascading: true
+      schema: { type: int, key: list.limit, variable: BC_LIST_LIMIT, default: 5 }
+  commands:
+    - name: sub
+      summary: a sub-command
+-- cmd/bc/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/bc/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/bc/zz_bc.go
+      package: bc
+  features:
+    - type: help
+      enabled: true
+validate:
+  fail: collect

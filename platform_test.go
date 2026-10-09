@@ -72,7 +72,7 @@ func TestDiscoverWalkUp_reachesTheRoot(t *testing.T) {
 	}
 	t.Chdir(deep)
 
-	dirs, err := discoverDirs(&DiscoverDef{Strategy: "walk-up", File: ".nothing-here.yaml"})
+	dirs, err := discoverDirs(&DiscoverDef{Strategy: "walk-up", File: ".nothing-here.yaml"}, nil)
 	if err != nil {
 		t.Fatalf("walk-up: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestDiscoverXDG_isLiteralOnEveryPlatform(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	base := os.Getenv("XDG_CONFIG_HOME")
 
-	dirs, err := discoverDirs(&DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "acme"})
+	dirs, err := discoverDirs(&DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "acme"}, nil)
 	if err != nil {
 		t.Fatalf("xdg: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestDiscoverXDG_isLiteralOnEveryPlatform(t *testing.T) {
 
 	// With the variable unset it falls back to ~/.config/<app>, again on every platform.
 	os.Unsetenv("XDG_CONFIG_HOME")
-	dirs, err = discoverDirs(&DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "acme"})
+	dirs, err = discoverDirs(&DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "acme"}, nil)
 	if err != nil {
 		t.Fatalf("xdg without the variable: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestDiscoverXDG_isLiteralOnEveryPlatform(t *testing.T) {
 
 // TestDiscoverDirs_unknownStrategy: an unrecognized strategy is an error, not an empty search.
 func TestDiscoverDirs_unknownStrategy(t *testing.T) {
-	if _, err := discoverDirs(&DiscoverDef{Strategy: "magic", File: "x"}); err == nil {
+	if _, err := discoverDirs(&DiscoverDef{Strategy: "magic", File: "x"}, nil); err == nil {
 		t.Fatal("an unknown discover strategy returned no error")
 	}
 }

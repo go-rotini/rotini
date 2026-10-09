@@ -7,8 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"reflect"
-	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -74,7 +72,7 @@ type completionContext struct {
 // words, the rest being context. It completes flag values, flag names, sub-command and
 // plugin names, and positional values, all filtered by the typed prefix and excluding
 // hidden inputs. An empty result lets the shell apply its own default.
-func complete(def Definition, words []string, handlers any, rtx *Context) []string {
+func complete(def Definition, words []string, lookup HandlerLookup, rtx *Context) []string {
 	if len(words) == 0 {
 		words = []string{""}
 	}
@@ -82,6 +80,7 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 	context := words[:len(words)-1]
 
 	cc := walkContext(def, context)
+	bindChainView(cc.chain, rtx.osView())
 	if cc.plugin {
 		return nil // the plugin binary owns its own argument surface
 	}
@@ -93,10 +92,10 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 		return nil // raw tokens past the boundary: let the shell fall back to files
 	}
 
-	if cands, handled := completePendingFlagValue(cc, context, words, partial, handlers, rtx); handled {
+	if cands, handled := completePendingFlagValue(cc, context, words, partial, lookup, rtx); handled {
 		return cands
 	}
-	if cands, handled := completeFlagWord(cc, words, partial, handlers, rtx); handled {
+	if cands, handled := completeFlagWord(cc, words, partial, lookup, rtx); handled {
 		return cands
 	}
 
@@ -106,7 +105,7 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 	if !cc.afterTerminator && cc.positionals == 0 {
 		names = dispatchableNames(cur)
 	}
-	names = append(names, argValueCandidates(handlers, rtx, cc, words, partial)...)
+	names = append(names, argValueCandidates(lookup, rtx, cc, words, partial)...)
 	return filterPrefix(names, partial)
 }
 
@@ -114,7 +113,7 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 // "--flag = val" splitting — where the word being completed is the preceding flag's value. An
 // empty result falls back to the shell's file completion, never to sub-command names, which
 // dispatch would read as this flag's value.
-func completePendingFlagValue(cc completionContext, context, words []string, partial string, handlers any, rtx *Context) ([]string, bool) {
+func completePendingFlagValue(cc completionContext, context, words []string, partial string, lookup HandlerLookup, rtx *Context) ([]string, bool) {
 	if cc.afterTerminator {
 		return nil, false
 	}
@@ -126,13 +125,13 @@ func completePendingFlagValue(cc completionContext, context, words []string, par
 	if !found || !takesSeparateValue(fd) {
 		return nil, false
 	}
-	return filterPrefix(flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, partial), partial), true
+	return filterPrefix(flagValueCandidates(lookup, rtx, cc.chain, words, owner, fd, partial), partial), true
 }
 
 // completeFlagWord handles a word beginning with "-": either a flag name, or a flag's value in
 // the inline "--flag=value" form. Only declared, non-hidden flags are offered, and the whole
 // chain contributes, since ancestor flags resolve on descendants.
-func completeFlagWord(cc completionContext, words []string, partial string, handlers any, rtx *Context) ([]string, bool) {
+func completeFlagWord(cc completionContext, words []string, partial string, lookup HandlerLookup, rtx *Context) ([]string, bool) {
 	if cc.afterTerminator || !strings.HasPrefix(partial, "-") {
 		return nil, false
 	}
@@ -142,7 +141,7 @@ func completeFlagWord(cc completionContext, words []string, partial string, hand
 		if !found || !takesValue(fd) {
 			return nil, true // a flag that takes no value has nothing to offer after "="
 		}
-		cands := flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, val)
+		cands := flagValueCandidates(lookup, rtx, cc.chain, words, owner, fd, val)
 		out := make([]string, 0, len(cands))
 		for _, c := range cands {
 			out = append(out, name+"="+c)
@@ -285,13 +284,13 @@ func pendingValueFlag(context []string) (string, bool) {
 
 // flagValueCandidates returns the candidates for one flag's value: the owning handler's dynamic
 // completer when it answers, else a map flag's declared key vocabulary, else the static enum.
-func flagValueCandidates(handlers any, rtx *Context, chain []Command, words []string, owner string, fd FlagDef, partial string) []string {
+func flagValueCandidates(lookup HandlerLookup, rtx *Context, chain []Command, words []string, owner string, fd FlagDef, partial string) []string {
 	// An '@' on a from:file flag is a path in progress — offer nothing, so the
 	// shell falls back to its own file completion.
 	if strings.HasPrefix(partial, "@") && slices.Contains(fd.From, "file") {
 		return nil
 	}
-	if cands, dyn := dynamicFlagValues(handlers, rtx, chain, words, owner, fd.Name, partial); dyn {
+	if cands, dyn := dynamicFlagValues(lookup, rtx, chain, words, owner, fd.Name, partial); dyn {
 		return cands
 	}
 	if len(fd.KeyPaths) > 0 && isMapType(fd.Type) && !strings.Contains(partial, "=") {
@@ -307,7 +306,7 @@ func flagValueCandidates(handlers any, rtx *Context, chain []Command, words []st
 // argValueCandidates returns the candidates for the argument the completed word would bind to
 // — the leaf's next positional index, a trailing variadic absorbing everything past the end.
 // The leaf handler's dynamic completer wins when it answers, else the static enum.
-func argValueCandidates(handlers any, rtx *Context, cc completionContext, words []string, partial string) []string {
+func argValueCandidates(lookup HandlerLookup, rtx *Context, cc completionContext, words []string, partial string) []string {
 	cur := cc.chain[len(cc.chain)-1]
 	args := cur.Arguments
 	idx := cc.positionals
@@ -321,7 +320,7 @@ func argValueCandidates(handlers any, rtx *Context, cc completionContext, words 
 	if ad.Hidden {
 		return nil
 	}
-	if cands, dyn := dynamicArgValues(handlers, rtx, cc.chain, words, ad.Name, partial); dyn {
+	if cands, dyn := dynamicArgValues(lookup, rtx, cc.chain, words, ad.Name, partial); dyn {
 		return cands
 	}
 	return ad.Enum
@@ -329,9 +328,9 @@ func argValueCandidates(handlers any, rtx *Context, cc completionContext, words 
 
 // dynamicFlagValues asks the declaring command's handler for candidates, when it implements
 // [FlagValueCompleter]. It reports true only when a completer ran and returned a non-nil
-// slice; otherwise the caller falls back to the static enum. handlers is the aggregate handler
-// set, nil in purely structural callers.
-func dynamicFlagValues(handlers any, rtx *Context, chain []Command, words []string, owner, flag, partial string) ([]string, bool) {
+// slice; otherwise the caller falls back to the static enum. lookup is the program's handler
+// lookup, nil in purely structural callers.
+func dynamicFlagValues(lookup HandlerLookup, rtx *Context, chain []Command, words []string, owner, flag, partial string) ([]string, bool) {
 	var handlerName string
 	for _, fr := range chain {
 		if fr.Name == owner {
@@ -339,7 +338,7 @@ func dynamicFlagValues(handlers any, rtx *Context, chain []Command, words []stri
 			break
 		}
 	}
-	completer, ok := resolveHandler[FlagValueCompleter](handlers, handlerName)
+	completer, ok := resolveHandler[FlagValueCompleter](lookup, handlerName)
 	if !ok {
 		return nil, false
 	}
@@ -353,8 +352,8 @@ func dynamicFlagValues(handlers any, rtx *Context, chain []Command, words []stri
 
 // dynamicArgValues is dynamicFlagValues' positional counterpart, asking the chain leaf's
 // handler, since positionals always bind to the leaf.
-func dynamicArgValues(handlers any, rtx *Context, chain []Command, words []string, arg, partial string) ([]string, bool) {
-	completer, ok := resolveHandler[ArgValueCompleter](handlers, chain[len(chain)-1].Handler)
+func dynamicArgValues(lookup HandlerLookup, rtx *Context, chain []Command, words []string, arg, partial string) ([]string, bool) {
+	completer, ok := resolveHandler[ArgValueCompleter](lookup, chain[len(chain)-1].Handler)
 	if !ok {
 		return nil, false
 	}
@@ -366,18 +365,18 @@ func dynamicArgValues(handlers any, rtx *Context, chain []Command, words []strin
 	return cands, true
 }
 
-// resolveHandler resolves handlerName on the aggregate handler set — the same
-// reflection dispatch uses — and reports whether the handler implements T.
-func resolveHandler[T any](handlers any, handlerName string) (T, bool) {
+// resolveHandler resolves handlerName through the program's lookup — the same one dispatch
+// uses — and reports whether the handler implements T.
+func resolveHandler[T any](lookup HandlerLookup, handlerName string) (T, bool) {
 	var zero T
-	if handlers == nil || handlerName == "" {
+	if lookup == nil || handlerName == "" {
 		return zero, false
 	}
-	m := reflect.ValueOf(handlers).MethodByName(handlerName)
-	if !m.IsValid() || m.Type().NumIn() != 0 || m.Type().NumOut() != 1 {
+	h, ok := lookup(handlerName)
+	if !ok {
 		return zero, false
 	}
-	completer, ok := reflect.TypeAssert[T](m.Call(nil)[0])
+	completer, ok := any(h).(T)
 	return completer, ok
 }
 
@@ -396,7 +395,7 @@ func seedCompletionContext(rtx *Context, chain []Command, words []string) {
 // deduped and sorted by name. It also returns any errors scanning pluginPath — the
 // author-configured location, where a failure is a real misconfiguration; failures scanning the
 // incidental locations are ignored as normal.
-func discoverPlugins(d *PluginDiscoveryDef, pluginPath string) ([]DiscoveredPlugin, []error) {
+func discoverPlugins(d *PluginDiscoveryDef, pluginPath string, view *osView) ([]DiscoveredPlugin, []error) {
 	if d.Prefix == "" {
 		return nil, nil
 	}
@@ -405,7 +404,7 @@ func discoverPlugins(d *PluginDiscoveryDef, pluginPath string) ([]DiscoveredPlug
 	var problems []error
 	// On Windows a plugin is host-foo.exe (or another PATHEXT extension), offered as "foo";
 	// a file without one cannot be run, so it is not a plugin.
-	exts := executableExts(runtime.GOOS, os.Getenv("PATHEXT"))
+	exts := view.executableExts()
 	scan := func(dir string, report bool) {
 		// A configured path that is a FILE is a misconfiguration on every OS. It is checked
 		// first because the OSes disagree on how reading it fails: "not a directory" elsewhere,
@@ -447,9 +446,9 @@ func discoverPlugins(d *PluginDiscoveryDef, pluginPath string) ([]DiscoveredPlug
 	if pluginPath != "" {
 		scan(pluginPath, true) // the author-configured path: a scan failure is a real diagnostic
 	}
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+	for _, dir := range filepath.SplitList(view.getenv("PATH")) {
 		if dir != "" {
-			scan(dir, false)
+			scan(view.abs(dir), false)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -656,7 +655,7 @@ func (p *Program) Complete(words []string, format CompletionFormat) (int, error)
 		rtx.completionMessages = &added
 	}
 	result := CompletionResult{Hint: completionHintFor(p.def, words)}
-	for _, c := range complete(p.def, words, p.handlers, rtx) {
+	for _, c := range complete(p.def, words, p.lookup, rtx) {
 		value, desc, _ := strings.Cut(c, "\t")
 		result.Candidates = append(result.Candidates, CompletionCandidate{Value: value, Description: desc})
 	}
@@ -699,7 +698,8 @@ func (p *Program) completionMessagesOn(rtx *Context) bool {
 		return p.completionMessages(rtx)
 	}
 	if env := p.def.CompletionMessages.Env; env != "" {
-		switch strings.ToLower(strings.TrimSpace(os.Getenv(env))) {
+		value, _ := rtx.LookupEnv(env)
+		switch strings.ToLower(strings.TrimSpace(value)) {
 		case "0", "false", "off":
 			return false
 		}

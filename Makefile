@@ -34,7 +34,7 @@ TOOL := go tool -modfile=tools.mod
 # which the other tools' shared graph would override. Keep the version in step with editors.
 GOPLS := go run golang.org/x/tools/gopls@v0.23.0
 
-.PHONY: all check-generated clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race tools-upgrade vuln vuln-tools rotini rotini-build rotini-install
+.PHONY: all bench-cli check-generated clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race tools-upgrade vuln vuln-tools rotini rotini-build rotini-install
 
 all: clean lint test test-conformance test-acceptance test-e2e test-bench test-fuzz test-mutation test-race rotini-build rotini-install
 
@@ -132,6 +132,13 @@ test-e2e:
 
 test-bench:
 	@go test -bench=. -benchmem -count=1 ./... | tee test_bench.out
+
+# Builds the lean-runtime fixture CLI (e2e r11_lean_runtime) from this working tree and prints its
+# size, linked packages, and dispatch, --help and completion latency. Wall-clock timing is too
+# noisy to enforce, so this records numbers and is not part of `all`; the size, dependency and
+# allocation budgets are enforced by `test` and `test-e2e`.
+bench-cli:
+	@go run ./internal/benchcli -root .
 
 test-fuzz:
 	@for target in $(FUZZ_TARGETS); do \

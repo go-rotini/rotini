@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/recon"
 )
 
 // scDef is a root with a short-circuit --help and every kind of declared requirement, plus a
@@ -162,9 +164,10 @@ func TestShortCircuit_readerWaivesChannelRequirements(t *testing.T) {
 	}
 }
 
-// TestShortCircuit_readerKeepsUnreadableInput confirms a waived run still reports input that
-// cannot be read: an env value of the wrong type, and a config file that is not valid YAML.
-func TestShortCircuit_readerKeepsUnreadableInput(t *testing.T) {
+// TestShortCircuit_readerSkipsUnparseableConfig confirms a waived run still reports an env value
+// it cannot read, but skips a configuration file that cannot be parsed or holds a value of the
+// wrong type, so --help works in a broken directory.
+func TestShortCircuit_readerSkipsUnparseableConfig(t *testing.T) {
 	t.Run("env value of the wrong type", func(t *testing.T) {
 		t.Setenv("PORT", "abc")
 		rtx := NewContextFor(scChannelDef(), []string{"--help"})
@@ -183,10 +186,140 @@ func TestShortCircuit_readerKeepsUnreadableInput(t *testing.T) {
 		rtx.Stdin = strings.NewReader("")
 		var in scChannelInputs
 		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
-		if err == nil {
-			t.Fatal("Read = nil, want the unreadable config file reported")
+		if err != nil {
+			t.Fatalf("Read = %v, want the unparseable config file skipped", err)
 		}
 	})
+	t.Run("config value of the wrong type", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "app.yaml")
+		if err := os.WriteFile(path, []byte("count: abc\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		rtx := NewContextFor(scChannelDef(), []string{"--help"})
+		rtx.Stdin = strings.NewReader("")
+		var in struct {
+			App struct {
+				Flags struct {
+					Help bool `rotini:"help"`
+				}
+				Config struct {
+					Count int `rotini:"count" recon:"count"`
+				}
+			}
+		}
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
+		if err != nil {
+			t.Fatalf("Read = %v, want the config value skipped", err)
+		}
+	})
+	t.Run("missing config_source path", func(t *testing.T) {
+		t.Setenv("APP_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+		rtx := NewContextFor(scChannelDef(), []string{"--help"})
+		rtx.Stdin = strings.NewReader("")
+		var in scChannelInputs
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{
+			Name: "app", Path: "app.yaml", PathFrom: &PathFromDef{Env: "APP_CONFIG"},
+		}}}).Read(rtx, &in)
+		if err != nil {
+			t.Fatalf("Read = %v, want the missing config file skipped", err)
+		}
+	})
+}
+
+// brokenConfigDef is a root with a short-circuit --help and an int flag that falls back to a
+// configuration key, the shape a seeded root hook reads under --help.
+func brokenConfigDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "help", Identifiers: []string{"--help"}, Type: "bool", ShortCircuit: true},
+			{Name: "limit", Identifiers: []string{"--limit"}, Type: "int", Default: "5"},
+		},
+		Commands: []CommandDef{{Name: "sub", Handler: "AppSub"}},
+	}
+}
+
+type brokenConfigInputs struct {
+	App struct {
+		Flags struct {
+			Help  bool `rotini:"help"`
+			Limit int  `rotini:"limit" recon:"list.limit"`
+		}
+		Arguments struct{}
+	}
+}
+
+// TestShortCircuit_brokenConfigFallbackFlag confirms a fallback flag's broken configuration
+// file, unparseable or holding a value of the wrong type, doesn't block --help, and the flag
+// keeps its default.
+func TestShortCircuit_brokenConfigFallbackFlag(t *testing.T) {
+	for _, body := range []string{"defaults: [\n", "list:\n  limit: abc\n"} {
+		path := filepath.Join(t.TempDir(), ".app.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "project", Path: path}}})
+		for _, argv := range [][]string{{"--help"}, {"sub", "--help"}} {
+			rtx := NewContextFor(brokenConfigDef(), argv)
+			rtx.frame = 0
+			var in brokenConfigInputs
+			if err := reader.Read(rtx, &in); err != nil {
+				t.Fatalf("%q with %q: Read = %v, want nil", body, argv, err)
+			}
+			if in.App.Flags.Limit != 5 {
+				t.Errorf("%q with %q: Limit = %d, want the default 5", body, argv, in.App.Flags.Limit)
+			}
+		}
+	}
+}
+
+// TestShortCircuit_brokenConfigWithoutWaiver confirms a normal run still reports the file.
+func TestShortCircuit_brokenConfigWithoutWaiver(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".app.yaml")
+	if err := os.WriteFile(path, []byte("defaults: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "project", Path: path}}})
+	rtx := NewContextFor(brokenConfigDef(), []string{"sub"})
+	rtx.frame = 0
+	var in brokenConfigInputs
+	err := reader.Read(rtx, &in)
+	var ie *InputError
+	if !errors.As(err, &ie) || ie.Channel != channelConfig {
+		t.Fatalf("Read = %v, want a config *InputError", err)
+	}
+	if _, ok := errors.AsType[*recon.ParseError](err); !ok {
+		t.Errorf("Read = %v, want the recon parse error reachable", err)
+	}
+	if !strings.Contains(err.Error(), `configuration file "project"`) {
+		t.Errorf("Read = %q, want the file named", err)
+	}
+}
+
+// TestShortCircuit_brokenConfigKeepsOtherFiles confirms a waived run with one broken file still
+// binds the other file's values.
+func TestShortCircuit_brokenConfigKeepsOtherFiles(t *testing.T) {
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "broken.yaml")
+	good := filepath.Join(dir, "good.yaml")
+	if err := os.WriteFile(broken, []byte("list: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(good, []byte("list:\n  limit: 9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{
+		{Name: "broken", Path: broken},
+		{Name: "good", Path: good},
+	}})
+	rtx := NewContextFor(brokenConfigDef(), []string{"--help"})
+	var in brokenConfigInputs
+	if err := reader.Read(rtx, &in); err != nil {
+		t.Fatalf("Read = %v, want nil", err)
+	}
+	if in.App.Flags.Limit != 9 {
+		t.Errorf("Limit = %d, want 9 from the readable file", in.App.Flags.Limit)
+	}
 }
 
 // TestShortCircuit_resolvedValuesStillBound confirms the waiver reads every channel: values that

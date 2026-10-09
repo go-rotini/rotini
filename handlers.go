@@ -8,9 +8,9 @@ import "context"
 //
 // # Instance lifetime
 //
-// Per run, the runtime asks the handler set given to [NewProgram] (the generated
-// ProgramHandlers) once for each command in the chain, and that value serves the command's
-// hooks for the run:
+// Per run, the runtime asks the program's handlers (the generated ProgramHandlers, through
+// [NewProgramFunc] or [NewProgram]) once for each command in the chain, and that value serves
+// the command's hooks for the run:
 //
 //   - A field carries state between one command's own hooks. The leaf's PreRun, Run and
 //     PostRun share one value, as do a command's CascadingPreRun and CascadingPostRun.

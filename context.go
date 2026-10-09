@@ -18,7 +18,8 @@ import (
 // The surface groups into eight jobs:
 //
 //   - invocation — the [Context.Argv], [Context.Stdin], [Context.Stdout] and [Context.Stderr]
-//     fields
+//     fields, and the run's environment and working directory: [Context.LookupEnv],
+//     [Context.Environ] and [Context.Dir]
 //   - command — [Context.Command] is the command whose hook is running (its Invoked field
 //     reports whether the user ran it), [Context.CommandPath] names it, and
 //     [Context.CommandChain] lists every command from the root to the invoked one
@@ -39,7 +40,8 @@ import (
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
 //   - rotini's own settings — [Context.Version], [Context.Help] and [Context.Parser] read them;
 //     [Context.WithVersion], [Context.WithHelp], [Context.WithParser],
-//     [Context.WithInputSettings] and [Context.WithInputReader] set them on a standalone Context
+//     [Context.WithInputSettings], [Context.WithInputReader], [Context.WithEnviron] and
+//     [Context.WithDir] set them on a standalone Context
 //
 // Nothing is parsed or validated until a handler calls an inputs method; a handler with its
 // own parser reads [Context.Argv] instead.
@@ -93,6 +95,10 @@ type Context struct {
 	version  string
 	help     HelpFunc
 	parser   *Parser
+
+	// view is the environment and directory this run reads; see [Program.WithEnviron] and
+	// [Program.WithDir]. nil reads the process's.
+	view *osView
 
 	// outputChecks makes WriteOutput and WriteOutputItem check each value against the declared
 	// output schema before writing it. See [Program.WithOutputChecks].
@@ -149,6 +155,12 @@ func (rtx *Context) flagStdin() io.Reader {
 		rtx.flagStdinMemo = &stdinMemo{src: rtx.Stdin}
 	}
 	return &memoReader{m: rtx.flagStdinMemo}
+}
+
+// argvAcq is what parsing this run's argv reads values from: the replayed stdin and the
+// injected directory.
+func (rtx *Context) argvAcq() argvAcq {
+	return argvAcq{stdin: rtx.flagStdin(), dir: rtx.osView().base()}
 }
 
 type memoReader struct {

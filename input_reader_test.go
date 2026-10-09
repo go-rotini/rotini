@@ -1960,11 +1960,11 @@ func TestTrimAcquiredPayload_oneRuleForBothPaths(t *testing.T) {
 	}
 	fd := FlagDef{Name: "input", Identifiers: []string{"-i"}, From: []string{"file", "stdin"}}
 
-	fromFile, err := resolveFlagValue(fd, "-i", "@"+file, nil)
+	fromFile, err := resolveFlagValue(fd, "-i", "@"+file, argvAcq{})
 	if err != nil {
 		t.Fatalf("resolveFlagValue(@file): %v", err)
 	}
-	fromStdin, err := resolveFlagValue(fd, "-i", "-", strings.NewReader(payload))
+	fromStdin, err := resolveFlagValue(fd, "-i", "-", argvAcq{stdin: strings.NewReader(payload)})
 	if err != nil {
 		t.Fatalf("resolveFlagValue(-): %v", err)
 	}

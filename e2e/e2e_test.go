@@ -18,7 +18,8 @@
 //	exists cmd/demo/main.go    a path must exist
 //	wantexit 2 ./app --bad     run a command and assert its exact exit status
 //
-// wantexit and gomodinit are rotini's own commands; `! exec` only proves a non-zero exit.
+// wantexit, gomodinit, nodeps and sizebelow are rotini's own commands, and leandeps and
+// pinnedgo its own conditions; `! exec` only proves a non-zero exit.
 //
 // # Script names
 //
@@ -35,6 +36,7 @@
 //	r8   the version guard
 //	r9   plugins
 //	r10  structured output
+//	r11  a lean runtime: linked packages, binary size
 package e2e
 
 import (
@@ -44,6 +46,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,7 +126,52 @@ func TestScripts(t *testing.T) {
 			}
 			return nil
 		},
+		Condition: func(cond string) (bool, error) {
+			switch cond {
+			case "leandeps":
+				return leanRuntimeDeps, nil
+			case "pinnedgo":
+				return pinnedToolchain(root)
+			}
+			return false, fmt.Errorf("unknown condition %q", cond)
+		},
 		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
+			// nodeps fails when the last command's stdout, a `go list -deps` listing, names a
+			// package in testdata/forbidden_deps.txt.
+			"nodeps": func(ts *testscript.TestScript, neg bool, args []string) {
+				if neg || len(args) != 0 {
+					ts.Fatalf("usage: nodeps")
+				}
+				list, err := os.ReadFile(filepath.Join(ts.Getenv("ROTINI_ROOT"), "testdata", "forbidden_deps.txt"))
+				ts.Check(err)
+				deps := strings.Fields(ts.ReadFile("stdout"))
+				var linked []string
+				for line := range strings.Lines(string(list)) {
+					pkg := strings.TrimSpace(line)
+					if pkg != "" && !strings.HasPrefix(pkg, "#") && slices.Contains(deps, pkg) {
+						linked = append(linked, pkg)
+					}
+				}
+				if len(linked) > 0 {
+					ts.Fatalf("the program links %s", strings.Join(linked, ", "))
+				}
+			},
+			// sizebelow fails when a file is not smaller than a number of bytes.
+			"sizebelow": func(ts *testscript.TestScript, neg bool, args []string) {
+				if neg || len(args) != 2 {
+					ts.Fatalf("usage: sizebelow <file> <bytes>")
+				}
+				limit, err := strconv.ParseInt(args[1], 10, 64)
+				if err != nil {
+					ts.Fatalf("sizebelow: %q is not a byte count", args[1])
+				}
+				info, err := os.Stat(ts.MkAbs(args[0]))
+				ts.Check(err)
+				ts.Logf("%s: %d bytes (budget %d)", args[0], info.Size(), limit)
+				if info.Size() >= limit {
+					ts.Fatalf("%s is %d bytes, over the budget of %d", args[0], info.Size(), limit)
+				}
+			},
 			// wantexit runs a command and asserts its exact exit status.
 			"wantexit": func(ts *testscript.TestScript, neg bool, args []string) {
 				if neg || len(args) < 2 {
@@ -169,7 +217,35 @@ func TestScripts(t *testing.T) {
 	})
 }
 
-// gomod returns a script's go.mod: rotini required at version, declared as a tool (so the
+// leanRuntimeDeps turns on r11_lean_runtime's forbidden-package check and its tighter size
+// budget. It stays false while rotini's go.mod requires go-rotini module releases that still
+// link those packages; set it, and leanRuntimeDeps in deps_test.go, to true in the change that
+// requires releases free of them.
+const leanRuntimeDeps = false
+
+// pinnedToolchain reports whether the go command scripts run is the toolchain go.mod names,
+// which the linker-output and size checks are calibrated against.
+func pinnedToolchain(root string) (bool, error) {
+	mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return false, err
+	}
+	for line := range strings.Lines(string(mod)) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "toolchain "); ok {
+			// Scripts run with GOTOOLCHAIN=local, so ask the same go command.
+			cmd := exec.Command("go", "env", "GOVERSION")
+			cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
+			out, err := cmd.Output()
+			if err != nil {
+				return false, err
+			}
+			return strings.TrimSpace(string(out)) == v, nil
+		}
+	}
+	return false, nil
+}
+
+// gomod returns a script's go.mod:rotini required at version, declared as a tool (so the
 // seeded //go:generate line's `go tool rotini` resolves), and replaced with the working tree at
 // root. A rotini built through this module reports version, since build info outranks an
 // -ldflags stamp, so a script that needs a particular version passes it here.

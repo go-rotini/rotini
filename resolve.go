@@ -1,8 +1,6 @@
 package rotini
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,8 +30,9 @@ type Command struct {
 	Plugins               []PluginDef         // co-located plugin binaries dispatched as sub-commands
 	PluginDiscovery       *PluginDiscoveryDef // plugin auto-discovery (nil = off)
 	// PluginPath is an extra directory searched for this command's declared and discovered
-	// plugin binaries, with a leading ~ and $VAR references already expanded. Empty means only
-	// the host binary's directory and PATH are searched.
+	// plugin binaries, with a leading ~ and $VAR references already expanded from the run's
+	// environment ([Program.WithEnviron]). Empty means only the host binary's directory and PATH
+	// are searched.
 	PluginPath  string
 	Passthrough bool       // every token after this command is a raw positional (no flag parsing)
 	Output      *OutputDef // what the command writes to stdout (nil = not declared); see [Context.WriteOutput]
@@ -42,22 +41,20 @@ type Command struct {
 	// chain. Exactly one entry of [Context.CommandChain] has it set; in a cascading hook,
 	// rtx.Command().Invoked distinguishes the invoked command from its ancestors.
 	Invoked bool
+
+	// pluginPathRaw is PluginPath as declared, for re-expanding it against a run's injected
+	// environment; view is that run's environment, used by [Command.PluginBinary] and
+	// [Command.DiscoveredPlugins]. Both are set by the runtime; nil reads the process.
+	pluginPathRaw string
+	view          *osView
 }
 
 // expandPluginPath expands a leading ~ to the user's home directory and $VAR / ${VAR}
 // references from the environment, as a shell would. When the home directory cannot be found
 // the ~ is left in place.
 func expandPluginPath(dir string) string {
-	if dir == "" {
-		return ""
-	}
-	dir = os.ExpandEnv(dir)
-	if dir == "~" || strings.HasPrefix(dir, "~/") || strings.HasPrefix(dir, "~"+string(filepath.Separator)) {
-		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, dir[1:])
-		}
-	}
-	return dir
+	var process *osView
+	return process.expandPluginPath(dir)
 }
 
 // rootFrame is the chain frame for the program's root command.
@@ -67,7 +64,7 @@ func rootFrame(def Definition) Command {
 		Flags: def.Flags, Arguments: def.Arguments,
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Plugins: def.Plugins, PluginDiscovery: def.PluginDiscovery,
-		PluginPath: expandPluginPath(def.PluginPath), Passthrough: def.Passthrough,
+		PluginPath: expandPluginPath(def.PluginPath), pluginPathRaw: def.PluginPath, Passthrough: def.Passthrough,
 		Output: def.Output,
 	}
 }
@@ -79,7 +76,7 @@ func cmdFrame(c CommandDef) Command {
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Plugins: c.Plugins, PluginDiscovery: c.PluginDiscovery,
-		PluginPath: expandPluginPath(c.PluginPath), Passthrough: c.Passthrough,
+		PluginPath: expandPluginPath(c.PluginPath), pluginPathRaw: c.PluginPath, Passthrough: c.Passthrough,
 		Output: c.Output,
 	}
 }

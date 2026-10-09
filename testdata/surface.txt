@@ -229,6 +229,7 @@ func NewDependency[T any](name string) Dependency[T]
 func NewInputReader(meta InputSettings) *InputReader
 func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
+func NewProgramFunc(def Definition, lookup HandlerLookup) *Program
 func NewSuggestor() *Suggestor
 func PluginCompletion(w io.Writer, result CompletionResult) error
 func PresenceOf[T any](v T) Presence
@@ -257,7 +258,9 @@ method Context.Command() Command
 method Context.CommandChain() []Command
 method Context.CommandPath() string
 method Context.DefaultInputs[T any]() (InputLayer[T], error)
+method Context.Dir() string
 method Context.EnvInputs[T any]() (InputLayer[T], error)
+method Context.Environ() []string
 method Context.Exit(code int)
 method Context.Failed() bool
 method Context.FileInputs[T any]() (InputLayer[T], error)
@@ -268,6 +271,7 @@ method Context.HaltWithCode(code int)
 method Context.Help() string
 method Context.InputsWithReport[T any]() (T, InputReport, error)
 method Context.Inputs[T any]() (T, error)
+method Context.LookupEnv(name string) (string, bool)
 method Context.MustGetDependency[T any](dep Dependency[T]) T
 method Context.Parser() *Parser
 method Context.RecordError(err error)
@@ -278,6 +282,8 @@ method Context.SetDependencyIfAbsent[T any](dep Dependency[T], value T)
 method Context.SetDependency[T any](dep Dependency[T], value T)
 method Context.StdinInputs[T any]() (InputLayer[T], error)
 method Context.Version() string
+method Context.WithDir(dir string) *Context
+method Context.WithEnviron(env []string) *Context
 method Context.WithHelp(help HelpFunc) *Context
 method Context.WithInputReader(fn func(InputSettings) *InputReader) *Context
 method Context.WithInputSettings(meta InputSettings) *Context
@@ -331,6 +337,8 @@ method Program.WithCompletion(format CompletionFormat) *Program
 method Program.WithCompletionMessages(fn func(rtx *Context) bool) *Program
 method Program.WithContext(ctx context.Context) *Program
 method Program.WithDependency[T any](dep Dependency[T], value T) *Program
+method Program.WithDir(dir string) *Program
+method Program.WithEnviron(env []string) *Program
 method Program.WithExit(fn func(int)) *Program
 method Program.WithHelp(help HelpFunc) *Program
 method Program.WithInputReader(fn func(InputSettings) *InputReader) *Program
@@ -383,6 +391,7 @@ type FlagGroup
 type FlagGroupKind
 type FlagValueCompleter
 type Handler
+type HandlerLookup
 type HelpFunc
 type HexBytes
 type InputError

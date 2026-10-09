@@ -436,7 +436,7 @@ func TestComplete_dynamicFlagValue(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := complete(def, c.words, c.handlers, newContext())
+			got := complete(def, c.words, reflectLookup(c.handlers), newContext())
 			if !reflect.DeepEqual(got, c.want) {
 				t.Errorf("complete(%v) = %v, want %v", c.words, got, c.want)
 			}
@@ -449,7 +449,7 @@ func TestComplete_dynamicFlagValue(t *testing.T) {
 func TestComplete_dynamicReceivesContext(t *testing.T) {
 	def := dynCompletionDef()
 	rtx := newContext()
-	got := complete(def, []string{"build", "--mode", "x"}, dynCtxHandlers{t: t}, rtx)
+	got := complete(def, []string{"build", "--mode", "x"}, reflectLookup(dynCtxHandlers{t: t}), rtx)
 	if !reflect.DeepEqual(got, []string{"x-leaf-build"}) {
 		t.Errorf("completer did not observe rtx chain/args: %v", got)
 	}
@@ -606,12 +606,12 @@ func TestComplete_dynamicArgValue(t *testing.T) {
 	want := []string{"dyn-one", "dyn-two"}
 	// Candidates are prefix-filtered, so query with a prefix the dynamic ones share:
 	// "x" would filter every one of them out and prove nothing.
-	got := complete(def, []string{"deploy", "dyn"}, argCompleterHandlers{}, nil)
+	got := complete(def, []string{"deploy", "dyn"}, reflectLookup(argCompleterHandlers{}), nil)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dynamic arg candidates = %v, want %v", got, want)
 	}
 	// The variadic "extra" argument gets nil from the completer → its enum.
-	got = complete(def, []string{"deploy", "api", "f"}, argCompleterHandlers{}, nil)
+	got = complete(def, []string{"deploy", "api", "f"}, reflectLookup(argCompleterHandlers{}), nil)
 	if !reflect.DeepEqual(got, []string{"fast"}) {
 		t.Errorf("enum fallback after dynamic nil = %v, want [fast]", got)
 	}
@@ -992,10 +992,10 @@ func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
 		Commands: []CommandDef{{Name: "show", Handler: "AppShow", Arguments: []ArgDef{{Name: "name", Type: "string"}}}},
 	}
 	t.Setenv("LENIENT_STORE", "env")
-	if got := complete(def, []string{"show", ""}, lenientHandlers{}, newContext()); !reflect.DeepEqual(got, []string{"from-env"}) {
+	if got := complete(def, []string{"show", ""}, reflectLookup(lenientHandlers{}), newContext()); !reflect.DeepEqual(got, []string{"from-env"}) {
 		t.Errorf("env fallback: candidates = %v, want [from-env]", got)
 	}
-	if got := complete(def, []string{"--store", "line", "show", ""}, lenientHandlers{}, newContext()); !reflect.DeepEqual(got, []string{"from-line"}) {
+	if got := complete(def, []string{"--store", "line", "show", ""}, reflectLookup(lenientHandlers{}), newContext()); !reflect.DeepEqual(got, []string{"from-line"}) {
 		t.Errorf("flag on the line: candidates = %v, want [from-line] — argv outranks env", got)
 	}
 }

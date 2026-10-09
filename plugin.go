@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -111,7 +110,7 @@ type PluginDispatch struct {
 // passes through unchanged. chain is the resolved path; its last command is the one that dispatched, whose names are a
 // discovered token's candidates.
 func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command, r *PluginDispatch) (int, error) {
-	path, err := resolvePluginBinary(r.Def.Binary, r.Dir)
+	path, err := resolvePluginBinary(r.Def.Binary, r.Dir, rtx.osView())
 	if err != nil {
 		cat := CategoryInternal
 		var candidates []string
@@ -140,6 +139,11 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 	cmd.Stdin = p.stdin
 	cmd.Stdout = p.stdout
 	cmd.Stderr = p.stderr
+	// The child gets the run's environment and directory when they were injected; otherwise it
+	// inherits the process's.
+	if view := rtx.osView(); view.injected() {
+		cmd.Env, cmd.Dir = view.environ(), view.base()
+	}
 
 	switch err := cmd.Run(); {
 	case err == nil:
@@ -187,7 +191,7 @@ func (cmd Command) PluginBinary(name string) (string, bool) {
 	default:
 		return "", false
 	}
-	path, err := resolvePluginBinary(binary, dir)
+	path, err := resolvePluginBinary(binary, dir, cmd.view)
 	if err != nil {
 		return "", false
 	}
@@ -197,22 +201,23 @@ func (cmd Command) PluginBinary(name string) (string, bool) {
 // resolvePluginBinary finds the plugin binary: first next to the running executable, then in
 // dir (the command's plugin path, when set), then on PATH. The error names only the locations
 // actually searched.
-func resolvePluginBinary(name, dir string) (string, error) {
+func resolvePluginBinary(name, dir string, view *osView) (string, error) {
+	exts := view.executableExts()
 	searched := []string{}
 	if exe, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exe)
-		if p, ok := executableAt(exeDir, name); ok {
+		if p, ok := executableAt(exeDir, name, exts); ok {
 			return p, nil
 		}
 		searched = append(searched, "next to the binary "+exeDir)
 	}
 	if dir != "" {
-		if p, ok := executableAt(dir, name); ok {
+		if p, ok := executableAt(dir, name, exts); ok {
 			return p, nil
 		}
 		searched = append(searched, "the plugin path "+dir)
 	}
-	if p, err := exec.LookPath(name); err == nil {
+	if p, ok := view.lookPath(name); ok {
 		return p, nil
 	}
 	searched = append(searched, "PATH")
@@ -223,8 +228,8 @@ func resolvePluginBinary(name, dir string) (string, error) {
 // non-directory file. On Windows a program is a file with an executable extension, so
 // "host-sync" is found as host-sync.exe (or any other PATHEXT extension), the way the shell
 // finds it; elsewhere the file is taken as named.
-func executableAt(dir, name string) (string, bool) {
-	for _, candidate := range executableFileNames(name, executableExts(runtime.GOOS, os.Getenv("PATHEXT"))) {
+func executableAt(dir, name string, exts []string) (string, bool) {
+	for _, candidate := range executableFileNames(name, exts) {
 		p := filepath.Join(dir, candidate)
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 			return p, true
@@ -344,7 +349,7 @@ func discoveredFor(cmd Command) ([]DiscoveredPlugin, []error) {
 			declared[a] = true
 		}
 	}
-	all, problems := discoverPlugins(d, cmd.PluginPath)
+	all, problems := discoverPlugins(d, cmd.PluginPath, cmd.view)
 	var out []DiscoveredPlugin
 	for _, plugin := range all {
 		if !declared[plugin.Name] {

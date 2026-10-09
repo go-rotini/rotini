@@ -242,9 +242,30 @@ type RotiniVersionInputs struct {
 var InputSettings = rotini.InputSettings{}
 
 // NewProgram builds the program from the generated command tree and handlers. Taking
-// ProgramHandlers makes the compiler check that every command has a handler.
+// ProgramHandlers makes the compiler check that every command has a handler. The switch finds
+// each command's handler without reflection, which keeps the binary small.
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	return rotini.NewProgram(definition, handlers).
+	return rotini.NewProgramFunc(definition, func(name string) (rotini.Handler, bool) {
+		switch name {
+		case "Rotini":
+			return handlers.Rotini(), true
+		case "RotiniCompletion":
+			return handlers.RotiniCompletion(), true
+		case "RotiniGenerate":
+			return handlers.RotiniGenerate(), true
+		case "RotiniHelp":
+			return handlers.RotiniHelp(), true
+		case "RotiniInitialize":
+			return handlers.RotiniInitialize(), true
+		case "RotiniMan":
+			return handlers.RotiniMan(), true
+		case "RotiniValidate":
+			return handlers.RotiniValidate(), true
+		case "RotiniVersion":
+			return handlers.RotiniVersion(), true
+		}
+		return nil, false
+	}).
 		WithInputSettings(InputSettings).
 		WithHelp(Help)
 }

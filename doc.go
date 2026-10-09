@@ -74,7 +74,7 @@
 //
 // # The runtime
 //
-// The generated entrypoint builds a [Program] with [NewProgram] and calls [Program.Execute],
+// The generated entrypoint builds a [Program] with [NewProgramFunc] and calls [Program.Execute],
 // which resolves the invoked command from argv, runs its [Handler] hooks, and exits. Each
 // invocation carries a [Context]: the argv, the resolved chain, the program's streams and its
 // dependencies. A handler stops with [Context.HaltWith], [Context.Halt],
@@ -88,6 +88,11 @@
 // validation; [Context.CheckInputs] checks inputs it collects another way. A flag marked
 // short_circuit in the spec ([FlagDef.ShortCircuit]), such as --help, waives every declared
 // requirement when it is set on the command line, so the handler can act on it.
+//
+// A run reads the process environment and working directory unless the program gives it its
+// own with [Program.WithEnviron] and [Program.WithDir]. Env inputs and fallbacks, config file
+// paths and discovery, `@file` and existingfile paths, and plugins all read through them, and a
+// handler reads them with [Context.LookupEnv], [Context.Environ] and [Context.Dir].
 //
 // The runtime's only built-in behaviors are a default SIGINT/SIGTERM trap (see
 // [Program.WithoutSignalHandling] and [Program.WithSignals]), the hidden __complete entry the
