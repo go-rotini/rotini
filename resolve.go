@@ -160,7 +160,7 @@ func isFlag(chain []Command, tok string) bool {
 		return false
 	}
 	if isDigit(tok[1]) {
-		_, _, declared := findFlag(chain, tok[:2])
+		_, _, declared := findFlagIndex(chain, tok[:2])
 		return declared
 	}
 	return len(tok) < 3 || tok[1] != '.' || !isDigit(tok[2])
@@ -179,19 +179,6 @@ func splitFlag(tok string) (name, value string, hasValue bool) {
 		return before, after, true
 	}
 	return tok, "", false
-}
-
-// findFlag searches the resolved chain leaf→root for a flag whose identifiers
-// include name, returning its definition and the owning command-name scope.
-func findFlag(chain []Command, name string) (FlagDef, string, bool) {
-	for _, v := range slices.Backward(chain) {
-		for _, f := range v.Flags {
-			if slices.Contains(f.Identifiers, name) {
-				return f, v.Name, true
-			}
-		}
-	}
-	return FlagDef{}, "", false
 }
 
 // findChild returns the sub-command of f matching tok by name or alias.

@@ -143,6 +143,100 @@ mandemo man > mandemo.1
 man ./mandemo.1
 {{< /code >}}
 
+## Observability
+
+### Tracing with OpenTelemetry
+
+One span per run, named after the invoked command, with every span a command starts nested
+under it. The root handler's `CascadingPreRun`, which runs first in every run, starts the span
+and passes its context on with [`rtx.SetContext`](/docs#passing-a-context-on), so `Run` and
+every later hook receive it:
+
+{{< code title="internal/cmd/tracedemo/tracedemo.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package tracedemo
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var _ rotini.Handler = (*tracedemoHandler)(nil)
+
+var tracer = otel.Tracer("example.com/tracedemo")
+
+type tracedemoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+
+	// span is the run's span. CascadingPostRun receives the context this handler's
+	// CascadingPreRun received, not the one it set, so the span is kept here to end it.
+	span trace.Span
+}
+
+// CascadingPreRun starts the run's span, named after the invoked command, and hands its
+// context to every later hook.
+func (h *tracedemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	var names []string
+	for _, c := range rtx.CommandChain() {
+		names = append(names, c.Name)
+	}
+	ctx, h.span = tracer.Start(ctx, strings.Join(names, " "))
+	rtx.SetContext(ctx)
+}
+
+func (h *tracedemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	if rtx.Failed() {
+		h.span.SetStatus(codes.Error, "the command failed")
+	}
+	h.span.End()
+}
+
+func (*tracedemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+{{< /code >}}
+
+The root's `CascadingPostRun` receives the context its `CascadingPreRun` received, not the one
+it set, so the span is kept in a handler field to end there. A command starts its own spans
+from the context it is given:
+
+{{< code title="internal/cmd/tracedemo/tracedemo_work.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package tracedemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*tracedemoWorkHandler)(nil)
+
+type tracedemoWorkHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*tracedemoWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	_, span := tracer.Start(ctx, "load")
+	defer span.End()
+	fmt.Fprintln(rtx.Stdout, "worked")
+}
+{{< /code >}}
+
+Set up the tracer provider and its exporter in `main.go` as for any Go program. `Execute` exits
+the process, so call `Run` instead, shut the provider down to send the last spans, then exit
+with the code `Run` returned.
+
 ## Testing
 
 ### Debugging completion

@@ -1,0 +1,26 @@
+# `uniqueItems` rejects a list holding the same value twice, so it applies to lists only, sits
+# on the list rather than under `items`, and a list default must not repeat a value as the
+# runtime compares it.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: name
+      identifiers: [--name]
+      schema: {type: string, uniqueItems: true}
+    - name: labels
+      identifiers: [--label]
+      schema: {type: map, uniqueItems: true}
+    - name: ports
+      identifiers: [--port]
+      schema: {type: array, items: {type: int, uniqueItems: true}}
+    - name: ids
+      identifiers: [--id]
+      schema: {type: array, items: {type: int}, uniqueItems: true, default: [1, 2, 1]}
+    - name: waits
+      identifiers: [--wait]
+      schema: {type: array, items: {type: duration}, uniqueItems: true, default: [1h, 60m]}
+    # Fine: distinct values.
+    - name: hosts
+      identifiers: [--host]
+      schema: {type: array, uniqueItems: true, default: [a, b]}

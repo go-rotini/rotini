@@ -338,13 +338,13 @@ func TestSchemaBlockProblems_acceptsEveryDefinedKey(t *testing.T) {
 // an unimplemented JSON Schema keyword versus a typo.
 func TestSchemaBlockProblems_explainsUnimplementedJSONSchemaKeywords(t *testing.T) {
 	problems := blockProblems(t, "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n"+
-		"      schema: { type: array, uniqueItems: true, defualt: [x] }\n")
+		"      schema: { type: array, contains: { type: string }, defualt: [x] }\n")
 	if len(problems) != 2 {
 		t.Fatalf("got %d problems, want 2: %v", len(problems), problems)
 	}
 	msgs := problems[0].Error() + "\n" + problems[1].Error()
-	if !strings.Contains(msgs, `"uniqueItems" is a JSON Schema keyword`) {
-		t.Errorf("uniqueItems not explained as an unimplemented keyword:\n%s", msgs)
+	if !strings.Contains(msgs, `"contains" is a JSON Schema keyword`) {
+		t.Errorf("contains not explained as an unimplemented keyword:\n%s", msgs)
 	}
 	if strings.Contains(msgs, `"defualt" is a JSON Schema keyword`) {
 		t.Errorf("a plain typo was described as a JSON Schema keyword:\n%s", msgs)

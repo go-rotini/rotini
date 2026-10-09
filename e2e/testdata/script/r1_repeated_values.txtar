@@ -1,0 +1,73 @@
+# R1 — repeated values: `repeatable: false` makes a second occurrence of a single-value flag a
+# usage error naming both values, and `uniqueItems` rejects a list holding a value twice,
+# compared as its type reads it, on the command line and in the environment.
+
+gomodinit example.com/repdemo
+
+exec rotini generate cmd/repdemo/.rotini.spec.yaml --config cmd/repdemo/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o repdemo$exe ./cmd/repdemo
+
+exec ./repdemo$exe push --name a --port 1 --port 2
+! stderr .
+
+wantexit 1 ./repdemo$exe push --name a --name b
+stderr '^Error: --name was given more than once \("a", then "b"\); it takes one value$'
+
+# Without repeatable: false, the last value wins.
+exec ./repdemo$exe push --tag a --tag b
+
+wantexit 1 ./repdemo$exe push --port 1 --port 01
+stderr '^Error: --port must not repeat a value \(got "01" twice\)$'
+
+env HOSTS=a,b,a
+wantexit 1 ./repdemo$exe push
+stderr 'must not repeat a value \(got "a" twice\)'
+
+# validate explains a misplaced key.
+! exec rotini validate bad.yaml --config cmd/repdemo/.rotini.conf.yaml
+stderr 'sets `repeatable: false`, but a list or map flag takes one value per occurrence'
+
+-- cmd/repdemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: repdemo
+  summary: repeated values
+  commands:
+    - name: push
+      summary: push something
+      flags:
+        - name: name
+          summary: a name, given once
+          identifiers: [--name]
+          schema: { type: string, repeatable: false }
+        - name: tag
+          summary: a tag, the last one wins
+          identifiers: [--tag]
+          schema: { type: string }
+        - name: port
+          summary: distinct ports
+          identifiers: [--port]
+          schema: { type: '[]int', uniqueItems: true }
+      env:
+        - name: hosts
+          summary: distinct hosts
+          schema: { type: '[]string', uniqueItems: true }
+-- cmd/repdemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/repdemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/repdemo/zz_repdemo.go
+      package: repdemo
+-- bad.yaml --
+version: 0.0.0
+command:
+  name: repdemo
+  flags:
+    - name: tags
+      identifiers: [--tag]
+      schema: { type: '[]string', repeatable: false }

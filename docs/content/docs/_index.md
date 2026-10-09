@@ -163,7 +163,8 @@ Other argument shapes:
 - **A literal `@`** for a `from: [file]` flag is doubled: `--to @@alice` gives `@alice`, and
   `--to @./@name` reads a file whose name starts with `@`.
 - **Enum values with summaries**, `enum: [json, {value: yaml, summary: human-friendly}]`, are
-  described in help and completion; the value is still what the user types.
+  described on the help, man and markdown pages and in completion; the value is still what the
+  user types.
 
 ### Response files
 
@@ -173,6 +174,21 @@ comment lines skipped. Words read from a file aren't expanded again, and `@@x` i
 argument `@x`. Expansion happens before anything else reads the command line, so a file can hold
 the command's name, and `rtx.Argv` holds the expanded words. Choose a prefix other than `@` when a
 flag reads `from: [file]`.
+
+### Repeated values
+
+A single-value flag given twice keeps the last value, so a script can override an alias's
+setting. Two schema keys make repeats an error instead:
+
+- **`repeatable: false`** on a single-value flag rejects a second occurrence, naming both values:
+  `--name was given more than once ("a", then "b"); it takes one value`. `-vv` and
+  `--color --no-color` are repeats too, and so is a root flag given before and after a
+  sub-command's name. Environment and config values never count as repeats.
+- **`uniqueItems: true`** on a list rejects one that holds the same value twice:
+  `--port must not repeat a value (got "01" twice)`. Values compare as their type reads them,
+  so `01` and `1` are the same int and `1h` and `60m` the same duration; a time compares as the
+  instant it names, and a list of objects compares whole objects. It applies on every channel,
+  including an environment list (`PORTS=80,80`), and in `rtx.CheckInputs`.
 
 ## Where values come from
 
@@ -388,6 +404,40 @@ if err := report.Validate(); err != nil {
 	return
 }
 {{< /code >}}
+
+### Passing a context on
+
+Every hook receives the run's `context.Context`. A hook that derives one, to add a deadline or a
+tracing span, hands it to the hooks after it with `rtx.SetContext`, so a root `--timeout` can
+limit the command's `Run`:
+
+{{< code title="internal/cmd/todo/todo.go" language="golang" open="true" collapsible="false" copy="true" >}}
+type todoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	cancel context.CancelFunc
+}
+
+func (h *todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	ctx, h.cancel = context.WithTimeout(ctx, 30*time.Second)
+	rtx.SetContext(ctx)
+}
+
+func (h *todoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	h.cancel()
+}
+{{< /code >}}
+
+- **Later hooks get it**, `Run` included, and so do their teardowns. A teardown gets the context
+  its own setup hook received: the `CascadingPostRun` above gets the run's context, never a
+  deadline that has already passed.
+- **Keep the cancel function in a handler field** and call it in the matching teardown. Handlers
+  are created once per run, so the field belongs to this run.
+- **A derived context ending doesn't stop the run.** Check `ctx.Err()` in the hook and stop with
+  `rtx.HaltWith(err)`; canceling the run's own context still stops it between hooks. An
+  `ExitCause` on a derived context sets no exit code: use `rtx.HaltWithCode`.
+- **Calls from a teardown change nothing**, and the reporter always gets the run's context.
+  `rtx.Context()` returns the running hook's context; read it in the hook.
 
 ## Errors and exit codes
 
@@ -787,7 +837,8 @@ example, a `completion` command whose handler prints the script `Completion(shel
 
 Pages show what the spec declares, so they stay accurate without editing:
 
-- **Usage lines** put flags first: `todo add [flags] <title>`.
+- **Usage lines** put flags first: `todo add [flags] <title>`. A passthrough argument gets a
+  `[--]` before it: `app exec [flags] [--] <command...>`.
 - **Constraints** follow each row's summary: bounds (`1..65535`, `>= 1`), lengths, item counts
   and `repeatable` in help, and as sentences in man and markdown, which also give patterns and
   separators.
@@ -796,6 +847,8 @@ Pages show what the spec declares, so they stay accurate without editing:
   their order (the example below).
 - **A passthrough command's** page says that every word after its name is passed through, so
   flags go before it.
+- **Enum values** are a short list on their row. When values have summaries, they are also
+  listed under the row, one per line in the declared order.
 
 {{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
@@ -878,6 +931,81 @@ A rotini program can also answer completion requests from another program, such 
 plugin, in whatever format that host reads. A `rotini.CompletionFormat` writes the answer in the
 host's protocol; `rotini.PluginCompletion` is the built-in one for kubectl, Docker and Flux, and
 [tab completion](#tab-completion) shows how to use it.
+
+### What completion offers
+
+Completion reads the spec the way the parser does, so it offers only what the command line can
+still take:
+
+- **Flags already set** are left out, read the way the parser reads them (`-vx` sets both, and
+  `--no-color` sets `--color`). List, map, count and object flags stay, since they repeat.
+- **Flag groups**: once one flag of a `mutually_exclusive` or `one_of` group is set, the others
+  are left out. Required flags not yet set come first, including those a group or a
+  `flag_dependencies` entry requires.
+- **Deprecated** flags, identifiers, commands and aliases are left out. They still work when typed.
+- **Negatable flags** offer their `--no-` form.
+- **Enum values** come in the order the spec declares them, each with its summary.
+- **Map keys** (`--set image=`) are completed up to the `=`, with no space after it, so the user
+  types the value straight on. macOS's bash 3.2 still adds the space.
+
+`complete.kind` names what a value is. Beside `file`, `directory` and `none`:
+
+| Kind | Offers |
+|---|---|
+| `command` | command paths below the root, for a help command's argument: `help remote <TAB>` offers `remote`'s sub-commands. `rotini init` seeds it on `help`. |
+| `executable` | program names (bash offers every command name it knows) |
+| `user`, `group` | local account and group names |
+| `host` | the host names the shell knows (`/etc/hosts`, ssh known hosts) |
+
+Each shell's own completer supplies `executable`, `user`, `group` and `host`. PowerShell has no
+host completer, and lists users and groups on Windows only. A plugin host offers nothing for
+them.
+
+Descriptions show beside each candidate in zsh, fish and PowerShell, and in bash 4.0 or later on
+the second TAB, the one that lists the candidates. Give your users an off switch with
+`descriptions_env`; setting the variable it names to `0`, `false` or `off` hides descriptions in
+every shell. `Program.WithCompletionDescriptions` replaces the variable check with a rule of your
+own.
+
+{{< code title="cmd/todo/.rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+generate:
+  features:
+    - type: completion
+      enabled: true
+      descriptions_env: TODO_COMPLETION_DESCRIPTIONS
+{{< /code >}}
+
+Regenerate and reinstall the completion scripts to get these. A script and a binary from
+different rotini versions still work together.
+
+### Completers
+
+A `CompleteFlagValue` or `CompleteArgValue` method on a handler supplies candidates at run time.
+Its candidates are offered in the order it returns them (bash before 4.4 sorts them). It runs as
+the command that declares the flag, and `rtx` gives it:
+
+- `rtx.PartialInputs[T]()`: what has been typed so far, over the environment and the defaults.
+  Nothing is validated or required, an unknown or half-typed flag is skipped, and stdin and
+  files are never read, so it is safe on every TAB. It returns the inputs, which fields were
+  supplied, and an error only for a type that doesn't describe the command.
+- `rtx.Context()`: the program's base context, from `Program.WithContext` or `RunContext`.
+  Rotini sets no deadline and traps no signal for a completion request, so a completer that
+  calls the network sets its own.
+- `rtx.SetCompletionOptions(rotini.CompletionOptions{NoSpace: true})`: no space after the
+  inserted candidate, for a value the user goes on typing. fish adds none only after a value
+  ending in one of `@=/:.,`.
+
+{{< code title="internal/cmd/todo/todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
+	in, _, _ := rtx.PartialInputs[TodoDoneInputs]()
+	ctx, cancel := context.WithTimeout(rtx.Context(), 2*time.Second)
+	defer cancel()
+	return listTasks(ctx, in.Todo.Flags.List)
+}
+{{< /code >}}
+
+`rotini.PluginCompletion` passes the options on to kubectl, Docker and Flux as their no-space
+and keep-order directives.
 
 ## Plugins
 

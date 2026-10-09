@@ -236,6 +236,11 @@
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "examples": ["TASKR_COMPLETION_MESSAGES"],
           "description": "completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide completion messages; unset or any other value leaves them on. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionMessages replaces this check with a rule of your own. Requires `messages`."
+        },
+        "descriptions_env": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "examples": ["TASKR_COMPLETION_DESCRIPTIONS"],
+          "description": "completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide the descriptions shown beside completion candidates, in every shell; unset or any other value leaves them on. Descriptions show by default: zsh, fish and PowerShell beside each candidate, and bash on the second TAB. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionDescriptions replaces this check with a rule of your own."
         }
       }
     }

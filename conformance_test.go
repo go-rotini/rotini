@@ -1052,6 +1052,44 @@ func conformanceCases() []inputCase {
 					t.Errorf("argv = %q, want %q", got, want)
 				}
 			}},
+
+		// ── repeated values ──
+		{id: "FLAG-17", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, meta InputSettings) {
+				// repeatable: false makes a second occurrence a usage error naming both values;
+				// a flag without it keeps the last value.
+				var in acSetInputs
+				err := NewInputReader(meta).Read(NewContextFor(acSetDef(), []string{"--name", "a", "--name", "b"}), &in)
+				if err == nil || err.Error() != `--name was given more than once ("a", then "b"); it takes one value` || CategoryOf(err) != CategoryUsage {
+					t.Errorf("err = %v, want the repeat usage error", err)
+				}
+				if err := NewInputReader(meta).Read(NewContextFor(acmeDef(), []string{"deploy", "--env", "dev", "--env", "prod"}), &acDeployInputs{}); err != nil {
+					t.Errorf("last-wins by default: %v", err)
+				}
+			}},
+		{id: "FLAG-18", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, meta InputSettings) {
+				// uniqueItems compares values as the type reads them: 01 is 1.
+				var in acSetInputs
+				err := NewInputReader(meta).Read(NewContextFor(acSetDef(), []string{"--port", "1", "--port", "01"}), &in)
+				if err == nil || err.Error() != `--port must not repeat a value (got "01" twice)` || CategoryOf(err) != CategoryUsage {
+					t.Errorf("err = %v, want the duplicate usage error", err)
+				}
+			}},
+		{id: "ENV-07", args: []string{"deploy"}, env: map[string]string{"SET_PORTS": "80,443,80"},
+			check: func(t *testing.T, _ *Context, meta InputSettings) {
+				// An environment list is checked element by element: uniqueItems and bounds.
+				var in acSetInputs
+				err := NewInputReader(meta).Read(NewContextFor(acSetDef(), nil), &in)
+				if err == nil || !strings.Contains(err.Error(), `SET_PORTS must not repeat a value (got "80" twice)`) {
+					t.Errorf("err = %v, want the duplicate error naming the variable", err)
+				}
+				t.Setenv("SET_PORTS", "80,70000")
+				err = NewInputReader(meta).Read(NewContextFor(acSetDef(), nil), &in)
+				if err == nil || !strings.Contains(err.Error(), "must be <= 65535 (got 70000)") {
+					t.Errorf("err = %v, want the element's bound", err)
+				}
+			}},
 	}
 }
 
@@ -1111,6 +1149,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"ARG-13", "ARG-14", "FLAG-15", "FLAG-16",
 		"ARG-10", "ARG-11", "ARG-12", "ARG-15", "ARG-16", "FLAG-13", "FLAG-14",
 		"RSP-01", "RSP-02", "RSP-03", "RSP-04",
+		"FLAG-17", "FLAG-18", "ENV-07",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {

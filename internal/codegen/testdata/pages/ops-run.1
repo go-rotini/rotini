@@ -1,0 +1,46 @@
+.TH "OPS\-RUN" 1 "" "ops" "User Commands"
+.SH NAME
+ops\-run \- run a command on a host
+.SH SYNOPSIS
+\fBops run\fR [flags] <host> [\-\-] <command...>
+.SH ARGUMENTS
+.TP
+\fI<host>\fR
+where to run it [edge|core]
+.RS
+.RS 2
+\fBedge\fR \- the edge pool
+.br
+\fBcore\fR
+.RE
+.RE
+.TP
+\fI<command...>\fR
+the command and its arguments (passed through as typed)
+.SH "OPTIONS"
+.TP
+\fB\-f\fR, \fB\-\-format\fR \fIstring\fR
+how to print results (default text) [text|json|yaml]
+.RS
+.RS 2
+\fBtext\fR \- aligned columns
+.br
+\fBjson\fR
+.br
+\fByaml\fR \- human\-friendly
+.RE
+.RE
+.SH "GLOBAL OPTIONS"
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+print help
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+say more (repeatable)
+.br
+repeat to count: \-vvv
+.TP
+\fB\-\-color\fR \fIstring\fR
+when to color (default auto) [auto|always|never]
+.SH "SEE ALSO"
+\fBops\fR(1)

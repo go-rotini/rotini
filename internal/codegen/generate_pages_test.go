@@ -42,6 +42,17 @@ func TestDeriveUsage(t *testing.T) {
 		{"placeholder", &Inputs{Arguments: []ArgumentInput{arg("file", &InputSchema{Placeholder: "FILE", Required: true})}}, false, "demo run <FILE>"},
 		{"required variadic", &Inputs{Arguments: []ArgumentInput{arg("src", &InputSchema{Type: "[]string", Required: true})}}, false, "demo run <src...>"},
 		{"hidden argument", &Inputs{Arguments: []ArgumentInput{{Name: "secret", Hidden: true}}}, false, "demo run"},
+		{"passthrough argument", &Inputs{
+			Flags:     []FlagInput{flag(false)},
+			Arguments: []ArgumentInput{{Name: "command", Passthrough: true, Schema: &InputSchema{Type: "[]string", Required: true}}},
+		}, false, "demo run [flags] [--] <command...>"},
+		{"passthrough after an argument", &Inputs{
+			Arguments: []ArgumentInput{arg("host", required), {Name: "rest", Passthrough: true, Schema: variadic}},
+		}, false, "demo run <host> [--] [rest...]"},
+		{"variadic before a fixed tail", &Inputs{
+			Flags:     []FlagInput{flag(false)},
+			Arguments: []ArgumentInput{arg("src", &InputSchema{Type: "[]string", Required: true}), arg("dst", required)},
+		}, false, "demo run [flags] <src...> <dst>"},
 	} {
 		if got := deriveUsage("demo run", tt.inputs, tt.children); got != tt.want {
 			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)

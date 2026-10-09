@@ -39,6 +39,7 @@ func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef) error {
 	if f.Kind() == reflect.Slice {
 		elem := f.Type().Elem()
 		out := reflect.MakeSlice(f.Type(), 0, len(raw))
+		docs := make([]map[string]any, 0, len(raw))
 		for _, r := range raw {
 			doc, err := decodeObject(r, elem)
 			if err != nil {
@@ -49,6 +50,12 @@ func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef) error {
 				return err
 			}
 			out = reflect.Append(out, v)
+			docs = append(docs, doc)
+		}
+		if fd.UniqueItems {
+			if dup := duplicateDocument(docs); dup != "" {
+				return duplicateObjectError(redactValue(dup, fd.Secret))
+			}
 		}
 		f.Set(out)
 		return nil

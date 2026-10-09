@@ -40,6 +40,21 @@ stdout '^yaml$'
 exec ./hints$exe __complete open ''
 stdout '^:rotini:file$'
 
+# A map key is completed up to its "=", with no space after it, and bash's split of the
+# entry ("--set image = <TAB>") is the value, which offers nothing, not sub-commands.
+exec ./hints$exe __complete --set ''
+cmp stdout want-keys.txt
+exec ./hints$exe __complete --set image = ''
+cmp stdout want-none.txt
+
+# The shell completes account names itself.
+exec ./hints$exe __complete --owner ''
+stdout '^:rotini:user$'
+
+# help <TAB> completes command paths, and never files.
+exec ./hints$exe __complete help ''
+cmp stdout want-help.txt
+
 # The generated scripts must actually handle the directive rather than offering it as a
 # candidate — a user would otherwise be shown a line of punctuation.
 exec rotini generate cmd/hints/.rotini.spec.yaml --config completion.conf.yaml
@@ -48,6 +63,16 @@ grep ':rotini:' internal/cmd/hints/renders/completion_zsh.txt
 grep ':rotini:' internal/cmd/hints/renders/completion_fish.txt
 grep ':rotini:' internal/cmd/hints/renders/completion_powershell.txt
 
+-- want-keys.txt --
+image=
+replicas=
+:rotini:option nospace
+-- want-none.txt --
+:rotini:none
+-- want-help.txt --
+help	print help
+open	open a file
+:rotini:none
 -- completion.conf.yaml --
 version: 0.0.0
 generate:
@@ -110,6 +135,23 @@ command:
         enum:
           - json
           - yaml
+    - name: set
+      summary: a map with declared keys
+      identifiers:
+        - --set
+      schema:
+        type: map
+        properties:
+          image: { type: string }
+          replicas: { type: string }
+    - name: owner
+      summary: a local account
+      identifiers:
+        - --owner
+      schema:
+        type: string
+        complete:
+          kind: user
   commands:
     - name: open
       summary: open a file
@@ -119,6 +161,14 @@ command:
             type: string
             complete:
               kind: file
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          schema:
+            type: array
+            complete:
+              kind: command
 -- cmd/hints/.rotini.conf.yaml --
 version: 0.0.0
 generate:

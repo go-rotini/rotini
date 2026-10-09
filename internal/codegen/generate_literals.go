@@ -55,6 +55,7 @@ func renderDefinition(gp *program) string {
 		fmt.Fprintf(&b, "PluginDiscovery: %s,\n", dl)
 	}
 	b.WriteString(completionMessagesLiteral(gp.conf))
+	b.WriteString(completionDescriptionsLiteral(gp.conf))
 	if rf := gp.responseFiles(); rf != nil {
 		fmt.Fprintf(&b, "ResponseFiles: &%s.ResponseFilesDef{Prefix: %q},\n", rotiniPkgName, rf.Prefix)
 	}
@@ -258,6 +259,9 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		}
 		if f.ShortCircuit {
 			b.WriteString(", ShortCircuit: true")
+		}
+		if f.Schema != nil && f.Schema.Repeatable != nil && !*f.Schema.Repeatable {
+			b.WriteString(", NoRepeat: true")
 		}
 		if f.Schema != nil && f.Schema.ImplicitValue != nil {
 			fmt.Fprintf(b, ", ImplicitValue: %q", defaultString(f.Schema.ImplicitValue))

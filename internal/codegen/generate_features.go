@@ -171,12 +171,10 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix, gp.readsConfig(nil)), nil, gp.tree, gp.rootOutput, gp.rootInputs),
 		listed:   true,
 	}}
-	// The variable that hides completion messages is an input the end user sets, so the root's
-	// man page lists it with the program's other environment variables.
-	if mode, env := completionMessages(gp.conf); feat.manPages && mode != "" && env != "" {
-		out[0].data.Environment = append(out[0].data.Environment, templateDocEnvRow{
-			Var: env, Summary: "set to 0, false or off to hide completion messages",
-		})
+	// The variables that switch completion messages and descriptions are inputs the end user
+	// sets, so the root's man page lists them with the program's other environment variables.
+	if feat.manPages {
+		out[0].data.Environment = append(out[0].data.Environment, completionEnvRows(gp.conf)...)
 	}
 
 	// cascading accumulates the cascading flags of a node's ancestors.
@@ -353,6 +351,8 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				Variadic:    isVariadicSchema(a.Schema),
 				Default:     schemaDefaultString(a.Schema),
 				Enum:        enumOf(a.Schema),
+				EnumValues:  enumValuesOf(a.Schema),
+				Passthrough: a.Passthrough,
 				Deprecated:  a.Deprecated,
 				Constraints: constraints,
 				Rules:       rules,
@@ -376,6 +376,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				Required:    e.Schema != nil && e.Schema.Required,
 				Default:     schemaDefaultString(e.Schema),
 				Enum:        enumOf(e.Schema),
+				EnumValues:  enumValuesOf(e.Schema),
 				Deprecated:  e.Deprecated,
 				Constraints: constraints,
 				Rules:       rules,
@@ -394,6 +395,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				Required:    c.Schema != nil && c.Schema.Required,
 				Default:     schemaDefaultString(c.Schema),
 				Enum:        enumOf(c.Schema),
+				EnumValues:  enumValuesOf(c.Schema),
 				Deprecated:  c.Deprecated,
 				Constraints: constraints,
 				Rules:       rules,
@@ -565,6 +567,7 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		Required:    f.Schema != nil && f.Schema.Required,
 		Default:     schemaDefaultString(f.Schema),
 		Enum:        enumOf(f.Schema),
+		EnumValues:  enumValuesOf(f.Schema),
 		Deprecated:  deprecated,
 		Constraints: constraints,
 		Rules:       rules,
@@ -697,8 +700,8 @@ func (gp *program) readsConfig(path []string) bool {
 
 // deriveUsage builds the default usage line: the invocation, [flags] when there are visible
 // flags, a <command> slot when there are visible children, then each visible argument
-// (<required> or [optional], "..." when variadic). A command's flags are accepted anywhere
-// after its name, so before its arguments is always right.
+// (<required> or [optional], "..." when variadic), with [--] before a passthrough argument. A
+// command's flags are accepted anywhere after its name, so before its arguments is always right.
 func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 	var b strings.Builder
 	b.WriteString(invocation)
@@ -719,6 +722,9 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 			}
 			if isVariadicSchema(a.Schema) {
 				name += "..."
+			}
+			if a.Passthrough {
+				b.WriteString(" [--]")
 			}
 			if a.Schema != nil && a.Schema.Required {
 				b.WriteString(" <")
@@ -805,6 +811,15 @@ func enumOf(schema *InputSchema) []string {
 		return nil
 	}
 	return enumStrings(schema.Enum)
+}
+
+// enumValuesOf returns every enum value in declared order with its summary, for the docs pages;
+// nil when no value has a summary, so the pages keep the compact value list.
+func enumValuesOf(schema *InputSchema) []enumValue {
+	if schema == nil || !enumDescribed(schema.Enum) {
+		return nil
+	}
+	return enumValues(schema.Enum)
 }
 
 // negatableIdentifiers returns a flag's identifiers as docs show them. A negatable flag's long
@@ -966,10 +981,10 @@ func docFeatureContents(pl *planner, featDir string, nodes []helpNode, feat docF
 }
 
 // completionContents returns each node's shell completion script, parallel to nodes.
-func completionContents(prog, messagesEnv string, nodes []helpNode) ([]string, error) {
+func completionContents(prog string, envs completionEnvs, nodes []helpNode) ([]string, error) {
 	contents := make([]string, len(nodes))
 	for i, n := range nodes {
-		script, err := completionScript(prog, n.name, messagesEnv)
+		script, err := completionScript(prog, n.name, envs)
 		if err != nil {
 			return nil, fmt.Errorf("generate %s completion: %w", n.name, err)
 		}

@@ -51,7 +51,7 @@ const (
 //   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr]
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
 //     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion],
-//     [Program.WithCompletionMessages], and the environment and working directory a run reads,
+//     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions], and the environment and working directory a run reads,
 //     [Program.WithEnviron] and [Program.WithDir]
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
@@ -103,6 +103,10 @@ type Program struct {
 	// completionMessages decides whether completion messages show; nil reads the declared
 	// environment variable. See WithCompletionMessages.
 	completionMessages func(rtx *Context) bool
+
+	// completionDescriptions decides whether completion candidates carry descriptions; nil reads
+	// the declared environment variable. See WithCompletionDescriptions.
+	completionDescriptions func(rtx *Context) bool
 
 	// rotini's own settings, kept out of the dependency store so a program's dependency can
 	// never shadow them.
@@ -483,7 +487,7 @@ func (p *Program) RunContext(ctx context.Context, argv []string) (int, error) {
 // supplied the context, which decides the default signal trap.
 func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (int, error) {
 	if len(argv) > 0 && argv[0] == completeCommand {
-		return p.Complete(argv[1:], p.completion)
+		return p.complete(runCtx, argv[1:], p.completion)
 	}
 
 	// signalAuto traps iff the caller supplied no context; WithSignals and
@@ -515,6 +519,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	}
 	rtx := p.newRunContext()
 	rtx.bindRun(ctx)
+	rtx.enterHook(ctx, true)
 
 	if rf := p.def.ResponseFiles; rf != nil {
 		expanded, err := expandResponseFiles(argv, rf.Prefix, rtx.view, false)
@@ -640,7 +645,8 @@ func (p *Program) resolveHandlers(chain []Command) ([]Handler, *WiringError) {
 // Recovered panics reach the reporter after teardown. A canceled run context becomes a
 // [Context.HaltWithCode] between forward hooks (teardown still runs; the code is the
 // cancellation cause's, or 0). The conversion happens on the dispatch goroutine, so rtx keeps
-// a single writer.
+// a single writer. Only the run context counts: one a hook set with [Context.SetContext]
+// reaches the later hooks but never halts the run.
 func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (int, error) {
 	handlers, werr := p.resolveHandlers(chain)
 	if werr != nil {
@@ -660,9 +666,9 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	// after teardown rather than reported.
 	panicked := false
 	var panicValue any
-	run := func(hook func(context.Context, *Context)) {
+	run := func(hookCtx context.Context, hook func(context.Context, *Context)) {
 		if !p.panicRecover && !p.teardownOnPanic {
-			hook(ctx, rtx) // unguarded: original stack, no teardown
+			hook(hookCtx, rtx) // unguarded: original stack, no teardown
 			return
 		}
 		defer func() {
@@ -675,7 +681,7 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 				}
 			}
 		}()
-		hook(ctx, rtx)
+		hook(hookCtx, rtx)
 	}
 
 	// halt reports whether forward progress should stop, converting a cancellation into
@@ -698,12 +704,17 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	}
 
 	// Forward. began records how far the plan got, so the unwind covers exactly the begun steps.
+	// rtx holds the context the next hook receives, moved on by SetContext; received keeps
+	// what each step's Do received, for its teardown. halt and the reporter keep the run's ctx.
 	began := 0
-	for _, s := range steps {
+	received := make([]context.Context, len(steps))
+	rtx.enterHook(ctx, false)
+	for i, s := range steps {
 		began++
+		received[i] = rtx.Context() //nolint:fatcontext // one context per step, recorded, not nested
 		// A nil Do is a step with only a teardown.
 		if s.Do != nil {
-			run(s.Do)
+			run(received[i], s.Do) //nolint:contextcheck // the context SetContext handed on
 		}
 		if halt() {
 			break
@@ -714,9 +725,11 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	// hook stops the rest too.
 	for i := began - 1; i >= 0 && !exitNow() && (p.teardownOnPanic || !panicked); i-- {
 		if steps[i].Undo != nil {
-			run(steps[i].Undo)
+			rtx.enterHook(received[i], true) //nolint:contextcheck // what this step's Do received
+			run(received[i], steps[i].Undo)  //nolint:contextcheck // what this step's Do received
 		}
 	}
+	rtx.enterHook(ctx, true)
 
 	// panicRecover=false, teardownOnPanic=true: the panic was caught only so teardown could
 	// run; re-raise it.

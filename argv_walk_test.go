@@ -107,8 +107,8 @@ func TestWalkers_agreeOnFloatWords(t *testing.T) {
 	if cc := walkContext(def, []string{"-Inf", "x", "sub"}); len(cc.chain) != 2 || cc.positionals != 0 {
 		t.Errorf("walk -Inf x sub: chain %d, positionals %d; want 2, 0", len(cc.chain), cc.positionals)
 	}
-	if name, ok := pendingValueFlag(nil, []string{"sub", "-Inf"}); !ok || name != "-Inf" {
-		t.Errorf("pendingValueFlag(-Inf) = %q, %v; want -Inf awaiting a value", name, ok)
+	if cc := walkContext(def, []string{"sub", "-Inf"}); cc.pending == nil || cc.pending.fd.Name != "inf" {
+		t.Errorf("walk sub -Inf: pending %+v, want -Inf awaiting a value", cc.pending)
 	}
 }
 

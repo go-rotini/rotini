@@ -1,7 +1,8 @@
 # R2 — what a generated help page shows from the spec alone: the usage line with flags first,
 # group headings with their descriptions in the declared order, long-only flags lined up with
-# the long column, declared constraints, the stdin a command reads, and the note on a
-# passthrough command that its flags go before its name.
+# the long column, declared constraints, the stdin a command reads, the note on a passthrough
+# command that its flags go before its name, the `[--]` before a passthrough argument, and enum
+# values listed with their summaries.
 
 gomodinit example.com/ops
 
@@ -31,6 +32,11 @@ exec ./ops$exe --help exec
 stdout '^  ops exec <argv\.\.\.>$'
 stdout '^Every word after "exec" is passed through as written, so flags go before "exec"\.$'
 
+# A passthrough argument has `[--]` before it in the usage line, and enum values with summaries
+# are listed under their row in the declared order.
+exec ./ops$exe run --help
+cmp stdout run.txt
+
 -- root.txt --
 run the fleet
 
@@ -39,6 +45,7 @@ Usage:
 
 Commands:
   exec    run a command
+  run     run a command on a host
 
 Data:
   Commands that read a document from standard input.
@@ -67,6 +74,25 @@ Arguments:
 Flags:
   -p, --port int        listen port (default 8080) (1..65535)
       --tag []string    a label (1..5 values, repeatable)
+
+Global Flags:
+  -h, --help            print help
+  -v, --verbose         say more (repeatable)
+      --color string    when to color (default auto) [auto|always|never]
+-- run.txt --
+run a command on a host
+
+Usage:
+  ops run [flags] [--] <command...>
+
+Arguments:
+  <command...>    the command and its arguments (passed through as typed)
+
+Flags:
+  -f, --format string    how to print results (default text) [text|json|yaml]
+                           text    aligned columns
+                           json
+                           yaml    human-friendly
 
 Global Flags:
   -h, --help            print help
@@ -138,6 +164,24 @@ command:
         - name: argv
           summary: the command and its arguments
           schema: {type: '[]string', required: true}
+    - name: run
+      summary: run a command on a host
+      arguments:
+        - name: command
+          summary: the command and its arguments
+          passthrough: true
+          schema: {type: '[]string', required: true}
+      flags:
+        - name: format
+          summary: how to print results
+          identifiers: [--format, -f]
+          schema:
+            type: string
+            default: text
+            enum:
+              - {value: text, summary: aligned columns}
+              - json
+              - {value: yaml, summary: human-friendly}
 -- cmd/ops/.rotini.conf.yaml --
 version: 0.0.0
 generate:

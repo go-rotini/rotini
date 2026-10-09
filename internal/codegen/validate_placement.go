@@ -31,6 +31,7 @@ var schemaKeyChannels = map[string][]string{
 	"key":            {"flag", "config"},
 	"nesting":        {"env"},
 	"file":           {"config"},
+	"repeatable":     {"flag"},
 }
 
 // schemaKeyFits reports whether key is a schema key that takes effect on channel.

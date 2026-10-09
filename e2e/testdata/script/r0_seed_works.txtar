@@ -74,6 +74,11 @@ exec ./demo$exe __complete ''
 stdout 'help'
 stdout 'version'
 
+# The seeded help command's argument completes command paths, and never files.
+exec ./demo$exe __complete help ''
+stdout '^version\tprint version$'
+stdout '^:rotini:none$'
+
 # A command that only groups sub-commands gets the same stub as the root: run bare, it prints
 # its help on stderr and exits 1. A command with a secret input never prints its inputs, and
 # no page shows a secret's default.

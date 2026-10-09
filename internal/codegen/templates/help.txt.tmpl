@@ -22,11 +22,12 @@
          .CommandGroups[] {.Title .Description .Commands[]} — Title "" = default heading;
                           .Description is the paragraph the command's `groups` gives it
          .FlagGroups[]    {.Title .Description .Flags[]} — the same, for .Flags
-         .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .Deprecated
-                          .Constraints .Rules}
+         .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .EnumValues
+                          .Deprecated .Constraints .Rules .Passthrough} — .Passthrough: the
+                          argument and every word after it are passed on as typed
          .Flags[]         {.Identifiers .Label .Summary .Type .Required .Default .Implicit .Enum
-                          .Deprecated .Env .ConfigKey .Constraints .Rules} — .Label: the
-                          identifiers joined, long-only flags indented to the long column;
+                          .EnumValues .Deprecated .Env .ConfigKey .Constraints .Rules} —
+                          .Label: the identifiers joined, long-only flags indented to the long column;
                           .Env: the flag's environment variables, in lookup order; .ConfigKey:
                           its config key, set only when the command reads config files. Both
                           are empty for a flag with no fallback. alsoSetBy .Env .ConfigKey "" ""
@@ -34,9 +35,13 @@
          .Constraints     on argument, flag, env and config rows: the declared bounds, lengths,
                           item counts and repeatability as a short note (1..65535); .Rules: the
                           same as sentences, plus pattern and separator
-         .Environment[]   {.Var .Summary .Type .Required .Default .Enum .Deprecated .Constraints .Rules}
-         .Configuration[] {.Name .Location .Summary .Type .Required .Default .Enum .Deprecated
+         .EnumValues      on argument, flag, env and config rows: every value in declared order
+                          as {.Value .Summary}, nil when no value has a summary (.Enum always
+                          holds the values alone)
+         .Environment[]   {.Var .Summary .Type .Required .Default .Enum .EnumValues .Deprecated
                           .Constraints .Rules}
+         .Configuration[] {.Name .Location .Summary .Type .Required .Default .Enum
+                          .EnumValues .Deprecated .Constraints .Rules}
          .Cascading[]     same shape as .Flags — cascading flags inherited from ancestors
          .Stdin           {.Format .Type .Description .Required .Fields[]}, nil when the
                           command declares no stdin
@@ -47,6 +52,8 @@
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last,
                 alsoSetBy.
                 All deterministic (no clock/entropy) to keep rendering byte-stable. */ -}}
+{{- define "values"}}{{range .EnumValues}}  	  {{.Value}}	{{.Summary}}
+{{end}}{{end -}}
 {{- with .Header}}{{.}}
 
 {{end -}}
@@ -70,27 +77,27 @@
 {{end}}
 {{end -}}
 {{- with .Arguments}}{{$.Headings.Arguments}}
-{{range .}}  {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
-{{end}}
+{{range .}}  {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{template "values" .}}{{end}}
 {{end -}}
 {{- range .FlagGroups}}{{if .Title}}{{.Title}}:{{else}}{{$.Headings.Flags}}{{end}}
 {{with .Description}}{{indent 2 .}}
 {{end}}{{range .Flags}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
-{{end}}{{end}}
+{{end}}{{template "values" .}}{{end}}
 {{end -}}
 {{- with .Environment}}{{$.Headings.Environment}}
 {{range .}}  {{.Var}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
-{{end}}
+{{template "values" .}}{{end}}
 {{end -}}
 {{- with .Configuration}}{{$.Headings.Configuration}}
 {{range .}}  {{.Name}}{{with .Location}} ({{.}}){{end}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
-{{end}}
+{{template "values" .}}{{end}}
 {{end -}}
 {{- with .Cascading}}{{$.Headings.Cascading}}
 {{range .}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
-{{end}}{{end}}
+{{end}}{{template "values" .}}{{end}}
 {{end -}}
 {{- with .Stdin}}{{$.Headings.Stdin}}
 {{with .Description}}  {{.}}

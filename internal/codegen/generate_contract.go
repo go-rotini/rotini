@@ -38,7 +38,8 @@ type contractResponseFiles struct {
 
 // contractCompletion is what the program's shell completion lets its users switch.
 type contractCompletion struct {
-	MessagesEnv string `json:"messages_env,omitempty"` // set to 0, false or off to hide completion messages
+	MessagesEnv     string `json:"messages_env,omitempty"`     // set to 0, false or off to hide completion messages
+	DescriptionsEnv string `json:"descriptions_env,omitempty"` // set to 0, false or off to hide completion descriptions
 }
 
 // contractCommand is one visible command, or one plugin a command declares.
@@ -85,6 +86,7 @@ type contractFlag struct {
 	Deprecated   string                       `json:"deprecated,omitempty"`
 	EnumValues   map[string]contractEnumValue `json:"enum_values,omitempty"`
 	Schema       any                          `json:"schema"`
+	Repeatable   *bool                        `json:"repeatable,omitempty"` // set only to false: a repeat is an error
 }
 
 type contractEnv struct {
@@ -385,8 +387,8 @@ func schemaRefs(v any) []string {
 // contract renders the contract document.
 func (p *program) contract(nodes []contractNode) ([]byte, error) {
 	doc := contractDoc{Format: contractFormat, Name: p.rootName, Errors: errorSchemaBytes}
-	if mode, env := completionMessages(p.conf); mode != "" && env != "" {
-		doc.Completion = &contractCompletion{MessagesEnv: env}
+	if envs := completionScriptEnvs(p.conf); envs != (completionEnvs{}) {
+		doc.Completion = &contractCompletion{MessagesEnv: envs.messages, DescriptionsEnv: envs.descriptions}
 	}
 	if rf := p.responseFiles(); rf != nil {
 		doc.ResponseFiles = &contractResponseFiles{Prefix: rf.Prefix}
@@ -466,6 +468,9 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 			Cascading: f.Cascading && !inherited, Inherited: inherited, Deprecated: f.Deprecated,
 			ShortCircuit: f.ShortCircuit, EnumValues: contractEnumValues(f.Schema),
 			Schema: inputJSONSchema(f.Schema),
+		}
+		if f.Schema != nil && f.Schema.Repeatable != nil && !*f.Schema.Repeatable {
+			cf.Repeatable = f.Schema.Repeatable
 		}
 		// The same names help shows, from the same functions as the generated env tags.
 		row := withConfigKeys([]templateDocFlagRow{flagRow(f, p.envPrefix)}, readsConfig)[0]

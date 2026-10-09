@@ -33,6 +33,11 @@ type Definition struct {
 	// declares `messages`; nil leaves them off. See [Context.AddCompletionMessage].
 	CompletionMessages *CompletionMessagesDef
 
+	// CompletionDescriptions is how completion descriptions are switched off at run time, when
+	// the conf's completion feature declares `descriptions_env`; nil leaves them always on. See
+	// [Program.WithCompletionDescriptions].
+	CompletionDescriptions *CompletionDescriptionsDef
+
 	// ResponseFiles turns on response files: a word starting with the prefix names a file whose
 	// lines are read as more words. nil leaves them off.
 	ResponseFiles *ResponseFilesDef
@@ -60,6 +65,15 @@ type CompletionMessagesDef struct {
 	// Env is the environment variable the conf's `messages_env` names, "" for none. Set to
 	// 0, false or off, in any case, it hides every message. [Program.WithCompletionMessages]
 	// replaces this check.
+	Env string
+}
+
+// CompletionDescriptionsDef is how completion descriptions are switched at run time, from the
+// conf's completion feature.
+type CompletionDescriptionsDef struct {
+	// Env is the environment variable the conf's `descriptions_env` names. Set to 0, false or
+	// off, in any case, it hides every candidate's description in every shell.
+	// [Program.WithCompletionDescriptions] replaces this check.
 	Env string
 }
 
@@ -155,6 +169,9 @@ type Constraints struct {
 	MaxItems         *int     // maximum item count; nil = unset
 	Pattern          string   // regular expression the value must contain (string types); "" = unset
 	PatternMessage   string   // what a Pattern failure tells the user, in place of the regex; "" = show the regex
+	// UniqueItems rejects a list that holds the same value twice (repeatable flag / variadic
+	// argument). Values compare as their type reads them, so `01` and `1` are the same int.
+	UniqueItems bool
 }
 
 // Ptr returns a pointer to v, for the pointer [Constraints] bounds:
@@ -167,11 +184,6 @@ func Ptr[T any](v T) *T { return new(v) }
 // takesValue reports whether a flag consumes a value token: every type but bool (which takes
 // a value only in the inline form) and count.
 func takesValue(fd FlagDef) bool { return fd.Type != "bool" && fd.Type != "count" }
-
-// takesSeparateValue reports whether fd's value may be the NEXT word: a value-taking flag whose
-// value is not optional. An optional value (ImplicitValue) must be attached, so `--color <TAB>`
-// completes whatever comes next, not the flag's values.
-func takesSeparateValue(fd FlagDef) bool { return takesValue(fd) && fd.ImplicitValue == "" }
 
 // FlagDef describes a single flag of a command. Name is the logical name and
 // matches the `rotini:"<name>"` tag on the corresponding generated input field.
@@ -225,9 +237,12 @@ type FlagDef struct {
 	// so [Context.Inputs] succeeds and the handler decides what to do. Errors reading the
 	// command line are still reported.
 	ShortCircuit bool
-	DottedKeys   bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
-	KeyPaths     []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
-	From         []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
+	// NoRepeat makes a single-value flag given more than once on the command line an error
+	// (spec `repeatable: false`) instead of the last value winning.
+	NoRepeat   bool
+	DottedKeys bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
+	KeyPaths   []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
+	From       []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
 	// Complete is the declarative shell-completion hint for this flag's value (spec
 	// complete:). The zero value means no hint.
 	Complete Completion
@@ -240,9 +255,17 @@ type FlagDef struct {
 // completer ([FlagValueCompleter], [ArgValueCompleter]) wins when it answers; the hint is the
 // fallback.
 type Completion struct {
-	// Kind is "file", "directory", or "none". Empty means no hint: the shell applies its
-	// own default, which for bash and zsh is file completion. "none" suppresses that
-	// default, for opaque values such as resource IDs.
+	// Kind is what the value is. Empty means no hint: the shell applies its own default, which
+	// for bash and zsh is file completion.
+	//   - "file" and "directory" complete paths; "none" completes nothing, suppressing that
+	//     default, for opaque values such as resource IDs.
+	//   - "command" completes command paths below the root: the words already given to the
+	//     argument are the path, and the candidates are that command's visible sub-commands.
+	//     Rotini answers it itself, and tells the shell "none".
+	//   - "executable", "user", "group" and "host" are completed by the shell's own completer:
+	//     program names (bash offers every command name it knows), local accounts and groups,
+	//     and the host names the shell knows. PowerShell has no host completer and offers
+	//     users and groups on Windows only.
 	Kind string
 	// Extensions narrows Kind "file" to these suffixes, written without a dot
 	// ("yaml", "json"). Empty offers every file.

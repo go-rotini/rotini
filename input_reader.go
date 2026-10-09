@@ -1592,6 +1592,14 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		if ignoreCase {
 			canonicalizeField(s.Field(j), enum)
 		}
+		// A list is checked element by element as bound, since an environment variable's list
+		// arrives as one string.
+		if elems, count, ok := typedElems(s.Field(j)); ok && isArrayType(typ) {
+			if err := checkTypedConstraints(label, typ, c, count, elems, secret, view.base()); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := checkConstraints(label, typ, c, vals, secret, view.base()); err != nil {
 			return err
 		}
@@ -1696,6 +1704,9 @@ func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 		c.Pattern, has = v, true
 	}
 	c.PatternMessage = tag.Get("patternmsg")
+	if tag.Get("unique") == "true" {
+		c.UniqueItems, has = true, true
+	}
 	return c, has
 }
 
@@ -1718,7 +1729,11 @@ func channelGoType(t reflect.Type) string {
 	case reflect.Float32, reflect.Float64:
 		return "float64"
 	case reflect.Slice:
-		return "[]string"
+		// The element type, so per-element bounds apply; a byte-backed type is one value.
+		if t.Elem().Kind() == reflect.Uint8 {
+			return "[]string"
+		}
+		return "[]" + channelGoType(t.Elem())
 	default:
 		return "string"
 	}

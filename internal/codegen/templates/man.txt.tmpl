@@ -26,6 +26,10 @@
          Argument, flag, env and config rows carry .Constraints (the declared bounds, lengths,
          item counts and repeatability as a short note) and .Rules (the same as sentences,
          plus pattern and separator).
+         Argument, flag, env and config rows carry .EnumValues: every value in declared order
+         as {.Value .Summary}, nil when no value has a summary (.Enum always holds the values
+         alone). An argument row carries .Passthrough when it and every word after it are
+         passed on as typed.
        HELPERS: roff, roffBlock, roffLines, roffArg, join, upper, lower, title, trim,
                 trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
                 hasPrefix, hasSuffix, first, last, alsoSetBy. */ -}}
@@ -33,12 +37,19 @@
 {{- define "rules"}}{{with .Rules}}.br
 {{roff (join . "; ")}}
 {{end}}{{end -}}
+{{- define "values"}}{{with .EnumValues}}.RS
+.RS 2
+{{range $i, $v := .}}{{if $i}}.br
+{{end}}\fB{{roff $v.Value}}\fR{{with $v.Summary}} \- {{roff .}}{{end}}
+{{end}}.RE
+.RE
+{{end}}{{end -}}
 {{- define "flag"}}.TP
 {{range $i, $id := .Identifiers}}{{if $i}}, {{end}}\fB{{roff $id}}\fR{{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
 {{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
-{{end}}{{end -}}
+{{end}}{{template "values" .}}{{end -}}
 .TH {{roffArg (upper .PageName)}} {{.Section}} "{{.Date}}" {{roffArg .Source}} "User Commands"
 .SH NAME
 {{roff .PageName}}{{with .Summary}} \- {{roff .}}{{end}}
@@ -62,8 +73,8 @@ Every word after \fB{{roff .}}\fR is passed through as written, so options go be
 {{with .Arguments}}.SH ARGUMENTS
 {{range .}}.TP
 \fI{{if .Required}}<{{roff .Name}}{{if .Variadic}}...{{end}}>{{else}}[{{roff .Name}}{{if .Variadic}}...{{end}}]{{end}}\fR
-{{roff .Summary}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}
-{{template "rules" .}}{{end}}{{end}}
+{{roff .Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}
+{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
 {{range .FlagGroups}}.SH {{roffArg (upper (default "Options" .Title))}}
 {{with .Description}}{{roffBlock .}}
 {{end}}{{range .Flags}}{{template "flag" .}}{{end}}{{end}}
@@ -73,12 +84,12 @@ Every word after \fB{{roff .}}\fR is passed through as written, so options go be
 {{range .}}.TP
 \fB{{roff .Var}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}
-{{template "rules" .}}{{end}}{{end}}
+{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
 {{with .Configuration}}.SH CONFIGURATION
 {{range .}}.TP
 \fB{{roff .Name}}\fR{{with .Location}} ({{roff .}}){{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}
-{{template "rules" .}}{{end}}{{end}}
+{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
 {{with .Stdin}}.SH STDIN
 {{with .Description}}{{roffBlock .}}
 .PP

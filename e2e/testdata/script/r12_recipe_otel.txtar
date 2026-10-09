@@ -1,0 +1,191 @@
+# R12 — the OpenTelemetry recipe: the root handler starts one span per run and hands its context
+# on with SetContext, so a command's own spans are its children, and the root's teardown ends
+# it, marked failed when the command failed. The handler files are the ones the recipes page
+# shows; printer.go stands in for an exporter and is not on the page.
+
+gomodinit example.com/tracedemo
+
+exec rotini generate cmd/tracedemo/.rotini.spec.yaml --config cmd/tracedemo/.rotini.conf.yaml
+cp root.go.txt internal/cmd/tracedemo/tracedemo.go
+cp work.go.txt internal/cmd/tracedemo/tracedemo_work.go
+exec go get go.opentelemetry.io/otel@v1.44.0 go.opentelemetry.io/otel/trace@v1.44.0 go.opentelemetry.io/otel/sdk@v1.44.0
+exec go mod tidy
+exec go build -o tracedemo$exe ./cmd/tracedemo
+
+# The command's span is a child of the run's, which ends last.
+exec ./tracedemo$exe work
+stdout '^worked$'
+cmp stderr want-work.txt
+
+# A failed command marks the run's span.
+wantexit 1 ./tracedemo$exe fail
+stderr '^span "tracedemo fail" failed$'
+stderr 'no luck'
+
+-- want-work.txt --
+span "load" in "tracedemo work"
+span "tracedemo work"
+-- root.go.txt --
+package tracedemo
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var _ rotini.Handler = (*tracedemoHandler)(nil)
+
+var tracer = otel.Tracer("example.com/tracedemo")
+
+type tracedemoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+
+	// span is the run's span. CascadingPostRun receives the context this handler's
+	// CascadingPreRun received, not the one it set, so the span is kept here to end it.
+	span trace.Span
+}
+
+// CascadingPreRun starts the run's span, named after the invoked command, and hands its
+// context to every later hook.
+func (h *tracedemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	var names []string
+	for _, c := range rtx.CommandChain() {
+		names = append(names, c.Name)
+	}
+	ctx, h.span = tracer.Start(ctx, strings.Join(names, " "))
+	rtx.SetContext(ctx)
+}
+
+func (h *tracedemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	if rtx.Failed() {
+		h.span.SetStatus(codes.Error, "the command failed")
+	}
+	h.span.End()
+}
+
+func (*tracedemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+-- work.go.txt --
+package tracedemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*tracedemoWorkHandler)(nil)
+
+type tracedemoWorkHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*tracedemoWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	_, span := tracer.Start(ctx, "load")
+	defer span.End()
+	fmt.Fprintln(rtx.Stdout, "worked")
+}
+-- internal/cmd/tracedemo/tracedemo_fail.go --
+package tracedemo
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*tracedemoFailHandler)(nil)
+
+type tracedemoFailHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*tracedemoFailHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.HaltWith(errors.New("no luck"))
+}
+-- internal/cmd/tracedemo/printer.go --
+package tracedemo
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"sync"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
+)
+
+func init() {
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(&printer{names: map[trace.SpanID]string{}})))
+}
+
+// printer writes each span to stderr as it ends, naming the span it is a child of.
+type printer struct {
+	mu    sync.Mutex
+	names map[trace.SpanID]string
+}
+
+func (p *printer) OnStart(_ context.Context, s sdktrace.ReadWriteSpan) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.names[s.SpanContext().SpanID()] = s.Name()
+}
+
+func (p *printer) OnEnd(s sdktrace.ReadOnlySpan) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	line := fmt.Sprintf("span %q", s.Name())
+	if parent, ok := p.names[s.Parent().SpanID()]; ok {
+		line += fmt.Sprintf(" in %q", parent)
+	}
+	if s.Status().Code == codes.Error {
+		line += " failed"
+	}
+	fmt.Fprintln(os.Stderr, line)
+}
+
+func (*printer) Shutdown(context.Context) error   { return nil }
+func (*printer) ForceFlush(context.Context) error { return nil }
+-- cmd/tracedemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: tracedemo
+  summary: one span per run
+  commands:
+    - name: work
+      summary: do some traced work
+    - name: fail
+      summary: fail, marking the span
+-- cmd/tracedemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/tracedemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/tracedemo/zz_tracedemo.go
+      package: tracedemo
+  features:
+    - type: help
+      enabled: true

@@ -10,6 +10,9 @@ add a note
 .TP
 \fBexec\fR
 run a command
+.TP
+\fBrun\fR
+run a command on a host
 .SH "DATA"
 Commands that read a document from standard input.
 .TP
@@ -44,12 +47,34 @@ when to color (default auto) [auto|always|never]
 the API token (length >= 20)
 .br
 at least 20 characters
+.TP
+\fBOPS_LOG\fR \fIstring\fR
+the log level [debug|info|error]
+.RS
+.RS 2
+\fBdebug\fR \- everything
+.br
+\fBinfo\fR
+.br
+\fBerror\fR \- failures only
+.RE
+.RE
 .SH CONFIGURATION
 .TP
 \fBregion\fR (region) \fIstring\fR
 the default region
 .br
 must look like eu\-1
+.TP
+\fBprofile\fR (profile) \fIstring\fR
+the output profile [short|long]
+.RS
+.RS 2
+\fBshort\fR \- one line each
+.br
+\fBlong\fR \- every field
+.RE
+.RE
 .SH "SEE ALSO"
 \fBops\-deploy\fR(1), \fBops\-import\fR(1), \fBops\-upper\fR(1),
-\fBops\-note\fR(1), \fBops\-exec\fR(1)
+\fBops\-note\fR(1), \fBops\-exec\fR(1), \fBops\-run\fR(1)

@@ -580,7 +580,7 @@ func flagNamed(chain []Command, name string) bool {
 		return true
 	}
 	if isShortCluster(name) {
-		_, _, ok := findFlag(chain, name[:2])
+		_, _, ok := findFlagIndex(chain, name[:2])
 		return ok
 	}
 	return false
@@ -709,7 +709,13 @@ func checkFlagValues(fd FlagDef, label string, vals []string, dir string) error 
 			}
 		}
 	}
-	return checkConstraints(label, fd.Type, fd.Constraints, vals, fd.Secret, dir)
+	if err := checkConstraints(label, fd.Type, fd.Constraints, vals, fd.Secret, dir); err != nil {
+		return err
+	}
+	if fd.UniqueItems && !isObjectFlag(fd) {
+		return checkUniqueItems(label, vals, uniqueKeyFor(fd.Type, fd.Layout, fd.Enum, fd.IgnoreCase), fd.Secret)
+	}
+	return nil
 }
 
 // strayCommand reports a positional on a command that branches but takes no arguments: a
@@ -790,7 +796,7 @@ func validate(chain []Command, store *parsedInputs) error {
 			var err error
 			if waived {
 				err = checkFlagShape(fd, fsi.label(fd), fsi.flags[fd.Name])
-			} else {
+			} else if err = checkRepeat(fd, fsi.label(fd), fsi.flags[fd.Name], store.setOnArgv(i, fd.Name)); err == nil {
 				err = checkFlagValues(fd, fsi.label(fd), fsi.flags[fd.Name], store.dir)
 			}
 			if err != nil {
@@ -854,7 +860,14 @@ func checkArgValues(ad ArgDef, vals []string, dir string) error {
 			}
 		}
 	}
-	return checkConstraints("<"+ad.Name+">", ad.Type, ad.Constraints, vals, ad.Secret, dir)
+	label := "<" + ad.Name + ">"
+	if err := checkConstraints(label, ad.Type, ad.Constraints, vals, ad.Secret, dir); err != nil {
+		return err
+	}
+	if ad.UniqueItems {
+		return checkUniqueItems(label, vals, uniqueKeyFor(ad.Type, ad.Layout, ad.Enum, ad.IgnoreCase), ad.Secret)
+	}
+	return nil
 }
 
 // hasVariadicArg reports whether any of a command's arguments is variadic.
@@ -1691,6 +1704,9 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef) error {
 				continue
 			case isObjectFlag(def):
 				if err := bindObjectFlag(v.Field(i), raw, def); err != nil {
+					if _, dup := errors.AsType[duplicateObjectError](err); dup {
+						return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s %v", label, err), Flag: label}
+					}
 					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", label, err), Flag: label}
 				}
 				continue

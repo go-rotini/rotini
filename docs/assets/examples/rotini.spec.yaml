@@ -121,7 +121,7 @@ command:
         - name: env
           summary: the environment
           identifiers: [-e, --env]
-          schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, complete: { kind: none, message: "one of dev, staging or prod" } }
+          schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, repeatable: false, complete: { kind: none, message: "one of dev, staging or prod" } }
         - name: target
           summary: where to ship
           identifiers: [--target]
@@ -137,7 +137,7 @@ command:
         - name: tag
           summary: image tags
           identifiers: [--tag]
-          schema: { type: '[]string', separator: ',', minItems: 1 }
+          schema: { type: '[]string', separator: ',', minItems: 1, uniqueItems: true }
         - name: set
           summary: override values (a.b=c)
           identifiers: [--set]
@@ -220,7 +220,13 @@ command:
         - name: command
           summary: the command to run, and its arguments
           passthrough: true
-          schema: { type: '[]string' }
+          schema: { type: '[]string', complete: { kind: executable } }
+    - name: help
+      summary: show help for a command
+      arguments:
+        - name: command
+          summary: the command to show help for
+          schema: { type: '[]string', complete: { kind: command } }
     - name: status
       summary: show what is deployed
       help: |

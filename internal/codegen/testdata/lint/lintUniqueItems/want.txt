@@ -1,0 +1,5 @@
+spec: .rotini.spec.yaml:8:7: command demo: flag "name": sets `uniqueItems`, which applies to list types only, not string; it would be silently ignored
+spec: .rotini.spec.yaml:11:7: command demo: flag "labels": sets `uniqueItems`, which applies to list types only, not map[string]any; it would be silently ignored
+spec: .rotini.spec.yaml:14:7: command demo: flag "ports": sets `uniqueItems` under `items`, but it is a rule about the whole list; move it up beside `type`
+spec: .rotini.spec.yaml:17:7: command demo: flag "ids": `default` repeats "1", but `uniqueItems` is set; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:20:7: command demo: flag "waits": `default` repeats "60m", but `uniqueItems` is set; every run that leaves it unset would fail

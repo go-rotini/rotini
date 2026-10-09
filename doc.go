@@ -278,7 +278,10 @@
 //     __complete answer in that format, for hosts that call it (Docker, Flux). When the conf
 //     turns completion messages on, a completer adds its own with
 //     [Context.AddCompletionMessage], and [Program.WithCompletionMessages] decides when they
-//     show.
+//     show. A completer reads what has been typed so far with [Context.PartialInputs] and the
+//     program's context with [Context.Context], and asks for no trailing space with
+//     [Context.SetCompletionOptions]; [Program.WithCompletionDescriptions] decides whether
+//     candidates carry descriptions.
 //
 // # Batteries
 //

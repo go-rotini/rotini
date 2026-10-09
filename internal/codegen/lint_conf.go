@@ -299,9 +299,10 @@ func lintModelsKeep(conf *Conf) []error {
 	return problems
 }
 
-// lintCompletionMessages keeps `messages` and `messages_env` to the completion feature, where
-// they switch completion messages, and requires `messages` for `messages_env`, which would
-// otherwise switch nothing.
+// lintCompletionMessages keeps `messages`, `messages_env` and `descriptions_env` to the
+// completion feature, where they switch completion messages and descriptions, requires
+// `messages` for `messages_env`, which would otherwise switch nothing, and warns when the two
+// variables are one.
 func lintCompletionMessages(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil
@@ -320,10 +321,19 @@ func lintCompletionMessages(conf *Conf) []error {
 			if f.MessagesEnv != "" {
 				add(i, f, "messages_env", "`messages_env` switches completion messages and applies only to the completion feature; move it to the completion entry or remove it")
 			}
+			if f.DescriptionsEnv != "" {
+				add(i, f, "descriptions_env", "`descriptions_env` switches completion descriptions and applies only to the completion feature; move it to the completion entry or remove it")
+			}
 			continue
 		}
 		if f.MessagesEnv != "" && f.Messages == "" {
 			add(i, f, "messages_env", "is set but `messages` is not, so there are no completion messages for it to switch; set `messages: declared` or `messages: all`, or remove it")
+		}
+		if f.DescriptionsEnv != "" && f.DescriptionsEnv == f.MessagesEnv {
+			problems = append(problems, &problem{
+				kind: "conf", ptr: featurePointer(i), loc: "generate.features.completion.descriptions_env", sev: severityWarning,
+				msg: "names the same variable as `messages_env`, so one setting hides both messages and descriptions; give each its own variable",
+			})
 		}
 	}
 	return problems

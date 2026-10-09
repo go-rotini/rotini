@@ -163,6 +163,8 @@ command:
           summary: name of the command to print help for
           schema:
             type: array
+            complete:
+              kind: command
     - name: version
       summary: print version
       description: Print the rotini cli version.

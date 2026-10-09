@@ -123,6 +123,12 @@ One generated feature, chosen by 'type' (help, completion, man, markdown): an on
 
 Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion&lt;Shell&gt;' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.
 
+### `descriptions_env`
+
+`string`
+
+completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide the descriptions shown beside completion candidates, in every shell; unset or any other value leaves them on. Descriptions show by default: zsh, fish and PowerShell beside each candidate, and bash on the second TAB. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionDescriptions replaces this check with a rule of your own.
+
 ### `embed`
 
 `boolean` · default `false`

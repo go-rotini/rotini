@@ -1,6 +1,7 @@
 # Every page section that comes from declared data: group descriptions in the declared order,
 # long-only flags aligned with the long column, constraints on each input kind, a stdin
-# section for each format, and a passthrough command.
+# section for each format, and a passthrough command, described enum values, and a passthrough
+# argument.
 version: 0.0.0
 command:
   name: ops
@@ -41,10 +42,18 @@ command:
     - name: token
       summary: the API token
       schema: {type: string, minLength: 20}
+    - name: log
+      summary: the log level
+      schema:
+        type: string
+        enum: [{value: debug, summary: everything}, info, {value: error, summary: failures only}]
   config:
     - name: region
       summary: the default region
       schema: {type: string, key: region, pattern: '^[a-z]+-[0-9]$', pattern_message: 'must look like eu-1'}
+    - name: profile
+      summary: the output profile
+      schema: {type: string, key: profile, enum: [{value: short, summary: one line each}, {value: long, summary: every field}]}
   schemas:
     Task:
       type: object
@@ -118,3 +127,25 @@ command:
         - name: argv
           summary: the command and its arguments
           schema: {type: '[]string', required: true}
+    - name: run
+      summary: run a command on a host
+      options_first: true
+      arguments:
+        - name: host
+          summary: where to run it
+          schema: {type: string, required: true, enum: [{value: edge, summary: the edge pool}, core]}
+        - name: command
+          summary: the command and its arguments
+          passthrough: true
+          schema: {type: '[]string', required: true}
+      flags:
+        - name: format
+          summary: how to print results
+          identifiers: [--format, -f]
+          schema:
+            type: string
+            default: text
+            enum:
+              - {value: text, summary: aligned columns}
+              - json
+              - {value: yaml, summary: human-friendly}

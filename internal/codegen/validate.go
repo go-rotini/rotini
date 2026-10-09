@@ -440,7 +440,7 @@ var loadSchemaBlockKeys = sync.OnceValues(func() (schemaBlockKeySets, error) {
 // jsonSchemaOnlyKeywords are JSON Schema keywords rotini's schema blocks do not implement.
 // An unknown key in this set gets a message saying so rather than a plain typo message.
 var jsonSchemaOnlyKeywords = map[string]bool{
-	"uniqueItems": true, "const": true, "format": true, "contains": true, "minContains": true,
+	"const": true, "format": true, "contains": true, "minContains": true,
 	"maxContains": true, "additionalProperties": true, "patternProperties": true,
 	"propertyNames": true, "minProperties": true, "maxProperties": true, "dependencies": true,
 	"dependentRequired": true, "dependentSchemas": true, "if": true, "then": true, "else": true,

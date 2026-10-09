@@ -76,10 +76,15 @@ field Completion.Kind
 field Completion.Message
 field CompletionCandidate.Description
 field CompletionCandidate.Value
+field CompletionDescriptionsDef.Env
 field CompletionMessagesDef.Env
+field CompletionOptions.KeepOrder
+field CompletionOptions.NoSpace
 field CompletionResult.Candidates
 field CompletionResult.Hint
+field CompletionResult.KeepOrder
 field CompletionResult.Messages
+field CompletionResult.NoSpace
 field ConfigFile.Discover
 field ConfigFile.Format
 field ConfigFile.Name
@@ -98,12 +103,14 @@ field Constraints.Minimum
 field Constraints.MultipleOf
 field Constraints.Pattern
 field Constraints.PatternMessage
+field Constraints.UniqueItems
 field Context.Argv
 field Context.Stderr
 field Context.Stdin
 field Context.Stdout
 field Definition.Arguments
 field Definition.Commands
+field Definition.CompletionDescriptions
 field Definition.CompletionMessages
 field Definition.FlagDependencies
 field Definition.FlagGroups
@@ -147,6 +154,7 @@ field FlagDef.KeyPaths
 field FlagDef.Layout
 field FlagDef.Name
 field FlagDef.Negatable
+field FlagDef.NoRepeat
 field FlagDef.ObjectSchema
 field FlagDef.Required
 field FlagDef.Secret
@@ -268,6 +276,7 @@ method Context.CheckOutput(v any) error
 method Context.Command() Command
 method Context.CommandChain() []Command
 method Context.CommandPath() string
+method Context.Context() context.Context
 method Context.DashIndex() (int, bool)
 method Context.DefaultInputs[T any]() (InputLayer[T], error)
 method Context.Dir() string
@@ -286,10 +295,13 @@ method Context.Inputs[T any]() (T, error)
 method Context.LookupEnv(name string) (string, bool)
 method Context.MustGetDependency[T any](dep Dependency[T]) T
 method Context.Parser() *Parser
+method Context.PartialInputs[T any]() (T, Presence, error)
 method Context.RecordError(err error)
 method Context.RecordInfo(msg string)
 method Context.RecordSuccess(msg string)
 method Context.RecordWarning(warn error)
+method Context.SetCompletionOptions(opts CompletionOptions)
+method Context.SetContext(ctx context.Context)
 method Context.SetDependencyIfAbsent[T any](dep Dependency[T], value T)
 method Context.SetDependency[T any](dep Dependency[T], value T)
 method Context.StdinInputs[T any]() (InputLayer[T], error)
@@ -350,6 +362,7 @@ method Program.RunContext(ctx context.Context, argv []string) (int, error)
 method Program.With(opts ...Option) *Program
 method Program.WithArgs(args []string) *Program
 method Program.WithCompletion(format CompletionFormat) *Program
+method Program.WithCompletionDescriptions(fn func(rtx *Context) bool) *Program
 method Program.WithCompletionMessages(fn func(rtx *Context) bool) *Program
 method Program.WithContext(ctx context.Context) *Program
 method Program.WithDependency[T any](dep Dependency[T], value T) *Program
@@ -388,8 +401,10 @@ type Command
 type CommandDef
 type Completion
 type CompletionCandidate
+type CompletionDescriptionsDef
 type CompletionFormat
 type CompletionMessagesDef
+type CompletionOptions
 type CompletionResult
 type ConfigFile
 type Constraints

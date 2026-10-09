@@ -39,6 +39,10 @@ stdout '^:rotini:file yaml yml$'
 [exec:bash] stdout 'CONFIG: .*b\.yml'
 [exec:bash] ! stdout 'CONFIG: .*c\.txt'
 [exec:bash] ! stdout ':rotini:'
+[exec:bash] stdout 'LISTED: \|deploy  \(deploy it\)\|status  \(show status\)\|$'
+[exec:bash] stdout 'INSERTED: \|deploy\|status\|$'
+[exec:bash] stdout 'ORDER: low high$'
+[exec:bash] stdout 'OFF: \|deploy\|status\|$'
 
 [exec:zsh] exec zsh drive-zsh.sh
 [exec:zsh] stdout 'OK: zsh script parsed'
@@ -48,6 +52,7 @@ stdout '^:rotini:file yaml yml$'
 [exec:fish] stdout 'CANDIDATES: .*status'
 [exec:fish] stdout 'ENUM: .*json'
 [exec:fish] stdout 'ENUM: .*text'
+[exec:fish] stdout 'ORDER: low high$'
 [exec:fish] ! stdout ':rotini:'
 [exec:fish] stdout 'CONFIG: .*a\.yaml'
 [exec:fish] stdout 'CONFIG: .*b\.yml'
@@ -107,6 +112,27 @@ COMPREPLY=()
 _app_complete
 echo "ENUM: ${COMPREPLY[@]}"
 
+# The second TAB (COMP_TYPE 63) lists each candidate with its description; the first inserts
+# bare values. APP_DESCRIPTIONS=off turns descriptions off in the binary.
+COMP_WORDS=(app "")
+COMP_CWORD=1
+COMP_TYPE=63 COLUMNS=80
+_app_complete
+printf 'LISTED: '; printf '|%s' "${COMPREPLY[@]}"; echo '|'
+COMP_TYPE=9
+_app_complete
+printf 'INSERTED: '; printf '|%s' "${COMPREPLY[@]}"; echo '|'
+COMP_TYPE=63
+APP_DESCRIPTIONS=off _app_complete
+printf 'OFF: '; printf '|%s' "${COMPREPLY[@]}"; echo '|'
+unset COMP_TYPE
+
+# An enum keeps its declared order.
+COMP_WORDS=(app --level "")
+COMP_CWORD=2
+_app_complete
+echo "ORDER: ${COMPREPLY[*]}"
+
 # And a THIRD word, so a one-off fencepost cannot pass either.
 COMP_WORDS=(app deploy --format "")
 COMP_CWORD=3
@@ -141,6 +167,10 @@ end
 # offer the flag again instead of its values.
 set -l enum (complete -C "app --format ")
 echo "ENUM: "(string join ' ' (for l in $enum; string split -f1 \t -- $l; end))
+
+# An enum keeps its declared order.
+set -l order (complete -C "app --level ")
+echo "ORDER: "(string join ' ' (for l in $order; string split -f1 \t -- $l; end))
 
 # The file hint still offers files, narrowed to its extensions.
 set -l cfg (complete -C "app --config ")
@@ -207,6 +237,15 @@ command:
           - json
           - text
           - yaml
+    - name: level
+      summary: how much to say
+      identifiers:
+        - --level
+      schema:
+        type: string
+        enum:
+          - { value: low, summary: quiet }
+          - { value: high, summary: loud }
   commands:
     - name: deploy
       summary: deploy it
@@ -226,6 +265,7 @@ generate:
       enabled: true
       embed: true
       embed_dir: internal/cmd/app/renders
+      descriptions_env: APP_DESCRIPTIONS
 -- internal/cmd/app/app.go --
 package app
 

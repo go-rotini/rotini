@@ -1,3 +1,5 @@
-conf: .rotini.conf.yaml:11:7: generate.features.completion.messages_env: is set but `messages` is not, so there are no completion messages for it to switch; set `messages: declared` or `messages: all`, or remove it
-conf: .rotini.conf.yaml:15:7: generate.features.help.messages: `messages` turns on completion messages and applies only to the completion feature; move it to the completion entry or remove it
-conf: .rotini.conf.yaml:15:7: generate.features.help.messages_env: `messages_env` switches completion messages and applies only to the completion feature; move it to the completion entry or remove it
+conf: .rotini.conf.yaml:12:7: generate.features.completion.messages_env: is set but `messages` is not, so there are no completion messages for it to switch; set `messages: declared` or `messages: all`, or remove it
+conf: .rotini.conf.yaml:17:7: generate.features.help.messages: `messages` turns on completion messages and applies only to the completion feature; move it to the completion entry or remove it
+conf: .rotini.conf.yaml:17:7: generate.features.help.messages_env: `messages_env` switches completion messages and applies only to the completion feature; move it to the completion entry or remove it
+conf: .rotini.conf.yaml:17:7: generate.features.help.descriptions_env: `descriptions_env` switches completion descriptions and applies only to the completion feature; move it to the completion entry or remove it
+warning: conf: .rotini.conf.yaml:12:7: generate.features.completion.descriptions_env: names the same variable as `messages_env`, so one setting hides both messages and descriptions; give each its own variable

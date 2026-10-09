@@ -1,0 +1,5 @@
+spec: .rotini.spec.yaml:13:7: command demo: flag "tags": sets `repeatable: false`, but a list or map flag takes one value per occurrence; remove it, or use `maxItems: 1`
+spec: .rotini.spec.yaml:16:7: command demo: flag "labels": sets `repeatable: false`, but a list or map flag takes one value per occurrence; remove it, or use `maxItems: 1`
+spec: .rotini.spec.yaml:19:7: command demo: flag "verbose": sets `repeatable: false`, but a count flag is its number of occurrences; remove it
+spec: .rotini.spec.yaml:22:7: command demo: flag "db": sets `repeatable: false`, but an object flag's occurrences merge into one value (or, for a list, each is an element); remove it
+spec: .rotini.spec.yaml:33:7: command demo: env "token": sets `repeatable`, which applies only to flags given on the command line; here it would do nothing

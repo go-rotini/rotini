@@ -30,7 +30,8 @@
       "additionalProperties": false,
       "description": "What the program's shell completion lets its users switch. Present only when the cli declares something here.",
       "properties": {
-        "messages_env": { "type": "string", "description": "The environment variable that hides completion messages when set to 0, false or off." }
+        "messages_env": { "type": "string", "description": "The environment variable that hides completion messages when set to 0, false or off." },
+        "descriptions_env": { "type": "string", "description": "The environment variable that hides the descriptions shown beside completion candidates when set to 0, false or off." }
       }
     },
     "response_files": {
@@ -105,7 +106,8 @@
         "config_key": { "type": "string", "description": "The config file key the flag falls back to after its environment variables. Present only when the command reads config files." },
         "deprecated": { "type": "string" },
         "enum_values": { "$ref": "#/definitions/EnumValues" },
-        "schema": { "$ref": "#/definitions/JSONSchema" }
+        "schema": { "$ref": "#/definitions/JSONSchema" },
+        "repeatable": { "type": "boolean", "description": "false when giving the flag more than once on the command line is an error rather than the last value winning. Absent means repeats are accepted." }
       }
     },
     "Env": {

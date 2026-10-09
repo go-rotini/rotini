@@ -6,6 +6,7 @@ Usage:
 Commands:
   note    add a note
   exec    run a command
+  run     run a command on a host
 
 Data:
   Commands that read a document from standard input.
@@ -27,6 +28,13 @@ Output:
 
 Environment:
   OPS_TOKEN string    the API token (length >= 20)
+  OPS_LOG string      the log level [debug|info|error]
+                        debug    everything
+                        info
+                        error    failures only
 
 Configuration:
-  region (region) string    the default region
+  region (region) string      the default region
+  profile (profile) string    the output profile [short|long]
+                                short    one line each
+                                long     every field

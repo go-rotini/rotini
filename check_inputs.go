@@ -353,6 +353,11 @@ func checkTypedFlag(fd FlagDef, f reflect.Value, dir string) error {
 		return nil
 	}
 	if fd.ObjectSchema != "" {
+		if fd.UniqueItems && isArrayType(fd.Type) {
+			if err := checkUniqueTyped(label, elems, fd.Secret); err != nil {
+				return err
+			}
+		}
 		return checkTypedObject(label, fd.ObjectSchema, elems)
 	}
 	for _, s := range typedTexts(elems) {
@@ -541,6 +546,11 @@ func toDocument(v any) (map[string]any, error) {
 func checkTypedConstraints(label, typ string, c Constraints, count int, elems []reflect.Value, secret bool, dir string) error {
 	if isArrayType(typ) || isMapType(typ) {
 		if err := checkItemCount(label, c, count); err != nil {
+			return err
+		}
+	}
+	if c.UniqueItems && isArrayType(typ) {
+		if err := checkUniqueTyped(label, elems, secret); err != nil {
 			return err
 		}
 	}

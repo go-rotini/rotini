@@ -165,6 +165,9 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 			visit("patternmsg", "PatternMessage", schema.PatternMessage, strconv.Quote(schema.PatternMessage))
 		}
 	}
+	if schema.UniqueItems {
+		visit("unique", "UniqueItems", "true", "true")
+	}
 }
 
 // envVarOf returns an input's explicit environment variables (schema.variable) comma-joined,

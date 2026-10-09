@@ -499,6 +499,8 @@ type templateDocArgumentRow struct {
 	Variadic    bool
 	Default     string
 	Enum        []string
+	EnumValues  []enumValue // every value in declared order, with its summary; nil when no value has one
+	Passthrough bool        // the argument and every word after it are passed on as typed
 	Deprecated  string
 	Constraints string   // the declared constraints as a short note (1..65535); "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
@@ -515,6 +517,7 @@ type templateDocFlagRow struct {
 	Default     string
 	Implicit    string // the value a bare flag takes (implicit_value); its identifier reads --x[=<type>]
 	Enum        []string
+	EnumValues  []enumValue // every value in declared order, with its summary; nil when no value has one
 	Deprecated  string
 	Group       string   // the flag's `group` (buckets it in the Flags section)
 	Env         []string // the env fallback variables, in lookup order (first preferred); nil for an argv-only flag
@@ -541,6 +544,7 @@ type templateDocEnvRow struct {
 	Required    bool
 	Default     string
 	Enum        []string
+	EnumValues  []enumValue // every value in declared order, with its summary; nil when no value has one
 	Deprecated  string
 	Constraints string   // the declared constraints as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
@@ -554,6 +558,7 @@ type templateDocConfigRow struct {
 	Required    bool
 	Default     string
 	Enum        []string
+	EnumValues  []enumValue // every value in declared order, with its summary; nil when no value has one
 	Deprecated  string
 	Constraints string   // the declared constraints as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
@@ -709,11 +714,22 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 		}
 		return out
 	}
+	cleanEnum := func(values []enumValue) []enumValue {
+		if values == nil {
+			return nil
+		}
+		out := make([]enumValue, len(values))
+		for i, v := range values {
+			out[i] = enumValue{Value: clean(v.Value), Summary: clean(v.Summary)}
+		}
+		return out
+	}
 	d.Arguments = append([]templateDocArgumentRow(nil), d.Arguments...)
 	for i := range d.Arguments {
 		d.Arguments[i].Summary = clean(d.Arguments[i].Summary)
 		d.Arguments[i].Deprecated = clean(d.Arguments[i].Deprecated)
 		d.Arguments[i].Rules = cleanAll(d.Arguments[i].Rules)
+		d.Arguments[i].EnumValues = cleanEnum(d.Arguments[i].EnumValues)
 	}
 	cleanFlags := func(rows []templateDocFlagRow) []templateDocFlagRow {
 		rows = append([]templateDocFlagRow(nil), rows...)
@@ -721,6 +737,7 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 			rows[i].Summary = clean(rows[i].Summary)
 			rows[i].Deprecated = clean(rows[i].Deprecated)
 			rows[i].Rules = cleanAll(rows[i].Rules)
+			rows[i].EnumValues = cleanEnum(rows[i].EnumValues)
 		}
 		return rows
 	}
@@ -737,12 +754,14 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 		d.Environment[i].Summary = clean(d.Environment[i].Summary)
 		d.Environment[i].Deprecated = clean(d.Environment[i].Deprecated)
 		d.Environment[i].Rules = cleanAll(d.Environment[i].Rules)
+		d.Environment[i].EnumValues = cleanEnum(d.Environment[i].EnumValues)
 	}
 	d.Configuration = append([]templateDocConfigRow(nil), d.Configuration...)
 	for i := range d.Configuration {
 		d.Configuration[i].Summary = clean(d.Configuration[i].Summary)
 		d.Configuration[i].Deprecated = clean(d.Configuration[i].Deprecated)
 		d.Configuration[i].Rules = cleanAll(d.Configuration[i].Rules)
+		d.Configuration[i].EnumValues = cleanEnum(d.Configuration[i].EnumValues)
 	}
 	d.ExitStatus = append([]templateDocExitRow(nil), d.ExitStatus...)
 	for i := range d.ExitStatus {

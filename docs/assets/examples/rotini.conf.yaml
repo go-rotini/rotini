@@ -34,6 +34,7 @@ generate:
       enabled: true
       messages: all
       messages_env: DEPLOY_COMPLETION_MESSAGES
+      descriptions_env: DEPLOY_COMPLETION_DESCRIPTIONS
     - type: man
       enabled: false
       section: 1

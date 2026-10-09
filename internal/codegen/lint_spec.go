@@ -95,6 +95,8 @@ var specLints = []func(*Spec) []error{
 	lintExitStatus,
 	lintStdinSchema,
 	lintGroups,
+	lintRepeatable,
+	lintUniqueItems,
 }
 
 // lintRootCommand requires the root command, which is the binary itself, to have a
@@ -1082,10 +1084,31 @@ func lintComplete(spec *Spec) []error {
 			if len(schema.Complete.Extensions) > 0 && schema.Complete.Kind != "file" {
 				add(fmt.Sprintf("sets `complete.extensions` with kind %q; extensions narrow files, so they apply to kind \"file\" only", schema.Complete.Kind))
 			}
+			t := getSchemaType(schema)
+			switch kind := schema.Complete.Kind; kind {
+			case "command":
+				switch {
+				case channel != "argument":
+					add("sets `complete.kind: command`, which completes the command path an argument names (a help command's); a flag's value isn't a command path")
+				case t != "string" && t != "[]string":
+					add(fmt.Sprintf("sets `complete.kind: command` but its type is %s; a command path is words, so the argument is a string or a list of strings", t))
+				case len(schema.Enum) > 0:
+					add("sets `complete.kind: command` and `enum`; the command names are the candidates, so an enum would never be offered")
+				}
+			case "executable", "user", "group", "host":
+				if t != "string" && t != "[]string" {
+					p := inputProblem(ptr, path, channel, name, fmt.Sprintf("sets `complete.kind: %s` but its type is %s, which can't hold the %s names the shell offers", kind, t, nativeKindNouns[kind]))
+					p.sev = severityWarning
+					problems = append(problems, p)
+				}
+			}
 		})
 	})
 	return problems
 }
+
+// nativeKindNouns names what each shell-completed `complete.kind` offers.
+var nativeKindNouns = map[string]string{"executable": "program", "user": "user", "group": "group", "host": "host"}
 
 // lintDefaultScalar requires a `default:` to be a scalar, or, on a repeatable (list or map)
 // input, a list or map of scalars, each seeded as one occurrence.

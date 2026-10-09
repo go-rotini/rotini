@@ -824,10 +824,12 @@ document instead; see [StdinSpec](#stdinspec).
 | `pattern_message` | ✓ | ✓ | ✓ | ✓ |
 | `placeholder` | ✓ | ✓ | ✓ | ✓ |
 | `properties` | ✓ | — | — | — |
+| `repeatable` | ✓ | — | — | — |
 | `required` | ✓ | ✓ | ✓ | ✓ |
 | `secret` | ✓ | ✓ | ✓ | ✓ |
 | `separator` | ✓ | ✓ | — | — |
 | `type` | ✓ | ✓ | ✓ | ✓ |
+| `uniqueItems` | ✓ | ✓ | ✓ | ✓ |
 | `variable` | ✓ | — | ✓ | — |
 
 ### `complete`
@@ -926,6 +928,12 @@ Env inputs only, map-typed ('map'/'object' → map[string]any): the separator th
 
 Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, `<PATH>` instead of the argument's name. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or &lt;angle-bracketed&gt;.
 
+### `repeatable`
+
+`boolean` or `null`
+
+On a single-value flag: `repeatable: false` makes giving the flag more than once on the command line an error naming the first and last values, instead of the last value winning, which is the default. `-vv` and `--color --no-color` are repeats, and so is a cascading flag given at two levels of the command path; a sub-command that redeclares the flag has its own. Environment and configuration values are unaffected. Rejected on list, map, count and object flags, which repeat by nature, and on arguments, env and config inputs.
+
 ### `required`
 
 `boolean` · default `false`
@@ -982,7 +990,7 @@ The application directory under the XDG config root: the '&lt;app&gt;' in $XDG_C
 
 ## BaseSchema
 
-Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema — with the same positioned "unknown key" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (uniqueItems, format, title, …) is rejected too, since it would otherwise do nothing. `description` is accepted on object schemas and their properties, where it becomes a Go doc comment.
+Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema — with the same positioned "unknown key" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (format, title, …) is rejected too, since it would otherwise do nothing. `description` is accepted on object schemas and their properties, where it becomes a Go doc comment.
 
 ### `$ref`
 
@@ -1130,4 +1138,10 @@ Shapes that change how a flag is written:
 Any other Go type (time.Time, uuid.UUID, your own): set 'import' to the backing package path. It must implement encoding.TextUnmarshaler — that method is its parser and validator, applied to each element of a list too. Rotini refuses a type without it at parse time with a loud error, never a silently zeroed field; validate cannot check it, since that would mean type-checking foreign packages.
 
 A NAMED OBJECT schema is different: a flag whose schema is `$ref: '#/schemas/DB'` (or `type: array, items: {$ref: '#/schemas/DB'}` for a list) takes a structured value — see `$ref`.
+
+### `uniqueItems`
+
+`boolean`
+
+On a list input (a list flag, a variadic argument, or a list env or config input): reject a list that holds the same value twice. Values compare as their type reads them, so `01` and `1` are the same int, `1h` and `60m` the same duration, `1Ki` and `1024` the same bytesize, and `::1` and `0:0:0:0:0:0:0:1` the same ip; a time compares as the instant it names, read with its layout; a list of objects compares whole objects; a case-insensitive enum compares its declared spellings. Checked on every channel and by CheckInputs, and a list default may not repeat a value. Rejected on scalar, map and count inputs, and inside items. On output, stdin and named schemas it is the JSON Schema keyword.
 

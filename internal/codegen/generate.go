@@ -268,8 +268,7 @@ func (p *program) resolveFeatures() error {
 		var contents []string
 		var err error
 		if f.desc.perShell {
-			_, messagesEnv := completionMessages(p.conf)
-			contents, err = completionContents(p.rootName, messagesEnv, nodes)
+			contents, err = completionContents(p.rootName, completionScriptEnvs(p.conf), nodes)
 		} else {
 			contents, err = docFeatureContents(p.plan, absTemplateDir, nodes, f.desc, f.cfg.Template)
 		}

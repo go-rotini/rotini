@@ -12,6 +12,7 @@ ops [flags] <command>
 
 - `note` — add a note
 - `exec` — run a command
+- `run` — run a command on a host
 
 ## Data Commands
 
@@ -41,7 +42,14 @@ Flags that shape what ops prints.
 ## Environment
 
 - `OPS_TOKEN` `string` — the API token; at least 20 characters
+- `OPS_LOG` `string` — the log level (one of debug, info, error)
+  - `debug` — everything
+  - `info`
+  - `error` — failures only
 
 ## Configuration
 
 - `region` (region) `string` — the default region; must look like eu-1
+- `profile` (profile) `string` — the output profile (one of short, long)
+  - `short` — one line each
+  - `long` — every field

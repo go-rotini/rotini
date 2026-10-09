@@ -131,3 +131,13 @@ func completionMessagesLiteral(conf *Conf) string {
 	}
 	return out + "},\n"
 }
+
+// completionDescriptionsLiteral renders the Definition's CompletionDescriptions field, or ""
+// when the conf declares no `descriptions_env`, so a CLI without one omits the field.
+func completionDescriptionsLiteral(conf *Conf) string {
+	env := completionScriptEnvs(conf).descriptions
+	if env == "" {
+		return ""
+	}
+	return "CompletionDescriptions: &" + rotiniPkgName + ".CompletionDescriptionsDef{Env: " + strconv.Quote(env) + "},\n"
+}

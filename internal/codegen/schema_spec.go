@@ -27,7 +27,7 @@ type ArgumentInput struct {
 	Summary string `json:"summary,omitempty"`
 }
 
-// Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema — with the same positioned "unknown key" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (uniqueItems, format, title, …) is rejected too, since it would otherwise do nothing. `description` is accepted on object schemas and their properties, where it becomes a Go doc comment.
+// Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema — with the same positioned "unknown key" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (format, title, …) is rejected too, since it would otherwise do nothing. `description` is accepted on object schemas and their properties, where it becomes a Go doc comment.
 type BaseSchema struct {
 	// Reference to a named schema in the root command's "schemas" map, by its name (`$ref: DB`) or as a JSON pointer (`$ref: '#/schemas/DB'`). The two mean the same; the pointer is what JSON Schema tooling reads. Resolved when you generate. A reference to a named scalar schema brings that schema's enum, pattern (and pattern_message), lengths and bounds with it, wherever the input leaves them unset.
 	//
@@ -104,6 +104,8 @@ type BaseSchema struct {
 	//
 	// A NAMED OBJECT schema is different: a flag whose schema is `$ref: '#/schemas/DB'` (or `type: array, items: {$ref: '#/schemas/DB'}` for a list) takes a structured value — see `$ref`.
 	Type string `json:"type,omitempty"`
+	// On a list input (a list flag, a variadic argument, or a list env or config input): reject a list that holds the same value twice. Values compare as their type reads them, so `01` and `1` are the same int, `1h` and `60m` the same duration, `1Ki` and `1024` the same bytesize, and `::1` and `0:0:0:0:0:0:0:1` the same ip; a time compares as the instant it names, read with its layout; a list of objects compares whole objects; a case-insensitive enum compares its declared spellings. Checked on every channel and by CheckInputs, and a list default may not repeat a value. Rejected on scalar, map and count inputs, and inside items. On output, stdin and named schemas it is the JSON Schema keyword.
+	UniqueItems bool `json:"uniqueItems,omitempty"`
 }
 
 // A command node in the CLI command tree — the root command (under the document's 'command' key) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The two root-command-level keys (env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
@@ -402,6 +404,8 @@ type InputSchema struct {
 	Nesting string `json:"nesting,omitempty"`
 	// Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, `<PATH>` instead of the argument's name. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or <angle-bracketed>.
 	Placeholder string `json:"placeholder,omitempty"`
+	// On a single-value flag: `repeatable: false` makes giving the flag more than once on the command line an error naming the first and last values, instead of the last value winning, which is the default. `-vv` and `--color --no-color` are repeats, and so is a cascading flag given at two levels of the command path; a sub-command that redeclares the flag has its own. Environment and configuration values are unaffected. Rejected on list, map, count and object flags, which repeat by nature, and on arguments, env and config inputs.
+	Repeatable *bool `json:"repeatable,omitempty"`
 	// When true, the input must be provided (or stdin must not be empty for stdin inputs). Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
 	Required bool `json:"required,omitempty"`
 	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input.
@@ -422,7 +426,7 @@ type InputSchema struct {
 type InputSchemaComplete struct {
 	// Narrows kind 'file' to these suffixes, written without a leading dot ('yaml', 'json'). Omitted, every file is offered. Rejected on the other kinds, which have no extensions to filter.
 	Extensions []string `json:"extensions,omitempty"`
-	// 'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete nothing, which is not the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that is file completion; 'none' turns it off, so for an opaque value (a container id, an API resource name) the shell does not offer the files in the current directory.
+	// 'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete nothing, which is not the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that is file completion; 'none' turns it off, so for an opaque value (a container id, an API resource name) the shell does not offer the files in the current directory. 'command': complete command paths below the root, for a help command's argument: the words already given to this argument are the path, and the candidates are its visible sub-commands (`help remote <TAB>` offers remote's sub-commands). Arguments of type string or a list of strings only. 'executable': program names (bash offers every command name it knows; zsh, fish and PowerShell offer programs). 'user', 'group': local account and group names. 'host': host names the shell knows (/etc/hosts, ssh known hosts). Each shell's own completer supplies these four; PowerShell has no host completer, and offers users and groups on Windows only. Values of type string or a list of strings only.
 	Kind string `json:"kind,omitempty"`
 	// A line the shell shows while this input's value is being completed and there is nothing to offer, such as `a service name from deploy.yaml`. One line. It shows only when the conf's completion feature sets `messages`, and in zsh and bash 4.4 or later; other shells skip it. A message a completer adds with rtx.AddCompletionMessage takes its place.
 	Message string `json:"message,omitempty"`

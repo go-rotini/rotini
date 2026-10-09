@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"context"
 	"io"
 	"maps"
 	"os"
@@ -18,7 +19,9 @@ import (
 //
 //   - invocation — the [Context.Argv], [Context.Stdin], [Context.Stdout] and [Context.Stderr]
 //     fields, and the run's environment and working directory: [Context.LookupEnv],
-//     [Context.Environ] and [Context.Dir]; [Context.DashIndex] says where a "--" was typed
+//     [Context.Environ] and [Context.Dir]; [Context.DashIndex] says where a "--" was typed;
+//     [Context.Context] is the running hook's context, and [Context.SetContext] hands a
+//     derived one to the hooks after it
 //   - command — [Context.Command] is the command whose hook is running (its Invoked field
 //     reports whether the user ran it), [Context.CommandPath] names it, and
 //     [Context.CommandChain] lists every command from the root to the invoked one
@@ -34,7 +37,8 @@ import (
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
 //     [Context.RecordError], and [Context.Failed]; during completion,
-//     [Context.AddCompletionMessage]
+//     [Context.AddCompletionMessage] and [Context.SetCompletionOptions], [Context.PartialInputs] reads
+//     what has been typed so far, and [Context.Context] is the program's base context
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
 //   - rotini's own settings — [Context.Version], [Context.Help] and [Context.Parser] read them;
@@ -90,6 +94,11 @@ type Context struct {
 	// and the inputs methods anchor on it.
 	frame int
 
+	// ctx is the context the running hook received; see [Context.SetContext]. ctxFrozen makes
+	// SetContext a no-op during teardown and the reporter.
+	ctx       context.Context
+	ctxFrozen bool
+
 	// rotini's own settings, seeded from the Program each run and kept out of services so a
 	// dependency can never shadow them.
 	meta     *InputSettings
@@ -109,6 +118,9 @@ type Context struct {
 	// completionMessages collects what [Context.AddCompletionMessage] adds. It is non-nil only
 	// while a completion request runs with completion messages on.
 	completionMessages *[]string
+	// completionOptions collects what [Context.SetCompletionOptions] asks for. It is non-nil
+	// only while a completion request runs.
+	completionOptions *CompletionOptions
 
 	// stdinRead is the run's stdin, read at most once and shared by every consumer: argv can
 	// be parsed several times in one run and inputs collected more than once, but stdin can be

@@ -509,6 +509,8 @@ var inputKeySamples = map[string]string{
 	"separator":        `{"type": "array", "separator": ","}`,
 	"type":             `{"type": "string"}`,
 	"variable":         `{"type": "string", "variable": "X_VAR"}`,
+	"repeatable":       `{"type": "string", "repeatable": false}`,
+	"uniqueItems":      `{"type": "array", "uniqueItems": true}`,
 }
 
 // inputChannelTable renders which input-schema keys each channel accepts by validating every
