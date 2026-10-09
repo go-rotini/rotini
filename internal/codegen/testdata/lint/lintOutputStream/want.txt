@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:16:22: command demo/tail: sets `output_stream` but declares no `output`; declare the shape of one item as `output`, or drop `output_stream`

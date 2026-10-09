@@ -1,0 +1,4 @@
+spec: .rotini.spec.yaml:20:7: command demo: flag "until": `default` "-1h" is not a valid time (-1h is a time ago; this input takes future times, such as 1h); every run that leaves it unset would fail
+spec: .rotini.spec.yaml:26:7: command demo: flag "day": `default` "+2h" is not a valid date (a date moves in whole days, such as 1d or 2w); every run that leaves it unset would fail
+spec: .rotini.spec.yaml:14:7: command demo: flag "count": sets `relative` but its type is int; a relative value is a time measured from now, so it applies to time, datetime and date
+spec: .rotini.spec.yaml:34:7: command demo: env "after": has a relative `default` "1h"; an env or config input's default is read as an absolute time, so write one (2026-09-29T14:00:00Z), or give a flag the relative default

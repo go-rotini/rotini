@@ -167,7 +167,7 @@ func TestUniqueItems_comparesParsedValues(t *testing.T) {
 		{"[]string", reflect.TypeFor[[]string](), "", []string{"a", "a"}, []string{"a", "A"}},
 	} {
 		fd := FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: tt.typ, Layout: tt.layout, UniqueItems: true}
-		key := uniqueKeyFor(tt.typ, tt.layout, nil, false)
+		key := uniqueKeyFor(tt.typ, timeSpec{layout: tt.layout}, enumSet{})
 		if key(tt.dup[0]) != key(tt.dup[1]) {
 			t.Errorf("%s %s: %v are different keys (%q, %q)", tt.typ, tt.layout, tt.dup, key(tt.dup[0]), key(tt.dup[1]))
 		}

@@ -49,6 +49,9 @@ func TestDefinitionTypePreservesParserSemantics(t *testing.T) {
 		{"array of strings is unaffected", &InputSchema{Type: "array", Items: &Schema{Type: "string"}}, "[]string", "[]string"},
 		{"a $ref wins over the type name", &InputSchema{Ref: "#/schemas/Meta", Type: "count"}, "Meta", "Meta"},
 		{"nil schema defaults to string", nil, "string", "string"},
+		{"input file", &InputSchema{Type: "inputfile"}, "inputfile", "string"},
+		{"output file", &InputSchema{Type: "outputfile"}, "outputfile", "string"},
+		{"list of input files", &InputSchema{Type: "[]inputfile"}, "[]inputfile", "[]string"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

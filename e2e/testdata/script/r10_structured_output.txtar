@@ -5,6 +5,7 @@
 gomodinit example.com/taskr
 
 exec rotini generate cmd/taskr/.rotini.spec.yaml --config cmd/taskr/.rotini.conf.yaml
+! stderr WriteOutputItem
 exec go mod tidy
 exec go build -o taskr$exe ./cmd/taskr
 
@@ -57,6 +58,7 @@ exists schemas/output/taskr-watch.output.json
 exists schemas/output/taskr-bad.output.json
 grep '"format": "rotini-contract/1"' cli-contract.json
 grep '"\$ref": "#/definitions/TaskList"' cli-contract.json
+grep '"stream": true' cli-contract.json
 ! grep 'format_flag' cli-contract.json
 
 # The pages say what each command writes.
@@ -65,6 +67,7 @@ stdout 'Output:'
 stdout 'Every task, oldest first\.'
 stdout '^  TaskList$'
 ! stdout 'chosen with'
+grep 'a stream of Task, one item at a time' internal/cmd/taskr/zz_taskr.go
 
 # DecodeOutput reads captured stdout back, checked against the contract.
 exec go test ./internal/cmd/taskr
@@ -127,6 +130,7 @@ command:
     - name: watch
       summary: write each task as it is read
       output: {$ref: "#/schemas/Task"}
+      output_stream: true
     - name: wrong
       summary: write the wrong type
       output: {$ref: "#/schemas/TaskList"}

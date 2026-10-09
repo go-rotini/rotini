@@ -75,9 +75,9 @@ func ancestorOwners(chain []*Command) map[string]*ancestorFlag {
 			owner := &ancestorFlag{flag: f, path: paths[i]}
 			for _, id := range flagIdentifiers(f) {
 				owners[id] = owner
-				if long, ok := strings.CutPrefix(id, "--"); ok && f.Schema != nil && f.Schema.Negatable {
-					owners["--no-"+long] = owner
-				}
+			}
+			for _, neg := range negatedForms(f) {
+				owners[neg] = owner
 			}
 		}
 	}
@@ -322,7 +322,7 @@ func lintShortOnlyFlags(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		for i, f := range commandFlags(c) {
-			if f.Hidden || (f.Schema != nil && f.Schema.Negatable) {
+			if f.Hidden || negatable(f.Schema) {
 				continue
 			}
 			ids := flagIdentifiers(f)

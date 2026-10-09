@@ -30,15 +30,39 @@ func (*rotiniValidateHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
+	release, err := releaseOf(rtx, spec, conf, flags.Release)
+	if err != nil {
+		rtx.HaltWith(rotini.UsageError(err))
+		return
+	}
+
 	version := rtx.Version()
 	rtx.SetDependencyIfAbsent(validateDep, codegen.NewProcessor(version).Validate)
 	validate := rtx.MustGetDependency(validateDep)
 
 	// Warnings never fail the run.
-	if err := validate(spec, conf, flags.Watch, flags.Fail, printResult(rtx), printWarnings(rtx)); err != nil {
+	if err := validate(spec, conf, flags.Watch, flags.Fail, release, printResult(rtx), printWarnings(rtx)); err != nil {
 		haltWithProblems(rtx, err)
 		return
 	}
 
 	rtx.HaltWithCode(0)
+}
+
+// releaseOf is the release validate checks planned removals against: --release when given,
+// else the variable the conf's validate.release_env names, else none. A value that isn't
+// X.Y.Z is an error naming where it came from.
+func releaseOf(rtx *rotini.Context, spec, conf, flag string) (string, error) {
+	if flag != "" {
+		return flag, codegen.CheckRelease(flag, "--release")
+	}
+	name := codegen.ReleaseEnv(spec, conf)
+	if name == "" {
+		return "", nil
+	}
+	value, _ := rtx.LookupEnv(name)
+	if value == "" {
+		return "", nil
+	}
+	return value, codegen.CheckRelease(value, "$"+name+" (validate.release_env)")
 }

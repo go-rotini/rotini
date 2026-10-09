@@ -34,7 +34,7 @@ func FuzzValidateSpec(f *testing.F) {
 		mustWrite(t, filepath.Join(dir, ".rotini.conf.yaml"), lintFixtureConf)
 		t.Chdir(dir)
 
-		err := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect",
+		err := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect", "",
 			func(string, error) {}, func([]error) {})
 		if err != nil && strings.TrimSpace(err.Error()) == "" {
 			t.Fatalf("validate rejected the document with an empty message")
@@ -63,7 +63,7 @@ func FuzzValidateConf(f *testing.F) {
 		mustWrite(t, filepath.Join(dir, ".rotini.conf.yaml"), conf)
 		t.Chdir(dir)
 
-		err := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect",
+		err := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect", "",
 			func(string, error) {}, func([]error) {})
 		if err != nil && strings.TrimSpace(err.Error()) == "" {
 			t.Fatalf("validate rejected the conf with an empty message")

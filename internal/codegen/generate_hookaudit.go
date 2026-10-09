@@ -78,7 +78,12 @@ func (p *program) auditHooks() error {
 
 	expected, known := p.inputsTypeExpectations()
 	p.auditWarnings = append(p.auditWarnings, wrongInputsTypes(fset, files, expected, known, p.module.root)...)
-	p.auditWarnings = append(p.auditWarnings, undocumentedExitCodes(fset, files, p.exitContracts(), p.module.root)...)
+	named := namedExitCodes{consts: map[string]exitConst{}, modelsImport: p.layout.modelsImport, modelsName: p.layout.modelsPkgName}
+	for _, c := range p.exitConstants() {
+		named.consts[c.name] = c
+	}
+	p.auditWarnings = append(p.auditWarnings, undocumentedExitCodes(fset, files, p.exitContracts(), named, p.module.root)...)
+	p.auditWarnings = append(p.auditWarnings, p.unmarkedStreams(fset, files)...)
 
 	if featureEnabled(p.conf, "help") && rootShortCircuitFlag(p, "help", true) != "" {
 		p.auditWarnings = append(p.auditWarnings, missingRootHook(fset, files, p.root.handler, p.module.root)...)
@@ -506,14 +511,58 @@ func (p *program) exitContracts() map[string]exitContract {
 // exitMethods are the Context methods that set the exit code from their argument.
 var exitMethods = map[string]bool{"HaltWithCode": true, "Exit": true}
 
+// namedExitCodes are the constants generated for named exit codes, which the audit reads from
+// the spec rather than from the generated files, so it works in a dry run and through the
+// models package's re-exports.
+type namedExitCodes struct {
+	consts       map[string]exitConst
+	modelsImport string // the models package's import path; "" without one
+	modelsName   string // its package name, which a file imports it as unless renamed
+}
+
+// lookup resolves e as a generated exit-code constant: its name in the cmd package, or
+// models.<Name> in a file that imports the models package.
+func (n namedExitCodes) lookup(e ast.Expr, f *ast.File) (exitConst, bool) {
+	switch v := e.(type) {
+	case *ast.Ident:
+		c, ok := n.consts[v.Name]
+		return c, ok
+	case *ast.SelectorExpr:
+		x, ok := v.X.(*ast.Ident)
+		if !ok || n.modelsImport == "" || x.Name != importName(f, n.modelsImport, n.modelsName) {
+			return exitConst{}, false
+		}
+		c, ok := n.consts[v.Sel.Name]
+		return c, ok
+	}
+	return exitConst{}, false
+}
+
+// importName is how file f refers to the package at path: its import alias, else name; ""
+// when f doesn't import it.
+func importName(f *ast.File, path, name string) string {
+	for _, imp := range f.Imports {
+		if strings.Trim(imp.Path.Value, `"`) == path {
+			if imp.Name != nil {
+				return imp.Name.Name
+			}
+			return name
+		}
+	}
+	return ""
+}
+
 // undocumentedExitCodes warns about each exit code a handler sets directly that its command's
 // exit_status doesn't list: a call to HaltWithCode or Exit on the method's *rotini.Context
-// parameter, with an integer literal or a same-package integer constant. Code 0 is exempt.
+// parameter, with an integer literal, a same-package integer constant or a generated exit-code
+// constant. Code 0 is exempt. It also warns when a handler uses another command's generated
+// constant, even when the code is listed on its own command too: the name describes the other
+// command's outcome.
 //
 // It is best effort. It doesn't see a code computed at run time, set in a helper or another
 // package, or set by a reporter. A code set in a cascading hook is attributed to the command
 // whose handler declares the hook, though the hook also runs for that command's descendants.
-func undocumentedExitCodes(fset *token.FileSet, files map[string]*ast.File, contracts map[string]exitContract, moduleRoot string) []error {
+func undocumentedExitCodes(fset *token.FileSet, files map[string]*ast.File, contracts map[string]exitContract, named namedExitCodes, moduleRoot string) []error {
 	if len(contracts) == 0 {
 		return nil
 	}
@@ -549,18 +598,33 @@ func undocumentedExitCodes(fset *token.FileSet, files map[string]*ast.File, cont
 				if x, ok := sel.X.(*ast.Ident); !ok || !params[x.Name] {
 					return true
 				}
-				code, known := intValue(call.Args[0], consts[filepath.Dir(path)])
-				if !known || code == 0 || slices.Contains(contract.codes, code) {
-					return true
+				if msg := exitCodeProblem(call.Args[0], f, contract, named, consts[filepath.Dir(path)]); msg != "" {
+					at := findingAt(fset, call.Pos(), moduleRoot)
+					at.msg = fmt.Sprintf("%s:%d: %q exits with %s", at.file, at.line, contract.invocation, msg)
+					found = append(found, at)
 				}
-				at := findingAt(fset, call.Pos(), moduleRoot)
-				at.msg = fmt.Sprintf("%s:%d: %q exits with %d, which its exit_status doesn't list", at.file, at.line, contract.invocation, code)
-				found = append(found, at)
 				return true
 			})
 		}
 	}
 	return sortedWarnings(found)
+}
+
+// exitCodeProblem judges the code arg passes to an exit method in file f against contract: a
+// generated constant of another command, or a known code the command doesn't list. It returns
+// what follows "<command> exits with", or "" when there is nothing to report.
+func exitCodeProblem(arg ast.Expr, f *ast.File, contract exitContract, named namedExitCodes, consts map[string]int) string {
+	code, known := intValue(arg, consts)
+	if c, ok := named.lookup(arg, f); ok {
+		if c.owner != contract.invocation {
+			return fmt.Sprintf("%s, which belongs to %q; declare the code on this command and use its own constant", c.name, c.owner)
+		}
+		code, known = c.code, true
+	}
+	if !known || code == 0 || slices.Contains(contract.codes, code) {
+		return ""
+	}
+	return fmt.Sprintf("%d, which its exit_status doesn't list", code)
 }
 
 // rotiniContextSelector returns how file f spells rotini's Context type's package ("rotini",

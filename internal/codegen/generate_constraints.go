@@ -44,7 +44,10 @@ func constraintText(s *InputSchema, channel string) (compact string, rules []str
 	for _, c := range valueConstraintText(&s.BaseSchema, elem) {
 		add(c[0], each+c[1])
 	}
-	if repeated && s.Separator != "" {
+	switch {
+	case repeated && s.Separator == "nul":
+		add("", "NUL-separated in files")
+	case repeated && s.Separator != "":
 		add("", fmt.Sprintf("several values per occurrence, separated by %q", s.Separator))
 	}
 	if channel == "flag" {

@@ -1090,6 +1090,36 @@ func conformanceCases() []inputCase {
 					t.Errorf("err = %v, want the element's bound", err)
 				}
 			}},
+		{id: "ARG-17", args: []string{"deploy"}, check: confArgumentEnvFallback},
+		{id: "ARG-18", args: []string{"deploy"}, check: confArgumentConfigFallback},
+		{id: "ARG-19", args: []string{"deploy"}, check: confArgumentFrom},
+		{id: "FLAG-19", args: []string{"deploy"}, check: confCustomNegation},
+		{id: "FLAG-20", args: []string{"deploy"}, check: confEnumValueForms},
+		{id: "FLAG-21", args: []string{"deploy"}, check: confTimeLayouts},
+		{id: "FLAG-22", args: []string{"deploy"}, check: confRelativeTime},
+		{id: "FLAG-23", args: []string{"deploy"}, check: confPatternKinds},
+		{id: "ENV-08", args: []string{"deploy"}, check: confEnvListSeparator},
+
+		// ── FILE — input and output files ──
+		{id: "FILE-01", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// "-" among inputfile values is stdin, read in place.
+				if got := fileCat(t, "piped\n", "a.txt", "-", "b.txt"); got != "a\npiped\nb\n" {
+					t.Errorf("cat a.txt - b.txt = %q", got)
+				}
+			}},
+		{id: "FILE-02", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// stdin can be named only once.
+				if _, err := fileParse(t, "-", "a.txt", "-"); err == nil || CategoryOf(err) != CategoryUsage {
+					t.Errorf("err = %v, want a usage error", err)
+				}
+			}},
+		{id: "FILE-03", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// "-" as an outputfile is stdout; an existing file is kept without Overwrite.
+				fileOutput(t)
+			}},
 	}
 }
 
@@ -1150,9 +1180,16 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"ARG-10", "ARG-11", "ARG-12", "ARG-15", "ARG-16", "FLAG-13", "FLAG-14",
 		"RSP-01", "RSP-02", "RSP-03", "RSP-04",
 		"FLAG-17", "FLAG-18", "ENV-07",
+		"ARG-17", "ARG-18", "ARG-19", "FLAG-19", "FLAG-20", "FLAG-21", "FLAG-22", "FLAG-23", "ENV-08",
+		"FILE-01", "FILE-02", "FILE-03",
+		"STDIN-08", "STDIN-09", "STDIN-10", "STDIN-11", "STDIN-12", "STDIN-13", "STDIN-14",
+		"LIST-01", "LIST-02", "LIST-03", "ENV-09", "ENV-10", "ENV-11", "PREC-05", "CFG-09", "CFG-10",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range dataConformanceCases() {
 		seen[c.id]++
 	}
 	for _, id := range acceptanceMatrixIDs {

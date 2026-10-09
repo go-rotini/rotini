@@ -22,6 +22,8 @@ type osView struct {
 	list     []string          // the environment as KEY=value, duplicates removed
 	dir      string            // absolute; "" is the process working directory
 	foldCase bool              // names match case-insensitively (Windows)
+	clock    *runClock         // the run's clock (see Program.WithClock); nil reads time.Now
+	input    *inputEnv         // what inputs read beyond env: .env files and variable_file values
 }
 
 // newOSView indexes env (exec.Cmd.Env's KEY=value form; later duplicates win). A nil env reads
@@ -56,10 +58,31 @@ func newOSView(env []string, dir, goos string) *osView {
 // withEnviron returns a copy of v with env as its environment.
 func (v *osView) withEnviron(env []string) *osView {
 	dir, goos := "", runtime.GOOS
+	var clock *runClock
 	if v != nil {
-		dir = v.dir
+		dir, clock = v.dir, v.clock
 	}
-	return newOSView(env, dir, goos)
+	out := newOSView(env, dir, goos)
+	out.clock = clock
+	return out
+}
+
+// withClock returns a copy of v reading time from clock.
+func (v *osView) withClock(clock *runClock) *osView {
+	out := &osView{foldCase: runtime.GOOS == "windows"}
+	if v != nil {
+		*out = *v
+	}
+	out.clock = clock
+	return out
+}
+
+// clockRef is the run's clock; nil, which reads time.Now, for a view without one.
+func (v *osView) clockRef() *runClock {
+	if v == nil {
+		return nil
+	}
+	return v.clock
 }
 
 // withDir returns a copy of v resolving relative paths against dir.
@@ -89,7 +112,7 @@ func (v *osView) resolved() *osView {
 func (v *osView) injected() bool { return v != nil && (v.env != nil || v.dir != "") }
 
 func (v *osView) key(name string) string {
-	if v.foldCase {
+	if v != nil && v.foldCase {
 		return strings.ToUpper(name)
 	}
 	return name

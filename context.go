@@ -19,7 +19,8 @@ import (
 //
 //   - invocation — the [Context.Argv], [Context.Stdin], [Context.Stdout] and [Context.Stderr]
 //     fields, and the run's environment and working directory: [Context.LookupEnv],
-//     [Context.Environ] and [Context.Dir]; [Context.DashIndex] says where a "--" was typed;
+//     [Context.Environ] and [Context.Dir], and the run's clock reading, [Context.Now];
+//     [Context.DashIndex] says where a "--" was typed;
 //     [Context.Context] is the running hook's context, and [Context.SetContext] hands a
 //     derived one to the hooks after it
 //   - command — [Context.Command] is the command whose hook is running (its Invoked field
@@ -31,8 +32,9 @@ import (
 //     [Context.StdinInputs] and [Context.DefaultInputs] read one channel each;
 //     [Context.CheckInputs] checks inputs the program collected itself against the spec
 //   - output — [Context.WriteOutput] writes the command's declared output to stdout,
-//     [Context.WriteOutputItem] one item of a stream, and [Context.CheckOutput] checks a value
-//     against the declared shape without writing it
+//     [Context.WriteOutputItem] one item of a stream, [Context.WriteOutputTo] and
+//     [Context.WriteOutputItemTo] write them to another writer, and [Context.CheckOutput] checks
+//     a value against the declared shape without writing it
 //   - dependencies — [Context.GetDependency] and [Context.MustGetDependency] read one;
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
@@ -44,7 +46,7 @@ import (
 //   - rotini's own settings — [Context.Version], [Context.Help] and [Context.Parser] read them;
 //     [Context.WithVersion], [Context.WithHelp], [Context.WithParser],
 //     [Context.WithInputSettings], [Context.WithInputReader], [Context.WithEnviron],
-//     [Context.WithDir], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
+//     [Context.WithDir], [Context.WithClock], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
 //     [Context.WithOutputChecks] set them on a standalone Context
 //
 // Nothing is parsed or validated until a handler calls an inputs method; a handler with its
@@ -111,6 +113,9 @@ type Context struct {
 	// [Program.WithDir]. nil reads the process's.
 	view *osView
 
+	// clock is the run's clock and its one reading; see [Program.WithClock]. view points at it.
+	clock runClock
+
 	// outputChecks makes WriteOutput and WriteOutputItem check each value against the declared
 	// output schema before writing it. See [Program.WithOutputChecks].
 	outputChecks bool
@@ -127,6 +132,13 @@ type Context struct {
 	// read only once. runState is the run a blocking stdin read watches for cancellation.
 	stdinRead *stdinState
 	runState  *stdinRun
+
+	// bufOut is the run's buffered stdout under [Program.WithBufferedOutput], kept apart from
+	// Stdout so a handler that replaces Stdout cannot hide it from the final flush.
+	bufOut *bufferedStdout
+	// outputs are the files [CreateOutput] opened and that are not yet closed or aborted; the
+	// run aborts them when it settles.
+	outputs []*OutputFile
 }
 
 // AddCompletionMessage adds a line for the shell to show while it completes, from a
@@ -153,7 +165,7 @@ func (rtx *Context) AddCompletionMessage(msg string) {
 // argvAcq is what parsing this run's argv reads values from: the replayed stdin and the
 // injected directory.
 func (rtx *Context) argvAcq() argvAcq {
-	return argvAcq{stdin: rtx.flagStdin(), dir: rtx.osView().base()}
+	return argvAcq{stdin: rtx.flagStdin(), dir: rtx.osView().base(), clock: &rtx.clock}
 }
 
 // cloneServices copies the dependency store. Each run is seeded from the Program's copy, so a
@@ -203,6 +215,7 @@ func NewContextFor(def Definition, argv []string) *Context {
 	markInvoked(chain)
 	rtx.Argv = argv
 	rtx.chain = chain
+	rtx.view = rtx.view.withClock(&rtx.clock)
 	return rtx
 }
 

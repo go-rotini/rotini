@@ -52,6 +52,9 @@ type parsedInputs struct {
 	// dir is the run's injected working directory, which relative existingfile and existingdir
 	// values are checked against; "" is the process's.
 	dir string
+
+	// clock is what relative time values are measured from; nil reads time.Now.
+	clock *runClock
 }
 
 // argvAcq is what reading argv values may consult: stdin for a `from: [stdin]` flag's "-",
@@ -60,6 +63,9 @@ type parsedInputs struct {
 type argvAcq struct {
 	stdin io.Reader
 	dir   string
+	clock *runClock // what relative time values are measured from; nil reads time.Now
+	// goos is the operating system whose rules glob arguments follow; "" is the running one.
+	goos string
 }
 
 // detachedHint is the hint an unexpected-positional error carries when one of the extra
@@ -119,6 +125,12 @@ type scopeInputs struct {
 	// handBuiltArgs marks argument indexes the command line supplied but a hand-built layer
 	// overrode: the value that won is checked with the typed rules, not the string read here.
 	handBuiltArgs map[int]bool
+	// argvArgs counts the positional values the command line gave, before defaults or fallbacks
+	// were added after them.
+	argvArgs int
+	// argOrigin names where an argument's value came from when its env or config fallback
+	// supplied it, by argument index; see origin.
+	argOrigin map[int]string
 }
 
 // fromSource is the suffix an error about a fallback value carries, naming its origin; "" for
@@ -435,11 +447,16 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, 
 	if !slices.Contains(si.used[fd.Name], typed) {
 		si.used[fd.Name] = append(si.used[fd.Name], typed)
 	}
+	acquired := acquiresValue(fd, value)
 	value, err := resolveFlagValue(fd, typed, value, acq)
 	if err != nil {
 		return err
 	}
-	values, err := splitValue(value, fd.Separator)
+	split := splitValue
+	if acquired && splitsAcquiredLines(fd) {
+		split = splitAcquired // a file's (or stdin's) lines are separate values
+	}
+	values, err := split(value, fd.Separator)
 	if err != nil {
 		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", typed, err), Flag: typed}
 	}
@@ -457,7 +474,14 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, 
 // recordArg records one positional of the leaf command, split on the separator of the variadic
 // argument it lands in, if that declares one. A variadic followed by fixed arguments splits
 // nothing, since where it ends is known only once every word is in.
-func (p *parsedInputs) recordArg(leaf Command, idx int, value string) error {
+func (p *parsedInputs) recordArg(leaf Command, idx int, value string, acq argvAcq) error {
+	if ad, ok := acquiringArg(leaf.Arguments, len(p.scopes[idx].args)); ok {
+		resolved, err := resolveAcquired(ad.From, "<"+ad.Name+">", "", value, acq)
+		if err != nil {
+			return err
+		}
+		value = resolved
+	}
 	values := []string{value}
 	if def, ok := variadicAt(leaf.Arguments, len(p.scopes[idx].args)); ok && def.Separator != "" && !hasArgTail(leaf.Arguments) {
 		var err error
@@ -469,6 +493,21 @@ func (p *parsedInputs) recordArg(leaf Command, idx int, value string) error {
 	return nil
 }
 
+// acquiringArg returns the argument positional number pos fills when it declares acquisition
+// modes ([ArgDef.From]): only an argument before any variadic one, whose position is known as
+// the words arrive.
+func acquiringArg(args []ArgDef, pos int) (ArgDef, bool) {
+	for i, a := range args {
+		if a.Variadic {
+			return ArgDef{}, false
+		}
+		if i == pos {
+			return a, len(a.From) > 0
+		}
+	}
+	return ArgDef{}, false
+}
+
 // parseArgvTokens is parseInto without defaults: exactly what argv supplied. It records each
 // explicitly set flag in the store's argvSet, the single source of truth for "set on the
 // command line". acq.stdin backs the from:stdin sentinel and is read only when a "-" value
@@ -478,6 +517,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 		scopes:  make([]scopeInputs, len(chain)),
 		argvSet: make([]map[string]bool, len(chain)),
 		dir:     acq.dir,
+		clock:   acq.clock,
 	}
 	leaf := len(chain) - 1 // chain index of the leaf command
 	depth := 1             // index of the next chain frame we might descend into
@@ -499,7 +539,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 		return store.recordArgvFlag(idx, fd, value, typed, acq)
 	}
 	addArg := func(value string) error {
-		return store.recordArg(chain[leaf], leaf, value)
+		return store.recordArg(chain[leaf], leaf, value, acq)
 	}
 	passthrough := func() bool {
 		return chain[leaf].Passthrough && depth == len(chain)
@@ -560,7 +600,9 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 			terminated, optionsDone = true, true
 		}
 	}
+	store.scopes[leaf].argvArgs = len(store.scopes[leaf].args)
 
+	store.expandGlobs(chain[leaf].Arguments, leaf, acq.goos)
 	return store, nil
 }
 
@@ -598,7 +640,7 @@ func noteDetached(store *parsedInputs, chain []Command, tok string, argv []strin
 	if !ok || fd.ImplicitValue == "" || isFlag(chain, next) || next == "--" {
 		return
 	}
-	if len(fd.Enum) > 0 && !enumHas(fd.Enum, next, fd.IgnoreCase) {
+	if e := flagEnum(fd); e.declared() && !e.has(next) {
 		return
 	}
 	store.detached = &[2]string{tok, next}
@@ -692,16 +734,11 @@ func checkValueShape(typ, label, flag string, vals []string, secret bool) error 
 
 // checkFlagValues checks one flag's argv values against its enum, its key=value shape when it
 // is a map, and its constraints. label is the flag as the user typed it.
-func checkFlagValues(fd FlagDef, label string, vals []string, dir string) error {
+func checkFlagValues(fd FlagDef, label string, vals []string, dir string, clock *runClock) error {
+	enum := flagEnum(fd)
 	for _, v := range vals {
-		if len(fd.Enum) > 0 && !enumHas(fd.Enum, v, fd.IgnoreCase) {
-			return &ParseError{
-				Kind:       ParseKindEnumViolation,
-				Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), label, strings.Join(fd.Enum, ", ")),
-				Flag:       label,
-				Token:      redactValue(v, fd.Secret),
-				Candidates: fd.Enum,
-			}
+		if enum.declared() && !enum.has(v) {
+			return enum.violation(label, label, v, fd.Secret)
 		}
 		if isMapType(fd.Type) {
 			if err := checkMapPair(label, v, fd.Secret); err != nil {
@@ -713,7 +750,7 @@ func checkFlagValues(fd FlagDef, label string, vals []string, dir string) error 
 		return err
 	}
 	if fd.UniqueItems && !isObjectFlag(fd) {
-		return checkUniqueItems(label, vals, uniqueKeyFor(fd.Type, fd.Layout, fd.Enum, fd.IgnoreCase), fd.Secret)
+		return checkUniqueItems(label, vals, uniqueKeyFor(fd.Type, flagTimeSpec(fd, clock), flagEnum(fd)), fd.Secret)
 	}
 	return nil
 }
@@ -782,6 +819,9 @@ func validate(chain []Command, store *parsedInputs) error {
 		if err := requiredErrors(chain, store); err != nil {
 			return err
 		}
+		if err := stdinDashOnce(chain, store); err != nil {
+			return err
+		}
 	}
 
 	for i, f := range chain {
@@ -797,7 +837,7 @@ func validate(chain []Command, store *parsedInputs) error {
 			if waived {
 				err = checkFlagShape(fd, fsi.label(fd), fsi.flags[fd.Name])
 			} else if err = checkRepeat(fd, fsi.label(fd), fsi.flags[fd.Name], store.setOnArgv(i, fd.Name)); err == nil {
-				err = checkFlagValues(fd, fsi.label(fd), fsi.flags[fd.Name], store.dir)
+				err = checkFlagValues(fd, fsi.label(fd), fsi.flags[fd.Name], store.dir, store.clock)
 			}
 			if err != nil {
 				return withSource(err, fsi.origin[fd.Name])
@@ -811,12 +851,12 @@ func validate(chain []Command, store *parsedInputs) error {
 	if err := extraPositionals(leaf, si, store); err != nil {
 		return err
 	}
-	return validateArgs(leaf, si, waived, store.dir)
+	return validateArgs(leaf, si, waived, store.dir, store.clock)
 }
 
 // validateArgs checks the leaf's positional values: every rule normally, and only whether each
 // value can be read at all under a short circuit.
-func validateArgs(leaf Command, si scopeInputs, waived bool, dir string) error {
+func validateArgs(leaf Command, si scopeInputs, waived bool, dir string, clock *runClock) error {
 	args := si.args[:len(si.args)-si.placeholderArgs] // only values this store actually read
 	spans := argSpans(leaf.Arguments, len(si.args))
 	for i, ad := range leaf.Arguments {
@@ -840,8 +880,8 @@ func validateArgs(leaf Command, si scopeInputs, waived bool, dir string) error {
 		if len(vals) == 0 && !ad.Variadic {
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		} // an absent variadic still gets a MinItems check
-		if err := checkArgValues(ad, vals, dir); err != nil {
-			return err
+		if err := checkArgValues(ad, vals, dir, clock); err != nil {
+			return withSource(err, si.argOrigin[i])
 		}
 	}
 	return nil
@@ -849,15 +889,11 @@ func validateArgs(leaf Command, si scopeInputs, waived bool, dir string) error {
 
 // checkArgValues checks one argument's values against its enum and its constraints; the
 // positional counterpart of [checkFlagValues].
-func checkArgValues(ad ArgDef, vals []string, dir string) error {
+func checkArgValues(ad ArgDef, vals []string, dir string, clock *runClock) error {
+	enum := argEnum(ad)
 	for _, v := range vals {
-		if len(ad.Enum) > 0 && !enumHas(ad.Enum, v, ad.IgnoreCase) {
-			return &ParseError{
-				Kind:       ParseKindEnumViolation,
-				Msg:        fmt.Sprintf("invalid value %q for <%s> (one of: %s)", redactValue(v, ad.Secret), ad.Name, strings.Join(ad.Enum, ", ")),
-				Token:      redactValue(v, ad.Secret),
-				Candidates: ad.Enum,
-			}
+		if enum.declared() && !enum.has(v) {
+			return enum.violation("<"+ad.Name+">", "", v, ad.Secret)
 		}
 	}
 	label := "<" + ad.Name + ">"
@@ -865,7 +901,7 @@ func checkArgValues(ad ArgDef, vals []string, dir string) error {
 		return err
 	}
 	if ad.UniqueItems {
-		return checkUniqueItems(label, vals, uniqueKeyFor(ad.Type, ad.Layout, ad.Enum, ad.IgnoreCase), ad.Secret)
+		return checkUniqueItems(label, vals, uniqueKeyFor(ad.Type, argTimeSpec(ad, clock), argEnum(ad)), ad.Secret)
 	}
 	return nil
 }
@@ -915,15 +951,21 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 	return nil
 }
 
-// isPathType reports whether typ is existingfile or existingdir. The generated field is a
-// plain string; only the type name tells the parser to check the path.
-func isPathType(typ string) bool { return typ == "existingfile" || typ == "existingdir" }
+// isPathType reports whether typ is a path kind: existingfile, existingdir, inputfile or
+// outputfile. The generated field is a plain string; only the type name tells the parser to
+// check the path.
+func isPathType(typ string) bool {
+	return typ == "existingfile" || typ == "existingdir" || isStreamPathType(typ)
+}
 
 // checkPathExists enforces an existingfile/existingdir type at parse time, so the error names
 // the flag the user typed. It checks only existence and kind; expanding "~", cleaning,
 // resolving symlinks and creating missing files are left to the handler. A relative value is
 // checked against dir, the run's injected directory ("" is the process working directory).
 func checkPathExists(label, typ, value, dir string) error {
+	if isStreamPathType(typ) {
+		return checkStreamPath(label, typ, value, dir)
+	}
 	info, err := os.Stat(joinDir(dir, value))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -1329,34 +1371,40 @@ func plural(word string, n int) string {
 // ordinary characters. Sentinels are argv grammar only: defaults and fallbacks never resolve.
 // A relative `@file` path resolves against acq.dir; the error names it as typed.
 func resolveFlagValue(fd FlagDef, label, value string, acq argvAcq) (string, error) {
+	return resolveAcquired(fd.From, label, label, value, acq)
+}
+
+// resolveAcquired applies acquisition modes from to one argv value; see [resolveFlagValue].
+// label names the input in a message, and flag is its flag label, "" for an argument.
+func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (string, error) {
 	switch {
-	case strings.HasPrefix(value, "@@") && slices.Contains(fd.From, "file"):
+	case strings.HasPrefix(value, "@@") && slices.Contains(from, "file"):
 		return value[1:], nil // a doubled @ is one literal @: @@alice is the value @alice
-	case strings.HasPrefix(value, "@") && slices.Contains(fd.From, "file"):
+	case strings.HasPrefix(value, "@") && slices.Contains(from, "file"):
 		path := joinDir(acq.dir, value[1:])
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
 				Msg:  label + ": " + unreadableFile(value[1:], path, err),
-				Flag: label, Token: value,
+				Flag: flag, Token: value,
 			}
 		}
 		return trimAcquiredPayload(string(data)), nil
-	case value == "-" && slices.Contains(fd.From, "stdin"):
+	case value == "-" && slices.Contains(from, "stdin"):
 		data, err := readStdin(acq.stdin)
 		if err != nil {
 			// An interrupted read keeps its own error, so the run's signal cause stays reachable.
 			if ie, ok := errors.AsType[*InputError](err); ok {
 				return "", ie
 			}
-			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: label + ": could not read stdin", Flag: label}
+			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: label + ": could not read stdin", Flag: flag}
 		}
 		if len(data) == 0 {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
 				Msg:  fmt.Sprintf("%s: stdin is empty; %q asks for a piped value", label, "-"),
-				Flag: label,
+				Flag: flag,
 			}
 		}
 		return trimAcquiredPayload(string(data)), nil
@@ -1466,11 +1514,14 @@ func findFlagMatch(chain []Command, name string) (def FlagDef, idx int, negated,
 	return FlagDef{}, -1, false, false
 }
 
-// negatedIdentifiers returns the "--no-<x>" form of each long identifier of a negatable flag.
-// Short identifiers have no negated form.
+// negatedIdentifiers returns the negated forms of a negatable flag: its declared [FlagDef.Negation],
+// else the "--no-<x>" form of each long identifier. Short identifiers have no negated form.
 func negatedIdentifiers(f FlagDef) []string {
 	if !f.Negatable {
 		return nil
+	}
+	if f.Negation != "" {
+		return []string{f.Negation}
 	}
 	var out []string
 	for _, id := range f.Identifiers {
@@ -1540,7 +1591,7 @@ func bindInputs(v reflect.Value, p *parsedInputs, chain []Command, offset int) e
 		return err
 	}
 	for i := range v.NumField() {
-		if err := bindCommandInputs(v.Field(i), p.scopes[offset+i], chain[offset+i]); err != nil {
+		if err := bindCommandInputs(v.Field(i), p.scopes[offset+i], chain[offset+i], p.clock); err != nil {
 			return err
 		}
 	}
@@ -1655,7 +1706,7 @@ func pathOf(chain []Command) string {
 }
 
 // bindCommandInputs fills a <Cmd>CommandInputs struct's Flags and Arguments.
-func bindCommandInputs(v reflect.Value, si scopeInputs, frame Command) error {
+func bindCommandInputs(v reflect.Value, si scopeInputs, frame Command, clock *runClock) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1663,11 +1714,11 @@ func bindCommandInputs(v reflect.Value, si scopeInputs, frame Command) error {
 	for i := range v.NumField() {
 		switch t.Field(i).Name {
 		case "Flags":
-			if err := bindFlags(v.Field(i), si, frame.Flags); err != nil {
+			if err := bindFlags(v.Field(i), si, frame.Flags, clock); err != nil {
 				return err
 			}
 		case "Arguments":
-			if err := bindArgs(v.Field(i), si.args, frame.Arguments); err != nil {
+			if err := bindArgs(v.Field(i), si.args, frame.Arguments, clock); err != nil {
 				return err
 			}
 		}
@@ -1677,7 +1728,7 @@ func bindCommandInputs(v reflect.Value, si scopeInputs, frame Command) error {
 
 // bindFlags fills a <Cmd>Flags struct by matching each field's `rotini:"<name>"` tag against
 // the parsed values, surfacing a coercion failure as a usage error naming the flag.
-func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef) error {
+func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef, clock *runClock) error {
 	flags := si.flags
 	if v.Kind() != reflect.Struct {
 		return nil
@@ -1718,10 +1769,8 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef) error {
 				continue
 			}
 		}
-		if def.IgnoreCase {
-			raw = canonicalEnum(def.Enum, raw)
-		}
-		if err := coerceWithLayout(v.Field(i), raw, def.Layout); err != nil {
+		raw = flagEnum(def).canonical(raw)
+		if err := coerceTime(v.Field(i), raw, flagTimeSpec(def, clock)); err != nil {
 			return coerceFailure(label, label, err, def.Secret)
 		}
 	}
@@ -1756,7 +1805,7 @@ func labelForFlag(defs []FlagDef, name string) string {
 
 // bindArgs fills a <Cmd>Arguments struct positionally; a []string field is variadic and
 // absorbs what the fields around it leave (see argSpans).
-func bindArgs(v reflect.Value, args []string, defs []ArgDef) error {
+func bindArgs(v reflect.Value, args []string, defs []ArgDef, clock *runClock) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1773,7 +1822,7 @@ func bindArgs(v reflect.Value, args []string, defs []ArgDef) error {
 		if f.Kind() != reflect.Slice && s[0] >= s[1] {
 			continue
 		}
-		if err := coerceWithLayout(f, canonicalFor(def, args[s[0]:s[1]]), def.Layout); err != nil {
+		if err := coerceTime(f, argEnum(def).canonical(args[s[0]:s[1]]), argTimeSpec(def, clock)); err != nil {
 			return coerceFailure(label, "", err, argSecret(defs, i))
 		}
 	}
@@ -1795,13 +1844,17 @@ func fieldArgDefs(v reflect.Value, defs []ArgDef) []ArgDef {
 
 // splitValue splits one value on a list input's separator, CSV-style: an item in double quotes
 // keeps the separator ("a,b"), leading spaces are trimmed, and an empty value is no items — so
-// `--tags ""` clears to an empty list. With no separator the value is one item, untouched.
+// `--tags ""` clears to an empty list. With no separator the value is one item, untouched. A
+// NUL separator splits on the byte alone.
 func splitValue(value, sep string) ([]string, error) {
 	if sep == "" {
 		return []string{value}, nil
 	}
 	if value == "" {
 		return nil, nil
+	}
+	if sep == "\x00" {
+		return strings.Split(value, sep), nil // NUL can't be a CSV delimiter; nothing is quoted
 	}
 	r := csv.NewReader(strings.NewReader(value))
 	r.Comma, _ = utf8.DecodeRuneInString(sep)
@@ -1824,41 +1877,6 @@ func variadicAt(args []ArgDef, pos int) (ArgDef, bool) {
 		}
 	}
 	return ArgDef{}, false
-}
-
-// enumHas reports whether v is one of enum's members, ignoring case when asked.
-func enumHas(enum []string, v string, ignoreCase bool) bool {
-	if !ignoreCase {
-		return slices.Contains(enum, v)
-	}
-	return slices.ContainsFunc(enum, func(m string) bool { return strings.EqualFold(m, v) })
-}
-
-// canonicalEnum rewrites each value that matches an enum member case-insensitively to that
-// member's declared spelling, leaving any other value for validation to reject.
-func canonicalEnum(enum, vals []string) []string {
-	if len(enum) == 0 {
-		return vals
-	}
-	out := make([]string, len(vals))
-	for i, v := range vals {
-		out[i] = v
-		for _, m := range enum {
-			if strings.EqualFold(m, v) {
-				out[i] = m
-				break
-			}
-		}
-	}
-	return out
-}
-
-// canonicalFor applies an argument's case-insensitive enum, if it declares one.
-func canonicalFor(def ArgDef, vals []string) []string {
-	if !def.IgnoreCase {
-		return vals
-	}
-	return canonicalEnum(def.Enum, vals)
 }
 
 var (

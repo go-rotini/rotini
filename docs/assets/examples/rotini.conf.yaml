@@ -12,6 +12,7 @@ generate:
   dry_run_env: CI
   contract:
     file: cmd/deploy/cli-contract.json
+    go: true
   packages:
     - type: main
       file: cmd/deploy/main.go
@@ -44,3 +45,4 @@ validate:
   fail: collect
   flags_first: false
   posix_names: false
+  release_env: RELEASE

@@ -92,18 +92,33 @@ func (p *Processor) GenerateDryRun(specPath, confPath string, onNotices func(not
 
 // Validate reconciles, validates and lints both documents, once or, with watch, on every
 // change. failMode overrides the conf's validate.fail ("fast" or "collect"; "" uses the conf).
+// A non-empty release (X.Y.Z) also fails for each command, input or deprecated identifier
+// whose removed_in is at or below it, in the spec and the local specs it composes.
 // onValidate (optional) receives a summary and each pass's error; onWarnings (optional)
 // receives each pass's non-fatal warnings.
-func (p *Processor) Validate(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error), onWarnings func(warnings []error)) error {
+func (p *Processor) Validate(specPath, confPath string, watch bool, failMode, release string, onValidate func(result string, err error), onWarnings func(warnings []error)) error {
 	if onValidate == nil {
 		onValidate = func(string, error) {}
+	}
+	if release != "" {
+		if err := CheckRelease(release, "release"); err != nil {
+			return err
+		}
 	}
 	pass := func(specPath, confPath string) (warnings []error, err error) {
 		rs, rc, err := p.reconcile(specPath, confPath)
 		if err != nil {
 			return nil, err
 		}
-		return p.validateDocuments(rs, rc, failMode)
+		warnings, err = p.validateDocuments(rs, rc, failMode)
+		if release == "" || (err != nil && failFast(failMode, rc)) {
+			return warnings, err
+		}
+		due := releaseCheck(rs, release, map[string]bool{})
+		if len(due) > 0 && failFast(failMode, rc) && err == nil {
+			return warnings, due[0]
+		}
+		return warnings, errors.Join(append([]error{err}, due...)...)
 	}
 	return p.run(specPath, confPath, watch, pass, onValidate, onWarnings)
 }

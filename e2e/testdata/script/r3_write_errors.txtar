@@ -1,0 +1,95 @@
+# R3 — a stdout that can't be written makes the run fail, with buffered output flushed and
+# checked before the reporter runs. /dev/full (Linux) fails every write with ENOSPC.
+
+gomodinit example.com/report
+
+exec rotini generate cmd/report/.rotini.spec.yaml --config cmd/report/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o report$exe ./cmd/report
+
+# Buffered output reaches a file whole, after the handler returns.
+execout out.txt ./report$exe
+cmp out.txt want.txt
+
+# The handler ignores its write errors; the final flush still reports the failure.
+[linux] ! execout /dev/full ./report$exe
+[linux] stderr '^Error: write output: no space left on device$'
+
+# An output file on a full device fails as it is written, not silently.
+[linux] ! exec ./report$exe --to /dev/full
+[linux] stderr 'no space left on device'
+
+# The companion buffers its own output, so a full disk fails `rotini completion`.
+[linux] ! execout /dev/full rotini completion bash
+[linux] stderr 'no space left on device'
+
+-- want.txt --
+line 1
+line 2
+line 3
+-- cmd/report/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: report
+  summary: write a few lines
+  flags:
+    - name: to
+      identifiers: [--to]
+      summary: where to write
+      schema:
+        type: outputfile
+        default: '-'
+-- cmd/report/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/report/main.go
+    - type: cmd
+      file: internal/cmd/report/zz_report.go
+      package: report
+-- cmd/report/main.go --
+package main
+
+import (
+	report "example.com/report/internal/cmd/report"
+)
+
+func main() {
+	report.NewProgram(report.Handlers()).
+		WithBufferedOutput(true).
+		Execute()
+}
+-- internal/cmd/report/report.go --
+package report
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type reportHandler struct {
+	rotini.NoHooks
+}
+
+func (*reportHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ReportInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	out, err := rotini.CreateOutput(rtx, in.Report.Flags.To, rotini.Overwrite(true))
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	defer out.Abort()
+	for i := 1; i <= 3; i++ {
+		fmt.Fprintf(out, "line %d\n", i)
+	}
+	if err := out.Close(); err != nil {
+		rtx.HaltWith(err)
+	}
+}

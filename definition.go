@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"reflect"
 	"time"
 )
 
@@ -41,6 +42,20 @@ type Definition struct {
 	// ResponseFiles turns on response files: a word starting with the prefix names a file whose
 	// lines are read as more words. nil leaves them off.
 	ResponseFiles *ResponseFilesDef
+
+	// Inputs is the root command's generated inputs type, which [ArgvOf] finds a command by;
+	// nil when not recorded.
+	Inputs reflect.Type
+	// ExitStatus lists the exit codes the root command documents (the spec's exit_status).
+	ExitStatus []ExitStatusDef
+}
+
+// ExitStatusDef is one exit code a command documents: the spec's `exit_status` entry.
+type ExitStatusDef struct {
+	Code      int
+	Name      string // the code's snake_case name (`not_found`); "" when none
+	Summary   string // what the code means; "" when none
+	Retryable bool   // running the same command again may succeed
 }
 
 // ResponseFilesDef is how a program reads response files (the spec's root `response_files`).
@@ -53,10 +68,24 @@ type ResponseFilesDef struct {
 }
 
 // EnumValue describes one declared value of an enum input beyond its spelling: the spec's
-// `{value, summary}` form of an enum item.
+// object form of an enum item.
 type EnumValue struct {
 	Value   string
 	Summary string // one line saying what the value means; "" when none
+	// Aliases are other spellings accepted for the value; each binds as Value.
+	Aliases []string
+	// Hidden values are accepted but not offered: completion, help and error candidates leave
+	// them out.
+	Hidden bool
+	// Deprecated is the value's deprecation message: using the value on the command line, or one
+	// of DeprecatedAliases, reports a [Deprecation] carrying it. A deprecated value is not
+	// offered either.
+	Deprecated string
+	// DeprecatedAliases are the Aliases whose use reports a [Deprecation], for retiring one
+	// spelling while the value stays.
+	DeprecatedAliases []string
+	// DeprecatedSince, RemovedIn and ReplacedBy plan the value's removal, as for an input.
+	DeprecatedSince, RemovedIn, ReplacedBy string
 }
 
 // CompletionMessagesDef is how completion messages are switched at run time, from the conf's
@@ -135,7 +164,16 @@ type CommandDef struct {
 	DeprecatedIdentifiers []string // aliases (subset of Aliases) that [Deprecations] reports when used to invoke
 	// Deprecated is the command's deprecation message: invoking it by any name reports a
 	// [Deprecation] carrying it. Empty means the command is not deprecated as a whole.
-	Deprecated       string
+	Deprecated string
+
+	// DeprecatedSince and RemovedIn are the releases (X.Y.Z) the spec says deprecated the
+	// command and will remove it; DeprecatedIdentifiersRemovedIn is the release removing each
+	// deprecated alias. [Deprecations] reports them as [Deprecation.Since] and
+	// [Deprecation.RemovedIn].
+	DeprecatedSince                string
+	RemovedIn                      string
+	DeprecatedIdentifiersRemovedIn map[string]string
+
 	Flags            []FlagDef
 	Arguments        []ArgDef
 	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
@@ -151,6 +189,13 @@ type CommandDef struct {
 	// command: every later word is an argument, flag-shaped words and "--" included. Words
 	// before that argument parse as usual. Sub-commands don't inherit it.
 	OptionsFirst bool
+
+	// Inputs is the command's generated inputs type, which [ArgvOf] finds the command by; nil
+	// when not recorded.
+	Inputs reflect.Type
+	// ExitStatus lists the exit codes the command documents (the spec's exit_status). Each
+	// command lists its own; a sub-command doesn't inherit its parent's.
+	ExitStatus []ExitStatusDef
 }
 
 // Constraints carries the validation bounds a spec may declare on a flag or argument. The
@@ -218,6 +263,13 @@ type FlagDef struct {
 	// ("2006-01-02", "Jan 2 2006 15:04"), or "unix" / "unixmilli" for a timestamp. Empty means
 	// RFC 3339. `type: date` gets "2006-01-02".
 	Layout string
+	// Layouts lists every layout when there are several, tried in order: the first that parses
+	// wins, and an error names them all. Layout is then the first. nil means Layout alone.
+	Layouts []string
+	// Relative also accepts times measured from the run's clock ([Program.WithClock]): "past"
+	// (2h or -2h ago, yesterday), "future" (2h or +2h from now, tomorrow) or "both" (a sign is
+	// required), plus now and today. Absolute values are tried first. Empty means absolute only.
+	Relative string
 	// ObjectSchema is the JSON Schema of an object-valued flag's value — set when the spec's
 	// schema is a named object (`$ref: '#/schemas/DB'`), or a list of them. The flag then
 	// takes JSON, key=value pairs, a YAML @file, or one field per flag (--db.host=…); see
@@ -229,9 +281,17 @@ type FlagDef struct {
 	// Deprecated is the flag's deprecation message: setting it by any identifier reports a
 	// [Deprecation] carrying it. Empty means the flag is not deprecated as a whole.
 	Deprecated string
+	// DeprecatedSince, RemovedIn and DeprecatedIdentifiersRemovedIn are the flag's planned
+	// lifecycle; see [CommandDef.DeprecatedSince].
+	DeprecatedSince                string
+	RemovedIn                      string
+	DeprecatedIdentifiersRemovedIn map[string]string
 	// Negatable adds a "--no-<x>" form for every long identifier of a bool flag, which sets
 	// it false, overriding a true default, config value or environment variable.
 	Negatable bool
+	// Negation, with Negatable, is the one negated identifier ("--plain" for --color) in place of
+	// the derived "--no-<x>" forms.
+	Negation string
 	// ShortCircuit marks a flag that replaces the command's normal run (--help, --version):
 	// when it is set on the command line, every declared requirement of the chain is waived,
 	// so [Context.Inputs] succeeds and the handler decides what to do. Errors reading the
@@ -294,9 +354,17 @@ type ArgDef struct {
 	Separator string
 	// Layout is how a time argument's value is written; see [FlagDef.Layout].
 	Layout string
+	// Layouts and Relative are the argument's other time forms; see [FlagDef.Layouts] and
+	// [FlagDef.Relative].
+	Layouts  []string
+	Relative string
 	// Deprecated is the argument's deprecation message: supplying it reports a [Deprecation]
 	// carrying it.
 	Deprecated string
+	// DeprecatedSince and RemovedIn are the argument's planned lifecycle; see
+	// [CommandDef.DeprecatedSince].
+	DeprecatedSince string
+	RemovedIn       string
 	// Complete is the declarative shell-completion hint for this argument's value.
 	Complete Completion
 	Secret   bool // when true, the value is redacted in usage/validation error output
@@ -305,5 +373,12 @@ type ArgDef struct {
 	// usual, and it and every word after it are taken as typed, flag-shaped words and "--"
 	// included. It is a variadic []string. See [Context.DashIndex].
 	Passthrough bool
+	// From lists extra acquisition modes, as for a flag ([FlagDef.From]): "file" resolves an
+	// @path value and "stdin" a bare "-". Only an argument before any variadic one takes it.
+	From []string
+	// Glob expands each word of this variadic argument that contains `*`, `?` or `[` into the
+	// paths it matches, on Windows only, where the shell passes patterns through. A word
+	// that names an existing path, or matches nothing, is kept as written.
+	Glob bool
 	Constraints
 }

@@ -145,7 +145,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 	withPage := func(d templateHelpData, names []string, children []rnode, output *Schema, inputs *Inputs) templateHelpData {
 		d.Output = outputDoc(output, gp.schemas)
 		if inputs != nil {
-			d.Stdin = stdinDoc(inputs.Stdin, gp.schemas)
+			d.Stdin = stdinDocFor(inputs, gp.schemas)
 		}
 		d.PageName = manPageName(gp.rootName, names)
 		d.Section = section
@@ -173,6 +173,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 	}}
 	// The variables that switch completion messages and descriptions are inputs the end user
 	// sets, so the root's man page lists them with the program's other environment variables.
+	markStream(out[0].data.Output, gp.rootStream)
 	if feat.manPages {
 		out[0].data.Environment = append(out[0].data.Environment, completionEnvRows(gp.conf)...)
 	}
@@ -189,6 +190,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			if n.passthrough {
 				data.Passthrough = n.name
 			}
+			markStream(data.Output, n.stream)
 			out = append(out, helpNode{
 				prefix:   n.prefix,
 				file:     file(childNames),
@@ -311,7 +313,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		SeeAlso:     h.SeeAlso,
 	}
 	for _, e := range h.ExitStatus {
-		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Summary: e.Summary, Output: shapeTypeName(e.Output)})
+		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, Output: shapeTypeName(e.Output)})
 	}
 	var cmds []templateDocCommandRow
 	for _, c := range children {
@@ -328,6 +330,8 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			Aliases:    aliases,
 			Group:      c.group,
 			Deprecated: deprecated,
+
+			DeprecatedSince: c.lifecycle.since, RemovedIn: c.lifecycle.removedIn,
 		})
 	}
 	for _, r := range plugins {
@@ -343,20 +347,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if a.Hidden {
 				continue
 			}
-			constraints, rules := constraintText(a.Schema, "argument")
-			d.Arguments = append(d.Arguments, templateDocArgumentRow{
-				Name:        a.Name,
-				Summary:     a.Summary,
-				Required:    a.Schema != nil && a.Schema.Required,
-				Variadic:    isVariadicSchema(a.Schema),
-				Default:     schemaDefaultString(a.Schema),
-				Enum:        enumOf(a.Schema),
-				EnumValues:  enumValuesOf(a.Schema),
-				Passthrough: a.Passthrough,
-				Deprecated:  a.Deprecated,
-				Constraints: constraints,
-				Rules:       rules,
-			})
+			d.Arguments = append(d.Arguments, argumentRow(a, envPrefix, readsConfig))
 		}
 		for _, f := range inputs.Flags {
 			if f.Hidden {
@@ -379,7 +370,10 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				EnumValues:  enumValuesOf(e.Schema),
 				Deprecated:  e.Deprecated,
 				Constraints: constraints,
+				Accepts:     acceptsNote(e.Schema),
 				Rules:       rules,
+
+				DeprecatedSince: e.DeprecatedSince, RemovedIn: e.RemovedIn,
 			})
 		}
 		for _, c := range inputs.Config {
@@ -398,7 +392,10 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				EnumValues:  enumValuesOf(c.Schema),
 				Deprecated:  c.Deprecated,
 				Constraints: constraints,
+				Accepts:     acceptsNote(c.Schema),
 				Rules:       rules,
+
+				DeprecatedSince: c.DeprecatedSince, RemovedIn: c.RemovedIn,
 			})
 		}
 	}
@@ -409,11 +406,41 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 	return d
 }
 
+// argumentRow is an argument's row on the help, man and markdown pages.
+func argumentRow(a ArgumentInput, envPrefix string, readsConfig bool) templateDocArgumentRow {
+	constraints, rules := constraintText(a.Schema, "argument")
+	if a.Schema != nil && a.Schema.Glob {
+		rules = append(rules, globRule)
+	}
+	row := templateDocArgumentRow{
+		Name:        a.Name,
+		Summary:     withStreamNote(a.Summary, a.Schema),
+		Required:    a.Schema != nil && a.Schema.Required,
+		Variadic:    isVariadicSchema(a.Schema),
+		Default:     schemaDefaultString(a.Schema),
+		Enum:        enumOf(a.Schema),
+		EnumValues:  enumValuesOf(a.Schema),
+		Passthrough: a.Passthrough,
+		Deprecated:  a.Deprecated,
+		Constraints: constraints,
+		Accepts:     acceptsNote(a.Schema),
+		Rules:       rules,
+
+		DeprecatedSince: a.DeprecatedSince, RemovedIn: a.RemovedIn,
+	}
+	row.Env, row.ConfigKey = argumentFallback(a, envPrefix, readsConfig)
+	return row
+}
+
 // envVarLabel returns the environment variable(s) an env input reads, for display: the names
 // envVarName produces (the same ones the generated `env:` tag pins), comma-separated with a
 // space, first preferred.
 func envVarLabel(e EnvInput, envPrefix string) string {
-	return strings.ReplaceAll(envVarName(e, envPrefix), ",", ", ")
+	label := strings.ReplaceAll(envVarName(e, envPrefix), ",", ", ")
+	if e.Schema != nil && e.Schema.VariableFile != "" {
+		label += ", " + e.Schema.VariableFile + fileVariableNote
+	}
+	return label
 }
 
 // configLocation returns where a config input is read from, for display: "<file>.<key>" when a
@@ -561,7 +588,7 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 	constraints, rules := constraintText(f.Schema, "flag")
 	row := templateDocFlagRow{
 		Identifiers: shortFirst(negatableIdentifiers(f, ids)),
-		Summary:     f.Summary,
+		Summary:     withStreamNote(f.Summary, f.Schema),
 		Group:       f.Group,
 		Type:        flagDisplayType(f.Schema),
 		Required:    f.Schema != nil && f.Schema.Required,
@@ -570,8 +597,11 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		EnumValues:  enumValuesOf(f.Schema),
 		Deprecated:  deprecated,
 		Constraints: constraints,
+		Accepts:     acceptsNote(f.Schema),
 		Rules:       rules,
 		key:         flagReconKey(f.Name, f.Schema),
+
+		DeprecatedSince: f.DeprecatedSince, RemovedIn: f.RemovedIn,
 	}
 	// A count flag's rule shows the repetition with its short form: repeat to count: -vvv.
 	if f.Schema != nil && f.Schema.Type == "count" {
@@ -585,6 +615,9 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 	}
 	if env := flagEnvVar(f.Schema, row.key, envPrefix); env != "" {
 		row.Env = strings.Split(env, ",")
+		if f.Schema.VariableFile != "" {
+			row.Env = append(row.Env, f.Schema.VariableFile+fileVariableNote)
+		}
 	}
 	// An implicit value must be attached, so the value token moves into brackets on the last
 	// identifier: `-c, --color[=when]`.
@@ -774,6 +807,7 @@ var valueTypeAliases = []string{
 	"duration", "time", "datetime", "date",
 	"url", "email", "timezone", "mac", "ip", "cidr", "hostport",
 	"bytesize", "hexbytes", "base64bytes",
+	"regexp", "glob",
 }
 
 // helpTypeName renders a declared type for docs: value aliases as written, everything else
@@ -806,27 +840,41 @@ func schemaDefaultString(schema *InputSchema) string {
 	return defaultString(schema.Default)
 }
 
+// enumOf returns an input's enum values for the docs pages: every value that is not hidden,
+// deprecated ones included, since they are still accepted.
 func enumOf(schema *InputSchema) []string {
 	if schema == nil {
 		return nil
 	}
-	return enumStrings(schema.Enum)
+	return enumVisible(schema.Enum)
 }
 
-// enumValuesOf returns every enum value in declared order with its summary, for the docs pages;
-// nil when no value has a summary, so the pages keep the compact value list.
+// enumValuesOf returns every enum value that is not hidden, in declared order, with what it
+// declares beyond its spelling, for the docs pages; nil when no value declares more, so the
+// pages keep the compact value list.
 func enumValuesOf(schema *InputSchema) []enumValue {
-	if schema == nil || !enumDescribed(schema.Enum) {
+	if schema == nil || !enumDetailed(schema.Enum) {
 		return nil
 	}
-	return enumValues(schema.Enum)
+	var out []enumValue
+	for _, v := range enumValues(schema.Enum) {
+		if !v.Hidden {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // negatableIdentifiers returns a flag's identifiers as docs show them. A negatable flag's long
-// forms render as "--[no-]color"; short forms have no negated spelling and are unchanged.
+// forms render as "--[no-]color"; short forms have no negated spelling and are unchanged. A
+// custom negated form is listed after the flag's own identifiers: "--color, --plain".
 func negatableIdentifiers(f FlagInput, ids []string) []string {
-	if f.Schema == nil || !f.Schema.Negatable {
+	on, custom := negation(f.Schema)
+	if !on {
 		return ids
+	}
+	if custom != "" {
+		return append(slices.Clone(ids), custom)
 	}
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {

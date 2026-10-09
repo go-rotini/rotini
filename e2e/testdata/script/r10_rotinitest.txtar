@@ -1,0 +1,188 @@
+# R10 — rotinitest runs a generated CLI from its tests with typed inputs.
+#
+# Each run writes the inputs as a command line, runs the program with its own environment and
+# directory, and checks the output against its schema and the exit code against exit_status.
+# The tests run in parallel, and the process environment doesn't leak into a run.
+
+gomodinit example.com/taskr
+
+exec rotini generate cmd/taskr/.rotini.spec.yaml --config cmd/taskr/.rotini.conf.yaml
+exec go mod tidy
+exec go vet ./...
+exec go test -count=1 ./internal/cmd/taskr
+! stderr .
+
+# The CLI's binary doesn't link the test package.
+exec go list -deps ./cmd/taskr
+! stdout 'rotinitest'
+! stdout '^testing$'
+
+-- cmd/taskr/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: taskr
+  summary: track tasks
+  env_prefix: TASKR
+  flags:
+    - name: output
+      summary: how to write the result
+      identifiers: [-o, --output]
+      cascading: true
+      schema: {type: string, default: json, enum: [json, yaml]}
+  env:
+    - name: owner
+      summary: who owns new tasks
+      schema: {type: string, default: nobody}
+  schemas:
+    Task:
+      type: object
+      required: [title, priority, owner]
+      properties:
+        title: {type: string}
+        priority: {type: integer, minimum: 0}
+        owner: {type: string}
+  commands:
+    - name: add
+      summary: add a task
+      flags:
+        - name: priority
+          identifiers: [-p, --priority]
+          schema: {type: integer, default: 1}
+      arguments:
+        - name: title
+          schema: {type: string}
+      output: {$ref: "#/schemas/Task"}
+      exit_status:
+        - {code: 0, summary: added}
+        - {code: 3, summary: a task with that title exists}
+-- cmd/taskr/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+    - type: cmd
+      file: internal/cmd/taskr/zz_taskr.go
+      package: taskr
+-- cmd/taskr/main.go --
+package main
+
+import taskr "example.com/taskr/internal/cmd/taskr"
+
+func main() {
+	taskr.NewProgram(taskr.Handlers()).Execute()
+}
+-- internal/cmd/taskr/taskr.go --
+package taskr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrHandler struct{ rotini.NoHooks }
+
+func (*taskrHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/taskr/taskr_add.go --
+package taskr
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrAddHandler struct{ rotini.NoHooks }
+
+func (*taskrAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TaskrAddInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.TaskrAdd.Arguments.Title == "dup" {
+		rtx.RecordError(errors.New("a task with that title exists"))
+		rtx.HaltWithCode(3)
+		return
+	}
+	task := TaskrAddOutput{
+		Title:    in.TaskrAdd.Arguments.Title,
+		Priority: in.TaskrAdd.Flags.Priority,
+		Owner:    in.Taskr.Env.Owner,
+	}
+	if err := rtx.WriteOutput(task, in.Taskr.Flags.Output, nil); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- internal/cmd/taskr/taskr_test.go --
+package taskr_test
+
+import (
+	"testing"
+
+	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/rotinitest"
+
+	"example.com/taskr/internal/cmd/taskr"
+)
+
+func TestAdd(t *testing.T) {
+	t.Parallel()
+	var in taskr.TaskrAddInputs
+	in.Taskr.Env.Owner = "ada"
+	in.TaskrAdd.Flags.Priority = 2
+	in.TaskrAdd.Arguments.Title = "--write docs"
+	res := rotinitest.Run(t, taskr.NewProgram(taskr.Handlers()), in)
+	rotinitest.ExitDocumented(t, res)
+	out := rotinitest.Output[taskr.TaskrAddOutput](t, res)
+	if out.Title != "--write docs" || out.Priority != 2 || out.Owner != "ada" {
+		t.Errorf("added %+v (argv %q)", out, res.Argv)
+	}
+}
+
+func TestAddYAML(t *testing.T) {
+	t.Parallel()
+	var in taskr.TaskrAddInputs
+	in.Taskr.Flags.Output = "yaml"
+	in.TaskrAdd.Arguments.Title = "ship"
+	res := rotinitest.Run(t, taskr.NewProgram(taskr.Handlers()), in)
+	if out := rotinitest.OutputAs[taskr.TaskrAddOutput](t, res, "yaml"); out.Priority != 1 {
+		t.Errorf("added %+v, want the default priority", out)
+	}
+}
+
+func TestAddExplicitZero(t *testing.T) {
+	t.Parallel()
+	var in taskr.TaskrAddInputs
+	in.TaskrAdd.Arguments.Title = "later"
+	set := rotini.PresenceOf(in)
+	set["TaskrAdd.Flags.Priority"] = rotini.InputSource{}
+	res := rotinitest.Run(t, taskr.NewProgram(taskr.Handlers()), in, rotinitest.Presence(set))
+	if out := rotinitest.Output[taskr.TaskrAddOutput](t, res); out.Priority != 0 {
+		t.Errorf("added %+v, want priority 0 over the default", out)
+	}
+}
+
+func TestAddDuplicate(t *testing.T) {
+	t.Parallel()
+	var in taskr.TaskrAddInputs
+	in.TaskrAdd.Arguments.Title = "dup"
+	res := rotinitest.Run(t, taskr.NewProgram(taskr.Handlers()), in)
+	if res.Code != 3 {
+		t.Fatalf("exit %d, want 3: %v", res.Code, res.Err)
+	}
+	rotinitest.ExitDocumented(t, res)
+}
+
+// The process environment never reaches a run.
+func TestAddIsolated(t *testing.T) {
+	t.Setenv("TASKR_OWNER", "leaked")
+	var in taskr.TaskrAddInputs
+	in.TaskrAdd.Arguments.Title = "mine"
+	res := rotinitest.Run(t, taskr.NewProgram(taskr.Handlers()), in)
+	if out := rotinitest.Output[taskr.TaskrAddOutput](t, res); out.Owner != "nobody" {
+		t.Errorf("owner %q, want the default", out.Owner)
+	}
+}

@@ -364,6 +364,9 @@ func inputFieldTag(f fieldDef) string {
 	if f.EnvNest != "" {
 		tag += fmt.Sprintf(" envnest:%q", f.EnvNest)
 	}
+	if f.EnvFile != "" {
+		tag += fmt.Sprintf(" envfile:%q", f.EnvFile)
+	}
 	if f.CfgFile != "" {
 		tag += fmt.Sprintf(" cfgfile:%q", f.CfgFile)
 	}
@@ -448,6 +451,8 @@ type templateRotiniData struct {
 	// WithHelp so [rotini.Context.Help] can find the running command's page.
 	HelpResolver string
 	Header       string // the target's conf `header:`; "" for none
+	ExitCodes    string // pre-rendered named exit-code constants (or their re-exports); "" when none
+	Contract     string // pre-rendered Contract variable (generate.contract.go); "" when off
 }
 
 func renderRotiniFile(data templateRotiniData) ([]byte, error) {
@@ -462,6 +467,7 @@ type templateModelsData struct {
 	Imports     []string // pre-rendered import lines for the field types
 	Blocks      []templateInputBlock
 	OutputTypes string // pre-rendered output type declarations; "" when none
+	ExitCodes   string // pre-rendered named exit-code constants; "" when none
 	Header      string // the target's conf `header:`; "" for none
 }
 
@@ -490,6 +496,10 @@ type templateDocCommandRow struct {
 	Aliases    []string
 	Group      string // the child command's `group` (buckets it in the Commands section)
 	Deprecated string
+
+	// DeprecatedSince and RemovedIn are the planned lifecycle of a command, flag or input
+	// deprecated as a whole; "" when not planned.
+	DeprecatedSince, RemovedIn string
 }
 
 type templateDocArgumentRow struct {
@@ -499,11 +509,16 @@ type templateDocArgumentRow struct {
 	Variadic    bool
 	Default     string
 	Enum        []string
-	EnumValues  []enumValue // every value in declared order, with its summary; nil when no value has one
+	EnumValues  []enumValue // every value that is not hidden, in declared order; nil when no value declares more than its spelling
 	Passthrough bool        // the argument and every word after it are passed on as typed
 	Deprecated  string
 	Constraints string   // the declared constraints as a short note (1..65535); "" for none
+	Accepts     string   // the forms a time input accepts beyond RFC 3339, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
+	Env         []string // the env fallback variables, in lookup order; nil for an argument with no fallback
+	ConfigKey   string   // the config fallback key; "" for none, or when the page's command reads no config files
+
+	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 }
 
 type templateDocFlagRow struct {
@@ -517,13 +532,16 @@ type templateDocFlagRow struct {
 	Default     string
 	Implicit    string // the value a bare flag takes (implicit_value); its identifier reads --x[=<type>]
 	Enum        []string
-	EnumValues  []enumValue // every value in declared order, with its summary; nil when no value has one
+	EnumValues  []enumValue // every value that is not hidden, in declared order; nil when no value declares more than its spelling
 	Deprecated  string
 	Group       string   // the flag's `group` (buckets it in the Flags section)
 	Env         []string // the env fallback variables, in lookup order (first preferred); nil for an argv-only flag
 	ConfigKey   string   // the config fallback key; "" for an argv-only flag, or when the page's command reads no config files
 	Constraints string   // the declared constraints as a short note (1..65535, repeatable); "" for none
+	Accepts     string   // the forms a time input accepts beyond RFC 3339, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
+
+	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 
 	key string // the config fallback key whether or not the page reads config files
 }
@@ -544,10 +562,13 @@ type templateDocEnvRow struct {
 	Required    bool
 	Default     string
 	Enum        []string
-	EnumValues  []enumValue // every value in declared order, with its summary; nil when no value has one
+	EnumValues  []enumValue // every value that is not hidden, in declared order; nil when no value declares more than its spelling
 	Deprecated  string
 	Constraints string   // the declared constraints as a short note; "" for none
+	Accepts     string   // the forms a time input accepts beyond RFC 3339, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
+
+	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 }
 
 type templateDocConfigRow struct {
@@ -558,16 +579,21 @@ type templateDocConfigRow struct {
 	Required    bool
 	Default     string
 	Enum        []string
-	EnumValues  []enumValue // every value in declared order, with its summary; nil when no value has one
+	EnumValues  []enumValue // every value that is not hidden, in declared order; nil when no value declares more than its spelling
 	Deprecated  string
 	Constraints string   // the declared constraints as a short note; "" for none
+	Accepts     string   // the forms a time input accepts beyond RFC 3339, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
+
+	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 }
 
 type templateDocExitRow struct {
-	Code    int
-	Summary string
-	Output  string // the shape stdout carries with this code, as a type name; "" for none
+	Code      int
+	Name      string // the code's snake_case name; "" for none
+	Summary   string
+	Retryable bool   // running the command again may succeed
+	Output    string // the shape stdout carries with this code, as a type name; "" for none
 }
 
 // templateHelpData is the per-command data shared by the help, man and markdown templates.
@@ -720,7 +746,8 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 		}
 		out := make([]enumValue, len(values))
 		for i, v := range values {
-			out[i] = enumValue{Value: clean(v.Value), Summary: clean(v.Summary)}
+			out[i] = v
+			out[i].Value, out[i].Summary, out[i].Deprecated = clean(v.Value), clean(v.Summary), clean(v.Deprecated)
 		}
 		return out
 	}
@@ -859,6 +886,10 @@ func templateFuncMap() template.FuncMap {
 			return elems[len(elems)-1]
 		},
 		"alsoSetBy": alsoSetBy,
+		// "deprecated since 1.4.0, removed in 2.0.0: <message>", for a deprecated item's note.
+		"deprecation": deprecationNote,
+		"listed":      listedEnum,
+		"described":   describedEnum,
 		// roff escaping, for man page templates (see generate_roff.go).
 		"roff":      roffInline,
 		"roffLines": roffLines,
@@ -927,6 +958,11 @@ func templateFailure(name string, err error) string {
 func alsoSetBy(env []string, configKey, before, after string) string {
 	var names []string
 	for _, e := range env {
+		name, isFile := strings.CutSuffix(e, fileVariableNote)
+		if isFile {
+			names = append(names, before+name+after+fileVariableNote)
+			continue
+		}
 		names = append(names, before+e+after)
 	}
 	if configKey != "" {
@@ -939,4 +975,21 @@ func alsoSetBy(env []string, configKey, before, after string) string {
 		return "also set by " + names[0]
 	}
 	return "also set by " + strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
+}
+
+// deprecationNote phrases a deprecation for the note beside an item in help, man and
+// markdown: "deprecated since 1.4.0, removed in 2.0.0: use --config". Each part shows only
+// when set.
+func deprecationNote(message, since, removedIn string) string {
+	note := "deprecated"
+	if since != "" {
+		note += " since " + since
+	}
+	if removedIn != "" {
+		note += ", removed in " + removedIn
+	}
+	if message != "" {
+		note += ": " + message
+	}
+	return note
 }

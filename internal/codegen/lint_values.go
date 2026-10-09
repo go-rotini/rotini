@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,14 +57,16 @@ func lintValuesParse(spec *Spec) []error {
 // built here.
 func runtimeRejects(schema *InputSchema, values []string) string {
 	defType := definitionType(schema, nil)
-	if defType == "count" || strings.Contains(defType, "existingfile") || strings.Contains(defType, "existingdir") {
+	if defType == "count" || strings.Contains(defType, "existingfile") || strings.Contains(defType, "existingdir") ||
+		strings.Contains(defType, "inputfile") || strings.Contains(defType, "outputfile") {
 		return ""
 	}
 	rt, ok := reflectTypeOf(getSchemaType(schema))
 	if !ok {
 		return ""
 	}
-	fd := rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: defType, Layout: layoutFor(schema)}
+	fd := rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: defType}
+	withTimeForms(&fd, schema)
 	// Measured-type bounds are checked here because lintDefaultConstraints cannot read "3s".
 	if measuredTypes[strings.TrimPrefix(getSchemaType(schema), "[]")] {
 		fd.Constraints = rotini.Constraints{
@@ -91,7 +94,7 @@ func parseAsRuntime(rt reflect.Type, fd rotini.FlagDef, text string) (field refl
 	})
 	out := reflect.New(reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}}))
 	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{fd}}
-	if err := rotini.NewParser().Parse(rotini.NewContextFor(def, []string{"--v=" + text}), out.Interface()); err != nil {
+	if err := rotini.NewParser().Parse(lintContext(def, []string{"--v=" + text}), out.Interface()); err != nil {
 		return reflect.Value{}, err.Error()
 	}
 	return out.Elem().Field(0).Field(0).Field(0), ""
@@ -135,6 +138,8 @@ var valueTypes = map[string]reflect.Type{
 	rotiniPkgName + ".ByteSize":    reflect.TypeFor[rotini.ByteSize](),
 	rotiniPkgName + ".HexBytes":    reflect.TypeFor[rotini.HexBytes](),
 	rotiniPkgName + ".Base64Bytes": reflect.TypeFor[rotini.Base64Bytes](),
+	"*regexp.Regexp":               reflect.TypeFor[*regexp.Regexp](),
+	rotiniPkgName + ".Glob":        reflect.TypeFor[rotini.Glob](),
 }
 
 // reflectTypeOf builds the reflect.Type for a resolved Go type spelling out of valueTypes,
@@ -209,7 +214,7 @@ func scalarOnlyKeys(s *InputSchema) []string {
 		"separator":      s.Separator != "",
 		"ignore_case":    s.IgnoreCase,
 		"implicit_value": s.ImplicitValue != nil,
-		"negatable":      s.Negatable,
+		"negatable":      negatable(s),
 		"dotted_keys":    s.DottedKeys,
 		"minimum/maximum/exclusiveMinimum/exclusiveMaximum/multipleOf": s.Minimum != nil || s.Maximum != nil ||
 			s.ExclusiveMinimum != nil || s.ExclusiveMaximum != nil || s.MultipleOf != nil,
@@ -278,7 +283,8 @@ func lintLayout(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
-			if schema == nil || schema.Layout == "" {
+			layouts := declaredLayouts(schema)
+			if len(layouts) == 0 {
 				return
 			}
 			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
@@ -286,8 +292,16 @@ func lintLayout(spec *Spec) []error {
 				add(fmt.Sprintf("sets `layout` but its type is %s; a layout says how a time is written, so it applies to time, datetime and date", displayType(getSchemaType(schema))))
 				return
 			}
-			if msg := layoutProblem(schema.Layout); msg != "" {
-				add(msg)
+			for i, l := range layouts {
+				if msg := layoutProblem(l); msg != "" {
+					add(msg)
+					continue
+				}
+				if j := shadowingLayout(layouts[:i], l); j >= 0 {
+					p := inputProblem(ptr, path, channel, name, fmt.Sprintf("lists `layout` %q after %q, which also reads its values, as a different time; %q is never reached for them, so list the more specific layout first", l, layouts[j], l))
+					p.sev = severityWarning
+					problems = append(problems, p)
+				}
 			}
 		})
 	})

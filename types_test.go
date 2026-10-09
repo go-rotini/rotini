@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"errors"
+	"math"
 	"net"
 	"net/mail"
 	"net/netip"
@@ -281,18 +282,18 @@ func TestCoerceWithLayout(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(coerceWithLayout(v.FieldByName("Day"), []string{"2026-09-29"}, "2006-01-02"))
-	must(coerceWithLayout(v.FieldByName("Maybe"), []string{"2026-09-30"}, "2006-01-02"))
-	must(coerceWithLayout(v.FieldByName("Days"), []string{"2026-01-01", "2026-12-25"}, "2006-01-02"))
-	must(coerceWithLayout(v.FieldByName("At"), []string{"2026-09-29T14:00:00Z"}, ""))
+	must(coerceTime(v.FieldByName("Day"), []string{"2026-09-29"}, timeSpec{layout: "2006-01-02"}))
+	must(coerceTime(v.FieldByName("Maybe"), []string{"2026-09-30"}, timeSpec{layout: "2006-01-02"}))
+	must(coerceTime(v.FieldByName("Days"), []string{"2026-01-01", "2026-12-25"}, timeSpec{layout: "2006-01-02"}))
+	must(coerceTime(v.FieldByName("At"), []string{"2026-09-29T14:00:00Z"}, timeSpec{}))
 	if f.Day.Day() != 29 || f.Maybe == nil || f.Maybe.Day() != 30 || len(f.Days) != 2 || f.Days[1].Month() != 12 || f.At.Hour() != 14 {
 		t.Errorf("%+v", f)
 	}
-	err := coerceWithLayout(v.FieldByName("Day"), []string{"29-09-2026"}, "2006-01-02")
+	err := coerceTime(v.FieldByName("Day"), []string{"29-09-2026"}, timeSpec{layout: "2006-01-02"})
 	if err == nil || !strings.Contains(err.Error(), `"29-09-2026" is not a valid date (write it as 2006-01-02)`) {
 		t.Errorf("err = %v", err)
 	}
-	err = coerceWithLayout(v.FieldByName("At"), []string{"2026-09-29"}, "")
+	err = coerceTime(v.FieldByName("At"), []string{"2026-09-29"}, timeSpec{})
 	if err == nil || !strings.Contains(err.Error(), "is not a valid time (write it as RFC 3339") {
 		t.Errorf("err = %v", err)
 	}
@@ -320,6 +321,24 @@ func TestFormatDuration(t *testing.T) {
 		}
 		if back, err := parseDuration(got); err != nil || back != d {
 			t.Errorf("formatDuration(%v) = %q, which parses back to %v, %v", d, got, back, err)
+		}
+	}
+}
+
+// TestFormatDurationExtremes pins that the most negative and most positive durations render,
+// and read back, exactly: negating the most negative one overflows, so it must not be negated
+// whole.
+func TestFormatDurationExtremes(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		math.MinInt64: "-106751d23h47m16.854775808s",
+		math.MaxInt64: "106751d23h47m16.854775807s",
+	} {
+		got := formatDuration(d)
+		if got != want {
+			t.Errorf("formatDuration(%d) = %q, want %q", int64(d), got, want)
+		}
+		if back, err := parseDuration(got); err != nil || back != d {
+			t.Errorf("formatDuration(%d) = %q, which parses back to %v, %v", int64(d), got, back, err)
 		}
 	}
 }

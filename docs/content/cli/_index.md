@@ -191,6 +191,12 @@ It finds the spec and conf the same way `generate` does. `--fail fast` stops at 
 problem; `--fail collect` reports every problem at once, and is the default unless the conf's
 `validate.fail` says otherwise. `--watch` validates again whenever the spec or conf changes.
 
+`--release 2.0.0` also fails for each command, input or deprecated identifier still declared
+whose `removed_in` is at or below that release, so a planned removal can't ship by accident.
+Without the flag, the variable the conf's `validate.release_env` names is read instead; unset,
+nothing is checked. A prerelease such as `2.0.0-rc.1` counts as `2.0.0`, so the check fails early.
+Specs composed from another module (`mod://`) are left out: they follow that module's releases.
+
 {{< code title="$ rotini help validate" language="text" open="true" collapsible="false" copy="false" >}}
 Validate a rotini spec file and its conf for correctness.
 
@@ -204,6 +210,7 @@ Flags:
   -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)
       --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]
   -w, --watch            watch the spec and conf for changes and re-validate
+      --release X.Y.Z    fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names
 
 Global Flags:
   -h, --help    print help

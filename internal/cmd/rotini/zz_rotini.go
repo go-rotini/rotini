@@ -3,6 +3,7 @@ package rotini
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/go-rotini/rotini"
@@ -26,6 +27,7 @@ var definition = rotini.Definition{
 		{Name: "version", Identifiers: []string{"-v", "--version"}, Summary: "print version", Type: "bool", ShortCircuit: true},
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool", ShortCircuit: true},
 	},
+	Inputs: reflect.TypeFor[RotiniInputs](),
 	Commands: []rotini.CommandDef{
 		{Name: "initialize",
 			Handler: "RotiniInitialize",
@@ -39,6 +41,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "name", Type: "string", Required: true, Complete: rotini.Completion{Message: "<name>: the root command name written to the created spec file (expected binary name)"}},
 			},
+			Inputs: reflect.TypeFor[RotiniInitializeInputs](),
 		},
 		{Name: "generate",
 			Handler: "RotiniGenerate",
@@ -52,6 +55,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
 			},
+			Inputs: reflect.TypeFor[RotiniGenerateInputs](),
 		},
 		{Name: "validate",
 			Handler: "RotiniValidate",
@@ -61,10 +65,12 @@ var definition = rotini.Definition{
 				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Summary: "path to the rotini conf file (default the .rotini.conf.* beside the spec)", Type: "string", Complete: rotini.Completion{Message: "--config string: path to the rotini conf file (default the .rotini.conf.* beside the spec)"}},
 				{Name: "fail", Identifiers: []string{"--fail"}, Summary: "failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect", Type: "string", Enum: []string{"fast", "collect"}, Complete: rotini.Completion{Message: "--fail string: failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect"}},
 				{Name: "watch", Identifiers: []string{"-w", "--watch"}, Summary: "watch the spec and conf for changes and re-validate", Type: "bool"},
+				{Name: "release", Identifiers: []string{"--release"}, Summary: "fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names", Type: "string", Complete: rotini.Completion{Message: "--release X.Y.Z: fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names"}},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
 			},
+			Inputs: reflect.TypeFor[RotiniValidateInputs](),
 		},
 		{Name: "help",
 			Handler: "RotiniHelp",
@@ -72,10 +78,12 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "command", Type: "[]string", Variadic: true, Complete: rotini.Completion{Kind: "command", Message: "<command>: name of the command to print help for"}},
 			},
+			Inputs: reflect.TypeFor[RotiniHelpInputs](),
 		},
 		{Name: "version",
 			Handler: "RotiniVersion",
 			Summary: "print version",
+			Inputs:  reflect.TypeFor[RotiniVersionInputs](),
 		},
 		{Name: "completion",
 			Handler: "RotiniCompletion",
@@ -83,6 +91,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "shell", Type: "string", Required: true, Enum: []string{"bash", "zsh", "fish", "powershell"}, Complete: rotini.Completion{Message: "<shell>: the shell to print the script for"}},
 			},
+			Inputs: reflect.TypeFor[RotiniCompletionInputs](),
 		},
 		{Name: "man",
 			Handler: "RotiniMan",
@@ -93,6 +102,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "command", Type: "[]string", Variadic: true, Complete: rotini.Completion{Message: "<command>: the command whose page to print (default rotini itself)"}},
 			},
+			Inputs: reflect.TypeFor[RotiniManInputs](),
 		},
 	},
 	CompletionMessages: &rotini.CompletionMessagesDef{Env: "ROTINI_COMPLETION_MESSAGES"},
@@ -208,6 +218,7 @@ type RotiniValidateFlags struct {
 	ConfFilePath string `rotini:"conf_file_path"`
 	Fail         string `rotini:"fail"`
 	Watch        bool   `rotini:"watch"`
+	Release      string `rotini:"release"`
 }
 
 type RotiniValidateArguments struct {
@@ -327,7 +338,7 @@ var HelpRotiniInitialize = "Scaffold a new rotini cli — write the spec + conf,
 
 var HelpRotiniGenerate = "Generate a cli program from a rotini spec file and its conf.\n\nUsage:\n  rotini generate [flags] [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n  -w, --watch            watch the spec and conf for changes and re-generate\n  -n, --[no-]dry-run     show what would be written, created or removed, and change nothing; exits 2 when something would change\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini generate\n  rotini generate ./path/to/.rotini.spec.json --watch\n  rotini generate --dry-run\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniValidate = "Validate a rotini spec file and its conf for correctness.\n\nUsage:\n  rotini validate [flags] [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n      --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]\n  -w, --watch            watch the spec and conf for changes and re-validate\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini validate\n  rotini val ./path/to/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniValidate = "Validate a rotini spec file and its conf for correctness.\n\nUsage:\n  rotini validate [flags] [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n      --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]\n  -w, --watch            watch the spec and conf for changes and re-validate\n      --release X.Y.Z    fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini validate\n  rotini val ./path/to/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniHelp = "Print help for a specific command.\n\nUsage:\n  rotini help [command...]\n\nArguments:\n  [command...]    name of the command to print help for\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini help\n  rotini help generate\n  rotini help init\n\nUse \"rotini help <command>\" for more information about a command."
 
@@ -369,7 +380,7 @@ var ManRotiniInitialize = ".TH \"ROTINI\\-INITIALIZE\" 1 \"\" \"rotini\" \"User 
 
 var ManRotiniGenerate = ".TH \"ROTINI\\-GENERATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-generate \\- generate a cli program\n.SH SYNOPSIS\n\\fBrotini generate\\fR [flags] [spec_file_path]\n.SH DESCRIPTION\nGenerate a cli program from a rotini spec file and its conf.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-generate\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what would be written, created or removed, and change nothing; exits 2 when\nsomething would change\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini generate\n.sp\nrotini generate ./path/to/.rotini.spec.json \\-\\-watch\n.sp\nrotini generate \\-\\-dry\\-run\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniValidate = ".TH \"ROTINI\\-VALIDATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-validate \\- validate a spec and conf\n.SH SYNOPSIS\n\\fBrotini validate\\fR [flags] [spec_file_path]\n.SH DESCRIPTION\nValidate a rotini spec file and its conf for correctness.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-\\-fail\\fR \\fIstring\\fR\nfailure reporting \\[u2014] fast (first problem) or collect (all); defaults to\nvalidate.fail in the conf, else collect [fast|collect]\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-validate\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini validate\n.sp\nrotini val ./path/to/.rotini.spec.yaml\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniValidate = ".TH \"ROTINI\\-VALIDATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-validate \\- validate a spec and conf\n.SH SYNOPSIS\n\\fBrotini validate\\fR [flags] [spec_file_path]\n.SH DESCRIPTION\nValidate a rotini spec file and its conf for correctness.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-\\-fail\\fR \\fIstring\\fR\nfailure reporting \\[u2014] fast (first problem) or collect (all); defaults to\nvalidate.fail in the conf, else collect [fast|collect]\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-validate\n.TP\n\\fB\\-\\-release\\fR \\fIX.Y.Z\\fR\nfail for each item whose removed_in is at or below this release; defaults to the\nvariable validate.release_env names\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini validate\n.sp\nrotini val ./path/to/.rotini.spec.yaml\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 var ManRotiniHelp = ".TH \"ROTINI\\-HELP\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-help \\- print help\n.SH SYNOPSIS\n\\fBrotini help\\fR [command...]\n.SH DESCRIPTION\nPrint help for a specific command.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nname of the command to print help for\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini help\n.sp\nrotini help generate\n.sp\nrotini help init\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 

@@ -506,7 +506,7 @@ func flagValueCandidates(lookup HandlerLookup, rtx *Context, chain []Command, wo
 		}
 		return valueCandidates{cands: keys, sorted: true}
 	}
-	return valueCandidates{cands: enumCandidates(fd.Enum, fd.EnumValues)}
+	return valueCandidates{cands: enumCandidates(flagEnum(fd))}
 }
 
 // argValueCandidates returns the candidates for the argument the completed word would bind to
@@ -519,6 +519,10 @@ func argValueCandidates(def Definition, lookup HandlerLookup, rtx *Context, cc c
 	if !ok || ad.Hidden {
 		return valueCandidates{}
 	}
+	// An @file value is a path: the shell falls back to its own file completion.
+	if strings.HasPrefix(partial, "@") && slices.Contains(ad.From, "file") {
+		return valueCandidates{}
+	}
 	if cands, dyn := dynamicArgValues(lookup, rtx, cc.chain, words, ad.Name, partial); dyn {
 		return valueCandidates{cands: cands, dynamic: true}
 	}
@@ -529,7 +533,7 @@ func argValueCandidates(def Definition, lookup HandlerLookup, rtx *Context, cc c
 		}
 		return valueCandidates{cands: commandPathCandidates(def, path), sorted: true}
 	}
-	return valueCandidates{cands: enumCandidates(ad.Enum, ad.EnumValues)}
+	return valueCandidates{cands: enumCandidates(argEnum(ad))}
 }
 
 // commandPathCandidates returns the visible sub-commands of the command path names below the
@@ -547,19 +551,18 @@ func commandPathCandidates(def Definition, path []string) []string {
 	return commandNames(cur)
 }
 
-// enumCandidates returns an enum's values in declared order, each with its summary.
-func enumCandidates(enum []string, described []EnumValue) []string {
-	if len(described) == 0 {
-		return enum
+// enumCandidates returns an enum's offered values in declared order, each with its summary:
+// hidden and deprecated values, and aliases, are accepted but not offered.
+func enumCandidates(enum enumSet) []string {
+	listed := enum.listed()
+	if len(enum.described) == 0 {
+		return listed
 	}
-	out := make([]string, len(enum))
-	for i, v := range enum {
+	out := make([]string, len(listed))
+	for i, v := range listed {
 		out[i] = v
-		for _, d := range described {
-			if d.Value == v {
-				out[i] = withDescription(v, d.Summary)
-				break
-			}
+		if d, ok := enum.describe(v); ok {
+			out[i] = withDescription(v, d.Summary)
 		}
 	}
 	return out

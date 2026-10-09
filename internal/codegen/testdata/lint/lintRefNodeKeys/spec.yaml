@@ -10,3 +10,4 @@ command:
           schema:
             type: bool
       options_first: true
+      output_stream: true

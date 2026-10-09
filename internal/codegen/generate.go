@@ -69,6 +69,7 @@ type program struct {
 	rootPlugins     []PluginSpec       // root-level declared plugins
 	rootHelp        cmdHelp            // root command's flattened help fields
 	rootOutput      *Schema            // root command's output type (nil when unset)
+	rootStream      bool               // root command's output_stream
 	rootDiscovery   *PluginDiscovery   // root command's plugin discovery (nil = off)
 	rootPluginPath  string             // root command's extra plugin directory (both kinds of plugin)
 	rootPassthrough bool               // root command's passthrough (raw positionals)
@@ -87,6 +88,10 @@ type program struct {
 	// per-command pages written to disk (featureOutputs).
 	featureBlocks  []templateFeature
 	featureOutputs []featureOutput
+
+	// contractGo is the contract document for the cmd file's Contract variable
+	// (generate.contract.go), set by emitContract; nil when that is off.
+	contractGo []byte
 }
 
 // module is the Go module a spec lives in: the filesystem root (the directory holding
@@ -165,9 +170,13 @@ func (p *program) emitModelsFile() error {
 		Imports:     renderImports(imports),
 		Blocks:      blocks,
 		OutputTypes: outputTypes,
+		ExitCodes:   exitConstantsDecl(p.exitConstants(), false),
 		Header:      p.layout.modelsHeader,
 	})
 	if err != nil {
+		return err
+	}
+	if err := duplicateDecls(p.layout.modelsFile, generatedNames(p.exitConstants(), false), content); err != nil {
 		return err
 	}
 	return p.plan.write(filepath.Join(p.layout.modelsDir, p.layout.modelsFile), content)
@@ -177,6 +186,9 @@ func (p *program) emitModelsFile() error {
 func (p *program) emitCmdFile() error {
 	content, err := renderCmdFile(p, p.layout, p.featureBlocks)
 	if err != nil {
+		return err
+	}
+	if err := duplicateDecls(p.layout.cmdFile, generatedNames(p.exitConstants(), p.contractGo != nil), content); err != nil {
 		return err
 	}
 	return p.plan.write(filepath.Join(p.layout.cmdDir, p.layout.cmdFile), content)
@@ -374,12 +386,10 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 			return nil, err
 		}
 	}
-	if declaresOutput(gp) { // the Definition records each output's Go type
-		if imports == nil {
-			imports = map[string]bool{}
-		}
-		imports["reflect"] = true
+	if imports == nil {
+		imports = map[string]bool{}
 	}
+	imports["reflect"] = true // the Definition records each command's inputs type
 
 	return renderRotiniFile(templateRotiniData{
 		Package:       lay.cmdPkgName,
@@ -399,6 +409,8 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		InputSettings: renderInputSettings(gp),
 		Features:      features,
 		EmbedImport:   anyEmbed(features),
+		ExitCodes:     exitConstantsDecl(gp.exitConstants(), lay.splitModels),
+		Contract:      contractDecl(gp.contractGo),
 	})
 }
 
@@ -428,6 +440,9 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 			InputsFields: toTemplateFields(c.inputs),
 		})
 		c.addImports(imports)
+		if strings.HasPrefix(c.stdinType, "iter.") {
+			imports["iter"] = true // a streamed stdin field
+		}
 	}
 
 	// A composed node's handler uses the child package's types, so it needs no local

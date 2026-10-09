@@ -1,0 +1,23 @@
+# `variable_file` names the variable holding a file to read an env input or a flag's
+# environment fallback from. It needs its own name, and something that reads the environment.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: token
+      identifiers: [--token]
+      schema: {type: string, variable: APP_TOKEN, variable_file: APP_TOKEN_FILE}
+    - name: plain
+      identifiers: [--plain]
+      schema: {type: string, variable_file: PLAIN_FILE}
+    - name: same
+      identifiers: [--same]
+      schema: {type: string, variable: SAME, variable_file: SAME}
+  env:
+    - name: password
+      schema: {type: string, variable_file: APP_TOKEN_FILE}
+    - name: labels
+      schema: {type: map, variable: LABELS, nesting: _, variable_file: LABELS_FILE}
+  arguments:
+    - name: who
+      schema: {type: string, variable_file: WHO_FILE}

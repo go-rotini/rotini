@@ -1,0 +1,13 @@
+# The force role marks one bool flag per command.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: force
+      role: force
+      schema:
+        type: string
+    - name: yes
+      role: force
+      schema:
+        type: bool

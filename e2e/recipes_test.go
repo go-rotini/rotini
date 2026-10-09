@@ -22,6 +22,7 @@ var recipeBlocks = []struct{ title, script, file string }{
 	{"$ taskr __complete list --out ''", "r12_recipe_complete_debug.txtar", "out.txt"},
 	{"internal/cmd/tracedemo/tracedemo.go", "r12_recipe_otel.txtar", "root.go.txt"},
 	{"internal/cmd/tracedemo/tracedemo_work.go", "r12_recipe_otel.txtar", "work.go.txt"},
+	{"internal/cmd/teedemo/teedemo_export.go", "r12_recipe_tee.txtar", "export.go.txt"},
 }
 
 func TestRecipeBlocksMatchScripts(t *testing.T) {

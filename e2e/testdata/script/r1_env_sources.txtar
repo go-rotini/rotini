@@ -1,0 +1,124 @@
+# R1 — where environment values come from: a variable naming a file that holds the value (the
+# Docker and Kubernetes secrets convention), a .env file under the real environment, and a
+# config file in the platform's own config directory over a system-wide one.
+
+gomodinit example.com/svc
+
+exec rotini generate cmd/svc/.rotini.spec.yaml --config cmd/svc/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o svc$exe ./cmd/svc
+
+env HOME=$WORK/home
+env USERPROFILE=$WORK/home
+env AppData=$WORK/appdata
+env XDG_CONFIG_HOME=$WORK/xdg
+env XDG_CONFIG_DIRS=$WORK/sys
+
+# The secret comes from the file SVC_TOKEN_FILE names, as a mounted secret would.
+env SVC_TOKEN_FILE=secrets/token
+exec ./svc$exe
+stdout '^token=s3cret$'
+
+# The plain variable and its file form together are an error.
+env SVC_TOKEN=plain
+! exec ./svc$exe
+stderr 'set SVC_TOKEN or SVC_TOKEN_FILE, not both'
+env SVC_TOKEN_FILE=
+
+# The .env file supplies what the environment does not set.
+exec ./svc$exe
+stdout '^token=plain$'
+stdout '^endpoint=https://dotenv.example$'
+
+# The real environment wins over the .env file.
+env SVC_ENDPOINT=https://real.example
+exec ./svc$exe
+stdout '^endpoint=https://real.example$'
+
+# The user's config file in the platform's config directory wins key by key over the system one.
+stdout '^region=user$'
+stdout '^owner=system$'
+
+-- secrets/token --
+s3cret
+-- .env --
+SVC_ENDPOINT=https://dotenv.example
+-- home/Library/Application Support/svc/config.yaml --
+region: user
+-- appdata/svc/config.yaml --
+region: user
+-- xdg/svc/config.yaml --
+region: user
+-- sys/svc/config.yaml --
+region: system
+owner: system
+-- cmd/svc/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: svc
+  summary: a service client
+  config_files:
+    - name: dotenv
+      path: .env
+      format: dotenv
+      as: env
+    - name: user
+      discover: {strategy: native, app: svc, file: config.yaml}
+    - name: system
+      discover: {strategy: xdg-system, app: svc, file: config.yaml}
+  env:
+    - name: token
+      schema: {type: string, variable: SVC_TOKEN, variable_file: SVC_TOKEN_FILE, secret: true}
+    - name: endpoint
+      schema: {type: string, variable: SVC_ENDPOINT}
+  config:
+    - name: region
+      schema: {type: string}
+    - name: owner
+      schema: {type: string}
+-- cmd/svc/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/svc/main.go
+    - type: cmd
+      file: internal/cmd/svc/zz_svc.go
+      package: svc
+-- internal/cmd/svc/svc.go --
+package svc
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type svcHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*svcHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[SvcInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "token=%s\nendpoint=%s\nregion=%s\nowner=%s\n",
+		in.Svc.Env.Token, in.Svc.Env.Endpoint, in.Svc.Config.Region, in.Svc.Config.Owner)
+}
+-- cmd/svc/main.go --
+package main
+
+import (
+	svc "example.com/svc/internal/cmd/svc"
+)
+
+func main() {
+	svc.NewProgram(svc.Handlers()).
+		Execute()
+}

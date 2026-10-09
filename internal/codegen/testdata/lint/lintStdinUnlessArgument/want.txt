@@ -1,0 +1,6 @@
+spec: .rotini.spec.yaml:17:26: command demo/missing: stdin: sets `unless_argument: files`, but the command declares no argument "files"; name one of its own file arguments
+spec: .rotini.spec.yaml:24:26: command demo/words: stdin: sets `unless_argument: files`, but its type is []string; stdin is read when no file is given, so the argument must be a file path: `inputfile` or `existingfile`, or a list of either
+spec: .rotini.spec.yaml:31:26: command demo/needed: stdin: sets `unless_argument: file`, but the argument is required, so a file is always given and stdin is never read; make it optional
+spec: .rotini.spec.yaml:38:26: command demo/defaulted: stdin: sets `unless_argument: file`, but the argument has a `default`, so it always has a value and stdin is never read; remove the default
+spec: .rotini.spec.yaml:46:26: command demo/exec: stdin: sets `unless_argument` on a passthrough command, whose arguments are raw words rather than files
+warning: spec: .rotini.spec.yaml:13:26: command demo/cat: stdin: sets `unless_argument: files`, an `existingfile`, which can't be `-`, so stdin is read only when no file is given; use `inputfile` to also accept `-`

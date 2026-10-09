@@ -1,0 +1,186 @@
+# R1 — value forms, end to end through codegen: an argument's environment fallback, a custom
+# negated form, enum aliases with hidden and deprecated values, several time layouts with
+# relative times, and the regexp and glob kinds. Each is spec data that codegen has to carry
+# into the Definition and the field tags, and help has to show.
+
+gomodinit example.com/ship
+
+exec rotini validate cmd/ship/.rotini.spec.yaml --config cmd/ship/.rotini.conf.yaml
+exec rotini generate cmd/ship/.rotini.spec.yaml --config cmd/ship/.rotini.conf.yaml
+grep 'Negation: "--plain"' internal/cmd/ship/zz_ship.go
+grep 'Relative: "past"' internal/cmd/ship/zz_ship.go
+grep 'recon:"env" env:"SHIP_ENV"' internal/cmd/ship/zz_ship.go
+grep 'Re +\*regexp.Regexp' internal/cmd/ship/zz_ship.go
+grep 'Include +\[\]rotini.Glob' internal/cmd/ship/zz_ship.go
+
+exec go mod tidy
+exec go build -o ship$exe ./cmd/ship
+
+# Help: the argument's variable, the custom negated form, the values to use, and what the time
+# input accepts.
+exec ./ship$exe --help
+stdout 'also set by SHIP_ENV'
+stdout '--color, --plain'
+stdout '\[json\|yaml\]'
+! stdout 'xml'
+stdout '\(accepts 2006-01-02 or a time ago: 2h, 3d, yesterday\)'
+
+# The argument falls back to its variable, and the command line wins over it.
+env SHIP_ENV=prod
+exec ./ship$exe
+stdout 'env=prod service=api color=true format=json'
+exec ./ship$exe dev web
+stdout 'env=dev service=web'
+env SHIP_ENV=
+! exec ./ship$exe
+stderr 'missing required input: <env>'
+
+# --plain sets --color false; --no-color is not a form of it.
+exec ./ship$exe dev --plain
+stdout 'color=false'
+! exec ./ship$exe dev --no-color
+stderr 'unknown flag "--no-color"'
+
+# An alias binds as its value, a hidden value is accepted, and a deprecated one is reported.
+exec ./ship$exe dev --format yml
+stdout 'format=yaml'
+exec ./ship$exe dev --format xml
+stdout 'format=xml'
+exec ./ship$exe dev --format ini
+stdout 'format=ini'
+stdout 'deprecated: flag "--format" value "ini" is deprecated: INI output is going away'
+! exec ./ship$exe dev --format toml
+stderr 'invalid value "toml" for --format \(one of: json, yaml\)'
+
+# Time layouts in order, a relative time, and the direction's sign rule.
+exec ./ship$exe dev --since 2026-09-29
+stdout 'since=2026-09-29T00:00:00Z'
+exec ./ship$exe dev --since 1759104000
+stdout 'since=2025-09-29T00:00:00Z'
+exec ./ship$exe dev --since 2h
+stdout 'since=past'
+exec ./ship$exe dev --since yesterday
+stdout 'since=past'
+! exec ./ship$exe dev --since +2h
+stderr '--since: "\+2h" is not a valid time \(\+2h is a time from now; this input takes past times, such as 2h\)'
+
+# Patterns are checked when parsed.
+exec ./ship$exe dev --re '^v[0-9]+$' --include '*.go'
+stdout 're=true include=true'
+! exec ./ship$exe dev --re '('
+stderr '--re: "\(" is not a valid regular expression'
+! exec ./ship$exe dev --include '[a'
+stderr '--include: "\[a" is not a valid glob pattern'
+
+-- cmd/ship/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: ship
+  summary: ship it
+  arguments:
+    - name: env
+      summary: where to ship
+      schema: { type: string, required: true, variable: SHIP_ENV }
+    - name: service
+      summary: what to ship
+      schema: { type: string, default: api }
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help]
+      short_circuit: true
+      schema: { type: bool }
+    - name: color
+      summary: color output
+      identifiers: [--color]
+      schema: { type: bool, default: true, negatable: --plain }
+    - name: format
+      summary: output format
+      identifiers: [--format]
+      schema:
+        type: string
+        default: json
+        enum:
+          - json
+          - { value: yaml, aliases: [yml] }
+          - { value: xml, hidden: true }
+          - { value: ini, deprecated: INI output is going away }
+    - name: since
+      summary: changes since
+      identifiers: [--since]
+      schema: { type: time, layout: ['2006-01-02', unix], relative: past }
+    - name: re
+      summary: a version filter
+      identifiers: [--re]
+      schema: { type: regexp }
+    - name: include
+      summary: files to include
+      identifiers: [--include]
+      schema: { type: '[]glob' }
+-- cmd/ship/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/ship/main.go
+    - type: cmd
+      file: internal/cmd/ship/zz_ship.go
+      package: ship
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/ship/ship.go --
+package ship
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+type shipHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*shipHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ShipInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Ship.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	for _, d := range rotini.Deprecations(rtx) {
+		fmt.Fprintln(rtx.Stdout, "deprecated:", d)
+	}
+	a, f := in.Ship.Arguments, in.Ship.Flags
+	fmt.Fprintf(rtx.Stdout, "env=%s service=%s color=%t format=%s\n", a.Env, a.Service, f.Color, f.Format)
+	switch {
+	case f.Since.IsZero():
+	case f.Since.Before(rtx.Now()) && f.Since.After(rtx.Now().Add(-72*time.Hour)):
+		fmt.Fprintln(rtx.Stdout, "since=past")
+	default:
+		fmt.Fprintf(rtx.Stdout, "since=%s\n", f.Since.UTC().Format(time.RFC3339))
+	}
+	if f.Re != nil {
+		fmt.Fprintf(rtx.Stdout, "re=%t include=%t\n", f.Re.MatchString("v12"), len(f.Include) == 1 && f.Include[0].Match("main.go"))
+	}
+}
+-- cmd/ship/main.go --
+package main
+
+import (
+	ship "example.com/ship/internal/cmd/ship"
+)
+
+func main() {
+	ship.NewProgram(ship.Handlers()).
+		Execute()
+}

@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -55,7 +56,7 @@ type InputLayer[T any] struct {
 type layerCore struct {
 	chain       []Command
 	store       *parsedInputs
-	argDefaults map[int]string // the defaults layer's per-index argument defaults (sparse)
+	argDefaults map[int]string // the per-index argument values a layer supplies past argv: defaults or fallbacks (sparse)
 	// anchor is the chain index of the inputs type's first field (see frameAnchor), so a merged
 	// report can check hand-built values against the right commands; anchored says it is set.
 	anchor   int
@@ -81,8 +82,11 @@ type layerCore struct {
 //
 // Stdin is outside that order because it never competes: it fills only the leaf command's
 // payload field, which no other channel writes. It is read once per run and held in memory, so
-// a later call binds the same payload. A read of piped stdin ends when the run is canceled (by
-// a trapped signal, for one), with an [*InputError] whose cause is the cancellation's.
+// a later call binds the same payload; a streamed stdin is an iterator over the run's one
+// stream instead. It is not read at all, and the field stays nil, under a short-circuit flag or
+// when the command's `unless_argument` file was given. A read of piped stdin ends when the run
+// is canceled (by a trapped signal, for one), with an [*InputError] whose cause is the
+// cancellation's.
 //
 // T must be the inputs type generated for the command whose hook is running ([Context.Command]),
 // in any hook. Its last field describes that command and the preceding fields its ancestors, so
@@ -314,6 +318,8 @@ func (r InputReport) Fields() []FieldPath {
 // A merge of hand-built layers alone has no command to check against, so Validate reports a
 // [ParseKindInternal] error pointing at [Context.CheckInputs], which takes the command from
 // the running context.
+//
+// A streamed stdin field is carried, not checked: its items are checked as they are read.
 func (r InputReport) Validate() error {
 	if r.chain == nil || r.store == nil {
 		if len(r.handBuilt) > 0 {
@@ -362,7 +368,13 @@ func (r *InputReport) absorb(core *layerCore) {
 		}
 	}
 	if core.argDefaults != nil {
-		r.argDefs = core.argDefaults
+		// A later layer's positions win, as its values do.
+		merged := maps.Clone(r.argDefs)
+		if merged == nil {
+			merged = map[int]string{}
+		}
+		maps.Copy(merged, core.argDefaults)
+		r.argDefs = merged
 	}
 	if core.anchored {
 		r.anchor, r.anchored = core.anchor, true
@@ -528,11 +540,12 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				if !ok {
 					return
 				}
-				_ = coerce(f, []string{d})
-				var secret bool
+				var ad ArgDef
 				if i < len(frame.Arguments) {
-					secret = frame.Arguments[i].Secret
+					ad = frame.Arguments[i]
 				}
+				_ = coerceTime(f, []string{d}, argTimeSpec(ad, rtx.osView().clockRef()))
+				secret := ad.Secret
 				set[fieldPath(topName, "Arguments", fieldName)] = InputSource{
 					Layer: "defaults",
 					Raw:   redactValue(d, secret),
@@ -547,7 +560,9 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				if d == "" {
 					return
 				}
-				_ = coerce(f, []string{d})
+				ts := tagTimeSpec(tag)
+				ts.clock = rtx.osView().clockRef()
+				_ = coerceTime(f, []string{d}, ts)
 				set[fieldPath(topName, channel, fieldName)] = InputSource{
 					Layer: "defaults",
 					Raw:   redactValue(d, reconHasSecret(body)),
@@ -566,8 +581,15 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 		return nil, nil, err
 	}
 	view := rtx.osView()
+	overrides := map[string]string{}
+	if store, err := parseInto(chain, rtx.Argv, rtx.argvAcq()); err == nil {
+		overrides = b.pathOverrides(chain, store, view)
+	}
+	if view, err = b.inputView(chain, v, overrides, argvWaived(rtx, chain), view); err != nil {
+		return nil, nil, err
+	}
 	var envReg, flagReg *recon.Registry
-	if hasChannel(v, "Env") {
+	if hasEnvChannel(v) {
 		if envReg, err = recon.New(recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
 			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
 		}
@@ -610,9 +632,16 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 	view := rtx.osView()
 	overrides := map[string]string{}
 	waived := false
-	if store, err := parseInto(chain, rtx.Argv, rtx.argvAcq()); err == nil {
+	store, perr := parseInto(chain, rtx.Argv, rtx.argvAcq())
+	if perr == nil {
 		overrides = b.pathOverrides(chain, store, view)
 		waived = shortCircuited(chain, store)
+	}
+	if view, err = b.inputView(chain, v, overrides, waived, view); err != nil {
+		return nil, nil, err
+	}
+	if perr == nil && view.hasInputEnv() {
+		overrides = b.pathOverrides(chain, store, view)
 	}
 	var reg *recon.Registry
 	var cfg *cfgRegs
@@ -642,6 +671,7 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	var bindErr error
+	var placed map[int]string // the leaf's argument fallbacks, by position
 
 	walkCommandStructs(v, chain, anchor, func(topName string, scope int, ci reflect.Value) {
 		if bindErr != nil {
@@ -657,13 +687,17 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 			rd := fallbackRead{view: view, waiveFiles: waived, files: labels.files}
 			if err := recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg, rd); err != nil {
 				bindErr = err
+				return
+			}
+			if scope == len(chain)-1 {
+				placed, bindErr = recordArgFallbacks(set, ci, chain[scope], topName, layerName, flagReg, rd)
 			}
 		}
 	})
 	if bindErr != nil {
 		return nil, nil, bindErr
 	}
-	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, view: view}, nil
+	return set, &layerCore{chain: chain, store: store, argDefaults: placed, anchor: anchor, anchored: true, view: view}, nil
 }
 
 // fillChannelStruct binds one command's channel struct from the registry, validates it, and
@@ -773,25 +807,39 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 	return bindErr
 }
 
-// stdinLayer acquires the stdin channel into v.
+// stdinLayer acquires the stdin channel into v. A streamed field counts as set when it holds
+// an iterator; nothing is read until the handler ranges over it.
 func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := b.fillStdin(rtx, v, argvWaived(rtx, chain)); err != nil {
+	args := func(name string) ([]string, error) {
+		store, err := parseArgvTokens(chain, rtx.Argv, rtx.argvAcq())
+		if err != nil {
+			return nil, err
+		}
+		return leafArgValues(chain, store, name), nil
+	}
+	if err := b.fillStdin(rtx, v, argvWaived(rtx, chain), args); err != nil {
 		return nil, nil, err
 	}
 	set := Presence{}
 	if v.Kind() == reflect.Struct && v.NumField() > 0 {
 		leaf := v.Field(v.NumField() - 1)
 		if leaf.Kind() == reflect.Struct {
-			if sf := leaf.FieldByName("Stdin"); sf.IsValid() && sf.Kind() == reflect.Pointer && !sf.IsNil() {
+			if sf := leaf.FieldByName("Stdin"); stdinSet(sf) {
 				set[fieldPath(v.Type().Field(v.NumField()-1).Name, "Stdin")] = InputSource{Layer: "stdin"}
 			}
 		}
 	}
 	return set, &layerCore{chain: chain, view: rtx.osView()}, nil
+}
+
+// stdinSet reports whether a Stdin field holds a payload: a non-nil pointer, or a non-nil
+// iterator for a streamed stdin.
+func stdinSet(sf reflect.Value) bool {
+	return sf.IsValid() && (sf.Kind() == reflect.Pointer || sf.Kind() == reflect.Func) && !sf.IsNil()
 }
 
 // ── shared walking helpers ───────────────────────────────────────────────────.

@@ -53,6 +53,10 @@ type rnode struct {
 	plugins               []PluginSpec     // plugins declared on this command
 	pluginHost            string           // program name plugin binaries are named after ("" = this program's)
 	pluginPath            string           // extra directory searched for BOTH this command's kinds of plugin
+	scope                 *schemaScope     // the named schemas its $refs resolve against (nil = the root spec's)
+	stream                bool             // output_stream: the command writes a stream of output items
+	lifecycle             lifecycle        // deprecated_since, removed_in and per-alias removals
+	inputsType            string           // Go type of the command's inputs, qualified when composed; "" when none can be named
 	children              []rnode
 }
 
@@ -82,6 +86,12 @@ type composeCtx struct {
 	// composed spec's root name, so a plugin serves `child cmd` and `parent child cmd`
 	// alike. "" outside a composed subtree.
 	pluginHost string
+	// scope is the composed spec's named schemas, which its commands' $refs name. nil outside
+	// a composed subtree.
+	scope *schemaScope
+	// nested marks a subtree grafted from a `$ref` inside a composed child; its types live in
+	// a package the parent doesn't import.
+	nested bool
 }
 
 // scopedConfigFile is one config_files entry tagged with the path of the command that
@@ -140,6 +150,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		rootPlugins:     root.Plugins,
 		rootHelp:        commandHelp(root),
 		rootOutput:      root.Output,
+		rootStream:      root.OutputStream,
 		rootDiscovery:   root.PluginDiscovery,
 		rootPluginPath:  root.PluginPath,
 		rootPassthrough: root.Passthrough,
@@ -213,9 +224,11 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			path = parentPath + "_" + c.Name
 		}
 		prefix := gp.rootPascal + toPascalCase(path)
+		inputsType := prefix + "Inputs"
 
 		if ctx.composed {
 			rel := strings.TrimPrefix(strings.TrimPrefix(path, ctx.rootPath), "_")
+			inputsType = composedInputsType(ctx, ctx.childPascal+toPascalCase(rel))
 			gp.composed = append(gp.composed, composedCmd{
 				prefix:         prefix,
 				delegateAlias:  ctx.alias,
@@ -274,6 +287,10 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			plugins:               c.Plugins,
 			pluginHost:            ctx.pluginHost,
 			pluginPath:            c.PluginPath,
+			scope:                 ctx.scope,
+			stream:                c.OutputStream,
+			lifecycle:             lifecycleOf(&c),
+			inputsType:            inputsType,
 			children:              children,
 		})
 	}
@@ -298,6 +315,9 @@ func overlayCommand(child, parent Command) Command {
 	if len(parent.DeprecatedIdentifiers) > 0 {
 		m.DeprecatedIdentifiers = parent.DeprecatedIdentifiers
 	}
+	if len(parent.DeprecatedIdentifiersRemovedIn) > 0 {
+		m.DeprecatedIdentifiersRemovedIn = parent.DeprecatedIdentifiersRemovedIn
+	}
 	if parent.Hidden {
 		m.Hidden = true
 	}
@@ -306,6 +326,12 @@ func overlayCommand(child, parent Command) Command {
 	}
 	if parent.Deprecated != "" {
 		m.Deprecated = parent.Deprecated
+	}
+	if parent.DeprecatedSince != "" {
+		m.DeprecatedSince = parent.DeprecatedSince
+	}
+	if parent.RemovedIn != "" {
+		m.RemovedIn = parent.RemovedIn
 	}
 	if parent.Summary != "" {
 		m.Summary = parent.Summary
@@ -428,7 +454,8 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		inputFields: gp.inputFieldsOf(childRoot.inputs()),
 	})
 
-	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, pluginHost: childRoot.Name}
+	scope := &schemaScope{name: childRoot.Name, schemas: childRoot.Schemas}
+	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, pluginHost: childRoot.Name, scope: scope}
 	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
@@ -455,6 +482,8 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		passthrough: childRoot.Passthrough, plugins: childRoot.Plugins,
 		discovery: childRoot.PluginDiscovery, pluginPath: merged.PluginPath,
 		pluginHost: childRoot.Name, composed: true, children: children,
+		scope: scope, lifecycle: lifecycleOf(&merged),
+		inputsType: composedInputsType(ctx, delegateRoot),
 	}, nil
 }
 
@@ -518,6 +547,8 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	synth.Commands = gc.Commands // authored siblings merge below
 	gcCtx := ctx
 	gcCtx.pluginHost = gc.Name
+	gcCtx.scope = &schemaScope{name: gc.Name, schemas: gc.Schemas}
+	gcCtx.nested = true
 	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleName, seen, gcCtx)
 	if err != nil {
 		return nil, err
@@ -616,6 +647,7 @@ type fieldDef struct {
 	Recon   string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
 	EnvVar  string // environment variable an env field reads, explicit (schema.variable) or derived (envVarFor); "" otherwise
 	EnvNest string // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
+	EnvFile string // the variable naming a file to read the value from (schema.variable_file); "" otherwise
 	CfgFile string // config input's pinned source file (schema.file); the value is read from that file only
 	Comment string // trailing line comment on the generated field, e.g. the TextUnmarshaler note; "" for none
 	// Constraint is the space-separated validation struct tags for an env/config field
@@ -637,7 +669,7 @@ type inputFields struct {
 func (gp *program) inputFieldsOf(in *Inputs) inputFields {
 	return inputFields{
 		flags:  flagFields(in, gp.envPrefix),
-		args:   argFields(in),
+		args:   argFields(in, gp.envPrefix),
 		env:    envFields(in, gp.envPrefix),
 		config: configFields(in),
 	}

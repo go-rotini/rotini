@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -37,12 +36,12 @@ func duplicateItem(label, v string, secret bool) error {
 
 // uniqueKeyFor returns how a command-line value of type typ compares for uniqueness: as the
 // value its element type reads it as, or as written when it doesn't read (binding reports
-// that). layout is a time input's layout; enum and ignoreCase fold a case-insensitive enum
-// value to its declared spelling.
-func uniqueKeyFor(typ, layout string, enum []string, ignoreCase bool) func(string) string {
+// that). ts is a time input's layouts and relative forms; an enum folds an alias, or a value
+// in another case, to the main value it binds as.
+func uniqueKeyFor(typ string, ts timeSpec, enum enumSet) func(string) string {
 	elem := constraintElemType(typ)
-	if ignoreCase && len(enum) > 0 {
-		return func(v string) string { return canonicalEnum(enum, []string{v})[0] }
+	if enum.declared() && enum.rewrites() {
+		return func(v string) string { return enum.canonical([]string{v})[0] }
 	}
 	if t, ok := shapeTypes[elem]; ok {
 		return func(v string) string {
@@ -56,15 +55,7 @@ func uniqueKeyFor(typ, layout string, enum []string, ignoreCase bool) func(strin
 	parse := uniqueParsers[elem]
 	if elem == "time.Time" {
 		parse = func(v string) (string, error) {
-			var (
-				t   time.Time
-				err error
-			)
-			if layout == "" {
-				t, err = time.Parse(time.RFC3339, strings.TrimSpace(v))
-			} else {
-				t, err = parseTimeLayout(v, layout)
-			}
+			t, err := parseTimeValue(v, ts)
 			return t.UTC().Format(time.RFC3339Nano), err
 		}
 	}

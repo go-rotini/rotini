@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"syscall"
+	"time"
 )
 
 // trapSignals are the signals trapped by default. It is a var so a test can substitute a
@@ -47,12 +48,14 @@ const (
 //
 //   - run — [Program.Execute] exits, [Program.Run] returns the code, [Program.RunContext]
 //     scopes one invocation, [Program.Complete] answers a completion request in a
-//     [CompletionFormat]
-//   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr]
+//     [CompletionFormat]; [Program.Definition] returns the command tree it runs
+//   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr], and
+//     [Program.WithBufferedOutput] to buffer stdout
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
 //     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion],
 //     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions], and the environment and working directory a run reads,
-//     [Program.WithEnviron] and [Program.WithDir]
+//     [Program.WithEnviron] and [Program.WithDir], and the clock relative times read,
+//     [Program.WithClock]
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
@@ -116,8 +119,10 @@ type Program struct {
 	help     HelpFunc                         // WithHelp: nil → no pages
 	parser   *Parser                          // WithParser: nil → a default, built per run
 	view     *osView                          // WithEnviron, WithDir: nil → the process environment and directory
+	clock    func() time.Time                 // WithClock: nil → time.Now
 
-	outputChecks bool // WithOutputChecks: check every written output against its schema
+	outputChecks   bool // WithOutputChecks: check every written output against its schema
+	bufferedOutput bool // WithBufferedOutput: buffer stdout and flush it when the run settles
 }
 
 // NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
@@ -395,7 +400,12 @@ func (p *Program) newRunContext() *Context {
 	rtx.meta, rtx.readerFn = p.meta, p.readerFn
 	rtx.version, rtx.parser, rtx.help = p.version, p.parser, p.help
 	rtx.outputChecks = p.outputChecks
-	rtx.view = p.view.resolved()
+	rtx.clock.fn = p.clock
+	rtx.view = p.view.resolved().withClock(&rtx.clock)
+	if p.bufferedOutput && !IsTerminal(p.stdout) {
+		rtx.bufOut = newBufferedStdout(p.stdout)
+		rtx.Stdout = rtx.bufOut
+	}
 	return rtx
 }
 
@@ -509,15 +519,18 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		defer cancel(nil)
 	}
 
+	rtx := p.newRunContext()
+	// Runs after settle, where it has nothing left to write, and while a panic is re-raised,
+	// where it writes out what the handlers wrote.
+	defer rtx.flushOutput()
 	if trap {
-		defer p.installTrap(cancel)()
+		defer p.installTrap(cancel, rtx.flushOutput)()
 	}
 
 	resolve := p.resolver
 	if resolve == nil {
 		resolve = DefaultResolver
 	}
-	rtx := p.newRunContext()
 	rtx.bindRun(ctx)
 	rtx.enterHook(ctx, true)
 
@@ -566,8 +579,8 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 // installTrap starts rotini's signal trap for one run and returns the function that removes
 // it. The first signal cancels the run with the signal's exit code as the cause, so dispatch
 // halts and teardown runs; a second calls the exit action with forceExitCode, skipping the
-// remaining teardown.
-func (p *Program) installTrap(cancel context.CancelCauseFunc) (stop func()) {
+// remaining teardown after beforeExit, a best-effort flush of buffered stdout.
+func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func()) (stop func()) {
 	sigs := p.signalSet
 	if len(sigs) == 0 {
 		sigs = trapSignals
@@ -585,6 +598,7 @@ func (p *Program) installTrap(cancel context.CancelCauseFunc) (stop func()) {
 		}
 		select {
 		case <-sigCh:
+			beforeExit()
 			p.exit(forceExitCode)
 		case <-done:
 		}

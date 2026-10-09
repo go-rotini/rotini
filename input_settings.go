@@ -38,6 +38,11 @@ type ConfigFile struct {
 	// against at bind time; "" is none. The file that actually resolved is the one
 	// validated, and an absent optional file passes vacuously.
 	Schema string
+	// As is "env" for a dotenv file read as environment variables (the `.env` shape): its
+	// KEY=value lines feed env inputs and flag environment fallbacks under the real
+	// environment, which wins variable by variable, and never configuration inputs. "" (or
+	// "config") is a configuration file.
+	As string
 }
 
 // PathFromDef names the runtime inputs that supply a [ConfigFile]'s path — the declarative
@@ -52,7 +57,11 @@ type PathFromDef struct {
 // DiscoverDef locates a configuration file at run time. The strategy orders the directories
 // searched for File; the first containing it wins, and a file found nowhere is absent.
 type DiscoverDef struct {
-	Strategy string // "walk-up" (working directory up to the filesystem root) | "xdg" ($XDG_CONFIG_HOME/<app> when absolute, else ~/.config/<app>)
+	// Strategy is "walk-up" (the working directory up to the filesystem root), "xdg"
+	// ($XDG_CONFIG_HOME/<app> when absolute, else ~/.config/<app>), "native" (the platform's
+	// config directory: %AppData% on Windows, ~/Library/Application Support on macOS, else as
+	// xdg) or "xdg-system" (each absolute directory of $XDG_CONFIG_DIRS, else /etc/xdg).
+	Strategy string
 	File     string // the file name looked for in each searched directory
-	App      string // the application directory under the XDG config root (xdg only)
+	App      string // the application directory under the config root (xdg, native and xdg-system)
 }

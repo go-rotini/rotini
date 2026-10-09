@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:10:7: command demo: config_files "local": sets `as: env`, which reads the file's KEY=value lines as environment variables, so it must be a dotenv file; set `format: dotenv`
+spec: .rotini.spec.yaml:15:55: command demo: config "endpoint": pins `file: dotenv`, a file read as environment (`as: env`); read its variables with an env input instead

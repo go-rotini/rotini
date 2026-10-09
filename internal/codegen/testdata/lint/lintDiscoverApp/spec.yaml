@@ -1,0 +1,11 @@
+# The native and xdg-system strategies search <dir>/<app>, so they need `app`.
+version: 0.0.0
+command:
+  name: demo
+  config_files:
+    - name: user
+      discover: {strategy: native, file: config.yaml, app: demo}
+    - name: system
+      discover: {strategy: xdg-system, file: config.yaml}
+    - name: native
+      discover: {strategy: native, file: config.yaml}

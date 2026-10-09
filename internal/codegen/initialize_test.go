@@ -101,7 +101,7 @@ func TestGenerate_reportsValidationWarnings(t *testing.T) {
 	p := NewProcessor("0.0.0")
 	var validateWarnings, generateNotices []error
 	spec := filepath.Join(dir, "cmd", "demo", ".rotini.spec.yaml")
-	if err := p.Validate(spec, "", false, "", nil, func(w []error) { validateWarnings = append(validateWarnings, w...) }); err != nil {
+	if err := p.Validate(spec, "", false, "", "", nil, func(w []error) { validateWarnings = append(validateWarnings, w...) }); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 	if len(validateWarnings) == 0 {
@@ -126,7 +126,7 @@ func TestGenerate_reportsValidationWarnings(t *testing.T) {
 func TestGenerate_missingExplicitConfIsAnError(t *testing.T) {
 	dir := initDemo(t)
 	spec := filepath.Join(dir, "cmd", "demo", ".rotini.spec.yaml")
-	err := NewProcessor("0.0.0").Validate(spec, filepath.Join(dir, "nosuch.yaml"), false, "", nil, nil)
+	err := NewProcessor("0.0.0").Validate(spec, filepath.Join(dir, "nosuch.yaml"), false, "", "", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "nosuch.yaml") {
 		t.Errorf("Validate with a missing --config = %v, want an error naming it", err)
 	}

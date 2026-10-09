@@ -1,0 +1,42 @@
+# inputfile and outputfile are command-line grammar, and an inputfile's "-" consumes stdin.
+version: 0.0.0
+command:
+  name: demo
+  env:
+    - name: OUT
+      schema:
+        type: outputfile
+  flags:
+    - name: data
+      schema:
+        type: inputfile
+        from: [file]
+  commands:
+    - name: cat
+      flags:
+        - name: input
+          identifiers: [-i, --input]
+          schema:
+            type: inputfile
+      stdin:
+        format: text
+      arguments:
+        - name: files
+          schema:
+            type: '[]inputfile'
+    - name: exec
+      arguments:
+        - name: command
+          passthrough: true
+          schema:
+            type: '[]inputfile'
+    - name: join
+      flags:
+        - name: sep
+          schema:
+            type: string
+            from: [stdin]
+      arguments:
+        - name: files
+          schema:
+            type: '[]inputfile'

@@ -1,0 +1,42 @@
+# deprecated_since and removed_in plan a deprecation: each needs the deprecation message, and
+# the removal comes after the deprecation. A per-identifier removal names a deprecated
+# identifier.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    # Correct: a planned removal, and a deprecated alias with its own removal. No problem.
+    - name: old
+      aliases: [legacy]
+      deprecated: use new
+      deprecated_since: 1.4.0
+      removed_in: 2.0.0
+      deprecated_identifiers: [legacy]
+      deprecated_identifiers_removed_in: { legacy: 1.5.0 }
+      flags:
+        - name: config
+          identifiers: [--config, --conf]
+          deprecated_identifiers: [--conf]
+          deprecated_identifiers_removed_in: { --conf: 2.0.0 }
+          schema: { type: string }
+    # Planned without saying why.
+    - name: quiet
+      deprecated_since: 1.4.0
+      arguments:
+        - name: target
+          removed_in: 2.0.0
+          schema: { type: string }
+    # Removed no later than deprecated.
+    - name: early
+      deprecated: use late
+      deprecated_since: 2.0.0
+      removed_in: 1.9.0
+      env:
+        - name: token
+          deprecated: use TOKEN_FILE
+          deprecated_since: 1.4.0
+          removed_in: 1.4.0
+    # A removal for an identifier that isn't deprecated.
+    - name: alias
+      aliases: [al]
+      deprecated_identifiers_removed_in: { al: 2.0.0 }

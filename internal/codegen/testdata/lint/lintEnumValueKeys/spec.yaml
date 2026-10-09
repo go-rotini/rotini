@@ -1,0 +1,50 @@
+# Enum values may declare aliases, hidden and a deprecation. Each spelling means one value, a
+# deprecation plan needs a deprecation and names a value still in use, a default is written as
+# a value, and only an input's own enum declares these.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    Format:
+      type: string
+      enum: [json, {value: yaml, aliases: [yml]}]
+  flags:
+    # Fine: an alias, a hidden value and a planned deprecation.
+    - name: format
+      identifiers: [--format]
+      schema:
+        type: string
+        default: json
+        enum:
+          - json
+          - {value: yaml, summary: human-friendly, aliases: [yml], deprecated_aliases: [yml]}
+          - {value: xml, hidden: true}
+          - {value: ini, deprecated: INI output is going away, deprecated_since: 1.4.0, removed_in: 2.0.0, replaced_by: toml}
+          - toml
+    # Spellings that mean two values, a deprecated alias not declared, a plan without a
+    # deprecation, a removal before the deprecation, and a replacement that is not a value.
+    - name: mode
+      identifiers: [--mode]
+      schema:
+        type: string
+        ignore_case: true
+        default: f
+        enum:
+          - {value: fast, aliases: [f, Slow]}
+          - {value: slow, deprecated_aliases: [s]}
+          - {value: safe, deprecated_since: 1.0.0}
+          - {value: old, deprecated: gone, deprecated_since: 2.0.0, removed_in: 1.0.0, replaced_by: new}
+    # Nothing left to offer.
+    - name: level
+      identifiers: [--level]
+      schema:
+        type: string
+        enum:
+          - {value: a, hidden: true}
+          - {value: b, deprecated: use nothing}
+  output:
+    type: object
+    properties:
+      kind:
+        type: string
+        enum: [{value: one, aliases: [uno]}]

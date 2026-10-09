@@ -42,11 +42,14 @@ func flagFields(in *Inputs, envPrefix string) []fieldDef {
 			EnvVar:  flagEnvVar(f.Schema, key, envPrefix),
 			Comment: contractComment(f.Schema),
 		})
+		if key != "" && f.Schema.VariableFile != "" {
+			fields[len(fields)-1].EnvFile = f.Schema.VariableFile
+		}
 	}
 	return fields
 }
 
-// flagReconKey is a flag's reconciliation key, which opts it into the fallback chain
+// flagReconKey is a flag's (or an argument's) reconciliation key, which opts it into the fallback chain
 // (argv > env > config > default); "" for an argv-only flag. An explicit `key:` is used
 // as-is. `variable:` alone also opts in, keyed by the flag's name, so --token can read
 // GITHUB_TOKEN without a config key.
@@ -77,6 +80,13 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 			EnvVar:     envVarName(e, envPrefix),
 			Constraint: constraintTags(e.Schema),
 		}
+		// recon splits an env list or map on its separator option (default ","), plainly.
+		if e.Schema != nil && e.Schema.Separator != "" && e.Schema.Separator != "," {
+			fd.Recon += ",separator=" + e.Schema.Separator
+		}
+		if e.Schema != nil && e.Schema.Nesting == "" {
+			fd.EnvFile = e.Schema.VariableFile
+		}
 		// A nested input's variable is a family prefix, so it goes in the envnest tag
 		// instead of env:, and rotini (not recon) enforces required, since recon
 		// resolves leaf keys only. lintVariable allows a single name here.
@@ -106,8 +116,16 @@ func constraintTags(schema *InputSchema) string {
 	eachConstraint(schema, func(tag, _, tagVal, _ string) {
 		parts = append(parts, tag+":"+strconv.Quote(tagVal))
 	})
-	if l := layoutFor(schema); l != "" {
-		parts = append(parts, "layout:"+strconv.Quote(l))
+	if l := layoutsFor(schema); len(l) > 0 {
+		parts = append(parts, "layout:"+strconv.Quote(l[0]))
+		if len(l) > 1 {
+			if list, err := json.Marshal(l); err == nil { // a []string always marshals
+				parts = append(parts, "layouts:"+strconv.Quote(string(list)))
+			}
+		}
+	}
+	if r := relative(schema); r != "" {
+		parts = append(parts, "relative:"+strconv.Quote(r))
 	}
 	if schema != nil && len(schema.Enum) > 0 {
 		if members, err := json.Marshal(enumStrings(schema.Enum)); err == nil { // a []string always marshals
@@ -115,6 +133,16 @@ func constraintTags(schema *InputSchema) string {
 		}
 		if schema.IgnoreCase {
 			parts = append(parts, `ignorecase:"true"`)
+		}
+		if aliases := enumAliases(schema.Enum); aliases != nil {
+			if m, err := json.Marshal(aliases); err == nil { // a map[string]string always marshals
+				parts = append(parts, "enumalias:"+strconv.Quote(string(m)))
+			}
+		}
+		if unlisted := enumUnlisted(schema.Enum); unlisted != nil {
+			if m, err := json.Marshal(unlisted); err == nil {
+				parts = append(parts, "enumunlisted:"+strconv.Quote(string(m)))
+			}
 		}
 	}
 	return strings.Join(parts, " ")
@@ -176,7 +204,7 @@ func envVarOf(schema *InputSchema) string {
 	return strings.Join(variables(schema), ",")
 }
 
-// flagEnvVar is a flag's pinned env-fallback variable: its explicit `variable:` (exempt from
+// flagEnvVar is a flag's (or an argument's) pinned env-fallback variable: its explicit `variable:` (exempt from
 // env_prefix), else the name derived from its recon key, else "" for an argv-only flag.
 func flagEnvVar(schema *InputSchema, reconKey, envPrefix string) string {
 	if v := envVarOf(schema); v != "" {
@@ -245,51 +273,82 @@ func reconTag(key string, schema *InputSchema) string {
 	return strings.Join(parts, ",")
 }
 
-// stdinTypeExpr returns the Go type for a command's Stdin field: "*<Prefix>Stdin" for a
-// document payload, "*string" for text, "*[]string" for lines, or "" when the command
-// declares no stdin. It is always a pointer so "nothing piped" differs from "empty payload".
+// stdinTypeExpr returns the Go type for a command's Stdin field, or "" when the command
+// declares no stdin: "*<Prefix>Stdin" for a document payload, "*string" for text, "*[]string"
+// for lines, "*[]byte" for bytes and "*[]<Prefix>Stdin" for jsonl, where <Prefix>Stdin is one
+// record. A pointer, so "nothing piped" differs from "empty payload". A streamed lines or jsonl
+// stdin is an iterator instead, nil when stdin isn't read.
 func stdinTypeExpr(prefix string, in *Inputs) string {
 	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
 		return ""
 	}
+	stream := in.Stdin.Stream
 	switch in.Stdin.Format {
 	case "text":
 		return "*string"
+	case "bytes":
+		return "*[]byte"
 	case "lines":
+		if stream {
+			return "iter.Seq2[string, error]"
+		}
 		return "*[]string"
+	case "jsonl":
+		if stream {
+			return "iter.Seq2[" + prefix + "Stdin, error]"
+		}
+		return "*[]" + prefix + "Stdin"
 	}
 	return "*" + prefix + "Stdin"
 }
 
 // rawStdinFormat reports whether a stdin format binds the payload directly rather than
-// decoding it into a generated struct.
-func rawStdinFormat(format string) bool { return format == "text" || format == "lines" }
+// decoding it into a generated type.
+func rawStdinFormat(format string) bool {
+	return format == "text" || format == "lines" || format == "bytes"
+}
 
-// stdinFormatExpr returns the value of a command's `stdin:"<format>[,required]"` struct
-// tag: the decode format (default json), plus ",required" when the payload is required so
-// the input reader rejects an empty stdin. "" when the command declares no stdin.
+// stdinFormatExpr returns the value of a command's
+// `stdin:"<format>[,stream][,nul][,required][,unless=<argument>]"` struct tag: the decode
+// format (default json), then the options the input reader needs: a streamed field, NUL as the
+// line separator, an empty stdin rejected, and the file argument whose value means stdin is
+// not read. "" when the command declares no stdin.
 func stdinFormatExpr(in *Inputs) string {
 	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
 		return ""
 	}
-	format := in.Stdin.Format
-	if format == "" {
-		format = "json"
+	parts := []string{in.Stdin.Format}
+	if parts[0] == "" {
+		parts[0] = "json"
+	}
+	if in.Stdin.Stream {
+		parts = append(parts, "stream")
+	}
+	if in.Stdin.Separator == "nul" {
+		parts = append(parts, "nul")
 	}
 	if in.Stdin.Schema.Required {
-		format += ",required"
+		parts = append(parts, "required")
 	}
-	return format
+	if in.Stdin.UnlessArgument != "" {
+		parts = append(parts, "unless="+in.Stdin.UnlessArgument)
+	}
+	return strings.Join(parts, ",")
 }
 
-// argFields returns the <Prefix>Arguments struct fields for a command's inputs.
-func argFields(in *Inputs) []fieldDef {
+// argFields returns the <Prefix>Arguments struct fields for a command's inputs. An argument
+// with an env or config fallback carries the same recon and env tags a flag does.
+func argFields(in *Inputs, envPrefix string) []fieldDef {
 	if in == nil {
 		return nil
 	}
 	fields := make([]fieldDef, 0, len(in.Arguments))
 	for _, a := range in.Arguments {
-		fields = append(fields, fieldDef{Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema), Comment: contractComment(a.Schema)})
+		key := flagReconKey(a.Name, a.Schema)
+		fields = append(fields, fieldDef{
+			Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema),
+			Recon: key, EnvVar: flagEnvVar(a.Schema, key, envPrefix), Comment: contractComment(a.Schema),
+		})
 	}
 	return fields
 }
@@ -340,33 +399,33 @@ func jsonSchemaTypeToGo(t string) string {
 		return "int" // presence counter: the field tallies occurrences (-vvv → 3)
 	case "existingfile", "existingdir":
 		return "string" // a path; the declared type name makes the parser check it (see definitionType)
-	case "duration":
-		return "time.Duration"
-	case "time", "datetime", "date":
-		return "time.Time"
-	case "url":
-		return "*url.URL"
-	case "email":
-		return "mail.Address"
-	case "timezone":
-		return "*time.Location"
-	case "mac":
-		return "net.HardwareAddr"
-	case "ip":
-		return "netip.Addr"
-	case "cidr":
-		return "netip.Prefix"
-	case "hostport":
-		return "netip.AddrPort"
-	case "bytesize":
-		return "rotini.ByteSize"
-	case "hexbytes":
-		return "rotini.HexBytes"
-	case "base64bytes":
-		return "rotini.Base64Bytes"
-	default:
-		return t
+	case "inputfile", "outputfile":
+		return "string" // a path, or "-" for stdin or stdout; checked like existingfile
 	}
+	if g, ok := valueTypeGo[t]; ok {
+		return g
+	}
+	return t
+}
+
+// valueTypeGo is the Go type each of rotini's value types reads into.
+var valueTypeGo = map[string]string{
+	"duration":    "time.Duration",
+	"time":        "time.Time",
+	"datetime":    "time.Time",
+	"date":        "time.Time",
+	"url":         "*url.URL",
+	"email":       "mail.Address",
+	"timezone":    "*time.Location",
+	"mac":         "net.HardwareAddr",
+	"ip":          "netip.Addr",
+	"cidr":        "netip.Prefix",
+	"hostport":    "netip.AddrPort",
+	"bytesize":    "rotini.ByteSize",
+	"hexbytes":    "rotini.HexBytes",
+	"base64bytes": "rotini.Base64Bytes",
+	"regexp":      "*regexp.Regexp",
+	"glob":        "rotini.Glob",
 }
 
 // splitMapType splits a `map[K]V` spelling into its key and value, matching brackets so a key or
@@ -399,6 +458,8 @@ var rotiniTypeAliases = []string{
 	"existingfile", "existingdir", "duration", "time", "datetime", "date",
 	"url", "email", "timezone", "mac", "ip", "cidr", "hostport",
 	"bytesize", "hexbytes", "base64bytes",
+	"regexp", "glob",
+	"inputfile", "outputfile",
 }
 
 // toTemplateFields converts fieldDefs to template fields, assembling each struct-tag

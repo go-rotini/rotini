@@ -190,6 +190,98 @@ setting. Two schema keys make repeats an error instead:
   instant it names, and a list of objects compares whole objects. It applies on every channel,
   including an environment list (`PORTS=80,80`), and in `rtx.CheckInputs`.
 
+### Deprecating a command or flag
+
+`deprecated: <message>` marks a command, flag, argument, environment or config input as
+deprecated: help, man and markdown show the message beside it. To deprecate only some
+spellings, list them in `deprecated_identifiers` (aliases for a command, identifiers for a
+flag); the others are the ones to move to.
+
+Rotini prints nothing when a deprecated spelling is used. `rotini.Deprecations(rtx)` lists what
+this run used, and the handler decides what to say:
+
+{{< code title="internal/cmd/todo/todo.go" language="go" open="true" collapsible="false" copy="true" >}}
+for _, d := range rotini.Deprecations(rtx) {
+	rtx.RecordWarning(d)
+}
+{{< /code >}}
+
+Plan the removal with `deprecated_since` and `removed_in` (both `X.Y.Z`) beside `deprecated`.
+Pages then read `(deprecated since 1.4.0, removed in 2.0.0: use --config)`, the contract
+carries both, and each `Deprecation` has them as `Since` and `RemovedIn`, so a handler can
+compare them with `rtx.Version()` (for example with `golang.org/x/mod/semver`, which wants a
+leading `v`). To plan the removal of a deprecated spelling while the command or flag stays, map
+it to its release with `deprecated_identifiers_removed_in`:
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+flags:
+  - name: config
+    identifiers: [--config, --conf]
+    deprecated_identifiers: [--conf]
+    deprecated_identifiers_removed_in: {--conf: 2.0.0}
+  - name: legacy
+    deprecated: use --config
+    deprecated_since: 1.4.0
+    removed_in: 2.0.0
+{{< /code >}}
+
+`rotini validate --release 2.0.0` then fails for each item still declared whose removal is due
+at or before that release, so a planned removal can't ship by accident. Set the conf's
+`validate.release_env` to the name of a variable your release job sets, and `rotini validate`
+reads the release from it; `--release` wins. `rotini generate` never runs this check.
+
+### Times, patterns and negated forms
+
+- **Several time layouts**, `layout: ['2006-01-02 15:04', '2006-01-02', unix]`, are tried in
+  order and the first that parses wins. Help shows the first, an error names them all, and
+  `validate` warns when an earlier layout would read a later one's values as a different time.
+- **Relative times**, `relative: past`, also accept a time measured from now: `2h` or `3d` ago,
+  `now`, `today` and `yesterday`. `future` takes `2h` or `+2h` from now and `tomorrow`; `both`
+  needs a sign (`-2h`, `+3d`). Absolute values are still read first. On a `date` the result is the
+  calendar date it falls on, and an offset must be whole days. Every relative value in a run is
+  measured from one clock reading, which `rtx.Now()` returns; set the clock in tests with
+  `Program.WithClock`:
+
+  ```go
+  at := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+  code, err := cmd.NewProgram(cmd.Handlers()).
+  	WithClock(func() time.Time { return at }).
+  	Run([]string{"log", "--since", "2h"}) // since is 10:00
+  ```
+
+  `today` follows the clock's time zone, which is the process's unless the clock says otherwise.
+- **`type: regexp`** is compiled when parsed into a `*regexp.Regexp`, so a bad expression is a
+  usage error naming the flag. The syntax is Go's RE2, which has no backreferences or lookaround.
+- **`type: glob`** is a `rotini.Glob`, a `path.Match` pattern checked when parsed, with a `Match`
+  method that reads `\` in a name as `/` on Windows. `**` is not recursive: it is two `*`.
+  It keeps the pattern as a value; it doesn't expand it into file names.
+- **`negatable: --plain`** names the negated form of a bool flag instead of deriving
+  `--no-color`: `--plain` sets `--color` false, and `--no-color` isn't accepted. Help lists it
+  beside the flag, `--color, --plain`.
+
+### Enum aliases, hidden and deprecated values
+
+An enum value written as an object can declare more than a summary:
+
+```yaml
+schema:
+  type: string
+  enum:
+    - json
+    - { value: yaml, aliases: [yml] }
+    - { value: xml, hidden: true }
+    - { value: ini, deprecated: INI output is going away, deprecated_since: 1.4.0, removed_in: 2.0.0, replaced_by: json }
+```
+
+- An **alias** is accepted on every channel and bound as its value, so the handler only ever
+  sees `yaml`. `deprecated_aliases: [yml]` retires one spelling while the value stays.
+- A **hidden** value is accepted but never offered: help, completion and error messages leave it
+  out.
+- A **deprecated** value is still accepted and left out of the same lists. Given on the command
+  line, it is reported by `rotini.Deprecations` with `Deprecation.Value` set, as a deprecated
+  alias is. Man and markdown pages list each value with its aliases and deprecation; help keeps
+  its short list of the values to use.
+
 ## Where values come from
 
 A flag can also be read from an environment variable and a configuration file. Give it a `key:`
@@ -244,6 +336,143 @@ also be found by walking up from the working directory (`strategy: walk-up`) or 
 
 Commands can also declare pure `env:` and `config:` inputs, and a typed `stdin:` payload. They all
 land in the same generated inputs struct.
+
+### Arguments from the environment and files
+
+An argument takes `variable:` and `key:` as a flag does, for a position the command line leaves
+out: the command line, then the environment, then the config file, then the default.
+
+```yaml
+- name: deploy
+  arguments:
+    - name: env
+      schema: { type: string, required: true, variable: DEPLOY_ENV }
+    - name: service
+      schema: { type: string, default: api }
+```
+
+`DEPLOY_ENV=prod ./app deploy` deploys `api` to `prod`, and `./app deploy dev` still wins over the
+variable. Positionals fill left to right, so a fallback applies only when every argument before
+it has a value, and `validate` asks for a fallback or a default on any argument after one with a
+fallback: otherwise `./app deploy web` would put `web` into `<env>`. A variadic argument splits
+its variable on its `separator`; without one, the whole value is one item. Help shows the
+sources under the argument, and an error about such a value names the variable it came from.
+
+`from: [file, stdin]` works on an argument before any variadic one, as on a flag: `./app cat -`
+reads stdin and `./app cat @notes.txt` the file. Stdin can be read once, so one input on a
+command path may take it.
+
+An env list input splits its variable on commas; `separator: ':'` splits a `PATH`-style value
+instead (`KUBECONFIG=a:b`). It's a plain split with spaces trimmed, not the CSV quoting a flag's
+separator allows, and item counts and per-item rules are checked on the split items.
+
+### Reading stdin
+
+A declared `stdin:` is read once per run, whole, and held in memory; a second `rtx.Inputs` call
+sees the same payload. For a filter that should handle any size, stream it: `stream: true` on
+`format: lines` (or `jsonl`, one JSON record per line) makes the field an iterator that reads one
+item at a time.
+
+`unless_argument:` names an optional file argument: stdin is read only when that argument gets
+no file, or `-`. This is the `grep PATTERN [FILE...]` shape, and it keeps a command that was
+given a file from waiting on a stdin its caller holds open:
+
+{{< code title="cmd/logs/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+commands:
+  - name: grep
+    arguments:
+      - name: pattern
+        schema: { type: string, required: true }
+      - name: files
+        schema: { type: '[]existingfile' }
+    stdin:
+      format: lines
+      stream: true
+      unless_argument: files
+{{< /code >}}
+
+{{< code title="internal/cmd/logs/logs_grep.go" language="go" open="true" collapsible="false" copy="true" >}}
+in, err := rtx.Inputs[LogsGrepInputs]()
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+if in.LogsGrep.Stdin == nil {
+	// Files were given (or stdin is a terminal): read in.LogsGrep.Arguments.Files.
+	return
+}
+for line, err := range in.LogsGrep.Stdin {
+	if err != nil {
+		rtx.HaltWith(err) // a read error, or Ctrl-C: the run exits 130
+		return
+	}
+	if strings.Contains(line, in.LogsGrep.Arguments.Pattern) {
+		fmt.Fprintln(rtx.Stdout, line)
+	}
+}
+{{< /code >}}
+
+The iterator is nil whenever stdin is not read: a terminal, a short-circuit flag such as
+`--help`, or a file given. Ranging over a nil iterator panics, so check it first. It reads the
+run's one stdin: a `break` leaves the rest unread, and a later range continues from there. A
+`jsonl` record is checked against the schema as it is read, and an error names its line
+(`stdin line 12: …`). A line is limited only by memory. `CheckInputs` and
+`InputReport.Validate` carry a stream but don't check its items.
+
+`format: bytes` binds the payload byte for byte (`*[]byte`); every other format removes one
+leading byte-order mark. `separator: nul` splits `lines` on NUL bytes instead of newlines, as
+`find -print0` writes them, with each item kept exactly:
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ find . -name '*.log' -print0 | logs rotate
+{{< /code >}}
+
+A list or map flag with `from: [file]` or `from: [stdin]` takes one value per line of the file
+(blank lines skipped), each split further on its `separator`; `separator: nul` splits that
+content on NUL instead. `--tags @tags.txt` with `a,b` and `c` on two lines is `[a b c]`.
+
+### Secrets in files and .env files
+
+`variable_file:` names a variable holding the path of a file to read the value from, the way
+Docker and Kubernetes mount secrets. Setting both forms is an error:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+env:
+  - name: token
+    schema: { type: string, variable: TODO_TOKEN, variable_file: TODO_TOKEN_FILE, secret: true }
+{{< /code >}}
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ TODO_TOKEN_FILE=/run/secrets/todo ./todo sync
+{{< /code >}}
+
+A `config_files` entry with `format: dotenv` and `as: env` supplies environment variables
+instead of configuration. Env inputs and flag fallbacks read it, and the real environment wins
+variable by variable, so the order is: command line, environment, `.env` file, configuration
+files, default. Its values are literal (`${OTHER}` is not expanded), and rotini's own variables
+(`HOME`, `XDG_*`, `PATH`) never come from it. Prefer a fixed `path: .env` to discovery:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+config_files:
+  - name: dotenv
+    path: .env
+    format: dotenv
+    as: env
+{{< /code >}}
+
+### Config directories
+
+`discover:` finds a config file at run time with one of four strategies:
+
+| Strategy | Searches |
+|---|---|
+| `walk-up` | the working directory, then each parent |
+| `xdg` | `$XDG_CONFIG_HOME/<app>` (default `~/.config/<app>`) on every platform, the portable choice |
+| `native` | the platform's own: `%AppData%\<app>` on Windows, `~/Library/Application Support/<app>` on macOS, as `xdg` elsewhere |
+| `xdg-system` | each directory of `$XDG_CONFIG_DIRS` (default `/etc/xdg`), joined with `<app>` |
+
+Declare a system tier as its own entry after the user's: the first declared entry wins per key,
+so the user's file overrides the system one key by key.
 
 ## Handlers
 
@@ -520,6 +749,27 @@ run time, set in another function or package, or set by a reporter, and it skips
 handler lives in another package (`handler:`). `rotini validate` also reports a code listed
 twice, and warns about a code above 128, which a process stopped by a signal also exits with.
 
+Give a code a `name` and `rotini generate` writes a constant for it, named after the command,
+so a handler doesn't repeat the number:
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+- name: get
+  exit_status:
+    - { code: 3, name: not_found, summary: no such task }
+    - { code: 4, name: busy, summary: the store is locked, retryable: true }
+{{< /code >}}
+
+{{< code title="internal/cmd/todo/todo_get.go" language="go" open="true" collapsible="false" copy="true" >}}
+rtx.HaltWithCode(TodoGetExitNotFound)
+{{< /code >}}
+
+Names are snake_case and unique within a command. The man and markdown EXIT STATUS sections
+and the contract show them, and `retryable: true` tells callers such as agents that running the
+command again may succeed. The constants are in the cmd package, or in the models package when
+the conf declares one, re-exported in the cmd package. The check above reads a constant like its
+number, and warns when a handler uses another command's constant: declare the code on the
+command that exits with it.
+
 ### Handling errors in a handler
 
 An error about the user's input, from `rtx.Inputs`, the per-source methods, `rtx.CheckInputs` or
@@ -724,9 +974,14 @@ $ todo list -o json
 }
 ```
 
-An empty format means json. `rtx.WriteOutputItem` writes one item of a stream as it is ready:
-one compact JSON value per line, or one YAML document per item. A stream can't be written as
-toml.
+An empty format means json. A command that writes a stream of items, rather than one value,
+declares `output_stream: true`, and its `output:` is then the shape of one item.
+`rtx.WriteOutputItem` writes each item as it is ready: one compact JSON value per line, or one
+YAML document per item, each starting `---`. A stream can't be written as toml. The pages'
+OUTPUT section says the command writes a stream, and the contract marks it `stream: true`.
+`WriteOutput` on such a command, or `WriteOutputItem` on one that writes a single value, is an
+internal error, and `rotini generate` warns when a handler calls `WriteOutputItem` on a command
+that doesn't declare `output_stream: true`.
 
 Both return an internal error, and write nothing, when the value is not the command's
 `<Prefix>Output` type or when a format they don't write has no renderer. Both are bugs in the
@@ -735,6 +990,66 @@ program, not mistakes by the user. A renderer's own error is returned as it is.
 **Keep stdout for the output.** A script reading `todo list -o json` breaks if anything else
 lands on stdout, such as a progress line before the JSON document. Write progress, notes and
 prompts to `rtx.Stderr`.
+
+### Templates
+
+The `github.com/go-rotini/rotini/shape` package lets the user format the output with a Go
+template, as in `--format '{{.title}}'`. Declare the flag with the type `shape.Template`,
+imported through `import:`. A placeholder keeps help from showing the Go type:
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: todo
+  flags:
+    - name: format
+      summary: format the output with a Go template
+      cascading: true
+      schema: { type: shape.Template, import: github.com/go-rotini/rotini/shape, placeholder: TEMPLATE }
+{{< /code >}}
+
+When the flag is set, pass `shape.Render` to `WriteOutput` or `WriteOutputItem` as the renderer:
+
+{{< code title="internal/cmd/todo/todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
+list := TodoListOutput{Tasks: load()}
+if format := in.Todo.Flags.Format; !format.IsZero() {
+	rtx.HaltWith(rtx.WriteOutput(list, "template", shape.Render[TodoListOutput](format)))
+	return
+}
+rtx.HaltWith(rtx.WriteOutput(list, in.Todo.Flags.Output, renderTable))
+{{< /code >}}
+
+A template names fields by their JSON property names, the names `-o json` shows, not the Go
+field names. `Render` ends what it writes with a newline, once per item for a stream:
+
+```console
+$ todo list --format '{{range .tasks}}{{.id}} {{.title}}{{"\n"}}{{end}}{{len .tasks}} tasks'
+1 write docs
+2 ship
+2 tasks
+```
+
+Besides Go's template builtins (`printf`, `len`, `index`, `eq`, …), a template can call `json`,
+the compact JSON of a value (`{{json .tags}}`), and `join`, a list joined by a separator
+(`{{join ", " .tags}}`). Numbers print as JSON prints them, and every field the output type
+declares is there, an empty optional one included.
+
+A template that does not parse is a usage error when the flag is read, before the command runs.
+One that names a field the output doesn't have is a usage error when it runs, and nothing is
+written:
+
+```console
+$ todo list --format '{{.Title}}'
+Error: template:1:2: executing "template" at <.Title>: map has no entry for key "Title"
+```
+
+A `default:` template is checked when the flag is read, not by `rotini validate`.
+
+The template is the user's own code, run by your program. It sees only the value you pass, as
+plain data, and its functions reach no files, environment or network. Pass outputs, never the
+inputs value, which may hold secrets.
+
+Importing `shape` links Go's `text/template`, which makes the binary larger. A program that does
+not import it links no template code.
 
 ### Check it
 
@@ -757,8 +1072,8 @@ Error: todo list: output does not match its contract: output.tasks[2].status: va
 `rtx.CheckOutput(v)` makes the same check without writing anything.
 
 `rotini.DecodeOutput[T]` reads captured stdout back in a test. It decodes json, yaml or toml
-into the command's output type, checking it against the shape first. To read a stream written
-with `WriteOutputItem`, use a slice of the type:
+into the command's output type, checking it against the shape first. A stream is read into a
+slice of the item type, and only a stream is:
 
 {{< code title="todo_test.go" language="go" open="true" collapsible="false" copy="true" >}}
 var stdout bytes.Buffer
@@ -803,13 +1118,23 @@ described by
   fields. Its help heading is `headings.stdin`.
 - **One JSON Schema per output**, with `generate.schemas.output.dir` in the conf:
   `todo-list.output.json` for a command, and `todo.exit-3.output.json` for an exit status.
-  Each is standard JSON Schema (draft-07), with the named schemas it uses included.
+  Each is standard JSON Schema (draft-07), with the named schemas it uses included. Hidden
+  commands get none.
 - **The contract document**, with `generate.contract.file`: one JSON file describing every
-  visible command, including its arguments, flags, environment variables, configuration keys,
-  stdin, output shape and exit statuses. Each command also has a `parameters` JSON Schema
-  covering its arguments and flags, so it maps directly onto a tool definition for an AI
-  agent. Its format is described by
-  [schema-contract.json](https://github.com/go-rotini/rotini/blob/main/schema-contract.json).
+  command, including its arguments, flags, environment variables, configuration keys and files,
+  stdin, output shape and exit statuses. Beside each input's JSON Schema it states what a
+  caller needs to build a command line: the rotini type (`int8`, `duration`), the kind of value
+  (`count` means repeat the flag, never `=3`), negated forms, separators, time layouts, and
+  which inputs are secret. Hidden commands and inputs are listed with `hidden: true`. Each
+  command also has a `parameters` JSON Schema covering its visible arguments and flags, so it
+  maps directly onto a tool definition for an AI agent; `parameters`, `output` and the stdin
+  schema each work on their own, carrying the definitions they use. Its format is described by
+  [schema-contract.json](https://github.com/go-rotini/rotini/blob/main/schema-contract.json);
+  validate a contract with the copy from the rotini that wrote it.
+- **The contract in the binary**, with `generate.contract.go: true`: the generated cmd file holds
+  the same document as `var Contract string`. Declare a command for it, such as `describe`, and
+  print it from the handler: `fmt.Fprint(rtx.Stdout, Contract)`. It adds the document's size to
+  the binary.
 
 {{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 generate:
@@ -819,6 +1144,86 @@ generate:
   contract:
     file: cli-contract.json
 {{< /code >}}
+
+### Files and the standard streams
+
+Two value kinds give a command the usual `-` conventions:
+
+- **`inputfile`** is a file to read, where `-` means stdin. It is checked like `existingfile`,
+  except that `-` passes, and only one `-` may be given in a run. `rotini.OpenInput(rtx, path)`
+  opens either; stdin comes byte for byte, and closing it leaves stdin open. When stdin is a
+  terminal, `-` is a usage error rather than a wait for typing.
+- **`outputfile`** is a file to write, where `-` means stdout. It is checked to be no directory
+  and to sit in an existing directory. `rotini.CreateOutput(rtx, path)` writes it atomically:
+  to a temporary file that `Close` renames into place and `Abort` removes. A file the run leaves
+  open is removed when the run ends. An existing file is replaced only with
+  `rotini.Overwrite(true)`. Devices such as `/dev/null` are written directly.
+
+Help, man and markdown pages add `(- for stdin)` or `(- for stdout)` to the input's line.
+
+{{< code title="internal/cmd/todo/todo_cat.go" language="go" open="true" collapsible="false" copy="true" >}}
+files := in.TodoCat.Arguments.Files // type: '[]inputfile'
+if len(files) == 0 {
+	files = []string{"-"}
+}
+for _, name := range files {
+	f, err := rotini.OpenInput(rtx, name)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	_, err = io.Copy(rtx.Stdout, f)
+	f.Close()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+}
+{{< /code >}}
+
+{{< code title="internal/cmd/todo/todo_export.go" language="go" open="true" collapsible="false" copy="true" >}}
+func export(rtx *rotini.Context, path string, force bool) error {
+	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
+	if err != nil {
+		return err
+	}
+	defer out.Abort() // discards the file unless Close commits it
+	if err := rtx.WriteOutputTo(out, TodoExportOutput{Tasks: load()}, "json", nil); err != nil {
+		return err
+	}
+	return out.Close()
+}
+{{< /code >}}
+
+`rtx.WriteOutputTo` and `rtx.WriteOutputItemTo` are `WriteOutput` and `WriteOutputItem` with a
+writer of your choice. Mark the flag that allows replacing a file with `role: force`, so a
+program driving the CLI knows which one it is. To write to a file and stdout at once, see
+[the tee recipe](/recipes#writing-to-a-file-and-to-stdout-at-once).
+
+### Buffered output
+
+A command that writes many small pieces of output is much faster with stdout buffered.
+`Program.WithBufferedOutput(true)` buffers `rtx.Stdout` for every run (not on a terminal, where
+output shows as it is written). Rotini flushes it before the reporter runs and checks the
+result, so a full disk or a closed pipe is an error exit even when the handler ignored its own
+write errors:
+
+{{< code title="cmd/todo/main.go (buffered)" language="go" open="true" collapsible="false" copy="true" >}}
+cmd.NewProgram(cmd.Handlers()).WithBufferedOutput(true).Execute()
+{{< /code >}}
+
+Write through `rtx.Stdout`, never `os.Stdout`, or the output comes out of order. Flush before
+waiting for input; `rtx.Stdout` then has a `Flush() error` method. It is no longer an
+`*os.File`, so check for a terminal with `rotini.IsTerminal(rtx.Stdout)`, which reports whether
+any stream with an `Fd` method is a terminal (`/dev/null` is not).
+
+### Patterns on Windows
+
+POSIX shells expand `*.txt` before the program sees it; the Windows shells don't. `glob: true`
+on a variadic argument (`string`, `existingfile`, `existingdir` or `inputfile` elements) expands
+such words on Windows only, relative to the run's directory. A word naming an existing path is
+kept, and a pattern matching nothing is passed through, so the path check reports it as a POSIX
+shell would. Matching is case-sensitive and `**` is not supported.
 
 ## Help, completion and docs
 
@@ -1272,6 +1677,73 @@ func TestAddDefaultPriority(t *testing.T) {
 A handler reads the same environment with `rtx.LookupEnv`. It still runs in the process's working
 directory, so it opens a relative path with `filepath.Join(rtx.Dir(), path)`, including the value
 of an `existingfile` input, which Rotini checks against the run's directory but binds as typed.
+
+### Testing with typed inputs
+
+The `rotinitest` package (`github.com/go-rotini/rotini/rotinitest`) runs a command from the
+inputs type `rotini generate` wrote for it, so a test sets fields instead of spelling out
+arguments:
+
+{{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func TestAddHigh(t *testing.T) {
+	t.Parallel()
+	var in TodoAddInputs
+	in.TodoAdd.Arguments.Title = "buy milk"
+	in.TodoAdd.Flags.Priority = "high"
+	res := rotinitest.Run(t, NewProgram(Handlers()), in)
+	if res.Code != 0 {
+		t.Fatalf("code %d, err %v", res.Code, res.Err)
+	}
+	if got := string(res.Stdout); got != "added \"buy milk\" (priority high)\n" {
+		t.Errorf("stdout = %q", got)
+	}
+}
+{{< /code >}}
+
+- **`Run`** writes the inputs as the command line that supplies them (`add --priority=high --
+  "buy milk"`), runs the program in-process, and returns the exit code, the error, stdout,
+  stderr and the argv it ran. Only the fields that hold a value are written; to write a zero
+  value, such as `--count=0`, name it with `rotinitest.Presence`. A value no command line can
+  express, such as a config input or a secret flag, fails the test (`rotinitest.Secrets()`
+  allows secrets). A stdin payload comes from the inputs' `Stdin` field.
+- **Each run is isolated.** It gets its own environment, holding only the env inputs you set,
+  plus `HOME` and `XDG_CONFIG_HOME` pointing into a temporary directory, and its own working
+  directory. Your shell's variables and config files never leak in. `t.Setenv` changes the whole
+  process, and Go doesn't allow it in a parallel test; a `rotinitest` run never needs it, so
+  tests can call `t.Parallel()`. Add variables with `rotinitest.Env`, and write a config file
+  into a directory you pass with `rotinitest.Dir`.
+- **`Output`** decodes stdout as JSON into the output type of a command that declares
+  [`output:`](#structured-output), checking it against the output schema:
+  `rotinitest.Output[TodoListOutput](t, res)`. `OutputAs` reads yaml or toml. Output checks are
+  on for the run, so a handler that writes a value off its schema fails it.
+- **`ExitDocumented`** fails the test when the exit code isn't one the command lists in its
+  `exit_status`. 0 always passes; a command that lists none passes only 0.
+
+Pass a fresh `NewProgram(Handlers())` to every `Run`, with the dependencies `main.go` adds:
+`Run` sets the program's streams and environment. A command line that typed inputs can't express,
+such as a typo or an unknown flag, is still tested with `Program.Run`.
+
+### Turning inputs back into a command line
+
+`rotini.ArgvOf` is what `rotinitest` builds on: it turns an inputs value into argv and env, for
+your own test helpers or for tools that drive a CLI.
+
+{{< code language="golang" open="true" collapsible="false" copy="true" >}}
+p := NewProgram(Handlers())
+argv, env, err := rotini.ArgvOf(p.Definition(), in, rotini.PresenceOf(in))
+code, err := p.WithEnviron(env).Run(argv)
+{{< /code >}}
+
+The third argument says which fields to write. `rotini.PresenceOf` names every field that holds
+a value; build the `rotini.Presence` yourself to write a zero value. Flags are written attached
+(`--name=value`), each after its own command's name, and `--` always comes before the
+positionals, so a value that looks like a flag or a command stays a positional (it shows in
+`rtx.DashIndex()`). On a flag that reads `@file` values, a value starting with `@` is written
+`@@…`. Secrets are refused unless you pass `rotini.ArgvSecrets()`, since argv shows in the
+process list. A value no command line can supply is a `*rotini.ArgvError` naming the field:
+config and stdin inputs, an argument of a command other than the invoked one, `-` on a flag that
+reads stdin from it, an explicit empty list on a flag without a separator, and a time its layout
+can't show exactly.
 
 ## Composing CLIs
 

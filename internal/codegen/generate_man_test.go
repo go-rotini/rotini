@@ -334,7 +334,7 @@ command:
 	t.Chdir(dir)
 
 	var got error
-	if err := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", func(_ string, err error) { got = err }, func([]error) {}); err != nil && got == nil {
+	if err := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", "", func(_ string, err error) { got = err }, func([]error) {}); err != nil && got == nil {
 		got = err
 	}
 	if got == nil || !strings.Contains(got.Error(), `"notes-remove"`) ||
@@ -348,7 +348,7 @@ command:
 	off := strings.Replace(strings.ReplaceAll(manConfEmbed, "acme", "notes"), "enabled: true", "enabled: false", 1)
 	writeTestFile(t, dir, ".rotini.conf.yaml", off)
 	got = nil
-	_ = NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", func(_ string, err error) { got = err }, func([]error) {})
+	_ = NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", "", func(_ string, err error) { got = err }, func([]error) {})
 	if got != nil {
 		t.Errorf("with man off, validate = %v, want no problem", got)
 	}

@@ -23,8 +23,9 @@
                           .Description is the paragraph the command's `groups` gives it
          .FlagGroups[]    {.Title .Description .Flags[]} — the same, for .Flags
          .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .EnumValues
-                          .Deprecated .Constraints .Rules .Passthrough} — .Passthrough: the
-                          argument and every word after it are passed on as typed
+                          .Deprecated .Constraints .Rules .Passthrough .Env .ConfigKey} — .Passthrough:
+                          the argument and every word after it are passed on as typed; .Env and
+                          .ConfigKey as on a flag row
          .Flags[]         {.Identifiers .Label .Summary .Type .Required .Default .Implicit .Enum
                           .EnumValues .Deprecated .Env .ConfigKey .Constraints .Rules} —
                           .Label: the identifiers joined, long-only flags indented to the long column;
@@ -34,26 +35,35 @@
                           renders them as "also set by ...".
          .Constraints     on argument, flag, env and config rows: the declared bounds, lengths,
                           item counts and repeatability as a short note (1..65535); .Rules: the
-                          same as sentences, plus pattern and separator
-         .EnumValues      on argument, flag, env and config rows: every value in declared order
-                          as {.Value .Summary}, nil when no value has a summary (.Enum always
-                          holds the values alone)
+                          same as sentences, plus pattern and separator; .Accepts: what a
+                          time input accepts beyond its type's default (a layout, relative times)
+         .EnumValues      on argument, flag, env and config rows: every value that is not hidden,
+                          in declared order, as {.Value .Summary .Aliases .Deprecated
+                          .DeprecatedSince .RemovedIn .ReplacedBy .Note}, nil when no value declares
+                          more than its spelling (.Enum always holds the values alone, hidden ones
+                          left out); listed .Enum .EnumValues leaves out the deprecated ones too,
+                          and described .EnumValues says whether any value has a summary
+         .DeprecatedSince .RemovedIn   on command, argument, flag, env and config rows: the
+                          releases that deprecated the item and will remove it ("" when not
+                          planned); deprecation .Deprecated .DeprecatedSince .RemovedIn renders
+                          "deprecated since 1.4.0, removed in 2.0.0: <message>"
          .Environment[]   {.Var .Summary .Type .Required .Default .Enum .EnumValues .Deprecated
                           .Constraints .Rules}
          .Configuration[] {.Name .Location .Summary .Type .Required .Default .Enum
                           .EnumValues .Deprecated .Constraints .Rules}
          .Cascading[]     same shape as .Flags — cascading flags inherited from ancestors
-         .Stdin           {.Format .Type .Description .Required .Fields[]}, nil when the
+         .Stdin           {.Format .Type .Description .Required .Stream .NUL .Unless .Fields[]}, nil when the
                           command declares no stdin
-         .Output          {.Description .Type .Fields[]}, nil when
-                          the command declares no output; .Fields[] {.Name .Type .Description .Required}
+         .Output          {.Description .Type .Fields[] .Stream}, nil when
+                          the command declares no output; .Fields[] {.Name .Type .Description .Required};
+                          .Stream: the command writes a stream of .Type, one item at a time
          .Examples[]      strings
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last,
-                alsoSetBy.
+                alsoSetBy, deprecation, listed, described.
                 All deterministic (no clock/entropy) to keep rendering byte-stable. */ -}}
-{{- define "values"}}{{range .EnumValues}}  	  {{.Value}}	{{.Summary}}
-{{end}}{{end -}}
+{{- define "values"}}{{if described .EnumValues}}{{range .EnumValues}}{{if not .Deprecated}}  	  {{.Value}}	{{.Summary}}
+{{end}}{{end}}{{end}}{{end -}}
 {{- with .Header}}{{.}}
 
 {{end -}}
@@ -73,41 +83,42 @@
 {{end -}}
 {{- range .CommandGroups}}{{if .Title}}{{.Title}}:{{else}}{{$.Headings.Commands}}{{end}}
 {{with .Description}}{{indent 2 .}}
-{{end}}{{range .Commands}}  {{.Name}}{{with .Aliases}}, {{join . ", "}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}{{range .Commands}}  {{.Name}}{{with .Aliases}}, {{join . ", "}}{{end}}	{{.Summary}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Arguments}}{{$.Headings.Arguments}}
-{{range .}}  {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
-{{template "values" .}}{{end}}
+{{range .}}  {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
+{{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
+{{end}}{{template "values" .}}{{end}}
 {{end -}}
 {{- range .FlagGroups}}{{if .Title}}{{.Title}}:{{else}}{{$.Headings.Flags}}{{end}}
 {{with .Description}}{{indent 2 .}}
-{{end}}{{range .Flags}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}{{range .Flags}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
 {{end}}{{template "values" .}}{{end}}
 {{end -}}
 {{- with .Environment}}{{$.Headings.Environment}}
-{{range .}}  {{.Var}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{range .}}  {{.Var}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{template "values" .}}{{end}}
 {{end -}}
 {{- with .Configuration}}{{$.Headings.Configuration}}
-{{range .}}  {{.Name}}{{with .Location}} ({{.}}){{end}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{range .}}  {{.Name}}{{with .Location}} ({{.}}){{end}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{template "values" .}}{{end}}
 {{end -}}
 {{- with .Cascading}}{{$.Headings.Cascading}}
-{{range .}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{range .}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
 {{end}}{{template "values" .}}{{end}}
 {{end -}}
 {{- with .Stdin}}{{$.Headings.Stdin}}
 {{with .Description}}  {{.}}
-{{end}}  {{.Format}}{{with .Type}} {{.}}{{end}}{{if .Required}} (required){{end}}
+{{end}}  {{.Format}}{{with .Type}} {{.}}{{end}}{{if .NUL}} (NUL-separated){{end}}{{if .Stream}} (streamed){{end}}{{if .Required}} (required){{end}}{{with .Unless}} (only when no {{.}} is given){{end}}
 {{range .Fields}}    {{.Name}}{{with .Type}} {{.}}{{end}}	{{.Description}}{{if .Required}} (required){{end}}
 {{end}}
 {{end -}}
 {{- with .Output}}{{$.Headings.Output}}
 {{with .Description}}  {{.}}
-{{end}}  {{.Type}}
+{{end}}  {{if .Stream}}a stream of {{.Type}}, one item at a time (JSON: one compact value per line; YAML: one document per item, each starting ---){{else}}{{.Type}}{{end}}
 {{range .Fields}}    {{.Name}}{{with .Type}} {{.}}{{end}}	{{.Description}}{{if .Required}} (required){{end}}
 {{end}}
 {{end -}}

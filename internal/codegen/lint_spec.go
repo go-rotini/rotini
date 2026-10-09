@@ -97,6 +97,21 @@ var specLints = []func(*Spec) []error{
 	lintGroups,
 	lintRepeatable,
 	lintUniqueItems,
+	lintOutputStream,
+	lintDeprecationLifecycle,
+	lintArgumentFallback,
+	lintRelativeTime,
+	lintPatternKinds,
+	lintEnumValueKeys,
+	lintStdinStream,
+	lintStdinUnlessArgument,
+	lintNulSeparator,
+	lintVariableFile,
+	lintConfigFilesAsEnv,
+	lintDiscoverApp,
+	lintStreamPaths,
+	lintRoles,
+	lintGlob,
 }
 
 // lintRootCommand requires the root command, which is the binary itself, to have a
@@ -200,6 +215,9 @@ func lintRefNodeKeys(spec *Spec) []error {
 		}
 		if c.Output != nil {
 			reject("output")
+		}
+		if c.OutputStream {
+			reject("output_stream")
 		}
 		if len(c.Plugins) > 0 {
 			reject("plugins")
@@ -385,8 +403,8 @@ func lintSeparator(spec *Spec) []error {
 			t := getSchemaType(schema)
 			isList, isMap := strings.HasPrefix(t, "[]"), strings.HasPrefix(t, "map[")
 			switch {
-			case channel != "flag" && channel != "argument":
-				add("sets `separator`, which applies to flags and arguments only; an env input's list splits on commas and a configuration file writes a list as a list, so there is nothing for it to choose")
+			case channel != "flag" && channel != "argument" && channel != "env":
+				add("sets `separator`, which applies to flags, arguments and env inputs only; a configuration file writes a list as a list, so there is nothing for it to choose")
 			case !isList && !isMap:
 				add(fmt.Sprintf("sets `separator` but its type is %s; only a list or map takes several values to split into", displayType(t)))
 			case schema.Separator == `"`:
@@ -395,6 +413,10 @@ func lintSeparator(spec *Spec) []error {
 				add("sets `separator` to a line break, which ends a CSV record rather than separating items in one")
 			case isMap && schema.Separator == "=":
 				add("sets `separator` to \"=\", which already separates each map entry's key from its value")
+			case channel == "env" && schema.Separator == ",":
+				p := inputProblem(ptr, path, channel, name, "sets `separator` to \",\", which an env input already splits on; remove it")
+				p.sev = severityWarning
+				problems = append(problems, p)
 			}
 		})
 	})
@@ -404,10 +426,14 @@ func lintSeparator(spec *Spec) []error {
 // enumMember reports whether v is one of schema's enum members, the way the runtime matches:
 // exactly, or regardless of case under ignore_case.
 func enumMember(schema *InputSchema, v string) bool {
-	if schema.IgnoreCase {
-		return slices.ContainsFunc(enumStrings(schema.Enum), func(m string) bool { return strings.EqualFold(m, v) })
+	spellings := enumStrings(schema.Enum)
+	for a := range enumAliases(schema.Enum) {
+		spellings = append(spellings, a) // an alias is accepted; lintEnumValueKeys asks for the value
 	}
-	return slices.Contains(enumStrings(schema.Enum), v)
+	if schema.IgnoreCase {
+		return slices.ContainsFunc(spellings, func(m string) bool { return strings.EqualFold(m, v) })
+	}
+	return slices.Contains(spellings, v)
 }
 
 // lintImplicitValue restricts implicit_value to single-valued flags (not bool, count, list
@@ -719,11 +745,11 @@ func inertKeyProblems(ptr, path, channel, name string, schema *InputSchema) []er
 		problems = append(problems, inputProblem(ptr, path, channel, name,
 			fmt.Sprintf("sets %#q, which applies only to %s; here it would do nothing", key, where)))
 	}
-	if schema.Negatable && channel != "flag" {
+	if negatable(schema) && channel != "flag" {
 		inert("negatable", "bool flags (it derives a --no-<name> form)")
 	}
-	if schema.Key != "" && channel != "flag" && channel != "config" {
-		inert("key", "config inputs and a flag's configuration fallback")
+	if schema.Key != "" && channel != "flag" && channel != "argument" && channel != "config" {
+		inert("key", "config inputs and the configuration fallback of flags and arguments")
 	}
 	if len(schema.Properties) > 0 && channel != "flag" {
 		inert("properties", "a map flag, whose property names feed shell completion (an object's shape belongs in a named schema)")
@@ -807,7 +833,8 @@ func measuredBoundProblems(s *InputSchema, elem string) []string {
 // stringValued reports whether a type's value is a string and so accepts string constraints:
 // "string" and the path types, whose generated field is a plain string.
 func stringValued(elem string) bool {
-	return elem == "string" || elem == "existingfile" || elem == "existingdir"
+	return elem == "string" || elem == "existingfile" || elem == "existingdir" ||
+		elem == "inputfile" || elem == "outputfile"
 }
 
 // lintPassthrough requires a passthrough command, whose every token is a raw positional, to
@@ -891,7 +918,7 @@ func lintCountFlags(spec *Spec) []error {
 }
 
 // lintVariable restricts variable, which names the environment variable an input reads, to
-// env inputs and flags (as the flag's env fallback), and requires a nested env input to name
+// env inputs, flags and arguments (as their env fallback), and requires a nested env input to name
 // a single prefix.
 func lintVariable(spec *Spec) []error {
 	var problems []error
@@ -901,7 +928,7 @@ func lintVariable(spec *Spec) []error {
 			if schema == nil || len(vars) == 0 {
 				return
 			}
-			if channel == "env" || channel == "flag" {
+			if channel == "env" || channel == "flag" || channel == "argument" {
 				if len(vars) > 1 && schema.Nesting != "" {
 					problems = append(problems, inputProblem(ptr, path, channel, name,
 						fmt.Sprintf("sets `nesting` with %d variables; a nested input reads the family of variables under ONE prefix, so name one", len(vars))))
@@ -909,52 +936,8 @@ func lintVariable(spec *Spec) []error {
 				return
 			}
 			problems = append(problems, inputProblem(ptr, path, channel, name,
-				"sets `variable`, which names an environment variable; only env inputs and flags (as a flag's env fallback) read one, so here it would be silently ignored"))
+				"sets `variable`, which names an environment variable; only env inputs, flags and arguments (as their env fallback) read one, so here it would be silently ignored"))
 		})
-	})
-	return problems
-}
-
-// lintNegatable restricts negatable to bool flags with a long identifier to derive
-// "--no-<name>" from, and rejects a derived form that collides with a declared identifier.
-func lintNegatable(spec *Spec) []error {
-	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		flagPtr := func(i int) string { return fmt.Sprintf("%s/flags/%d", ptr, i) }
-		for i, f := range c.Flags {
-			if f.Schema == nil || !f.Schema.Negatable {
-				continue
-			}
-			add := func(msg string) { problems = append(problems, inputProblem(flagPtr(i), path, "flag", f.Name, msg)) }
-			if t := f.Schema.Type; t != "bool" && t != "boolean" {
-				add(fmt.Sprintf("sets `negatable` but its type is %s; the negated form sets a bool false, so it applies to bool flags only", displayType(t)))
-				continue
-			}
-			if !slices.ContainsFunc(flagIdentifiers(f), func(id string) bool { return strings.HasPrefix(id, "--") }) {
-				add("sets `negatable` but declares no long identifier; the negated form is derived as \"--no-<name>\", so there is nothing to derive it from")
-			}
-		}
-		declared := map[string]string{}
-		for _, f := range c.Flags {
-			for _, id := range flagIdentifiers(f) {
-				declared[id] = f.Name
-			}
-		}
-		for i, f := range c.Flags {
-			if f.Schema == nil || !f.Schema.Negatable {
-				continue
-			}
-			for _, id := range flagIdentifiers(f) {
-				if !strings.HasPrefix(id, "--") {
-					continue
-				}
-				neg := "--no-" + strings.TrimPrefix(id, "--")
-				if owner, clash := declared[neg]; clash {
-					problems = append(problems, inputProblem(flagPtr(i), path, "flag", f.Name,
-						fmt.Sprintf("sets `negatable`, deriving %q, which flag %q already declares; one of the two would never match", neg, owner)))
-				}
-			}
-		}
 	})
 	return problems
 }
@@ -1010,7 +993,7 @@ func shortCircuitFlagProblems(f FlagInput, grouped, dependent bool) []string {
 	if s.Key != "" || len(variables(s)) > 0 {
 		msgs = append(msgs, "sets `short_circuit` and reads an environment variable or config key (`key` / `variable`); only the command line sets a short-circuit flag, or every run with that value set would be short-circuited")
 	}
-	if s.Negatable {
+	if negatable(s) {
 		msgs = append(msgs, "sets `short_circuit` and `negatable`; a negated short-circuit flag has no meaning")
 	}
 	if grouped {
@@ -1031,9 +1014,9 @@ func displayType(t string) string {
 }
 
 // lintStdinFormat requires the schema type of a raw stdin format to match what the payload
-// becomes: string for 'text', []string for 'lines'. A mismatch would otherwise surface at run
-// time as a wiring error. Document formats decode into the generated struct and are
-// unconstrained.
+// becomes: string for 'text' and 'bytes', []string for 'lines'. A mismatch would otherwise
+// surface at run time as a wiring error. Document formats decode into the generated struct
+// and are unconstrained.
 func lintStdinFormat(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -1047,7 +1030,7 @@ func lintStdinFormat(spec *Spec) []error {
 					c.Stdin.Format, want, displayType(typ), want)))
 		}
 		switch c.Stdin.Format {
-		case "text":
+		case "text", "bytes":
 			if typ != "string" {
 				add("string")
 			}
@@ -1214,39 +1197,6 @@ func lintConfigInputFiles(spec *Spec) []error {
 			if !declared[schema.File] {
 				problems = append(problems, inputProblem(ptr, path, channel, name,
 					fmt.Sprintf("pins `file` %q, which is not a `config_files` entry in scope (declared on this command or an ancestor)", schema.File)))
-			}
-		})
-	})
-	return problems
-}
-
-// lintFrom restricts `from` to non-bool flags and allows one stdin consumer per command: a
-// from:stdin flag cannot coexist with a `stdin:` channel or another from:stdin flag.
-func lintFrom(spec *Spec) []error {
-	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		stdinClaim := "" // what already claimed this command's stdin
-		if c.Stdin != nil {
-			stdinClaim = "the `stdin` channel"
-		}
-		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
-			if schema == nil || len(schema.From) == 0 {
-				return
-			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
-			if channel != "flag" {
-				add("sets `from`, which applies to flags only")
-				return
-			}
-			if t := getSchemaType(schema); t == "bool" {
-				add("sets `from` but its type is bool; a bool takes no value to resolve")
-			}
-			if slices.Contains(schema.From, "stdin") {
-				if stdinClaim != "" {
-					add(fmt.Sprintf("sets `from: stdin` but %s already consumes stdin; stdin has one consumer", stdinClaim))
-					return
-				}
-				stdinClaim = fmt.Sprintf("flag %q", name)
 			}
 		})
 	})
@@ -1873,6 +1823,7 @@ func lintExitStatus(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		seen := map[int]bool{}
+		names := map[string]string{} // generated constant suffix → the name that claimed it
 		for i, e := range c.ExitStatus {
 			at := &problem{kind: "spec", ptr: fmt.Sprintf("%s/exit_status/%d", ptr, i), loc: "command " + path}
 			switch {
@@ -1885,6 +1836,20 @@ func lintExitStatus(spec *Spec) []error {
 				problems = append(problems, at)
 			}
 			seen[e.Code] = true
+			if e.Name == "" {
+				continue
+			}
+			ident := toPascalCase(e.Name)
+			switch prev, dup := names[ident]; {
+			case dup && prev == e.Name:
+				problems = append(problems, &problem{kind: "spec", ptr: at.ptr + "/name", loc: at.loc,
+					msg: fmt.Sprintf("exit_status names two codes %q; give each code its own name", e.Name)})
+			case dup:
+				problems = append(problems, &problem{kind: "spec", ptr: at.ptr + "/name", loc: at.loc,
+					msg: fmt.Sprintf("exit_status names %q and %q both become the Go name Exit%s; rename one", prev, e.Name, ident)})
+			default:
+				names[ident] = e.Name
+			}
 		}
 	})
 	return problems

@@ -1,0 +1,122 @@
+# R10 — the contract states how each command line parses, and a binary can carry its own.
+#
+# generate.contract.file writes the contract; go: true also puts it in the generated cmd file
+# as Contract, which an ordinary command prints. Hidden items are listed, marked hidden, so a
+# tool can tell hiding from removing.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# The parsing facts a caller needs beside each schema.
+grep '"type": "int8"' cli-contract.json
+grep '"kind": "count"' cli-contract.json
+grep '"--no-color"' cli-contract.json
+grep '"layouts": \[' cli-contract.json
+grep '"name": "not_found"' cli-contract.json
+grep '"retryable": true' cli-contract.json
+grep '"hidden": true' cli-contract.json
+grep '"name": "app debug"' cli-contract.json
+# A unix-time flag claims no date-time format.
+! grep '"format": "date-time"' cli-contract.json
+# Each command's parameters are a self-contained draft-07 schema.
+grep '"\$schema": "http://json-schema.org/draft-07/schema#"' cli-contract.json
+
+# The binary prints the same document, byte for byte.
+exec ./app$exe describe
+cmp stdout cli-contract.json
+
+# The named code is a constant the handler uses.
+wantexit 3 ./app$exe get 9
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a contract demo
+  flags:
+    - name: color
+      summary: color the output
+      identifiers: [--color]
+      schema: {type: bool, negatable: true}
+  commands:
+    - name: get
+      summary: get an item
+      exit_status:
+        - { code: 0, summary: found }
+        - { code: 3, name: not_found, summary: no such item, retryable: true }
+      arguments:
+        - name: id
+          summary: the item
+          schema: {type: int8, required: true}
+      flags:
+        - name: verbose
+          summary: say more
+          identifiers: [-v, --verbose]
+          schema: {type: count}
+        - name: since
+          summary: only items changed since
+          identifiers: [--since]
+          schema: {type: time, layout: unix}
+    - name: debug
+      summary: internal diagnostics
+      hidden: true
+    - name: describe
+      summary: print the machine-readable contract
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+    go: true
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- internal/cmd/app/app_describe.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appDescribeHandler)(nil)
+
+type appDescribeHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appDescribeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprint(rtx.Stdout, Contract)
+}
+-- internal/cmd/app/app_get.go --
+package app
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appGetHandler)(nil)
+
+type appGetHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appGetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.HaltWithCode(AppGetExitNotFound)
+}

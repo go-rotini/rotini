@@ -18,8 +18,9 @@
 //	exists cmd/demo/main.go    a path must exist
 //	wantexit 2 ./app --bad     run a command and assert its exact exit status
 //
-// wantexit, gomodinit, nodeps and sizebelow are rotini's own commands, and leandeps and
-// pinnedgo its own conditions; `! exec` only proves a non-zero exit.
+// wantexit, execout, gomodinit, nodeps, sizebelow, writebytes, genlines, heldstdin and rssbelow
+// are rotini's own commands, and leandeps and pinnedgo its own conditions; `! exec` only proves
+// a non-zero exit.
 //
 // # Script names
 //
@@ -136,7 +137,7 @@ func TestScripts(t *testing.T) {
 			}
 			return false, fmt.Errorf("unknown condition %q", cond)
 		},
-		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
+		Cmds: mergeCmds(dataCmds(), map[string]func(ts *testscript.TestScript, neg bool, args []string){
 			// nodeps fails when the last command's stdout, a `go list -deps` listing, names a
 			// package in testdata/forbidden_deps.txt.
 			"nodeps": func(ts *testscript.TestScript, neg bool, args []string) {
@@ -197,6 +198,25 @@ func TestScripts(t *testing.T) {
 					ts.Fatalf("wantexit: %v exited %d, want %d", args[1:], got, want)
 				}
 			},
+			// execout runs a command with its stdout written to a file, such as /dev/full, which
+			// testscript's captured stdout can't stand in for. Its stderr is the script's stderr.
+			"execout": func(ts *testscript.TestScript, neg bool, args []string) {
+				if len(args) < 2 {
+					ts.Fatalf("usage: execout <stdout-file> <command> [args...]")
+				}
+				out, err := os.OpenFile(ts.MkAbs(args[0]), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+				ts.Check(err)
+				defer out.Close()
+				cmd := exec.Command(lookScriptPath(ts, args[1]), args[2:]...)
+				cmd.Dir = ts.MkAbs(".")
+				cmd.Env = scriptEnv(ts)
+				cmd.Stdout = out
+				cmd.Stderr = ts.Stderr()
+				err = cmd.Run()
+				if neg != (err != nil) {
+					ts.Fatalf("execout %v: unexpected result: %v", args[1:], err)
+				}
+			},
 			// gomodinit writes a go.mod wired to this working tree (see gomod).
 			"gomodinit": func(ts *testscript.TestScript, neg bool, args []string) {
 				if neg || len(args) < 1 || len(args) > 2 {
@@ -212,7 +232,7 @@ func TestScripts(t *testing.T) {
 					0o600,
 				))
 			},
-		},
+		}),
 		RequireExplicitExec: true,
 		RequireUniqueNames:  true,
 	})
@@ -327,4 +347,34 @@ func codeBlock(page, title string) (string, bool) {
 	}
 	body, _, ok = strings.Cut(body, "\n{{< /code >}}")
 	return body, ok
+}
+
+// scriptEnv is the environment a command a custom script command starts runs with: the
+// variables Setup gives every script.
+func scriptEnv(ts *testscript.TestScript) []string {
+	var env []string
+	for _, name := range []string{"PATH", "HOME", "WORK", "TMPDIR", "NO_COLOR", "TERM", "PATHEXT", "SYSTEMROOT", "GOCACHE", "GOMODCACHE", "GOPATH"} {
+		if v := ts.Getenv(name); v != "" {
+			env = append(env, name+"="+v)
+		}
+	}
+	return env
+}
+
+// lookScriptPath resolves a command the way exec does in a script: a path relative to $WORK,
+// or a name searched on the script's PATH.
+func lookScriptPath(ts *testscript.TestScript, name string) string {
+	if strings.ContainsRune(name, '/') || strings.ContainsRune(name, filepath.Separator) {
+		return ts.MkAbs(name)
+	}
+	for _, dir := range filepath.SplitList(ts.Getenv("PATH")) {
+		for _, ext := range []string{"", ".exe"} {
+			p := filepath.Join(dir, name+ext)
+			if info, err := os.Stat(p); err == nil && !info.IsDir() {
+				return p
+			}
+		}
+	}
+	ts.Fatalf("%s: not found on the script's PATH", name)
+	return ""
 }

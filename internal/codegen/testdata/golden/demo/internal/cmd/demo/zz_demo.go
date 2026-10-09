@@ -2,6 +2,8 @@
 package demo
 
 import (
+	"reflect"
+
 	"github.com/go-rotini/rotini"
 )
 
@@ -16,6 +18,7 @@ var definition = rotini.Definition{
 	Flags: []rotini.FlagDef{
 		{Name: "verbose", Identifiers: []string{"--verbose", "-v"}, Summary: "verbose output", Type: "bool"},
 	},
+	Inputs: reflect.TypeFor[DemoInputs](),
 	Commands: []rotini.CommandDef{
 		{Name: "build",
 			Handler: "DemoBuild",
@@ -27,6 +30,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "target", Type: "string"},
 			},
+			Inputs: reflect.TypeFor[DemoBuildInputs](),
 		},
 	},
 }

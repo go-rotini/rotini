@@ -1,0 +1,4 @@
+spec: .rotini.spec.yaml:42:11: command demo/tail: argument "last": follows variadic argument "files", so it must be required: arguments after a variadic bind from the end
+spec: .rotini.spec.yaml:26:11: command demo/gap: argument "service": has neither a fallback nor a default, but comes after <env>, which has a fallback; when <env> is left out, a word typed for <service> fills <env> instead. Give it a `variable`, `key` or `default`, or move it before <env>
+spec: .rotini.spec.yaml:33:11: command demo/run: argument "words": sets `variable` or `key`, but "run" is a passthrough command, whose words are taken as typed; a fallback would never apply
+spec: .rotini.spec.yaml:42:11: command demo/tail: argument "last": sets `variable` or `key` after a variadic argument, so its position isn't known until every word is in; move the fallback to an argument before the variadic one

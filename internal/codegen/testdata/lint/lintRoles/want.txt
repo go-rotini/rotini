@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:7:13: command demo: flag "force": has role force but is not a bool; the force role marks the switch that allows replacing existing files
+spec: .rotini.spec.yaml:11:13: command demo: flag "yes": has role force, which flag "force" already has; a command gives each role to one flag

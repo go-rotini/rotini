@@ -86,7 +86,7 @@ func readResponseFile(view *osView, path string) ([]string, error) {
 	if len(data) > responseFileCap {
 		return nil, errors.New("larger than 1 MiB")
 	}
-	return responseFileWords(string(stripBOM(data))), nil
+	return responseFileWords(string(data)), nil
 }
 
 // responseFileProblem names why a response file could not be read.
@@ -104,21 +104,10 @@ func responseFileProblem(err error) error {
 	return errors.New("cannot read it")
 }
 
-// responseFileWords splits a response file's text into words: one per line, a trailing "\r"
-// removed, skipping empty and blank lines and lines whose first non-blank character is '#'.
-// Other lines are kept exactly, spaces included.
-func responseFileWords(text string) []string {
-	var words []string
-	for line := range strings.SplitSeq(text, "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		words = append(words, line)
-	}
-	return words
-}
+// responseFileWords splits a response file's text into words: one per line, a leading
+// byte-order mark and a trailing "\r" removed, skipping empty and blank lines and lines whose
+// first non-blank character is '#'. Other lines are kept exactly, spaces included.
+func responseFileWords(text string) []string { return acquiredLines(text, false, true) }
 
 // completionWords expands the response files among the words before the cursor, skipping any
 // that can't be read, so completion walks the words the run would. It reports whether the

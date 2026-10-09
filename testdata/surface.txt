@@ -24,22 +24,32 @@ field ArgDef.Complete
 field ArgDef.Constraints
 field ArgDef.Default
 field ArgDef.Deprecated
+field ArgDef.DeprecatedSince
 field ArgDef.Enum
 field ArgDef.EnumValues
+field ArgDef.From
+field ArgDef.Glob
 field ArgDef.Hidden
 field ArgDef.IgnoreCase
 field ArgDef.Layout
+field ArgDef.Layouts
 field ArgDef.Name
 field ArgDef.Passthrough
+field ArgDef.Relative
+field ArgDef.RemovedIn
 field ArgDef.Required
 field ArgDef.Secret
 field ArgDef.Separator
 field ArgDef.Type
 field ArgDef.Variadic
+field ArgvError.Field
+field ArgvError.Reason
 field Command.Arguments
 field Command.Commands
 field Command.Deprecated
 field Command.DeprecatedIdentifiers
+field Command.DeprecatedIdentifiersRemovedIn
+field Command.DeprecatedSince
 field Command.FlagDependencies
 field Command.FlagGroups
 field Command.Flags
@@ -53,16 +63,21 @@ field Command.Passthrough
 field Command.PluginDiscovery
 field Command.PluginPath
 field Command.Plugins
+field Command.RemovedIn
 field CommandDef.Aliases
 field CommandDef.Arguments
 field CommandDef.Commands
 field CommandDef.Deprecated
 field CommandDef.DeprecatedIdentifiers
+field CommandDef.DeprecatedIdentifiersRemovedIn
+field CommandDef.DeprecatedSince
+field CommandDef.ExitStatus
 field CommandDef.FlagDependencies
 field CommandDef.FlagGroups
 field CommandDef.Flags
 field CommandDef.Handler
 field CommandDef.Hidden
+field CommandDef.Inputs
 field CommandDef.Name
 field CommandDef.OptionsFirst
 field CommandDef.Output
@@ -70,6 +85,7 @@ field CommandDef.Passthrough
 field CommandDef.PluginDiscovery
 field CommandDef.PluginPath
 field CommandDef.Plugins
+field CommandDef.RemovedIn
 field CommandDef.Summary
 field Completion.Extensions
 field Completion.Kind
@@ -85,6 +101,7 @@ field CompletionResult.Hint
 field CompletionResult.KeepOrder
 field CompletionResult.Messages
 field CompletionResult.NoSpace
+field ConfigFile.As
 field ConfigFile.Discover
 field ConfigFile.Format
 field ConfigFile.Name
@@ -112,10 +129,12 @@ field Definition.Arguments
 field Definition.Commands
 field Definition.CompletionDescriptions
 field Definition.CompletionMessages
+field Definition.ExitStatus
 field Definition.FlagDependencies
 field Definition.FlagGroups
 field Definition.Flags
 field Definition.Handler
+field Definition.Inputs
 field Definition.Name
 field Definition.OptionsFirst
 field Definition.Output
@@ -129,19 +148,35 @@ field Deprecation.Identifier
 field Deprecation.Kind
 field Deprecation.Message
 field Deprecation.Name
+field Deprecation.RemovedIn
+field Deprecation.Since
+field Deprecation.Value
 field DiscoverDef.App
 field DiscoverDef.File
 field DiscoverDef.Strategy
 field DiscoveredPlugin.Name
 field DiscoveredPlugin.Path
+field EnumValue.Aliases
+field EnumValue.Deprecated
+field EnumValue.DeprecatedAliases
+field EnumValue.DeprecatedSince
+field EnumValue.Hidden
+field EnumValue.RemovedIn
+field EnumValue.ReplacedBy
 field EnumValue.Summary
 field EnumValue.Value
+field ExitStatusDef.Code
+field ExitStatusDef.Name
+field ExitStatusDef.Retryable
+field ExitStatusDef.Summary
 field FlagDef.Complete
 field FlagDef.Constraints
 field FlagDef.Default
 field FlagDef.Defaults
 field FlagDef.Deprecated
 field FlagDef.DeprecatedIdentifiers
+field FlagDef.DeprecatedIdentifiersRemovedIn
+field FlagDef.DeprecatedSince
 field FlagDef.DottedKeys
 field FlagDef.Enum
 field FlagDef.EnumValues
@@ -152,10 +187,14 @@ field FlagDef.IgnoreCase
 field FlagDef.ImplicitValue
 field FlagDef.KeyPaths
 field FlagDef.Layout
+field FlagDef.Layouts
 field FlagDef.Name
 field FlagDef.Negatable
+field FlagDef.Negation
 field FlagDef.NoRepeat
 field FlagDef.ObjectSchema
+field FlagDef.Relative
+field FlagDef.RemovedIn
 field FlagDef.Required
 field FlagDef.Secret
 field FlagDef.Separator
@@ -194,6 +233,7 @@ field Outcome.Panics
 field Outcome.Successes
 field Outcome.Warnings
 field OutputDef.Schema
+field OutputDef.Stream
 field OutputDef.Type
 field Page.Content
 field Page.Name
@@ -233,14 +273,20 @@ field ResponseFilesDef.Prefix
 field WiringError.Command
 field WiringError.Handler
 field WiringError.Msg
+func ArgvOf[T any](def Definition, v T, set Presence, opts ...ArgvOption) (argv, env []string, err error)
+func ArgvPath(names ...string) ArgvOption
+func ArgvSecrets() ArgvOption
 func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func CategoryOf(err error) Category
+func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile, error)
 func DecodeOutput[T any](p *Program, data []byte, format string) (T, error)
 func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep
 func DefaultResolver(def Definition, argv []string) (Resolution, error)
 func Deprecations(rtx *Context) []Deprecation
 func ExitCause(code int) error
+func FileMode(perm fs.FileMode) OutputOption
 func InternalError(err error) error
+func IsTerminal(stream any) bool
 func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport)
 func MergeInputs[T any](layers ...InputLayer[T]) T
 func NewContextFor(def Definition, argv []string) *Context
@@ -250,6 +296,8 @@ func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
 func NewProgramFunc(def Definition, lookup HandlerLookup) *Program
 func NewSuggestor() *Suggestor
+func OpenInput(rtx *Context, path string) (io.ReadCloser, error)
+func Overwrite(enabled bool) OutputOption
 func PluginCompletion(w io.Writer, result CompletionResult) error
 func PresenceOf[T any](v T) Presence
 func Ptr[T any](v T) *T
@@ -259,6 +307,7 @@ func SuggestionFacts(err error) (token string, candidates []string, ok bool)
 func UsageError(err error) error
 func WithDependency[T any](dep Dependency[T], value T) Option
 method ArgValueCompleter.CompleteArgValue
+method ArgvError.Error() string
 method Base64Bytes.MarshalText() ([]byte, error)
 method Base64Bytes.String() string
 method Base64Bytes.UnmarshalText(text []byte) error
@@ -294,6 +343,7 @@ method Context.InputsWithReport[T any]() (T, InputReport, error)
 method Context.Inputs[T any]() (T, error)
 method Context.LookupEnv(name string) (string, bool)
 method Context.MustGetDependency[T any](dep Dependency[T]) T
+method Context.Now() time.Time
 method Context.Parser() *Parser
 method Context.PartialInputs[T any]() (T, Presence, error)
 method Context.RecordError(err error)
@@ -306,6 +356,7 @@ method Context.SetDependencyIfAbsent[T any](dep Dependency[T], value T)
 method Context.SetDependency[T any](dep Dependency[T], value T)
 method Context.StdinInputs[T any]() (InputLayer[T], error)
 method Context.Version() string
+method Context.WithClock(now func() time.Time) *Context
 method Context.WithDir(dir string) *Context
 method Context.WithEnviron(env []string) *Context
 method Context.WithHelp(help HelpFunc) *Context
@@ -317,7 +368,9 @@ method Context.WithStderr(w io.Writer) *Context
 method Context.WithStdin(r io.Reader) *Context
 method Context.WithStdout(w io.Writer) *Context
 method Context.WithVersion(version string) *Context
+method Context.WriteOutputItemTo[T any](w io.Writer, item T, format string, render func(io.Writer, string, T) error) error
 method Context.WriteOutputItem[T any](item T, format string, render func(io.Writer, string, T) error) error
+method Context.WriteOutputTo[T any](w io.Writer, v T, format string, render func(io.Writer, string, T) error) error
 method Context.WriteOutput[T any](v T, format string, render func(io.Writer, string, T) error) error
 method Dependency.Name() string
 method Dependency.String() string
@@ -325,6 +378,9 @@ method DependencyError.Error() string
 method DependencyError.Unwrap() []error
 method Deprecation.Error() string
 method FlagValueCompleter.CompleteFlagValue
+method Glob.MarshalText() ([]byte, error)
+method Glob.Match(name string) bool
+method Glob.UnmarshalText(text []byte) error
 method Handler.CascadingPostRun
 method Handler.CascadingPreRun
 method Handler.PostRun
@@ -346,6 +402,10 @@ method NoPostRun.PostRun(ctx context.Context, rtx *Context)
 method NoPreRun.PreRun(ctx context.Context, rtx *Context)
 method Outcome.Empty() bool
 method Outcome.Failed() bool
+method OutputFile.Abort() error
+method OutputFile.Close() error
+method OutputFile.Name() string
+method OutputFile.Write(p []byte) (int, error)
 method PanicError.Error() string
 method PanicError.Unwrap() []error
 method ParseError.Error() string
@@ -356,11 +416,14 @@ method PluginError.Error() string
 method PluginError.Unwrap() []error
 method PluginErrorKind.String() string
 method Program.Complete(words []string, format CompletionFormat) (int, error)
+method Program.Definition() Definition
 method Program.Execute() error
 method Program.Run(argv []string) (int, error)
 method Program.RunContext(ctx context.Context, argv []string) (int, error)
 method Program.With(opts ...Option) *Program
 method Program.WithArgs(args []string) *Program
+method Program.WithBufferedOutput(enabled bool) *Program
+method Program.WithClock(now func() time.Time) *Program
 method Program.WithCompletion(format CompletionFormat) *Program
 method Program.WithCompletionDescriptions(fn func(rtx *Context) bool) *Program
 method Program.WithCompletionMessages(fn func(rtx *Context) bool) *Program
@@ -394,6 +457,8 @@ method WiringError.Error() string
 method WiringError.Unwrap() error
 type ArgDef
 type ArgValueCompleter
+type ArgvError
+type ArgvOption
 type Base64Bytes
 type ByteSize
 type Category
@@ -416,12 +481,14 @@ type Deprecation
 type DiscoverDef
 type DiscoveredPlugin
 type EnumValue
+type ExitStatusDef
 type FieldPath
 type FlagDef
 type FlagDependency
 type FlagGroup
 type FlagGroupKind
 type FlagValueCompleter
+type Glob
 type Handler
 type HandlerLookup
 type HelpFunc
@@ -442,6 +509,8 @@ type NoPreRun
 type Option
 type Outcome
 type OutputDef
+type OutputFile
+type OutputOption
 type Page
 type PanicError
 type ParseError

@@ -100,6 +100,12 @@ type {{.Prefix}}Inputs struct {
 {{with .OutputTypes}}
 {{.}}
 {{end}}
+{{- with .ExitCodes}}
+{{.}}
+{{end}}
+{{- with .Contract}}
+{{.}}
+{{end}}
 {{- with .InputSettings}}
 {{.}}
 {{end}}

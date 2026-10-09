@@ -90,7 +90,7 @@ command:
 				confPath = ".rotini.conf.yaml"
 			}
 			var reported error
-			err := NewProcessor("0.0.0").Validate(tt.specFile, confPath, false, "", func(_ string, e error) {
+			err := NewProcessor("0.0.0").Validate(tt.specFile, confPath, false, "", "", func(_ string, e error) {
 				if e != nil {
 					reported = e
 				}
@@ -127,7 +127,7 @@ func TestDuplicateKeyProblems_composedChild(t *testing.T) {
 	writeTestFile(t, dir, ".rotini.spec.yaml", "version: 0.0.0\ncommand:\n  name: demo\n  commands:\n    - $ref: ./child.yaml\n")
 	writeTestFile(t, dir, "child.yaml", "version: 0.0.0\ncommand:\n  name: child\n  summary: a\n  summary: b\n")
 	writeTestFile(t, dir, ".rotini.conf.yaml", "version: 0.0.0\n")
-	err := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", func(string, error) {}, func([]error) {})
+	err := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", "", func(string, error) {}, func([]error) {})
 	if err == nil || !strings.Contains(err.Error(), `spec: child.yaml:5:3: /command/summary: duplicate key "summary" (first at line 4)`) {
 		t.Errorf("Validate = %v, want the child's duplicate key", err)
 	}

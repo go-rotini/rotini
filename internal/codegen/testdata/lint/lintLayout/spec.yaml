@@ -35,3 +35,22 @@ command:
       identifiers: [--holiday]
       schema:
         type: '[]date'
+    # Fine: a list of layouts, the most specific first.
+    - name: when
+      identifiers: [--when]
+      schema:
+        type: time
+        layout: ['2006-01-02 15:04', '2006-01-02', unix]
+    # A layout listed after one that reads its values as a different time: unix reads a year
+    # such as 2019 as seconds since 1970, so the year layout is never reached. A bad entry in a
+    # list is reported as a single layout is.
+    - name: year
+      identifiers: [--year]
+      schema:
+        type: time
+        layout: [unix, '2006']
+    - name: bad
+      identifiers: [--bad]
+      schema:
+        type: time
+        layout: ['2006-01-02', YYYY]

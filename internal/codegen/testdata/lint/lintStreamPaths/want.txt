@@ -1,0 +1,8 @@
+spec: .rotini.spec.yaml:10:7: command demo: flag "data": is type inputfile and sets `from`; its "-" already names a standard stream, so remove `from`
+spec: .rotini.spec.yaml:6:7: command demo: env "OUT": is type outputfile, whose "-" names a standard stream; that is command-line grammar, so use it on a flag or argument (or string here)
+spec: .rotini.spec.yaml:29:11: command demo/exec: argument "command": is a passthrough argument, whose words are kept as typed; it can't be inputfile or outputfile
+spec: .rotini.spec.yaml:10:7: command demo: flag "data": is type inputfile, whose "-" reads stdin, but command demo/cat declares `stdin`; stdin has one consumer, unless `stdin.unless_argument` names this argument
+spec: .rotini.spec.yaml:17:11: command demo/cat: flag "input": is type inputfile, whose "-" reads stdin, but command demo/cat declares `stdin`; stdin has one consumer, unless `stdin.unless_argument` names this argument
+spec: .rotini.spec.yaml:24:11: command demo/cat: argument "files": is type inputfile, whose "-" reads stdin, but command demo/cat declares `stdin`; stdin has one consumer, unless `stdin.unless_argument` names this argument
+spec: .rotini.spec.yaml:10:7: command demo: flag "data": is type inputfile, whose "-" reads stdin, but flag "sep" (from: stdin) already consumes stdin; stdin has one consumer
+spec: .rotini.spec.yaml:40:11: command demo/join: argument "files": is type inputfile, whose "-" reads stdin, but flag "sep" (from: stdin) already consumes stdin; stdin has one consumer

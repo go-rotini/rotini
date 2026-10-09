@@ -207,6 +207,29 @@
           "type": "string",
           "description": "Deprecation message. The command is annotated as deprecated in its parent's generated Commands list, and invoking it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those aliases report; without, every name does."
         },
+        "deprecated_since": {
+          "type": "string",
+          "description": "The release that deprecated this command (X.Y.Z), shown beside the deprecation in help, man and markdown, written into the contract, and reported by rotini.Deprecations as Since. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["1.4.0"]
+        },
+        "removed_in": {
+          "type": "string",
+          "description": "The release that will remove this command (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since` and reported as RemovedIn. `rotini validate --release <X.Y.Z>` (or the variable the conf's `validate.release_env` names) fails while the command is still declared at or past that release, so a planned removal is not forgotten. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["2.0.0"]
+        },
+        "deprecated_identifiers_removed_in": {
+          "type": "object",
+          "description": "The release that removes each deprecated alias, by alias: `{remove: 2.0.0}` plans the removal of the alias `remove` while the command stays. Each key must be listed in `deprecated_identifiers`. `rotini validate --release` checks these like `removed_in`, and the contract carries them.",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["2.0.0"]
+          }
+        },
+        "output_stream": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the command writes a stream of items rather than one value, and `output:` declares one item. Write each item with rtx.WriteOutputItem: JSON is one compact value per line, YAML one document per item, each starting `---`. Help, man and markdown say so in the OUTPUT section, and the contract marks the command `stream: true`. Needs `output`. `rotini generate` warns when a handler calls WriteOutputItem on a command without it."
+        },
         "filename": {
           "type": "string",
           "description": "Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file \u2014 move your handler code first.",
@@ -385,7 +408,7 @@
         },
         "type": {
           "type": "string",
-          "description": "The type used to parse and store the value. Go type names (bool, int, float64, []string, duration, map) and JSON Schema names (boolean, integer, number, array, object) are equivalent. A bool accepts true/false, yes/no, on/off, y/n, t/f and 1/0, in any case, so `--cache=off` and CACHE=yes both work.\n\nValue types parse a kind of value and generate the matching Go field:\n\n- 'duration' \u2014 time.Duration; Go units plus 'd' days and 'w' weeks (7d, 2w3d)\n- 'time' / 'datetime' \u2014 time.Time, RFC 3339 (2026-09-29T14:00:00Z)\n- 'date' \u2014 time.Time, a calendar date (2026-09-29, that day's UTC midnight). All three time types take `layout:` for another format, Unix timestamps included\n- 'url' \u2014 *url.URL; needs a scheme and host\n- 'email' \u2014 mail.Address; 'Name <a@b.c>' or a bare address\n- 'timezone' \u2014 *time.Location; an IANA name such as Europe/Berlin\n- 'mac' (net.HardwareAddr), 'ip' (netip.Addr), 'cidr' (netip.Prefix), 'hostport' (netip.AddrPort)\n- 'bytesize' \u2014 rotini.ByteSize; 512Mi, 10MB, 1.5GiB (an 'i' makes the unit binary)\n- 'hexbytes' \u2014 rotini.HexBytes; optional 0x\n- 'base64bytes' \u2014 rotini.Base64Bytes; standard or URL-safe, padded or not\n- 'existingfile' / 'existingdir' \u2014 a plain string field, checked at parse time to exist and be that kind of thing, so a bad path is a usage error naming the flag the user typed. The check is existence and kind only: expanding '~', cleaning, following symlinks and creating a missing file are the handler's policy. A relative path is checked against the run's directory (Program.WithDir, by default the working directory) and bound as typed, so a handler opens it joined to rtx.Dir()\n\nA value type works inside Go spellings too ('[]bytesize', 'map[string]duration'), and help shows the name as written ('--limit bytesize'), not the Go type. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.\n\nShapes that change how a flag is written:\n\n- 'count' (flags only) \u2014 a presence counter: the flag takes no value, each occurrence increments the generated int field (-vvv \u2192 3, clustering included), an inline value (--verbose=3) is a parse error, and every value-shaped key (default, enum, constraints, from, key, \u2026) is rejected\n- '[]\u2026' / 'array' \u2014 repeatable (--tag a --tag b \u2192 a slice); 'items' declares the element type ('array' + items int \u2192 []int), defaulting to string\n- a map ('map[string]string', or 'map'/'object' \u2192 map[string]any) \u2014 repeatable too, taking 'key=value' pairs (--label k=v --label a=b; split on the first '='; the value coerced to the element type)\n\nAny other Go type (time.Time, uuid.UUID, your own): set 'import' to the backing package path. It must implement encoding.TextUnmarshaler \u2014 that method is its parser and validator, applied to each element of a list too. Rotini refuses a type without it at parse time with a loud error, never a silently zeroed field; validate cannot check it, since that would mean type-checking foreign packages.\n\nA NAMED OBJECT schema is different: a flag whose schema is `$ref: '#/schemas/DB'` (or `type: array, items: {$ref: '#/schemas/DB'}` for a list) takes a structured value \u2014 see `$ref`."
+          "description": "The type used to parse and store the value. Go type names (bool, int, float64, []string, duration, map) and JSON Schema names (boolean, integer, number, array, object) are equivalent. A bool accepts true/false, yes/no, on/off, y/n, t/f and 1/0, in any case, so `--cache=off` and CACHE=yes both work.\n\nValue types parse a kind of value and generate the matching Go field:\n\n- 'duration' \u2014 time.Duration; Go units plus 'd' days and 'w' weeks (7d, 2w3d)\n- 'time' / 'datetime' \u2014 time.Time, RFC 3339 (2026-09-29T14:00:00Z)\n- 'date' \u2014 time.Time, a calendar date (2026-09-29, that day's UTC midnight). All three time types take `layout:` for another format, Unix timestamps included, and `relative:` for times measured from now (2h, today)\n- 'url' \u2014 *url.URL; needs a scheme and host\n- 'email' \u2014 mail.Address; 'Name <a@b.c>' or a bare address\n- 'timezone' \u2014 *time.Location; an IANA name such as Europe/Berlin\n- 'mac' (net.HardwareAddr), 'ip' (netip.Addr), 'cidr' (netip.Prefix), 'hostport' (netip.AddrPort)\n- 'bytesize' \u2014 rotini.ByteSize; 512Mi, 10MB, 1.5GiB (an 'i' makes the unit binary)\n- 'hexbytes' \u2014 rotini.HexBytes; optional 0x\n- 'base64bytes' \u2014 rotini.Base64Bytes; standard or URL-safe, padded or not\n- 'regexp' \u2014 *regexp.Regexp, compiled when parsed; Go's RE2 syntax, which has no backreferences or lookaround\n- 'glob' \u2014 rotini.Glob, a path.Match pattern checked when parsed (`*`, `?`, `[a-z]`, `\\` escapes) with a Match method; `**` is not recursive. It keeps the pattern as a value; `glob: true` instead expands a pattern into file names\n- 'existingfile' / 'existingdir' \u2014 a plain string field, checked at parse time to exist and be that kind of thing, so a bad path is a usage error naming the flag the user typed. The check is existence and kind only: expanding '~', cleaning, following symlinks and creating a missing file are the handler's policy. A relative path is checked against the run's directory (Program.WithDir, by default the working directory) and bound as typed, so a handler opens it joined to rtx.Dir()\n- 'inputfile' — a plain string field, checked like 'existingfile', except that '-' means stdin: rotini.OpenInput(rtx, path) opens either (`cat a.txt - b.txt`). Only one '-' may be given per run, across every inputfile value. Unlike `from: [stdin]`, where '-' replaces the value with stdin's text, the value stays '-' and the handler reads the stream. Help adds '(- for stdin)'\n- 'outputfile' — a plain string field: a file to write, where '-' means stdout. Checked at parse time to be no directory and to sit in an existing directory; rotini.CreateOutput(rtx, path) writes it atomically and refuses to replace an existing file unless given rotini.Overwrite(true). Help adds '(- for stdout)'\n\nA value type works inside Go spellings too ('[]bytesize', 'map[string]duration'), and help shows the name as written ('--limit bytesize'), not the Go type. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.\n\nShapes that change how a flag is written:\n\n- 'count' (flags only) \u2014 a presence counter: the flag takes no value, each occurrence increments the generated int field (-vvv \u2192 3, clustering included), an inline value (--verbose=3) is a parse error, and every value-shaped key (default, enum, constraints, from, key, \u2026) is rejected\n- '[]\u2026' / 'array' \u2014 repeatable (--tag a --tag b \u2192 a slice); 'items' declares the element type ('array' + items int \u2192 []int), defaulting to string\n- a map ('map[string]string', or 'map'/'object' \u2192 map[string]any) \u2014 repeatable too, taking 'key=value' pairs (--label k=v --label a=b; split on the first '='; the value coerced to the element type)\n\nAny other Go type (time.Time, uuid.UUID, your own): set 'import' to the backing package path. It must implement encoding.TextUnmarshaler \u2014 that method is its parser and validator, applied to each element of a list too. Rotini refuses a type without it at parse time with a loud error, never a silently zeroed field; validate cannot check it, since that would mean type-checking foreign packages.\n\nA NAMED OBJECT schema is different: a flag whose schema is `$ref: '#/schemas/DB'` (or `type: array, items: {$ref: '#/schemas/DB'}` for a list) takes a structured value \u2014 see `$ref`."
         },
         "import": {
           "type": "string",
@@ -399,9 +422,9 @@
         },
         "enum": {
           "type": "array",
-          "description": "Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.\n\nEach member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.",
+          "description": "Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.\n\nEach member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.\n\nThe object form also takes `aliases` (other spellings accepted and bound as the value: `{value: yaml, aliases: [yml]}`), `hidden: true` (accepted, but left out of help's list, completion and error messages), and `deprecated` with a message, optionally `deprecated_since`, `removed_in` and `replaced_by` (another value). A deprecated value is still accepted and is left out of the same lists; `rotini.Deprecations` reports it when given on the command line, as it does `deprecated_aliases`, the aliases being retired. Help keeps its short list of the values to use; man and markdown pages list each value with its aliases and deprecation.",
           "items": {
-            "x-hint": "must be a value (json) or a value with a one-line summary ({value: yaml, summary: human-friendly}), whose only keys are value and summary",
+            "x-hint": "must be a value (json) or an object ({value: yaml, summary: human-friendly}) whose keys are value, summary, aliases, deprecated_aliases, hidden, deprecated, deprecated_since, removed_in and replaced_by",
             "anyOf": [
               {
                 "type": "string"
@@ -421,6 +444,46 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "One line saying what the value means."
+                  },
+                  "aliases": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "description": "Other spellings accepted for the value, each bound as the value itself. Never offered: help, completion and error messages list the value."
+                  },
+                  "deprecated_aliases": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "description": "The aliases being retired: still accepted, and reported by rotini.Deprecations when given on the command line. Each must be one of `aliases`."
+                  },
+                  "hidden": {
+                    "type": "boolean",
+                    "description": "Accepted, but left out of help's list, completion and error messages."
+                  },
+                  "deprecated": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The value's deprecation message. The value is still accepted, is left out of help's list, completion and error messages, and is reported by rotini.Deprecations when given on the command line."
+                  },
+                  "deprecated_since": {
+                    "type": "string",
+                    "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+                    "examples": ["1.4.0"],
+                    "description": "With deprecated: the release that deprecated the value."
+                  },
+                  "removed_in": {
+                    "type": "string",
+                    "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+                    "examples": ["2.0.0"],
+                    "description": "With deprecated: the release that will remove the value, after deprecated_since."
+                  },
+                  "replaced_by": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "With deprecated: the value to use instead, another value of this enum that is not deprecated."
                   }
                 }
               }
@@ -586,8 +649,14 @@
               "items": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "examples": ["GH_TOKEN"]},
               "minItems": 1,
               "uniqueItems": true,
-              "description": "The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. For a flag, help shows them under the flag, in lookup order. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on flags (as a flag's environment fallback); rejected on arguments, config inputs and stdin, which have no environment variable.\n\nA variable named here is never given the `env_prefix`: it is already exact, and prefixing it would silently make it a different variable.\n\nOn a flag it also turns on the fallback chain (command line, then environment, then config file, then default), keyed by the flag's own name unless `key:` names one. So `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no need for a config `key:` whose UPPER_SNAKE form happens to match. Because the flag now has a key, a configuration file that defines that key supplies it too; declare `key:` to control what that key is.",
+              "description": "The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. For a flag, help shows them under the flag, in lookup order. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs, and on flags and arguments as their environment fallback; rejected on config inputs and stdin, which have no environment variable.\n\nA variable named here is never given the `env_prefix`: it is already exact, and prefixing it would silently make it a different variable.\n\nOn a flag or an argument it also turns on the fallback chain (command line, then environment, then config file, then default), keyed by the input's own name unless `key:` names one. So `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no need for a config `key:` whose UPPER_SNAKE form happens to match. Because the flag now has a key, a configuration file that defines that key supplies it too; declare `key:` to control what that key is.\n\nAn argument's fallback fills a position the command line left out (`deploy` reads `<env>` from `DEPLOY_ENV`). Positionals fill left to right, so a fallback applies only when every argument before it has a value, and an argument after one with a fallback needs a fallback or a default too. A variadic argument splits its environment value on its `separator`; without one the whole value is one item. Not on a passthrough argument, or the arguments of a passthrough command, whose words are taken as typed.",
               "pattern": "^[A-Z_][A-Z0-9_]*$", "examples": ["GITHUB_TOKEN"]
+            },
+            "variable_file": {
+              "type": "string",
+              "pattern": "^[A-Z_][A-Z0-9_]*$",
+              "examples": ["APP_TOKEN_FILE"],
+              "description": "An environment variable holding the path of a file to read this input's value from, the convention Docker and Kubernetes secrets use: with `variable_file: APP_TOKEN_FILE`, `APP_TOKEN_FILE=/run/secrets/token` reads the value from that file. One trailing line ending is removed, a relative path is read from the run's working directory, and the file may be at most 1 MiB. Setting both the plain variable and this one is an error; an empty value counts as unset. Valid on env inputs and on flags that read an environment variable (as part of the flag's fallback); like `variable:`, the name is exact and never given the `env_prefix`. Help lists it after the plain names, and a secret input's file contents are redacted like any other value."
             },
             "file": {
               "type": "string",
@@ -596,7 +665,7 @@
             },
             "key": {
               "type": "string",
-              "description": "Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable). Help shows a flag's key under the flag when the command reads configuration files.",
+              "description": "Dotted key path the value is read from (config inputs, and the config fallback of flags and arguments; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's or argument's env fallback variable). Help shows the key under the flag or argument when the command reads configuration files.",
               "pattern": "^[a-zA-Z0-9_-]+(\\.[a-zA-Z0-9_-]+)*$", "examples": ["port", "server.port"]
             },
             "secret": {
@@ -613,9 +682,10 @@
             "separator": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 1,
-              "description": "List and map flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style: an item in double quotes keeps the separator (`--tags '\"a,b\",c'`), leading spaces are trimmed, and an empty value (`--tags \"\"`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Without a separator, each occurrence is one value, used as is. Not valid on env and config inputs: an env input's list is always split on commas (TAGS=a,b), and a configuration file writes a list as a list.",
-              "$comment": "Enforced by lintSeparator: list/map types on flags and arguments only; not a double quote, a line break, or '=' on a map."
+              "maxLength": 3,
+              "pattern": "^(?:[\\s\\S]|nul)$", "examples": [",", "nul"],
+              "description": "List and map flags, a variadic argument, and an env list or map input: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. The word `nul` splits on NUL bytes, as `find -print0` writes them; since command-line and environment values can't contain a NUL, it applies only to content rotini reads itself, so it is valid only on a list or map flag with `from: [file]` or `from: [stdin]`, whose file or piped content is split on NUL instead of lines, byte for byte. Splitting is CSV-style: an item in double quotes keeps the separator (`--tags '\"a,b\",c'`), leading spaces are trimmed, and an empty value (`--tags \"\"`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Without a separator, each occurrence is one value, used as is. An env list or map input splits its variable on commas (TAGS=a,b) unless it declares a separator (`separator: ':'` reads PATHS=a:b): a plain split that trims spaces, with no quoting. A map's separator splits pairs; each pair still splits on `=`. Not valid on config inputs: a configuration file writes a list as a list.",
+              "$comment": "Enforced by lintSeparator: list/map types on flags, arguments and env inputs only; not a double quote, a line break, or '=' on a map."
             },
             "implicit_value": {
               "type": [
@@ -632,21 +702,29 @@
               "description": "How help, man and markdown pages show the default, in place of the value itself. Use it for a default that reads badly as written (`default_text: 'the number of CPUs'`, `default_text: '$HOME/.cache/app'`), or one the handler computes when the input is unset, so there is no literal to show. Display only: the value the input takes is still `default`, or nothing."
             },
             "layout": {
-              "type": "string",
+              "type": ["string", "array"],
               "minLength": 1,
+              "items": {"type": "string", "minLength": 1},
+              "minItems": 1,
+              "uniqueItems": true,
+              "x-hint": "a layout (2006-01-02) or a list of them, tried in order",
               "examples": [
                 "2006-01-02",
                 "Jan 2 2006 15:04",
-                "unix"
+                "unix",
+                ["2006-01-02", "unix"]
               ],
-              "description": "Time inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout (the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is: `2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`), or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies wherever the input reads a value, and a `default` must parse under it.",
+              "description": "Time inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout (the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is: `2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`), or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies wherever the input reads a value, and a `default` must parse under it. It may be a list, tried in order: the first layout that parses wins, help shows the first, and an error names them all (`layout: [2006-01-02, unix]`). Put the most specific first, since a value that parses under an earlier layout never reaches a later one.",
               "$comment": "Enforced by lintLayout (time types only; a real layout) and lintValuesParse (defaults)."
             },
             "negatable": {
-              "type": "boolean",
+              "type": ["boolean", "string"],
+              "pattern": "^--[a-zA-Z][a-zA-Z0-9_-]*$",
+              "x-hint": "true, or the negated form as a long identifier (--plain)",
+              "examples": [true, "--plain"],
               "default": false,
-              "description": "Bool flags only: also accept a `--no-<name>` form for every long identifier, which sets the flag false. `--color` with negatable declares `--no-color` too.\n\nUse it to turn something off for one run when a default, a config file or an environment variable already turned it on, which a plain bool flag cannot do. Short identifiers get no negated form.\n\nA declared identifier always wins over a derived negated one, so a flag you declare as `--no-cache` keeps that name. The negated form takes no value: `--no-color=true` is a parse error. The generated field is the same single bool either way, and help shows it as `--[no-]color`.",
-              "$comment": "Enforced by lintNegatable: bool only, never count, and the long identifier is what the negated form derives from."
+              "description": "Bool flags only: also accept a `--no-<name>` form for every long identifier, which sets the flag false. `--color` with negatable declares `--no-color` too.\n\nUse it to turn something off for one run when a default, a config file or an environment variable already turned it on, which a plain bool flag cannot do. Short identifiers get no negated form.\n\nA declared identifier always wins over a derived negated one, so a flag you declare as `--no-cache` keeps that name. The negated form takes no value: `--no-color=true` is a parse error. The generated field is the same single bool either way, and help shows it as `--[no-]color`.\n\nA string names the one negated form instead: `negatable: --plain` on `--color` accepts `--plain` to set it false, and no `--no-color`. It is a long identifier that no flag on the command path declares, and help shows it beside the flag's own identifiers: `--color, --plain`.",
+              "$comment": "Enforced by lintNegatable: bool only, never count, and the long identifier is what the negated form derives from; a custom form collides with no identifier on the command path."
             },
             "dotted_keys": {
               "type": "boolean",
@@ -663,7 +741,7 @@
                   "stdin"
                 ]
               },
-              "description": "Flag inputs only: where this flag's value may come from, besides the text on the command line.\n\n- 'file' \u2014 a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file). To pass a literal value that starts with `@`, double it: `--to @@alice` gives `@alice`, and `@./@name` reads a file whose name starts with `@`\n- 'stdin' \u2014 a value of exactly '-' is replaced by what is piped on stdin (`-f -`); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: input, since stdin can be read only once\n- 'value' \u2014 always allowed; listing it is documentation only. Any value that does not match an enabled marker stays literal\n\nText read from a file or stdin has one trailing line ending removed (leading and interior whitespace is kept), then goes through the normal type, enum and constraint checks: the flag's value is that text. On an object-valued flag the text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the whole command belongs in the command's stdin: input.\n\nWithout 'from', '@' and '-' are ordinary characters. Defaults and environment and config fallbacks are always literal: the markers apply only to values given on the command line."
+              "description": "Flags, and arguments before any variadic one: where the input's value may come from, besides the text on the command line.\n\n- 'file' \u2014 a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file). To pass a literal value that starts with `@`, double it: `--to @@alice` gives `@alice`, and `@./@name` reads a file whose name starts with `@`\n- 'stdin' \u2014 a value of exactly '-' is replaced by what is piped on stdin (`-f -`); empty stdin is then a usage error, and stdin can be read once, so one input on a command path may take it: a from:stdin flag or argument, or the command's stdin: input\n- 'value' \u2014 always allowed; listing it is documentation only. Any value that does not match an enabled marker stays literal\n\nText read from a file or stdin has one trailing line ending removed (leading and interior whitespace is kept), then goes through the normal type, enum and constraint checks: the flag's value is that text. On an object-valued flag the text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the whole command belongs in the command's stdin: input. On a list or map flag, the file's (or stdin's) lines are separate values; blank lines are skipped, and each line is split on the flag's `separator`.\n\nWithout 'from', '@' and '-' are ordinary characters. Defaults and environment and config fallbacks are always literal: the markers apply only to values given on the command line. On an argument they work the same way: `cat-config -` reads stdin, `cat-config @app.yaml` the file."
             },
             "config_source": {
               "type": "string",
@@ -725,6 +803,18 @@
                 "null"
               ],
               "description": "On a single-value flag: `repeatable: false` makes giving the flag more than once on the command line an error naming the first and last values, instead of the last value winning, which is the default. `-vv` and `--color --no-color` are repeats, and so is a cascading flag given at two levels of the command path; a sub-command that redeclares the flag has its own. Environment and configuration values are unaffected. Rejected on list, map, count and object flags, which repeat by nature, and on arguments, env and config inputs."
+            },
+            "relative": {
+              "type": "string",
+              "enum": ["past", "future", "both"],
+              "examples": ["past"],
+              "$comment": "Enforced by lintRelativeTime: time types only, and the default parses under it.",
+              "description": "Time inputs only (time, datetime, date, and lists of them): also accept a time measured from now. The input still takes absolute values, tried first, so declaring it never changes what one means.\n\n- 'past' \u2014 a time ago: `2h` or `-2h` (two hours ago), `3d`, `1w`; `+2h` is an error. The words `now`, `today` (midnight) and `yesterday`\n- 'future' \u2014 a time from now: `2h` or `+2h`; `-2h` is an error. The words `now`, `today` and `tomorrow`\n- 'both' \u2014 either, with a sign required (`-2h`, `+3d`), and all four words\n\nDurations take Go units plus `d` (24h) and `w`. Words are read in any case. On a date the result is the calendar date it falls on, and an offset must be whole days. Times are measured from the run's clock, read once per run, so every relative value in a run agrees; Program.WithClock sets it for tests, and rtx.Now() returns the same reading. `today` and the date a value falls on follow the clock's time zone (the process's, by default). A flag's or argument's `default` may be relative (`default: 24h`) and is measured at run time; an env or config input's default is absolute."
+            },
+            "glob": {
+              "type": "boolean",
+              "default": false,
+              "description": "On a variadic argument of type string, existingfile, existingdir or inputfile: on Windows, where the shell passes patterns through unexpanded, rotini expands each word containing `*`, `?` or `[` into the matching paths, sorted, relative to the run's directory. A word naming an existing path is kept as written (`file[1].txt`), `-` is never expanded, and a pattern matching nothing is passed through as written, so the path check reports it as a POSIX shell would. Matching is case-sensitive (`*.TXT` does not match `a.txt`), `**` is not supported, and matches use `\\` separators. On other systems the shell has already expanded unquoted patterns, so nothing changes. Not the `glob` value type, which validates a pattern instead of expanding it."
             }
           }
         }
@@ -789,6 +879,31 @@
             "pattern": "^-{1,2}[a-zA-Z][a-zA-Z0-9_-]*$|^-[0-9]$", "examples": ["--out"]
           },
           "description": "CLI tokens for this input that are deprecated \u2014 a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. Pair it with `deprecated:` to give the report a message; `deprecated:` alone deprecates every spelling"
+        },
+        "deprecated_since": {
+          "type": "string",
+          "description": "The release that deprecated this flag (X.Y.Z), shown beside the deprecation in help, man and markdown, written into the contract, and reported by rotini.Deprecations as Since. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["1.4.0"]
+        },
+        "removed_in": {
+          "type": "string",
+          "description": "The release that will remove this flag (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since` and reported as RemovedIn. `rotini validate --release <X.Y.Z>` (or the variable the conf's `validate.release_env` names) fails while the flag is still declared at or past that release. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["2.0.0"]
+        },
+        "deprecated_identifiers_removed_in": {
+          "type": "object",
+          "description": "The release that removes each deprecated identifier, by identifier: `{--conf: 2.0.0}` plans the removal of the spelling `--conf` while the flag stays under its other identifiers. Each key must be listed in `deprecated_identifiers`. `rotini validate --release` checks these like `removed_in`, and the contract carries them.",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["2.0.0"]
+          }
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "force"
+          ],
+          "description": "What this flag means to a program driving the CLI, such as an agent; it changes nothing at run time. 'force' marks the bool flag that lets the command replace existing output files (the handler passes it on, as in rotini.CreateOutput(rtx, path, rotini.Overwrite(in.Flags.Force))). At most one flag per command has a given role."
         }
       }
     },
@@ -820,6 +935,16 @@
         "deprecated": {
           "type": "string",
           "description": "Deprecation message. The argument is annotated as deprecated in generated help, and supplying it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing)."
+        },
+        "deprecated_since": {
+          "type": "string",
+          "description": "The release that deprecated this argument (X.Y.Z), shown beside the deprecation in help, man and markdown, written into the contract, and reported by rotini.Deprecations as Since. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["1.4.0"]
+        },
+        "removed_in": {
+          "type": "string",
+          "description": "The release that will remove this argument (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since` and reported as RemovedIn. `rotini validate --release <X.Y.Z>` fails while the argument is still declared at or past that release. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["2.0.0"]
         },
         "passthrough": {
           "type": "boolean",
@@ -853,6 +978,16 @@
           "type": "string",
           "description": "Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries \u2014 commands, flags and arguments.)"
         },
+        "deprecated_since": {
+          "type": "string",
+          "description": "The release that deprecated this input (X.Y.Z), shown beside the deprecation in help, man and markdown and written into the contract. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["1.4.0"]
+        },
+        "removed_in": {
+          "type": "string",
+          "description": "The release that will remove this input (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since`. `rotini validate --release <X.Y.Z>` fails while the input is still declared at or past that release. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["2.0.0"]
+        },
         "schema": {
           "$ref": "#/definitions/InputSchema",
           "description": "Type definition and input-level metadata (required, default, file, key)"
@@ -884,6 +1019,16 @@
           "type": "string",
           "description": "Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries \u2014 commands, flags and arguments.)"
         },
+        "deprecated_since": {
+          "type": "string",
+          "description": "The release that deprecated this input (X.Y.Z), shown beside the deprecation in help, man and markdown and written into the contract. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["1.4.0"]
+        },
+        "removed_in": {
+          "type": "string",
+          "description": "The release that will remove this input (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since`. `rotini validate --release <X.Y.Z>` fails while the input is still declared at or past that release. Needs `deprecated`.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["2.0.0"]
+        },
         "schema": {
           "$ref": "#/definitions/InputSchema",
           "description": "Type definition and input-level metadata (required, default, variable)"
@@ -906,10 +1051,28 @@
             "jsonc",
             "toml",
             "text",
-            "lines"
+            "lines",
+            "jsonl",
+            "bytes"
           ],
           "default": "json",
-          "description": "How the piped stdin payload is read.\n\nThe four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin struct, validated against the declared schema. The default is json.\n\nThe two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and is implied when left out; neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help, man and markdown pages and the contract.\n\nOne leading UTF-8 byte-order mark is removed before the payload is read, in every format."
+          "description": "How the piped stdin payload is read, and the Go type of the generated Stdin field.\n\nThe four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin type (`*<Prefix>Stdin`), validated against the declared schema. The default is json.\n\n'jsonl' reads JSON Lines: one JSON record per line, blank lines skipped, each checked against the schema, which describes one record. The field is `*[]<Prefix>Stdin`, or with `stream: true` an iterator, `iter.Seq2[<Prefix>Stdin, error]`. An error names the line it was found on.\n\nThe raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as one string (`*string`), 'lines' binds its lines (`*[]string`, a trailing newline adds no empty element; with `stream: true`, `iter.Seq2[string, error]`), and 'bytes' binds the payload byte for byte (`*[]byte`), nothing trimmed. Their schema type is implied when left out ('string' for text and bytes, '[]string' for lines); none generates a <Prefix>Stdin type, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help, man and markdown pages and the contract.\n\nOne leading UTF-8 byte-order mark is removed before the payload is read, in every format but 'bytes'. A declared stdin that is not streamed is held in memory for the run."
+        },
+        "stream": {
+          "type": "boolean",
+          "default": false,
+          "description": "With 'lines' or 'jsonl' only: generate an iterator (`iter.Seq2[string, error]`, or `iter.Seq2[<Prefix>Stdin, error]`) instead of a slice, so a filter reads one line or record at a time in constant memory. Nothing is read until the handler ranges over it, and stdin is read once per run: a second range, or a second Inputs call, continues where the last stopped. The field is nil when stdin is not read (a terminal, a short-circuit flag such as --help, or `unless_argument` choosing the files), so check it before ranging. A read error, a record that fails its schema, or a cancelled run is yielded once as the error, and the iterator then stops. A line or record is limited only by memory. CheckInputs and InputReport.Validate carry a stream but don't check its items: they are checked as they are read."
+        },
+        "unless_argument": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "examples": ["files"],
+          "description": "The name of an optional file argument of the same command (`inputfile` or `existingfile`, or a list of either): stdin is read only when that argument got no value, or its value is (or, for a list, contains) `-`. Otherwise the Stdin field stays nil and nothing is read. This is the `cat [FILE...]` and `jq FILTER [FILE]` shape. Without it, a declared stdin is read on every run, even when a file is given, which waits forever when a caller holds stdin open. With `required`, an empty stdin is an error only when no file is given."
+        },
+        "separator": {
+          "type": "string",
+          "enum": ["nul"],
+          "description": "With 'lines' only: split the payload on NUL bytes instead of newlines, as `find -print0` and `xargs -0` write it. Items are kept byte for byte (no `\\r` or space trimming, since a file name may contain either), and a trailing NUL adds no empty item. The default splits on newlines."
         }
       }
     },
@@ -1034,6 +1197,12 @@
         "discover": {
           "$ref": "#/definitions/ConfigurationFileDiscover",
           "description": "Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set."
+        },
+        "as": {
+          "type": "string",
+          "enum": ["config", "env"],
+          "default": "config",
+          "description": "What the file supplies. 'config' (the default): configuration values, read by config inputs and flag config fallbacks. 'env': environment variables, the `.env` shape: a `format: dotenv` file whose KEY=value lines are read as if they were set in the environment, by env inputs, flag environment fallbacks, `variable_file` and `config_source` variables. The real environment wins over the file, variable by variable, so the precedence is command line, environment, `.env` file, configuration files, default. Values are literal: `${OTHER}` is not expanded. Rotini's own variables (HOME, XDG_*, PATH) are never read from it. Requires `format: dotenv` (or a `.env` file name); a config input can't pin it with `file:`. Several `as: env` files in scope layer like config files: the nearest command's first, then in declaration order. Prefer a fixed `path: .env` to `walk-up` discovery, which could find a stray ~/.env."
         }
       }
     },
@@ -1052,9 +1221,11 @@
               "type": "string",
               "enum": [
                 "walk-up",
-                "xdg"
+                "xdg",
+                "native",
+                "xdg-system"
               ],
-              "description": "'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.\n\n'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows)."
+              "description": "'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.\n\n'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. This is the portable choice. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows).\n\n'native': search the platform's own config directory, <dir>/<app>: %AppData% on Windows, ~/Library/Application Support on macOS, and $XDG_CONFIG_HOME (default ~/.config) elsewhere, so on Linux it is the same directory as 'xdg'. A relative $XDG_CONFIG_HOME is ignored here too.\n\n'xdg-system': search each absolute directory in $XDG_CONFIG_DIRS, in order, defaulting to /etc/xdg, for <app>/<file>. On Windows it searches only when $XDG_CONFIG_DIRS is set. Declare it as its own config_files entry after the user's ('xdg' or 'native'): the first declared entry wins per key, so the user's file overrides the system one key by key.\n\n'xdg', 'native' and 'xdg-system' need 'app'."
             },
             "file": {
               "type": "string",
@@ -1063,7 +1234,7 @@
             },
             "app": {
               "type": "string",
-              "description": "The application directory under the XDG config root: the '<app>' in $XDG_CONFIG_HOME/<app>. Required by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. `rotini validate` enforces both, so its message can say which strategy needs it and what it is for.",
+              "description": "The application directory under the config root: the '<app>' in $XDG_CONFIG_HOME/<app> (or the native or system directory). Required by the 'xdg', 'native' and 'xdg-system' strategies and rejected by 'walk-up', which has no such directory. `rotini validate` enforces both, so its message can say which strategy needs it and what it is for.",
               "pattern": "^[^/\\\\]+$", "examples": ["mytool"]
             }
           }
@@ -1090,6 +1261,16 @@
         "output": {
           "$ref": "#/definitions/Schema",
           "description": "The shape stdout still carries when the command exits with this code, for an outcome that is not plain success but prints data anyway (`3: some tasks failed; stdout lists what succeeded`). Documented in the EXIT STATUS section and described in the output schema files and the contract document."
+        },
+        "name": {
+          "type": "string",
+          "description": "A snake_case name for the code, unique within the command. `rotini generate` writes a constant for it, `<Command>Exit<Name>` (`not_found` on `taskr get` gives TaskrGetExitNotFound), so a handler writes rtx.HaltWithCode(TaskrGetExitNotFound) instead of a bare number; the exit-code check reads the constant like the number. The man and markdown EXIT STATUS sections and the contract show the name too.",
+          "pattern": "^[a-z][a-z0-9_]*$", "examples": ["not_found"]
+        },
+        "retryable": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, running the same command again may succeed (a timeout, a busy lock). Carried into the contract for agents and other callers that decide whether to retry; rotini itself never retries."
         }
       }
     },

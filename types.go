@@ -10,8 +10,11 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"path"
+	"path/filepath"
 	"reflect"
 	"regexp"
+	"regexp/syntax"
 	"strconv"
 	"strings"
 	"sync"
@@ -149,6 +152,31 @@ func (b Base64Bytes) MarshalText() ([]byte, error) { return []byte(b.String()), 
 // String renders the bytes as standard, padded base64.
 func (b Base64Bytes) String() string { return base64.StdEncoding.EncodeToString(b) }
 
+// Glob is a validated path.Match pattern: `*` and `?` match within one path segment, `[a-z]` a
+// class, and `\` escapes the next character. It matches slash-separated names, and `**` is not
+// recursive: it means two `*`. A spec declares one with `type: glob`.
+type Glob string
+
+// UnmarshalText implements [encoding.TextUnmarshaler], rejecting a malformed pattern.
+func (g *Glob) UnmarshalText(text []byte) error {
+	if _, err := path.Match(string(text), ""); err != nil {
+		return fmt.Errorf("check its brackets and escapes: %w", err)
+	}
+	*g = Glob(text)
+	return nil
+}
+
+// MarshalText implements [encoding.TextMarshaler].
+func (g Glob) MarshalText() ([]byte, error) { return []byte(g), nil }
+
+// Match reports whether name matches the pattern. name's separators are read as slashes, so a
+// Windows path matches the same pattern a Unix one does. A malformed pattern, which
+// [Glob.UnmarshalText] rejects, matches nothing.
+func (g Glob) Match(name string) bool {
+	ok, err := path.Match(string(g), filepath.ToSlash(name))
+	return ok && err == nil
+}
+
 // valueParsers parse standard-library input types that do not implement
 // encoding.TextUnmarshaler, keyed on the exact field type. [coerce] consults it before anything
 // else, including pointer dereferencing, because *url.URL and *time.Location are built by their
@@ -199,6 +227,17 @@ var valueParsers = map[reflect.Type]func(string) (reflect.Value, error){
 		}
 		return reflect.ValueOf(mac), nil
 	},
+	// *regexp.Regexp parses itself, but this entry names the problem without Go's prefix.
+	reflect.TypeFor[*regexp.Regexp](): func(s string) (reflect.Value, error) {
+		re, err := regexp.Compile(s)
+		if err != nil {
+			if se, ok := errors.AsType[*syntax.Error](err); ok {
+				return reflect.Value{}, fmt.Errorf("%s: `%s`", se.Code, se.Expr)
+			}
+			return reflect.Value{}, fmt.Errorf("want a regular expression: %w", err)
+		}
+		return reflect.ValueOf(re), nil
+	},
 }
 
 // valueTypeLabels name value types in a parse error in user terms ("URL", not "*url.URL").
@@ -214,6 +253,8 @@ var valueTypeLabels = map[reflect.Type]string{
 	reflect.TypeFor[ByteSize]():         "size",
 	reflect.TypeFor[HexBytes]():         "hex value",
 	reflect.TypeFor[Base64Bytes]():      "base64 value",
+	reflect.TypeFor[*regexp.Regexp]():   "regular expression",
+	reflect.TypeFor[Glob]():             "glob pattern",
 }
 
 // typeLabel names a field type for a parse error: its label when it has one, else its Go name.
@@ -282,42 +323,6 @@ func layoutLabel(layout string) string {
 
 var timeType = reflect.TypeFor[time.Time]()
 
-// coerceWithLayout is [coerce] for an input that declares a time layout: a time.Time field —
-// or a pointer to one, or a list of them — parses each value under the layout instead of as
-// RFC 3339. Any other field, or no layout, is plain coerce.
-func coerceWithLayout(f reflect.Value, raw []string, layout string) error {
-	if layout == "" || len(raw) == 0 {
-		return coerce(f, raw)
-	}
-	switch {
-	case f.Type() == timeType:
-		last := raw[len(raw)-1]
-		t, err := parseTimeLayout(last, layout)
-		if err != nil {
-			return &coerceError{Value: last, TypeName: layoutLabel(layout), Cause: err}
-		}
-		f.Set(reflect.ValueOf(t))
-		return nil
-	case f.Kind() == reflect.Pointer && f.Type().Elem() == timeType:
-		v := reflect.New(timeType)
-		if err := coerceWithLayout(v.Elem(), raw, layout); err != nil {
-			return err
-		}
-		f.Set(v)
-		return nil
-	case f.Kind() == reflect.Slice && derefType(f.Type().Elem()) == timeType:
-		out := reflect.MakeSlice(f.Type(), len(raw), len(raw))
-		for i, r := range raw {
-			if err := coerceWithLayout(out.Index(i), []string{r}, layout); err != nil {
-				return err
-			}
-		}
-		f.Set(out)
-		return nil
-	}
-	return coerce(f, raw)
-}
-
 // durationDays matches a day or week component of a duration: `7d`, `1.5w`.
 var durationDays = sync.OnceValue(func() *regexp.Regexp {
 	return regexp.MustCompile(`(\d*\.?\d+)([dw])`)
@@ -344,18 +349,21 @@ func parseDuration(s string) (time.Duration, error) {
 // zero units ("30d", "1d12h", "1h30m", "90s"), so a bound such as `maximum: 30d` prints in an
 // error as the spec wrote it.
 func formatDuration(d time.Duration) string {
-	if d < 0 {
-		return "-" + formatDuration(-d)
-	}
 	const day = 24 * time.Hour
-	out := ""
-	if d >= day {
-		out = strconv.FormatInt(int64(d/day), 10) + "d"
-		d %= day
-		if d == 0 {
+	// Split before negating: -d overflows for the most negative duration, but its whole days
+	// and the remainder each negate safely.
+	days, rest, sign := d/day, d%day, ""
+	if d < 0 {
+		days, rest, sign = -days, -rest, "-"
+	}
+	out := sign
+	if days > 0 {
+		out += strconv.FormatInt(int64(days), 10) + "d"
+		if rest == 0 {
 			return out
 		}
 	}
+	d = rest
 	s := d.String() // "1h0m0s", "2m0s", "1h30m0s", "90ms"
 	if strings.HasSuffix(s, "m0s") {
 		s = strings.TrimSuffix(s, "0s")

@@ -1,0 +1,7 @@
+func (*Template) UnmarshalText(text []byte) error
+func (Template) Execute(w io.Writer, v any) error
+func (Template) IsZero() bool
+func (Template) MarshalText() ([]byte, error)
+func (Template) String() string
+func Render[T any](t Template) func(io.Writer, string, T) error
+type Template

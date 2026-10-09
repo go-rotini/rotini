@@ -30,6 +30,7 @@ func main() {
 | `WithReporter(fn)` | replace how recorded outcomes are printed and which exit code is used |
 | `WithoutSignalHandling()` | turn off the default Ctrl+C and SIGTERM handling |
 | `WithEnviron(env)` / `WithDir(dir)` | give a run its own environment and working directory instead of the process's, so tests can run in parallel |
+| `WithBufferedOutput(true)` | buffer stdout, flushed and checked before the reporter runs; see [buffered output](/docs#buffered-output) |
 | `Execute()` | run with `os.Args` and exit with the resulting code |
 | `Run(argv)` | run once and return the exit code and error instead of exiting, for tests and embedding |
 
@@ -70,6 +71,9 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.Failed()` | whether anything has failed so far, for a teardown hook deciding to commit or roll back |
 | `rtx.Help()` / `rtx.Version()` | the command's help page and the program's version |
 | `rtx.WriteOutput(v, format, render)` | write a command's [structured output](/docs#structured-output) |
+| `shape.Render(t)` | a renderer for `WriteOutput` that runs a `--format '{{…}}'` template, from the opt-in package `github.com/go-rotini/rotini/shape`; see [templates](/docs#templates) |
+| `rotini.OpenInput(rtx, path)` / `rotini.CreateOutput(rtx, path)` | open an `inputfile` or `outputfile` value, where `-` is stdin or stdout; see [files and the standard streams](/docs#files-and-the-standard-streams) |
+| `rotini.IsTerminal(rtx.Stdout)` | whether a stream is a terminal, to pick a default format or skip a prompt |
 
 {{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
@@ -141,3 +145,10 @@ form of the command tree `rotini generate` produces from your spec. Building one
 supported for tests and for tooling; it is not a way to define a CLI, which the spec is. Fields
 are added as the spec gains keys, including in minor releases, so write them with field names
 (`rotini.FlagDef{Name: "verbose"}`), not positionally.
+
+`rotinitest.Run` runs a command from its generated inputs type, each run with its own
+environment and directory, so tests can run in parallel. `rotinitest.Output` decodes stdout
+against the output schema, and `rotinitest.ExitDocumented` checks the exit code against
+`exit_status`; see [testing with typed inputs](/docs#testing-with-typed-inputs). Underneath,
+`rotini.ArgvOf` turns an inputs value into argv and env, and `Program.Definition` returns the
+command tree it reads.

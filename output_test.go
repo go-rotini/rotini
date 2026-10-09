@@ -32,7 +32,7 @@ func outDef() Definition {
 		Name: "taskr",
 		Commands: []CommandDef{
 			{Name: "list", Output: &OutputDef{Type: reflect.TypeFor[outList](), Schema: outListSchema}},
-			{Name: "watch", Output: &OutputDef{Type: reflect.TypeFor[outTask](), Schema: outTaskSchema}},
+			{Name: "watch", Output: &OutputDef{Type: reflect.TypeFor[outTask](), Schema: outTaskSchema, Stream: true}},
 			{Name: "free"},
 		},
 	}
@@ -86,6 +86,10 @@ func TestWriteOutput_programBugs(t *testing.T) {
 			`taskr list: the output written is a rotini.outTask, but the command declares rotini.outList`},
 		{"toml as a stream", "free", func(rtx *Context) error { return rtx.WriteOutputItem(outTask{}, "toml", nil) },
 			"taskr free: write output as toml: toml cannot be written as a stream"},
+		{"one value on a stream", "watch", func(rtx *Context) error { return rtx.WriteOutput(outTask{}, "json", nil) },
+			"taskr watch: declares a stream (output_stream); write each item with WriteOutputItem"},
+		{"items without a stream", "list", func(rtx *Context) error { return rtx.WriteOutputItem(sampleList, "json", nil) },
+			"taskr list: writes items, but its spec doesn't declare output_stream: true"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -237,10 +241,12 @@ func TestDecodeOutput(t *testing.T) {
 	if err != nil || len(items) != 2 {
 		t.Errorf("yaml stream: %+v %v", items, err)
 	}
-	// The declared type itself is one document, never a stream.
-	one, err := DecodeOutput[outTask](p, []byte(`{"id":7}`), "json")
-	if err != nil || one.ID != 7 {
-		t.Errorf("one item: %+v %v", one, err)
+	// A stream decodes into a slice of its item, never into one item; a single value never into a slice.
+	if _, err := DecodeOutput[outTask](p, []byte(`{"id":7}`), "json"); err == nil || !strings.Contains(err.Error(), "decode it into []rotini.outTask") {
+		t.Errorf("one item of a stream: %v", err)
+	}
+	if _, err := DecodeOutput[[]outList](p, []byte(`{"tasks":[]}`), "json"); err == nil || !strings.Contains(err.Error(), "not a stream; decode it into rotini.outList") {
+		t.Errorf("a single value as a stream: %v", err)
 	}
 
 	for _, tt := range []struct {

@@ -1,0 +1,98 @@
+# R12 — the tee recipe: one WriteOutputTo call writes the output to stdout and to a file
+# CreateOutput opened, and the file is kept only when everything succeeded. The handler is the
+# one the recipes page shows.
+
+gomodinit example.com/teedemo
+
+exec rotini generate cmd/teedemo/.rotini.spec.yaml --config cmd/teedemo/.rotini.conf.yaml
+cp export.go.txt internal/cmd/teedemo/teedemo_export.go
+exec go mod tidy
+exec go build -o teedemo$exe ./cmd/teedemo
+
+exec ./teedemo$exe export -o report.json
+stdout '"count": 3'
+cmp stdout report.json
+
+# The file exists now, so replacing it takes --force.
+! exec ./teedemo$exe export -o report.json
+stderr 'output file "report\.json" already exists'
+exec ./teedemo$exe export -o report.json --force
+cmp stdout report.json
+
+-- export.go.txt --
+package teedemo
+
+import (
+	"context"
+	"io"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*teedemoExportHandler)(nil)
+
+type teedemoExportHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*teedemoExportHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TeedemoExportInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	flags := in.TeedemoExport.Flags
+	if err := export(rtx, flags.Output, flags.Force); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+
+func export(rtx *rotini.Context, path string, force bool) error {
+	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
+	if err != nil {
+		return err
+	}
+	defer out.Abort() // discards the file unless Close below commits it
+	report := TeedemoExportOutput{Count: 3}
+	if err := rtx.WriteOutputTo(io.MultiWriter(rtx.Stdout, out), report, "json", nil); err != nil {
+		return err
+	}
+	return out.Close()
+}
+-- cmd/teedemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: teedemo
+  summary: tee demo
+  commands:
+    - name: export
+      summary: export a report
+      flags:
+        - name: output
+          identifiers: [-o, --output]
+          summary: also write the report to this file
+          schema:
+            type: outputfile
+            required: true
+        - name: force
+          identifiers: [-f, --force]
+          summary: replace an existing file
+          role: force
+          schema:
+            type: bool
+      output:
+        type: object
+        properties:
+          count: { type: integer }
+-- cmd/teedemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/teedemo/main.go
+    - type: cmd
+      file: internal/cmd/teedemo/zz_teedemo.go
+      package: teedemo

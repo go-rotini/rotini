@@ -63,14 +63,17 @@ func (p *Program) WithReporter(fn Reporter) *Program {
 	return p
 }
 
-// settle is the single run tail every run path ends in: it hands the recorded outcome to the
-// reporter and resolves the exit code.
+// settle is the single run tail every run path ends in: it discards output files left open,
+// flushes buffered stdout (recording a failed flush as an error), hands the recorded outcome to
+// the reporter and resolves the exit code.
 //
 // A handler's exit code is already in rtx.exitCode when the reporter runs; the reporter is
 // the final authority, since rtx.Exit overrides it during the reporter stage. The exit floor
 // lives in defaultReporter, so a custom reporter does not inherit it.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	rtx.endStdin()
+	rtx.abortOutputs()
+	rtx.settleOutput()
 	out := Outcome{
 		Infos:     rtx.copyInfos(),
 		Successes: rtx.copySuccesses(),

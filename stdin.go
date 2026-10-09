@@ -18,16 +18,17 @@ import (
 // The slurped payload is kept raw, as one string, for the rest of the run: each consumer strips
 // a byte-order mark and trims as its format requires.
 type stdinState struct {
-	mu       sync.Mutex
-	src      io.Reader
-	checked  bool // terminal and direct are decided
-	terminal bool // src is nil or a terminal: reads give nothing
-	direct   bool // src never blocks (a regular file or an in-memory reader): no pump needed
-	mode     uint8
-	text     string // the slurped payload, raw
-	err      error
-	stream   *cancelReader // the one reader every stream consumer shares
-	run      func() *stdinRun
+	mu         sync.Mutex
+	src        io.Reader
+	checked    bool // terminal and direct are decided
+	terminal   bool // src is nil or a terminal: reads give nothing
+	direct     bool // src never blocks (a regular file or an in-memory reader): no pump needed
+	mode       uint8
+	text       string // the slurped payload, raw
+	err        error
+	stream     *cancelReader // the one reader every stream consumer shares
+	lineReader *stdinLines   // the one line reader every streamed field shares
+	run        func() *stdinRun
 }
 
 const (

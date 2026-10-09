@@ -14,6 +14,7 @@ type templateDocOutput struct {
 	Description string                   // the shape's description, or the named schema's it references
 	Type        string                   // the shape as a type name: TaskList, []Task, object
 	Fields      []templateDocOutputField // the top-level fields of an object shape, by name
+	Stream      bool                     // the command writes a stream of Type, one item at a time
 }
 
 // templateDocOutputField is one top-level field of an output shape.
@@ -79,5 +80,12 @@ func shapeTypeName(s *Schema) string {
 		return "object"
 	default:
 		return s.Type
+	}
+}
+
+// markStream marks an Output section as a stream of its type (output_stream).
+func markStream(d *templateDocOutput, stream bool) {
+	if d != nil {
+		d.Stream = stream
 	}
 }

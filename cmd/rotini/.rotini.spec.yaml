@@ -150,6 +150,13 @@ command:
             - --watch
           schema:
             type: bool
+        - name: release
+          summary: fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names
+          identifiers:
+            - --release
+          schema:
+            type: string
+            placeholder: X.Y.Z
     - name: help
       summary: print help
       description: Print help for a specific command.

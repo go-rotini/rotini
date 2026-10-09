@@ -29,7 +29,7 @@ func (s declaredEnv) Get(path recon.Path) (recon.Value, bool, error) {
 	if !ok {
 		return recon.Value{}, false, nil
 	}
-	val, set := s.view.lookup(name)
+	val, set := s.view.inputLookup(name)
 	if !set || (s.emptyAbsent && val == "") {
 		return recon.Value{}, false, nil
 	}
@@ -63,39 +63,44 @@ func newDeclaredEnv(v reflect.Value, structName, envPrefix string, view *osView)
 	}
 	project := recon.SnakeUpperPrefixTransform(prefix)
 	for _, ci := range v.Fields() {
-		var s reflect.Value
+		var structs [2]reflect.Value
 		if structName == "Flags" {
-			s = commandFlags(ci)
+			structs = [2]reflect.Value{commandFlags(ci), commandArgs(ci)} // an argument's fallback reads the same way
 		} else if ci.Kind() == reflect.Struct {
-			s = ci.FieldByName(structName)
+			structs[0] = ci.FieldByName(structName)
 		}
-		if !s.IsValid() || s.Kind() != reflect.Struct {
-			continue
-		}
-		for f := range s.Type().Fields() {
-			key := reconKey(f.Tag.Get("recon"))
-			if key == "" || f.Tag.Get("envnest") != "" {
-				continue
+		for _, s := range structs {
+			if s.IsValid() && s.Kind() == reflect.Struct {
+				src.addFields(s.Type(), project, view)
 			}
-			if _, dup := src.names[key]; dup {
-				continue
-			}
-			path := recon.ParsePath(key)
-			name := project(path)
-			if tag := f.Tag.Get("env"); tag != "" {
-				name = chosenEnv(view, tag)
-			}
-			src.names[key] = name
-			src.keys = append(src.keys, path)
 		}
 	}
 	return src
 }
 
-// hasChannel reports whether any command frame of the inputs struct v declares a non-empty
-// structName sub-struct ("Env" or "Config"). A struct that describes none of a channel's
-// inputs never builds that channel's registry.
-func hasChannel(v reflect.Value, structName string) bool {
+// addFields adds the recon-keyed fields of one sub-struct type; see [newDeclaredEnv].
+func (s *declaredEnv) addFields(t reflect.Type, project recon.KeyTransform, view *osView) {
+	for f := range t.Fields() {
+		key := reconKey(f.Tag.Get("recon"))
+		if key == "" || f.Tag.Get("envnest") != "" {
+			continue
+		}
+		if _, dup := s.names[key]; dup {
+			continue
+		}
+		path := recon.ParsePath(key)
+		name := project(path)
+		if tag := f.Tag.Get("env"); tag != "" {
+			name = chosenEnv(view, tag)
+		}
+		s.names[key] = name
+		s.keys = append(s.keys, path)
+	}
+}
+
+// hasEnvChannel reports whether any command frame of the inputs struct v declares a non-empty
+// Env sub-struct. A struct that describes no env input never builds the env registry.
+func hasEnvChannel(v reflect.Value) bool {
 	if v.Kind() != reflect.Struct {
 		return false
 	}
@@ -103,7 +108,7 @@ func hasChannel(v reflect.Value, structName string) bool {
 		if ci.Kind() != reflect.Struct {
 			continue
 		}
-		if s := ci.FieldByName(structName); s.IsValid() && s.Kind() == reflect.Struct && s.NumField() > 0 {
+		if s := ci.FieldByName("Env"); s.IsValid() && s.Kind() == reflect.Struct && s.NumField() > 0 {
 			return true
 		}
 	}

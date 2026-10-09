@@ -1,0 +1,26 @@
+# glob expands patterns into paths, so it belongs on a variadic, path-like argument.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: include
+      schema:
+        type: '[]string'
+        glob: true
+  arguments:
+    - name: first
+      schema:
+        type: existingfile
+        glob: true
+    - name: rest
+      schema:
+        type: '[]string'
+        separator: ','
+        glob: true
+  commands:
+    - name: sum
+      arguments:
+        - name: counts
+          schema:
+            type: '[]int'
+            glob: true

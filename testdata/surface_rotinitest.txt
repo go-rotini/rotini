@@ -1,0 +1,20 @@
+field Result.Argv
+field Result.Code
+field Result.Dir
+field Result.Env
+field Result.Err
+field Result.Stderr
+field Result.Stdout
+func Context(ctx context.Context) Option
+func Dir(dir string) Option
+func Env(kv ...string) Option
+func ExitDocumented(tb testing.TB, res Result)
+func OutputAs[T any](tb testing.TB, res Result, format string) T
+func Output[T any](tb testing.TB, res Result) T
+func Path(names ...string) Option
+func Presence(set rotini.Presence) Option
+func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result
+func Secrets() Option
+func Stdin(r io.Reader) Option
+type Option
+type Result

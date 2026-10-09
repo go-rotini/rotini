@@ -18,7 +18,7 @@ func validateInModule(t *testing.T, spec, conf, failMode string) (err error, war
 	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", conf)
 	t.Chdir(dir)
-	err = NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, failMode,
+	err = NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, failMode, "",
 		func(string, error) {},
 		func(w []error) { warnings = append(warnings, w...) })
 	return err, warnings

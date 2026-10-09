@@ -401,6 +401,7 @@ var specSpellings = map[string]string{
 	"*time.Location": "timezone", "net.HardwareAddr": "mac", "netip.Addr": "ip",
 	"netip.Prefix": "cidr", "netip.AddrPort": "hostport", rotiniPkgName + ".ByteSize": "bytesize",
 	rotiniPkgName + ".HexBytes": "hexbytes", rotiniPkgName + ".Base64Bytes": "base64bytes",
+	"*regexp.Regexp": "regexp", rotiniPkgName + ".Glob": "glob",
 }
 
 // typeSpelling renders a resolved Go type as the spec spells it, for a message: duration, not

@@ -2,11 +2,13 @@
 # listed as "<package> <FuzzName>". List every FuzzXxx here as it is added.
 #
 #   FuzzParse          the argv grammar
+#   FuzzArgvOf         ArgvOf's command line parses back to the value it was given
 #   FuzzSuggest        the suggestion ranking
 #   FuzzSuggestionFacts reading a token and candidates from any error tree
 #   FuzzValidateSpec   the spec loader: four codecs, schema, lint rules, source locator
 #   FuzzValidateConf   the same for the conf
-FUZZ_TARGETS := .:FuzzParse .:FuzzSuggest .:FuzzSuggestionFacts ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf
+#   FuzzTemplate       shape templates: parsing, round-trips, execution errors
+FUZZ_TARGETS := .:FuzzParse .:FuzzArgvOf .:FuzzSuggest .:FuzzSuggestionFacts ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf ./shape:FuzzTemplate
 
 # The version `rotini-build` stamps into the dogfood binary: the checkout's own, from git.
 # v1.2.0 on a tagged commit; v1.2.0-3-gabc1234 between tags, which rotini reads as the last

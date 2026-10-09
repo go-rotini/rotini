@@ -1,5 +1,6 @@
 # The negated form sets a bool FALSE, so negatable needs a bool with a long identifier to
-# derive "--no-<x>" from — and the derived form must not collide with a real one.
+# derive "--no-<x>" from (or a custom form of its own), and the negated form must not collide
+# with a real identifier or another flag's negated form.
 version: 0.0.0
 command:
   name: demo
@@ -30,3 +31,28 @@ command:
         - --no-cache
       schema:
         type: bool
+    # Fine: a custom negated form, set on --color as --plain.
+    - name: color
+      identifiers:
+        - --color
+      schema:
+        type: bool
+        negatable: --plain
+    # A custom form a flag already declares, and one another flag's negated form also uses.
+    - name: verbose
+      identifiers:
+        - --verbose
+      schema:
+        type: bool
+        negatable: --name
+    - name: name
+      identifiers:
+        - --name
+      schema:
+        type: string
+    - name: fancy
+      identifiers:
+        - --fancy
+      schema:
+        type: bool
+        negatable: --plain

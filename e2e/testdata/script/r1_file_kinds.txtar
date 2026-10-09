@@ -1,0 +1,221 @@
+# R1 — inputfile and outputfile, end to end: "-" is stdin or stdout, OpenInput and
+# CreateOutput open the values, and buffered stdout is flushed and checked.
+
+gomodinit example.com/files
+
+exec rotini generate cmd/files/.rotini.spec.yaml --config cmd/files/.rotini.conf.yaml
+
+# The kinds reach the Definition, and the fields stay strings.
+grep 'Type: "\[\]inputfile"' internal/cmd/files/zz_files.go
+grep 'Type: "outputfile"' internal/cmd/files/zz_files.go
+grep 'Files +\[\]string' internal/cmd/files/zz_files.go
+
+exec go mod tidy
+exec go build -o files$exe ./cmd/files
+
+# "-" among files reads stdin in place, byte for byte.
+stdin piped.txt
+exec ./files$exe cat a.txt - b.txt
+cmp stdout want_cat.txt
+
+# No files reads stdin.
+stdin piped.txt
+exec ./files$exe cat
+cmp stdout piped.txt
+
+# stdin can be read only once.
+stdin piped.txt
+! exec ./files$exe cat - a.txt -
+stderr '<files>: "-" \(stdin\) can be given only once'
+
+# A missing file is a usage error before the handler runs.
+! exec ./files$exe cat a.txt nope.txt
+stderr '<files>: no such file: "nope\.txt"'
+
+# -o writes a new file; an existing one is replaced only with --force.
+exec ./files$exe emit -o out.json
+cmp out.json want_emit.json
+! exec ./files$exe emit -o out.json --name other
+stderr 'output file "out\.json" already exists'
+cmp out.json want_emit.json
+exec ./files$exe emit -o out.json --name other --force
+grep '"name": "other"' out.json
+
+# "-", the default, writes to stdout.
+exec ./files$exe emit -o -
+cmp stdout want_emit.json
+exec ./files$exe emit
+cmp stdout want_emit.json
+
+# The output's directory must exist, and the output can't be a directory.
+! exec ./files$exe emit -o missing/out.json
+stderr '-o: no such directory: "missing.?"'
+mkdir adir
+! exec ./files$exe emit -o adir
+stderr '-o: "adir" is a directory'
+
+# Nothing is left behind by a failed write.
+! exists .out.json.*
+
+-- piped.txt --
+from stdin
+-- a.txt --
+from a
+-- b.txt --
+from b
+-- want_cat.txt --
+from a
+from stdin
+from b
+-- want_emit.json --
+{
+  "name": "demo"
+}
+-- cmd/files/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: files
+  summary: input and output files
+  commands:
+    - name: cat
+      summary: print files
+      arguments:
+        - name: files
+          summary: files to print
+          schema:
+            type: '[]inputfile'
+    - name: emit
+      summary: write a report
+      flags:
+        - name: output
+          identifiers: [-o, --output]
+          summary: where to write
+          schema:
+            type: outputfile
+            default: '-'
+        - name: name
+          identifiers: [--name]
+          summary: the report's name
+          schema:
+            type: string
+            default: demo
+        - name: force
+          identifiers: [-f, --force]
+          summary: replace an existing file
+          role: force
+          schema:
+            type: bool
+      output:
+        type: object
+        properties:
+          name: { type: string }
+-- cmd/files/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/files/main.go
+    - type: cmd
+      file: internal/cmd/files/zz_files.go
+      package: files
+-- cmd/files/main.go --
+package main
+
+import (
+	files "example.com/files/internal/cmd/files"
+)
+
+func main() {
+	files.NewProgram(files.Handlers()).
+		WithBufferedOutput(true).
+		Execute()
+}
+-- internal/cmd/files/files.go --
+package files
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+type filesHandler struct{ base }
+
+func (*filesHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/files/files_cat.go --
+package files
+
+import (
+	"context"
+	"io"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filesCatHandler struct{ base }
+
+func (*filesCatHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilesCatInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	names := in.FilesCat.Arguments.Files
+	if len(names) == 0 {
+		names = []string{"-"}
+	}
+	for _, name := range names {
+		f, err := rotini.OpenInput(rtx, name)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		_, err = io.Copy(rtx.Stdout, f)
+		f.Close()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+}
+-- internal/cmd/files/files_emit.go --
+package files
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filesEmitHandler struct{ base }
+
+func (*filesEmitHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilesEmitInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	flags := in.FilesEmit.Flags
+	if err := emit(rtx, flags.Output, flags.Name, flags.Force); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+
+func emit(rtx *rotini.Context, path, name string, force bool) error {
+	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
+	if err != nil {
+		return err
+	}
+	defer out.Abort()
+	if err := rtx.WriteOutputTo(out, FilesEmitOutput{Name: name}, "json", nil); err != nil {
+		return err
+	}
+	return out.Close()
+}

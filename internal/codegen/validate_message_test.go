@@ -157,7 +157,7 @@ func validateSpecText(t *testing.T, spec string) []string {
 	t.Chdir(mod)
 
 	var msgs []string
-	failure := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect",
+	failure := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect", "",
 		func(string, error) {}, func([]error) {})
 	if failure != nil {
 		for line := range strings.SplitSeq(failure.Error(), "\n") {
@@ -184,7 +184,7 @@ func TestHumanizeSchemaError_patternQuotesExamples(t *testing.T) {
 			`"identifiers" item 1 must look like "-o", "--output" or "--dry-run"; one or two dashes, then a letter, then letters, digits, - or _; or a single dash and one digit (-4), as in ssh -4. No dots: --db.host is how a user sets field host of an object flag --db (declare --db with $ref to a named object schema), so a declared --db.host would compete with it; to name a flag after a nested setting, write --db-host`},
 		{jsonschema.ValidationError{Keyword: "anyOf", InstanceLocation: "/command/flags/0/schema/enum/1",
 			KeywordLocation: "#/definitions/BaseSchema/properties/enum/items/anyOf"},
-			`"enum" item 1 must be a value (json) or a value with a one-line summary ({value: yaml, summary: human-friendly}), whose only keys are value and summary`},
+			`"enum" item 1 must be a value (json) or an object ({value: yaml, summary: human-friendly}) whose keys are value, summary, aliases, deprecated_aliases, hidden, deprecated, deprecated_since, removed_in and replaced_by`},
 		{jsonschema.ValidationError{Keyword: "pattern", InstanceLocation: "/generate/packages/0/package",
 			KeywordLocation: "#/definitions/PackageConfig/allOf/0/properties/package/pattern"},
 			`"package" must look like "app"`},
@@ -214,7 +214,11 @@ func TestSchemaPatternsHaveMatchingExamples(t *testing.T) {
 					}
 					re := regexp.MustCompile(pat)
 					for _, e := range ex {
-						if s, _ := e.(string); !re.MatchString(s) {
+						s, isString := e.(string)
+						if !isString {
+							continue // a pattern constrains strings only, as in negatable: true
+						}
+						if !re.MatchString(s) {
 							t.Errorf("%s %s: example %q does not match pattern %q", name, path, s, pat)
 						}
 					}

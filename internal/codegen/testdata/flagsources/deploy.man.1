@@ -2,11 +2,20 @@
 .SH NAME
 app\-deploy \- deploy it
 .SH SYNOPSIS
-\fBapp deploy\fR [flags] <command>
+\fBapp deploy\fR [flags] <command> <target> [stage]
 .SH "COMMANDS"
 .TP
 \fBcanary\fR
 a canary deploy
+.SH ARGUMENTS
+.TP
+\fI<target>\fR
+what to deploy
+.br
+also set by \fBDEPLOY_TARGET\fR or config key \fBdeploy.target\fR
+.TP
+\fI[stage]\fR
+which stage (default prod)
 .SH "OPTIONS"
 .TP
 \fB\-r\fR, \fB\-\-replicas\fR \fIint\fR

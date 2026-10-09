@@ -1,0 +1,75 @@
+# R1 — a streamed stdin reads a large input in constant memory: 500 MB of lines through a
+# filter stays under 50 MB of resident memory.
+
+[!unix] skip 'peak memory is measured on unix'
+
+gomodinit example.com/count
+
+exec rotini generate cmd/count/.rotini.spec.yaml --config cmd/count/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o count$exe ./cmd/count
+
+genlines 500000000 big.txt
+rssbelow 50 big.txt ./count$exe
+
+-- cmd/count/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: count
+  summary: count the piped lines
+  stdin:
+    format: lines
+    stream: true
+-- cmd/count/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/count/main.go
+    - type: cmd
+      file: internal/cmd/count/zz_count.go
+      package: count
+-- internal/cmd/count/count.go --
+package count
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type countHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*countHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[CountInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	n := 0
+	for _, err := range in.Count.Stdin {
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		n++
+	}
+	fmt.Fprintln(rtx.Stdout, n)
+}
+-- cmd/count/main.go --
+package main
+
+import (
+	count "example.com/count/internal/cmd/count"
+)
+
+func main() {
+	count.NewProgram(count.Handlers()).
+		Execute()
+}

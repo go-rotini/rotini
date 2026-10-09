@@ -435,7 +435,7 @@ func TestCompose_validatesComposedSpecs(t *testing.T) {
 		writeTestFile(t, dir, path, body)
 	}
 	t.Chdir(dir)
-	err := NewProcessor("0.0.0").Validate("cmd/root/.rotini.spec.yaml", "", false, "collect", nil, nil)
+	err := NewProcessor("0.0.0").Validate("cmd/root/.rotini.spec.yaml", "", false, "collect", "", nil, nil)
 	if err == nil {
 		t.Fatal("the parent validated clean over broken composed specs")
 	}

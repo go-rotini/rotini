@@ -1,5 +1,7 @@
-spec: .rotini.spec.yaml:17:11: command demo/run: exit_status lists code 3 twice; give each code one entry
+spec: .rotini.spec.yaml:18:11: command demo/run: exit_status lists code 3 twice; give each code one entry
+spec: .rotini.spec.yaml:25:28: command demo/run: exit_status names two codes "not_found"; give each code its own name
+spec: .rotini.spec.yaml:26:28: command demo/run: exit_status names "not_found" and "not__found" both become the Go name ExitNotFound; rename one
 spec: kid.yaml:7:7: command kid: exit_status lists code 5 twice; give each code one entry
-warning: spec: .rotini.spec.yaml:19:11: command demo/run: exit_status code 130 is also the exit code for signal 2 (Ctrl-C, SIGINT); readers can't tell them apart
-warning: spec: .rotini.spec.yaml:20:11: command demo/run: exit_status code 143 is also the exit code for signal 15 (SIGTERM); readers can't tell them apart
-warning: spec: .rotini.spec.yaml:21:11: command demo/run: exit_status code 200 is also the exit code for signal 72; readers can't tell them apart
+warning: spec: .rotini.spec.yaml:20:11: command demo/run: exit_status code 130 is also the exit code for signal 2 (Ctrl-C, SIGINT); readers can't tell them apart
+warning: spec: .rotini.spec.yaml:21:11: command demo/run: exit_status code 143 is also the exit code for signal 15 (SIGTERM); readers can't tell them apart
+warning: spec: .rotini.spec.yaml:22:11: command demo/run: exit_status code 200 is also the exit code for signal 72; readers can't tell them apart

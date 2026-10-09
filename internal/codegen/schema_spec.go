@@ -15,12 +15,16 @@ type Spec struct {
 type ArgumentInput struct {
 	// Deprecation message. The argument is annotated as deprecated in generated help, and supplying it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing).
 	Deprecated string `json:"deprecated,omitempty"`
+	// The release that deprecated this argument (X.Y.Z), shown beside the deprecation in help, man and markdown, written into the contract, and reported by rotini.Deprecations as Since. Needs `deprecated`.
+	DeprecatedSince string `json:"deprecated_since,omitempty"`
 	// When true, the argument is omitted from generated help (it still parses on the command line).
 	Hidden bool `json:"hidden,omitempty"`
 	// Logical name for the argument
 	Name string `json:"name"`
 	// When true, raw words start at this argument: flags before it parse as usual, and it and every word after it are taken as typed, flag-shaped words and `--` included (`app exec --region eu ls -la --help` gives the command's `--region` and passes `ls -la --help` on). A word starting with `-` that should be the first raw word goes after `--` (`app exec -- -x`). It must be the command's last argument, a variadic `[]string` without a separator, enum, pattern or bounds, on a command with no sub-commands, plugins or command-level `passthrough`. A handler reads where a `--` was typed with rtx.DashIndex(). Shell completion offers no flags or sub-commands past the boundary; the argument's own completer, enum or hint still applies.
 	Passthrough bool `json:"passthrough,omitempty"`
+	// The release that will remove this argument (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since` and reported as RemovedIn. `rotini validate --release <X.Y.Z>` fails while the argument is still declared at or past that release. Needs `deprecated`.
+	RemovedIn string `json:"removed_in,omitempty"`
 	// Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 	Schema *InputSchema `json:"schema,omitempty"`
 	// Short one-liner shown next to this argument in the Arguments section of generated help.
@@ -45,6 +49,8 @@ type BaseSchema struct {
 	// Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.
 	//
 	// Each member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.
+	//
+	// The object form also takes `aliases` (other spellings accepted and bound as the value: `{value: yaml, aliases: [yml]}`), `hidden: true` (accepted, but left out of help's list, completion and error messages), and `deprecated` with a message, optionally `deprecated_since`, `removed_in` and `replaced_by` (another value). A deprecated value is still accepted and is left out of the same lists; `rotini.Deprecations` reports it when given on the command line, as it does `deprecated_aliases`, the aliases being retired. Help keeps its short list of the values to use; man and markdown pages list each value with its aliases and deprecation.
 	Enum []any `json:"enum,omitempty"`
 	// Exclusive upper bound: the value must be strictly less. Same applicability rules as 'maximum'.
 	ExclusiveMaximum any `json:"exclusiveMaximum,omitempty"`
@@ -82,7 +88,7 @@ type BaseSchema struct {
 	//
 	// - 'duration' — time.Duration; Go units plus 'd' days and 'w' weeks (7d, 2w3d)
 	// - 'time' / 'datetime' — time.Time, RFC 3339 (2026-09-29T14:00:00Z)
-	// - 'date' — time.Time, a calendar date (2026-09-29, that day's UTC midnight). All three time types take `layout:` for another format, Unix timestamps included
+	// - 'date' — time.Time, a calendar date (2026-09-29, that day's UTC midnight). All three time types take `layout:` for another format, Unix timestamps included, and `relative:` for times measured from now (2h, today)
 	// - 'url' — *url.URL; needs a scheme and host
 	// - 'email' — mail.Address; 'Name <a@b.c>' or a bare address
 	// - 'timezone' — *time.Location; an IANA name such as Europe/Berlin
@@ -90,7 +96,11 @@ type BaseSchema struct {
 	// - 'bytesize' — rotini.ByteSize; 512Mi, 10MB, 1.5GiB (an 'i' makes the unit binary)
 	// - 'hexbytes' — rotini.HexBytes; optional 0x
 	// - 'base64bytes' — rotini.Base64Bytes; standard or URL-safe, padded or not
+	// - 'regexp' — *regexp.Regexp, compiled when parsed; Go's RE2 syntax, which has no backreferences or lookaround
+	// - 'glob' — rotini.Glob, a path.Match pattern checked when parsed (`*`, `?`, `[a-z]`, `\` escapes) with a Match method; `**` is not recursive. It keeps the pattern as a value; `glob: true` instead expands a pattern into file names
 	// - 'existingfile' / 'existingdir' — a plain string field, checked at parse time to exist and be that kind of thing, so a bad path is a usage error naming the flag the user typed. The check is existence and kind only: expanding '~', cleaning, following symlinks and creating a missing file are the handler's policy. A relative path is checked against the run's directory (Program.WithDir, by default the working directory) and bound as typed, so a handler opens it joined to rtx.Dir()
+	// - 'inputfile' — a plain string field, checked like 'existingfile', except that '-' means stdin: rotini.OpenInput(rtx, path) opens either (`cat a.txt - b.txt`). Only one '-' may be given per run, across every inputfile value. Unlike `from: [stdin]`, where '-' replaces the value with stdin's text, the value stays '-' and the handler reads the stream. Help adds '(- for stdin)'
+	// - 'outputfile' — a plain string field: a file to write, where '-' means stdout. Checked at parse time to be no directory and to sit in an existing directory; rotini.CreateOutput(rtx, path) writes it atomically and refuses to replace an existing file unless given rotini.Overwrite(true). Help adds '(- for stdout)'
 	//
 	// A value type works inside Go spellings too ('[]bytesize', 'map[string]duration'), and help shows the name as written ('--limit bytesize'), not the Go type. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.
 	//
@@ -140,6 +150,10 @@ type Command struct {
 	Deprecated string `json:"deprecated,omitempty"`
 	// Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rotini's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Sub-commands only, like 'aliases' — rejected on the root by rotini validation.
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
+	// The release that removes each deprecated alias, by alias: `{remove: 2.0.0}` plans the removal of the alias `remove` while the command stays. Each key must be listed in `deprecated_identifiers`. `rotini validate --release` checks these like `removed_in`, and the contract carries them.
+	DeprecatedIdentifiersRemovedIn map[string]string `json:"deprecated_identifiers_removed_in,omitempty"`
+	// The release that deprecated this command (X.Y.Z), shown beside the deprecation in help, man and markdown, written into the contract, and reported by rotini.Deprecations as Since. Needs `deprecated`.
+	DeprecatedSince string `json:"deprecated_since,omitempty"`
 	// Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set.
 	Description string `json:"description,omitempty"`
 	// Root only: the name the generated help, man and markdown pages show for the program, in place of the root's 'name'. For a plugin, which a host runs as `<host>-<name>` but the user types as `<host> <name>`: with name: kubectl-ctx and display_name: "kubectl ctx", every derived usage line reads `kubectl ctx use [flags] <name>`, the man page's SYNOPSIS `kubectl ctx use …` and the markdown title `# kubectl ctx use`. It may contain spaces. It changes presentation only: 'name' still matches the binary and names the generated page files and man pages (kubectl-ctx-use.1), completion scripts still register for 'name' (the shell completes the binary), and routing, handler names and Context.CommandPath() are unaffected. Text the author writes verbatim (usage, footer, examples, a verbatim help/man/markdown page) is not rewritten. A composed child's display_name is ignored; the composing parent's root decides.
@@ -192,6 +206,8 @@ type Command struct {
 	OptionsFirst bool `json:"options_first,omitempty"`
 	// The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '<Prefix>Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type <Prefix>Output Task', so convert a value with <Prefix>Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
 	Output *Schema `json:"output,omitempty"`
+	// When true, the command writes a stream of items rather than one value, and `output:` declares one item. Write each item with rtx.WriteOutputItem: JSON is one compact value per line, YAML one document per item, each starting `---`. Help, man and markdown say so in the OUTPUT section, and the contract marks the command `stream: true`. Needs `output`. `rotini generate` warns when a handler calls WriteOutputItem on a command without it.
+	OutputStream bool `json:"output_stream,omitempty"`
 	// When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no declared plugins or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion. To parse the command's own flags first and take the raw words only from one argument on, mark that argument `passthrough: true` instead.
 	Passthrough bool `json:"passthrough,omitempty"`
 	// Auto-expose external '<prefix>*' executables as plugin sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared plugins. Presence enables discovery.
@@ -200,6 +216,8 @@ type Command struct {
 	PluginPath string `json:"plugin_path,omitempty"`
 	// Declared plugins: separate executables dispatched as first-class sub-commands of this command.
 	Plugins []PluginSpec `json:"plugins,omitempty"`
+	// The release that will remove this command (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since` and reported as RemovedIn. `rotini validate --release <X.Y.Z>` (or the variable the conf's `validate.release_env` names) fails while the command is still declared at or past that release, so a planned removal is not forgotten. Needs `deprecated`.
+	RemovedIn string `json:"removed_in,omitempty"`
 	// Root only: read response files. A word starting with the prefix (`@args.rsp`) is replaced by the file's lines, one argument per line, before the command line is parsed.
 	ResponseFiles *ResponseFiles `json:"response_files,omitempty"`
 	// Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
@@ -219,10 +237,14 @@ type Command struct {
 type ConfigInput struct {
 	// Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries — commands, flags and arguments.)
 	Deprecated string `json:"deprecated,omitempty"`
+	// The release that deprecated this input (X.Y.Z), shown beside the deprecation in help, man and markdown and written into the contract. Needs `deprecated`.
+	DeprecatedSince string `json:"deprecated_since,omitempty"`
 	// When true, the input is omitted from generated help (it is still bound).
 	Hidden bool `json:"hidden,omitempty"`
 	// Logical name for this config value
 	Name string `json:"name"`
+	// The release that will remove this input (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since`. `rotini validate --release <X.Y.Z>` fails while the input is still declared at or past that release. Needs `deprecated`.
+	RemovedIn string `json:"removed_in,omitempty"`
 	// Type definition and input-level metadata (required, default, file, key)
 	Schema *InputSchema `json:"schema,omitempty"`
 	// Short one-liner shown next to this input in the generated Environment/Configuration help section.
@@ -230,6 +252,8 @@ type ConfigInput struct {
 }
 
 type ConfigurationFile struct {
+	// What the file supplies. 'config' (the default): configuration values, read by config inputs and flag config fallbacks. 'env': environment variables, the `.env` shape: a `format: dotenv` file whose KEY=value lines are read as if they were set in the environment, by env inputs, flag environment fallbacks, `variable_file` and `config_source` variables. The real environment wins over the file, variable by variable, so the precedence is command line, environment, `.env` file, configuration files, default. Values are literal: `${OTHER}` is not expanded. Rotini's own variables (HOME, XDG_*, PATH) are never read from it. Requires `format: dotenv` (or a `.env` file name); a config input can't pin it with `file:`. Several `as: env` files in scope layer like config files: the nearest command's first, then in declaration order. Prefer a fixed `path: .env` to `walk-up` discovery, which could find a stray ~/.env.
+	As string `json:"as,omitempty"`
 	// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set.
 	Discover *ConfigurationFileDiscover `json:"discover,omitempty"`
 	// The file's format. When omitted, the format is inferred from the file extension; declare it when the extension is missing or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys are used as written: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
@@ -244,23 +268,33 @@ type ConfigurationFile struct {
 
 // A run-time location strategy for a configuration file, instead of a fixed 'path'. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent, the same as a missing fixed path. Among one command's config_files the first declared still wins, wherever each was found.
 type ConfigurationFileDiscover struct {
-	// The application directory under the XDG config root: the '<app>' in $XDG_CONFIG_HOME/<app>. Required by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. `rotini validate` enforces both, so its message can say which strategy needs it and what it is for.
+	// The application directory under the config root: the '<app>' in $XDG_CONFIG_HOME/<app> (or the native or system directory). Required by the 'xdg', 'native' and 'xdg-system' strategies and rejected by 'walk-up', which has no such directory. `rotini validate` enforces both, so its message can say which strategy needs it and what it is for.
 	App string `json:"app,omitempty"`
 	// The file name to look for in each searched directory (e.g. '.acme.toml', 'config.yaml').
 	File string `json:"file"`
 	// 'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
 	//
-	// 'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows).
+	// 'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. This is the portable choice. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows).
+	//
+	// 'native': search the platform's own config directory, <dir>/<app>: %AppData% on Windows, ~/Library/Application Support on macOS, and $XDG_CONFIG_HOME (default ~/.config) elsewhere, so on Linux it is the same directory as 'xdg'. A relative $XDG_CONFIG_HOME is ignored here too.
+	//
+	// 'xdg-system': search each absolute directory in $XDG_CONFIG_DIRS, in order, defaulting to /etc/xdg, for <app>/<file>. On Windows it searches only when $XDG_CONFIG_DIRS is set. Declare it as its own config_files entry after the user's ('xdg' or 'native'): the first declared entry wins per key, so the user's file overrides the system one key by key.
+	//
+	// 'xdg', 'native' and 'xdg-system' need 'app'.
 	Strategy string `json:"strategy"`
 }
 
 type EnvInput struct {
 	// Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries — commands, flags and arguments.)
 	Deprecated string `json:"deprecated,omitempty"`
+	// The release that deprecated this input (X.Y.Z), shown beside the deprecation in help, man and markdown and written into the contract. Needs `deprecated`.
+	DeprecatedSince string `json:"deprecated_since,omitempty"`
 	// When true, the input is omitted from generated help (it is still bound).
 	Hidden bool `json:"hidden,omitempty"`
 	// Logical name for this env var input
 	Name string `json:"name"`
+	// The release that will remove this input (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since`. `rotini validate --release <X.Y.Z>` fails while the input is still declared at or past that release. Needs `deprecated`.
+	RemovedIn string `json:"removed_in,omitempty"`
 	// Type definition and input-level metadata (required, default, variable)
 	Schema *InputSchema `json:"schema,omitempty"`
 	// Short one-liner shown next to this input in the generated Environment/Configuration help section.
@@ -270,8 +304,12 @@ type EnvInput struct {
 type ExitStatusEntry struct {
 	// The exit status code being documented (0-255 — the range a process can actually return).
 	Code int `json:"code"`
+	// A snake_case name for the code, unique within the command. `rotini generate` writes a constant for it, `<Command>Exit<Name>` (`not_found` on `taskr get` gives TaskrGetExitNotFound), so a handler writes rtx.HaltWithCode(TaskrGetExitNotFound) instead of a bare number; the exit-code check reads the constant like the number. The man and markdown EXIT STATUS sections and the contract show the name too.
+	Name string `json:"name,omitempty"`
 	// The shape stdout still carries when the command exits with this code, for an outcome that is not plain success but prints data anyway (`3: some tasks failed; stdout lists what succeeded`). Documented in the EXIT STATUS section and described in the output schema files and the contract document.
 	Output *Schema `json:"output,omitempty"`
+	// When true, running the same command again may succeed (a timeout, a busy lock). Carried into the contract for agents and other callers that decide whether to retry; rotini itself never retries.
+	Retryable bool `json:"retryable,omitempty"`
 	// What this exit code means.
 	Summary string `json:"summary,omitempty"`
 }
@@ -299,6 +337,10 @@ type FlagInput struct {
 	Deprecated string `json:"deprecated,omitempty"`
 	// CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. Pair it with `deprecated:` to give the report a message; `deprecated:` alone deprecates every spelling
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
+	// The release that removes each deprecated identifier, by identifier: `{--conf: 2.0.0}` plans the removal of the spelling `--conf` while the flag stays under its other identifiers. Each key must be listed in `deprecated_identifiers`. `rotini validate --release` checks these like `removed_in`, and the contract carries them.
+	DeprecatedIdentifiersRemovedIn map[string]string `json:"deprecated_identifiers_removed_in,omitempty"`
+	// The release that deprecated this flag (X.Y.Z), shown beside the deprecation in help, man and markdown, written into the contract, and reported by rotini.Deprecations as Since. Needs `deprecated`.
+	DeprecatedSince string `json:"deprecated_since,omitempty"`
 	// Group label that puts this flag under its own heading in generated help, the way a command's 'group' does in the Commands list: flags sharing a group appear together, and ungrouped flags fall under the default Flags heading. Groups appear in the order their first member is declared, unless the command declares `groups`: then the ungrouped flags come first, then the groups it lists, in its order, then any others.
 	//
 	// Presentation only: parsing, precedence and the generated field are unchanged. Use it on a command with many flags, so its help page is easy to scan. Not to be confused with 'flag_groups', which validates combinations of flags.
@@ -311,6 +353,10 @@ type FlagInput struct {
 	Identifiers []string `json:"identifiers,omitempty"`
 	// Logical name for the flag
 	Name string `json:"name"`
+	// The release that will remove this flag (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since` and reported as RemovedIn. `rotini validate --release <X.Y.Z>` (or the variable the conf's `validate.release_env` names) fails while the flag is still declared at or past that release. Needs `deprecated`.
+	RemovedIn string `json:"removed_in,omitempty"`
+	// What this flag means to a program driving the CLI, such as an agent; it changes nothing at run time. 'force' marks the bool flag that lets the command replace existing output files (the handler passes it on, as in rotini.CreateOutput(rtx, path, rotini.Overwrite(in.Flags.Force))). At most one flag per command has a given role.
+	Role string `json:"role,omitempty"`
 	// Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 	Schema *InputSchema `json:"schema,omitempty"`
 	// When true, setting this flag on the command line waives every declared requirement of the invoked command chain: required inputs, enums, bounds, patterns, flag groups and flag dependencies are not checked, and rtx.Inputs succeeds. Use it for flags that replace the command's normal run, such as --help, --version or --print-schema. Errors in reading the command line (an unknown flag or command, a value of the wrong type, too many arguments) are still reported, as is an environment value of the wrong type. A configuration file that can't be found, parsed or read into its inputs is skipped for that run, so --help works in a broken directory. rotini takes no action of its own: your handler checks the flag and decides what to do. Only the command line sets it, never an environment variable, a configuration file or a default. Must be a bool, and can't be required, negatable, given a default of true, read from the environment or a configuration file (key, variable), or listed in a flag group or flag dependency.
@@ -376,48 +422,64 @@ type InputSchema struct {
 	DottedKeys bool `json:"dotted_keys,omitempty"`
 	// Config inputs only: reads this input from one named config_files entry only, never from the other files, so a key present in another file does not satisfy it (or its 'required'). Omit it to read through the declared order, where the first file with the key wins.
 	File string `json:"file,omitempty"`
-	// Flag inputs only: where this flag's value may come from, besides the text on the command line.
+	// Flags, and arguments before any variadic one: where the input's value may come from, besides the text on the command line.
 	//
 	// - 'file' — a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file). To pass a literal value that starts with `@`, double it: `--to @@alice` gives `@alice`, and `@./@name` reads a file whose name starts with `@`
-	// - 'stdin' — a value of exactly '-' is replaced by what is piped on stdin (`-f -`); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: input, since stdin can be read only once
+	// - 'stdin' — a value of exactly '-' is replaced by what is piped on stdin (`-f -`); empty stdin is then a usage error, and stdin can be read once, so one input on a command path may take it: a from:stdin flag or argument, or the command's stdin: input
 	// - 'value' — always allowed; listing it is documentation only. Any value that does not match an enabled marker stays literal
 	//
-	// Text read from a file or stdin has one trailing line ending removed (leading and interior whitespace is kept), then goes through the normal type, enum and constraint checks: the flag's value is that text. On an object-valued flag the text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the whole command belongs in the command's stdin: input.
+	// Text read from a file or stdin has one trailing line ending removed (leading and interior whitespace is kept), then goes through the normal type, enum and constraint checks: the flag's value is that text. On an object-valued flag the text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the whole command belongs in the command's stdin: input. On a list or map flag, the file's (or stdin's) lines are separate values; blank lines are skipped, and each line is split on the flag's `separator`.
 	//
-	// Without 'from', '@' and '-' are ordinary characters. Defaults and environment and config fallbacks are always literal: the markers apply only to values given on the command line.
+	// Without 'from', '@' and '-' are ordinary characters. Defaults and environment and config fallbacks are always literal: the markers apply only to values given on the command line. On an argument they work the same way: `cat-config -` reads stdin, `cat-config @app.yaml` the file.
 	From []string `json:"from,omitempty"`
+	// On a variadic argument of type string, existingfile, existingdir or inputfile: on Windows, where the shell passes patterns through unexpanded, rotini expands each word containing `*`, `?` or `[` into the matching paths, sorted, relative to the run's directory. A word naming an existing path is kept as written (`file[1].txt`), `-` is never expanded, and a pattern matching nothing is passed through as written, so the path check reports it as a POSIX shell would. Matching is case-sensitive (`*.TXT` does not match `a.txt`), `**` is not supported, and matches use `\` separators. On other systems the shell has already expanded unquoted patterns, so nothing changes. Not the `glob` value type, which validates a pattern instead of expanding it.
+	Glob bool `json:"glob,omitempty"`
 	// With 'enum' only: match a value against the enum without regard to case, so `--mode FAST` is accepted against [fast, slow]. The value is stored in its declared spelling (fast), so a handler compares against one form. Applies wherever the input reads a value: the command line, a flag's environment and config fallbacks, and env and config inputs.
 	IgnoreCase bool `json:"ignore_case,omitempty"`
 	// Flags only: the value a flag takes when it is given without one, which makes its value optional (the `--color[=when]` shape). With `implicit_value: always`, a bare `--color` means always, `--color=never` sets never, and a flag left out takes its `default` as usual. Because the value is optional it must be attached: in `--color never`, `never` is the next argument, not the flag's value (a short flag attaches too: `-cnever`, `-c=never`). Help shows the flag as `--color[=<type>]` with `(implicit: always)`. For a scalar flag that is not a bool (a bool already works this way, with true), and the value must satisfy the flag's type, enum and constraints.
 	ImplicitValue any `json:"implicit_value,omitempty"`
-	// Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable). Help shows a flag's key under the flag when the command reads configuration files.
+	// Dotted key path the value is read from (config inputs, and the config fallback of flags and arguments; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's or argument's env fallback variable). Help shows the key under the flag or argument when the command reads configuration files.
 	Key string `json:"key,omitempty"`
-	// Time inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout (the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is: `2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`), or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies wherever the input reads a value, and a `default` must parse under it.
-	Layout string `json:"layout,omitempty"`
+	// Time inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout (the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is: `2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`), or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies wherever the input reads a value, and a `default` must parse under it. It may be a list, tried in order: the first layout that parses wins, help shows the first, and an error names them all (`layout: [2006-01-02, unix]`). Put the most specific first, since a value that parses under an earlier layout never reaches a later one.
+	Layout any `json:"layout,omitempty"`
 	// Bool flags only: also accept a `--no-<name>` form for every long identifier, which sets the flag false. `--color` with negatable declares `--no-color` too.
 	//
 	// Use it to turn something off for one run when a default, a config file or an environment variable already turned it on, which a plain bool flag cannot do. Short identifiers get no negated form.
 	//
 	// A declared identifier always wins over a derived negated one, so a flag you declare as `--no-cache` keeps that name. The negated form takes no value: `--no-color=true` is a parse error. The generated field is the same single bool either way, and help shows it as `--[no-]color`.
-	Negatable bool `json:"negatable,omitempty"`
+	//
+	// A string names the one negated form instead: `negatable: --plain` on `--color` accepts `--plain` to set it false, and no `--no-color`. It is a long identifier that no flag on the command path declares, and help shows it beside the flag's own identifiers: `--color, --plain`.
+	Negatable any `json:"negatable,omitempty"`
 	// Env inputs only, map-typed ('map'/'object' → map[string]any): the separator that collects a family of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the UPPER_SNAKE form of the input's name. With name: http, variable: ACME_HTTP, nesting: "__", ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: "30", retry: {max: "9"}} (segments lowercased; values are strings). 'required: true' is an error when no matching variables exist. 'default:' is rejected: set defaults in code or in a config file instead.
 	Nesting string `json:"nesting,omitempty"`
 	// Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, `<PATH>` instead of the argument's name. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or <angle-bracketed>.
 	Placeholder string `json:"placeholder,omitempty"`
+	// Time inputs only (time, datetime, date, and lists of them): also accept a time measured from now. The input still takes absolute values, tried first, so declaring it never changes what one means.
+	//
+	// - 'past' — a time ago: `2h` or `-2h` (two hours ago), `3d`, `1w`; `+2h` is an error. The words `now`, `today` (midnight) and `yesterday`
+	// - 'future' — a time from now: `2h` or `+2h`; `-2h` is an error. The words `now`, `today` and `tomorrow`
+	// - 'both' — either, with a sign required (`-2h`, `+3d`), and all four words
+	//
+	// Durations take Go units plus `d` (24h) and `w`. Words are read in any case. On a date the result is the calendar date it falls on, and an offset must be whole days. Times are measured from the run's clock, read once per run, so every relative value in a run agrees; Program.WithClock sets it for tests, and rtx.Now() returns the same reading. `today` and the date a value falls on follow the clock's time zone (the process's, by default). A flag's or argument's `default` may be relative (`default: 24h`) and is measured at run time; an env or config input's default is absolute.
+	Relative string `json:"relative,omitempty"`
 	// On a single-value flag: `repeatable: false` makes giving the flag more than once on the command line an error naming the first and last values, instead of the last value winning, which is the default. `-vv` and `--color --no-color` are repeats, and so is a cascading flag given at two levels of the command path; a sub-command that redeclares the flag has its own. Environment and configuration values are unaffected. Rejected on list, map, count and object flags, which repeat by nature, and on arguments, env and config inputs.
 	Repeatable *bool `json:"repeatable,omitempty"`
 	// When true, the input must be provided (or stdin must not be empty for stdin inputs). Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
 	Required bool `json:"required,omitempty"`
 	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 	Secret bool `json:"secret,omitempty"`
-	// List and map flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style: an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Without a separator, each occurrence is one value, used as is. Not valid on env and config inputs: an env input's list is always split on commas (TAGS=a,b), and a configuration file writes a list as a list.
+	// List and map flags, a variadic argument, and an env list or map input: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. The word `nul` splits on NUL bytes, as `find -print0` writes them; since command-line and environment values can't contain a NUL, it applies only to content rotini reads itself, so it is valid only on a list or map flag with `from: [file]` or `from: [stdin]`, whose file or piped content is split on NUL instead of lines, byte for byte. Splitting is CSV-style: an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Without a separator, each occurrence is one value, used as is. An env list or map input splits its variable on commas (TAGS=a,b) unless it declares a separator (`separator: ':'` reads PATHS=a:b): a plain split that trims spaces, with no quoting. A map's separator splits pairs; each pair still splits on `=`. Not valid on config inputs: a configuration file writes a list as a list.
 	Separator string `json:"separator,omitempty"`
-	// The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. For a flag, help shows them under the flag, in lookup order. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on flags (as a flag's environment fallback); rejected on arguments, config inputs and stdin, which have no environment variable.
+	// The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. For a flag, help shows them under the flag, in lookup order. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs, and on flags and arguments as their environment fallback; rejected on config inputs and stdin, which have no environment variable.
 	//
 	// A variable named here is never given the `env_prefix`: it is already exact, and prefixing it would silently make it a different variable.
 	//
-	// On a flag it also turns on the fallback chain (command line, then environment, then config file, then default), keyed by the flag's own name unless `key:` names one. So `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no need for a config `key:` whose UPPER_SNAKE form happens to match. Because the flag now has a key, a configuration file that defines that key supplies it too; declare `key:` to control what that key is.
+	// On a flag or an argument it also turns on the fallback chain (command line, then environment, then config file, then default), keyed by the input's own name unless `key:` names one. So `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no need for a config `key:` whose UPPER_SNAKE form happens to match. Because the flag now has a key, a configuration file that defines that key supplies it too; declare `key:` to control what that key is.
+	//
+	// An argument's fallback fills a position the command line left out (`deploy` reads `<env>` from `DEPLOY_ENV`). Positionals fill left to right, so a fallback applies only when every argument before it has a value, and an argument after one with a fallback needs a fallback or a default too. A variadic argument splits its environment value on its `separator`; without one the whole value is one item. Not on a passthrough argument, or the arguments of a passthrough command, whose words are taken as typed.
 	Variable any `json:"variable,omitempty"`
+	// An environment variable holding the path of a file to read this input's value from, the convention Docker and Kubernetes secrets use: with `variable_file: APP_TOKEN_FILE`, `APP_TOKEN_FILE=/run/secrets/token` reads the value from that file. One trailing line ending is removed, a relative path is read from the run's working directory, and the file may be at most 1 MiB. Setting both the plain variable and this one is an error; an empty value counts as unset. Valid on env inputs and on flags that read an environment variable (as part of the flag's fallback); like `variable:`, the name is exact and never given the `env_prefix`. Help lists it after the plain names, and a secret input's file contents are redacted like any other value.
+	VariableFile string `json:"variable_file,omitempty"`
 }
 
 // Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
@@ -467,14 +529,22 @@ type Schema struct {
 }
 
 type StdinSpec struct {
-	// How the piped stdin payload is read.
+	// How the piped stdin payload is read, and the Go type of the generated Stdin field.
 	//
-	// The four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin struct, validated against the declared schema. The default is json.
+	// The four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin type (`*<Prefix>Stdin`), validated against the declared schema. The default is json.
 	//
-	// The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and is implied when left out; neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help, man and markdown pages and the contract.
+	// 'jsonl' reads JSON Lines: one JSON record per line, blank lines skipped, each checked against the schema, which describes one record. The field is `*[]<Prefix>Stdin`, or with `stream: true` an iterator, `iter.Seq2[<Prefix>Stdin, error]`. An error names the line it was found on.
 	//
-	// One leading UTF-8 byte-order mark is removed before the payload is read, in every format.
+	// The raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as one string (`*string`), 'lines' binds its lines (`*[]string`, a trailing newline adds no empty element; with `stream: true`, `iter.Seq2[string, error]`), and 'bytes' binds the payload byte for byte (`*[]byte`), nothing trimmed. Their schema type is implied when left out ('string' for text and bytes, '[]string' for lines); none generates a <Prefix>Stdin type, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help, man and markdown pages and the contract.
+	//
+	// One leading UTF-8 byte-order mark is removed before the payload is read, in every format but 'bytes'. A declared stdin that is not streamed is held in memory for the run.
 	Format string `json:"format,omitempty"`
 	// Type definition for stdin content. Set required: true in schema to error when stdin is empty. The document formats need a `type` or `$ref` here; the raw formats imply theirs, so `schema:` may be left out or hold only `required`.
 	Schema *InputSchema `json:"schema,omitempty"`
+	// With 'lines' only: split the payload on NUL bytes instead of newlines, as `find -print0` and `xargs -0` write it. Items are kept byte for byte (no `\r` or space trimming, since a file name may contain either), and a trailing NUL adds no empty item. The default splits on newlines.
+	Separator string `json:"separator,omitempty"`
+	// With 'lines' or 'jsonl' only: generate an iterator (`iter.Seq2[string, error]`, or `iter.Seq2[<Prefix>Stdin, error]`) instead of a slice, so a filter reads one line or record at a time in constant memory. Nothing is read until the handler ranges over it, and stdin is read once per run: a second range, or a second Inputs call, continues where the last stopped. The field is nil when stdin is not read (a terminal, a short-circuit flag such as --help, or `unless_argument` choosing the files), so check it before ranging. A read error, a record that fails its schema, or a cancelled run is yielded once as the error, and the iterator then stops. A line or record is limited only by memory. CheckInputs and InputReport.Validate carry a stream but don't check its items: they are checked as they are read.
+	Stream bool `json:"stream,omitempty"`
+	// The name of an optional file argument of the same command (`inputfile` or `existingfile`, or a list of either): stdin is read only when that argument got no value, or its value is (or, for a list, contains) `-`. Otherwise the Stdin field stays nil and nothing is read. This is the `cat [FILE...]` and `jq FILTER [FILE]` shape. Without it, a declared stdin is read on every run, even when a file is given, which waits forever when a caller holds stdin open. With `required`, an empty stdin is an error only when no file is given.
+	UnlessArgument string `json:"unless_argument,omitempty"`
 }

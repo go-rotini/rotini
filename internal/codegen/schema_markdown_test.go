@@ -213,11 +213,11 @@ var commandKeyGroups = []struct {
 	title string
 	keys  []string
 }{
-	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers"}},
+	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers", "deprecated_since", "removed_in", "deprecated_identifiers_removed_in"}},
 	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies", "response_files"}},
 	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "options_first", "plugins", "plugin_discovery", "plugin_path", "timeout"}},
 	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "groups", "header", "footer", "headings", "help", "man", "markdown"}},
-	{"Output and shared types", []string{"output", "schemas"}},
+	{"Output and shared types", []string{"output", "output_stream", "schemas"}},
 	{"Generated code", []string{"filename"}},
 }
 
@@ -506,10 +506,13 @@ var inputKeySamples = map[string]string{
 	"properties":       `{"type": "map", "properties": {"k": {"type": "string"}}}`,
 	"required":         `{"type": "string", "required": true}`,
 	"secret":           `{"type": "string", "secret": true}`,
-	"separator":        `{"type": "array", "separator": ","}`,
+	"separator":        `{"type": "array", "separator": ":"}`,
 	"type":             `{"type": "string"}`,
 	"variable":         `{"type": "string", "variable": "X_VAR"}`,
+	"variable_file":    `{"type": "string", "variable": "X_VAR", "variable_file": "X_VAR_FILE"}`,
 	"repeatable":       `{"type": "string", "repeatable": false}`,
+	"relative":         `{"type": "time", "relative": "past"}`,
+	"glob":             `{"type": "[]existingfile", "glob": true}`,
 	"uniqueItems":      `{"type": "array", "uniqueItems": true}`,
 }
 
@@ -528,7 +531,7 @@ func inputChannelTable(t *testing.T) string {
 		writeTestFile(t, dir, ".rotini.conf.yaml", lintFixtureConf)
 		var warnings []error
 		err := NewProcessor("0.0.0").Validate(filepath.Join(dir, ".rotini.spec.yaml"), filepath.Join(dir, ".rotini.conf.yaml"),
-			false, "collect", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
+			false, "collect", "", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
 		return err == nil && len(warnings) == 0
 	}
 	// A plain input must pass on every channel, or rejections below would be the probe's fault.
@@ -611,7 +614,7 @@ func TestEveryKeyExamplesAreValidAndComplete(t *testing.T) {
 	}
 	var warnings []error
 	err := NewProcessor("0.0.0").Validate(filepath.Join(mod, "cmd/deploy/.rotini.spec.yaml"), filepath.Join(mod, "cmd/deploy/.rotini.conf.yaml"),
-		false, "collect", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
+		false, "collect", "", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
 	// The examples turn on response files beside passthrough and plugins, which is worth a
 	// warning in a real spec.
 	warnings = slices.DeleteFunc(warnings, func(w error) bool { return strings.Contains(w.Error(), "turns on response files") })

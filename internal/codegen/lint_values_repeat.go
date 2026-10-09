@@ -86,10 +86,11 @@ func duplicateDefault(schema *InputSchema) string {
 		return ""
 	}
 	fd := rotini.FlagDef{
-		Name: "v", Identifiers: []string{"--v"}, Type: definitionType(schema, nil), Layout: layoutFor(schema),
-		Enum: enumStrings(schema.Enum), IgnoreCase: schema.IgnoreCase,
+		Name: "v", Identifiers: []string{"--v"}, Type: definitionType(schema, nil),
+		Enum: enumStrings(schema.Enum), EnumValues: runtimeEnumValues(schema.Enum), IgnoreCase: schema.IgnoreCase,
 		UniqueItems: true,
 	}
+	withTimeForms(&fd, schema)
 	argv := make([]string, len(values))
 	for i, v := range values {
 		argv[i] = "--v=" + v
@@ -101,7 +102,7 @@ func duplicateDefault(schema *InputSchema) string {
 	})
 	out := reflect.New(reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}}))
 	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{fd}}
-	err := rotini.NewParser().Parse(rotini.NewContextFor(def, argv), out.Interface())
+	err := rotini.NewParser().Parse(lintContext(def, argv), out.Interface())
 	var pe *rotini.ParseError
 	if !errors.As(err, &pe) || pe.Kind != rotini.ParseKindConstraintViolation {
 		return ""

@@ -18,7 +18,7 @@ import (
 
 // ValidateFn is the signature of [Processor.Validate]. The companion CLI injects it as a
 // dependency so tests can substitute a double (see [GenerateFn]).
-type ValidateFn = func(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error), onWarnings func(warnings []error)) error
+type ValidateFn = func(specPath, confPath string, watch bool, failMode, release string, onValidate func(result string, err error), onWarnings func(warnings []error)) error
 
 // validateSpec checks the spec's version and validates its canonical JSON against the
 // embedded spec schema, returning every problem positioned in source. Lint runs only after

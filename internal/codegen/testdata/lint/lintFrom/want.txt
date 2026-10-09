@@ -1,1 +1,3 @@
 spec: .rotini.spec.yaml:7:7: command demo: flag "force": sets `from` but its type is bool; a bool takes no value to resolve
+spec: .rotini.spec.yaml:21:7: command demo: argument "other": sets `from: stdin` but argument "input" already consumes stdin; stdin has one consumer
+spec: .rotini.spec.yaml:26:7: command demo: argument "rest": sets `from` on a variadic argument, or one after it; only an argument before any variadic one takes `from`, since its position is known as the words arrive

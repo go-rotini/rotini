@@ -1,0 +1,68 @@
+# R1 — `glob: true` expands patterns on Windows, whose shells pass them through. Elsewhere the
+# shell has already expanded unquoted patterns, so a quoted one reaches the program as written.
+
+gomodinit example.com/globs
+
+exec rotini generate cmd/globs/.rotini.spec.yaml --config cmd/globs/.rotini.conf.yaml
+grep 'Glob: true' internal/cmd/globs/zz_globs.go
+exec go mod tidy
+exec go build -o globs$exe ./cmd/globs
+
+[windows] exec ./globs$exe *.txt
+[windows] stdout '^a\.txt b\.txt$'
+
+# A pattern matching nothing is passed through, and the path check reports it.
+[windows] ! exec ./globs$exe nope*.txt
+[windows] stderr 'no such file: "nope\*\.txt"'
+
+# Outside Windows a pattern is a literal name.
+[!windows] ! exec ./globs$exe *.txt
+[!windows] stderr 'no such file: "\*\.txt"'
+
+-- a.txt --
+a
+-- b.txt --
+b
+-- cmd/globs/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: globs
+  summary: list files
+  arguments:
+    - name: files
+      summary: files to list
+      schema:
+        type: '[]existingfile'
+        glob: true
+-- cmd/globs/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/globs/main.go
+    - type: cmd
+      file: internal/cmd/globs/zz_globs.go
+      package: globs
+-- internal/cmd/globs/globs.go --
+package globs
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type globsHandler struct {
+	rotini.NoHooks
+}
+
+func (*globsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[GlobsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, strings.Join(in.Globs.Arguments.Files, " "))
+}

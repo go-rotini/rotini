@@ -1,0 +1,326 @@
+# R1 — data through a filter: stdin read only when no file is given, streamed line by line or
+# record by record, byte for byte, or NUL-separated, and @file lists one value per line.
+
+gomodinit example.com/filter
+
+exec rotini generate cmd/filter/.rotini.spec.yaml --config cmd/filter/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o filter$exe ./cmd/filter
+
+# grep reads stdin, one line at a time, when no file is given.
+stdin log.txt
+exec ./filter$exe grep err
+stdout '^error one$'
+stdout '^error two$'
+! stdout 'fine'
+
+# Given a file, it reads the file and never touches stdin, even one a caller holds open.
+exec ./filter$exe grep err other.txt
+stdout '^other error$'
+heldstdin 5 ./filter$exe grep err other.txt
+
+# A short-circuit flag never waits on stdin either.
+heldstdin 5 ./filter$exe grep --help
+
+# The help page says how stdin is read.
+exec ./filter$exe grep --help
+stdout 'lines \[\]string \(streamed\) \(only when no <files> is given\)'
+
+# The audit's loop: a command given a file leaves the loop's stdin alone, so every name is read.
+[!windows] exec sh -c 'while read f; do ./filter$exe grep err "$f"; done < names.txt'
+[!windows] stdout -count=3 '^other error$'
+
+# JSON Lines in, NDJSON out: each record checked against its schema as it is read.
+stdin tasks.jsonl
+exec ./filter$exe tasks
+stdout -count=2 '^\{.*\}$'
+stdout '^\{"done":true,"name":"build"\}$'
+stdout '"name":"test"'
+
+# A bad record is reported with its line, and the run fails.
+stdin bad.jsonl
+! exec ./filter$exe tasks
+stdout '"name":"build"'
+stderr 'stdin line 3: '
+
+# bytes: exactly what was piped, a byte-order mark and NULs included.
+writebytes bin.dat '"\ufeff\x00\xff\r\n"'
+stdin bin.dat
+exec ./filter$exe hash
+stdout '^efbbbf00ff0d0a$'
+
+# NUL-separated lines, as find -print0 writes them, kept byte for byte.
+writebytes list.bin '"a b\x00c\nd\x00"'
+stdin list.bin
+exec ./filter$exe paths
+stdout '^\[a b\]$'
+stdout '^\[c$'
+
+# A list flag's @file gives one value per line, each split on the separator.
+exec ./filter$exe tags --tag @tags.txt
+stdout '^tags=a\|b\|c\|d$'
+
+-- log.txt --
+fine
+error one
+fine again
+error two
+-- other.txt --
+other error
+-- names.txt --
+other.txt
+other.txt
+other.txt
+-- tasks.jsonl --
+{"name":"build","done":true}
+
+{"name":"test","done":false}
+-- bad.jsonl --
+{"name":"build","done":true}
+
+{"name":"test","done":"no"}
+-- tags.txt --
+a,b
+
+c,d
+-- cmd/filter/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: filter
+  summary: text filters
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help, -h]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+  schemas:
+    Task:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        done: {type: boolean}
+  commands:
+    - name: grep
+      summary: print the lines that contain a pattern
+      arguments:
+        - name: pattern
+          schema: {type: string, required: true}
+        - name: files
+          schema: {type: '[]inputfile'}
+      stdin:
+        format: lines
+        stream: true
+        unless_argument: files
+    - name: tasks
+      summary: pass tasks through, one per line
+      stdin:
+        format: jsonl
+        stream: true
+        schema: {$ref: '#/schemas/Task'}
+      output: {$ref: '#/schemas/Task'}
+      output_stream: true
+    - name: hash
+      summary: print the piped bytes in hex
+      stdin:
+        format: bytes
+    - name: paths
+      summary: print NUL-separated names
+      stdin:
+        format: lines
+        separator: nul
+    - name: tags
+      summary: print tags
+      flags:
+        - name: tag
+          identifiers: [--tag]
+          schema: {type: '[]string', separator: ',', from: [file]}
+-- cmd/filter/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/filter/main.go
+    - type: cmd
+      file: internal/cmd/filter/zz_filter.go
+      package: filter
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/filter/helpers.go --
+package filter
+
+import "github.com/go-rotini/rotini"
+
+type base struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func fail(rtx *rotini.Context, err error) {
+	rtx.RecordError(err)
+	rtx.HaltWithCode(1)
+}
+-- internal/cmd/filter/filter_grep.go --
+package filter
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterGrepHandler struct{ base }
+
+func (*filterGrepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterGrepInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	g := in.FilterGrep
+	if g.Stdin != nil {
+		for line, err := range g.Stdin {
+			if err != nil {
+				fail(rtx, err)
+				return
+			}
+			if strings.Contains(line, g.Arguments.Pattern) {
+				fmt.Fprintln(rtx.Stdout, line)
+			}
+		}
+		return
+	}
+	for _, name := range g.Arguments.Files {
+		f, err := os.Open(filepath.Join(rtx.Dir(), name))
+		if err != nil {
+			fail(rtx, err)
+			return
+		}
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			if strings.Contains(sc.Text(), g.Arguments.Pattern) {
+				fmt.Fprintln(rtx.Stdout, sc.Text())
+			}
+		}
+		f.Close()
+	}
+}
+-- internal/cmd/filter/filter_tasks.go --
+package filter
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterTasksHandler struct{ base }
+
+func (*filterTasksHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterTasksInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	if in.FilterTasks.Stdin == nil {
+		return
+	}
+	for task, err := range in.FilterTasks.Stdin {
+		if err != nil {
+			fail(rtx, err)
+			return
+		}
+		if err := rtx.WriteOutputItem(FilterTasksOutput(task), "json", nil); err != nil {
+			fail(rtx, err)
+			return
+		}
+	}
+}
+-- internal/cmd/filter/filter_hash.go --
+package filter
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterHashHandler struct{ base }
+
+func (*filterHashHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterHashInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	if in.FilterHash.Stdin != nil {
+		fmt.Fprintf(rtx.Stdout, "%x\n", *in.FilterHash.Stdin)
+	}
+}
+-- internal/cmd/filter/filter_paths.go --
+package filter
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterPathsHandler struct{ base }
+
+func (*filterPathsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterPathsInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	if in.FilterPaths.Stdin != nil {
+		for _, p := range *in.FilterPaths.Stdin {
+			fmt.Fprintf(rtx.Stdout, "[%s]\n", p)
+		}
+	}
+}
+-- internal/cmd/filter/filter_tags.go --
+package filter
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterTagsHandler struct{ base }
+
+func (*filterTagsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterTagsInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "tags=%s\n", strings.Join(in.FilterTags.Flags.Tag, "|"))
+}
+-- cmd/filter/main.go --
+package main
+
+import (
+	filter "example.com/filter/internal/cmd/filter"
+)
+
+func main() {
+	filter.NewProgram(filter.Handlers()).
+		Execute()
+}

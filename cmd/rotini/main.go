@@ -14,5 +14,6 @@ var (
 func main() {
 	cmd.NewProgram(cmd.Handlers()).
 		WithVersion(cmd.ResolveVersion(version)).
+		WithBufferedOutput(true).
 		Execute()
 }

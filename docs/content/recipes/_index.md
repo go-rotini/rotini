@@ -268,3 +268,66 @@ of guidance to show (see [completion messages](/docs#completion-messages)), and
 
 When this output is right but the shell shows something else, the problem is in the shell's
 setup: reload the script (`source <(taskr completion bash)`) or start a new shell.
+
+## Input and output
+
+### Writing to a file and to stdout at once
+
+A command can show its output and keep a copy, as `tee` does. Open the file with
+`rotini.CreateOutput`, and write once through `io.MultiWriter` with `rtx.WriteOutputTo`. The
+file is written to a temporary name and renamed into place by `Close`, so a run that fails
+part-way leaves any earlier file as it was. The flag is `type: outputfile`, and `--force`
+carries `role: force`:
+
+{{< code title="internal/cmd/teedemo/teedemo_export.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package teedemo
+
+import (
+	"context"
+	"io"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*teedemoExportHandler)(nil)
+
+type teedemoExportHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*teedemoExportHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TeedemoExportInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	flags := in.TeedemoExport.Flags
+	if err := export(rtx, flags.Output, flags.Force); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+
+func export(rtx *rotini.Context, path string, force bool) error {
+	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
+	if err != nil {
+		return err
+	}
+	defer out.Abort() // discards the file unless Close below commits it
+	report := TeedemoExportOutput{Count: 3}
+	if err := rtx.WriteOutputTo(io.MultiWriter(rtx.Stdout, out), report, "json", nil); err != nil {
+		return err
+	}
+	return out.Close()
+}
+{{< /code >}}
+
+{{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
+teedemo export -o report.json
+teedemo export -o report.json --force
+{{< /code >}}
+
+`io.MultiWriter` stops at the first writer that fails, so a closed stdout also ends the file,
+and `Close` is never reached. With `-o -` the output goes to stdout twice.

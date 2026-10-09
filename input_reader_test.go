@@ -1032,18 +1032,18 @@ func TestInputReader_stdinRequired(t *testing.T) {
 }
 
 func TestParseStdinTag(t *testing.T) {
-	for tag, want := range map[string]struct {
-		format   string
-		required bool
-	}{
-		"yaml":          {"yaml", false},
-		"yaml,required": {"yaml", true},
-		"json,required": {"json", true},
-		"json,optional": {"json", false}, // unknown markers are ignored
+	for tag, want := range map[string]stdinTag{
+		"yaml":                              {format: "yaml"},
+		"yaml,required":                     {format: "yaml", required: true},
+		"json,required":                     {format: "json", required: true},
+		"json,optional":                     {format: "json"}, // unknown markers are ignored
+		"lines,stream":                      {format: "lines", stream: true},
+		"lines,stream,nul,required":         {format: "lines", stream: true, nul: true, required: true},
+		"text,unless=files,required":        {format: "text", required: true, unless: "files"},
+		"jsonl,required,stream,unless=file": {format: "jsonl", stream: true, required: true, unless: "file"},
 	} {
-		format, required := parseStdinTag(tag)
-		if format != want.format || required != want.required {
-			t.Errorf("parseStdinTag(%q) = (%q, %v), want (%q, %v)", tag, format, required, want.format, want.required)
+		if got := parseStdinTag(tag); got != want {
+			t.Errorf("parseStdinTag(%q) = %+v, want %+v", tag, got, want)
 		}
 	}
 }
@@ -1970,7 +1970,7 @@ func TestTrimAcquiredPayload_oneRuleForBothPaths(t *testing.T) {
 	}
 	var channel *string
 	sf := reflect.ValueOf(&channel).Elem()
-	if err := bindRawStdin(sf, "text", payload); err != nil {
+	if err := bindRawStdin(sf, stdinTag{format: "text"}, payload); err != nil {
 		t.Fatalf("bindRawStdin: %v", err)
 	}
 

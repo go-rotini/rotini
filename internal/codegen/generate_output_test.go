@@ -201,8 +201,11 @@ func TestContractDocument(t *testing.T) {
 		names = append(names, c.Name)
 		byName[c.Name] = c
 	}
-	if !slices.Equal(names, []string{"acme", "acme deploy", "acme status"}) {
-		t.Fatalf("commands = %v; the hidden one must be left out", names)
+	if !slices.Equal(names, []string{"acme", "acme deploy", "acme status", "acme secret"}) {
+		t.Fatalf("commands = %v; the hidden one must be listed too", names)
+	}
+	if !byName["acme secret"].Hidden || byName["acme status"].Hidden {
+		t.Errorf("only the hidden command is marked hidden: %+v", byName["acme secret"])
 	}
 	if doc.Format != contractFormat || doc.Name != "acme" || doc.Definitions["Status"] == nil || len(doc.Errors) == 0 {
 		t.Errorf("document header is wrong:\n%s", raw)
@@ -232,8 +235,9 @@ func TestContractDocument(t *testing.T) {
 			t.Errorf("deploy parameters lack %s:\n%s", want, params)
 		}
 	}
-	if out, _ := json.Marshal(deploy.Output); string(out) != `{"$ref":"#/definitions/Status"}` {
-		t.Errorf("deploy output = %s, want the shape alone", out)
+	out, _ := json.Marshal(deploy.Output)
+	if want := `{"$ref":"#/definitions/Status","$schema":"http://json-schema.org/draft-07/schema#","definitions":{"Status":`; !strings.HasPrefix(string(out), want) {
+		t.Errorf("deploy output = %s, want the shape with the definitions it reaches", out)
 	}
 }
 

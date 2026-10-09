@@ -5,12 +5,17 @@ deploy it
 ## Usage
 
 ```
-app deploy [flags] <command>
+app deploy [flags] <command> <target> [stage]
 ```
 
 ## Commands
 
 - `canary` — a canary deploy
+
+## Arguments
+
+- `<target>` — what to deploy; also set by `DEPLOY_TARGET` or config key `deploy.target`
+- `[stage]` — which stage (default `prod`)
 
 ## Flags
 

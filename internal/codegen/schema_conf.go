@@ -14,10 +14,12 @@ type Conf struct {
 	Version string `json:"version"`
 }
 
-// Optional: write the contract document, one JSON file describing the whole CLI for scripts, tools and AI agents. Every visible command is listed with its arguments, flags (including inherited cascading flags), environment variables, configuration keys and stdin; a `parameters` JSON Schema combining its arguments and flags; its output shape where one is declared; and its exit statuses. The format is rotini's own, described by schema-contract.json in the rotini repository, and the shape of the error line rotini.StructuredReporter writes to stderr is included under `errors`.
+// Optional: write the contract document, one JSON file describing the whole CLI for scripts, tools and AI agents. Every command is listed, a hidden one marked `hidden: true`, with its arguments, flags (including inherited cascading flags), environment variables, configuration keys and stdin, each marked hidden where it is; a `parameters` JSON Schema combining its visible arguments and flags; its output shape where one is declared; and its exit statuses. The format is rotini's own, described by schema-contract.json in the rotini repository, and the shape of the error line rotini.StructuredReporter writes to stderr is included under `errors`. Validate a contract with the schema-contract.json from the rotini that wrote it: newer releases add fields, which an older copy of the schema rejects.
 type ContractConfig struct {
 	// Module-root-relative path (no leading slash) ending in '.json' the contract document is written to. Rewritten on every `generate`.
-	File string `json:"file"`
+	File string `json:"file,omitempty"`
+	// When true, the generated cmd file also holds the contract document as `var Contract string`, byte for byte what `file` holds, so the binary can print its own contract. Declare a command for it and print Contract from its handler (`fmt.Fprint(rtx.Stdout, Contract)`); rotini adds no command of its own. It adds the document's size to the binary. Works without `file`.
+	Go bool `json:"go,omitempty"`
 }
 
 // One generated feature, chosen by 'type' (help, completion, man, markdown): an on/off switch ('enabled') plus two independent options. 'embed' chooses how the content is stored: a rendered file in 'embed_dir' loaded with //go:embed, or a string literal in the generated code. 'template' chooses how it is rendered: from an editable template seeded into 'template_dir', or from rotini's built-in one. The directories default to '<cmd-package>/renders' and '<cmd-package>/templates'. With embed on, embed_dir must be inside the cmd package, since //go:embed cannot reach outside it; template_dir may be anywhere. Output files never collide: help pages are 'help_*.txt', man pages '<page-name>.<section>' (taskr-add.1), markdown pages 'markdown_*.md' and completion scripts 'completion_<shell>.txt', and each feature removes only its own files.
@@ -109,4 +111,6 @@ type ValidateConfig struct {
 	FlagsFirst bool `json:"flags_first,omitempty"`
 	// Opt-in: warn when the root command's name, the program's name, isn't a POSIX utility name: 2 to 9 lowercase letters and digits. Sub-command names aren't checked. Warnings never fail validation.
 	PosixNames bool `json:"posix_names,omitempty"`
+	// The name of an environment variable holding the release being prepared (X.Y.Z). When it is set, `rotini validate` fails for each command or input whose `removed_in` (or a `deprecated_identifiers_removed_in` entry) is at or below that release, so a planned removal is not forgotten. `rotini validate --release` takes precedence. Unset or empty, nothing is checked. Only `rotini validate` reads it: `rotini generate` never runs this check.
+	ReleaseEnv string `json:"release_env,omitempty"`
 }

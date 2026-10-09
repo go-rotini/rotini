@@ -44,7 +44,9 @@ func renderDefinition(gp *program) string {
 		b.WriteString("Passthrough: true,\n")
 	}
 	writeInputDefsLiteral(&b, gp.rootInputs, gp.schemas)
-	b.WriteString(outputDefLiteral(gp.rootPascal+"Output", gp.rootOutput, gp.schemas))
+	b.WriteString(outputDefLiteral(gp.rootPascal+"Output", gp.rootOutput, gp.schemas, gp.rootStream))
+	b.WriteString(inputsTypeLiteral(gp.rootPascal + "Inputs"))
+	b.WriteString(exitStatusLiteral(gp.rootHelp.ExitStatus))
 	if cl := rnodesLiteral(gp.rootName, gp.tree, gp.schemas); cl != "" {
 		fmt.Fprintf(&b, "Commands: %s,\n", cl)
 	}
@@ -100,6 +102,9 @@ func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile
 		}
 		if f.Format != "" {
 			fmt.Fprintf(b, ", Format: %q", f.Format)
+		}
+		if f.As == "env" {
+			b.WriteString(", As: \"env\"")
 		}
 		renderDiscover(b, f.Discover)
 		if f.Schema != nil {
@@ -254,8 +259,12 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if f.Deprecated != "" {
 			fmt.Fprintf(b, ", Deprecated: %q", f.Deprecated)
 		}
-		if f.Schema != nil && f.Schema.Negatable {
+		writeLifecycleFields(b, ", %s: %s", lifecycle{since: f.DeprecatedSince, removedIn: f.RemovedIn, removedIDs: f.DeprecatedIdentifiersRemovedIn})
+		if on, custom := negation(f.Schema); on {
 			b.WriteString(", Negatable: true")
+			if custom != "" {
+				fmt.Fprintf(b, ", Negation: %q", custom)
+			}
 		}
 		if f.ShortCircuit {
 			b.WriteString(", ShortCircuit: true")
@@ -279,21 +288,33 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 	})
 }
 
-// layoutFor is the layout a time input is parsed under: its declared `layout:`, else
-// "2006-01-02" for `type: date` (or a list of dates), else "" (RFC 3339).
-func layoutFor(schema *InputSchema) string {
+// layoutsFor is the layouts a time input is parsed under, tried in order: its declared `layout:`,
+// else "2006-01-02" for `type: date` (or a list or map of dates), else none (RFC 3339).
+func layoutsFor(schema *InputSchema) []string {
 	if schema == nil {
-		return ""
+		return nil
 	}
-	if schema.Layout != "" {
-		return schema.Layout
+	if l := declaredLayouts(schema); len(l) > 0 {
+		return l
 	}
 	t := schema.Type
 	if schema.Items != nil && schema.Items.Type != "" && jsonSchemaTypeToGo(t) == "[]string" {
 		t = schema.Items.Type
 	}
-	if strings.TrimPrefix(t, "[]") == "date" {
-		return "2006-01-02"
+	t = strings.TrimPrefix(t, "[]")
+	if _, v, ok := splitMapType(t); ok {
+		t = v
+	}
+	if t == "date" {
+		return []string{"2006-01-02"}
+	}
+	return nil
+}
+
+// layoutFor is the first layout a time input is parsed under, "" for RFC 3339; see layoutsFor.
+func layoutFor(schema *InputSchema) string {
+	if l := layoutsFor(schema); len(l) > 0 {
+		return l[0]
 	}
 	return ""
 }
@@ -418,8 +439,15 @@ func argDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if a.Deprecated != "" {
 			fmt.Fprintf(b, ", Deprecated: %q", a.Deprecated)
 		}
+		writeLifecycleFields(b, ", %s: %s", lifecycle{since: a.DeprecatedSince, removedIn: a.RemovedIn})
 		if a.Passthrough {
 			b.WriteString(", Passthrough: true")
+		}
+		if a.Schema != nil && len(a.Schema.From) > 0 {
+			fmt.Fprintf(b, ", From: %s", goStringSlice(a.Schema.From))
+		}
+		if a.Schema != nil && a.Schema.Glob {
+			b.WriteString(", Glob: true")
 		}
 	})
 }
@@ -471,10 +499,13 @@ func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string
 		if n.deprecated != "" {
 			fmt.Fprintf(b, "Deprecated: %q,\n", n.deprecated)
 		}
+		writeLifecycleFields(b, "%s: %s,\n", n.lifecycle)
 		writeInputDefsLiteral(b, n.inputs, schemas)
 		if !n.composed { // a composed command's output type lives in its own cli's package
-			b.WriteString(outputDefLiteral(n.prefix+"Output", n.output, schemas))
+			b.WriteString(outputDefLiteral(n.prefix+"Output", n.output, schemas, n.stream))
 		}
+		b.WriteString(inputsTypeLiteral(n.inputsType))
+		b.WriteString(exitStatusLiteral(n.help.ExitStatus))
 		if cl := rnodesLiteral(host, n.children, schemas); cl != "" {
 			fmt.Fprintf(b, "Commands: %s,\n", cl)
 		}
@@ -512,7 +543,7 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	}
 	if len(schema.Enum) > 0 {
 		fmt.Fprintf(b, ", Enum: %s", goStringSlice(enumStrings(schema.Enum)))
-		if enumDescribed(schema.Enum) {
+		if enumDetailed(schema.Enum) {
 			fmt.Fprintf(b, ", EnumValues: %s", enumValuesLiteral(schema.Enum))
 		}
 		if schema.IgnoreCase {
@@ -523,10 +554,16 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 		b.WriteString(", Secret: true")
 	}
 	if schema.Separator != "" {
-		fmt.Fprintf(b, ", Separator: %q", schema.Separator)
+		fmt.Fprintf(b, ", Separator: %q", runtimeSeparator(schema.Separator))
 	}
-	if l := layoutFor(schema); l != "" {
-		fmt.Fprintf(b, ", Layout: %q", l)
+	if l := layoutsFor(schema); len(l) > 0 {
+		fmt.Fprintf(b, ", Layout: %q", l[0])
+		if len(l) > 1 {
+			fmt.Fprintf(b, ", Layouts: %s", goStringSlice(l))
+		}
+	}
+	if r := relative(schema); r != "" {
+		fmt.Fprintf(b, ", Relative: %q", r)
 	}
 	if c := constraintsLiteral(schema); c != "" {
 		fmt.Fprintf(b, ", Constraints: %s", c)
@@ -605,7 +642,8 @@ func namedScalarType(typ string, schemas map[string]Schema) string {
 // would erase. Keep in sync with the parser's isPathType and count handling;
 // TestDefinitionTypePreservesParserSemantics pins this set.
 func parserSignificantType(t string) bool {
-	return t == "count" || t == "existingfile" || t == "existingdir"
+	return t == "count" || t == "existingfile" || t == "existingdir" ||
+		t == "inputfile" || t == "outputfile"
 }
 
 // getSchemaType resolves an input schema to its Go type expression, defaulting to "string".
@@ -695,13 +733,30 @@ func defaultString(v any) string {
 	}
 }
 
-// enumValuesLiteral renders the []rotini.EnumValue literal for enum members, each with its
-// summary.
+// enumValuesLiteral renders the []rotini.EnumValue literal for enum members, each with what it
+// declares beyond its spelling.
 func enumValuesLiteral(members []any) string {
 	return sliceLiteral("EnumValue", enumValues(members), func(b *strings.Builder, v enumValue) {
 		fmt.Fprintf(b, "Value: %q", v.Value)
 		if v.Summary != "" {
 			fmt.Fprintf(b, ", Summary: %q", v.Summary)
+		}
+		if len(v.Aliases) > 0 {
+			fmt.Fprintf(b, ", Aliases: %s", goStringSlice(v.Aliases))
+		}
+		if v.Hidden {
+			b.WriteString(", Hidden: true")
+		}
+		if v.Deprecated != "" {
+			fmt.Fprintf(b, ", Deprecated: %q", v.Deprecated)
+		}
+		if len(v.DeprecatedAliases) > 0 {
+			fmt.Fprintf(b, ", DeprecatedAliases: %s", goStringSlice(v.DeprecatedAliases))
+		}
+		for _, kv := range [][2]string{{"DeprecatedSince", v.DeprecatedSince}, {"RemovedIn", v.RemovedIn}, {"ReplacedBy", v.ReplacedBy}} {
+			if kv[1] != "" {
+				fmt.Fprintf(b, ", %s: %q", kv[0], kv[1])
+			}
 		}
 	})
 }

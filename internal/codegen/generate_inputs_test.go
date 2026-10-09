@@ -15,7 +15,8 @@ import (
 )
 
 // TestRotiniTypeAliasesMatchTheResolver pins that rotiniTypeAliases (which lintSchemaTypes uses
-// to tell an alias from a typo) matches the names jsonSchemaTypeToGo's switch resolves.
+// to tell an alias from a typo) matches the names jsonSchemaTypeToGo resolves: its switch, and
+// the value types it reads from valueTypeGo.
 func TestRotiniTypeAliasesMatchTheResolver(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "generate_inputs.go", nil, 0)
@@ -43,6 +44,9 @@ func TestRotiniTypeAliasesMatchTheResolver(t *testing.T) {
 	})
 	if len(cases) == 0 {
 		t.Fatal("found no cases in jsonSchemaTypeToGo — did it move or change shape?")
+	}
+	for name := range valueTypeGo {
+		cases = append(cases, name)
 	}
 	for _, c := range cases {
 		if strings.ContainsAny(c, "[]") {

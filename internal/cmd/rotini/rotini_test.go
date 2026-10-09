@@ -74,7 +74,7 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 				t.Error("--help ran the generate work")
 				return nil
 			}))
-			p.WithDependency(validateDep, codegen.ValidateFn(func(string, string, bool, string, func(string, error), func([]error)) error {
+			p.WithDependency(validateDep, codegen.ValidateFn(func(string, string, bool, string, string, func(string, error), func([]error)) error {
 				t.Error("--help ran the validate work")
 				return nil
 			}))
@@ -208,7 +208,7 @@ func TestCLI_validateDelegatesFailMode(t *testing.T) {
 	var gotSpec, gotConf, gotFail string
 	p, out, _ := newTestCLI(t)
 	p.WithDependency(validateDep, codegen.ValidateFn(
-		func(spec, conf string, _ bool, failMode string, onValidate func(string, error), _ func([]error)) error {
+		func(spec, conf string, _ bool, failMode, _ string, onValidate func(string, error), _ func([]error)) error {
 			gotSpec, gotConf, gotFail = spec, conf, failMode
 			onValidate("valid", nil)
 			return nil
@@ -229,7 +229,7 @@ func TestCLI_validateDelegatesFailMode(t *testing.T) {
 func TestCLI_validateWarningsDoNotFail(t *testing.T) {
 	p, out, errb := newTestCLI(t)
 	p.WithDependency(validateDep, codegen.ValidateFn(
-		func(_, _ string, _ bool, _ string, _ func(string, error), onWarnings func([]error)) error {
+		func(_, _ string, _ bool, _, _ string, _ func(string, error), onWarnings func([]error)) error {
 			onWarnings([]error{errAdvisory})
 			return nil
 		}))
@@ -353,7 +353,10 @@ func TestCLI_aliases(t *testing.T) {
 			var ran bool
 			p, _, _ := newTestCLI(t)
 			p.WithDependency(generateDep, func(string, string, bool, func(string, error), func([]error)) error { ran = true; return nil })
-			p.WithDependency(validateDep, func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil })
+			p.WithDependency(validateDep, func(string, string, bool, string, string, func(string, error), func([]error)) error {
+				ran = true
+				return nil
+			})
 			p.WithDependency(initializeDep, func(string, string, bool) (codegen.Initialized, error) { ran = true; return codegen.Initialized{}, nil })
 
 			argv := []string{tc.alias, "x"}
@@ -557,7 +560,7 @@ func TestCLI_bannerNamesTheFilesRead(t *testing.T) {
 	}
 	p, out, _ := newTestCLI(t)
 	var gotSpec, gotConf string
-	p.WithDependency(validateDep, codegen.ValidateFn(func(spec, conf string, _ bool, _ string, _ func(string, error), _ func([]error)) error {
+	p.WithDependency(validateDep, codegen.ValidateFn(func(spec, conf string, _ bool, _, _ string, _ func(string, error), _ func([]error)) error {
 		gotSpec, gotConf = spec, conf
 		return nil
 	}))

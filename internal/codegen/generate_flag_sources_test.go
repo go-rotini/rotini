@@ -39,6 +39,13 @@ command:
       config_files:
         - name: deploy
           path: ./deploy.yaml
+      arguments:
+        - name: target
+          summary: what to deploy
+          schema: { type: string, required: true, key: deploy.target, variable: DEPLOY_TARGET }
+        - name: stage
+          summary: which stage
+          schema: { type: string, default: prod }
       flags:
         - name: replicas
           summary: how many
@@ -194,6 +201,9 @@ func TestFlagSources_render(t *testing.T) {
 	}
 	if want := "- `-r, --replicas` `int` — how many (default `1`); also set by `APP_DEPLOY_REPLICAS` or config key `deploy.replicas`"; !strings.Contains(page, want) {
 		t.Errorf("markdown is missing\n%s\n--- page ---\n%s", want, page)
+	}
+	if want := "- `<target>` — what to deploy; also set by `DEPLOY_TARGET` or config key `deploy.target`"; !strings.Contains(page, want) {
+		t.Errorf("markdown is missing the argument's sources\n%s\n--- page ---\n%s", want, page)
 	}
 
 	root := pages[""]

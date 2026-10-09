@@ -22,6 +22,8 @@ type Command struct {
 	Matched               string   // the argv token that resolved this command (name or an alias); "" for the root
 	DeprecatedIdentifiers []string // aliases of this command that are deprecated
 	Deprecated            string   // the command's deprecation message, when it is deprecated as a whole
+	DeprecatedSince       string   // the release that deprecated it; see [CommandDef.DeprecatedSince]
+	RemovedIn             string   // the release that will remove it
 	Flags                 []FlagDef
 	Arguments             []ArgDef
 	FlagGroups            []FlagGroup
@@ -40,6 +42,10 @@ type Command struct {
 	// OptionsFirst stops flags at this command's first argument when it is the invoked one; see
 	// [CommandDef.OptionsFirst].
 	OptionsFirst bool
+
+	// DeprecatedIdentifiersRemovedIn is the release removing each deprecated alias; see
+	// [CommandDef.DeprecatedIdentifiersRemovedIn].
+	DeprecatedIdentifiersRemovedIn map[string]string
 
 	// Invoked reports whether this is the command the user invoked: the last command in the
 	// chain. Exactly one entry of [Context.CommandChain] has it set; in a cascading hook,
@@ -77,6 +83,7 @@ func rootFrame(def Definition) Command {
 func cmdFrame(c CommandDef) Command {
 	return Command{
 		Name: c.Name, Handler: c.Handler, DeprecatedIdentifiers: c.DeprecatedIdentifiers, Deprecated: c.Deprecated,
+		DeprecatedSince: c.DeprecatedSince, RemovedIn: c.RemovedIn, DeprecatedIdentifiersRemovedIn: c.DeprecatedIdentifiersRemovedIn,
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Plugins: c.Plugins, PluginDiscovery: c.PluginDiscovery,

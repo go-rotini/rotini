@@ -1,0 +1,202 @@
+# R10 — structured output through a Go template: a --format flag typed shape.Template (through
+# import:) formats a command's output, naming the JSON property names the contract shows.
+
+gomodinit example.com/taskr
+
+exec rotini generate cmd/taskr/.rotini.spec.yaml --config cmd/taskr/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o taskr$exe ./cmd/taskr
+
+# Without --format, the output is json.
+exec ./taskr$exe list
+stdout '"title": "write the spec"'
+
+# A whole output: one newline at the end.
+exec ./taskr$exe list --format '{{range .tasks}}{{.id}}:{{.title}} {{end}}| {{len .tasks}} tasks'
+cmp stdout list.txt
+
+# A stream: one line per item; an omitempty field the item leaves out is there, empty.
+exec ./taskr$exe watch --format '{{.id}} {{.title}} [{{join "," .tags}}]{{if .note}} ({{.note}}){{end}}'
+cmp stdout watch.txt
+
+# json is one of the functions.
+exec ./taskr$exe watch --format '{{json .tags}}'
+stdout -count=1 '^\["docs","spec"\]$'
+stdout -count=1 '^null$'
+
+# A template that does not parse is a usage error while the flag is read: nothing runs.
+wantexit 1 ./taskr$exe list --format '{{range .tasks}'
+! stdout .
+stderr '^Error: --format: "\{\{range \.tasks\}" is not a valid shape\.Template \(template:1: '
+
+# A template naming a field the output does not have, a Go field name included, is a usage
+# error, and nothing is written.
+wantexit 1 ./taskr$exe list --format '{{range .tasks}}{{.Title}}{{end}}'
+! stdout .
+stderr 'map has no entry for key "Title"'
+env TASKR_STRUCTURED=1
+wantexit 1 ./taskr$exe watch --format '{{.nope}}'
+! stdout .
+stderr '"category":"usage"'
+stderr 'map has no entry for key \\"nope\\"'
+env TASKR_STRUCTURED=
+
+# Help shows the flag's placeholder, not the Go type.
+exec ./taskr$exe list --help
+stdout '--format TEMPLATE'
+
+# The program links text/template because it imports rotini/shape.
+exec go list -deps ./cmd/taskr
+stdout '^text/template$'
+stdout '^github.com/go-rotini/rotini/shape$'
+
+-- list.txt --
+1:write the spec 2:ship it | 2 tasks
+-- watch.txt --
+1 write the spec [docs,spec] (first)
+2 ship it []
+-- cmd/taskr/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: taskr
+  summary: track tasks
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      schema: {type: bool}
+    - name: format
+      summary: format the output with a Go template
+      cascading: true
+      schema: {type: shape.Template, import: github.com/go-rotini/rotini/shape, placeholder: TEMPLATE}
+  schemas:
+    Task:
+      type: object
+      required: [id, title]
+      properties:
+        id: {type: integer}
+        title: {type: string}
+        tags: {type: array, items: {type: string}}
+        note: {type: string}
+    TaskList:
+      type: object
+      required: [tasks]
+      properties:
+        tasks: {type: array, items: {$ref: "#/schemas/Task"}}
+  commands:
+    - name: list
+      summary: list the tasks
+      output: {$ref: "#/schemas/TaskList"}
+    - name: watch
+      summary: write each task as it is read
+      output: {$ref: "#/schemas/Task"}
+      output_stream: true
+-- cmd/taskr/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+    - type: cmd
+      file: internal/cmd/taskr/zz_taskr.go
+      package: taskr
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/taskr/taskr.go --
+package taskr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+type taskrHandler struct{ base }
+
+func (*taskrHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+var tasks = []Task{
+	{ID: 1, Title: "write the spec", Tags: []string{"docs", "spec"}, Note: "first"},
+	{ID: 2, Title: "ship it"},
+}
+-- internal/cmd/taskr/taskr_list.go --
+package taskr
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/shape"
+)
+
+type taskrListHandler struct{ base }
+
+func (*taskrListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TaskrListInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Taskr.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	list := TaskrListOutput{Tasks: tasks}
+	if format := in.Taskr.Flags.Format; !format.IsZero() {
+		rtx.HaltWith(rtx.WriteOutput(list, "template", shape.Render[TaskrListOutput](format)))
+		return
+	}
+	rtx.HaltWith(rtx.WriteOutput(list, "json", nil))
+}
+-- internal/cmd/taskr/taskr_watch.go --
+package taskr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/shape"
+)
+
+type taskrWatchHandler struct{ base }
+
+func (*taskrWatchHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TaskrWatchInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	for _, t := range tasks {
+		if err := rtx.WriteOutputItem(TaskrWatchOutput(t), "template", shape.Render[TaskrWatchOutput](in.Taskr.Flags.Format)); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+}
+-- cmd/taskr/main.go --
+package main
+
+import (
+	"os"
+
+	"github.com/go-rotini/rotini"
+
+	taskr "example.com/taskr/internal/cmd/taskr"
+)
+
+func main() {
+	p := taskr.NewProgram(taskr.Handlers())
+	if os.Getenv("TASKR_STRUCTURED") == "1" {
+		p = p.WithReporter(rotini.StructuredReporter(func(*rotini.Context) bool { return true }))
+	}
+	p.Execute()
+}

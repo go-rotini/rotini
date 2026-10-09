@@ -1,0 +1,34 @@
+# `stream` reads stdin one line or record at a time, so it applies to lines and jsonl only, and
+# the stdin `separator` chooses what separates lines, so it applies to lines only.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    Task:
+      type: object
+      properties:
+        name: {type: string}
+  commands:
+    - name: grep
+      stdin:
+        format: lines
+        stream: true
+        separator: nul
+    - name: tasks
+      stdin:
+        format: jsonl
+        stream: true
+        schema: {$ref: '#/schemas/Task'}
+    - name: upper
+      stdin:
+        format: text
+        stream: true
+    - name: apply
+      stdin:
+        format: yaml
+        stream: true
+        schema: {$ref: '#/schemas/Task'}
+    - name: hash
+      stdin:
+        format: bytes
+        separator: nul

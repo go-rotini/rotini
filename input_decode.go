@@ -188,22 +188,37 @@ var documentSchemas sync.Map // string → *jsonschema.Schema
 // validateDocumentJSON checks a JSON document of any shape against a stdin schema, reporting
 // failures as recon validation errors so they read like every other stdin field error.
 func validateDocumentJSON(schema string, raw []byte) error {
-	cached, ok := documentSchemas.Load(schema)
-	if !ok {
-		s, err := jsonschema.Compile([]byte(schema))
-		if err != nil {
-			return internalBind(channelStdin, "", "invalid stdin schema", err)
-		}
-		cached, _ = documentSchemas.LoadOrStore(schema, s)
-	}
-	compiled, ok := cached.(*jsonschema.Schema)
-	if !ok {
-		return internalBind(channelStdin, "", "invalid stdin schema", nil)
+	compiled, err := documentSchema(schema)
+	if err != nil {
+		return err
 	}
 	result, err := compiled.Validate(raw)
 	if err != nil {
 		return usageBind(channelStdin, "", "could not check stdin against its schema", err)
 	}
+	return documentResult(schema, result)
+}
+
+// documentSchema returns a stdin schema, compiled once per process.
+func documentSchema(schema string) (*jsonschema.Schema, error) {
+	cached, ok := documentSchemas.Load(schema)
+	if !ok {
+		s, err := jsonschema.Compile([]byte(schema))
+		if err != nil {
+			return nil, internalBind(channelStdin, "", "invalid stdin schema", err)
+		}
+		cached, _ = documentSchemas.LoadOrStore(schema, s)
+	}
+	compiled, ok := cached.(*jsonschema.Schema)
+	if !ok {
+		return nil, internalBind(channelStdin, "", "invalid stdin schema", nil)
+	}
+	return compiled, nil
+}
+
+// documentResult reports a failed stdin schema check as recon validation errors, so it reads
+// like every other stdin field error.
+func documentResult(schema string, result *jsonschema.Result) error {
 	if result.Valid {
 		return nil
 	}

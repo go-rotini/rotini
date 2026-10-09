@@ -210,7 +210,7 @@ func partialEnvLayer(b *InputReader, rtx *Context, v reflect.Value, chain []Comm
 	view := rtx.osView()
 	var envReg, flagReg *recon.Registry
 	var err error
-	if hasChannel(v, "Env") {
+	if hasEnvChannel(v) {
 		if envReg, err = recon.New(recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
 			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
 		}

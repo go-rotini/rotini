@@ -122,7 +122,7 @@ func impliedStdinSchemas(s *Spec) {
 			return
 		}
 		switch c.Stdin.Format {
-		case "text":
+		case "text", "bytes":
 			c.Stdin.Schema.Type = "string"
 		case "lines":
 			c.Stdin.Schema.Type = "[]string"

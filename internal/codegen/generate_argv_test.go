@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -189,7 +188,7 @@ func TestEnumValues_everySpecFormat(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", format, err)
 		}
-		if got := enumValues(spec.Command.Flags[0].Schema.Enum); !slices.Equal(got, want) {
+		if got := enumValues(spec.Command.Flags[0].Schema.Enum); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: enum = %+v, want %+v", format, got, want)
 		}
 	}

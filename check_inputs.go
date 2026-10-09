@@ -3,6 +3,7 @@ package rotini
 import (
 	"encoding"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -24,6 +25,9 @@ import (
 // [PresenceOf] builds a set from v's non-zero fields; build one by hand when a zero value must
 // count as supplied. A declared default satisfies a required input, as it does for
 // [Context.Inputs].
+//
+// A streamed stdin field (an iterator) counts as supplied when it is non-nil; its items are
+// checked as they are read, not here.
 //
 // It reads no channel, applies no defaults and never changes v. T must describe the running
 // command, as for Context.Inputs. Each input is named by its canonical spelling: a flag's first
@@ -102,7 +106,7 @@ func PresenceOf[T any](v T) Presence {
 				}
 			})
 		}
-		if sf := ci.FieldByName("Stdin"); sf.IsValid() && sf.Kind() == reflect.Pointer && !sf.IsNil() {
+		if sf := ci.FieldByName("Stdin"); stdinSet(sf) {
 			set[fieldPath(top, "Stdin")] = InputSource{Layer: "custom"}
 		}
 	}
@@ -279,6 +283,7 @@ func findArgDef(defs []ArgDef, name string) (ArgDef, bool) {
 // view names environment variables and resolves relative paths.
 func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func(FieldPath) bool, stdinSchemas map[string]string, view *osView) error {
 	var err error
+	var dash dashOnce // "-" may name stdin once across the inputfile fields
 	walkCommandStructs(v, chain, anchor, func(top string, scope int, ci reflect.Value) {
 		if err != nil {
 			return
@@ -289,7 +294,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 				return
 			}
 			if fd, ok := findFlagDef(frame.Flags, logical); ok {
-				err = checkTypedFlag(fd, f, view.base())
+				err = dash.typed(checkTypedFlag(fd, f, view.base()), fd.Type, flagLabel(fd), flagLabel(fd), f)
 			}
 		})
 		if err == nil && scope == len(chain)-1 {
@@ -298,7 +303,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 					return
 				}
 				if ad, ok := findArgDef(frame.Arguments, logical); ok {
-					err = checkTypedArg(ad, f, view.base())
+					err = dash.typed(checkTypedArg(ad, f, view.base()), ad.Type, "<"+ad.Name+">", "", f)
 				}
 			})
 		}
@@ -360,15 +365,10 @@ func checkTypedFlag(fd FlagDef, f reflect.Value, dir string) error {
 		}
 		return checkTypedObject(label, fd.ObjectSchema, elems)
 	}
+	enum := flagEnum(fd)
 	for _, s := range typedTexts(elems) {
-		if len(fd.Enum) > 0 && !enumHas(fd.Enum, s, fd.IgnoreCase) {
-			return &ParseError{
-				Kind:       ParseKindEnumViolation,
-				Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(s, fd.Secret), label, strings.Join(fd.Enum, ", ")),
-				Flag:       label,
-				Token:      redactValue(s, fd.Secret),
-				Candidates: fd.Enum,
-			}
+		if enum.declared() && !enum.has(s) {
+			return enum.violation(label, label, s, fd.Secret)
 		}
 	}
 	return checkTypedConstraints(label, fd.Type, fd.Constraints, count, elems, fd.Secret, dir)
@@ -381,14 +381,10 @@ func checkTypedArg(ad ArgDef, f reflect.Value, dir string) error {
 	if !ok {
 		return nil
 	}
+	enum := argEnum(ad)
 	for _, s := range typedTexts(elems) {
-		if len(ad.Enum) > 0 && !enumHas(ad.Enum, s, ad.IgnoreCase) {
-			return &ParseError{
-				Kind:       ParseKindEnumViolation,
-				Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(s, ad.Secret), label, strings.Join(ad.Enum, ", ")),
-				Token:      redactValue(s, ad.Secret),
-				Candidates: ad.Enum,
-			}
+		if enum.declared() && !enum.has(s) {
+			return enum.violation(label, "", s, ad.Secret)
 		}
 	}
 	return checkTypedConstraints(label, ad.Type, ad.Constraints, count, elems, ad.Secret, dir)
@@ -398,8 +394,8 @@ func checkTypedArg(ad ArgDef, f reflect.Value, dir string) error {
 // constraints, labeled as the channel validation labels it.
 func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Value, view *osView) error {
 	c, has := channelConstraints(tag)
-	enum, ignoreCase := channelEnum(tag)
-	if !has && len(enum) == 0 {
+	enum := channelEnum(tag)
+	if !has && !enum.declared() {
 		return nil
 	}
 	body := tag.Get("recon")
@@ -420,7 +416,7 @@ func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Val
 		return nil
 	}
 	secret := reconHasSecret(body)
-	if err := checkChannelEnum(ch, label, enum, ignoreCase, typedTexts(elems), secret); err != nil {
+	if err := checkChannelEnum(ch, label, enum, typedTexts(elems), secret); err != nil {
 		return err
 	}
 	return checkTypedConstraints(label, channelGoType(f.Type()), c, count, elems, secret, view.base())
@@ -462,8 +458,9 @@ func checkTypedChannelPresence(v reflect.Value, chain []Command, anchor int, set
 		if !ok {
 			return
 		}
-		if _, required := parseStdinTag(field.Tag.Get("stdin")); !required {
-			return
+		tag := parseStdinTag(field.Tag.Get("stdin"))
+		if !tag.required || (tag.unless != "" && typedArgGiven(ci, tag.unless)) {
+			return // not required, or the file argument is the input
 		}
 		if _, given := set[fieldPath(top, "Stdin")]; !given {
 			err = usageBind(channelStdin, "", "required stdin payload is missing", nil)
@@ -482,11 +479,16 @@ func reconHasOption(body, opt string) bool {
 	return false
 }
 
-// checkTypedStdin validates a supplied stdin document against the command's stdin schema.
+// checkTypedStdin validates a supplied stdin document against the command's stdin schema, or
+// each record of a JSON Lines payload against its record schema. A streamed stdin is not
+// checked here: its items are checked as they are read.
 func checkTypedStdin(ci reflect.Value, schemas map[string]string) error {
 	sf := ci.FieldByName("Stdin")
 	if !sf.IsValid() || sf.Kind() != reflect.Pointer || sf.IsNil() {
 		return nil
+	}
+	if field, ok := ci.Type().FieldByName("Stdin"); ok && parseStdinTag(field.Tag.Get("stdin")).format == "jsonl" {
+		return checkTypedRecords(sf.Elem(), schemas)
 	}
 	js := schemas[sf.Type().Elem().Name()]
 	if js == "" {
@@ -623,6 +625,19 @@ func typedTexts(elems []reflect.Value) []string {
 	return out
 }
 
+// typed checks the typed field f of an input of type typ for "-" after its value rules passed
+// (err is their result, returned when set): label is the input, flag its flag label or "".
+func (d *dashOnce) typed(err error, typ, label, flag string, f reflect.Value) error {
+	if err != nil || constraintElemType(typ) != typeInputFile {
+		return err
+	}
+	elems, _, ok := typedElems(f)
+	if !ok {
+		return nil
+	}
+	return d.seen(label, flag, typedTexts(elems))
+}
+
 // typedNumber returns a numeric value's float64, false for a non-number.
 func typedNumber(e reflect.Value) (float64, bool) {
 	switch e.Kind() {
@@ -668,4 +683,53 @@ func typedText(e reflect.Value) string {
 		return fmt.Sprint(e.Interface())
 	}
 	return ""
+}
+
+// typedArgGiven reports whether the command's argument name holds a value other than "-" in
+// the typed value ci, so a stdin that reads only when no file is given is not needed.
+func typedArgGiven(ci reflect.Value, name string) bool {
+	given := false
+	eachTaggedField(ci, "Arguments", func(_, logical string, _ reflect.StructTag, f reflect.Value) {
+		if logical != name {
+			return
+		}
+		switch f.Kind() {
+		case reflect.String:
+			given = f.String() != "" && f.String() != "-"
+		case reflect.Slice:
+			given = f.Len() > 0
+			for i := range f.Len() {
+				if e := f.Index(i); e.Kind() == reflect.String && e.String() == "-" {
+					given = false
+				}
+			}
+		default:
+			given = !f.IsZero()
+		}
+	})
+	return given
+}
+
+// checkTypedRecords validates each record of a JSON Lines payload against its record schema.
+func checkTypedRecords(records reflect.Value, schemas map[string]string) error {
+	if records.Kind() != reflect.Slice {
+		return nil
+	}
+	js := schemas[records.Type().Elem().Name()]
+	if js == "" {
+		return nil
+	}
+	for i := range records.Len() {
+		raw, err := json.Marshal(records.Index(i).Interface())
+		if err != nil {
+			return internalBind(channelStdin, "", "could not encode the stdin payload", err)
+		}
+		if err := validateDocumentJSON(js, raw); err != nil {
+			if ie, ok := errors.AsType[*InputError](err); ok {
+				return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin record %d: %s", i+1, ie.Msg), Cause: ie.Cause, usage: ie.usage}
+			}
+			return err
+		}
+	}
+	return nil
 }

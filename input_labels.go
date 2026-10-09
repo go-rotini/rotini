@@ -65,7 +65,7 @@ func envNames(v reflect.Value, structName, envPrefix string) map[string][]string
 // envLabel names an environment input: the variable that is set, else as [envUnsetLabel].
 func envLabel(view *osView, names []string, key string) string {
 	if set := firstSetEnv(view, strings.Join(names, ",")); set != "" {
-		return "environment variable " + set
+		return "environment variable " + set + view.inputOrigin(set)
 	}
 	return envUnsetLabel(names, key)
 }
