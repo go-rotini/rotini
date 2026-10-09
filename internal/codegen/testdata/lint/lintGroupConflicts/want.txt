@@ -1,0 +1,4 @@
+spec: .rotini.spec.yaml:30:7: command demo: flags "json" and "yaml" must be set together (a required_together group) but at most one of them may be set (a mutually_exclusive group), so neither can ever be set; remove one of the two `flag_groups` entries
+spec: .rotini.spec.yaml:35:7: command demo: flags "wide" and "name" must be set together (a required_together group) but at most one of them may be set (a one_of group), so no invocation can satisfy this command; remove one of the two `flag_groups` entries
+spec: .rotini.spec.yaml:44:7: command demo: `flag_dependencies` entry makes flag "insecure" require "tls", but `flag_groups` entry (mutually_exclusive) allows at most one of them, so "insecure" can never be set; remove the dependency or the group
+spec: .rotini.spec.yaml:39:7: command demo: `flag_groups` entry (mutually_exclusive) includes required flag "region", so the other members can never be set; drop `required`, or give "region" an env or config fallback

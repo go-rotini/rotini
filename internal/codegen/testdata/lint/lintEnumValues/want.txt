@@ -1,0 +1,8 @@
+spec: .rotini.spec.yaml:9:7: command demo: schema "Port": `enum` value "http" is not a valid integer, so no value can match both; fix the value or the type
+spec: .rotini.spec.yaml:15:7: command demo: flag "replicas": `enum` value "a" is not a valid integer, so no value can match both; fix the value or the type
+spec: .rotini.spec.yaml:17:7: command demo: flag "json": sets `enum` on a bool, which already takes only true or false; remove the enum, or make the type string
+spec: .rotini.spec.yaml:19:7: command demo: flag "sizes": `enum` value "x" is not a valid integer, so no value can match both; fix the value or the type
+spec: .rotini.spec.yaml:21:7: command demo: flag "wait": `enum` value "fast" is not a valid duration, so no value can match both; fix the value or the type
+spec: .rotini.spec.yaml:24:7: command demo: flag "labels": `enum` value "a" is not a key=value pair, which every value of a map input is; write members as key=value, or remove the enum
+spec: .rotini.spec.yaml:33:7: command demo: env "retries": `enum` value "x" is not a valid integer, so no value can match both; fix the value or the type
+warning: spec: .rotini.spec.yaml:26:7: command demo: flag "format": lists `enum` value "json" twice; list each value once

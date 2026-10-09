@@ -34,6 +34,10 @@ type parsedInputs struct {
 	// of an unexpected positional. [0] is the flag as typed, [1] the word; nil when none.
 	detached *[2]string
 
+	// dashedFirst records that a "--" came before the leaf's first positional, which ended
+	// command lookup there, so a sub-command's name after it is a positional.
+	dashedFirst bool
+
 	// dir is the run's injected working directory, which relative existingfile and existingdir
 	// values are checked against; "" is the process's.
 	dir string
@@ -146,6 +150,7 @@ const (
 	ParseKindNoArguments                   // a positional was given to a command that accepts none
 	ParseKindTooManyArguments              // more positionals than the command's declared (non-variadic) arity
 	ParseKindInternal                      // a parser API misuse: nil parser/context, a bad out argument, or an inputs type that does not describe the running command
+	ParseKindMisplacedFlag                 // a flag was typed where it can't apply, such as before a plugin's name
 )
 
 // String renders the kind as a short, stable label (for logs and tests).
@@ -171,6 +176,8 @@ func (k ParseKind) String() string {
 		return "too-many-arguments"
 	case ParseKindInternal:
 		return "internal"
+	case ParseKindMisplacedFlag:
+		return "misplaced-flag"
 	default:
 		return "unspecified"
 	}
@@ -217,8 +224,8 @@ func (e *ParseError) Unwrap() error {
 // resolved chain declares (GNU/POSIX grammar, typed coercion, enum and constraint checks),
 // failing with a [*ParseError].
 //
-// Parsing is opt-in: a CLI that wants raw argv reads [Context.Argv] instead. Supply a parser
-// with [Program.WithParser]; a handler reads it with [Context.Parser]:
+// Parsing is opt-in: a CLI that wants raw argv reads [Context.Argv] instead. A handler reads
+// the parser with [Context.Parser]:
 //
 //	parser := rtx.Parser()
 //	var in MycliInputs
@@ -479,6 +486,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 		}
 
 		if !terminated && tok == "--" { // explicit end of flags; the rest are
+			store.dashedFirst = !startedArgs
 			terminated = true  // positional, even flag-looking tokens (and any
 			startedArgs = true // further "--" is a literal positional)
 			continue
@@ -570,9 +578,22 @@ func checkFlagShape(fd FlagDef, label string, vals []string) error {
 		return checkValueShape(fd.Type, label, label, vals, fd.Secret)
 	}
 	for _, v := range vals {
-		if !strings.Contains(v, "=") {
-			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, fd.Secret)), Flag: label}
+		if err := checkMapPair(label, v, fd.Secret); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// checkMapPair reports a map input's value that is not a key=value pair with a non-empty key.
+// label names the input as the user supplied it.
+func checkMapPair(label, v string, secret bool) error {
+	key, _, ok := strings.Cut(v, "=")
+	switch {
+	case !ok:
+		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, secret)), Flag: label}
+	case key == "":
+		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s needs a key before \"=\" (got %q)", label, redactValue(v, secret)), Flag: label}
 	}
 	return nil
 }
@@ -617,20 +638,33 @@ func checkFlagValues(fd FlagDef, label string, vals []string, dir string) error 
 				Candidates: fd.Enum,
 			}
 		}
-		if isMapType(fd.Type) && !strings.Contains(v, "=") {
-			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, fd.Secret)), Flag: label}
+		if isMapType(fd.Type) {
+			if err := checkMapPair(label, v, fd.Secret); err != nil {
+				return err
+			}
 		}
 	}
 	return checkConstraints(label, fd.Type, fd.Constraints, vals, fd.Secret, dir)
 }
 
 // strayCommand reports a positional on a command that branches but takes no arguments: a
-// mistyped sub-command. The error carries the sibling vocabulary for a [Suggestor].
+// mistyped sub-command. The error carries the sibling vocabulary for a [Suggestor]. A command's
+// own name typed after "--" is not mistyped: "--" ended command lookup, which the message says,
+// and the name is left out of the vocabulary.
 func strayCommand(leaf Command, si scopeInputs, store *parsedInputs) error {
 	if len(leaf.Commands) == 0 || len(leaf.Arguments) > 0 || len(si.args) == 0 {
 		return nil
 	}
 	tok := si.args[0]
+	if store != nil && store.dashedFirst && namesChild(leaf, tok) {
+		return &ParseError{
+			Kind:       ParseKindUnknownCommand,
+			Msg:        fmt.Sprintf("%q after \"--\" is not read as a command, and %q takes no arguments", tok, leaf.Name),
+			Command:    leaf.Name,
+			Token:      tok,
+			Candidates: slices.DeleteFunc(childCommandNames(leaf), func(n string) bool { return n == tok }),
+		}
+	}
 	return &ParseError{
 		Kind:       ParseKindUnknownCommand,
 		Msg:        fmt.Sprintf("unknown command %q for %q", tok, leaf.Name) + store.detachedHint(si.args[:1]),
@@ -869,8 +903,8 @@ func checkItemCount(label string, c Constraints, n int) error {
 	switch {
 	case c.MinItems > 0 && n < c.MinItems:
 		return constraintViolation("%s needs at least %d %s (got %d)", label, c.MinItems, plural("value", c.MinItems), n)
-	case c.MaxItems > 0 && n > c.MaxItems:
-		return constraintViolation("%s accepts at most %d %s (got %d)", label, c.MaxItems, plural("value", c.MaxItems), n)
+	case c.MaxItems != nil && n > *c.MaxItems:
+		return constraintViolation("%s accepts at most %d %s (got %d)", label, *c.MaxItems, plural("value", *c.MaxItems), n)
 	}
 	return nil
 }
@@ -887,9 +921,12 @@ func checkNumericBounds(label string, c Constraints, v string, secret bool, pars
 
 // checkNumberBounds is the numeric rule core shared by the command-line path and
 // [Context.CheckInputs]: n is the value, got the text an error shows for it (already redacted
-// for a secret input), and format renders a bound.
+// for a secret input), and format renders a bound. Declaring any bound also requires a finite
+// number, so NaN and ±Inf are rejected; an unbounded float accepts them.
 func checkNumberBounds(label string, c Constraints, n float64, got string, format func(float64) string) error {
 	switch {
+	case hasNumericBounds(c) && (math.IsNaN(n) || math.IsInf(n, 0)):
+		return constraintViolation("%s must be a finite number (got %s)", label, got)
 	case c.Minimum != nil && n < *c.Minimum:
 		return constraintViolation("%s must be >= %s (got %s)", label, format(*c.Minimum), got)
 	case c.Maximum != nil && n > *c.Maximum:
@@ -902,6 +939,11 @@ func checkNumberBounds(label string, c Constraints, n float64, got string, forma
 		return constraintViolation("%s must be a multiple of %s (got %s)", label, format(*c.MultipleOf), got)
 	}
 	return nil
+}
+
+// hasNumericBounds reports whether c declares any numeric bound.
+func hasNumericBounds(c Constraints) bool {
+	return c.Minimum != nil || c.Maximum != nil || c.ExclusiveMinimum != nil || c.ExclusiveMaximum != nil || c.MultipleOf != nil
 }
 
 // parseNumber reports whether v is a number, and its value.
@@ -921,8 +963,8 @@ func checkStringBounds(label string, c Constraints, v string, secret bool) error
 	switch {
 	case c.MinLength > 0 && ln < c.MinLength:
 		return constraintViolation("%s must be at least %d %s long (got %s)", label, c.MinLength, plural("character", c.MinLength), gotLen)
-	case c.MaxLength > 0 && ln > c.MaxLength:
-		return constraintViolation("%s must be at most %d %s long (got %s)", label, c.MaxLength, plural("character", c.MaxLength), gotLen)
+	case c.MaxLength != nil && ln > *c.MaxLength:
+		return constraintViolation("%s must be at most %d %s long (got %s)", label, *c.MaxLength, plural("character", *c.MaxLength), gotLen)
 	}
 	if c.Pattern != "" {
 		if re, err := compiledPattern(c.Pattern); err == nil && !re.MatchString(v) {
@@ -1231,6 +1273,10 @@ func resolveFlagValue(fd FlagDef, label, value string, acq argvAcq) (string, err
 	case value == "-" && slices.Contains(fd.From, "stdin"):
 		data, err := readStdin(acq.stdin)
 		if err != nil {
+			// An interrupted read keeps its own error, so the run's signal cause stays reachable.
+			if ie, ok := errors.AsType[*InputError](err); ok {
+				return "", ie
+			}
 			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: label + ": could not read stdin", Flag: label}
 		}
 		if len(data) == 0 {
@@ -1360,6 +1406,14 @@ func negatedIdentifiers(f FlagDef) []string {
 		}
 	}
 	return out
+}
+
+// namesChild reports whether tok names a sub-command or declared plugin of cur, by name or
+// alias.
+func namesChild(cur Command, tok string) bool {
+	_, isChild := findChild(cur, tok)
+	_, isPlugin := findPlugin(cur, tok)
+	return isChild || isPlugin
 }
 
 // childCommandNames is the dispatchable vocabulary of a command's visible children, for a

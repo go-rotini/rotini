@@ -213,7 +213,7 @@ func scalarOnlyKeys(s *InputSchema) []string {
 		"dotted_keys":    s.DottedKeys,
 		"minimum/maximum/exclusiveMinimum/exclusiveMaximum/multipleOf": s.Minimum != nil || s.Maximum != nil ||
 			s.ExclusiveMinimum != nil || s.ExclusiveMaximum != nil || s.MultipleOf != nil,
-		"minLength/maxLength/pattern": s.MinLength != 0 || s.MaxLength != 0 || s.Pattern != "",
+		"minLength/maxLength/pattern": s.MinLength != 0 || s.MaxLength != nil || s.Pattern != "",
 	} {
 		if set {
 			bad = append(bad, key)

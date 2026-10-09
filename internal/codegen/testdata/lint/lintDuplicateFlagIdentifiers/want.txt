@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:12:7: command demo: flag "owner": identifier "-o" is already declared by flag "out"
+spec: .rotini.spec.yaml:13:7: command demo: flag "owner": identifier "-o" is already declared by flag "out"

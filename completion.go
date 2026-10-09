@@ -631,7 +631,7 @@ type CompletionFormat func(w io.Writer, result CompletionResult) error
 // the plugin's words:
 //
 //	if strings.Contains(filepath.Base(os.Args[0]), "_complete-") {
-//		code, _ := cmd.Program.Complete(os.Args[1:], rotini.PluginCompletion)
+//		code, _ := cmd.NewProgram(cmd.Handlers()).Complete(os.Args[1:], rotini.PluginCompletion)
 //		os.Exit(code)
 //	}
 //
@@ -712,7 +712,7 @@ func (p *Program) completionMessagesOn(rtx *Context) bool {
 // asked once per completion request, before anything is written, and applies to every shell
 // and to [PluginCompletion]:
 //
-//	cmd.Program.WithCompletionMessages(func(rtx *rotini.Context) bool {
+//	cmd.NewProgram(cmd.Handlers()).WithCompletionMessages(func(rtx *rotini.Context) bool {
 //		return !settings.Quiet
 //	}).Execute()
 //
@@ -824,7 +824,7 @@ func PluginCompletion(w io.Writer, result CompletionResult) error {
 // <name> …`) and the Flux CLI (`flux-<name> __complete …`) do with the format
 // [PluginCompletion] writes:
 //
-//	cmd.Program.WithCompletion(rotini.PluginCompletion).Execute()
+//	cmd.NewProgram(cmd.Handlers()).WithCompletion(rotini.PluginCompletion).Execute()
 //
 // Rotini's generated completion scripts read rotini's own format, so a standalone CLI leaves
 // this unset. A host that runs a separately named completer without a __complete word, such

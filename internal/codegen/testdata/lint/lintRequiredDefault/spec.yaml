@@ -1,0 +1,23 @@
+# A default always supplies a value, so `required` beside it can never fire.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Correct: required alone, and a default alone. No problem.
+    - name: target
+      schema: { type: string, required: true }
+    - name: region
+      schema: { type: string, default: us-east-1 }
+    - name: output
+      schema: { type: string, required: true, default: text }
+    - name: tags
+      schema: { type: '[]string', required: true, default: [a] }
+  arguments:
+    - name: path
+      schema: { type: string, required: true, default: . }
+  env:
+    - name: token
+      schema: { type: string, required: true, default: none }
+  config:
+    - name: endpoint
+      schema: { type: string, required: true, default: localhost }

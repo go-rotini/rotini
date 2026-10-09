@@ -13,3 +13,8 @@ command:
       flags:
         - json
         - yaml
+    # A flag listed twice is a typo.
+    - kind: mutually_exclusive
+      flags:
+        - json
+        - json

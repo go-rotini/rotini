@@ -105,9 +105,9 @@ func TestCLI_helpKeepsUnreadableInput(t *testing.T) {
 	}
 }
 
-// A bare root invocation prints help and exits non-zero.
+// A bare root invocation prints help on stderr and exits non-zero.
 func TestCLI_rootWithNoArgs(t *testing.T) {
-	p, out, _ := newTestCLI(t)
+	p, out, errb := newTestCLI(t)
 	code, err := p.Run(nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -115,8 +115,44 @@ func TestCLI_rootWithNoArgs(t *testing.T) {
 	if code == 0 {
 		t.Error("bare invocation exited 0; it printed usage, so it should signal a mistake")
 	}
-	if !strings.Contains(out.String(), "Usage:") {
-		t.Errorf("bare invocation printed no usage:\n%s", out.String())
+	if !strings.Contains(errb.String(), "Usage:") {
+		t.Errorf("bare invocation printed no usage on stderr:\n%s", errb.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("bare invocation wrote to stdout:\n%s", out.String())
+	}
+}
+
+// failingWriter fails every write, as stdout does on a full disk.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+// A failed write to stdout fails the run instead of exiting 0 with nothing written.
+func TestCLI_writeErrorsFailTheRun(t *testing.T) {
+	for _, argv := range [][]string{
+		{"version"},
+		{"--version"},
+		{"--help"},
+		{"help"},
+		{"completion", "bash"},
+		{"man"},
+	} {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			errb := &bytes.Buffer{}
+			p := NewProgram(Handlers()).
+				WithStdout(failingWriter{}).
+				WithStderr(errb).
+				WithExit(func(int) { t.Error("Run must not exit the process") }).
+				WithVersion(testVersion)
+			code, _ := p.Run(argv)
+			if code == 0 {
+				t.Error("exited 0 although stdout could not be written")
+			}
+			if !strings.Contains(errb.String(), "write output: no space left on device") {
+				t.Errorf("stderr = %q, want the write error", errb.String())
+			}
+		})
 	}
 }
 
@@ -624,12 +660,12 @@ func TestCLI_man(t *testing.T) {
 // `rotini man --dir <path>` creates the directory and writes every page as <name>.<section>.
 func TestCLI_manDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "man", "man1")
-	p, out, _ := newTestCLI(t)
+	p, _, errb := newTestCLI(t)
 	if code, err := p.Run([]string{"man", "--dir", dir}); code != 0 || err != nil {
 		t.Fatalf("man --dir = (%d, %v)", code, err)
 	}
-	if !strings.Contains(out.String(), "wrote 8 man pages to "+dir) {
-		t.Errorf("stdout = %q, want it to say what it wrote", out.String())
+	if !strings.Contains(errb.String(), "wrote 8 man pages to "+dir) {
+		t.Errorf("stderr = %q, want it to say what it wrote", errb.String())
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -649,7 +685,7 @@ func TestCLI_manDir(t *testing.T) {
 		t.Error("the file written for rotini man differs from what `rotini man man` prints")
 	}
 
-	p, _, errb := newTestCLI(t)
+	p, _, errb = newTestCLI(t)
 	if code, _ := p.Run([]string{"man", "generate", "--dir", dir}); code == 0 || !strings.Contains(errb.String(), "--dir writes every page") {
 		t.Errorf("man generate --dir = exit %d, stderr %q; want a usage error", code, errb.String())
 	}

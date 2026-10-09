@@ -115,8 +115,8 @@ type CommandDef struct {
 
 // Constraints carries the validation bounds a spec may declare on a flag or argument. The
 // parser enforces them after reconciliation, so a value supplied via env or config is checked
-// too. The numeric bounds are pointers, nil meaning unset, so `minimum: 0` is an enforced bound.
-// For the length and count bounds 0 means unset, so a maximum of 0 cannot be expressed.
+// too. The numeric bounds and the two maximums are pointers, nil meaning unset, so `minimum: 0`
+// and `maxItems: 0` are enforced bounds. For the two minimums 0 means unset.
 type Constraints struct {
 	Minimum          *float64 // inclusive numeric lower bound; nil = unset
 	Maximum          *float64 // inclusive numeric upper bound; nil = unset
@@ -124,14 +124,14 @@ type Constraints struct {
 	ExclusiveMaximum *float64 // strict numeric upper bound (value must be <); nil = unset
 	MultipleOf       *float64 // the value must be an integer multiple (strictly positive); nil = unset
 	MinLength        int      // minimum string length in runes; 0 = unset
-	MaxLength        int      // maximum string length in runes; 0 = unset
+	MaxLength        *int     // maximum string length in runes; nil = unset
 	MinItems         int      // minimum item count (repeatable flag / variadic argument); 0 = unset
-	MaxItems         int      // maximum item count; 0 = unset
+	MaxItems         *int     // maximum item count; nil = unset
 	Pattern          string   // regular expression the value must contain (string types); "" = unset
 	PatternMessage   string   // what a Pattern failure tells the user, in place of the regex; "" = show the regex
 }
 
-// Ptr returns a pointer to v, for the numeric [Constraints] bounds:
+// Ptr returns a pointer to v, for the pointer [Constraints] bounds:
 // Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0. Prefer the built-in new(v);
 // go fix inlines Ptr to it.
 //

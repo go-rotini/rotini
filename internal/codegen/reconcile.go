@@ -104,6 +104,30 @@ func (s *Spec) normalize() {
 	inheritScalarRefConstraints(s)
 	hoistItemConstraints(s)
 	normalizeBounds(s)
+	impliedStdinSchemas(s)
+}
+
+// impliedStdinSchemas gives a raw-format stdin the schema its format implies when the spec
+// leaves it out or declares one with no type: `stdin: {format: lines}` binds []string just as
+// `schema: {type: '[]string'}` would, and `schema: {required: true}` need only say what it adds.
+func impliedStdinSchemas(s *Spec) {
+	walkCommands(s, func(c *Command, _ string) {
+		if c.Stdin == nil || !rawStdinFormat(c.Stdin.Format) {
+			return
+		}
+		if c.Stdin.Schema == nil {
+			c.Stdin.Schema = &InputSchema{}
+		}
+		if c.Stdin.Schema.Type != "" || c.Stdin.Schema.Ref != "" {
+			return
+		}
+		switch c.Stdin.Format {
+		case "text":
+			c.Stdin.Schema.Type = "string"
+		case "lines":
+			c.Stdin.Schema.Type = "[]string"
+		}
+	})
 }
 
 // normalizeBounds converts a bound written in a measured type's spelling (`minimum: 1s` on a
@@ -237,7 +261,7 @@ func fillUnsetConstraints(dst, src *BaseSchema) {
 	if dst.MinLength == 0 {
 		dst.MinLength = src.MinLength
 	}
-	if dst.MaxLength == 0 {
+	if dst.MaxLength == nil {
 		dst.MaxLength = src.MaxLength
 	}
 	for _, pair := range [][2]*any{{&dst.Minimum, &src.Minimum}, {&dst.Maximum, &src.Maximum},

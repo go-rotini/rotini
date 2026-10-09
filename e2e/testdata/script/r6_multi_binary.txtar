@@ -368,7 +368,7 @@ import (
 )
 
 func main() {
-	parent.Program.Execute()
+	parent.NewProgram(parent.Handlers()).Execute()
 }
 -- cmd/alpha/main.go --
 package main
@@ -378,7 +378,7 @@ import (
 )
 
 func main() {
-	alpha.Program.Execute()
+	alpha.NewProgram(alpha.Handlers()).Execute()
 }
 -- cmd/beta/main.go --
 package main
@@ -388,5 +388,5 @@ import (
 )
 
 func main() {
-	beta.Program.Execute()
+	beta.NewProgram(beta.Handlers()).Execute()
 }

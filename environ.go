@@ -183,10 +183,10 @@ func homeFrom(goos string, getenv func(string) string) (string, error) {
 	return "", errors.New(shown + " is not defined")
 }
 
-// xdgConfigHome is the XDG base config directory on every platform: $XDG_CONFIG_HOME when
-// set, else ~/.config.
+// xdgConfigHome is the XDG base config directory on every platform: $XDG_CONFIG_HOME when it
+// is an absolute path, else ~/.config. A relative value is ignored, as the XDG spec requires.
 func (v *osView) xdgConfigHome() (string, error) {
-	if d := v.getenv("XDG_CONFIG_HOME"); d != "" {
+	if d := v.getenv("XDG_CONFIG_HOME"); d != "" && filepath.IsAbs(d) {
 		return d, nil
 	}
 	h, err := v.home()

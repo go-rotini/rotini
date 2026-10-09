@@ -1,0 +1,46 @@
+# Bounds that leave no value mean every run fails: the range is empty, or the minimum length or
+# count is above the maximum.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    # Reported once here, not again on the flag that refers to it.
+    Window:
+      type: int
+      minimum: 10
+      maximum: 1
+  commands:
+    - name: deploy
+      flags:
+        # Correct: a range with values in it. No problem.
+        - name: workers
+          schema: { type: int, minimum: 1, maximum: 8 }
+        - name: replicas
+          schema: { type: int, minimum: 10, maximum: 1 }
+        # No integer lies strictly between 1 and 2.
+        - name: port
+          schema: { type: int, exclusiveMinimum: 1, exclusiveMaximum: 2 }
+        # No number lies strictly between 1 and 1.
+        - name: ratio
+          schema: { type: float64, exclusiveMinimum: 1, exclusiveMaximum: 1 }
+        # Printed in the input's own unit.
+        - name: timeout
+          schema: { type: duration, minimum: 1m, maximum: 30s }
+        - name: mode
+          schema: { type: string, minLength: 5, maxLength: 2 }
+        # maxLength 0 is a real bound.
+        - name: label
+          schema: { type: string, minLength: 1, maxLength: 0 }
+        - name: tags
+          schema: { type: '[]string', minItems: 5, maxItems: 2 }
+        - name: window
+          schema: { $ref: Window }
+      stdin:
+        format: json
+        schema:
+          type: object
+          properties:
+            limits:
+              type: object
+              properties:
+                max: { type: integer, minimum: 5, maximum: 3 }

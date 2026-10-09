@@ -589,3 +589,49 @@ func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
 		}
 	}
 }
+
+// TestHelpPage_secretDefaultHidden pins that help, man and markdown never show a secret
+// input's default on any channel, while an explicit default_text still shows.
+func TestHelpPage_secretDefaultHidden(t *testing.T) {
+	spec := `version: 0.0.0
+command:
+  name: acme
+  summary: acme control
+  config_files:
+    - name: project
+      path: .acme.yaml
+  flags:
+    - name: token
+      summary: api token
+      identifiers: [--token]
+      schema: {type: string, secret: true, default: hunter2}
+    - name: key
+      summary: signing key
+      identifiers: [--key]
+      schema: {type: string, secret: true, default: hunter3, default_text: from the vault}
+  arguments:
+    - name: pass
+      summary: a password
+      schema: {type: string, secret: true, default: hunter4}
+  env:
+    - name: api-key
+      summary: api key
+      schema: {type: string, secret: true, default: hunter5}
+  config:
+    - name: password
+      summary: db password
+      schema: {type: string, secret: true, default: hunter6}
+`
+	dir, _ := emitModule(t, spec, featureConfInline)
+	gen := readEmitted(t, dir, "internal/cmd/acme/zz_acme.go")
+	for _, leaked := range []string{"hunter2", "hunter4", "hunter5", "hunter6"} {
+		for _, shown := range []string{"default " + leaked, "default `" + leaked + "`", `default \"` + leaked} {
+			if strings.Contains(gen, shown) {
+				t.Errorf("a page shows the secret default %q", shown)
+			}
+		}
+	}
+	if !strings.Contains(gen, "default from the vault") {
+		t.Error("an explicit default_text on a secret input should still show")
+	}
+}

@@ -47,6 +47,23 @@ stderr '^Error: .*variadic'
 stderr '^Error: .*declared twice'
 stderr '^Error: .*variadic'
 
+# Bounds that leave no value can never work: an error, positioned, naming the fix.
+! exec rotini validate bounds.spec.yaml --config ok.conf.yaml
+stderr '\.spec\.yaml:\d+:\d+'
+stderr '`minimum` 10 is above `maximum` 1'
+stderr 'lower `minimum` or raise `maximum`'
+
+# A warning goes to stderr as "Warning:" and never fails the run.
+exec rotini validate shortonly.spec.yaml --config ok.conf.yaml
+stderr '^Warning: .*has only a short identifier \(-v\)'
+! stderr 'Error'
+
+# A key written twice in one mapping is rejected where the second one stands, instead of one
+# silently replacing (or merging into) the other.
+! exec rotini validate dupkey.spec.yaml --config ok.conf.yaml
+stderr '^Error: spec: dupkey\.spec\.yaml:7:7: /command/flags/0/schema: duplicate key "schema" \(first at line 6\)'
+! stderr 'rotini bug'
+
 # And the valid document passes, silently, with exit 0 — the control case that proves the
 # rejections above are about the documents and not about the harness.
 exec rotini validate ok.spec.yaml --config ok.conf.yaml
@@ -123,3 +140,26 @@ command:
     - name: target
       schema:
         type: string
+-- bounds.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  flags:
+    - name: replicas
+      schema: { type: int, minimum: 10, maximum: 1 }
+-- shortonly.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  flags:
+    - name: verbose
+      identifiers: [-v]
+      schema: { type: bool }
+-- dupkey.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  flags:
+    - name: debug
+      schema: { type: bool }
+      schema: { type: string, default: x }

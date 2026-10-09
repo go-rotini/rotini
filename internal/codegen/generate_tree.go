@@ -159,6 +159,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		stdinFormat:    stdinFormatExpr(root.inputs()),
 		inputs:         []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
 		exitCodes:      exitCodesOf(root.ExitStatus),
+		secret:         hasSecretInput(root.inputs()),
 	}
 
 	absSpec := specPath
@@ -234,6 +235,8 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				stdinFormat:    stdinFormatExpr(c.inputs()),
 				inputs:         inputsFields(gp.rootPascal, path),
 				exitCodes:      exitCodesOf(c.ExitStatus),
+				hasChildren:    len(c.Commands) > 0 || len(c.Plugins) > 0 || c.PluginDiscovery != nil,
+				secret:         hasSecretInput(c.inputs()),
 			}
 			if c.Handler != nil {
 				// Inline passthrough: an own command whose handler lives in another
@@ -664,6 +667,8 @@ type genCommand struct {
 	stdinFormat    string     // stdin decode format, e.g. "yaml"; "" when no stdin
 	inputs         []fieldDef // InputsFields for this command's <Prefix>Inputs
 	exitCodes      []int      // the codes its spec's exit_status lists, for the handler audit
+	hasChildren    bool       // it declares sub-commands, plugins or plugin discovery
+	secret         bool       // one of its own inputs is secret, so its stub never prints inputs
 
 	// Inline passthrough: the command's types are generated locally, but the rollup
 	// returns delegateAlias.delegateMethod() instead of a stub, and no stub is seeded.

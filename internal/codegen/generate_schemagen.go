@@ -184,11 +184,12 @@ type pathFromClaim struct {
 
 // collectStdinSchemas maps each own command's "<Prefix>Stdin" name to the self-contained JSON
 // Schema the input reader validates its stdin payload against, or returns nil when none
-// declare stdin.
+// declare a decoded stdin. A raw format (text, lines) binds the payload as is, with no
+// <Prefix>Stdin type and nothing to validate, so it has no entry.
 func collectStdinSchemas(gp *program) map[string]string {
 	out := map[string]string{}
 	add := func(prefix string, in *Inputs) {
-		if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
+		if in == nil || in.Stdin == nil || in.Stdin.Schema == nil || rawStdinFormat(in.Stdin.Format) {
 			return
 		}
 		// Only the schema's shape (its BaseSchema) validates, matching the generated type.

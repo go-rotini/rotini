@@ -48,6 +48,9 @@ func ruleNames() []string {
 	for _, fn := range specLints {
 		add(fn)
 	}
+	for _, fn := range crossLints {
+		add(fn)
+	}
 	for _, fn := range confLints {
 		add(fn)
 	}

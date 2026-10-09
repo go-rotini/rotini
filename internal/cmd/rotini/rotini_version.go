@@ -22,6 +22,9 @@ func (*rotiniVersionHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "v%s\n", rtx.Version())
+	if _, err := fmt.Fprintf(rtx.Stdout, "v%s\n", rtx.Version()); err != nil {
+		haltWithWriteError(rtx, err)
+		return
+	}
 	rtx.HaltWithCode(0)
 }

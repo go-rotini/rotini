@@ -140,6 +140,6 @@ import (
 )
 
 func main() {
-	own.Program.
+	own.NewProgram(own.Handlers()).
 		Execute()
 }

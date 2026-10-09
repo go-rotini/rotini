@@ -1123,7 +1123,7 @@ func TestInputError_envCoercion_isCleanUsage(t *testing.T) {
 	// Non-leaky message: names the input in plain language, never echoes recon
 	// internals or the bad value.
 	msg := err.Error()
-	if !strings.Contains(msg, "environment variable") || !strings.Contains(msg, `"loud"`) || !strings.Contains(msg, "expected") {
+	if !strings.HasPrefix(msg, "environment variable LOUD: expected") {
 		t.Errorf("message = %q, want a clean environment-variable phrasing", msg)
 	}
 	if strings.Contains(msg, "recon") || strings.Contains(msg, "junk") {
@@ -1495,7 +1495,7 @@ func TestInputReader_badFallbackValueIsAUsageError(t *testing.T) {
 		var in tbFallbackInputs
 		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
 			Read(NewContextFor(tbFallbackDef(false), nil), &in)
-		if err == nil || !strings.Contains(err.Error(), `configuration file "app"`) {
+		if err == nil || !strings.Contains(err.Error(), "configuration file "+cfg+", key port") {
 			t.Fatalf("err = %v, want it to name the configuration file", err)
 		}
 	})
@@ -1970,7 +1970,7 @@ func TestTrimAcquiredPayload_oneRuleForBothPaths(t *testing.T) {
 	}
 	var channel *string
 	sf := reflect.ValueOf(&channel).Elem()
-	if err := bindRawStdin(sf, "text", []byte(payload)); err != nil {
+	if err := bindRawStdin(sf, "text", payload); err != nil {
 		t.Fatalf("bindRawStdin: %v", err)
 	}
 

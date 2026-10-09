@@ -90,7 +90,7 @@ func TestStructuredReporter_text(t *testing.T) {
 		"no command at all":    {wantsJSON, nil},
 	} {
 		stdout, stderr, code := runReporter(tc.structured, tc.argv, out, 0)
-		if stdout != "hello\n" || stderr != "Error: nope\n" || code != 1 {
+		if stdout != "" || stderr != "hello\nError: nope\n" || code != 1 {
 			t.Errorf("%s: stdout %q, stderr %q, exit %d; want the default reporter's text", name, stdout, stderr, code)
 		}
 	}

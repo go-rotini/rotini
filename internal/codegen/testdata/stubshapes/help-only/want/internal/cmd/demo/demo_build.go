@@ -23,5 +23,7 @@ func (*demoBuildHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "demo build", inputs)
+	if _, err := fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "demo build", inputs); err != nil {
+		rtx.HaltWith(err)
+	}
 }

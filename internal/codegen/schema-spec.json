@@ -127,7 +127,7 @@
         },
         "flag_groups": {
           "type": "array",
-          "description": "Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).",
+          "description": "Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair). Groups that contradict each other or a flag dependency are rejected, as is a required flag in a mutually_exclusive group with no env or config fallback.",
           "items": {
             "$ref": "#/definitions/FlagGroup"
           }
@@ -440,9 +440,12 @@
           "description": "Minimum string length in runes (string types only; for []string, each element) \u2014 rejected on non-string types."
         },
         "maxLength": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Maximum string length in runes (string types only; for []string, each element) \u2014 rejected on non-string types."
+          "description": "Maximum string length in runes (string types only; for []string, each element) \u2014 rejected on non-string types. maxLength: 0 is a real bound: only the empty string is accepted. A maxLength below minLength is rejected, since no value could pass."
         },
         "minItems": {
           "type": "integer",
@@ -450,9 +453,12 @@
           "description": "Minimum number of values for a repeatable (array or map) input \u2014 rejected on scalar types. A list flag or variadic argument that is left out has zero values, so minItems also applies to it unless it has a default (add required for the message to say the input is missing). An env or config list is checked only when it is set."
         },
         "maxItems": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
-          "description": "Maximum number of values for a repeatable (array or map) input \u2014 rejected on scalar types."
+          "description": "Maximum number of values for a repeatable (array or map) input \u2014 rejected on scalar types. maxItems: 0 is a real bound: no value is accepted. A maxItems below minItems is rejected, since no value could pass."
         },
         "properties": {
           "type": "object",
@@ -505,7 +511,7 @@
               "type": "boolean",
               "x-hint": "on an input, required is true or false; a list of property names (required: [host]) belongs on an object schema under schemas",
               "default": false,
-              "description": "When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean \u2014 unlike the string-array 'required' on Schema."
+              "description": "When true, the input must be provided (or stdin must not be empty for stdin inputs). Rejected beside a `default`, which would always supply the value. Note: this is a boolean \u2014 unlike the string-array 'required' on Schema."
             },
             "default": {
               "description": "The value an input takes when nothing supplies one. A scalar for a single value; a list for a repeatable input, each element added as one occurrence (as if the flag were repeated); a mapping for a map input, added as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). Write it the way a user would type the value (a duration as 30s, a date as 2026-09-29 or in the input's `layout:`). `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that uses it. A supplied value replaces the default; the two never merge. `default_text:` changes only how help shows it."
@@ -692,7 +698,7 @@
         },
         "identifiers": {
           "type": "array",
-          "description": "CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' \u2192 --dry-run).",
+          "description": "CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' \u2192 --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle, and an identifier that hides one of a cascading or short-circuit ancestor flag's.",
           "minItems": 1,
           "items": {
             "type": "string",
@@ -808,7 +814,7 @@
       "properties": {
         "schema": {
           "$ref": "#/definitions/InputSchema",
-          "description": "Type definition for stdin content. Set required: true in schema to error when stdin is empty."
+          "description": "Type definition for stdin content. Set required: true in schema to error when stdin is empty. The document formats need a `type` or `$ref` here; the raw formats imply theirs, so `schema:` may be left out or hold only `required`."
         },
         "format": {
           "type": "string",
@@ -821,7 +827,7 @@
             "lines"
           ],
           "default": "json",
-          "description": "How the piped stdin payload is read.\n\nThe four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin struct, validated against the declared schema. The default is json.\n\nThe two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion."
+          "description": "How the piped stdin payload is read.\n\nThe four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin struct, validated against the declared schema. The default is json.\n\nThe two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and is implied when left out; neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.\n\nOne leading UTF-8 byte-order mark is removed before the payload is read, in every format."
         }
       }
     },
@@ -966,7 +972,7 @@
                 "walk-up",
                 "xdg"
               ],
-              "description": "'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.\n\n'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead."
+              "description": "'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.\n\n'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows)."
             },
             "file": {
               "type": "string",

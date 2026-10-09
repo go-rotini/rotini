@@ -52,7 +52,7 @@ type PathFromDef struct {
 // DiscoverDef locates a configuration file at run time. The strategy orders the directories
 // searched for File; the first containing it wins, and a file found nowhere is absent.
 type DiscoverDef struct {
-	Strategy string // "walk-up" (working directory up to the filesystem root) | "xdg" ($XDG_CONFIG_HOME/<app>, default ~/.config/<app>)
+	Strategy string // "walk-up" (working directory up to the filesystem root) | "xdg" ($XDG_CONFIG_HOME/<app> when absolute, else ~/.config/<app>)
 	File     string // the file name looked for in each searched directory
 	App      string // the application directory under the XDG config root (xdg only)
 }

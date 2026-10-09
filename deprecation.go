@@ -94,6 +94,15 @@ func flagDeprecations(fd FlagDef, used []string) []Deprecation {
 // value acquisition off, so asking what argv says never reads a file or stdin. nil when argv
 // does not parse.
 func quietParse(chain []Command, argv []string) *parsedInputs {
+	store, err := quietTokens(chain, argv)
+	if err != nil {
+		return nil
+	}
+	return store
+}
+
+// quietTokens is quietParse that also returns the parse error.
+func quietTokens(chain []Command, argv []string) (*parsedInputs, error) {
 	quiet := make([]Command, len(chain))
 	for i, frame := range chain {
 		flags := make([]FlagDef, len(frame.Flags))
@@ -104,11 +113,7 @@ func quietParse(chain []Command, argv []string) *parsedInputs {
 		frame.Flags = flags
 		quiet[i] = frame
 	}
-	store, err := parseArgvTokens(quiet, argv, argvAcq{})
-	if err != nil {
-		return nil
-	}
-	return store
+	return parseArgvTokens(quiet, argv, argvAcq{})
 }
 
 // argumentDeprecations reports each deprecated argument of the leaf that argv supplied a value

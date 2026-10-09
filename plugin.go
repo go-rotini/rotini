@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -107,8 +108,9 @@ type PluginDispatch struct {
 // execPlugin locates and runs the co-located plugin binary, passing stdio through, honoring
 // the run context and any timeout, and returning the plugin's exit code. Rotini's own dispatch
 // failures are recorded as errors and routed through the reporter; the plugin's non-zero exit
-// passes through unchanged. chain is the resolved path; its last command is the one that dispatched, whose names are a
-// discovered token's candidates.
+// passes through unchanged, and a plugin a signal ended gives 128+n. chain is the resolved
+// path; its last command is the one that dispatched, whose names are a discovered token's
+// candidates.
 func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command, r *PluginDispatch) (int, error) {
 	path, err := resolvePluginBinary(r.Def.Binary, r.Dir, rtx.osView())
 	if err != nil {
@@ -156,13 +158,28 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 		})
 	default:
 		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
-			return ee.ExitCode(), err
+			return pluginExitCode(ctx, ee), err
 		}
 		return p.pluginFailure(ctx, rtx, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginStartFailed,
 			Cause: err, Msg: fmt.Sprintf("%s: %v", r.Def.Name, err), cat: CategoryInternal,
 		})
 	}
+}
+
+// pluginExitCode is the host's exit code for a plugin that ended unsuccessfully: the run's
+// cancellation code when an exit-coded cancellation (a trapped signal, or [ExitCause]) killed it,
+// 128+n when a signal ended it, and its own exit status otherwise.
+func pluginExitCode(ctx context.Context, ee *exec.ExitError) int {
+	if ctx.Err() != nil {
+		if code := canceledExitCode(ctx); code != 0 {
+			return code
+		}
+	}
+	if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return 128 + int(ws.Signal())
+	}
+	return ee.ExitCode()
 }
 
 // pluginFailure records a plugin dispatch error and settles the run. A missing, timed-out or

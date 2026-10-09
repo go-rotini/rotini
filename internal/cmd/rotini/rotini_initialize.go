@@ -37,7 +37,10 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 			rtx.HaltWith(err)
 			return
 		}
-		fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", planned.Spec, planned.Conf)
+		if _, err := fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", planned.Spec, planned.Conf); err != nil {
+			haltWithWriteError(rtx, err)
+			return
+		}
 		reportPlanned(rtx, planned.Result, planned.Changes)
 		return
 	}
@@ -51,7 +54,10 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n%s\n", written.Spec, written.Conf, written.Result)
+	if _, err := fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n%s\n", written.Spec, written.Conf, written.Result); err != nil {
+		haltWithWriteError(rtx, err)
+		return
+	}
 
 	// init does not edit go.mod, so it warns when the module does not yet require the runtime
 	// the scaffold imports.

@@ -71,8 +71,15 @@ jobs:
           # The seeded CLI must be usable, not merely compilable: --help has to work.
           go build -o fidelity ./cmd/fidelity
           ./fidelity --help
-          ./fidelity version
           ./fidelity help version
+
+          # Its version output names the program first. main.go's version stays 0.0.0 unless
+          # stamped, so only the name is checked.
+          got=$(./fidelity version | tr -d '\r')
+          case "$got" in
+            "fidelity "*) ;;
+            *) echo "::error::./fidelity version printed '$got', want 'fidelity <version>'"; exit 1 ;;
+          esac
 
       - name: The published $schema URL must resolve
         if: matrix.os == 'ubuntu-latest'

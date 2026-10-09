@@ -1,1 +1,2 @@
 spec: .rotini.spec.yaml:12:7: command demo: `flag_groups` entry (mutually_exclusive) references unknown flag "yaml"; it has no matching entry in this command's `flags`
+spec: .rotini.spec.yaml:17:7: command demo: `flag_groups` entry (mutually_exclusive) lists flag "json" twice; list each flag once

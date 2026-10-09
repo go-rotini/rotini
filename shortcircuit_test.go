@@ -291,7 +291,7 @@ func TestShortCircuit_brokenConfigWithoutWaiver(t *testing.T) {
 	if _, ok := errors.AsType[*recon.ParseError](err); !ok {
 		t.Errorf("Read = %v, want the recon parse error reachable", err)
 	}
-	if !strings.Contains(err.Error(), `configuration file "project"`) {
+	if !strings.Contains(err.Error(), "could not parse configuration file ") || !strings.Contains(err.Error(), ".app.yaml:1:11: ") {
 		t.Errorf("Read = %q, want the file named", err)
 	}
 }

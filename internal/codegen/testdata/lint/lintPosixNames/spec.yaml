@@ -1,0 +1,7 @@
+# With validate.posix_names, the program's name should be a POSIX utility name.
+version: 0.0.0
+command:
+  name: MyTool
+  commands:
+    # Correct: sub-command names aren't utilities. No problem.
+    - name: list-all

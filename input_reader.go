@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -149,7 +150,8 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		defer cfg.Close()
 	}
 
-	if err := fillChannels(v, envReg, cfg, waived, view); err != nil {
+	labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
+	if err := fillChannels(v, envReg, cfg, waived, labels); err != nil {
 		return err
 	}
 
@@ -186,6 +188,10 @@ func validateStore(chain []Command, store *parsedInputs) error {
 // schema before binding. With nothing piped the field stays nil, or a required payload is a
 // usage error. A short-circuited run (waived) still decodes what was piped but skips the
 // required and schema checks.
+//
+// Stdin is read once per run (see stdinState), so a later call binds the same payload. A read of
+// piped stdin ends when the run is canceled, with an [*InputError] whose cause is the
+// cancellation's.
 func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool) error {
 	if v.Kind() != reflect.Struct || v.NumField() == 0 {
 		return nil
@@ -205,11 +211,11 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool) erro
 	}
 	format, required := parseStdinTag(format)
 
-	data, err := readStdin(rtx.Stdin)
+	text, err := rtx.slurpStdin()
 	if err != nil {
-		return internalBind(channelStdin, "", "could not read stdin", err)
+		return err
 	}
-	if len(data) == 0 {
+	if text == "" {
 		if required && !waived {
 			noun := "document"
 			if isRawStdinFormat(format) {
@@ -219,10 +225,22 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool) erro
 		}
 		return nil // nothing piped → leave Stdin nil
 	}
+	if strings.HasPrefix(text, "\xff\xfe") || strings.HasPrefix(text, "\xfe\xff") {
+		return usageBind(channelStdin, "", "stdin is UTF-16 encoded; pipe UTF-8 instead", nil)
+	}
 
 	// A raw format binds the payload itself rather than decoding a document.
 	if isRawStdinFormat(format) {
-		return bindRawStdin(sf, format, data)
+		return bindRawStdin(sf, format, text)
+	}
+
+	data := stripBOM([]byte(text))
+	js := b.stdinSchemas[sf.Type().Elem().Name()]
+	if waived {
+		js = ""
+	}
+	if sf.Type().Elem().Kind() != reflect.Struct {
+		return bindStdinValue(sf, format, data, js)
 	}
 
 	codec, ok := recon.DefaultCodecs().ByName(format)
@@ -231,10 +249,10 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool) erro
 	}
 	m, err := codec.Decode(data)
 	if err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("could not decode stdin as %s", format), err)
+		return stdinDecodeError(format, data, err)
 	}
 
-	if js := b.stdinSchemas[sf.Type().Elem().Name()]; js != "" && !waived {
+	if js != "" {
 		validator, err := schemaValidator(js)
 		if err != nil {
 			return internalBind(channelStdin, "", "invalid stdin schema", err)
@@ -259,23 +277,56 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool) erro
 	return nil
 }
 
+// bindStdinValue binds a stdin document whose type is not an object, such as a list: decoded
+// to JSON, checked against schema (when given), then unmarshaled into the field.
+func bindStdinValue(sf reflect.Value, format string, data []byte, schema string) error {
+	raw, err := decodeDocumentJSON(format, data)
+	if err != nil {
+		return stdinDecodeError(format, data, err)
+	}
+	if schema != "" {
+		if err := validateDocumentJSON(schema, raw); err != nil {
+			return err
+		}
+	}
+	ptr := reflect.New(sf.Type().Elem())
+	if err := json.Unmarshal(raw, ptr.Interface()); err != nil {
+		return usageBind(channelStdin, "", fmt.Sprintf("could not bind stdin: %s", describeDecodeError(err, raw).msg), err)
+	}
+	sf.Set(ptr)
+	return nil
+}
+
+// stdinDecodeError reports a stdin document that did not decode, with the decoder's position
+// and reason.
+func stdinDecodeError(format string, data []byte, err error) error {
+	f := describeDecodeError(err, data)
+	msg := "could not parse stdin as " + format
+	if f.line > 0 {
+		msg += fmt.Sprintf(" at line %d, column %d", f.line, f.col)
+	}
+	return usageBind(channelStdin, "", msg+": "+f.msg, err)
+}
+
 // isRawStdinFormat reports whether format binds stdin directly instead of decoding it.
 func isRawStdinFormat(format string) bool { return format == "text" || format == "lines" }
 
-// trimAcquiredPayload is the single trimming rule for bytes rotini reads on the user's behalf,
+// trimAcquiredPayload is the single trimming rule for text rotini reads on the user's behalf,
 // shared by the stdin channel and the argv value sentinels (`--flag @file`, `--flag -`) so the
-// same bytes yield the same value on either path. It removes one trailing line ending (an
-// artifact of delivery, such as an editor's final newline) and nothing else: leading and
-// interior whitespace is content.
+// same bytes yield the same value on either path. It removes one leading UTF-8 byte-order mark
+// and one trailing line ending (artifacts of delivery, such as an editor's) and nothing else:
+// leading and interior whitespace is content.
 func trimAcquiredPayload(s string) string {
+	s = strings.TrimPrefix(s, utf8BOM)
 	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
 }
 
-// bindRawStdin sets a raw stdin field from the piped bytes: the whole payload as one string
-// for "text", or its newline-separated lines for "lines". Only the trailing line ending is
-// trimmed (see trimAcquiredPayload), so a final newline adds no empty element.
-func bindRawStdin(sf reflect.Value, format string, data []byte) error {
-	payload := trimAcquiredPayload(string(data))
+// bindRawStdin sets a raw stdin field from the piped text: the whole payload as one string
+// for "text", or its newline-separated lines for "lines". Only a leading byte-order mark and
+// the trailing line ending are trimmed (see trimAcquiredPayload), so a final newline adds no
+// empty element.
+func bindRawStdin(sf reflect.Value, format, text string) error {
+	payload := trimAcquiredPayload(text)
 
 	switch format {
 	case "text":
@@ -340,6 +391,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 	if err != nil {
 		return err
 	}
+	rd := fallbackRead{view: view, waiveFiles: waived, files: sourcePaths(files)}
 	srcs := make([]recon.Source, 0, 2+len(files))
 	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, b.envPrefix, view))
 	srcs = append(srcs, files...)
@@ -359,7 +411,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 		}
 		ft := flags.Type()
 		for j := range flags.NumField() {
-			if err := reconcileFlag(reg, flags.Field(j), ft.Field(j), chain, store, anchor+i, fallbackRead{view: view, waiveFiles: waived}); err != nil {
+			if err := reconcileFlag(reg, flags.Field(j), ft.Field(j), chain, store, anchor+i, rd); err != nil {
 				return err
 			}
 		}
@@ -391,11 +443,12 @@ func chosenEnv(view *osView, names string) string {
 }
 
 // fallbackRead is how a flag's fallback is read: the run's view, which names the variable an
-// error reports, and whether a short-circuited run skips a configuration file's value that the
-// flag's type cannot hold.
+// error reports, whether a short-circuited run skips a configuration file's value that the
+// flag's type cannot hold, and the file each configuration source read, by logical name.
 type fallbackRead struct {
 	view       *osView
 	waiveFiles bool
+	files      map[string]string
 }
 
 // reconcileFlag binds one fallback flag, at chain frame idx, from the registry: argv > env >
@@ -443,7 +496,7 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 			if rd.waiveFiles && source != osEnvSourceName {
 				return nil, "", nil
 			}
-			return nil, "", fallbackCoerceError(chain, idx, name, fallbackOrigin(rd.view, source, tag.Get("env")), err)
+			return nil, "", fallbackCoerceError(chain, idx, name, fallbackOrigin(rd, source, tag.Get("env"), key), err)
 		}
 	case field.Kind() == reflect.Map || (isObjectFlag(def) && field.Kind() != reflect.Slice):
 		// recon keeps a config map — or an object flag's config block — as its leaves
@@ -464,7 +517,7 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 	default:
 		return nil, "", nil
 	}
-	origin = fallbackOrigin(rd.view, source, tag.Get("env"))
+	origin = fallbackOrigin(rd, source, tag.Get("env"), key)
 	if def.IgnoreCase {
 		vals = canonicalEnum(def.Enum, vals)
 	}
@@ -587,9 +640,9 @@ func coerceFlagValues(f reflect.Value, def FlagDef, vals []string) error {
 }
 
 // fallbackOrigin names where a flag's fallback value came from in the user's terms: the
-// environment variable they set, or the configuration file by its declared name. recon's own
-// source names ("osenv") mean nothing to them.
-func fallbackOrigin(view *osView, source, envVar string) string {
+// environment variable they set, or the configuration file it was read from and the key that
+// held it. recon's own source names ("osenv") mean nothing to them.
+func fallbackOrigin(rd fallbackRead, source, envVar, key string) string {
 	switch source {
 	case "":
 		return ""
@@ -597,9 +650,13 @@ func fallbackOrigin(view *osView, source, envVar string) string {
 		if envVar == "" {
 			return "the environment"
 		}
-		return "environment variable " + chosenEnv(view, envVar)
+		return "environment variable " + chosenEnv(rd.view, envVar)
 	}
-	return fmt.Sprintf("configuration file %q", source)
+	file := rd.files[source]
+	if file == "" {
+		return fmt.Sprintf("configuration source %q", source)
+	}
+	return fmt.Sprintf("configuration file %s, key %s", file, key)
 }
 
 // fallbackCoerceError reports a flag's env or config fallback value that its type cannot hold,
@@ -778,19 +835,20 @@ func hasConfigChannel(v reflect.Value) bool {
 
 // configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. overrides carries any config_source-supplied paths.
-func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys, waived bool, view *osView) (*recon.Registry, error) {
+func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
 	srcs, err := b.fileSources(files, overrides, waived, view)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	paths := sourcePaths(srcs)
 	for i, src := range srcs {
 		srcs[i] = spellings{Source: src, keys: keys}
 	}
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
-		return nil, internalBind(channelConfig, "", "could not build the configuration registry", err)
+		return nil, nil, internalBind(channelConfig, "", "could not build the configuration registry", err)
 	}
-	return reg, nil
+	return reg, paths, nil
 }
 
 // cfgRegs is the config channel's registries for one bind: the merged precedence chain plus
@@ -804,6 +862,7 @@ type cfgRegs struct {
 	perFile   map[string]*recon.Registry
 	waived    bool // a short-circuited run: a file that cannot be read, or a bad value, is skipped
 	view      *osView
+	paths     map[string]string // each source's file, by logical name, for messages
 }
 
 // configRegs builds the merged config registry and the lazy per-file cache over the sources in
@@ -812,11 +871,11 @@ type cfgRegs struct {
 func (b *InputReader) configRegs(chain []Command, overrides map[string]string, v reflect.Value, waived bool, view *osView) (*cfgRegs, error) {
 	files := b.chainConfigFiles(chain)
 	keys := channelValueKeys(v, "Config")
-	merged, err := b.configRegistry(files, overrides, keys, waived, view)
+	merged, paths, err := b.configRegistry(files, overrides, keys, waived, view)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{reader: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived, view: view}, nil
+	return &cfgRegs{reader: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived, view: view, paths: paths}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
@@ -862,6 +921,12 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		if err != nil {
 			return nil, err
 		}
+		if ns, ok := src.(namedSource); ok && ns.path != "" {
+			if c.paths == nil {
+				c.paths = map[string]string{}
+			}
+			c.paths[name] = ns.path
+		}
 		reg, err := recon.New(recon.WithSource(spellings{Source: src, keys: c.keys}))
 		if err != nil {
 			return nil, internalBind(channelConfig, name, fmt.Sprintf("could not build the registry for configuration file %q", name), err)
@@ -870,6 +935,14 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		return reg, nil
 	}
 	return nil, internalBind(channelConfig, name, fmt.Sprintf("input pinned to unknown configuration file %q", name), nil)
+}
+
+// labels names this channel's inputs and files for messages.
+func (c *cfgRegs) labels() channelLabels {
+	if c == nil {
+		return channelLabels{}
+	}
+	return channelLabels{files: c.paths, view: c.view}
 }
 
 // Close closes the merged registry and every per-file registry built so far.
@@ -952,7 +1025,7 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 		}
 		tmp := reflect.New(reflect.StructOf(fields))
 		if err := bindConfigWaived(reg, tmp.Interface(), regs.waived); err != nil {
-			return reconBind(channelConfig, err)
+			return regs.labels().bind(channelConfig, err)
 		}
 		for i, j := range idxs {
 			cs.Field(j).Set(tmp.Elem().Field(i))
@@ -981,14 +1054,26 @@ func (b *InputReader) fileSources(files []ConfigFile, overrides map[string]strin
 
 // namedSource renames a recon source to its config_files logical name, since recon source
 // names must be unique and two entries may share a basename. The wrapper drops live-watch
-// support, which the input reader does not use.
+// support, which the input reader does not use. path is the file it read, for messages.
 type namedSource struct {
 	recon.Source
 
 	name string
+	path string
 }
 
 func (s namedSource) Name() string { return s.name }
+
+// sourcePaths maps each configuration file source's logical name to the file it read.
+func sourcePaths(srcs []recon.Source) map[string]string {
+	out := map[string]string{}
+	for _, s := range srcs {
+		if ns, ok := s.(namedSource); ok && ns.path != "" {
+			out[ns.name] = ns.path
+		}
+	}
+	return out
+}
 
 // fileSource builds the recon source for one config_files entry, schema-checked, reading the
 // process environment and working directory.
@@ -1001,7 +1086,7 @@ func (b *InputReader) fileSource(f ConfigFile, overrides map[string]string) (rec
 // parsed is skipped, standing in as an empty source under its own name so precedence holds,
 // and no file is checked against its schema.
 func (b *InputReader) readFileSource(f ConfigFile, overrides map[string]string, waived bool, view *osView) (recon.Source, error) {
-	src, err := b.openFileSource(f, overrides, view)
+	src, path, err := b.openFileSource(f, overrides, view)
 	if err != nil {
 		if waived {
 			return namedSource{Source: recon.NewMapSource(f.Name, nil), name: f.Name}, nil
@@ -1013,27 +1098,29 @@ func (b *InputReader) readFileSource(f ConfigFile, overrides map[string]string, 
 			return nil, err
 		}
 	}
-	return namedSource{Source: src, name: f.Name}, nil
+	return namedSource{Source: src, name: f.Name, path: path}, nil
 }
 
-// openFileSource locates and parses one config_files entry. rotini expands the path itself,
-// from the run's view, so recon reads exactly the absolute path it is given.
-func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]string, view *osView) (recon.Source, error) {
+// openFileSource locates and parses one config_files entry, returning the source and the file
+// it resolved to. rotini expands the path and runs the discover search itself, from the run's
+// view, so recon reads exactly the absolute path it is given.
+func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]string, view *osView) (recon.Source, string, error) {
 	opts := []recon.FileOption{recon.WithPathExpansion(false)}
 	if f.Format != "" {
 		opts = append(opts, recon.WithFileFormat(f.Format))
 	}
 	path, overridden := overrides[f.Name]
+	var dirs []string
 	switch {
 	case overridden:
 		opts = append(opts, recon.WithOptional(false))
 	case f.Discover != nil:
-		dirs, err := discoverDirs(f.Discover, view)
-		if err != nil {
-			return nil, internalBind(channelConfig, f.Name, fmt.Sprintf("could not resolve the search path for configuration file %q", f.Name), err)
+		var err error
+		if dirs, err = discoverDirs(f.Discover, view); err != nil {
+			return nil, "", internalBind(channelConfig, f.Name, fmt.Sprintf("could not resolve the search path for configuration file %q", f.Name), err)
 		}
 		path = f.Discover.File
-		opts = append(opts, recon.WithOptional(true), recon.WithSearchPaths(dirs...))
+		opts = append(opts, recon.WithOptional(true))
 	default:
 		path = f.Path
 		opts = append(opts, recon.WithOptional(true))
@@ -1042,14 +1129,62 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]string, 
 	if err == nil {
 		resolved, err = absPath(view, resolved)
 	}
-	if err == nil {
-		var src recon.Source
-		if src, err = recon.NewFileSource(resolved, opts...); err == nil {
-			return src, nil
+	if err != nil {
+		return nil, "", usageBind(channelConfig, f.Name, fmt.Sprintf("could not resolve configuration file path %s: %v", path, err), err)
+	}
+	if dirs != nil {
+		resolved = searchFile(dirs, filepath.Base(resolved))
+	}
+	if c, ok := fileCodec(f.Format, resolved); ok {
+		opts = append(opts, recon.WithFileCodec(c))
+	}
+	src, err := recon.NewFileSource(resolved, opts...)
+	if err != nil {
+		// The file's content or path is the user's to fix.
+		return nil, "", usageBind(channelConfig, f.Name, configFileProblem(resolved, err), err)
+	}
+	return src, resolved, nil
+}
+
+// searchFile returns the first of dirs holding name, else name in the first directory, as a
+// discover search resolves it.
+func searchFile(dirs []string, name string) string {
+	for _, d := range dirs {
+		p := filepath.Join(d, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
 		}
 	}
-	// The file's content or path is the user's to fix.
-	return nil, usageBind(channelConfig, f.Name, fmt.Sprintf("could not open configuration file %q (%s)", f.Name, path), err)
+	if len(dirs) == 0 {
+		return name
+	}
+	return filepath.Join(dirs[0], name)
+}
+
+// configFileProblem says why a configuration file could not be used: where a syntax error is
+// and what it is, or why the file could not be read.
+func configFileProblem(path string, err error) string {
+	if de, ok := errors.AsType[*docError](err); ok {
+		loc := path
+		if at := de.failure.at(); at != "" {
+			loc += ":" + at
+		}
+		return fmt.Sprintf("could not parse configuration file %s: %s", loc, de.failure.msg)
+	}
+	reason := "cannot be read"
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		reason = "no such file"
+	case errors.Is(err, fs.ErrPermission):
+		reason = "permission denied"
+	case errors.Is(err, recon.ErrUnsupportedFormat):
+		reason = "unsupported format"
+	default:
+		if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+			reason = "is a directory"
+		}
+	}
+	return fmt.Sprintf("could not open configuration file %s: %s", path, reason)
 }
 
 // absPath makes p absolute against the run's directory, or the process working directory when
@@ -1069,26 +1204,26 @@ func validateConfigFile(f ConfigFile, src recon.Source) error {
 	if f.Schema == "" {
 		return nil
 	}
-	fs, ok := src.(*recon.FileSource)
+	fsrc, ok := src.(*recon.FileSource)
 	if !ok {
 		return nil
 	}
-	path := fs.Path()
+	path := fsrc.Path()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // absent: vacuous
 		}
 		// A present-but-unreadable file the user controls.
-		return usageBind(channelConfig, f.Name, fmt.Sprintf("could not read configuration file %q (%s)", f.Name, path), err)
+		return usageBind(channelConfig, f.Name, configFileProblem(path, err), err)
 	}
-	codec, ok := recon.DefaultCodecs().ByName(fs.Format())
+	codec, ok := fileCodec(fsrc.Format(), path)
 	if !ok {
-		return internalBind(channelConfig, f.Name, fmt.Sprintf("unsupported format %q for configuration file %q", fs.Format(), f.Name), nil)
+		return internalBind(channelConfig, f.Name, fmt.Sprintf("unsupported format %q for configuration file %s", fsrc.Format(), path), nil)
 	}
 	m, err := codec.Decode(data)
 	if err != nil {
-		return usageBind(channelConfig, f.Name, fmt.Sprintf("configuration file %q (%s) is not valid %s", f.Name, path, fs.Format()), err)
+		return usageBind(channelConfig, f.Name, configFileProblem(path, err), err)
 	}
 	validator, err := schemaValidator(f.Schema)
 	if err != nil {
@@ -1097,7 +1232,7 @@ func validateConfigFile(f ConfigFile, src recon.Source) error {
 	if err := validator.Validate(m); err != nil {
 		applyPatternMessages(f.Schema, err)
 		return usageBind(channelConfig, f.Name,
-			fmt.Sprintf("configuration file %q (%s) is invalid: %s", f.Name, path, schemaDetail(err)), err)
+			fmt.Sprintf("configuration file %s is invalid: %s", path, schemaDetail(err)), err)
 	}
 	return nil
 }
@@ -1146,8 +1281,8 @@ func storeFlagValue(store *parsedInputs, name string) (explicit, defaulted strin
 }
 
 // discoverDirs resolves a Discover strategy to the ordered directories searched: "walk-up" is
-// the run's working directory up to the filesystem root, "xdg" is $XDG_CONFIG_HOME/<app>,
-// defaulting to ~/.config/<app>, from the run's environment.
+// the run's working directory up to the filesystem root, "xdg" is $XDG_CONFIG_HOME/<app> when
+// that is absolute, else ~/.config/<app>, from the run's environment.
 func discoverDirs(d *DiscoverDef, view *osView) ([]string, error) {
 	switch d.Strategy {
 	case "walk-up":
@@ -1298,7 +1433,7 @@ func fillEnvNested(env reflect.Value, view *osView) (map[string]bool, error) {
 			if opt == "required" {
 				name := et.Field(j).Tag.Get("rotini")
 				return filled, usageBind(channelEnv, name,
-					fmt.Sprintf("environment input %q is required; set %s%s* variables", name, base, sep), nil)
+					fmt.Sprintf("environment variables %s%s* are required for %s", base, sep, name), nil)
 			}
 			continue
 		}
@@ -1332,8 +1467,9 @@ func envFamily(view *osView, base, sep string) map[string]any {
 // fillChannels walks a <Cmd>Inputs struct and recon-binds each command's Env struct from
 // envReg and its Config struct from cfg. A short-circuited run (waived) binds what resolves and
 // ignores missing required values, and skips a configuration value of the wrong type. A nil
-// registry belongs to a channel the struct describes no inputs of.
-func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived bool, view *osView) error {
+// registry belongs to a channel the struct describes no inputs of. labels names the env inputs
+// in errors.
+func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived bool, labels channelLabels) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1348,10 +1484,13 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 				if envReg == nil {
 					continue
 				}
-				if err := bindReconWaived(envReg, ci.Field(j).Addr().Interface(), waived); err != nil {
-					return reconBind(channelEnv, err)
+				if err := checkEnvMaps(ci.Field(j), envReg, labels); err != nil {
+					return err
 				}
-				if _, err := fillEnvNested(ci.Field(j), view); err != nil {
+				if err := bindReconWaived(envReg, ci.Field(j).Addr().Interface(), waived); err != nil {
+					return labels.bind(channelEnv, err)
+				}
+				if _, err := fillEnvNested(ci.Field(j), labels.view); err != nil {
 					return err
 				}
 			case "Config":
@@ -1359,7 +1498,7 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 					continue
 				}
 				if err := bindConfigWaived(cfg.merged, ci.Field(j).Addr().Interface(), waived); err != nil {
-					return reconBind(channelConfig, err)
+					return cfg.labels().bind(channelConfig, err)
 				}
 				if err := bindPinnedConfig(ci.Field(j), cfg); err != nil {
 					return err
@@ -1525,7 +1664,7 @@ func canonicalizeField(f reflect.Value, enum []string) {
 }
 
 // channelConstraints reads the validation struct-tags codegen emits on a channel field into a
-// [Constraints]. A numeric bound is set whenever its tag is present, so min:"0" enforces >= 0.
+// [Constraints]. A pointer bound is set whenever its tag is present, so min:"0" enforces >= 0.
 func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 	var c Constraints
 	has := false
@@ -1539,15 +1678,20 @@ func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 			*dst, has = n, true
 		}
 	}
+	intPtrTag := func(name string, dst **int) {
+		if n, err := strconv.Atoi(tag.Get(name)); err == nil {
+			*dst, has = new(n), true
+		}
+	}
 	floatTag("min", &c.Minimum)
 	floatTag("max", &c.Maximum)
 	floatTag("xmin", &c.ExclusiveMinimum)
 	floatTag("xmax", &c.ExclusiveMaximum)
 	floatTag("multipleof", &c.MultipleOf)
 	intTag("minlen", &c.MinLength)
-	intTag("maxlen", &c.MaxLength)
+	intPtrTag("maxlen", &c.MaxLength)
 	intTag("minitems", &c.MinItems)
-	intTag("maxitems", &c.MaxItems)
+	intPtrTag("maxitems", &c.MaxItems)
 	if v := tag.Get("pattern"); v != "" {
 		c.Pattern, has = v, true
 	}
@@ -1676,39 +1820,7 @@ func internalBind(channel, input, msg string, cause error) *InputError {
 // inspects recon's typed errors to name the offending input and phrase a non-leaky message,
 // keeping the whole error as the Cause. Every result is usage-class: a value the user supplied
 // could not be used.
-func reconBind(channel string, err error) error {
-	if err == nil {
-		return nil
-	}
-	// An empty path means the failure concerns the payload as a whole; name the channel
-	// rather than a field called "".
-	label := func(path string) string {
-		if path == "" {
-			return channelDesc(channel)
-		}
-		return fmt.Sprintf("%s %q", channelNoun(channel), path)
-	}
-	var ce *recon.CoercionError
-	var mre *recon.MissingRequiredError
-	var ve *recon.ValidationError
-	var eve *recon.EmptyValueError
-	switch {
-	case errors.As(err, &ce):
-		return usageBind(channel, ce.Path.String(),
-			fmt.Sprintf("%s: expected %s", label(ce.Path.String()), cleanType(ce.Target)), err)
-	case errors.As(err, &mre):
-		return usageBind(channel, mre.Path.String(),
-			fmt.Sprintf("%s is required", label(mre.Path.String())), err)
-	case errors.As(err, &ve):
-		return usageBind(channel, ve.Path.String(),
-			fmt.Sprintf("%s: %s", label(ve.Path.String()), ve.Msg), err)
-	case errors.As(err, &eve):
-		return usageBind(channel, eve.Path.String(),
-			fmt.Sprintf("%s must not be empty", label(eve.Path.String())), err)
-	default:
-		return usageBind(channel, "", fmt.Sprintf("could not read %s input", channelDesc(channel)), err)
-	}
-}
+func reconBind(channel string, err error) error { return channelLabels{}.bind(channel, err) }
 
 // channelNoun names a single input on a channel, for per-input messages.
 func channelNoun(channel string) string {

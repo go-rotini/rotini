@@ -47,9 +47,10 @@ These are the files it writes:
 
 Specs and confs can also be JSON, JSONC or TOML: `rotini init todo --format toml`.
 
-The spec `init` writes declares a `--help` flag, a `--version` flag, and `help` and `version`
-commands. Rotini adds no flags or commands of its own, so these are ordinary spec entries you can
-rename, change or delete.
+The spec `init` writes declares a `--help` flag, a `--version` flag (long only, so `-v` stays free
+for a `--verbose`), and `help` and `version` commands. Both flags are cascading, so every
+command's help lists them. Rotini adds no flags or commands of its own, so these are ordinary spec
+entries you can rename, change or delete.
 
 From then on, development is a loop: change the spec, regenerate, implement any new handler, build.
 
@@ -68,6 +69,15 @@ spec: ./cmd/todo/.rotini.spec.yaml
 conf: ./cmd/todo/.rotini.conf.yaml
 Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sumary: unknown key "sumary" on a flag input
 {{< /code >}}
+
+Beyond the schemas, `validate` catches specs that can never work: bounds or lengths that leave no
+value, enum values that aren't the declared type, `required` with a `default`, contradictory flag
+groups, config keys read with two types, an identifier that hides every identifier of a parent's
+cascading or short-circuit flag, and `-ab` beside `-a` and `-b`. It warns, without failing,
+about an identifier that hides only some of them, one-dash multi-letter identifiers, flags with
+no long form, and a literal default on a secret input. Two opt-in conf keys add warnings:
+`validate.flags_first` for env and config inputs no flag can set, and `validate.posix_names` for
+a program name that isn't a POSIX utility name.
 
 `generate` runs the same checks first, so `validate` is mostly for CI. To also check in CI that
 the committed code matches the spec, run `go tool rotini generate --dry-run`: it writes nothing,
@@ -108,7 +118,8 @@ rules:
   handler does first. A bad value is a usage error naming the flag the user typed.
 - **A flag works anywhere after the command that declares it**, including after a sub-command's
   name. A flag written *before* a sub-command's name belongs to a parent, which is what lets a
-  parent and a sub-command both declare a flag with the same name.
+  parent and a sub-command both declare a flag with the same name. A *different* flag that
+  reuses an identifier of a cascading or short-circuit parent flag is flagged by `validate`.
 - **`cascading: true` also lists a flag in its sub-commands' help**, under "Global Flags"
   (GLOBAL OPTIONS in man pages). It changes help only: parsing is the same, and a sub-command's
   handler sees a parent's flags either way, since its generated inputs include them. Mark a flag
@@ -245,7 +256,7 @@ A dependency the handlers share, such as a database or an API client, is registe
 {{< code title="sharing a dependency" language="golang" open="true" collapsible="false" copy="true" >}}
 var Store = rotini.NewDependency[*store.Store]("todo.store") // in the cmd package
 
-cmd.Program.WithDependency(cmd.Store, openStore())          // in main.go
+cmd.NewProgram(cmd.Handlers()).WithDependency(cmd.Store, openStore()) // in main.go
 s := rtx.MustGetDependency(Store)                            // in a handler
 {{< /code >}}
 
@@ -263,9 +274,9 @@ inputs type describes: a hook whose inputs have no configuration values or fallb
 configuration file. Rotini takes no action of its own; your handler checks the flag and decides
 what to do.
 
-`rotini init` marks `--help` and `--version` this way, makes `--help` cascading so every command's
-page lists it, and writes one `CascadingPreRun` in the root handler that answers both for every
-command. So a command's handler needs no help code, and `todo add --help` works even with the
+`rotini init` marks `--help` and `--version` this way, makes both cascading so every command's
+page lists them, and writes one `CascadingPreRun` in the root handler that answers both for every
+command: `--version` prints the program's name, then its version (`todo 1.2.3`). So a command's handler needs no help code, and `todo add --help` works even with the
 title missing.
 
 A short-circuit flag can belong to one command, too:
@@ -346,7 +357,9 @@ if err := report.Validate(); err != nil {
 A handler that fails calls `rtx.HaltWith(err)`. The program's reporter runs once, after
 teardown, and decides what to print and which exit code to use. The default reporter prints each
 warning to stderr as `Warning: …` and each error as `Error: …`, and exits 1 when anything failed,
-unless a handler already set a non-zero code with `rtx.HaltWithCode`.
+unless a handler already set a non-zero code with `rtx.HaltWithCode`. It prints infos and
+successes to stderr too, so stdout carries only what handlers write. After Ctrl-C (or another
+trapped signal) it leaves out the error the cancellation caused, and the run exits 128+n.
 
 Every error carries a category, which `rotini.CategoryOf(err)` returns: `rotini.CategoryUsage`
 for a mistake the user can fix, `rotini.CategoryInternal` for a fault in the program, and
@@ -384,8 +397,8 @@ func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 	if len(out.Errors) > 0 && rotini.CategoryOf(out.Errors[0]) == rotini.CategoryUsage {
 		fmt.Fprintf(rtx.Stderr, "Run '%s --help' for usage.\n", rtx.CommandPath())
 	}
-	if !out.Failed() {
-		return
+	if !out.Failed() || ctx.Err() != nil {
+		return // a canceled run keeps its code: 128+n after a signal
 	}
 	code := 1
 	if len(out.Errors) > 0 {
@@ -400,7 +413,7 @@ func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 }
 {{< /code >}}
 
-Install it in `main.go` with `cmd.Program.WithReporter(cmd.Report)`. Keeping it in the command
+Install it in `main.go` with `cmd.NewProgram(cmd.Handlers()).WithReporter(cmd.Report)`. Keeping it in the command
 package, rather than in `main.go`, lets tests install the same reporter (see [Testing](#testing)).
 The `Outcome` also carries `Infos` and `Successes`, from `rtx.RecordInfo` and
 `rtx.RecordSuccess`, for a reporter that prints those too.
@@ -412,7 +425,9 @@ document a command's codes in its man and markdown pages.
 Once a command declares `exit_status:`, `rotini generate` checks its handler against it: a code
 the handler passes to `rtx.HaltWithCode` or `rtx.Exit` as a number or a constant, but that the
 list leaves out, is reported as a warning with its file and line. Code 0 needs no entry. A
-command that prints its help when called without a sub-command exits 1, so list 1 for it. The
+command that prints its help when called without a sub-command exits 1, so list 1 for it. (The
+stub `rotini generate` writes for a root or a group command does this, printing the help on
+stderr.) The
 check reads only the methods of the command's handler type, so it can't see a code computed at
 run time, set in another function or package, or set by a reporter, and it skips a command whose
 handler lives in another package (`handler:`). `rotini validate` also reports a code listed
@@ -636,12 +651,12 @@ prompts to `rtx.Stderr`.
 
 ### Check it
 
-`Program.WithOutputChecks()` makes every `WriteOutput` and `WriteOutputItem` call check its value
+`Program.WithOutputChecks(true)` makes every `WriteOutput` and `WriteOutputItem` call check its value
 against the declared shape before writing. It is off by default. Turn it on in tests, or in a
 debug build:
 
 {{< code title="todo_test.go" language="go" open="true" collapsible="false" copy="true" >}}
-p := NewProgram(Handlers()).WithOutputChecks()
+p := NewProgram(Handlers()).WithOutputChecks(true)
 {{< /code >}}
 
 With checks on, a value that does not match is an internal error naming each field at fault,
@@ -677,7 +692,7 @@ rule reads the command line itself rather than validated inputs. For a program t
 `--json` flag:
 
 {{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
-cmd.Program.WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
+cmd.NewProgram(cmd.Handlers()).WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 	return slices.Contains(rtx.Argv, "--json")
 })).Execute()
 {{< /code >}}
@@ -845,8 +860,9 @@ command:
   ```
 
 - **The plugin runs with** every argument after its name, and with the program's stdin, stdout
-  and stderr. Its exit code passes through unchanged. A plugin that runs past its `timeout:` is
-  killed, and so is one still running when the run is canceled, for example by Ctrl+C.
+  and stderr. Its exit code passes through unchanged, and a plugin ended by a signal exits
+  128+n, as a shell reports it. A plugin that runs past its `timeout:` is killed, and so is one
+  still running when the run is canceled, for example by Ctrl+C, which exits 130.
 
 Rotini prints nothing about discovered plugins itself. To list them, in your own help or a
 `plugins` command, call `DiscoveredPlugins()` on the command that has discovery:
@@ -936,11 +952,12 @@ when it is run that way:
 
 {{< code title="cmd/kubectl-ctx/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func main() {
+	p := cmd.NewProgram(cmd.Handlers())
 	if strings.Contains(filepath.Base(os.Args[0]), "_complete-") {
-		code, _ := cmd.Program.Complete(os.Args[1:], rotini.PluginCompletion)
+		code, _ := p.Complete(os.Args[1:], rotini.PluginCompletion)
 		os.Exit(code)
 	}
-	cmd.Program.WithVersion(version).Execute()
+	p.WithVersion(version).Execute()
 }
 {{< /code >}}
 
@@ -950,7 +967,7 @@ has that command; by default it answers in the format rotini's own generated she
 Set the plugin format in `main.go`:
 
 {{< code title="cmd/docker-where/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
-cmd.Program.
+cmd.NewProgram(cmd.Handlers()).
 	WithVersion(version).
 	WithCompletion(rotini.PluginCompletion).
 	Execute()
@@ -1037,8 +1054,8 @@ func TestAddRejectsUnknownPriority(t *testing.T) {
 
 Keep two things in mind:
 
-- **`NewProgram(Handlers())` is not the program `main.go` runs.** Settings `main.go` adds, such as
-  a reporter, a version or dependencies, are missing until the test adds them too. With the
+- **`NewProgram(Handlers())` is built the way `main.go` builds it,** but the settings `main.go`
+  adds, such as a reporter, a version or dependencies, are missing until the test adds them too. With the
   [reporter above](#errors-and-exit-codes), the second test would call
   `NewProgram(Handlers()).WithReporter(Report)` and expect exit code 2.
 - **Environment variables and config files come from the process,** unless the test gives the
@@ -1082,7 +1099,7 @@ a newer rotini than you have. A local `$ref` is rebuilt whenever you regenerate 
 
 {{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
 go build -ldflags "-X main.version=1.2.3" ./cmd/todo
-./todo --version   # 1.2.3
+./todo --version   # todo 1.2.3
 {{< /code >}}
 
 A binary built with `go install github.com/me/todo/cmd/todo@v1.2.3`, or with `go build` in a
@@ -1095,7 +1112,7 @@ func main() {
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "(devel)" && info.Main.Version != "" {
 		version = info.Main.Version
 	}
-	cmd.Program.
+	cmd.NewProgram(cmd.Handlers()).
 		WithVersion(version).
 		Execute()
 }

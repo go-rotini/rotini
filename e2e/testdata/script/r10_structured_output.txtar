@@ -332,10 +332,7 @@ import (
 )
 
 func main() {
-	p := taskr.Program
-	if os.Getenv("TASKR_CHECKS") == "1" {
-		p = p.WithOutputChecks()
-	}
+	p := taskr.NewProgram(taskr.Handlers()).WithOutputChecks(os.Getenv("TASKR_CHECKS") == "1")
 	if os.Getenv("TASKR_STRUCTURED") == "1" {
 		p = p.WithReporter(rotini.StructuredReporter(wantsJSON))
 	}

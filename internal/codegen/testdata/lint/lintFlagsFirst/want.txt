@@ -1,0 +1,2 @@
+warning: spec: .rotini.spec.yaml:16:7: command demo: env "region": no flag reads DEMO_REGION, so --help doesn't show it; add a flag with `variable: DEMO_REGION` (validate.flags_first)
+warning: spec: .rotini.spec.yaml:27:7: command demo: config "timeout": no flag reads config key "timeout", so --help doesn't show it; add a flag with `key: timeout` (validate.flags_first)

@@ -1,0 +1,10 @@
+# A completion message is shown only when the conf's completion feature turns messages on.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: region
+      schema:
+        type: string
+        complete:
+          message: a cloud region, such as us-east-1

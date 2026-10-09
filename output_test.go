@@ -39,10 +39,8 @@ func outDef() Definition {
 }
 
 func outContext(cmd string) (*Context, *bytes.Buffer) {
-	rtx := NewContextFor(outDef(), []string{cmd})
 	var out bytes.Buffer
-	rtx.Stdout = &out
-	return rtx, &out
+	return NewContextFor(outDef(), []string{cmd}).WithStdout(&out), &out
 }
 
 var sampleList = outList{Tasks: []outTask{{ID: 1, Status: "done"}, {ID: 2, Status: "open"}}}
@@ -179,7 +177,7 @@ func TestWriteOutput_checks(t *testing.T) {
 	}
 
 	rtx, out = outContext("list")
-	rtx.outputChecks = true
+	rtx.WithOutputChecks(true)
 	err := rtx.WriteOutput(bad, "json", nil)
 	if err == nil || !strings.HasPrefix(err.Error(), "taskr list: output does not match its contract: output.tasks[1].status: ") {
 		t.Fatalf("checked: err = %v", err)
@@ -207,9 +205,12 @@ func TestWriteOutput_checks(t *testing.T) {
 
 func TestProgramWithOutputChecks(t *testing.T) {
 	t.Parallel()
-	p := NewProgram(outDef(), nil).WithOutputChecks()
+	p := NewProgram(outDef(), nil).WithOutputChecks(true)
 	if !p.newRunContext().outputChecks {
 		t.Error("WithOutputChecks did not reach the run's Context")
+	}
+	if p.WithOutputChecks(false).newRunContext().outputChecks {
+		t.Error("WithOutputChecks(false) did not turn the checks off")
 	}
 	if NewProgram(outDef(), nil).newRunContext().outputChecks {
 		t.Error("output checks are on by default")

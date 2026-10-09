@@ -1,0 +1,9 @@
+spec: .rotini.spec.yaml:9:7: command demo: schema "Window": `minimum` 10 is above `maximum` 1, so no value can ever be accepted; lower `minimum` or raise `maximum`
+spec: .rotini.spec.yaml:18:11: command demo/deploy: flag "replicas": `minimum` 10 is above `maximum` 1, so no value can ever be accepted; lower `minimum` or raise `maximum`
+spec: .rotini.spec.yaml:21:11: command demo/deploy: flag "port": `exclusiveMinimum` 1 and `exclusiveMaximum` 2 leave no integer between them; widen the range or use `minimum`/`maximum`
+spec: .rotini.spec.yaml:24:11: command demo/deploy: flag "ratio": `exclusiveMinimum` 1 and `exclusiveMaximum` 1 leave no number between them; widen the range or use `minimum`/`maximum`
+spec: .rotini.spec.yaml:27:11: command demo/deploy: flag "timeout": `minimum` 1m0s is above `maximum` 30s, so no value can ever be accepted; lower `minimum` or raise `maximum`
+spec: .rotini.spec.yaml:29:11: command demo/deploy: flag "mode": `minLength` 5 is above `maxLength` 2, so no value can ever be accepted; lower `minLength` or raise `maxLength`
+spec: .rotini.spec.yaml:32:11: command demo/deploy: flag "label": `minLength` 1 is above `maxLength` 0, so no value can ever be accepted; lower `minLength` or raise `maxLength`
+spec: .rotini.spec.yaml:34:11: command demo/deploy: flag "tags": `minItems` 5 is above `maxItems` 2, so no value can ever be accepted; lower `minItems` or raise `maxItems`
+spec: .rotini.spec.yaml:46:22: command demo/deploy: stdin property "limits.max": `minimum` 5 is above `maximum` 3, so no value can ever be accepted; lower `minimum` or raise `maximum`

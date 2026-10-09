@@ -14,7 +14,8 @@ command:
       schema: { type: bool }
     - name: version
       summary: print version
-      identifiers: [-v, --version]
+      identifiers: [--version]
+      cascading: true
       short_circuit: true
       schema: { type: bool }
   commands:

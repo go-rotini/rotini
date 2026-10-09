@@ -162,6 +162,11 @@ var valueParsers = map[reflect.Type]func(string) (reflect.Value, error){
 		if u.Scheme == "" || (u.Host == "" && u.Opaque == "") {
 			return reflect.Value{}, errors.New("a URL needs a scheme and a host, e.g. https://example.com")
 		}
+		// "localhost:8080" parses as scheme "localhost" with the opaque part "8080": a host and
+		// port written without a scheme.
+		if u.Host == "" && isAllDigits(u.Opaque) {
+			return reflect.Value{}, fmt.Errorf("a host and port need a scheme, as in http://%s", s)
+		}
 		return reflect.ValueOf(u), nil
 	},
 	reflect.TypeFor[mail.Address](): func(s string) (reflect.Value, error) {
@@ -378,4 +383,17 @@ func expandDays(s string) (string, error) {
 		return strconv.FormatFloat(hours, 'f', -1, 64) + "h"
 	})
 	return expanded, convErr
+}
+
+// isAllDigits reports whether s is one or more ASCII digits.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if !isDigit(s[i]) {
+			return false
+		}
+	}
+	return true
 }

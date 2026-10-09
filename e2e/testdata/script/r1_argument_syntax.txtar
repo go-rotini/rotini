@@ -1,0 +1,170 @@
+# R1 — how argv words are read: numbers versus flags, "--", words before a plugin's name, and
+# the values a declared type or bound refuses.
+
+gomodinit example.com/demo
+
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+exec go mod tidy
+mkdir bin
+exec go build -o bin/demo$exe ./cmd/demo
+exec go build -o bin/demo-sig$exe ./plugins/sig
+
+# ── numbers versus flags ─────────────────────────────────────────────────────
+# Only "-" then a digit, or "-." then a digit, is a number. Any other dash word is a flag, so
+# the declared -I takes "-Inf" as -I with the value "nf".
+exec bin/demo$exe run -Inf s
+stdout 'include=\[nf\] .*args=\[s\]'
+exec bin/demo$exe run -INF s
+stdout 'include=\[NF\] .*args=\[s\]'
+exec bin/demo$exe run -Infinity s
+stdout 'include=\[nfinity\] .*args=\[s\]'
+exec bin/demo$exe run s -5 -.5 -1e3
+stdout 'include=\[\] .*args=\[s -5 -.5 -1e3\]'
+exec bin/demo$exe run --lines -4 s
+stdout 'lines=-4 '
+
+# "-nan" is a flag word too: -n with the value "an". A non-finite word goes after "--".
+wantexit 1 bin/demo$exe run s -nan
+stderr '-n: "an" is not a valid integer'
+exec bin/demo$exe run -- s -nan
+stdout 'args=\[s -nan\]'
+
+# ── "--" ends command lookup ─────────────────────────────────────────────────
+! exec bin/demo$exe -- run
+stderr '"run" after "--" is not read as a command, and "demo" takes no arguments'
+exec bin/demo$exe run -- --help
+stdout 'args=\[--help\]'
+
+# ── words before a plugin's name ─────────────────────────────────────────────
+exec bin/demo$exe sig a --verbose
+stdout 'sig got: a --verbose'
+
+# A short-circuit flag before the name is answered by the host; the plugin never runs.
+exec bin/demo$exe --help sig
+stdout 'argument syntax demo'
+! stdout 'sig got'
+
+# Any other flag there would never reach the plugin, so it is a usage error.
+wantexit 1 bin/demo$exe --verbose sig a
+stderr '--verbose can''t come before plugin "sig": a plugin receives only the words after its name'
+! stdout 'sig got'
+wantexit 1 bin/demo$exe --bogus sig
+stderr 'unknown flag "--bogus"'
+
+# ── values a type or bound refuses ───────────────────────────────────────────
+wantexit 1 bin/demo$exe run --ratio nan s
+stderr '--ratio must be a finite number \(got nan\)'
+wantexit 1 bin/demo$exe run --ratio inf s
+stderr '--ratio must be a finite number \(got inf\)'
+exec bin/demo$exe run --ratio 0.5 s
+stdout 'ratio=0.5 '
+
+wantexit 1 bin/demo$exe run --label =v s
+stderr '--label needs a key before "=" \(got "=v"\)'
+
+wantexit 1 bin/demo$exe run --url localhost:8080 s
+stderr 'a host and port need a scheme, as in http://localhost:8080'
+exec bin/demo$exe run --url http://localhost:8080 s
+stdout 'url=http://localhost:8080 '
+
+-- cmd/demo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: argument syntax demo
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: verbose
+      summary: more output
+      identifiers: [-v, --verbose]
+      cascading: true
+      schema: { type: count }
+  plugins:
+    - name: sig
+      summary: a plugin
+  commands:
+    - name: run
+      summary: run with every value kind
+      flags:
+        - name: include
+          summary: include dirs
+          identifiers: [-I, --include]
+          schema: { type: '[]string' }
+        - name: lines
+          summary: line count
+          identifiers: [-n, --lines]
+          schema: { type: int }
+        - name: ratio
+          summary: a ratio
+          identifiers: [--ratio]
+          schema: { type: float64, exclusiveMinimum: 0 }
+        - name: label
+          summary: a label
+          identifiers: [--label]
+          schema: { type: 'map[string]string' }
+        - name: url
+          summary: an endpoint
+          identifiers: [--url]
+          schema: { type: url }
+      arguments:
+        - name: args
+          summary: the words
+          schema: { type: '[]string' }
+-- cmd/demo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/demo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/demo/demo_run.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoRunHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*demoRunHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoRunInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := in.DemoRun.Flags
+	url := ""
+	if f.URL != nil {
+		url = f.URL.String()
+	}
+	fmt.Fprintf(rtx.Stdout, "include=%v lines=%d ratio=%v url=%s args=%v\n", f.Include, f.Lines, f.Ratio, url, in.DemoRun.Arguments.Args)
+}
+-- plugins/sig/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() { fmt.Printf("sig got: %s\n", strings.Join(os.Args[1:], " ")) }

@@ -13,14 +13,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-// TestLintRegistryCompleteness pins the number of registered spec and conf rules so a
+// TestLintRegistryCompleteness pins the number of registered spec, conf and cross rules so a
 // dropped rule is noticed.
 func TestLintRegistryCompleteness(t *testing.T) {
-	if got := len(specLints); got != 45 {
-		t.Errorf("len(specLints) = %d, want 45 (a rule was dropped or added — update intentionally)", got)
+	if got := len(specLints); got != 55 {
+		t.Errorf("len(specLints) = %d, want 55 (a rule was dropped or added — update intentionally)", got)
 	}
 	if got := len(confLints); got != 10 {
 		t.Errorf("len(confLints) = %d, want 10", got)
+	}
+	if got := len(crossLints); got != 4 {
+		t.Errorf("len(crossLints) = %d, want 4", got)
 	}
 }
 
@@ -342,7 +345,7 @@ func TestDefaultConstraintsAgreeWithRuntime(t *testing.T) {
 			func() any { return &stringInputs{} }},
 		{`type: string, maxLength: 2, default: abcdef`,
 			rotini.FlagDef{Type: "string", Default: "abcdef",
-				MaxLength: 2},
+				MaxLength: new(2)},
 			func() any { return &stringInputs{} }},
 		{`type: string, pattern: '^v[0-9]+$', default: nope`,
 			rotini.FlagDef{Type: "string", Default: "nope",

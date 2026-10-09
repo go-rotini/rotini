@@ -62,7 +62,7 @@ func report(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
 }
 
 func main() {
-	cmd.Program.WithReporter(report).Execute()
+	cmd.NewProgram(cmd.Handlers()).WithReporter(report).Execute()
 }
 -- internal/cmd/app/app.go --
 package app

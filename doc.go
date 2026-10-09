@@ -170,10 +170,11 @@
 // A hook that records a failure without stopping lets the next hook run, often repeating the
 // same failure.
 //
-// The default reporter prints infos, warnings, errors, panics, then successes (infos and
-// successes to stdout, the rest to stderr), then applies the exit floor: a recorded error or
-// fault exits 1 unless a handler already set a non-zero code. A custom reporter owns the exit
-// code entirely.
+// The default reporter prints infos, warnings, errors, panics, then successes, all to stderr so
+// stdout carries only what handlers write, then applies the exit floor: a recorded error or
+// fault exits 1 unless a handler already set a non-zero code. It leaves out an error the run's
+// own signal trap caused, since that run exits 128+n anyway. A custom reporter receives every
+// record and owns the exit code entirely.
 //
 // Every failure class is errors.Is-able against the [ErrUsage] or [ErrInternal] sentinel, so
 // [CategoryOf] classifies it (except a plugin timeout, which is [CategoryNone]), and
@@ -207,10 +208,10 @@
 //	var Store = rotini.NewDependency[*store.Store]("tasks.store")
 //
 //	// main.go — the value's type is checked where it is supplied
-//	cmd.Program.WithDependency(tasks.Store, store.New()).Execute()
+//	cmd.NewProgram(cmd.Handlers()).WithDependency(tasks.Store, store.New()).Execute()
 //
 //	// or several at once ([WithDependency] and [Program.With])
-//	cmd.Program.
+//	cmd.NewProgram(cmd.Handlers()).
 //		With(
 //			rotini.WithDependency(tasks.Store, store.New()),
 //			rotini.WithDependency(tasks.Client, client.New()),
@@ -245,7 +246,8 @@
 //   - [Parser] parses and validates the argv channel alone (GNU/POSIX grammar, typed
 //     coercion, enum and constraint checks), failing with a [*ParseError]. [InputReader] is the
 //     engine behind [Context.Inputs], for callers who hold the settings explicitly. Neither needs
-//     to be supplied; [Program.WithParser] replaces only the parser [Context.Parser] returns.
+//     to be supplied; [Program.WithParser] replaces only the parser [Context.Parser] returns,
+//     which has no options.
 //
 //   - [Deprecations] reports the deprecated aliases and identifiers this invocation used.
 //

@@ -106,7 +106,10 @@ func envTrue(value string) bool {
 // with a closing count, and exits 2.
 func reportPlanned(rtx *rotini.Context, result string, changes []string) {
 	if len(changes) == 0 {
-		fmt.Fprintln(rtx.Stdout, result)
+		if _, err := fmt.Fprintln(rtx.Stdout, result); err != nil {
+			haltWithWriteError(rtx, err)
+			return
+		}
 		rtx.HaltWithCode(0)
 		return
 	}

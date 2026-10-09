@@ -1,0 +1,16 @@
+# A secret's literal default is compiled into the binary, where anyone can read it.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Correct: a secret with no default. No problem.
+    - name: password
+      schema: { type: string, secret: true }
+    - name: token
+      schema: { type: string, secret: true, default: hunter2 }
+  env:
+    - name: api_key
+      schema: { type: string, secret: true, default: abc123 }
+  config:
+    - name: client_secret
+      schema: { type: string, secret: true, default: s3cret }

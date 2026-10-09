@@ -167,6 +167,6 @@ import (
 )
 
 func main() {
-	hints.Program.
+	hints.NewProgram(hints.Handlers()).
 		Execute()
 }

@@ -50,10 +50,10 @@ type BaseSchema struct {
 	Import string `json:"import,omitempty"`
 	// Element schema for an array type: 'array' + items int generates []int, and items $ref a slice of the named type; with no items, elements are strings. Per-value constraints (enum, pattern, minimum/maximum, exclusiveMinimum/exclusiveMaximum, multipleOf, minLength/maxLength) apply to every element and may be written either here, JSON Schema style, or on the list itself. The two spellings mean the same thing, and declaring the same constraint in both places with different values is an error. minItems/maxItems belong on the list (they count elements) and are rejected here on flags, arguments, env and config. The TextUnmarshaler rule also applies to each element (see 'type').
 	Items *Schema `json:"items,omitempty"`
-	// Maximum number of values for a repeatable (array or map) input — rejected on scalar types.
-	MaxItems int `json:"maxItems,omitempty"`
-	// Maximum string length in runes (string types only; for []string, each element) — rejected on non-string types.
-	MaxLength int `json:"maxLength,omitempty"`
+	// Maximum number of values for a repeatable (array or map) input — rejected on scalar types. maxItems: 0 is a real bound: no value is accepted. A maxItems below minItems is rejected, since no value could pass.
+	MaxItems *int `json:"maxItems,omitempty"`
+	// Maximum string length in runes (string types only; for []string, each element) — rejected on non-string types. maxLength: 0 is a real bound: only the empty string is accepted. A maxLength below minLength is rejected, since no value could pass.
+	MaxLength *int `json:"maxLength,omitempty"`
 	// Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numbers, durations and sizes, each in its own spelling; per-element for arrays; rejected elsewhere); maximum: 0 is a real, enforced bound.
 	Maximum any `json:"maximum,omitempty"`
 	// Minimum number of values for a repeatable (array or map) input — rejected on scalar types. A list flag or variadic argument that is left out has zero values, so minItems also applies to it unless it has a default (add required for the message to say the input is missing). An env or config list is checked only when it is set.
@@ -152,7 +152,7 @@ type Command struct {
 	Filename string `json:"filename,omitempty"`
 	// Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).
 	FlagDependencies []FlagDependency `json:"flag_dependencies,omitempty"`
-	// Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).
+	// Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair). Groups that contradict each other or a flag dependency are rejected, as is a required flag in a mutually_exclusive group with no env or config fallback.
 	FlagGroups []FlagGroup `json:"flag_groups,omitempty"`
 	// Flag inputs for this command
 	Flags []FlagInput `json:"flags,omitempty"`
@@ -238,7 +238,7 @@ type ConfigurationFileDiscover struct {
 	File string `json:"file"`
 	// 'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
 	//
-	// 'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead.
+	// 'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows).
 	Strategy string `json:"strategy"`
 }
 
@@ -293,7 +293,7 @@ type FlagInput struct {
 	Group string `json:"group,omitempty"`
 	// When true, the flag is omitted from generated help (it still parses on the command line).
 	Hidden bool `json:"hidden,omitempty"`
-	// CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run).
+	// CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle, and an identifier that hides one of a cascading or short-circuit ancestor flag's.
 	Identifiers []string `json:"identifiers,omitempty"`
 	// Logical name for the flag
 	Name string `json:"name"`
@@ -380,7 +380,7 @@ type InputSchema struct {
 	Nesting string `json:"nesting,omitempty"`
 	// Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, `<PATH>` instead of the argument's name. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or <angle-bracketed>.
 	Placeholder string `json:"placeholder,omitempty"`
-	// When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean — unlike the string-array 'required' on Schema.
+	// When true, the input must be provided (or stdin must not be empty for stdin inputs). Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
 	Required bool `json:"required,omitempty"`
 	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 	Secret bool `json:"secret,omitempty"`
@@ -439,8 +439,10 @@ type StdinSpec struct {
 	//
 	// The four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin struct, validated against the declared schema. The default is json.
 	//
-	// The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
+	// The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and is implied when left out; neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
+	//
+	// One leading UTF-8 byte-order mark is removed before the payload is read, in every format.
 	Format string `json:"format,omitempty"`
-	// Type definition for stdin content. Set required: true in schema to error when stdin is empty.
+	// Type definition for stdin content. Set required: true in schema to error when stdin is empty. The document formats need a `type` or `$ref` here; the raw formats imply theirs, so `schema:` may be left out or hold only `required`.
 	Schema *InputSchema `json:"schema,omitempty"`
 }

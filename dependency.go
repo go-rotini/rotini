@@ -14,7 +14,7 @@ import (
 //	var Store = rotini.NewDependency[*store.Store]("taskr.store")
 //
 //	// main.go: the value's type is checked at compile time here
-//	cmd.Program.WithDependency(tasks.Store, store.New()).Execute()
+//	cmd.NewProgram(cmd.Handlers()).WithDependency(tasks.Store, store.New()).Execute()
 //
 //	// any handler
 //	s := rtx.MustGetDependency(tasks.Store)
@@ -49,7 +49,7 @@ func (d Dependency[T]) String() string { return d.name }
 // WithDependency returns an [Option] that registers value under dep for the whole program; it
 // is the composable form of [Program.WithDependency], for use with [Program.With]:
 //
-//	cmd.Program.
+//	cmd.NewProgram(cmd.Handlers()).
 //		With(
 //			rotini.WithDependency(tasks.Store, store),
 //			rotini.WithDependency(tasks.Client, client),
@@ -63,7 +63,7 @@ func WithDependency[T any](dep Dependency[T], value T) Option {
 // WithDependency registers value under dep for the whole program, so every run sees it, and
 // returns p for chaining:
 //
-//	cmd.Program.
+//	cmd.NewProgram(cmd.Handlers()).
 //		WithDependency(tasks.Store, store).
 //		WithVersion(version).
 //		Execute()

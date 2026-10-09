@@ -77,7 +77,8 @@ import (
 )
 
 // An author's entrypoint: their own build metadata and their own bindings. Create-once means
-// regeneration leaves every line of this alone.
+// regeneration leaves every line of this alone. It uses the deprecated Program on purpose: an
+// existing project's main.go keeps building against it.
 var version = "9.9.9"
 
 func main() {

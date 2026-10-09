@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -11,10 +12,21 @@ func (p *Processor) lintAcross(rs *reconciledSpec, rc *reconciledConf) []error {
 	if rs == nil || rc == nil {
 		return nil
 	}
-	problems := lintManPageNames(rs.spec, rc.conf)
-	problems = append(problems, lintUnshownMessages(rs.spec, rc.conf)...)
+	var problems []error
+	for _, rule := range crossLints {
+		problems = append(problems, rule(rs.spec, rc.conf)...)
+	}
 	locateProblems(problems, rs.path, rs.locate)
 	return problems
+}
+
+// crossLints is the ordered set of rules that read the spec and the conf. The order is
+// observable (problems are reported in rule order), so keep it stable.
+var crossLints = []func(*Spec, *Conf) []error{
+	lintManPageNames,
+	lintUnshownMessages,
+	lintFlagsFirst,
+	lintPosixNames,
 }
 
 // lintManPageNames rejects two commands whose man pages would share a name when the man
@@ -73,4 +85,84 @@ func lintUnshownMessages(spec *Spec, conf *Conf) []error {
 		})
 	})
 	return problems
+}
+
+// lintFlagsFirst, turned on by the conf's `validate.flags_first`, warns about each env or
+// config input that no flag in its command chain can also set, through the flag's `variable:`
+// or `key:`, so `--help` doesn't show it. Secret inputs are exempt (a secret doesn't belong on
+// the command line), as are nested env inputs, which read a family of variables no single flag
+// can mirror.
+func lintFlagsFirst(spec *Spec, conf *Conf) []error {
+	if spec == nil || conf == nil || conf.Validate == nil || !conf.Validate.FlagsFirst {
+		return nil
+	}
+	prefix := spec.Command.EnvPrefix
+	var problems []error
+	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
+		vars, keys := map[string]bool{}, map[string]bool{}
+		for _, c := range chain {
+			for _, f := range c.Flags {
+				key := flagReconKey(f.Name, f.Schema)
+				if key == "" {
+					continue
+				}
+				keys[key] = true
+				for v := range strings.SplitSeq(flagEnvVar(f.Schema, key, prefix), ",") {
+					vars[v] = true
+				}
+			}
+		}
+		warn := func(at, channel, name, msg string) {
+			p := inputProblem(at, path, channel, name, msg+" (validate.flags_first)")
+			p.sev = severityWarning
+			problems = append(problems, p)
+		}
+		leaf := chain[len(chain)-1]
+		for i, e := range leaf.Env {
+			if e.Schema != nil && (e.Schema.Secret || e.Schema.Nesting != "") {
+				continue
+			}
+			names := strings.Split(envVarName(e, prefix), ",")
+			read := false
+			for _, v := range names {
+				read = read || vars[v]
+			}
+			if !read {
+				warn(fmt.Sprintf("%s/env/%d", ptr, i), "env", e.Name,
+					fmt.Sprintf("no flag reads %s, so --help doesn't show it; add a flag with `variable: %s`", names[0], names[0]))
+			}
+		}
+		for i, c := range leaf.Config {
+			if c.Schema != nil && c.Schema.Secret {
+				continue
+			}
+			if key := configKey(c); !keys[key] {
+				warn(fmt.Sprintf("%s/config/%d", ptr, i), "config", c.Name,
+					fmt.Sprintf("no flag reads config key %q, so --help doesn't show it; add a flag with `key: %s`", key, key))
+			}
+		}
+	})
+	return problems
+}
+
+// posixUtilityName matches a POSIX utility name (XBD 12.2, guidelines 1 and 2): 2 to 9
+// lowercase letters and digits.
+var posixUtilityName = regexp.MustCompile(`^[a-z0-9]{2,9}$`)
+
+// lintPosixNames, turned on by the conf's `validate.posix_names`, warns when the root
+// command's name, which is the program's name, isn't a POSIX utility name. Sub-command names
+// aren't utilities, so they aren't checked; display_name is ignored, since users type the
+// binary's name.
+func lintPosixNames(spec *Spec, conf *Conf) []error {
+	if spec == nil || conf == nil || conf.Validate == nil || !conf.Validate.PosixNames {
+		return nil
+	}
+	name := spec.Command.Name
+	if name == "" || posixUtilityName.MatchString(name) {
+		return nil
+	}
+	return []error{&problem{
+		kind: "spec", ptr: rootPointer + "/name", loc: rootLabel(spec), sev: severityWarning,
+		msg: "POSIX utility names are 2 to 9 lowercase letters and digits (utility syntax guidelines 1 and 2); rename the program, or leave validate.posix_names off",
+	}}
 }

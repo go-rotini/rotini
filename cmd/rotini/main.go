@@ -12,7 +12,7 @@ var (
 )
 
 func main() {
-	cmd.Program.
+	cmd.NewProgram(cmd.Handlers()).
 		WithVersion(cmd.ResolveVersion(version)).
 		Execute()
 }

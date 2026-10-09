@@ -147,4 +147,4 @@ package main
 
 import shutdown "example.com/shutdown/internal/cmd/shutdown"
 
-func main() { shutdown.Program.Execute() }
+func main() { shutdown.NewProgram(shutdown.Handlers()).Execute() }

@@ -321,7 +321,7 @@ func TestParse_constraintsWidenedTypes(t *testing.T) {
 			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float32",
 				Maximum: new(1.0)},
 			{Name: "port", Identifiers: []string{"--port"}, Type: "[]int",
-				Minimum: new(1.0), Maximum: new(65535.0), MaxItems: 3},
+				Minimum: new(1.0), Maximum: new(65535.0), MaxItems: new(3)},
 			{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
 				MinLength: 2},
 		},
@@ -352,7 +352,7 @@ func TestParse_stringLengthConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "name", Identifiers: []string{"--name"}, Type: "string",
-			MinLength: 2, MaxLength: 5,
+			MinLength: 2, MaxLength: new(5),
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -389,7 +389,7 @@ func TestParse_itemCountConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
-			MinItems: 1, MaxItems: 2,
+			MinItems: 1, MaxItems: new(2),
 		}},
 	}
 	for _, c := range []struct {
@@ -2275,7 +2275,7 @@ func TestParse_separator(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Separator: ",", Enum: []string{"a", "b", "c"},
-				MaxItems: 3},
+				MaxItems: new(3)},
 			{Name: "raw", Identifiers: []string{"--raw"}, Type: "[]string"},
 		},
 		Arguments: []ArgDef{{Name: "first", Type: "string"}, {Name: "rest", Type: "[]string", Variadic: true, Separator: ","}},

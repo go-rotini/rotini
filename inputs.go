@@ -80,7 +80,9 @@ type layerCore struct {
 //	inputs, err := rtx.Inputs[MycliDeployInputs]()
 //
 // Stdin is outside that order because it never competes: it fills only the leaf command's
-// payload field, which no other channel writes.
+// payload field, which no other channel writes. It is read once per run and held in memory, so
+// a later call binds the same payload. A read of piped stdin ends when the run is canceled (by
+// a trapped signal, for one), with an [*InputError] whose cause is the cancellation's.
 //
 // T must be the inputs type generated for the command whose hook is running ([Context.Command]),
 // in any hook. Its last field describes that command and the preceding fields its ancestors, so
@@ -375,6 +377,10 @@ func (r *InputReport) absorb(core *layerCore) {
 	if core.store == nil || len(core.store.scopes) != len(r.store.scopes) {
 		return
 	}
+	if r.store.detached == nil {
+		r.store.detached = core.store.detached
+	}
+	r.store.dashedFirst = r.store.dashedFirst || core.store.dashedFirst
 	for i := range core.store.scopes {
 		for name, vals := range core.store.scopes[i].flags {
 			if r.store.scopes[i].flags == nil {
@@ -580,7 +586,8 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 	if err != nil {
 		return nil, nil, err
 	}
-	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), view)
+	labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
+	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), labels)
 }
 
 // argvWaived reports whether the command line short-circuits the run ([shortCircuited]), for a
@@ -620,14 +627,18 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 	if err != nil {
 		return nil, nil, err
 	}
-	return channelLayer(v, chain, anchor, "files", "Config", reg, reg, cfg, waived, view)
+	labels := cfg.labels()
+	labels.view = view
+	return channelLayer(v, chain, anchor, "files", "Config", reg, reg, cfg, waived, labels)
 }
 
 // channelLayer is the shared env/files core: recon-bind each command's channel struct,
 // constraint-check the provided values, fill flag fallbacks, and record presence for
 // everything the channel supplied. A short-circuited run (waived) skips the requirement checks
-// and a configuration value of the wrong type. A nil registry reads nothing.
-func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs, waived bool, view *osView) (Presence, *layerCore, error) {
+// and a configuration value of the wrong type. A nil registry reads nothing. labels names the
+// channel's inputs and files in errors.
+func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs, waived bool, labels channelLabels) (Presence, *layerCore, error) {
+	view := labels.view
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	var bindErr error
@@ -637,13 +648,13 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 			return
 		}
 		if reg != nil {
-			if err := fillChannelStruct(set, ci, topName, structName, layerName, reg, cfg, waived, view); err != nil {
+			if err := fillChannelStruct(set, ci, topName, structName, layerName, reg, cfg, waived, labels); err != nil {
 				bindErr = err
 				return
 			}
 		}
 		if flagReg != nil {
-			rd := fallbackRead{view: view, waiveFiles: waived}
+			rd := fallbackRead{view: view, waiveFiles: waived, files: labels.files}
 			if err := recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg, rd); err != nil {
 				bindErr = err
 			}
@@ -657,7 +668,8 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 
 // fillChannelStruct binds one command's channel struct from the registry, validates it, and
 // records where each field's value came from.
-func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs, waived bool, view *osView) error {
+func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs, waived bool, labels channelLabels) error {
+	view := labels.view
 	cs := ci.FieldByName(structName)
 	if !cs.IsValid() || cs.Kind() != reflect.Struct {
 		return nil
@@ -665,9 +677,11 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 	bind := bindReconWaived
 	if cfg != nil {
 		bind = bindConfigWaived
+	} else if err := checkEnvMaps(cs, reg, labels); err != nil {
+		return err
 	}
 	if err := bind(reg, cs.Addr().Interface(), waived); err != nil {
-		return reconBind(channelOf(cfg), err)
+		return labels.bind(channelOf(cfg), err)
 	}
 	if !waived {
 		if err := validateChannelStruct(cs, reg, cfg, view); err != nil {

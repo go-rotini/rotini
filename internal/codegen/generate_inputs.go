@@ -123,7 +123,8 @@ func constraintTags(schema *InputSchema) string {
 // eachConstraint visits every present validation constraint on schema in a stable order,
 // passing its tag name, its Constraints field name, and its value rendered for a struct tag
 // and for a Go literal. constraintTags and constraintsLiteral both use it so they cannot drift.
-// Numeric bounds are present when non-nil; length and item counts only when non-zero.
+// Numeric bounds, maxLength and maxItems are present when non-nil, so a 0 is kept; minLength
+// and minItems only when non-zero.
 func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal string)) {
 	if schema == nil {
 		return
@@ -142,15 +143,22 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 		s := strconv.Itoa(n)
 		visit(tag, field, s, s)
 	}
+	intPtrC := func(tag, field string, p *int) {
+		if p == nil {
+			return
+		}
+		s := strconv.Itoa(*p)
+		visit(tag, field, s, rotiniPkgName+".Ptr("+s+")")
+	}
 	floatC("min", "Minimum", bound(schema.Minimum))
 	floatC("max", "Maximum", bound(schema.Maximum))
 	floatC("xmin", "ExclusiveMinimum", bound(schema.ExclusiveMinimum))
 	floatC("xmax", "ExclusiveMaximum", bound(schema.ExclusiveMaximum))
 	floatC("multipleof", "MultipleOf", bound(schema.MultipleOf))
 	intC("minlen", "MinLength", schema.MinLength)
-	intC("maxlen", "MaxLength", schema.MaxLength)
+	intPtrC("maxlen", "MaxLength", schema.MaxLength)
 	intC("minitems", "MinItems", schema.MinItems)
-	intC("maxitems", "MaxItems", schema.MaxItems)
+	intPtrC("maxitems", "MaxItems", schema.MaxItems)
 	if schema.Pattern != "" {
 		visit("pattern", "Pattern", schema.Pattern, strconv.Quote(schema.Pattern))
 		if schema.PatternMessage != "" {

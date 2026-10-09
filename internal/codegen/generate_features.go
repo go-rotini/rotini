@@ -674,6 +674,10 @@ func schemaDefaultString(schema *InputSchema) string {
 	if schema.DefaultText != "" {
 		return schema.DefaultText
 	}
+	if schema.Secret {
+		// A page is shared and pasted; only an author's explicit default_text shows.
+		return ""
+	}
 	return defaultString(schema.Default)
 }
 

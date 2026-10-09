@@ -41,3 +41,5 @@ generate:
       enabled: false
 validate:
   fail: collect
+  flags_first: false
+  posix_names: false

@@ -34,7 +34,7 @@ stderr 'did you mean "generate"'
 
 # ── man --dir: every page ────────────────────────────────────────────────────
 exec rotini man --dir share/man/man1
-stdout 'wrote 8 man pages to share/man/man1'
+stderr 'wrote 8 man pages to share/man/man1'
 exists share/man/man1/rotini.1
 exists share/man/man1/rotini-generate.1
 exists share/man/man1/rotini-man.1

@@ -1,8 +1,8 @@
 package rotini
 
 import (
+	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 )
 
@@ -144,18 +144,28 @@ func findPlugin(f Command, tok string) (PluginDef, bool) {
 	return PluginDef{}, false
 }
 
-// isFlag reports whether tok is a flag token. Bare "-" and "--" are not, and neither is a
-// token that parses as a number ("-5", "-1e3"): flag identifiers always have a letter after
-// the dashes, so a negative number is handled as a positional.
+// isFlag reports whether tok is a flag token. Every argv walker (the resolver, the parser and
+// completion) decides with it, so they agree on where flags are. Bare "-" and "--" are not
+// flags, and neither is a negative number: "-" followed by a digit ("-5", "-1e3", "-5s"), or by
+// "." and a digit ("-.5"). Any other word starting with "-" is a flag, so a declared -I wins
+// over "-Inf".
 func isFlag(tok string) bool {
 	if len(tok) <= 1 || tok[0] != '-' || tok == "--" {
 		return false
 	}
-	if _, err := strconv.ParseFloat(tok, 64); err == nil {
-		return false
-	}
-	return true
+	return !isNegativeNumber(tok)
 }
+
+// isNegativeNumber reports whether tok, which starts with "-", reads as a negative number:
+// "-" then a digit, or "-." then a digit.
+func isNegativeNumber(tok string) bool {
+	if len(tok) >= 2 && isDigit(tok[1]) {
+		return true
+	}
+	return len(tok) >= 3 && tok[1] == '.' && isDigit(tok[2])
+}
+
+func isDigit(b byte) bool { return '0' <= b && b <= '9' }
 
 // splitFlag splits a flag token into its identifier and an inline "=value".
 func splitFlag(tok string) (name, value string, hasValue bool) {
@@ -218,8 +228,49 @@ type Resolver func(def Definition, argv []string) (Resolution, error)
 // DefaultResolver is rotini's resolve phase, exported for a custom [Resolver] to wrap. It
 // descends sub-commands by name or alias, skips flags and their values, stops at the first
 // positional, and diverts to a plugin dispatch for declared and discovered plugins. It does
-// not validate input and never returns an error.
+// not validate the invoked command's input.
+//
+// A plugin receives only the words after its name, so flags typed before the name are checked
+// strictly: a short-circuit flag set there (such as --help) cancels the dispatch, and the run
+// answers it for the command the words before the plugin name resolve to, with [Resolution.Argv]
+// cut to those words. Any other flag there, or one that does not parse, is returned as a usage
+// [*ParseError].
 func DefaultResolver(def Definition, argv []string) (Resolution, error) {
 	chain, plugin := resolveChain(def, argv)
+	if plugin != nil {
+		before := argv[:len(argv)-len(plugin.Args)-1]
+		answer, err := pluginHostFlags(chain, before, plugin.Def.Name)
+		if err != nil {
+			return Resolution{}, err
+		}
+		if answer {
+			return Resolution{Chain: chain, Argv: before}, nil
+		}
+	}
 	return Resolution{Chain: chain, Plugin: plugin, Argv: argv}, nil
+}
+
+// pluginHostFlags checks the words before plugin's name (before) against chain, the commands
+// they resolved. It reports whether a short-circuit flag set there replaces the dispatch, and
+// fails on any other flag, which the plugin would never receive.
+func pluginHostFlags(chain []Command, before []string, plugin string) (answer bool, err error) {
+	first := slices.IndexFunc(before, isFlag)
+	if first < 0 {
+		return false, nil
+	}
+	store, err := quietTokens(chain, before)
+	if err != nil {
+		return false, err
+	}
+	if shortCircuited(chain, store) {
+		return true, nil
+	}
+	name, _, _ := splitFlag(before[first])
+	return false, &ParseError{
+		Kind:    ParseKindMisplacedFlag,
+		Msg:     fmt.Sprintf("%s can't come before plugin %q: a plugin receives only the words after its name", name, plugin),
+		Command: chain[len(chain)-1].Name,
+		Flag:    name,
+		Token:   name,
+	}
 }

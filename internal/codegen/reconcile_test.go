@@ -53,8 +53,8 @@ func TestHoistItemConstraints_everyPerValueConstraintReachesTheList(t *testing.T
 		t.Errorf("exclusiveMaximum = %v", s.ExclusiveMaximum)
 	case bound(s.MultipleOf) == nil || *bound(s.MultipleOf) != 10:
 		t.Errorf("multipleOf = %v", s.MultipleOf)
-	case s.MinLength != 1 || s.MaxLength != 3:
-		t.Errorf("minLength/maxLength = %d/%d", s.MinLength, s.MaxLength)
+	case s.MinLength != 1 || s.MaxLength == nil || *s.MaxLength != 3:
+		t.Errorf("minLength/maxLength = %d/%v", s.MinLength, s.MaxLength)
 	}
 }
 

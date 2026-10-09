@@ -69,6 +69,10 @@ const (
 // A Program is reusable: [Program.Run] dispatches one invocation and returns, giving each
 // call a fresh [Context].
 //
+// A nil argument to a With method restores that setting's default, as each method's doc says.
+// [Program.With] skips a nil [Option], and [Program.WithDependency] registers whatever value it
+// is given, nil included.
+//
 // The With methods are not synchronized: configure before the first run. Applied between
 // sequential runs, they take effect on the next one.
 //
@@ -145,49 +149,54 @@ func newProgram(def Definition, lookup HandlerLookup) *Program {
 }
 
 // WithStdin overrides the program's standard input (default os.Stdin): the reader exposed as
-// [Context.Stdin] and decoded for stdin inputs. A nil reader is ignored.
+// [Context.Stdin] and decoded for stdin inputs. A nil reader restores os.Stdin.
 func (p *Program) WithStdin(r io.Reader) *Program {
-	if r != nil {
-		p.stdin = r
+	if r == nil {
+		r = os.Stdin
 	}
+	p.stdin = r
 	return p
 }
 
-// WithStdout overrides the program's standard output (default os.Stdout), where the runtime
-// writes completion candidates and the default reporter writes infos and successes. A nil
-// writer is ignored.
+// WithStdout overrides the program's standard output (default os.Stdout): [Context.Stdout],
+// where handlers and [Context.WriteOutput] write and the runtime writes completion candidates.
+// A nil writer restores os.Stdout.
 func (p *Program) WithStdout(w io.Writer) *Program {
-	if w != nil {
-		p.stdout = w
+	if w == nil {
+		w = os.Stdout
 	}
+	p.stdout = w
 	return p
 }
 
-// WithStderr overrides the program's standard error (default os.Stderr), where the default
-// reporter writes warnings, errors and panics. A nil writer is ignored.
+// WithStderr overrides the program's standard error (default os.Stderr): [Context.Stderr],
+// where the default reporter writes everything the run recorded. A nil writer restores
+// os.Stderr.
 func (p *Program) WithStderr(w io.Writer) *Program {
-	if w != nil {
-		p.stderr = w
+	if w == nil {
+		w = os.Stderr
 	}
+	p.stderr = w
 	return p
 }
 
 // WithExit overrides what [Program.Execute] does with the resolved exit code (default
 // [os.Exit]). The same function receives the forced exit code when a second trapped signal
-// arrives. A nil function is ignored.
+// arrives. A nil function restores os.Exit.
 //
 // When fn returns, Execute returns the run's error to its caller; under os.Exit it never
 // does. This makes an end-to-end test or an embedding host possible:
 //
 //	code := -1
-//	err := cmd.Program.
+//	err := cmd.NewProgram(cmd.Handlers()).
 //		WithArgs(argv).WithStdout(&out).WithStderr(&errs).
 //		WithExit(func(c int) { code = c }).
 //		Execute()
 func (p *Program) WithExit(fn func(int)) *Program {
-	if fn != nil {
-		p.exit = fn
+	if fn == nil {
+		fn = os.Exit
 	}
+	p.exit = fn
 	return p
 }
 
@@ -224,16 +233,19 @@ func (p *Program) WithPanicRecover(enabled bool) *Program {
 // Only Execute reads it. [Program.Run] and [Program.RunContext] use the argv they are passed,
 // so `p.WithArgs(x).Run(nil)` runs with no arguments.
 //
-// A nil args is ignored; pass []string{} to run with none.
+// A nil args restores the default, reading os.Args[1:] again; pass []string{} to run with none.
 func (p *Program) WithArgs(args []string) *Program {
-	if args != nil {
-		p.args = args
+	if args == nil {
+		args = os.Args[1:]
 	}
+	p.args = args
 	return p
 }
 
 // WithContext sets the base context threaded to every lifecycle hook, the reporter, and any
-// plugin exec, so a caller can cancel or time-bound the whole run. A nil context is ignored.
+// plugin exec, so a caller can cancel or time-bound the whole run. A nil context restores the
+// default: rotini owns each run's context, and traps signals unless [Program.WithSignals] or
+// [Program.WithoutSignalHandling] decided otherwise.
 //
 // Cancellation is cooperative: it does not preempt a running hook, but once the context is
 // canceled no further forward hook starts, and the teardown of every begun setup hook runs in
@@ -243,9 +255,7 @@ func (p *Program) WithArgs(args []string) *Program {
 // (typically via [signal.NotifyContext]). [Program.WithSignals] re-enables the trap on top of
 // a supplied context; [Program.WithoutSignalHandling] disables it without one.
 func (p *Program) WithContext(ctx context.Context) *Program {
-	if ctx != nil {
-		p.ctx = ctx
-	}
+	p.ctx = ctx
 	return p
 }
 
@@ -263,13 +273,18 @@ func (p *Program) WithoutSignalHandling() *Program {
 // WithSignals enables rotini's signal trap for the given signals, whether or not a context
 // was supplied. With a supplied context the trap cancels a derived child, never the caller's
 // context. The first signal halts the run (teardown runs, exit 128+signum); a second exits
-// immediately with 130 through the exit action. An empty list is ignored; use
-// [Program.WithoutSignalHandling] to disable the trap.
+// immediately with 130 through the exit action.
+//
+// An empty list restores the default: os.Interrupt and syscall.SIGTERM are trapped unless a
+// context was supplied, undoing an earlier WithSignals or [Program.WithoutSignalHandling].
 func (p *Program) WithSignals(sigs ...os.Signal) *Program {
-	if len(sigs) > 0 {
-		p.signalMode = signalOn
-		p.signalSet = sigs
+	if len(sigs) == 0 {
+		p.signalMode = signalAuto
+		p.signalSet = nil
+		return p
 	}
+	p.signalMode = signalOn
+	p.signalSet = sigs
 	return p
 }
 
@@ -283,7 +298,7 @@ type Option func(*Program)
 
 // With applies each Option in order and returns the program:
 //
-//	cmd.Program.
+//	cmd.NewProgram(cmd.Handlers()).
 //		With(
 //			rotini.WithDependency(tasks.Store, store),
 //			rotini.WithDependency(tasks.Client, client),
@@ -321,11 +336,9 @@ func (p *Program) WithInputSettings(meta InputSettings) *Program {
 //		return rotini.NewInputReader(meta)
 //	})
 //
-// A nil fn is ignored.
+// A nil fn restores the default, [NewInputReader].
 func (p *Program) WithInputReader(fn func(InputSettings) *InputReader) *Program {
-	if fn != nil {
-		p.readerFn = fn
-	}
+	p.readerFn = fn
 	return p
 }
 
@@ -333,7 +346,7 @@ func (p *Program) WithInputReader(fn func(InputSettings) *InputReader) *Program 
 // the generated version command and --version flag.
 //
 //	var version = "0.0.0" // go build -ldflags "-X main.version=1.2.3"
-//	cmd.Program.WithVersion(version).Execute()
+//	cmd.NewProgram(cmd.Handlers()).WithVersion(version).Execute()
 func (p *Program) WithVersion(version string) *Program {
 	p.version = version
 	return p
@@ -345,24 +358,23 @@ func (p *Program) WithVersion(version string) *Program {
 type HelpFunc func(path ...string) (string, error)
 
 // WithHelp sets where [Context.Help] finds a command's help page. The generated NewProgram
-// passes its own Help function. A nil help is ignored.
+// passes its own Help function.
 //
 // Help is a program-level setting so that a command composed from another spec prints the page
 // of the program it runs in, with that program's full command path and inherited flags.
+//
+// A nil help restores the default, no pages: [Context.Help] then returns "", so a generated
+// --help prints nothing.
 func (p *Program) WithHelp(help HelpFunc) *Program {
-	if help != nil {
-		p.help = help
-	}
+	p.help = help
 	return p
 }
 
-// WithParser replaces the [Parser] that [Context.Parser] returns. [Context.Inputs] and the
-// [InputReader] always use the default parser, so this changes only what a handler gets from
-// [Context.Parser]. A nil parser is ignored.
+// WithParser sets the [Parser] that [Context.Parser] returns. [Parser] has no options, so every
+// Parser behaves like [NewParser]'s and this setting changes nothing today; [Context.Inputs] and
+// the [InputReader] always use the default parser. A nil parser restores the default.
 func (p *Program) WithParser(parser *Parser) *Program {
-	if parser != nil {
-		p.parser = parser
-	}
+	p.parser = parser
 	return p
 }
 
@@ -389,21 +401,18 @@ func (p *Program) newRunContext() *Context {
 // ([CategoryInternal] unless the error carries a category) and fails the run.
 //
 // Completion walks the [Definition], so an alias known only to the resolver is dispatchable
-// but not completed. A nil resolver is ignored.
+// but not completed. A nil resolver restores [DefaultResolver].
 func (p *Program) WithResolver(fn Resolver) *Program {
-	if fn != nil {
-		p.resolver = fn
-	}
+	p.resolver = fn
 	return p
 }
 
 // WithLifecycle overrides the run phase's plan: which hooks run, in what pairing and order
 // (see [Lifecycle] and [DefaultLifecycle]). Halting, the reverse teardown unwind, panic
-// handling and exit-code resolution are unchanged. A nil lifecycle is ignored.
+// handling and exit-code resolution are unchanged. A nil lifecycle restores
+// [DefaultLifecycle].
 func (p *Program) WithLifecycle(fn Lifecycle) *Program {
-	if fn != nil {
-		p.lifecycle = fn
-	}
+	p.lifecycle = fn
 	return p
 }
 
@@ -505,10 +514,17 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		resolve = DefaultResolver
 	}
 	rtx := p.newRunContext()
+	rtx.bindRun(ctx)
 
 	res, err := resolve(p.def, argv)
 	if err != nil {
-		rtx.recordFault(asFault(internalUnlessTagged(fmt.Errorf("resolve: %w", err))))
+		// A usage error is the user's to fix (a flag before a plugin's name); anything else
+		// is a fault.
+		if CategoryOf(err) == CategoryUsage {
+			rtx.RecordError(err)
+		} else {
+			rtx.recordFault(asFault(internalUnlessTagged(fmt.Errorf("resolve: %w", err))))
+		}
 		return p.settle(ctx, rtx)
 	}
 	if res.Plugin != nil {
@@ -549,7 +565,7 @@ func (p *Program) installTrap(cancel context.CancelCauseFunc) (stop func()) {
 	go func() {
 		select {
 		case s := <-sigCh:
-			cancel(exitCodeError{code: signalExitCode(s)})
+			cancel(exitCodeError{code: signalExitCode(s), signal: true})
 		case <-done:
 			return
 		}
@@ -654,10 +670,15 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	}
 
 	// halt reports whether forward progress should stop, converting a cancellation into
-	// HaltWithCode with the cause's exit code.
+	// HaltWithCode with the cause's exit code. A trapped signal sets its code even when the hook
+	// already halted (typically with HaltWith of the error the signal caused), unless it
+	// exited, so a run a signal ended exits 128+n.
 	halt := func() bool {
-		if stopped, _ := rtx.stopState(); !stopped && ctx.Err() != nil {
-			rtx.HaltWithCode(canceledExitCode(ctx))
+		if ctx.Err() != nil {
+			stopped, now := rtx.stopState()
+			if !stopped || (!now && signalCanceled(ctx)) {
+				rtx.HaltWithCode(canceledExitCode(ctx))
+			}
 		}
 		stopped, _ := rtx.stopState()
 		return stopped || panicked

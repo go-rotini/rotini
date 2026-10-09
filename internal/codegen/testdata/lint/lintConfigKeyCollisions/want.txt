@@ -1,0 +1,4 @@
+spec: .rotini.spec.yaml:14:7: command demo: config "b": config key "x.y" is read as string by config "a" (command demo) and as int here, so one file can't hold both; use one type, or rename one key
+spec: .rotini.spec.yaml:16:7: command demo: config "c": config key "x" is read as string here, but key "x.y" (config "a", command demo) nests under it, so one file can't hold both; make "x" a map, or rename one key
+spec: .rotini.spec.yaml:35:11: command demo/serve: config "port": config key "server.port" is read as int by flag "port" (command demo) and as string here, so one file can't hold both; use one type, or rename one key
+spec: .rotini.spec.yaml:44:11: command demo/list: config "region": config key "region" is read as string by config "region" (command demo/status) and as []string here, so one file can't hold both; use one type, or rename one key

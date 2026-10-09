@@ -1,0 +1,8 @@
+# With the man feature on, each command's page is named after its path, lowercased, so two
+# commands that differ only in case would write the same page.
+version: 0.0.0
+command:
+  name: notes
+  commands:
+    - name: Remove
+    - name: remove

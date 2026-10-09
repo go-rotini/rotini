@@ -124,7 +124,7 @@ In a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a pa
 
 array of [`FlagGroup`](#flaggroup)
 
-Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).
+Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair). Groups that contradict each other or a flag dependency are rejected, as is a required flag in a mutually_exclusive group with no env or config fallback.
 
 #### `flag_dependencies`
 
@@ -353,7 +353,7 @@ When true, the flag is omitted from generated help (it still parses on the comma
 
 array of `string`
 
-CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run).
+CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle, and an identifier that hides one of a cascading or short-circuit ancestor flag's.
 
 ### `schema`
 
@@ -483,13 +483,15 @@ How the piped stdin payload is read.
 
 The four document formats (json, yaml, jsonc, toml) decode it into the generated &lt;Prefix&gt;Stdin struct, validated against the declared schema. The default is json.
 
-The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and neither generates a &lt;Prefix&gt;Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
+The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and is implied when left out; neither generates a &lt;Prefix&gt;Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
+
+One leading UTF-8 byte-order mark is removed before the payload is read, in every format.
 
 ### `schema`
 
 [`InputSchema`](#inputschema)
 
-Type definition for stdin content. Set required: true in schema to error when stdin is empty.
+Type definition for stdin content. Set required: true in schema to error when stdin is empty. The document formats need a `type` or `$ref` here; the raw formats imply theirs, so `schema:` may be left out or hold only `required`.
 
 
 ## ConfigurationFile
@@ -868,7 +870,7 @@ Display name for this input's value in generated help, man pages and usage lines
 
 `boolean` · default `false`
 
-When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean — unlike the string-array 'required' on Schema.
+When true, the input must be provided (or stdin must not be empty for stdin inputs). Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
 
 ### `secret`
 
@@ -903,7 +905,7 @@ A run-time location strategy for a configuration file, instead of a fixed 'path'
 
 'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
 
-'xdg': search $XDG_CONFIG_HOME/&lt;app&gt;, defaulting to ~/.config/&lt;app&gt;, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/&lt;app&gt; reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead.
+'xdg': search $XDG_CONFIG_HOME/&lt;app&gt;, defaulting to ~/.config/&lt;app&gt;, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/&lt;app&gt; reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows).
 
 ### `file`
 
@@ -971,15 +973,15 @@ Element schema for an array type: 'array' + items int generates []int, and items
 
 ### `maxItems`
 
-`integer`
+`integer` or `null`
 
-Maximum number of values for a repeatable (array or map) input — rejected on scalar types.
+Maximum number of values for a repeatable (array or map) input — rejected on scalar types. maxItems: 0 is a real bound: no value is accepted. A maxItems below minItems is rejected, since no value could pass.
 
 ### `maxLength`
 
-`integer`
+`integer` or `null`
 
-Maximum string length in runes (string types only; for []string, each element) — rejected on non-string types.
+Maximum string length in runes (string types only; for []string, each element) — rejected on non-string types. maxLength: 0 is a real bound: only the empty string is accepted. A maxLength below minLength is rejected, since no value could pass.
 
 ### `maximum`
 

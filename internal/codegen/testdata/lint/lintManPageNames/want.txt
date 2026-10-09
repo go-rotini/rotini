@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:8:7: command notes remove: has the man page name "notes-remove", the same as command "notes Remove"; both pages would be written to notes-remove.<section>, so rename one of them

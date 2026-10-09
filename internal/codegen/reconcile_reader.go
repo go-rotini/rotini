@@ -86,6 +86,9 @@ func readFile[T any](path string) (*T, error) {
 // Loaders call it directly so one read feeds both the decoded value and bytesToJSON.
 func decodeData[T any](format fileFormat, data []byte, path string) (*T, error) {
 	out := new(T)
+	if err := checkDuplicateKeys(docKind(out), format, data, path); err != nil {
+		return nil, err
+	}
 	var err error
 	switch format {
 	case formatYAML:
@@ -100,6 +103,9 @@ func decodeData[T any](format fileFormat, data []byte, path string) (*T, error) 
 		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
 	if err != nil {
+		if dup := tomlDuplicateKey(docKind(out), err, path); dup != nil {
+			return nil, dup
+		}
 		return nil, &decodeError{path: path, format: format, data: data, err: err}
 	}
 	if n, ok := any(out).(normalizer); ok {

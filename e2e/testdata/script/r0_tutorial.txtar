@@ -78,7 +78,7 @@ exec ./todo$exe add --help
 stdout 'add a task'
 ! stderr .
 exec ./todo$exe add --version
-stdout '0\.0\.0'
+stdout '^todo 0\.0\.0$'
 
 -- spec-with-add.yaml --
 version: 0.0.0
@@ -100,8 +100,8 @@ command:
     - name: version
       summary: print version
       identifiers:
-        - -v
         - --version
+      cascading: true
       short_circuit: true
       schema:
         type: bool

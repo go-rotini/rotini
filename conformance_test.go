@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -273,8 +274,7 @@ func runInputCase(t *testing.T, c inputCase) {
 		t.Setenv(k, v)
 	}
 
-	rtx := NewContextFor(acmeDef(), c.args)
-	rtx.Stdin = strings.NewReader(c.stdin)
+	rtx := NewContextFor(acmeDef(), c.args).WithStdin(strings.NewReader(c.stdin))
 	c.check(t, rtx, acmeMeta(dir))
 }
 
@@ -479,7 +479,7 @@ func conformanceCases() []inputCase {
 			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				var in acIngestInputs
 				err := NewInputReader(meta).Read(rtx, &in)
-				if err == nil || !strings.Contains(err.Error(), "decode") {
+				if err == nil || !strings.Contains(err.Error(), "could not parse stdin as yaml at line 1") {
 					t.Errorf("err = %v, want a loud decode error for a malformed payload", err)
 				}
 			}},
@@ -902,6 +902,79 @@ func conformanceCases() []inputCase {
 					t.Errorf("plugin printed %q, want from-run and %s", lines, wantDir)
 				}
 			}},
+
+		// ── argv words: numbers versus flags, "--", map keys, bounds ──
+		{id: "ARG-13", args: []string{"run", "-.5", "-5s", "-1e3"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// Only "-" then a digit, or "-." then a digit, is a number; every other dash
+				// word is a flag, so a declared -I takes "-Inf" as -I with the value "nf".
+				in := bindAs[acRunInputs](t, rtx, meta)
+				if want := []string{"-.5", "-5s", "-1e3"}; !reflect.DeepEqual(in.Run.Arguments.Script, want) {
+					t.Errorf("script = %v, want number-shaped words as positionals %v", in.Run.Arguments.Script, want)
+				}
+				calc := bindAs[acCalcInputs](t, NewContextFor(acCalcDef(), []string{"-Inf", "-.5"}), meta)
+				if calc.Calc.Flags.Include != "nf" || !reflect.DeepEqual(calc.Calc.Arguments.Nums, []float64{-0.5}) {
+					t.Errorf("-Inf -.5 = include %q, nums %v; want nf, [-0.5]", calc.Calc.Flags.Include, calc.Calc.Arguments.Nums)
+				}
+			}},
+		{id: "ARG-14", args: []string{"--", "deploy"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// "--" ends command lookup: a sub-command's name after it is a positional, and
+				// the error says so instead of calling it unknown.
+				var in acDeployInputs
+				err := NewInputReader(meta).Read(rtx, &in)
+				pe, ok := errors.AsType[*ParseError](err)
+				if !ok || !strings.Contains(pe.Msg, `"deploy" after "--" is not read as a command`) {
+					t.Fatalf("err = %v, want the ended-lookup message", err)
+				}
+				if slices.Contains(pe.Candidates, "deploy") {
+					t.Errorf("candidates = %v, want deploy left out", pe.Candidates)
+				}
+			}},
+		{id: "FLAG-15", args: []string{"deploy", "--label", "=web"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// A map pair needs a key.
+				var in acDeployInputs
+				err := NewInputReader(meta).Read(rtx, &in)
+				if err == nil || !strings.Contains(err.Error(), `--label needs a key before "="`) || CategoryOf(err) != CategoryUsage {
+					t.Errorf("err = %v, want the empty-key usage error", err)
+				}
+			}},
+		{id: "FLAG-16", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, meta InputSettings) {
+				// A declared bound implies a finite number: NaN and ±Inf are rejected.
+				for _, v := range []string{"nan", "inf", "-Inf"} {
+					var in acCalcInputs
+					err := NewInputReader(meta).Read(NewContextFor(acCalcDef(), []string{"--ratio=" + v}), &in)
+					if err == nil || !strings.Contains(err.Error(), "must be a finite number") {
+						t.Errorf("--ratio=%s: err = %v, want a finite-number error", v, err)
+					}
+				}
+			}},
+	}
+}
+
+// acCalcDef is a small CLI beside the acme fixture for the cases about number-shaped words.
+func acCalcDef() Definition {
+	return Definition{
+		Name: "calc", Handler: "Calc",
+		Flags: []FlagDef{
+			{Name: "include", Identifiers: []string{"--include", "-I"}, Type: "string"},
+			{Name: "ratio", Identifiers: []string{"--ratio"}, Type: "float64", ExclusiveMinimum: new(0.0)},
+		},
+		Arguments: []ArgDef{{Name: "nums", Type: "[]float64", Variadic: true}},
+	}
+}
+
+type acCalcInputs struct {
+	Calc struct {
+		Flags struct {
+			Include string  `rotini:"include"`
+			Ratio   float64 `rotini:"ratio"`
+		}
+		Arguments struct {
+			Nums []float64 `rotini:"nums"`
+		}
 	}
 }
 
@@ -934,6 +1007,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"SEC-01", "SEC-02", "SEC-03",
 		"PREC-01", "PREC-02", "PREC-03", "PREC-04",
 		"INJ-01", "INJ-02", "INJ-03",
+		"ARG-13", "ARG-14", "FLAG-15", "FLAG-16",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {

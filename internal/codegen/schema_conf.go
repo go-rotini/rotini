@@ -8,7 +8,7 @@ type Conf struct {
 	Schema string `json:"$schema,omitempty"`
 	// Controls `rotini generate`: the generated packages and features. When omitted entirely, the defaults apply: one generated file under internal/cmd/<root>, and every feature off.
 	Generate *GenerateConfig `json:"generate,omitempty"`
-	// Controls how `rotini validate` and `rotini generate` report problems (collect everything vs. fail fast).
+	// Controls how `rotini validate` and `rotini generate` report problems (collect everything vs. fail fast), and which opt-in warnings they add.
 	Validate *ValidateConfig `json:"validate,omitempty"`
 	// The minimum rotini version this conf requires (X.Y.Z): the feature set it was written against, not an exact pin. Any rotini of the same major version at or beyond it accepts the document, so a patch or minor upgrade never requires an edit here. A rotini older than this, or a different major version, is an error. The check is skipped for a development build of rotini, which reports no release version (0.0.0, or none at all). Works the same as the spec's `version` key.
 	Version string `json:"version"`
@@ -76,7 +76,7 @@ type PackageConfig struct {
 	// Which code this target receives.
 	//
 	// - main: the program's entrypoint (main.go), created once and never overwritten.
-	// - cmd: the CLI package. Its directory holds the handler files you edit and the one generated file, which holds the typed input and output structs (what rtx.Inputs[T] and the per-source input methods fill), the command tree with NewProgram, ProgramHandlers and InputSettings, and the handler wiring (Program and Handlers()).
+	// - cmd: the CLI package. Its directory holds the handler files you edit and the one generated file, which holds the typed input and output structs (what rtx.Inputs[T] and the per-source input methods fill), the command tree with NewProgram, ProgramHandlers and InputSettings, and the handler wiring (Handlers(), and Program, which is deprecated).
 	// - models: only the typed input and output structs, in their own package. Optional: without it they live in the cmd file. Declare it when a command uses a handler from another package (`handler:`) and that package needs the input types: the cmd package imports the handler package, so the handler package cannot import cmd back, and with models both import it instead. The cmd package re-exports every model as a type alias, so handler code inside cmd is unaffected either way.
 	//
 	// There is no 'runtime' target: the rotini runtime is imported from github.com/go-rotini/rotini, not generated.
@@ -99,8 +99,12 @@ type SchemasConfig struct {
 	Spec *SchemaConfig `json:"spec,omitempty"`
 }
 
-// Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. Strictness is fixed (validation is always strict); only the failure-reporting mode is configurable. `rotini validate --fail` overrides this.
+// Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. The rules are fixed, apart from the opt-in `flags_first` and `posix_names` warnings. `rotini validate --fail` overrides `fail`.
 type ValidateConfig struct {
 	// fast = stop at and report the first problem; collect = run to completion and report every problem at once (default).
 	Fail string `json:"fail,omitempty"`
+	// Opt-in: warn about each env or config input that no flag can also set (through the flag's `variable:` or `key:`), so `--help` shows the whole configuration surface. Secret inputs are exempt, since a secret belongs in a file or the environment, not on the command line, and so are nested env inputs (`nesting:`), since no single flag can mirror a family of variables. Warnings never fail validation.
+	FlagsFirst bool `json:"flags_first,omitempty"`
+	// Opt-in: warn when the root command's name, the program's name, isn't a POSIX utility name: 2 to 9 lowercase letters and digits. Sub-command names aren't checked. Warnings never fail validation.
+	PosixNames bool `json:"posix_names,omitempty"`
 }

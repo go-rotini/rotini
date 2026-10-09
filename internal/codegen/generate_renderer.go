@@ -305,8 +305,13 @@ type templateHandlerData struct {
 	Header            string // the target's conf `header:`; "" for none
 	HelpPathArg       string // Go field of the variadic path argument on a command named `help`; "" otherwise
 	VersionOnly       bool   // a command named `version` whose whole job is to print it
-	PrintHelpWhenBare bool   // a dispatcher root: sub-commands, no own arguments, help feature on
+	PrintHelpWhenBare bool   // a dispatcher root or group: sub-commands, no own arguments, help feature on
 	NeedsInputs       bool   // the body calls Inputs (for its result or its validation)
+	Redact            bool   // the inputs chain holds a secret, so the default body prints only the command path
+	// NewShape: the root's --help is short_circuit and cascading. Only then do new stubs check
+	// their writes, print "<program> <version>" and send bare help to stderr, so a project on
+	// an older shape keeps the stubs it always got.
+	NewShape bool
 
 	// The root's CascadingPreRun, which answers the root's short-circuit --help and --version
 	// for every command in the tree (spec short_circuit). Set on the root stub only.

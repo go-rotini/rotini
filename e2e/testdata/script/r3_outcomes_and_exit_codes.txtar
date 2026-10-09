@@ -14,12 +14,12 @@ exec ./out$exe quiet
 ! stdout .
 ! stderr .
 
-# Infos and successes go to stdout; warnings and errors go to stderr. A reporter that
-# transposed the two would still "work", which is why this is asserted by stream.
+# Infos, successes, warnings and errors all go to stderr, so stdout carries only what a
+# handler writes. This is asserted by stream.
 exec ./out$exe note
-stdout 'an informational note'
-stdout 'it worked'
-! stderr .
+stderr 'an informational note'
+stderr 'it worked'
+! stdout .
 
 # A warning is non-fatal: stderr, but exit 0. The exit floor must not react to it.
 wantexit 0 ./out$exe warn
@@ -219,6 +219,6 @@ import (
 )
 
 func main() {
-	out.Program.
+	out.NewProgram(out.Handlers()).
 		Execute()
 }

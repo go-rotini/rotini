@@ -277,6 +277,6 @@ import (
 )
 
 func main() {
-	app.Program.
+	app.NewProgram(app.Handlers()).
 		Execute()
 }

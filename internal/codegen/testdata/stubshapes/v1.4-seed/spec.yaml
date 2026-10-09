@@ -1,0 +1,42 @@
+# The spec `rotini init` seeds from v1.4 (--version long-only and cascading), plus a group
+# command and a leaf: the root and the group print their help on stderr when called bare,
+# version output names the program, and every write is checked.
+$schema: ./.rotini-schema.spec.json
+version: 0.0.0
+command:
+  name: demo
+  summary: TODO — what demo does, in one line
+  description: TODO — the paragraph at the top of `demo --help`
+  footer: Use "demo help <command>" for more information about a command.
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [--version]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+      description: Print the demo version.
+    - name: remote
+      summary: manage remotes
+      commands:
+        - name: add
+          summary: add a remote
+          arguments:
+            - name: url
+              schema: { type: string, required: true }

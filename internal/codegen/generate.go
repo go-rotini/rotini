@@ -620,6 +620,7 @@ func seedHelpAndVersion(gp *program, c genCommand, d *templateHandlerData, isRoo
 	}
 	rootVersion := rootShortCircuitFlag(gp, "version", false)
 	newShape := helpOn && rootShortCircuitFlag(gp, "help", true) != ""
+	d.NewShape = newShape
 
 	if helpOn {
 		d.HelpFlag, d.HelpFrame = helpFlagFor(gp, c)
@@ -655,8 +656,9 @@ func rootShortCircuitFlag(gp *program, logical string, requireCascading bool) st
 // stubBody assembles the handler stub's template data, choosing the seeded body from the
 // command's declarations. A --help flag is wired only when the help feature is enabled. A
 // non-root `help` command with help enabled prints the page for its variadic path argument;
-// a non-root `version` command with no arguments prints the version; a dispatch-only root
-// prints its help when invoked bare. Every other command gets the default body.
+// a non-root `version` command with no arguments prints the version; a dispatch-only root or
+// group prints its help when invoked bare. Every other command gets the default body, which
+// prints the command path alone when its inputs hold a secret.
 func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) templateHandlerData {
 	d := templateHandlerData{
 		Package:       pkg,
@@ -675,17 +677,42 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		d.HelpPathArg = variadicStringArgField(c)
 	case name == "version" && !isRoot && len(c.args) == 0:
 		d.VersionOnly = true
-	case isRoot && helpOn && len(c.args) == 0 && len(gp.own)+len(gp.composed) > 0:
-		// A dispatch-only root shows its help when invoked bare.
+	case helpOn && len(c.args) == 0 && ((isRoot && len(gp.own)+len(gp.composed) > 0) || (!isRoot && c.hasChildren)):
+		// A dispatch-only root or group shows its help when invoked bare.
 		d.PrintHelpWhenBare = true
 	}
+	d.Redact = d.HelpPathArg == "" && !d.VersionOnly && !d.PrintHelpWhenBare && chainHasSecret(gp, c)
 
 	// NeedsInputs: the body calls rtx.Inputs, which also reports unknown flags.
 	// UsesInputs: the body reads the result; otherwise it is discarded to `_`.
 	d.NeedsInputs = d.HelpFlag != "" || d.VersionFlag != "" || d.HelpPathArg != "" ||
 		(!d.VersionOnly && !d.PrintHelpWhenBare)
-	d.UsesInputs = d.HelpPathArg != "" || (!d.VersionOnly && !d.PrintHelpWhenBare)
+	d.UsesInputs = d.HelpPathArg != "" || (!d.VersionOnly && !d.PrintHelpWhenBare && !d.Redact)
 	return d
+}
+
+// chainHasSecret reports whether c or any own ancestor declares a secret input. Its inputs type
+// embeds every frame of the chain, so printing it would print an ancestor's secret too.
+func chainHasSecret(gp *program, c genCommand) bool {
+	byPrefix := map[string]genCommand{}
+	for _, oc := range gp.ownCommands() {
+		byPrefix[oc.prefix] = oc
+	}
+	for _, frame := range c.inputs {
+		if byPrefix[frame.Field].secret {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSecretInput reports whether any of a command's own inputs is declared secret.
+func hasSecretInput(in *Inputs) bool {
+	secret := false
+	eachInputSchema(in, func(_, _ string, schema *InputSchema) {
+		secret = secret || (schema != nil && schema.Secret)
+	})
+	return secret
 }
 
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint package. It

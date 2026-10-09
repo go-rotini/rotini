@@ -43,7 +43,11 @@ var specLints = []func(*Spec) []error{
 	lintLocalTimeout,
 	lintFlagGroups,
 	lintFlagDependencies,
+	lintGroupConflicts,
 	lintDuplicateFlagIdentifiers,
+	lintShadowedIdentifiers,
+	lintSingleDashIdentifiers,
+	lintShortOnlyFlags,
 	lintSchemaRefs,
 	lintHandlerFilenames,
 	lintSiblingCollisions,
@@ -58,6 +62,7 @@ var specLints = []func(*Spec) []error{
 	lintConfigSource,
 	lintEnvNesting,
 	lintConfigInputFiles,
+	lintConfigKeyCollisions,
 	lintConstraintApplicability,
 	lintCountFlags,
 	lintPassthrough,
@@ -68,6 +73,9 @@ var specLints = []func(*Spec) []error{
 	lintShortCircuit,
 	lintStdinFormat,
 	lintComplete,
+	lintBoundsSatisfiable,
+	lintEnumValues,
+	lintRequiredDefault,
 	lintDefaultScalar,
 	lintDefaultConstraints,
 	lintItemConstraints,
@@ -76,9 +84,11 @@ var specLints = []func(*Spec) []error{
 	lintSeparator,
 	lintImplicitValue,
 	lintValuesParse,
+	lintSecretDefault,
 	lintObjectFlags,
 	lintLayout,
 	lintExitStatus,
+	lintStdinSchema,
 }
 
 // lintRootCommand requires the root command, which is the binary itself, to have a
@@ -759,10 +769,10 @@ func lintConstraintApplicability(spec *Spec) []error {
 					}
 				}
 			}
-			if (schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "") && !stringValued(elem) {
+			if (schema.MinLength != 0 || schema.MaxLength != nil || schema.Pattern != "") && !stringValued(elem) {
 				add(fmt.Sprintf("`minLength`/`maxLength`/`pattern` apply to string types only, not %s; the constraint would be silently ignored", typ))
 			}
-			if (schema.MinItems != 0 || schema.MaxItems != 0) &&
+			if (schema.MinItems != 0 || schema.MaxItems != nil) &&
 				!strings.HasPrefix(typ, "[]") && !strings.HasPrefix(typ, "map[") {
 				add(fmt.Sprintf("`minItems`/`maxItems` apply to repeatable (list or map) types only, not %s; the count bound would be silently ignored", typ))
 			}
@@ -868,8 +878,8 @@ func lintCountFlags(spec *Spec) []error {
 				"items":           schema.Items != nil,
 				"minimum/maximum": schema.Minimum != nil || schema.Maximum != nil,
 				"exclusiveMinimum/exclusiveMaximum/multipleOf": schema.ExclusiveMinimum != nil || schema.ExclusiveMaximum != nil || schema.MultipleOf != nil,
-				"minLength/maxLength/pattern":                  schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "",
-				"minItems/maxItems":                            schema.MinItems != 0 || schema.MaxItems != 0,
+				"minLength/maxLength/pattern":                  schema.MinLength != 0 || schema.MaxLength != nil || schema.Pattern != "",
+				"minItems/maxItems":                            schema.MinItems != 0 || schema.MaxItems != nil,
 			} {
 				if set {
 					bad = append(bad, key)
@@ -1344,7 +1354,7 @@ func lintLocalTimeout(spec *Spec) []error {
 }
 
 // lintFlagGroups rejects a flag_groups entry referencing a flag the command does not
-// declare, which would silently never match.
+// declare, which would silently never match, or listing one flag twice.
 func lintFlagGroups(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -1353,11 +1363,18 @@ func lintFlagGroups(spec *Spec) []error {
 		}
 		known, ordered := flagNames(c)
 		for i, g := range c.FlagGroups {
+			at := fmt.Sprintf("%s/flag_groups/%d", ptr, i)
+			listed := map[string]bool{}
 			for _, name := range g.Flags {
 				if !known[name] {
 					msg := fmt.Sprintf("`flag_groups` entry (%s) references unknown flag %q; it has no matching entry in this command's `flags`", g.Kind, name)
-					problems = append(problems, &problem{kind: "spec", ptr: fmt.Sprintf("%s/flag_groups/%d", ptr, i), loc: "command " + path, msg: didYouMean(msg, name, ordered)})
+					problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 				}
+				if listed[name] {
+					problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path,
+						msg: fmt.Sprintf("`flag_groups` entry (%s) lists flag %q twice; list each flag once", g.Kind, name)})
+				}
+				listed[name] = true
 			}
 		}
 	})
@@ -1365,7 +1382,7 @@ func lintFlagGroups(spec *Spec) []error {
 }
 
 // lintFlagDependencies rejects a flag_dependencies entry whose When or Requires references a
-// flag the command does not declare.
+// flag the command does not declare, or that makes a flag require itself.
 func lintFlagDependencies(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -1374,16 +1391,22 @@ func lintFlagDependencies(spec *Spec) []error {
 		}
 		known, ordered := flagNames(c)
 		for i, dep := range c.FlagDependencies {
+			at := fmt.Sprintf("%s/flag_dependencies/%d", ptr, i)
 			report := func(name string) {
 				msg := fmt.Sprintf("`flag_dependencies` entry references unknown flag %q; it has no matching entry in this command's `flags`", name)
-				problems = append(problems, &problem{kind: "spec", ptr: fmt.Sprintf("%s/flag_dependencies/%d", ptr, i), loc: "command " + path, msg: didYouMean(msg, name, ordered)})
+				problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 			}
-			if !known[dep.When] {
-				report(dep.When)
+			when := dependencyFlag(dep)
+			if !known[when] {
+				report(when)
 			}
 			for _, name := range dep.Requires {
 				if !known[name] {
 					report(name)
+				}
+				if name == when {
+					problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path,
+						msg: fmt.Sprintf("`flag_dependencies` entry makes flag %q require itself, which is always true; remove %q from `requires`", name, name)})
 				}
 			}
 		}
@@ -1697,9 +1720,9 @@ func lintDefaultConstraints(spec *Spec) []error {
 				if n := len(values); schema.MinItems > 0 && n < schema.MinItems {
 					add(fmt.Sprintf("`default` has %d %s but `minItems` is %d; %s",
 						n, pluralWord("value", n), schema.MinItems, defaultFails))
-				} else if schema.MaxItems > 0 && n > schema.MaxItems {
+				} else if schema.MaxItems != nil && n > *schema.MaxItems {
 					add(fmt.Sprintf("`default` has %d %s but `maxItems` is %d; %s",
-						n, pluralWord("value", n), schema.MaxItems, defaultFails))
+						n, pluralWord("value", n), *schema.MaxItems, defaultFails))
 				}
 			}
 
@@ -1747,9 +1770,9 @@ func defaultViolation(schema *InputSchema, label, v string) string {
 	if ln := utf8.RuneCountInString(v); schema.MinLength > 0 && ln < schema.MinLength {
 		return fmt.Sprintf("%s %q is %d %s, below the declared `minLength` %d",
 			label, v, ln, pluralWord("character", ln), schema.MinLength)
-	} else if schema.MaxLength > 0 && ln > schema.MaxLength {
+	} else if schema.MaxLength != nil && ln > *schema.MaxLength {
 		return fmt.Sprintf("%s %q is %d %s, above the declared `maxLength` %d",
-			label, v, ln, pluralWord("character", ln), schema.MaxLength)
+			label, v, ln, pluralWord("character", ln), *schema.MaxLength)
 	}
 
 	if schema.Pattern != "" {
@@ -1796,7 +1819,7 @@ func lintItemConstraints(spec *Spec) []error {
 			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			it := &schema.Items.BaseSchema
 
-			if it.MinItems > 0 || it.MaxItems > 0 {
+			if it.MinItems > 0 || it.MaxItems != nil {
 				add("`minItems`/`maxItems` on `items` would count values inside ONE element, but an element of a " +
 					channel + " list is a single value; put the bound on the list itself")
 			}
@@ -1815,7 +1838,7 @@ func lintItemConstraints(spec *Spec) []error {
 			conflict("exclusiveMaximum", floatBoundsDiffer(bound(it.ExclusiveMaximum), bound(schema.ExclusiveMaximum)))
 			conflict("multipleOf", floatBoundsDiffer(bound(it.MultipleOf), bound(schema.MultipleOf)))
 			conflict("minLength", it.MinLength != 0 && it.MinLength != schema.MinLength)
-			conflict("maxLength", it.MaxLength != 0 && it.MaxLength != schema.MaxLength)
+			conflict("maxLength", it.MaxLength != nil && (schema.MaxLength == nil || *it.MaxLength != *schema.MaxLength))
 		})
 	})
 	return problems

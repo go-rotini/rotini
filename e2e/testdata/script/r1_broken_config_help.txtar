@@ -23,7 +23,7 @@ stdout 'a sub-command'
 exec ./bc$exe --version
 stdout '0\.0\.0'
 ! exec ./bc$exe sub
-stderr 'configuration file "project"'
+stderr 'could not parse configuration file .*\.bc\.yaml:1:11: unterminated flow sequence'
 
 # A file whose value the fallback flag's type can't hold.
 cp badvalue.yaml .bc.yaml

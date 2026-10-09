@@ -19,6 +19,9 @@ exists cmd/demo/.rotini.conf.yaml
 exists internal/cmd/demo/demo.go
 exists internal/cmd/demo/zz_rotini.go
 
+# main.go builds the program itself rather than using a shared package variable.
+grep 'cmd\.NewProgram\(cmd\.Handlers\(\)\)' cmd/demo/main.go
+
 exec go mod tidy
 exec go build -o demo$exe ./cmd/demo
 
@@ -31,6 +34,9 @@ stdout '--help'
 stdout '--version'
 ! stderr .
 
+# --version is long-only: -v is left free for a --verbose.
+! stdout '-v,'
+
 # -h is the same page.
 exec ./demo$exe -h
 stdout 'Usage:'
@@ -39,20 +45,24 @@ stdout 'Usage:'
 exec ./demo$exe help
 stdout 'Usage:'
 
+# Version output names the program, then the version.
 exec ./demo$exe version
-stdout '0\.0\.0'
+stdout '^demo 0\.0\.0$'
 
 exec ./demo$exe --version
-stdout '0\.0\.0'
+stdout '^demo 0\.0\.0$'
 
-# `help <command>` resolves another command's page, not the root's.
+# `help <command>` resolves another command's page, not the root's. --version cascades, so a
+# sub-command's page lists it with --help.
 exec ./demo$exe help version
 stdout 'demo version'
+stdout '--version'
 
-# A bare invocation of a root that only dispatches shows its help and exits non-zero,
-# as every CLI does — not an empty inputs struct.
+# A bare invocation of a root that only dispatches shows its help on stderr and exits
+# non-zero, as every CLI does — not an empty inputs struct.
 ! exec ./demo$exe
-stdout 'Usage:'
+stderr 'Usage:'
+! stdout .
 
 # An unknown flag is a usage error on stderr, and says which token was wrong.
 ! exec ./demo$exe --nope
@@ -64,14 +74,33 @@ exec ./demo$exe __complete ''
 stdout 'help'
 stdout 'version'
 
+# A command that only groups sub-commands gets the same stub as the root: run bare, it prints
+# its help on stderr and exits 1. A command with a secret input never prints its inputs, and
+# no page shows a secret's default.
+cp spec-with-group.yaml cmd/demo/.rotini.spec.yaml
+exec rotini generate ./cmd/demo/.rotini.spec.yaml --config ./cmd/demo/.rotini.conf.yaml
+exec go build -o demo$exe ./cmd/demo
+! exec ./demo$exe remote
+stderr 'Usage:'
+stderr 'demo remote'
+! stdout .
+exec ./demo$exe remote add origin
+stdout '^demo remote add: '
+exec ./demo$exe deploy
+stdout '^demo deploy$'
+! stdout hunter2
+exec ./demo$exe deploy --help
+stdout '--token'
+! stdout hunter2
+
 # An entrypoint that never calls WithVersion: --version says so rather than printing a blank
-# line. rotini does not invent a version; "unknown" is the generated handler being honest.
+# version. rotini does not invent a version; "unknown" is the generated handler being honest.
 cp nover.go cmd/demo/main.go
 exec go build -o demo$exe ./cmd/demo
 exec ./demo$exe --version
-stdout '^unknown$'
+stdout '^demo unknown$'
 exec ./demo$exe version
-stdout '^unknown$'
+stdout '^demo unknown$'
 
 -- nover.go --
 package main
@@ -81,5 +110,50 @@ import (
 )
 
 func main() {
-	demo.Program.Execute()
+	demo.NewProgram(demo.Handlers()).Execute()
 }
+-- spec-with-group.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  footer: Use "demo help <command>" for more information about a command.
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [--version]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+      description: Print the demo version.
+    - name: remote
+      summary: manage remotes
+      commands:
+        - name: add
+          summary: add a remote
+          arguments:
+            - name: name
+              schema: { type: string, required: true }
+    - name: deploy
+      summary: deploy it
+      flags:
+        - name: token
+          summary: the api token
+          identifiers: [--token]
+          schema: { type: string, secret: true, default: hunter2 }

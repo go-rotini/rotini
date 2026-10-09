@@ -176,7 +176,7 @@ func presenceStore(v reflect.Value, chain []Command, anchor int, set Presence) *
 // is present for the presence rules (and set, for flag groups and dependencies) without
 // adding a value the value rules would read.
 func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anchor int, handBuilt map[FieldPath]bool) *parsedInputs {
-	out := &parsedInputs{scopes: make([]scopeInputs, len(p.scopes)), argvSet: make([]map[string]bool, len(p.argvSet)), span: p.span, detached: p.detached}
+	out := &parsedInputs{scopes: make([]scopeInputs, len(p.scopes)), argvSet: make([]map[string]bool, len(p.argvSet)), span: p.span, detached: p.detached, dashedFirst: p.dashedFirst}
 	for i, si := range p.scopes {
 		cp := si
 		cp.flags = maps.Clone(si.flags)
@@ -417,11 +417,16 @@ func checkTypedChannelPresence(v reflect.Value, chain []Command, anchor int, set
 				if _, given := set[fieldPath(top, channel, fieldName)]; given {
 					return
 				}
-				ch, key := channelConfig, reconKey(body)
+				key := reconKey(body)
 				if channel == "Env" {
-					ch = channelEnv
+					var names []string
+					if tag.Get("env") != "" {
+						names = strings.Split(tag.Get("env"), ",")
+					}
+					err = usageBind(channelEnv, key, envUnsetLabel(names, key)+" is required", nil)
+					return
 				}
-				err = usageBind(ch, key, fmt.Sprintf("%s %q is required", channelNoun(ch), key), nil)
+				err = usageBind(channelConfig, key, "config key "+key+" is required", nil)
 			})
 		}
 		if err != nil || scope != len(chain)-1 {
@@ -460,6 +465,13 @@ func checkTypedStdin(ci reflect.Value, schemas map[string]string) error {
 	js := schemas[sf.Type().Elem().Name()]
 	if js == "" {
 		return nil
+	}
+	if sf.Type().Elem().Kind() != reflect.Struct {
+		raw, err := json.Marshal(sf.Interface())
+		if err != nil {
+			return internalBind(channelStdin, "", "could not encode the stdin payload", err)
+		}
+		return validateDocumentJSON(js, raw)
 	}
 	doc, err := toDocument(sf.Interface())
 	if err != nil {

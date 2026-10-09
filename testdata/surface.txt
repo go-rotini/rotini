@@ -9,6 +9,7 @@ const ParseKindConstraintViolation
 const ParseKindEnumViolation
 const ParseKindInternal
 const ParseKindInvalidValue
+const ParseKindMisplacedFlag
 const ParseKindMissingRequired
 const ParseKindNeedsValue
 const ParseKindNoArguments
@@ -287,7 +288,11 @@ method Context.WithEnviron(env []string) *Context
 method Context.WithHelp(help HelpFunc) *Context
 method Context.WithInputReader(fn func(InputSettings) *InputReader) *Context
 method Context.WithInputSettings(meta InputSettings) *Context
+method Context.WithOutputChecks(enabled bool) *Context
 method Context.WithParser(parser *Parser) *Context
+method Context.WithStderr(w io.Writer) *Context
+method Context.WithStdin(r io.Reader) *Context
+method Context.WithStdout(w io.Writer) *Context
 method Context.WithVersion(version string) *Context
 method Context.WriteOutputItem[T any](item T, format string, render func(io.Writer, string, T) error) error
 method Context.WriteOutput[T any](v T, format string, render func(io.Writer, string, T) error) error
@@ -344,7 +349,7 @@ method Program.WithHelp(help HelpFunc) *Program
 method Program.WithInputReader(fn func(InputSettings) *InputReader) *Program
 method Program.WithInputSettings(meta InputSettings) *Program
 method Program.WithLifecycle(fn Lifecycle) *Program
-method Program.WithOutputChecks() *Program
+method Program.WithOutputChecks(enabled bool) *Program
 method Program.WithPanicRecover(enabled bool) *Program
 method Program.WithParser(parser *Parser) *Program
 method Program.WithReporter(fn Reporter) *Program

@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"errors"
+	"fmt"
 
 	"strings"
 	"testing"
@@ -51,13 +52,72 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 			d.HelpFlag, d.HelpFrame, d.VersionFlag = "Help", d.Prefix, "Version"
 			return d
 		},
+		"redacted": func(d templateHandlerData) templateHandlerData {
+			d.Redact, d.NeedsInputs = true, true
+			return d
+		},
+		"root hook": func(d templateHandlerData) templateHandlerData {
+			d.RootHook, d.RootHelpFlag, d.RootVersionFlag, d.PrintHelpWhenBare = true, "Help", "Version", true
+			return d
+		},
 	}
 	for name, mutate := range bodies {
-		t.Run(name, func(t *testing.T) {
-			if _, err := renderHandlerStubFile(mutate(base)); err != nil {
-				t.Errorf("handler stub: %v", err)
-			}
-		})
+		for _, newShape := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/newShape=%t", name, newShape), func(t *testing.T) {
+				d := mutate(base)
+				d.NewShape = newShape
+				out, err := renderHandlerStubFile(d)
+				if err != nil {
+					t.Fatalf("handler stub: %v", err)
+				}
+				// The new shape checks every write to stdout (a bare-help body writes only to
+				// stderr); the old shape keeps its stubs.
+				want := newShape && (d.RootHook || !d.PrintHelpWhenBare)
+				if got := strings.Contains(string(out), "if _, err := fmt.Fprint"); got != want {
+					t.Errorf("checked writes = %t, want %t:\n%s", got, want, out)
+				}
+			})
+		}
+	}
+}
+
+func TestStubBody_newShapeForms(t *testing.T) {
+	out, err := renderHandlerStubFile(templateHandlerData{
+		Package: "cli", HandlerType: "appHandler", InputsType: "AppInputs", Invocation: "app", Prefix: "App",
+		RuntimeImport: `"github.com/go-rotini/rotini"`,
+		RootHook:      true, RootHelpFlag: "Help", RootVersionFlag: "Version", PrintHelpWhenBare: true, NewShape: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version)",
+		"fmt.Fprintln(rtx.Stderr, rtx.Help())\n\trtx.HaltWithCode(1)",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("stub missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestStubBody_redactsSecretChains(t *testing.T) {
+	spec := `version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: token
+      schema: { type: string, secret: true }
+  commands:
+    - name: sub
+      summary: a sub
+`
+	// The root's secret flag is in sub's inputs too, so neither stub prints its inputs.
+	files := emitInModule(t, spec, goldenConf)
+	for _, name := range []string{"internal/cmd/demo/demo.go", "internal/cmd/demo/demo_sub.go"} {
+		stub := files[name]
+		if strings.Contains(stub, "%+v") || !strings.Contains(stub, "if _, err := rtx.Inputs[") {
+			t.Errorf("%s prints its inputs or skips reading them:\n%s", name, stub)
+		}
 	}
 }
 
@@ -114,6 +174,10 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "\"time\"\n\n\tchildcli \"example.com/child/cli\"") {
 		t.Error("imports should be grouped std then third-party")
+	}
+	// The Deprecated paragraph must sit directly on the var so gopls and staticcheck see it.
+	if !strings.Contains(string(out), "// later release.\nvar Program = NewProgram(&handlers{})") {
+		t.Error("var Program should carry its Deprecated doc comment")
 	}
 	// Own commands return a local handler; composed commands delegate to the child.
 	if !strings.Contains(string(out), "return &appHandler{}") {
@@ -375,7 +439,7 @@ func TestSeedSpecUsesTheDocumentedStyle(t *testing.T) {
 		t.Fatal(err)
 	}
 	seed := string(out)
-	for _, want := range []string{"identifiers: [-h, --help]", "identifiers: [-v, --version]", "schema: { type: bool }"} {
+	for _, want := range []string{"identifiers: [-h, --help]", "identifiers: [--version]", "cascading: true", "schema: { type: bool }"} {
 		if !strings.Contains(seed, want) {
 			t.Errorf("seed missing %q", want)
 		}

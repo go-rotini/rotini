@@ -213,6 +213,10 @@ func (p *Processor) validateComposedSpecs(rs *reconciledSpec, seen map[string]bo
 		seen[locator] = true
 		child, err := reconcileSpec(displayPath(locator))
 		if err != nil {
+			// A repeated key is reported in the child's own file, like its other problems.
+			if dup := (*duplicateKeysError)(nil); errors.As(err, &dup) {
+				problems = append(problems, dup.problems...)
+			}
 			continue
 		}
 		problems = append(problems, p.validateAndLintOne(child)...)

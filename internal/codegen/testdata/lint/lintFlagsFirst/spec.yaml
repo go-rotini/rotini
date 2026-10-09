@@ -1,0 +1,34 @@
+# With validate.flags_first, every env or config input should have a flag that sets it too, so
+# --help shows the whole configuration surface.
+version: 0.0.0
+command:
+  name: demo
+  env_prefix: DEMO
+  flags:
+    # Correct: these flags read DEMO_PROFILE and the config key "server.url".
+    - name: profile
+      schema: { type: string, variable: DEMO_PROFILE }
+    - name: url
+      schema: { type: string, key: server.url }
+  env:
+    - name: profile
+      schema: { type: string }
+    - name: region
+      schema: { type: string }
+    # Correct: a secret belongs in the environment, not on the command line. No problem.
+    - name: token
+      schema: { type: string, secret: true }
+    # Correct: a family of variables has no single flag. No problem.
+    - name: labels
+      schema: { type: map, nesting: _ }
+  config:
+    - name: server_url
+      schema: { type: string, key: server.url }
+    - name: timeout
+      schema: { type: duration }
+  commands:
+    - name: sync
+      env:
+        # Correct: the root's --profile flag reaches it. No problem.
+        - name: profile_again
+          schema: { type: string, variable: DEMO_PROFILE }

@@ -12,3 +12,7 @@ command:
     - when: tls
       requires:
         - cert
+    # A flag requiring itself is always satisfied.
+    - when: tls
+      requires:
+        - tls

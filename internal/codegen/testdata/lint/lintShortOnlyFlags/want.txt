@@ -1,0 +1,2 @@
+warning: spec: .rotini.spec.yaml:10:7: command demo: flag "verbose": has only a short identifier (-v); add a long form such as --verbose, which scripts and readers of help can understand
+warning: spec: .rotini.spec.yaml:13:7: command demo: flag "extract": has only short identifiers (-x, -X); add a long form such as --extract, which scripts and readers of help can understand

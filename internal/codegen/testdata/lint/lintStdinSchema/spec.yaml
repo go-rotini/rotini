@@ -1,0 +1,20 @@
+# A document format decodes stdin into the generated Stdin type, which only a schema with a
+# type or a $ref describes. Without one no Stdin field would be generated, so the declared
+# stdin would silently do nothing. The raw formats imply their schema and pass.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: apply
+      stdin:
+        format: yaml
+    - name: load
+      stdin:
+        schema: {required: true}
+    - name: upper
+      stdin:
+        format: text
+    - name: sort
+      stdin:
+        format: lines
+        schema: {required: true}

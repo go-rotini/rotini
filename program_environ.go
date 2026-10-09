@@ -10,7 +10,7 @@ package rotini
 // Each run reads it through [Context.LookupEnv] and [Context.Environ], so tests can run in
 // parallel and one process can run programs with different environments:
 //
-//	code, err := cmd.Program.
+//	code, err := cmd.NewProgram(cmd.Handlers()).
 //		WithEnviron([]string{"HOME=" + home, "APP_TOKEN=t"}).
 //		WithDir(t.TempDir()).
 //		Run([]string{"deploy"})

@@ -1,0 +1,45 @@
+# One configuration file can't hold a key read with two types, or a key that is both a value
+# and the parent of another key.
+version: 0.0.0
+command:
+  name: demo
+  config_files:
+    - name: main
+      path: demo.yaml
+    - name: other
+      path: other.yaml
+  config:
+    - name: a
+      schema: { type: string, key: x.y }
+    - name: b
+      schema: { type: int, key: x.y }
+    - name: c
+      schema: { type: string, key: x }
+    # Correct: a map holds labels.team. No problem.
+    - name: labels
+      schema: { type: map }
+    - name: team
+      schema: { type: string, key: labels.team }
+    # Correct: pinned to different files. No problem.
+    - name: mode
+      schema: { type: string, file: main }
+    - name: mode_count
+      schema: { type: int, key: mode, file: other }
+  flags:
+    # A flag's config fallback reads the key too.
+    - name: port
+      schema: { type: int, key: server.port }
+  commands:
+    - name: serve
+      config:
+        - name: port
+          schema: { type: string, key: server.port }
+    # Siblings read the same file, so they must agree.
+    - name: status
+      config:
+        - name: region
+          schema: { type: string }
+    - name: list
+      config:
+        - name: region
+          schema: { type: '[]string' }

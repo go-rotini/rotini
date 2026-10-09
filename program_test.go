@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -172,35 +173,35 @@ func TestProgram_RunContext_nilContext(t *testing.T) {
 
 // ── outcome reporter ──────────────────────────────────────────.
 
-// TestRun_recordSuccess_defaultToStdout: a recorded success reaches the default reporter,
-// which prints it to stdout, and the run stays exit 0.
-func TestRun_recordSuccess_defaultToStdout(t *testing.T) {
+// TestRun_recordSuccess_defaultToStderr: a recorded success reaches the default reporter,
+// which prints it to stderr, leaving stdout to the result, and the run stays exit 0.
+func TestRun_recordSuccess_defaultToStderr(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordSuccess("deployed 3 services")
 	}}
-	p, out, _ := newTestProgram(h, []string{"run"})
+	p, out, errs := newTestProgram(h, []string{"run"})
 	code, err := p.Run(p.args)
 	if code != 0 || err != nil {
 		t.Fatalf("run() = (%d, %v), want (0, nil)", code, err)
 	}
-	if !strings.Contains(out.String(), "deployed 3 services") {
-		t.Errorf("stdout = %q, want the success on stdout", out)
+	if !strings.Contains(errs.String(), "deployed 3 services") || out.Len() != 0 {
+		t.Errorf("stdout = %q, stderr = %q, want the success on stderr only", out, errs)
 	}
 }
 
-// TestRun_recordInfo_defaultToStdout: a recorded info prints to stdout and does not change
+// TestRun_recordInfo_defaultToStderr: a recorded info prints to stderr and does not change
 // the exit code.
-func TestRun_recordInfo_defaultToStdout(t *testing.T) {
+func TestRun_recordInfo_defaultToStderr(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordInfo("scanning 12 files")
 	}}
-	p, out, _ := newTestProgram(h, []string{"run"})
+	p, out, errs := newTestProgram(h, []string{"run"})
 	code, err := p.Run(p.args)
 	if code != 0 || err != nil {
 		t.Fatalf("run() = (%d, %v), want (0, nil)", code, err)
 	}
-	if !strings.Contains(out.String(), "scanning 12 files") {
-		t.Errorf("stdout = %q, want the info on stdout", out)
+	if !strings.Contains(errs.String(), "scanning 12 files") || out.Len() != 0 {
+		t.Errorf("stdout = %q, stderr = %q, want the info on stderr only", out, errs)
 	}
 }
 
@@ -1266,12 +1267,12 @@ func TestWithArgs_onlyExecuteConsultsIt(t *testing.T) {
 	}
 }
 
-// TestWithArgs_nilIsIgnored: a nil vector leaves the default in place.
-func TestWithArgs_nilIsIgnored(t *testing.T) {
-	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, []string{"run", "kept"})
+// TestWithArgs_nilRestoresDefault: a nil vector reads os.Args[1:] again.
+func TestWithArgs_nilRestoresDefault(t *testing.T) {
+	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, []string{"run", "replaced"})
 	p.WithArgs(nil)
-	if len(p.args) != 2 || p.args[1] != "kept" {
-		t.Errorf("args = %q, want the previous vector kept when nil is passed", p.args)
+	if !slices.Equal(p.args, os.Args[1:]) {
+		t.Errorf("args = %q, want os.Args[1:] restored when nil is passed", p.args)
 	}
 	p.WithArgs([]string{})
 	if len(p.args) != 0 {
