@@ -39,8 +39,9 @@ func flagFields(in *Inputs, envPrefix string) []fieldDef {
 			Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name,
 			Import: fieldImport(f.Schema), Recon: key,
 			// The env fallback is pinned at generate time; see [envVarFor].
-			EnvVar:  flagEnvVar(f.Schema, key, envPrefix),
-			Comment: contractComment(f.Schema),
+			EnvVar:     flagEnvVar(f.Schema, key, envPrefix),
+			Comment:    contractComment(f.Schema),
+			Constraint: expansionTags(f.Schema),
 		})
 		if key != "" && f.Schema.VariableFile != "" {
 			fields[len(fields)-1].EnvFile = f.Schema.VariableFile
@@ -78,7 +79,7 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 			Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name,
 			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema),
 			EnvVar:     envVarName(e, envPrefix),
-			Constraint: constraintTags(e.Schema),
+			Constraint: joinTags(constraintTags(e.Schema), expansionTags(e.Schema), pathTag(e.Schema)),
 		}
 		// recon splits an env list or map on its separator option (default ","), plainly.
 		if e.Schema != nil && e.Schema.Separator != "" && e.Schema.Separator != "," {
@@ -227,7 +228,7 @@ func configFields(in *Inputs) []fieldDef {
 		fd := fieldDef{
 			Field: toPascalCase(c.Name), GoType: goFieldType(c.Schema), Tag: c.Name,
 			Import: fieldImport(c.Schema), Recon: reconTag(configKey(c), c.Schema),
-			Constraint: constraintTags(c.Schema),
+			Constraint: joinTags(constraintTags(c.Schema), expansionTags(c.Schema), pathTag(c.Schema)),
 		}
 		if c.Schema != nil && c.Schema.File != "" {
 			fd.CfgFile = c.Schema.File
@@ -348,7 +349,11 @@ func argFields(in *Inputs, envPrefix string) []fieldDef {
 		fields = append(fields, fieldDef{
 			Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema),
 			Recon: key, EnvVar: flagEnvVar(a.Schema, key, envPrefix), Comment: contractComment(a.Schema),
+			Constraint: expansionTags(a.Schema),
 		})
+		if key != "" && a.Schema.VariableFile != "" {
+			fields[len(fields)-1].EnvFile = a.Schema.VariableFile
+		}
 	}
 	return fields
 }

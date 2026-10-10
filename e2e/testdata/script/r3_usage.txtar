@@ -1,0 +1,151 @@
+# R3 — the usage line as data. Nothing prints it by default; the guide's reporter prints
+# rtx.Usage() after a usage error, and the generated Usage function answers for any command.
+# internal/cmd/todo/report_usage.go is the guide's block, byte for byte.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# A missing argument: the reporter adds the invoked command's usage line.
+! exec ./todo$exe add
+stderr '^Error: missing required input: <title>'
+stderr '^Usage: todo add \[flags\] <title>$'
+stderr '^Run ''todo add --help'' for more\.$'
+
+# Not a usage error: no usage line.
+! exec ./todo$exe add --fail x
+stderr '^Error: the store is gone$'
+! stderr 'Usage:'
+
+# The generated Usage function, through an alias, and the declared line of another command.
+exec ./todo$exe lines
+cmp stdout lines.txt
+
+-- lines.txt --
+todo [flags] <command>
+todo add [flags] <title>
+todo ls --all
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  flags:
+    - name: verbose
+      identifiers: [--verbose]
+      schema:
+        type: bool
+  commands:
+    - name: add
+      aliases: [a]
+      summary: add a task
+      flags:
+        - name: fail
+          identifiers: [--fail]
+          schema:
+            type: bool
+      arguments:
+        - name: title
+          schema:
+            type: string
+            required: true
+    - name: list
+      aliases: [ls]
+      usage: todo ls --all
+      summary: list tasks
+    - name: lines
+      summary: print usage lines
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+-- cmd/todo/main.go --
+package main
+
+import todo "example.com/todo/internal/cmd/todo"
+
+func main() { todo.NewProgram(todo.Handlers()).WithReporter(todo.ReportWithUsage).Execute() }
+-- internal/cmd/todo/todo_add.go --
+package todo
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type todoAddHandler struct{ rotini.NoHooks }
+
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoAddInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.TodoAdd.Flags.Fail {
+		rtx.HaltWith(errors.New("the store is gone"))
+	}
+}
+-- internal/cmd/todo/todo_lines.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type todoLinesHandler struct{ rotini.NoHooks }
+
+func (*todoLinesHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	for _, path := range [][]string{nil, {"a"}, {"list"}} {
+		line, err := Usage(path...)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintln(rtx.Stdout, line)
+	}
+	if _, err := Usage("nope"); err == nil {
+		rtx.HaltWith(fmt.Errorf("Usage(\"nope\") returned no error"))
+	}
+}
+-- internal/cmd/todo/report_usage.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+// ReportWithUsage prints warnings and errors to stderr, then the command's usage line after a
+// usage error, and exits 1 when the run failed.
+func ReportWithUsage(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, w := range out.Warnings {
+		fmt.Fprintln(rtx.Stderr, "Warning:", w)
+	}
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+	}
+	for _, p := range out.Panics {
+		fmt.Fprintln(rtx.Stderr, "Error:", p)
+	}
+	if len(out.Errors) > 0 && rotini.CategoryOf(out.Errors[0]) == rotini.CategoryUsage {
+		if u := rtx.Usage(); u != "" {
+			fmt.Fprintf(rtx.Stderr, "Usage: %s\n", u)
+		}
+		fmt.Fprintf(rtx.Stderr, "Run '%s --help' for more.\n", rtx.CommandPath())
+	}
+	if out.Failed() && ctx.Err() == nil {
+		rtx.Exit(1)
+	}
+}

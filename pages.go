@@ -44,4 +44,7 @@ type Page struct {
 	Path []string
 	// Content is the page itself: roff for a man page, markdown for a markdown page.
 	Content string
+	// Topic is true for a help topic's page (the spec's `topics:`), listed after the commands'
+	// pages; its Path is the topic's name.
+	Topic bool
 }

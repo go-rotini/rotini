@@ -1,0 +1,269 @@
+# R2 — help topics, stability markers, long input descriptions, exit-code links and install-ready
+# files, from the spec through the built program.
+
+gomodinit example.com/demo
+
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o demo$exe ./cmd/demo
+
+# The root's help lists the topics, and `help <topic>` shows one through the generated Help.
+exec ./demo$exe help
+stdout '^Help Topics:$'
+stdout '^  filters +how filters work$'
+stdout '^  environment +the environment variables demo reads$'
+stdout '^  alpha +try new things \(experimental\)$'
+exec ./demo$exe help filters
+stdout '^A filter is a word that narrows a list\.$'
+exec ./demo$exe help environment
+stdout '^  DEMO_LEVEL int +how loud \(used by: demo alpha\)'
+stdout '^  DEMO_TOKEN string +the API token \(used by: demo\)'
+! exec ./demo$exe help nosuch
+stderr 'no help for command "nosuch"'
+
+# A command's own page says what its stability promises; help shows the summary, not the
+# description.
+exec ./demo$exe help alpha
+stdout '^This command is experimental: it may change or be removed in any release\.$'
+! stdout 'Loudness from 0'
+
+# `help <TAB>` offers the topics with the commands.
+exec ./demo$exe __complete help ''
+stdout '^environment\tthe environment variables demo reads$'
+stdout '^filters\thow filters work$'
+stdout '^alpha\ttry new things$'
+
+# The man pages carry the description, the docs link and a page per topic, and install_dir gets
+# the completion scripts and the man pages, byte for byte.
+grep '^Loudness from 0 to 9\.$' share/man/man1/demo-alpha.1
+grep '^See \\fIhttps://example\.com/demo/too\\-loud\\fR\.$' share/man/man1/demo-alpha.1
+grep '^\.TH "DEMO\\-FILTERS" 1 "" "demo" "Miscellaneous"$' share/man/man1/demo-filters.1
+! grep 'SYNOPSIS' share/man/man1/demo-filters.1
+exists share/man/man1/demo.1
+exists share/man/man1/demo-environment.1
+! exists share/man/man1/demo-secret.1
+exec ./demo$exe man filters
+cmp stdout share/man/man1/demo-filters.1
+exec ./demo$exe completion zsh
+cmp stdout share/completions/_demo
+exists share/completions/demo.bash
+exists share/completions/demo.fish
+exists share/completions/demo.ps1
+
+[exec:mandoc] exec mandoc -Tlint -W error share/man/man1/demo-alpha.1 share/man/man1/demo-filters.1 share/man/man1/demo-environment.1
+[exec:mandoc] ! stdout .
+
+# A removed topic's installed page is pruned on the next generate.
+cp no-filters.spec.yaml cmd/demo/.rotini.spec.yaml
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+! exists share/man/man1/demo-filters.1
+exists share/man/man1/demo-environment.1
+
+-- cmd/demo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  env_prefix: DEMO
+  topics:
+    - name: filters
+      summary: how filters work
+      body: A filter is a word that narrows a list.
+    - name: environment
+      summary: the environment variables demo reads
+      generate: environment
+  env:
+    - name: token
+      summary: the API token
+      schema: {type: string}
+  commands:
+    - name: help
+      summary: show help for a command or topic
+      arguments:
+        - name: command
+          summary: the command or topic
+          schema: {type: "[]string", complete: {kind: command}}
+    - name: man
+      summary: print a man page
+      arguments:
+        - name: path
+          summary: the command or topic
+          schema: {type: "[]string"}
+    - name: completion
+      summary: print a completion script
+      arguments:
+        - name: shell
+          summary: the shell
+          schema: {type: string, required: true}
+    - name: alpha
+      summary: try new things
+      stability: experimental
+      exit_status:
+        - {code: 0, summary: done}
+        - {code: 5, name: too_loud, summary: the level was too high, docs_url: "https://example.com/demo/too-loud"}
+      flags:
+        - name: level
+          summary: how loud
+          description: |-
+            Loudness from 0 to 9.
+
+            Higher is louder.
+          schema: {type: int, key: level}
+    - name: secret
+      summary: hidden
+      hidden: true
+-- cmd/demo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    - type: help
+      enabled: true
+    - type: man
+      enabled: true
+      install_dir: share
+    - type: completion
+      enabled: true
+      install_dir: share
+-- cmd/demo/main.go --
+package main
+
+import (
+	demo "example.com/demo/internal/cmd/demo"
+)
+
+func main() {
+	demo.NewProgram(demo.Handlers()).Execute()
+}
+-- internal/cmd/demo/demo_help.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*demoHelpHandler)(nil)
+
+type demoHelpHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*demoHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoHelpInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	page, err := Help(in.DemoHelp.Arguments.Command...)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, page)
+}
+-- internal/cmd/demo/demo_man.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*demoManHandler)(nil)
+
+type demoManHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*demoManHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoManInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	page, err := Man(in.DemoMan.Arguments.Path...)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprint(rtx.Stdout, page)
+}
+-- internal/cmd/demo/demo_completion.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*demoCompletionHandler)(nil)
+
+type demoCompletionHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*demoCompletionHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoCompletionInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	script, err := Completion(in.DemoCompletion.Arguments.Shell)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprint(rtx.Stdout, script)
+}
+-- no-filters.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  env_prefix: DEMO
+  topics:
+    - name: environment
+      summary: the environment variables demo reads
+      generate: environment
+  env:
+    - name: token
+      summary: the API token
+      schema: {type: string}
+  commands:
+    - name: help
+      summary: show help for a command or topic
+      arguments:
+        - name: command
+          summary: the command or topic
+          schema: {type: "[]string", complete: {kind: command}}
+    - name: man
+      summary: print a man page
+      arguments:
+        - name: path
+          summary: the command or topic
+          schema: {type: "[]string"}
+    - name: completion
+      summary: print a completion script
+      arguments:
+        - name: shell
+          summary: the shell
+          schema: {type: string, required: true}

@@ -219,6 +219,9 @@ func FuzzParse(f *testing.F) {
 		rtx2 := NewContextFor(matrixDef(), argv)
 		rtx2.Stdin = strings.NewReader("payload")
 		_ = NewParser().Parse(rtx2, &typed)
+
+		var set cpListInputs // a flag set embedded in the flags struct
+		_ = NewParser().Parse(NewContextFor(cpListDef(), argv), &set)
 	})
 }
 

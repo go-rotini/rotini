@@ -57,6 +57,9 @@ var machineFormats = []string{"json", "yaml", "toml"}
 // (output_stream), when v is not the type the command declares as its output, when no renderer is passed for a format rotini does not write, or, with
 // [Program.WithOutputChecks], when v does not match the declared shape. A renderer's error is
 // returned unwrapped. A command that declares no output may still use it; nothing is checked.
+//
+// v may be a [Selection] made from a value of the declared type by [SelectFields]: it is checked
+// as that type, and against the declared shape with every `required` removed.
 func (rtx *Context) WriteOutput[T any](v T, format string, render func(io.Writer, string, T) error) error {
 	return writeOutput(rtx, rtx.Stdout, v, format, render, false)
 }
@@ -100,16 +103,26 @@ func (rtx *Context) WriteOutputItemTo[T any](w io.Writer, item T, format string,
 //	taskr list: output does not match its contract: output.tasks[2].status: value is not in enum
 //
 // It writes nothing. [Program.WithOutputChecks] makes every WriteOutput call check.
+// A [Selection] is checked as the type it was selected from, against the schema with every
+// `required` removed.
 func (rtx *Context) CheckOutput(v any) error {
 	cmd := rtx.invokedCommand()
 	name := rtx.commandName()
 	if cmd.Output == nil || cmd.Output.Schema == "" {
 		return InternalError(fmt.Errorf("%s: declares no output to check against", name))
 	}
-	if err := checkOutputType(name, cmd.Output, reflect.TypeOf(v)); err != nil {
+	t := reflect.TypeOf(v)
+	sel, selected := v.(Selection)
+	if selected {
+		if sel.from == nil {
+			return InternalError(fmt.Errorf("%s: the output is a zero Selection; make one with SelectFields", name))
+		}
+		t = sel.from
+	}
+	if err := checkOutputType(name, cmd.Output, t); err != nil {
 		return err
 	}
-	return checkOutputValue(name, cmd.Output.Schema, v)
+	return checkOutputSchema(name, cmd.Output.Schema, v, selected)
 }
 
 // writeOutput is WriteOutput and WriteOutputItem, and their To forms, writing to w.
@@ -123,10 +136,17 @@ func writeOutput[T any](rtx *Context, w io.Writer, v T, format string, render fu
 	case out != nil && !out.Stream && item:
 		return InternalError(fmt.Errorf("%s: writes items, but its spec doesn't declare output_stream: true", name))
 	}
+	sel, selected := any(v).(Selection)
+	if selected && sel.from == nil {
+		return InternalError(fmt.Errorf("%s: the output written is a zero Selection; make one with SelectFields", name))
+	}
 	if out != nil {
 		t := reflect.TypeFor[T]()
 		if t.Kind() == reflect.Interface {
 			t = reflect.TypeOf(any(v))
+		}
+		if selected {
+			t = sel.from
 		}
 		if err := checkOutputType(name, out, t); err != nil {
 			return err
@@ -136,7 +156,7 @@ func writeOutput[T any](rtx *Context, w io.Writer, v T, format string, render fu
 		format = "json"
 	}
 	if out != nil && out.Schema != "" && rtx.outputChecks {
-		if err := checkOutputValue(name, out.Schema, v); err != nil {
+		if err := checkOutputSchema(name, out.Schema, v, selected); err != nil {
 			return err
 		}
 	}
@@ -192,7 +212,11 @@ func encodeOutput[T any](w *bytes.Buffer, v T, format string, render func(io.Wri
 		if item {
 			return errors.New("toml cannot be written as a stream")
 		}
-		b, err := toml.Marshal(v)
+		var doc any = v
+		if s, ok := doc.(Selection); ok {
+			doc = nativeNumbers(s.data) // the toml encoder doesn't ask the top-level value
+		}
+		b, err := toml.Marshal(doc)
 		if err != nil {
 			return err //nolint:wrapcheck // wrapped by the caller
 		}
@@ -225,13 +249,30 @@ var outputValidators sync.Map // string → *jsonschema.Schema
 
 // checkOutputValue checks v against schema, reporting every field that does not match.
 func checkOutputValue(name, schema string, v any) error {
-	cached, ok := outputValidators.Load(schema)
+	return checkOutputSchema(name, schema, v, false)
+}
+
+// checkOutputSchema is checkOutputValue, against the schema with every `required` removed when
+// partial, as for a [Selection].
+func checkOutputSchema(name, schema string, v any, partial bool) error {
+	key := schema
+	if partial {
+		key = "partial:" + schema
+	}
+	cached, ok := outputValidators.Load(key)
 	if !ok {
-		s, err := jsonschema.Compile([]byte(schema))
+		text := []byte(schema)
+		if partial {
+			var err error
+			if text, err = partialSchema(text); err != nil {
+				return InternalError(fmt.Errorf("%s: the output schema does not compile: %w", name, err))
+			}
+		}
+		s, err := jsonschema.Compile(text)
 		if err != nil {
 			return InternalError(fmt.Errorf("%s: the output schema does not compile: %w", name, err))
 		}
-		cached, _ = outputValidators.LoadOrStore(schema, s)
+		cached, _ = outputValidators.LoadOrStore(key, s)
 	}
 	compiled, ok := cached.(*jsonschema.Schema)
 	if !ok {
@@ -305,6 +346,9 @@ func outputPath(pointer string) string {
 //	p := cmd.NewProgram(cmd.Handlers()).WithStdout(&stdout)
 //	p.Run([]string{"list", "-o", "json"})
 //	list, err := rotini.DecodeOutput[cmd.TaskrListOutput](p, stdout.Bytes(), "json")
+//
+// Output written from a [Selection] leaves fields out, so it fails the schema's `required`
+// here; DecodeOutput is for whole outputs.
 func DecodeOutput[T any](p *Program, data []byte, format string) (T, error) {
 	var zero T
 	if !slices.Contains(machineFormats, format) {

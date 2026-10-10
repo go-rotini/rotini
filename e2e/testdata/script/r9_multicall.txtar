@@ -1,0 +1,101 @@
+# R9 — one binary, several names. With `multicall`, a link named after a command runs it, and
+# a link named kubectl_complete-<root> answers completion the way kubectl asks for it.
+
+[!unix] skip 'links the binary under other names'
+
+gomodinit example.com/demo
+
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o demo ./cmd/demo
+
+# Under its own name it is the root.
+exec ./demo ls a
+stdout '^ls ran: \[a\]$'
+
+# A link named ls runs `ls`; the handler sees the words after the name.
+symlink ls -> demo
+exec ./ls a
+stdout '^ls ran: \[a\]$'
+symlink list -> demo
+exec ./list
+stdout '^ls ran: \[\]$'
+
+# A name that is no command runs the root.
+symlink other -> demo
+exec ./other
+stdout '^root ran$'
+
+# kubectl runs kubectl_complete-<plugin> with the words to complete; the answer is in the
+# plugin hosts' format, candidates then a :directive line.
+symlink kubectl_complete-demo -> demo
+exec ./kubectl_complete-demo c
+stdout '^cat\tprint things$'
+stdout '^:0$'
+
+-- cmd/demo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: one binary, several names
+  multicall:
+    complete: kubectl_complete-
+  commands:
+    - name: ls
+      aliases: [list]
+      summary: list things
+      arguments:
+        - name: args
+          schema:
+            type: array
+            items: { type: string }
+    - name: cat
+      summary: print things
+-- cmd/demo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+-- cmd/demo/main.go --
+package main
+
+import demo "example.com/demo/internal/cmd/demo"
+
+func main() { demo.NewProgram(demo.Handlers()).Execute() }
+-- internal/cmd/demo/demo.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoHandler struct{ rotini.NoHooks }
+
+func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "root ran")
+}
+-- internal/cmd/demo/demo_ls.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoLsHandler struct{ rotini.NoHooks }
+
+func (*demoLsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoLsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "ls ran: %v\n", in.DemoLs.Arguments.Args)
+}

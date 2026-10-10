@@ -131,6 +131,12 @@ type scopeInputs struct {
 	// argOrigin names where an argument's value came from when its env or config fallback
 	// supplied it, by argument index; see origin.
 	argOrigin map[int]string
+	// written maps an argv value or default that declared expansion changed to the value as it
+	// was written, so a path error can name both; see [withWritten].
+	written map[string]string
+	// depValues holds the values flag dependencies compare (Equals) when the store was built from
+	// typed inputs, whose flags carry no values here; see [scopeInputs.dependencyValue].
+	depValues map[string]string
 }
 
 // fromSource is the suffix an error about a fallback value carries, naming its origin; "" for
@@ -295,30 +301,21 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 	return validateStore(chain, store)
 }
 
-// parseBind parses argv into a store and binds it into out without validating — that is
-// [validate]'s job. It is the shared front half of [Parser.Parse] and of the [InputReader], which
-// reconciles env and config fallbacks into the store before validating, so a required input is
-// satisfiable from any source. It returns the store and chain for that deferred pass.
+// parseBind parses argv into a store, expands the values of inputs that declare `expand`, and
+// binds the store into out without validating — that is [validate]'s job. It returns the store
+// and chain for that deferred pass. The [InputReader] runs the same steps with its own view of
+// the environment in between (see [parseArgvStore]).
 func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []Command, error) {
-	if p == nil {
-		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil parser"}
-	}
-	if rtx == nil {
-		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: parse on nil context"}
-	}
-	rv := reflect.ValueOf(out)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
-	}
-	chain := rtx.CommandChain()
-	if len(chain) == 0 {
-		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
-	}
-	store, err := parseInto(chain, rtx.Argv, rtx.argvAcq())
+	store, chain, err := parseArgvStore(p, rtx, out)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := bindInputs(rv.Elem(), store, chain, frameAnchor(rv.Elem(), chain, rtx.frameIndex())); err != nil {
+	v := reflect.ValueOf(out).Elem()
+	anchor := frameAnchor(v, chain, rtx.frameIndex())
+	if err := expandStore(v, chain, store, anchor, layerView(rtx, chain, v, store)); err != nil {
+		return nil, nil, err
+	}
+	if err := bindInputs(v, store, chain, anchor); err != nil {
 		return nil, nil, err
 	}
 	return store, chain, nil
@@ -447,6 +444,9 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, 
 	if !slices.Contains(si.used[fd.Name], typed) {
 		si.used[fd.Name] = append(si.used[fd.Name], typed)
 	}
+	if err := refuseSecretLiteral(fd.Secret, fd.From, typed, typed, value); err != nil {
+		return err
+	}
 	acquired := acquiresValue(fd, value)
 	value, err := resolveFlagValue(fd, typed, value, acq)
 	if err != nil {
@@ -476,6 +476,9 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, 
 // nothing, since where it ends is known only once every word is in.
 func (p *parsedInputs) recordArg(leaf Command, idx int, value string, acq argvAcq) error {
 	if ad, ok := acquiringArg(leaf.Arguments, len(p.scopes[idx].args)); ok {
+		if err := refuseSecretLiteral(ad.Secret, ad.From, "<"+ad.Name+">", "", value); err != nil {
+			return err
+		}
 		resolved, err := resolveAcquired(ad.From, "<"+ad.Name+">", "", value, acq)
 		if err != nil {
 			return err
@@ -840,7 +843,7 @@ func validate(chain []Command, store *parsedInputs) error {
 				err = checkFlagValues(fd, fsi.label(fd), fsi.flags[fd.Name], store.dir, store.clock)
 			}
 			if err != nil {
-				return withSource(err, fsi.origin[fd.Name])
+				return withSource(withWritten(err, fsi.flags[fd.Name], fsi.written), fsi.origin[fd.Name])
 			}
 		}
 	}
@@ -881,7 +884,7 @@ func validateArgs(leaf Command, si scopeInputs, waived bool, dir string, clock *
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		} // an absent variadic still gets a MinItems check
 		if err := checkArgValues(ad, vals, dir, clock); err != nil {
-			return withSource(err, si.argOrigin[i])
+			return withSource(withWritten(err, vals, si.written), si.argOrigin[i])
 		}
 	}
 	return nil
@@ -959,9 +962,10 @@ func isPathType(typ string) bool {
 }
 
 // checkPathExists enforces an existingfile/existingdir type at parse time, so the error names
-// the flag the user typed. It checks only existence and kind; expanding "~", cleaning,
-// resolving symlinks and creating missing files are left to the handler. A relative value is
-// checked against dir, the run's injected directory ("" is the process working directory).
+// the flag the user typed. It checks only existence and kind; cleaning, resolving symlinks and
+// creating missing files are left to the handler, and "~" and "$VAR" are expanded beforehand
+// only for inputs that declare `expand`. A relative value is checked against dir, the run's
+// injected directory ("" is the process working directory).
 func checkPathExists(label, typ, value, dir string) error {
 	if isStreamPathType(typ) {
 		return checkStreamPath(label, typ, value, dir)
@@ -1127,46 +1131,6 @@ func validateFlagGroups(chain []Command, store *parsedInputs) error {
 			}
 			if err := checkFlagGroup(g.Kind, set, all); err != nil {
 				return err
-			}
-		}
-	}
-	return nil
-}
-
-// validateFlagDependencies enforces each command's conditional cross-flag requirements: when a
-// dependency's When flag is set on argv, every flag it Requires must be too. Set follows the
-// same explicit-argv convention as flag groups.
-func validateFlagDependencies(chain []Command, store *parsedInputs) error {
-	for i, f := range chain {
-		if !store.covers(i) {
-			continue
-		}
-		for _, dep := range f.FlagDependencies {
-			whenFD, ok := findFlagDef(f.Flags, dep.When)
-			if !ok {
-				continue // unknown trigger flag; spec lint rejects this
-			}
-			whenLabel := flagLabel(whenFD)
-			if !store.setOnArgv(i, dep.When) {
-				continue
-			}
-			var missing []string
-			for _, name := range dep.Requires {
-				label := "--" + name
-				if fd, ok := findFlagDef(f.Flags, name); ok {
-					if store.setOnArgv(i, name) {
-						continue
-					}
-					label = flagLabel(fd)
-				}
-				missing = append(missing, label)
-			}
-			if len(missing) > 0 {
-				noun, verb := "flag", "is"
-				if len(missing) > 1 {
-					noun, verb = "flags", "are"
-				}
-				return constraintViolation("%s %s %s required when %s is set", noun, joinAnd(missing), verb, whenLabel)
 			}
 		}
 	}
@@ -1499,14 +1463,14 @@ func findFlagIndex(chain []Command, name string) (FlagDef, int, bool) {
 func findFlagMatch(chain []Command, name string) (def FlagDef, idx int, negated, ok bool) {
 	for i, v := range slices.Backward(chain) {
 		for _, f := range v.Flags {
-			if slices.Contains(f.Identifiers, name) {
+			if f.hasIdentifier(name) {
 				return f, i, false, true
 			}
 		}
 	}
 	for i, v := range slices.Backward(chain) {
 		for _, f := range v.Flags {
-			if f.Negatable && slices.Contains(negatedIdentifiers(f), name) {
+			if f.Negatable && slices.Contains(negatedForms(f), name) {
 				return f, i, true, true
 			}
 		}
@@ -1665,9 +1629,8 @@ func checkChainAlignment(v reflect.Value, chain []Command, offset int) error {
 		if frame.Name == "" && len(frame.Flags) == 0 {
 			continue // an anonymous frame (a hand-built chain) declares nothing to check against
 		}
-		ft := flags.Type()
-		for j := range flags.NumField() {
-			name := ft.Field(j).Tag.Get("rotini")
+		for sf := range typeLeaves(flags.Type()) {
+			name := sf.Tag.Get("rotini")
 			if name == "" {
 				continue
 			}
@@ -1733,9 +1696,8 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef, clock *runClock)
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
-	t := v.Type()
-	for i := range v.NumField() {
-		name := t.Field(i).Tag.Get("rotini")
+	for sf, field := range structLeaves(v) {
+		name := sf.Tag.Get("rotini")
 		if name == "" {
 			continue
 		}
@@ -1749,12 +1711,12 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef, clock *runClock)
 		if declared {
 			switch {
 			case def.DottedKeys:
-				if err := coerceMapDotted(v.Field(i), raw); err != nil {
+				if err := coerceMapDotted(field, raw); err != nil {
 					return coerceFailure(label, label, err, def.Secret)
 				}
 				continue
 			case isObjectFlag(def):
-				if err := bindObjectFlag(v.Field(i), raw, def); err != nil {
+				if err := bindObjectFlag(field, raw, def); err != nil {
 					if _, dup := errors.AsType[duplicateObjectError](err); dup {
 						return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s %v", label, err), Flag: label}
 					}
@@ -1763,14 +1725,14 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef, clock *runClock)
 				continue
 			case def.Type == "count":
 				// Each argv occurrence appended one marker; the field is the tally.
-				if f := v.Field(i); f.CanSet() && f.Kind() == reflect.Int {
+				if f := field; f.CanSet() && f.Kind() == reflect.Int {
 					f.SetInt(int64(len(raw)))
 				}
 				continue
 			}
 		}
 		raw = flagEnum(def).canonical(raw)
-		if err := coerceTime(v.Field(i), raw, flagTimeSpec(def, clock)); err != nil {
+		if err := coerceTime(field, raw, flagTimeSpec(def, clock)); err != nil {
 			return coerceFailure(label, label, err, def.Secret)
 		}
 	}

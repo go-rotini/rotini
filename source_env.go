@@ -80,7 +80,7 @@ func newDeclaredEnv(v reflect.Value, structName, envPrefix string, view *osView)
 
 // addFields adds the recon-keyed fields of one sub-struct type; see [newDeclaredEnv].
 func (s *declaredEnv) addFields(t reflect.Type, project recon.KeyTransform, view *osView) {
-	for f := range t.Fields() {
+	for f := range typeLeaves(t) {
 		key := reconKey(f.Tag.Get("recon"))
 		if key == "" || f.Tag.Get("envnest") != "" {
 			continue

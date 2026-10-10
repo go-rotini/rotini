@@ -73,7 +73,7 @@ func ancestorOwners(chain []*Command) map[string]*ancestorFlag {
 				continue
 			}
 			owner := &ancestorFlag{flag: f, path: paths[i]}
-			for _, id := range flagIdentifiers(f) {
+			for _, id := range matchIdentifiers(f) {
 				owners[id] = owner
 			}
 			for _, neg := range negatedForms(f) {
@@ -97,7 +97,7 @@ func shadowHits(leaf *Command, owners map[string]*ancestorFlag) (hits []*shadowH
 	taken = map[*ancestorFlag]map[string]bool{}
 	for i, f := range commandFlags(leaf) {
 		byOwner := map[*ancestorFlag]*shadowHit{}
-		for _, id := range flagIdentifiers(f) {
+		for _, id := range matchIdentifiers(f) {
 			o := owners[id]
 			if o == nil || redeclares(f, o.flag) {
 				continue

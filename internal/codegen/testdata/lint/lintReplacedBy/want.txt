@@ -1,0 +1,8 @@
+spec: .rotini.spec.yaml:23:20: command demo/wipe: sets `replaced_by: purgee`, which names no command; write the path below the root command, without the program's name (`purge`, `remote add`)
+spec: .rotini.spec.yaml:25:20: command demo/clean: sets `replaced_by: purge` without `deprecated`; it names what to use instead of a deprecated command, so say why with `deprecated`
+spec: .rotini.spec.yaml:31:20: command demo/self: sets `replaced_by: self`, which is the command itself
+spec: .rotini.spec.yaml:45:11: command demo/sync: flag "o2": sets `replaced_by: --nope`, which is no identifier of this command's flags or of an ancestor's cascading ones
+spec: .rotini.spec.yaml:49:11: command demo/sync: flag "o3": sets `replaced_by: --output` without `deprecated`; it names what to use instead of a deprecated flag, so say why with `deprecated`
+spec: .rotini.spec.yaml:52:11: command demo/sync: flag "o4": sets `replaced_by: --o4`, which is the flag itself
+warning: spec: .rotini.spec.yaml:28:20: command demo/zap: sets `replaced_by: wipe`, which is deprecated too; name the command to move to
+warning: spec: .rotini.spec.yaml:56:11: command demo/sync: flag "o5": sets `replaced_by: --out`, which is deprecated too; name the flag to move to

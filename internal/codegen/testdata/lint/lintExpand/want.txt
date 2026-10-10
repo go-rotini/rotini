@@ -1,0 +1,9 @@
+spec: .rotini.spec.yaml:14:7: command demo: flag "count": sets `expand`, but its type is int; it applies to paths: string, existingfile, existingdir, inputfile or outputfile, or a list of them
+spec: .rotini.spec.yaml:17:7: command demo: flag "mode": sets both `expand` and `enum`; enum values are words, not paths, and an expanded value could never match one
+spec: .rotini.spec.yaml:20:7: command demo: flag "token": sets `expand` on a secret input; the expanded value would appear in a path and in its errors, so expand it in the handler if needed
+spec: .rotini.spec.yaml:26:7: command demo: flag "local": sets `relative_to: config`, but nothing is read from a configuration file to resolve; use a config input, or give the flag or argument a configuration fallback with `key:`
+spec: .rotini.spec.yaml:35:7: command demo: env "base": sets `relative_to: config`, but nothing is read from a configuration file to resolve; use a config input, or give the flag or argument a configuration fallback with `key:`
+spec: .rotini.spec.yaml:40:7: command demo: config "labels": sets `expand`, but its type is map[string]any; it applies to paths: string, existingfile, existingdir, inputfile or outputfile, or a list of them
+spec: .rotini.spec.yaml:43:5: command demo: stdin: sets `expand`, which applies to path values; stdin's payload is data, not a path
+warning: spec: .rotini.spec.yaml:20:7: command demo: flag "token": is secret but accepts its value on the command line, where it shows in the process list and shell history; declare `from: [file]` or `from: [stdin]`, without `value`, to refuse it
+warning: spec: .rotini.spec.yaml:23:7: command demo: flag "cache": sets `expand: [env]` on an input a walk-up discovered file can set; a project file in a cloned repository could write the user's environment (a token, say) into this path, so prefer `expand: [home]`

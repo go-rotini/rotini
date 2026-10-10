@@ -9,6 +9,8 @@ generate:
       file: cmd/deploy/.rotini-schema.conf.json
     output:
       dir: cmd/deploy/schemas/output
+    config:
+      dir: cmd/deploy/schemas/config
   dry_run_env: CI
   contract:
     file: cmd/deploy/cli-contract.json
@@ -36,6 +38,7 @@ generate:
       messages: all
       messages_env: DEPLOY_COMPLETION_MESSAGES
       descriptions_env: DEPLOY_COMPLETION_DESCRIPTIONS
+      install_dir: share
     - type: man
       enabled: false
       section: 1

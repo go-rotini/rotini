@@ -30,6 +30,11 @@ type FieldPath string
 type InputSource struct {
 	Layer string // the supplying layer's name: "defaults", "files", "env", "argv", "stdin", or custom
 	Raw   string // the supplied text, a list's values joined with ", " whichever layer supplied it ("" when non-textual, e.g. a decoded stdin document); "[redacted]" for secrets
+	// Origin names where in the layer the value came from: "argv:--port" (the identifier as
+	// typed), "argv:<target>" (an argument), "env:TASKR_PORT", "env:TASKR_HTTP__*" (a nested
+	// env family), "config:user#deploy.port" (a configuration file's name and key), "default"
+	// or "stdin". It is "" for a hand-built layer, which names itself by Layer.
+	Origin string
 }
 
 // Presence maps each field a layer supplied to its provenance. Overlay copies only these
@@ -467,6 +472,9 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := expandStore(v, chain, store, anchor, layerView(rtx, chain, v, store)); err != nil {
+		return nil, nil, err
+	}
 	if err := bindInputs(v, store, chain, anchor); err != nil {
 		return nil, nil, err
 	}
@@ -482,8 +490,9 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 			}
 			fd, _ := findFlagDef(frame.Flags, logical)
 			set[fieldPath(topName, "Flags", fieldName)] = InputSource{
-				Layer: "argv",
-				Raw:   redactValue(strings.Join(vals, ", "), fd.Secret),
+				Layer:  "argv",
+				Raw:    redactValue(strings.Join(vals, ", "), fd.Secret),
+				Origin: argvFlagOrigin(si, logical),
 			}
 		})
 		argPresence(set, "argv", topName, ci, frame, si.args)
@@ -504,6 +513,10 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 	if err != nil {
 		return nil, nil, err
 	}
+	view := layerView(rtx, chain, v, nil)
+	if err := expandStore(v, chain, store, anchor, view); err != nil {
+		return nil, nil, err
+	}
 	if err := bindInputs(v, store, chain, anchor); err != nil {
 		return nil, nil, err
 	}
@@ -512,9 +525,10 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 	// and bound into their fields directly below.
 	leaf := chain[len(chain)-1]
 	argDefaults := map[int]string{}
+	argTags := leafArgTags(v, chain, anchor)
 	for i, ad := range leaf.Arguments {
 		if ad.Default != "" {
-			argDefaults[i] = ad.Default
+			argDefaults[i] = expandDefault(ad.Default, argTags[i], view)
 		}
 	}
 
@@ -527,8 +541,9 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 			}
 			fd, _ := findFlagDef(frame.Flags, logical)
 			set[fieldPath(topName, "Flags", fieldName)] = InputSource{
-				Layer: "defaults",
-				Raw:   redactValue(fd.Default, fd.Secret),
+				Layer:  "defaults",
+				Origin: "default",
+				Raw:    redactValue(fd.Default, fd.Secret),
 			}
 		})
 		if scope == len(chain)-1 {
@@ -547,8 +562,9 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				_ = coerceTime(f, []string{d}, argTimeSpec(ad, rtx.osView().clockRef()))
 				secret := ad.Secret
 				set[fieldPath(topName, "Arguments", fieldName)] = InputSource{
-					Layer: "defaults",
-					Raw:   redactValue(d, secret),
+					Layer:  "defaults",
+					Origin: "default",
+					Raw:    redactValue(d, secret),
 				}
 			})
 		}
@@ -556,7 +572,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 		for _, channel := range []string{"Env", "Config"} {
 			eachTaggedField(ci, channel, func(fieldName, _ string, tag reflect.StructTag, f reflect.Value) {
 				body := tag.Get("recon")
-				d := reconDefault(body)
+				d := expandDefault(reconDefault(body), tag, view)
 				if d == "" {
 					return
 				}
@@ -564,8 +580,9 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				ts.clock = rtx.osView().clockRef()
 				_ = coerceTime(f, []string{d}, ts)
 				set[fieldPath(topName, channel, fieldName)] = InputSource{
-					Layer: "defaults",
-					Raw:   redactValue(d, reconHasSecret(body)),
+					Layer:  "defaults",
+					Origin: "default",
+					Raw:    redactValue(d, reconHasSecret(body)),
 				}
 			})
 		}
@@ -717,6 +734,10 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 	if err := bind(reg, cs.Addr().Interface(), waived); err != nil {
 		return labels.bind(channelOf(cfg), err)
 	}
+	expanded, err := expandChannelStruct(cs, reg, cfg, waived, labels)
+	if err != nil {
+		return err
+	}
 	if !waived {
 		if err := validateChannelStruct(cs, reg, cfg, view); err != nil {
 			return err
@@ -739,14 +760,19 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 	}
 
 	eachTaggedField(ci, structName, func(fieldName, _ string, tag reflect.StructTag, _ reflect.Value) {
-		recordChannelField(set, tag, topName, structName, layerName, fieldName, reg, cfg, nested)
+		recordChannelField(set, tag, topName, structName, layerName, fieldName, reg, cfg, nested, view)
+		if x, ok := expanded[reconKey(tag.Get("recon"))]; ok {
+			src := set[fieldPath(topName, structName, fieldName)]
+			src.Raw = x
+			set[fieldPath(topName, structName, fieldName)] = src
+		}
 	})
 	return nil
 }
 
 // recordChannelField records which layer supplied one channel field and its raw value,
 // redacted when the input is secret. A pinned field is read from its own file's registry alone.
-func recordChannelField(set Presence, tag reflect.StructTag, topName, structName, layerName, fieldName string, reg *recon.Registry, cfg *cfgRegs, nested map[string]bool) {
+func recordChannelField(set Presence, tag reflect.StructTag, topName, structName, layerName, fieldName string, reg *recon.Registry, cfg *cfgRegs, nested map[string]bool, view *osView) {
 	body := tag.Get("recon")
 	key := reconKey(body)
 	if key == "" {
@@ -763,15 +789,17 @@ func recordChannelField(set Presence, tag reflect.StructTag, topName, structName
 	// A nested family was filled directly, so it has no single textual value.
 	if nested[key] {
 		set[fieldPath(topName, structName, fieldName)] = InputSource{
-			Layer: layerName,
-			Raw:   redactValue("", reconHasSecret(body)),
+			Layer:  layerName,
+			Raw:    redactValue("", reconHasSecret(body)),
+			Origin: nestedEnvOrigin(tag),
 		}
 		return
 	}
 	if val, found, err := fieldReg.Get(key); err == nil && found {
 		set[fieldPath(topName, structName, fieldName)] = InputSource{
-			Layer: layerName,
-			Raw:   redactValue(val.String(), reconHasSecret(body)),
+			Layer:  layerName,
+			Raw:    redactValue(val.String(), reconHasSecret(body)),
+			Origin: valueOrigin(view, val.Source(), tag.Get("env"), key),
 		}
 	}
 }
@@ -796,8 +824,9 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 		}
 		recordOrigin(store, scope, logical, origin)
 		set[fieldPath(topName, "Flags", fieldName)] = InputSource{
-			Layer: layerName,
-			Raw:   redactValue(strings.Join(vals, ", "), fd.Secret),
+			Layer:  layerName,
+			Raw:    redactValue(strings.Join(vals, ", "), fd.Secret),
+			Origin: fallbackValueOrigin(flagReg, rd.view, tag, key),
 		}
 		if store.scopes[scope].flags == nil {
 			store.scopes[scope].flags = map[string][]string{}
@@ -829,7 +858,7 @@ func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 		leaf := v.Field(v.NumField() - 1)
 		if leaf.Kind() == reflect.Struct {
 			if sf := leaf.FieldByName("Stdin"); stdinSet(sf) {
-				set[fieldPath(v.Type().Field(v.NumField()-1).Name, "Stdin")] = InputSource{Layer: "stdin"}
+				set[fieldPath(v.Type().Field(v.NumField()-1).Name, "Stdin")] = InputSource{Layer: "stdin", Origin: "stdin"}
 			}
 		}
 	}
@@ -877,20 +906,19 @@ func walkCommandStructs(v reflect.Value, chain []Command, offset int, visit func
 }
 
 // eachTaggedField visits each rotini-tagged field of one channel sub-struct
-// (Flags/Arguments/Env/Config) of a CommandInputs value, with its full struct tag.
+// (Flags/Arguments/Env/Config) of a CommandInputs value, with its full struct tag. A flag set's
+// fields, embedded in Flags, are visited as the command's own.
 func eachTaggedField(ci reflect.Value, structName string, visit func(fieldName, logical string, tag reflect.StructTag, f reflect.Value)) {
 	s := ci.FieldByName(structName)
 	if !s.IsValid() || s.Kind() != reflect.Struct {
 		return
 	}
-	st := s.Type()
-	for j := range s.NumField() {
-		sf := st.Field(j)
+	for sf, f := range structLeaves(s) {
 		logical := sf.Tag.Get("rotini")
 		if logical == "" {
 			continue
 		}
-		visit(sf.Name, logical, sf.Tag, s.Field(j))
+		visit(sf.Name, logical, sf.Tag, f)
 	}
 }
 
@@ -912,12 +940,15 @@ func argPresence(set Presence, layerName, topName string, ci reflect.Value, fram
 			continue
 		}
 		var secret bool
+		origin := layerName
 		if j < len(frame.Arguments) {
 			secret = frame.Arguments[j].Secret
+			origin = layerName + ":<" + frame.Arguments[j].Name + ">"
 		}
 		set[fieldPath(topName, "Arguments", st.Field(j).Name)] = InputSource{
-			Layer: layerName,
-			Raw:   redactValue(strings.Join(vals, ", "), secret),
+			Layer:  layerName,
+			Raw:    redactValue(strings.Join(vals, ", "), secret),
+			Origin: origin,
 		}
 	}
 }

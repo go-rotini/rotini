@@ -248,7 +248,8 @@
 //
 //     inputs, err := rtx.Inputs[DeployInputs]()
 //
-//     [Context.InputsWithReport] adds the provenance [InputReport]. Both use the
+//     [Context.InputsWithReport] adds the provenance [InputReport], whose [InputReport.Format]
+//     prints where each value came from ([InputSource.Origin]). Both use the
 //     [InputSettings] the generated NewProgram supplies via [Program.WithInputSettings].
 //
 //   - [Parser] parses and validates the argv channel alone (GNU/POSIX grammar, typed
@@ -265,6 +266,8 @@
 //     [DecodeOutput] check values against the declared shape, and [StructuredReporter] reports
 //     a run's outcome as JSON lines on stderr when the program's rule marks the run structured.
 //     [Context.WriteOutputTo] and [Context.WriteOutputItemTo] write to another writer.
+//     [SelectFields] keeps the output fields a `--json id,title` flag names, as a [Selection]
+//     these write in place of the output, and [SortBy] sorts items by one field.
 //
 //   - [OpenInput] and [CreateOutput] open an inputfile or outputfile value, where "-" is stdin
 //     or stdout; CreateOutput writes a file atomically. [Program.WithBufferedOutput] buffers

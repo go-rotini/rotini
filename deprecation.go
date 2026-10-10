@@ -18,6 +18,9 @@ type Deprecation struct {
 	// Value is the deprecated enum value as typed, when the deprecation is about the value given
 	// rather than the input; Message is then the value's own message. Empty otherwise.
 	Value string
+	// ReplacedBy is what to use instead, as the user types it: a command ("taskr purge"), a flag
+	// identifier ("--output") or an enum value. Empty when the spec names none.
+	ReplacedBy string
 }
 
 // Error renders the deprecation notice as a single line, with the author's message when there
@@ -41,7 +44,11 @@ func (d Deprecation) Error() string {
 // [Deprecation.Value] set). Rotini prints nothing; the handler decides what to do:
 //
 //	for _, d := range rotini.Deprecations(rtx) {
-//		rtx.RecordWarning(fmt.Errorf("%w — use %q instead", d, d.Name))
+//		if d.ReplacedBy != "" {
+//			rtx.RecordWarning(fmt.Errorf("%w; use %s instead", d, d.ReplacedBy))
+//			continue
+//		}
+//		rtx.RecordWarning(d)
 //	}
 //
 // It needs no [Parser]: it reads the resolved chain and argv from rtx, and never reads a file
@@ -61,7 +68,7 @@ func Deprecations(rtx *Context) []Deprecation {
 		if frame.Matched != "" && deprecatedToken(frame.Matched, frame.DeprecatedIdentifiers, frame.Deprecated) {
 			out = append(out, Deprecation{
 				Kind: "command", Name: frame.Name, Identifier: frame.Matched, Message: frame.Deprecated,
-				Since: frame.DeprecatedSince, RemovedIn: removedIn(frame.Matched, frame.DeprecatedIdentifiersRemovedIn, frame.RemovedIn),
+				Since: frame.DeprecatedSince, RemovedIn: removedIn(frame.Matched, frame.DeprecatedIdentifiersRemovedIn, frame.RemovedIn), ReplacedBy: frame.ReplacedBy,
 			})
 		}
 		if store == nil {
@@ -114,7 +121,7 @@ func flagDeprecations(fd FlagDef, used []string) []Deprecation {
 		if deprecatedToken(id, fd.DeprecatedIdentifiers, fd.Deprecated) {
 			out = append(out, Deprecation{
 				Kind: "flag", Name: fd.Name, Identifier: id, Message: fd.Deprecated,
-				Since: fd.DeprecatedSince, RemovedIn: removedIn(id, fd.DeprecatedIdentifiersRemovedIn, fd.RemovedIn),
+				Since: fd.DeprecatedSince, RemovedIn: removedIn(id, fd.DeprecatedIdentifiersRemovedIn, fd.RemovedIn), ReplacedBy: fd.ReplacedBy,
 			})
 		}
 	}
@@ -184,7 +191,7 @@ func valueDeprecations(kind, name, identifier string, enum enumSet, vals []strin
 			continue
 		}
 		seen[v] = true
-		out = append(out, Deprecation{Kind: kind, Name: name, Identifier: identifier, Message: d.Deprecated, Since: d.DeprecatedSince, RemovedIn: d.RemovedIn, Value: v})
+		out = append(out, Deprecation{Kind: kind, Name: name, Identifier: identifier, Message: d.Deprecated, Since: d.DeprecatedSince, RemovedIn: d.RemovedIn, ReplacedBy: d.ReplacedBy, Value: v})
 	}
 	return out
 }

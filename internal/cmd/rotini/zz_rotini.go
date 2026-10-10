@@ -28,6 +28,7 @@ var definition = rotini.Definition{
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool", ShortCircuit: true},
 	},
 	Inputs: reflect.TypeFor[RotiniInputs](),
+	Usage:  "rotini [flags] <command> <arguments>\n      [-v | --version] [-h | --help]\n",
 	Commands: []rotini.CommandDef{
 		{Name: "initialize",
 			Handler: "RotiniInitialize",
@@ -42,6 +43,7 @@ var definition = rotini.Definition{
 				{Name: "name", Type: "string", Required: true, Complete: rotini.Completion{Message: "<name>: the root command name written to the created spec file (expected binary name)"}},
 			},
 			Inputs: reflect.TypeFor[RotiniInitializeInputs](),
+			Usage:  "rotini initialize [flags] <name>",
 		},
 		{Name: "generate",
 			Handler: "RotiniGenerate",
@@ -56,6 +58,7 @@ var definition = rotini.Definition{
 				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
 			},
 			Inputs: reflect.TypeFor[RotiniGenerateInputs](),
+			Usage:  "rotini generate [flags] [spec_file_path]",
 		},
 		{Name: "validate",
 			Handler: "RotiniValidate",
@@ -71,6 +74,7 @@ var definition = rotini.Definition{
 				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
 			},
 			Inputs: reflect.TypeFor[RotiniValidateInputs](),
+			Usage:  "rotini validate [flags] [spec_file_path]",
 		},
 		{Name: "help",
 			Handler: "RotiniHelp",
@@ -79,11 +83,13 @@ var definition = rotini.Definition{
 				{Name: "command", Type: "[]string", Variadic: true, Complete: rotini.Completion{Kind: "command", Message: "<command>: name of the command to print help for"}},
 			},
 			Inputs: reflect.TypeFor[RotiniHelpInputs](),
+			Usage:  "rotini help [command...]",
 		},
 		{Name: "version",
 			Handler: "RotiniVersion",
 			Summary: "print version",
 			Inputs:  reflect.TypeFor[RotiniVersionInputs](),
+			Usage:   "rotini version",
 		},
 		{Name: "completion",
 			Handler: "RotiniCompletion",
@@ -92,6 +98,7 @@ var definition = rotini.Definition{
 				{Name: "shell", Type: "string", Required: true, Enum: []string{"bash", "zsh", "fish", "powershell"}, Complete: rotini.Completion{Message: "<shell>: the shell to print the script for"}},
 			},
 			Inputs: reflect.TypeFor[RotiniCompletionInputs](),
+			Usage:  "rotini completion <shell>",
 		},
 		{Name: "man",
 			Handler: "RotiniMan",
@@ -103,6 +110,7 @@ var definition = rotini.Definition{
 				{Name: "command", Type: "[]string", Variadic: true, Complete: rotini.Completion{Message: "<command>: the command whose page to print (default rotini itself)"}},
 			},
 			Inputs: reflect.TypeFor[RotiniManInputs](),
+			Usage:  "rotini man [flags] [command...]",
 		},
 	},
 	CompletionMessages: &rotini.CompletionMessagesDef{Env: "ROTINI_COMPLETION_MESSAGES"},
@@ -247,6 +255,32 @@ type RotiniVersionCommandInputs struct {
 type RotiniVersionInputs struct {
 	Rotini        RotiniCommandInputs
 	RotiniVersion RotiniVersionCommandInputs
+}
+
+// Usage returns the usage line of the command identified by path (command names or
+// aliases; no arguments for the root), or an error when path names no command. A handler
+// uses rtx.Usage() instead, which is right for a composed command too.
+func Usage(path ...string) (string, error) {
+	switch strings.Join(path, " ") {
+	case "":
+		return "rotini [flags] <command> <arguments>\n      [-v | --version] [-h | --help]\n", nil
+	case "initialize", "init":
+		return "rotini initialize [flags] <name>", nil
+	case "generate", "gen":
+		return "rotini generate [flags] [spec_file_path]", nil
+	case "validate", "val":
+		return "rotini validate [flags] [spec_file_path]", nil
+	case "help":
+		return "rotini help [command...]", nil
+	case "version":
+		return "rotini version", nil
+	case "completion":
+		return "rotini completion <shell>", nil
+	case "man":
+		return "rotini man [flags] [command...]", nil
+	default:
+		return "", fmt.Errorf("no usage for command %q", strings.Join(path, " "))
+	}
 }
 
 // InputSettings is the generated descriptor the default input reader (rotini.InputReader) reads.
@@ -421,8 +455,8 @@ func Man(path ...string) (string, error) {
 }
 
 // ManPages returns every command's man page, root first in tree order, leaving out
-// hidden commands and the commands below them. Each page's Content is what Man
-// returns for its Path.
+// hidden commands and the commands below them, then each help topic's page (Topic set). Each
+// page's Content is what Man returns for its Path.
 func ManPages() []rotini.Page {
 	return []rotini.Page{
 		{Name: "rotini", Path: nil, Content: ManRotini},

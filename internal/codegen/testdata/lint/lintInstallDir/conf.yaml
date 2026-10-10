@@ -1,0 +1,21 @@
+# install_dir writes installable completion scripts and man pages, so it belongs on those two
+# features only, inside the module.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    # Correct. No problem.
+    - type: completion
+      enabled: true
+      install_dir: share
+    # Escapes the module.
+    - type: man
+      enabled: true
+      install_dir: share/../../outside
+    # On a feature that has no installable files.
+    - type: help
+      enabled: true
+      install_dir: share

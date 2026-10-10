@@ -1,0 +1,142 @@
+# R1 — a git-style -C dir (`role: chdir`). Rotini reads it first: walk-up config discovery,
+# @file values and plugins follow it, while the process's own working directory is unchanged.
+
+gomodinit example.com/demo
+
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o demo$exe ./cmd/demo
+
+# Without -C: the config file found walking up from here.
+exec ./demo$exe show
+stdout '^name=from-here$'
+
+# With -C, before or after the command: sub's config file and sub's @file, and the handler
+# sees the directory as rtx.Dir() while its process stays where it started.
+exec ./demo$exe -C sub show --spec @spec.txt
+stdout '^name=from-sub$'
+stdout '^spec=spec in sub$'
+stdout '^dir=.*sub$'
+stdout '^cwd-is-run-dir=false$'
+exec ./demo$exe show --spec @spec.txt --dir=sub
+stdout '^name=from-sub$'
+stdout '^spec=spec in sub$'
+
+# A directory that isn't there is a usage error, even beside --help.
+! exec ./demo$exe -C nope show
+stderr '-C: no such directory: "nope"'
+! exec ./demo$exe -C nope --help
+stderr '-C: no such directory: "nope"'
+
+# -C may come before a plugin's name, and the plugin runs in the directory.
+[!unix] stop 'the plugin stand-in is a shell script'
+chmod 0755 bin/demo-ext
+env PATH=$WORK/bin:$PATH
+exec ./demo$exe -C sub ext
+stdout 'sub$'
+
+-- .demo.yaml --
+name: from-here
+-- sub/.demo.yaml --
+name: from-sub
+-- sub/spec.txt --
+spec in sub
+-- bin/demo-ext --
+#!/bin/sh
+pwd
+-- cmd/demo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a directory flag
+  config_files:
+    - name: project
+      discover:
+        strategy: walk-up
+        file: .demo.yaml
+  flags:
+    - name: dir
+      summary: run as if started in this directory
+      identifiers: [-C, --dir]
+      role: chdir
+      cascading: true
+      schema:
+        type: existingdir
+    - name: help
+      identifiers: [--help]
+      short_circuit: true
+      schema:
+        type: bool
+  plugins:
+    - name: ext
+      summary: an external command
+  commands:
+    - name: show
+      summary: show what was read
+      flags:
+        - name: name
+          identifiers: [--name]
+          schema:
+            type: string
+            key: name
+        - name: spec
+          identifiers: [--spec]
+          schema:
+            type: string
+            from: [value, file]
+-- cmd/demo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+-- cmd/demo/main.go --
+package main
+
+import demo "example.com/demo/internal/cmd/demo"
+
+func main() { demo.NewProgram(demo.Handlers()).Execute() }
+-- internal/cmd/demo/demo.go --
+package demo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoHandler struct{ rotini.NoHooks }
+
+func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[DemoInputs](); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- internal/cmd/demo/demo_show.go --
+package demo
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoShowHandler struct{ rotini.NoHooks }
+
+func (*demoShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DemoShowInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	cwd, _ := os.Getwd()
+	fmt.Fprintf(rtx.Stdout, "name=%s\n", in.DemoShow.Flags.Name)
+	if in.DemoShow.Flags.Spec != "" {
+		fmt.Fprintf(rtx.Stdout, "spec=%s\n", strings.TrimSpace(in.DemoShow.Flags.Spec))
+	}
+	fmt.Fprintf(rtx.Stdout, "dir=%s\ncwd-is-run-dir=%v\n", rtx.Dir(), cwd == rtx.Dir())
+}

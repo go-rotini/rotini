@@ -123,9 +123,9 @@ func lintNulSeparator(spec *Spec) []error {
 	return problems
 }
 
-// lintVariableFile restricts `variable_file` to env inputs and flags that read an environment
-// variable, and requires its name to be unique: not one of the input's own variables, and not
-// a variable another input of the chain reads.
+// lintVariableFile restricts `variable_file` to env inputs, and flags and arguments that read an
+// environment variable, and requires its name to be unique: not one of the input's own
+// variables, and not a variable another input of the chain reads.
 func lintVariableFile(spec *Spec) []error {
 	var problems []error
 	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
@@ -138,11 +138,11 @@ func lintVariableFile(spec *Spec) []error {
 			file := schema.VariableFile
 			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			switch {
-			case channel != "env" && channel != "flag":
-				add("sets `variable_file`, which names an environment variable; only env inputs and flags with an environment fallback read one, so here it would be silently ignored")
+			case channel != "env" && channel != "flag" && channel != "argument":
+				add("sets `variable_file`, which names an environment variable; only env inputs, and flags and arguments with an environment fallback, read one, so here it would be silently ignored")
 				return
-			case channel == "flag" && flagReconKey(name, schema) == "":
-				add("sets `variable_file` on a flag with no environment fallback; set `variable:` (or `key:`) so the flag reads an environment variable, then `variable_file` names its file form")
+			case channel != "env" && flagReconKey(name, schema) == "":
+				add(fmt.Sprintf("sets `variable_file` on %s %s with no environment fallback; set `variable:` (or `key:`) so the %s reads an environment variable, then `variable_file` names its file form", map[string]string{"flag": "a", "argument": "an"}[channel], channel, channel))
 				return
 			case schema.Nesting != "":
 				add("sets both `variable_file` and `nesting`; a nested input reads a family of variables, not one value a file could hold")

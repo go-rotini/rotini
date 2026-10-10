@@ -27,6 +27,7 @@ func (p *Processor) lintSpec(rs *reconciledSpec) []error {
 		problems = append(problems, rule(rs.spec)...)
 	}
 	problems = append(problems, lintComposedTree(rs.spec, rs.path)...)
+	problems = remapFlagSetProblems(rs.spec, problems)
 	locateProblems(problems, rs.path, rs.locate)
 	return problems
 }
@@ -112,6 +113,20 @@ var specLints = []func(*Spec) []error{
 	lintStreamPaths,
 	lintRoles,
 	lintGlob,
+	lintFlagSets,
+	lintSecretLiterals,
+	lintReplacedBy,
+	lintHiddenSpellings,
+	lintExpand,
+	lintUsageSchemaName,
+	lintMulticall,
+	lintChdirRole,
+	lintValuesFrom,
+	lintFieldRoles,
+	lintInputDescription,
+	lintStability,
+	lintTopics,
+	lintDocsURL,
 }
 
 // lintRootCommand requires the root command, which is the binary itself, to have a
@@ -266,6 +281,13 @@ func lintRootAliases(spec *Spec) []error {
 				quotedList(spec.Command.DeprecatedIdentifiers)),
 		})
 	}
+	if len(spec.Command.HiddenAliases) > 0 {
+		problems = append(problems, &problem{
+			kind: "spec", ptr: rootPointer + "/hidden_aliases", loc: rootLabel(spec),
+			msg: fmt.Sprintf("the root command cannot declare `hidden_aliases` (%s); it is reached by invoking the binary, not by a routing token; declare them on sub-commands",
+				quotedList(spec.Command.HiddenAliases)),
+		})
+	}
 	return problems
 }
 
@@ -298,7 +320,7 @@ func lintSiblingCollisions(spec *Spec) []error {
 			if owner == "" {
 				owner = child.Ref
 			}
-			claim(owner, fmt.Sprintf("%s/commands/%d", ptr, i), append([]string{child.Name}, child.Aliases...)...)
+			claim(owner, fmt.Sprintf("%s/commands/%d", ptr, i), dispatchTokens(child)...)
 		}
 		for i, r := range c.Plugins {
 			claim("plugin "+r.Name, fmt.Sprintf("%s/plugins/%d", ptr, i), append([]string{r.Name}, r.Aliases...)...)
@@ -957,9 +979,8 @@ func lintShortCircuit(spec *Spec) []error {
 		}
 		dependent := map[string]bool{}
 		for _, dep := range c.FlagDependencies {
-			dependent[dep.When] = true
-			for _, name := range dep.Requires {
-				dependent[name] = true
+			for _, kn := range dependencyNames(dep) {
+				dependent[kn[1]] = true
 			}
 		}
 		for i, f := range c.Flags {
@@ -1223,13 +1244,13 @@ func lintDeprecatedIdentifiers(spec *Spec) []error {
 		if c != &spec.Command && len(c.DeprecatedIdentifiers) > 0 {
 			subset(func(msg string) {
 				problems = append(problems, &problem{kind: "spec", ptr: ptr + "/deprecated_identifiers", loc: "command " + path, msg: msg})
-			}, c.Aliases, c.DeprecatedIdentifiers, "aliases")
+			}, slices.Concat(c.Aliases, c.HiddenAliases), c.DeprecatedIdentifiers, "aliases")
 		}
 		for i, f := range c.Flags {
 			if len(f.DeprecatedIdentifiers) > 0 {
 				subset(func(msg string) {
 					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name, msg))
-				}, flagIdentifiers(f), f.DeprecatedIdentifiers, "identifiers")
+				}, slices.Concat(flagIdentifiers(f), f.HiddenIdentifiers), f.DeprecatedIdentifiers, "identifiers")
 			}
 		}
 	})
@@ -1348,39 +1369,6 @@ func lintFlagGroups(spec *Spec) []error {
 	return problems
 }
 
-// lintFlagDependencies rejects a flag_dependencies entry whose When or Requires references a
-// flag the command does not declare, or that makes a flag require itself.
-func lintFlagDependencies(spec *Spec) []error {
-	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		if c.inputs() == nil || len(c.inputs().FlagDependencies) == 0 {
-			return
-		}
-		known, ordered := flagNames(c)
-		for i, dep := range c.FlagDependencies {
-			at := fmt.Sprintf("%s/flag_dependencies/%d", ptr, i)
-			report := func(name string) {
-				msg := fmt.Sprintf("`flag_dependencies` entry references unknown flag %q; it has no matching entry in this command's `flags`", name)
-				problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path, msg: didYouMean(msg, name, ordered)})
-			}
-			when := dependencyFlag(dep)
-			if !known[when] {
-				report(when)
-			}
-			for _, name := range dep.Requires {
-				if !known[name] {
-					report(name)
-				}
-				if name == when {
-					problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path,
-						msg: fmt.Sprintf("`flag_dependencies` entry makes flag %q require itself, which is always true; remove %q from `requires`", name, name)})
-				}
-			}
-		}
-	})
-	return problems
-}
-
 // lintDuplicateFlagIdentifiers rejects a flag identifier claimed twice on one command, a
 // collision the parser would resolve silently. It checks effective identifiers (declared, or
 // derived "--<name>"), so "dry_run" and "dry-run" collide.
@@ -1392,7 +1380,7 @@ func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 		}
 		claimedBy := map[string]string{} // identifier -> the flag name that first claimed it
 		for i, f := range c.Flags {
-			for _, id := range flagIdentifiers(f) {
+			for _, id := range matchIdentifiers(f) {
 				if prev, dup := claimedBy[id]; dup {
 					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name,
 						fmt.Sprintf("identifier %q is already declared by flag %q", id, prev)))

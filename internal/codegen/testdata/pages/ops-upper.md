@@ -2,6 +2,8 @@
 
 upper-case lines
 
+This command is experimental: it may change or be removed in any release.
+
 ## Usage
 
 ```

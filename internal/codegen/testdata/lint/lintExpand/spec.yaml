@@ -1,0 +1,44 @@
+# `expand` and `relative_to` apply to path values: a string or path type, or a list of them.
+# `expand` can't be combined with `enum` or `secret`, and `relative_to: config` needs a value
+# read from a configuration file. `expand: [env]` on an input a walk-up file can set warns.
+version: 0.0.0
+command:
+  name: demo
+  config_files:
+    - name: project
+      discover: {strategy: walk-up, file: .demo.yaml}
+  flags:
+    - name: out
+      identifiers: [--out]
+      schema: {type: outputfile, expand: [home, env]}
+    - name: count
+      identifiers: [--count]
+      schema: {type: int, expand: [home]}
+    - name: mode
+      identifiers: [--mode]
+      schema: {type: string, enum: [a, b], expand: [home]}
+    - name: token
+      identifiers: [--token]
+      schema: {type: string, secret: true, expand: [env]}
+    - name: cache
+      identifiers: [--cache]
+      schema: {type: string, key: cache, expand: [env], relative_to: config}
+    - name: local
+      identifiers: [--local]
+      schema: {type: string, relative_to: config}
+  arguments:
+    - name: files
+      schema: {type: '[]existingfile', expand: [home]}
+  env:
+    - name: home
+      schema: {type: existingdir, expand: [home, env]}
+    - name: base
+      schema: {type: string, relative_to: config}
+  config:
+    - name: data
+      schema: {type: string, expand: [home], relative_to: config}
+    - name: labels
+      schema: {type: map, expand: [home]}
+  stdin:
+    format: text
+    schema: {type: string, expand: [home]}

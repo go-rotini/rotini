@@ -47,7 +47,9 @@ func renderDefinition(gp *program) string {
 	b.WriteString(outputDefLiteral(gp.rootPascal+"Output", gp.rootOutput, gp.schemas, gp.rootStream))
 	b.WriteString(inputsTypeLiteral(gp.rootPascal + "Inputs"))
 	b.WriteString(exitStatusLiteral(gp.rootHelp.ExitStatus))
-	if cl := rnodesLiteral(gp.rootName, gp.tree, gp.schemas); cl != "" {
+	fmt.Fprintf(&b, "Usage: %q,\n", rootUsage(gp))
+	b.WriteString(multicallLiteral(gp))
+	if cl := rnodesLiteral(gp.rootName, gp.rootDisplay, gp.tree, gp.schemas); cl != "" {
 		fmt.Fprintf(&b, "Commands: %s,\n", cl)
 	}
 	if rl := pluginDefsLiteral(gp.rootName, gp.rootPlugins); rl != "" {
@@ -58,6 +60,7 @@ func renderDefinition(gp *program) string {
 	}
 	b.WriteString(completionMessagesLiteral(gp.conf))
 	b.WriteString(completionDescriptionsLiteral(gp.conf))
+	b.WriteString(topicsLiteral(gp))
 	if rf := gp.responseFiles(); rf != nil {
 		fmt.Fprintf(&b, "ResponseFiles: &%s.ResponseFilesDef{Prefix: %q},\n", rotiniPkgName, rf.Prefix)
 	}
@@ -260,6 +263,12 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 			fmt.Fprintf(b, ", Deprecated: %q", f.Deprecated)
 		}
 		writeLifecycleFields(b, ", %s: %s", lifecycle{since: f.DeprecatedSince, removedIn: f.RemovedIn, removedIDs: f.DeprecatedIdentifiersRemovedIn})
+		if f.ReplacedBy != "" {
+			fmt.Fprintf(b, ", ReplacedBy: %q", f.ReplacedBy)
+		}
+		if len(f.HiddenIdentifiers) > 0 {
+			fmt.Fprintf(b, ", HiddenIdentifiers: %s", goStringSlice(f.HiddenIdentifiers))
+		}
 		if on, custom := negation(f.Schema); on {
 			b.WriteString(", Negatable: true")
 			if custom != "" {
@@ -285,6 +294,9 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 			fmt.Fprintf(b, ", From: %s", goStringSlice(f.Schema.From))
 		}
 		b.WriteString(completionLiteral(f.Schema))
+		if f.Role != "" {
+			fmt.Fprintf(b, ", Role: %q", f.Role)
+		}
 	})
 }
 
@@ -470,14 +482,26 @@ func flagDependenciesLiteral(in *Inputs) string {
 		return ""
 	}
 	return sliceLiteral("FlagDependency", in.FlagDependencies, func(b *strings.Builder, d FlagDependency) {
-		fmt.Fprintf(b, "When: %q, Requires: %s", d.When, goStringSlice(d.Requires))
+		var parts []string
+		if d.When != "" {
+			parts = append(parts, fmt.Sprintf("When: %q", d.When))
+		}
+		for _, f := range []struct {
+			name   string
+			values []string
+		}{{"Requires", d.Requires}, {"Equals", dependencyEquals(d)}, {"Unless", d.Unless}, {"Forbids", d.Forbids}} {
+			if len(f.values) > 0 {
+				parts = append(parts, f.name+": "+goStringSlice(f.values))
+			}
+		}
+		b.WriteString(strings.Join(parts, ", "))
 	})
 }
 
 // rnodesLiteral renders the []rotini.CommandDef literal for a resolved command tree,
 // recursively, or "" when nodes is empty. host prefixes plugin binary names unless a node
-// carries its own pluginHost.
-func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string {
+// carries its own pluginHost; invocation is the parent's, which each usage line starts with.
+func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Schema) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
 		fmt.Fprintf(b, "Name: %q,\n", n.name)
 		fmt.Fprintf(b, "Handler: %q,\n", n.prefix)
@@ -493,6 +517,9 @@ func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string
 		if len(n.aliases) > 0 {
 			fmt.Fprintf(b, "Aliases: %s,\n", goStringSlice(n.aliases))
 		}
+		if len(n.hiddenAliases) > 0 {
+			fmt.Fprintf(b, "HiddenAliases: %s,\n", goStringSlice(n.hiddenAliases))
+		}
 		if len(n.deprecatedIdentifiers) > 0 {
 			fmt.Fprintf(b, "DeprecatedIdentifiers: %s,\n", goStringSlice(n.deprecatedIdentifiers))
 		}
@@ -500,13 +527,17 @@ func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string
 			fmt.Fprintf(b, "Deprecated: %q,\n", n.deprecated)
 		}
 		writeLifecycleFields(b, "%s: %s,\n", n.lifecycle)
+		if n.replacedBy.text != "" {
+			fmt.Fprintf(b, "ReplacedBy: %q,\n", n.replacedBy.text)
+		}
 		writeInputDefsLiteral(b, n.inputs, schemas)
 		if !n.composed { // a composed command's output type lives in its own cli's package
 			b.WriteString(outputDefLiteral(n.prefix+"Output", n.output, schemas, n.stream))
 		}
 		b.WriteString(inputsTypeLiteral(n.inputsType))
 		b.WriteString(exitStatusLiteral(n.help.ExitStatus))
-		if cl := rnodesLiteral(host, n.children, schemas); cl != "" {
+		fmt.Fprintf(b, "Usage: %q,\n", nodeUsage(invocation, n))
+		if cl := rnodesLiteral(host, usageInvocation(invocation, n), n.children, schemas); cl != "" {
 			fmt.Fprintf(b, "Commands: %s,\n", cl)
 		}
 		pluginHost := host

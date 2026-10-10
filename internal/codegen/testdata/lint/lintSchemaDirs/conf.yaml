@@ -1,0 +1,13 @@
+# The output and config schema directories are written relative to the module root, so neither
+# may escape it.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  schemas:
+    output:
+      dir: schemas/../../output
+    config:
+      dir: ..

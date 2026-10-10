@@ -5,9 +5,9 @@ command:
   flags:
     # Correct: a secret with no default. No problem.
     - name: password
-      schema: { type: string, secret: true }
+      schema: { type: string, secret: true, from: [file] }
     - name: token
-      schema: { type: string, secret: true, default: hunter2 }
+      schema: { type: string, secret: true, from: [file], default: hunter2 }
   env:
     - name: api_key
       schema: { type: string, secret: true, default: abc123 }

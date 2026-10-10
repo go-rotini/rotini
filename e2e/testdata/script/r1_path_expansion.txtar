@@ -1,0 +1,113 @@
+# R1 — declared path expansion: `expand: [home, env]` expands ~ and $VAR in values from the
+# command line, the environment, configuration files and defaults; `relative_to: config`
+# resolves a configuration file's relative path against that file's directory; and env and
+# config inputs of a path type are checked like flags.
+
+gomodinit example.com/tool
+
+exec rotini generate cmd/tool/.rotini.spec.yaml --config cmd/tool/.rotini.conf.yaml
+grep 'expand:"home,env"' internal/cmd/tool/zz_tool.go
+grep 'relativeto:"config"' internal/cmd/tool/zz_tool.go
+grep 'path:"file"' internal/cmd/tool/zz_tool.go
+exec go mod tidy
+exec go build -o tool$exe ./cmd/tool
+
+env HOME=$WORK/home
+env USERPROFILE=$WORK/home
+env XDG_CONFIG_HOME=$WORK/xdg
+env OUTDIR=$WORK/out
+
+# ~ and $VAR on the command line, and in the default, become paths before the check.
+[!windows] exec ./tool$exe --file ~/notes.txt
+[!windows] stdout '^file='$WORK'/home/notes.txt$'
+[!windows] stdout '^out='$WORK'/out/report.txt$'
+[!windows] stdout '^cache='$WORK'/xdg/tool/cache$'
+
+# The same file through a variable, and the check sees the expanded path.
+exec ./tool$exe --file '$HOME/notes.txt'
+stdout '^file=.*notes.txt$'
+! exec ./tool$exe --file '~/missing.txt'
+stderr 'no such file: ".*missing.txt"'
+
+# An unset variable is a usage error naming it, and shell operators are refused.
+! exec ./tool$exe --file '$NOPE/x'
+stderr '--file: \$NOPE is not set \(in "\$NOPE/x"\)'
+! exec ./tool$exe --file '${HOME:-/tmp}/x'
+stderr 'only \$NAME and \$\{NAME\} are expanded'
+
+# An env input of type existingfile is checked: a missing path fails, naming the variable.
+env TOOL_LOG=$WORK/missing.log
+! exec ./tool$exe --file ~/notes.txt
+stderr 'TOOL_LOG: no such file'
+env TOOL_LOG=
+
+-- home/notes.txt --
+notes
+-- xdg/tool/config.yaml --
+cache: cache
+-- cmd/tool/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: tool
+  summary: path expansion
+  config_files:
+    - name: user
+      discover: {strategy: xdg, app: tool, file: config.yaml}
+  flags:
+    - name: file
+      identifiers: [--file]
+      schema: {type: existingfile, expand: [home, env]}
+    - name: out
+      identifiers: [--out]
+      schema: {type: string, default: $OUTDIR/report.txt, expand: [env]}
+  env:
+    - name: log
+      schema: {type: existingfile, variable: TOOL_LOG}
+  config:
+    - name: cache
+      schema: {type: string, expand: [home], relative_to: config}
+-- cmd/tool/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/tool/main.go
+    - type: cmd
+      file: internal/cmd/tool/zz_tool.go
+      package: tool
+-- internal/cmd/tool/tool.go --
+package tool
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type toolHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*toolHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ToolInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "file=%s\nout=%s\ncache=%s\n", in.Tool.Flags.File, in.Tool.Flags.Out, in.Tool.Config.Cache)
+}
+-- cmd/tool/main.go --
+package main
+
+import (
+	tool "example.com/tool/internal/cmd/tool"
+)
+
+func main() {
+	tool.NewProgram(tool.Handlers()).
+		Execute()
+}

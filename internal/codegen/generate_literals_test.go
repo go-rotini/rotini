@@ -175,7 +175,7 @@ func TestDefsLiteral_deprecatedMessages(t *testing.T) {
 			t.Errorf("literal missing %s:\n%s", want, lit)
 		}
 	}
-	cmds := rnodesLiteral("app", []rnode{{name: "build", prefix: "AppBuild", deprecated: "use app make"}}, nil)
+	cmds := rnodesLiteral("app", "app", []rnode{{name: "build", prefix: "AppBuild", deprecated: "use app make"}}, nil)
 	if !strings.Contains(cmds, `Deprecated: "use app make"`) {
 		t.Errorf("command literal missing its message:\n%s", cmds)
 	}

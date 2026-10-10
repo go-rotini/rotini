@@ -16,3 +16,51 @@ command:
     - when: tls
       requires:
         - tls
+  commands:
+    - name: export
+      flags:
+        - name: format
+          schema: { type: string, enum: [text, csv], ignore_case: true }
+        - name: delimiter
+          schema: { type: string }
+        - name: tags
+          schema: { type: '[]string' }
+        - name: limit
+          schema: { type: int }
+        - name: all
+          schema: { type: bool }
+      flag_dependencies:
+        # Correct: a value trigger, a forbidden flag, and a rule turned off by another flag.
+        - when: format
+          equals: [CSV]
+          requires: [delimiter]
+        - when: all
+          forbids: [limit]
+        - unless: [all]
+          requires: [limit]
+        # No trigger, and no effect.
+        - requires: [delimiter]
+        - when: all
+        # equals needs when, a single-value flag, and values the flag accepts.
+        - unless: [all]
+          equals: [csv]
+          requires: [delimiter]
+        - when: tags
+          equals: [a]
+          requires: [delimiter]
+        - when: format
+          equals: [xml]
+          requires: [delimiter]
+        - when: limit
+          equals: [ten]
+          requires: [delimiter]
+        # Contradictions.
+        - when: format
+          requires: [delimiter]
+          forbids: [delimiter]
+        - when: all
+          unless: [all]
+          forbids: [all]
+        - when: format
+          unless: [limit]
+          requires: [limit, nope]

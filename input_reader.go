@@ -90,8 +90,8 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: Read out argument must be a non-nil pointer to an inputs struct"}
 	}
 
-	// 1. argv → Flags + Arguments, without validation: step 3 checks the reconciled store.
-	store, chain, err := b.parser.parseBind(rtx, out)
+	// 1. argv → a store, without validation: step 3 checks the reconciled store.
+	store, chain, err := parseArgvStore(b.parser, rtx, out)
 	if err != nil {
 		return err
 	}
@@ -114,9 +114,18 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		overrides = b.pathOverrides(chain, store, view)
 	}
 
+	// 1c. Declared path expansion of the argv values and defaults, then binding them into
+	//     Flags and Arguments.
+	anchor := frameAnchor(v, chain, rtx.frameIndex())
+	if err := expandStore(v, chain, store, anchor, view); err != nil {
+		return err
+	}
+	if err := bindInputs(v, store, chain, anchor); err != nil {
+		return err
+	}
+
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
-	anchor := frameAnchor(v, chain, rtx.frameIndex())
 	if err := b.reconcileFlags(v, chain, store, overrides, anchor, waived, view); err != nil {
 		return err
 	}
@@ -160,6 +169,9 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 
 	labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
 	if err := fillChannels(v, envReg, cfg, waived, labels); err != nil {
+		return err
+	}
+	if err := expandChannels(v, envReg, cfg, waived, labels); err != nil {
 		return err
 	}
 
@@ -468,9 +480,8 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 		if !flags.IsValid() {
 			continue
 		}
-		ft := flags.Type()
-		for j := range flags.NumField() {
-			if err := reconcileFlag(reg, flags.Field(j), ft.Field(j), chain, store, anchor+i, rd); err != nil {
+		for sf, f := range structLeaves(flags) {
+			if err := reconcileFlag(reg, f, sf, chain, store, anchor+i, rd); err != nil {
 				return err
 			}
 		}
@@ -579,6 +590,12 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 	origin = fallbackOrigin(rd, source, tag.Get("env"), key)
 	vals = flagEnum(def).canonical(vals)
 	waivable := rd.waiveFiles && source != osEnvSourceName
+	if vals, err = expandFallback(vals, tag, source, fallbackLabel(chain, idx, name), rd); err != nil {
+		if waivable {
+			return nil, "", nil
+		}
+		return nil, "", usageBind(channelFlag, name, err.Error()+fromSource(origin), err)
+	}
 	var prev reflect.Value
 	if waivable {
 		prev = reflect.New(field.Type()).Elem()
@@ -771,9 +788,8 @@ func hasReconFlags(v reflect.Value) bool {
 			if !s.IsValid() {
 				continue
 			}
-			st := s.Type()
-			for j := range s.NumField() {
-				if reconKey(st.Field(j).Tag.Get("recon")) != "" {
+			for sf := range typeLeaves(s.Type()) {
+				if reconKey(sf.Tag.Get("recon")) != "" {
 					return true
 				}
 			}
@@ -795,14 +811,13 @@ func flagOverrides(v reflect.Value, chain []Command, store *parsedInputs, offset
 		if !flags.IsValid() {
 			continue
 		}
-		ft := flags.Type()
-		for j := range flags.NumField() {
-			key := reconKey(ft.Field(j).Tag.Get("recon"))
+		for sf, f := range structLeaves(flags) {
+			key := reconKey(sf.Tag.Get("recon"))
 			if key == "" {
 				continue
 			}
-			if store.argvSetAt(offset + i)[ft.Field(j).Tag.Get("rotini")] {
-				setNested(m, key, flags.Field(j).Interface())
+			if store.argvSetAt(offset + i)[sf.Tag.Get("rotini")] {
+				setNested(m, key, f.Interface())
 			}
 		}
 	}
@@ -1405,12 +1420,20 @@ type spellings struct {
 type valueKeys struct {
 	bools     map[string]bool
 	times     map[string]timeSpec
+	timeMaps  map[string]timeSpec // map[string]time.Time fields, whose values are times
+	maps      map[string]bool     // every map field, which a configuration file holds as leaves
 	durations map[string]bool
 }
 
 func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 	v, found, err := s.Source.Get(path)
-	if !found || err != nil || v.Kind() != recon.StringKind {
+	if !found || err != nil {
+		return v, found, err
+	}
+	if tv, ok := s.timeMapValue(path, v); ok {
+		return tv, true, nil
+	}
+	if v.Kind() != recon.StringKind {
 		return v, found, err
 	}
 	key := path.String()
@@ -1437,7 +1460,7 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 
 // channelValueKeys collects [valueKeys] from each command's Env or Config struct.
 func channelValueKeys(v reflect.Value, structName string) valueKeys {
-	keys := valueKeys{bools: map[string]bool{}, times: map[string]timeSpec{}, durations: map[string]bool{}}
+	keys := valueKeys{bools: map[string]bool{}, times: map[string]timeSpec{}, timeMaps: map[string]timeSpec{}, maps: map[string]bool{}, durations: map[string]bool{}}
 	if v.Kind() != reflect.Struct {
 		return keys
 	}
@@ -1464,6 +1487,11 @@ func channelValueKeys(v reflect.Value, structName string) valueKeys {
 			case ft == timeType:
 				if ts := tagTimeSpec(sf.Tag); !ts.plain() {
 					keys.times[key] = ts
+				}
+			case ft.Kind() == reflect.Map && ft.Key().Kind() == reflect.String:
+				keys.maps[key] = true
+				if ts := tagTimeSpec(sf.Tag); ft.Elem() == timeType && !ts.plain() {
+					keys.timeMaps[key] = ts
 				}
 			}
 		}
@@ -1624,7 +1652,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		f := st.Field(j)
 		c, has := channelConstraints(f.Tag)
 		enum := channelEnum(f.Tag)
-		if !has && !enum.declared() {
+		if !has && !enum.declared() && f.Tag.Get("path") == "" {
 			continue
 		}
 		key := reconKey(f.Tag.Get("recon"))
@@ -1645,7 +1673,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		if !found {
 			continue // only provided values are constraint-checked
 		}
-		typ := channelGoType(s.Field(j).Type())
+		typ := channelFieldType(f.Tag, s.Field(j).Type())
 		label := f.Tag.Get("rotini")
 		if label == "" {
 			label = key
@@ -1658,6 +1686,12 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		}
 		secret := reconHasSecret(f.Tag.Get("recon"))
 		vals := channelValues(val, typ)
+		if tagExpandRule(f.Tag).declared() {
+			vals = expandedStrings(s.Field(j), vals) // checked as expanded and bound
+		}
+		if len(vals) == 1 && vals[0] == "" && isPathType(typ) {
+			typ = channelGoType(s.Field(j).Type()) // an empty path is no path: nothing to check
+		}
 		if err := checkChannelEnum(channelOf(cfg), label, enum, boundStrings(s.Field(j), vals), secret); err != nil {
 			return err
 		}

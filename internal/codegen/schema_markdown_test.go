@@ -213,10 +213,10 @@ var commandKeyGroups = []struct {
 	title string
 	keys  []string
 }{
-	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers", "deprecated_since", "removed_in", "deprecated_identifiers_removed_in"}},
-	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies", "response_files"}},
-	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "options_first", "plugins", "plugin_discovery", "plugin_path", "timeout"}},
-	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "groups", "header", "footer", "headings", "help", "man", "markdown"}},
+	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers", "deprecated_since", "removed_in", "deprecated_identifiers_removed_in", "hidden_aliases", "replaced_by", "stability"}},
+	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies", "response_files", "flag_sets", "use"}},
+	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "options_first", "plugins", "plugin_discovery", "plugin_path", "timeout", "multicall"}},
+	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "groups", "header", "footer", "headings", "help", "man", "markdown", "topics"}},
 	{"Output and shared types", []string{"output", "output_stream", "schemas"}},
 	{"Generated code", []string{"filename"}},
 }
@@ -513,6 +513,9 @@ var inputKeySamples = map[string]string{
 	"repeatable":       `{"type": "string", "repeatable": false}`,
 	"relative":         `{"type": "time", "relative": "past"}`,
 	"glob":             `{"type": "[]existingfile", "glob": true}`,
+	"expand":           `{"type": "string", "expand": ["home"]}`,
+	"relative_to":      `{"type": "string", "key": "k", "relative_to": "config"}`,
+	"values_from":      `{"type": "string", "values_from": "output"}`,
 	"uniqueItems":      `{"type": "array", "uniqueItems": true}`,
 }
 
@@ -525,6 +528,7 @@ func inputChannelTable(t *testing.T) string {
 		writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
 		spec := "version: 0.0.0\ncommand:\n  name: demo\n  summary: s\n" +
 			"  schemas:\n    Name: {type: string}\n" +
+			"  output: {type: object, properties: {id: {type: string}}}\n" +
 			"  config_files:\n    - name: main\n      path: c.yaml\n" +
 			fmt.Sprintf(decl, schema)
 		writeTestFile(t, dir, ".rotini.spec.yaml", spec)

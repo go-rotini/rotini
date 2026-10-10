@@ -1,0 +1,77 @@
+# One JSON Schema per config file: the keys every command that reads the file binds, nested by
+# dot, with types, enums and their summaries, defaults (never a secret's), bounds, deprecations
+# and the file's own declared schema. Hidden inputs and commands, dotenv files and inputs
+# pinned to another file are left out.
+version: 0.0.0
+command:
+  name: ops
+  env_prefix: OPS
+  config_files:
+    - name: user
+      discover: { strategy: xdg, app: ops, file: config.yaml }
+    - name: pinned
+      path: ./ops.lock.yaml
+      schema:
+        type: object
+        properties:
+          digest: { $ref: Digest }
+    - name: dotenv
+      path: .env
+      format: dotenv
+      as: env
+  schemas:
+    Digest:
+      type: string
+      pattern: '^sha256:[a-f0-9]+$'
+    Region:
+      type: string
+      enum: [eu, us]
+  flags:
+    - name: color
+      summary: when to color
+      cascading: true
+      schema:
+        type: string
+        key: ui.color
+        default: auto
+        enum:
+          - { value: auto, summary: color on a terminal, aliases: [tty] }
+          - always
+          - never
+          - { value: rainbow, hidden: true }
+    - name: debug
+      summary: debug output
+      hidden: true
+      schema: { type: bool, key: debug }
+  config:
+    - name: region
+      summary: the default region
+      description: The region commands use when none is given.
+      schema: { $ref: Region, key: defaults.region, default: eu }
+    - name: token
+      summary: the API token
+      deprecated: use auth.token
+      deprecated_since: 1.2.0
+      schema: { type: string, key: token, secret: true, default: s3cret }
+    - name: digest
+      summary: the pinned digest
+      schema: { type: string, file: pinned, key: digest }
+    - name: retries
+      summary: how often to retry
+      schema: { type: int, key: net.retries, minimum: 0, maximum: 9 }
+  commands:
+    - name: deploy
+      summary: ship a service
+      config_files:
+        - name: team
+          discover: { strategy: walk-up, file: .ops-team.yaml }
+      flags:
+        - name: replicas
+          summary: how many copies
+          schema: { type: int, key: deploy.replicas, minimum: 1 }
+    - name: ghost
+      hidden: true
+      flags:
+        - name: boo
+          summary: invisible
+          schema: { type: string, key: boo }

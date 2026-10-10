@@ -1,0 +1,50 @@
+# Help topics are root-only pages shown by `help <name>`, so a name is used once and never by a
+# root command, alias or plugin, and each topic has exactly one of body and generate.
+version: 0.0.0
+command:
+  name: demo
+  plugins:
+    - name: audit
+      summary: run the audit plugin
+  topics:
+    # Correct. No problem.
+    - name: filters
+      summary: how filters work
+      body: A filter is a word.
+    - name: environment
+      summary: the variables demo reads
+      generate: environment
+    # Declared twice.
+    - name: filters
+      summary: filters again
+      body: Again.
+    # A command's name, an alias, a hidden alias and a plugin's name.
+    - name: run
+      summary: running
+      body: Running.
+    - name: r
+      summary: running, short
+      body: Running.
+    - name: go
+      summary: running, hidden
+      body: Running.
+    - name: audit
+      summary: auditing
+      body: Auditing.
+    # Neither body nor generate, then both.
+    - name: empty
+      summary: nothing
+    - name: both
+      summary: too much
+      body: Text.
+      generate: environment
+  commands:
+    - name: run
+      aliases: [r]
+      hidden_aliases: [go]
+      summary: run it
+      # Topics are root-only.
+      topics:
+        - name: inner
+          summary: inner topic
+          body: Inner.

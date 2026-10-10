@@ -61,6 +61,8 @@ type contractFacts struct {
 	nesting       string
 	relative      string // past, future or both: the input also takes a time measured from now
 	variableFile  string // the variable naming a file that holds the value
+	expand        []string
+	relativeTo    string
 }
 
 func contractFactsOf(s *InputSchema, schemas map[string]Schema) contractFacts {
@@ -70,6 +72,7 @@ func contractFactsOf(s *InputSchema, schemas map[string]Schema) contractFacts {
 		f.ignoreCase, f.secret = s.IgnoreCase, s.Secret
 		f.configSource, f.dottedKeys, f.nesting = s.ConfigSource, s.DottedKeys, s.Nesting
 		f.relative, f.variableFile = s.Relative, s.VariableFile
+		f.expand, f.relativeTo = s.Expand, s.RelativeTo
 	}
 	return f
 }

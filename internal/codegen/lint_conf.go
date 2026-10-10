@@ -63,6 +63,8 @@ var confLints = []func(*Conf) []error{
 	lintCompletionMessages,
 	lintSchemaFiles,
 	lintModelsKeep,
+	lintInstallDir,
+	lintSchemaDirs,
 }
 
 // lintFeatureSection rejects `section`, the man page section number, on any feature but man,

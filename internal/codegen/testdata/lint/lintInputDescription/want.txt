@@ -1,0 +1,4 @@
+warning: spec: .rotini.spec.yaml:17:20: command demo: flag "--host": sets `description` but no `summary`; help shows only the summary, so its row there is empty; add a one-line summary
+warning: spec: .rotini.spec.yaml:21:20: command demo: argument "file": sets `description` but no `summary`; help shows only the summary, so its row there is empty; add a one-line summary
+warning: spec: .rotini.spec.yaml:25:20: command demo: env "token": sets `description` but no `summary`; help shows only the summary, so its row there is empty; add a one-line summary
+warning: spec: .rotini.spec.yaml:29:20: command demo: config "region": sets `description` but no `summary`; help shows only the summary, so its row there is empty; add a one-line summary

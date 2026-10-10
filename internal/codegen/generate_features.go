@@ -95,6 +95,7 @@ type helpNode struct {
 	data     templateHelpData // rendering inputs (used when verbatim == "")
 	path     []string         // the canonical command path below the root; nil for the root
 	listed   bool             // in ManPages/MarkdownPages: neither it nor an ancestor is hidden
+	topic    bool             // a help topic's page, not a command's; path is [topic name]
 }
 
 // cmdHelp bundles a command's doc fields. A non-empty Help, Man or Markdown is that feature's
@@ -113,6 +114,8 @@ type cmdHelp struct {
 	Help        string            // verbatim help page (command.help)
 	Man         string            // verbatim man page (command.man)
 	Markdown    string            // verbatim markdown reference page (command.markdown)
+	Stability   string            // command.stability as declared: "experimental", "beta" or "" (stable)
+	Topics      []Topic           // command.topics: help topics, read from the root only
 }
 
 // commandHelp gathers the doc fields of a command.
@@ -122,6 +125,7 @@ func commandHelp(c Command) cmdHelp {
 		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
 		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso, Groups: c.Groups,
 		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
+		Stability: c.Stability, Topics: c.Topics,
 	}
 }
 
@@ -177,12 +181,16 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 	if feat.manPages {
 		out[0].data.Environment = append(out[0].data.Environment, completionEnvRows(gp.conf)...)
 	}
+	out[0].data.Stability = gp.rootHelp.Stability
+	out[0].data.Topics = topicRows(gp.rootHelp.Topics)
+	out[0].data.RelatedPages = append(out[0].data.RelatedPages, topicPageNames(gp)...)
 
-	// cascading accumulates the cascading flags of a node's ancestors.
-	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool)
-	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool) {
+	// cascading accumulates the cascading flags of a node's ancestors; stability is the least
+	// stable of the ancestors' declared stability.
+	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool, stability string)
+	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool, stability string) {
 		for _, n := range nodes {
-			seg := append([]string{n.name}, n.aliases...)
+			seg := slices.Concat([]string{n.name}, n.aliases, n.hiddenAliases) // help accepts a hidden alias, as the command line does
 			childChain := append(append([][]string{}, identChain...), seg)
 			childNames := append(append([]string{}, names...), n.name)
 			invocation := gp.rootDisplay + " " + strings.Join(childNames, " ")
@@ -190,6 +198,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			if n.passthrough {
 				data.Passthrough = n.name
 			}
+			data.Stability = leastStable(stability, n.help.Stability)
 			markStream(data.Output, n.stream)
 			out = append(out, helpNode{
 				prefix:   n.prefix,
@@ -202,11 +211,23 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 				listed:   listed && !n.hidden,
 			})
 			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs, gp.envPrefix)...)
-			walk(n.children, childChain, childNames, childCascading, listed && !n.hidden)
+			walk(n.children, childChain, childNames, childCascading, listed && !n.hidden, data.Stability)
 		}
 	}
-	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs, gp.envPrefix), true)
-	return out
+	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs, gp.envPrefix), true, gp.rootHelp.Stability)
+	return append(out, topicNodes(gp, feat, section, date)...)
+}
+
+// stabilityRank orders stability markers from least to most stable; "" is stable.
+var stabilityRank = map[string]int{"experimental": 0, "beta": 1, "": 2}
+
+// leastStable returns the less stable of two stability markers: an item is never more stable
+// than the command it belongs to.
+func leastStable(a, b string) string {
+	if stabilityRank[b] < stabilityRank[a] {
+		return b
+	}
+	return a
 }
 
 // manPageName returns a command's man page name: the root's name and the command path joined
@@ -272,7 +293,7 @@ func completionNodes() []helpNode {
 // resolveHeadings returns the default section headings, overridden by any set in the spec.
 func resolveHeadings(h cmdHelp) templateDocHeadings {
 	// Defaults carry the trailing ":" so an override renders verbatim, colon or not.
-	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:", Stdin: "Stdin:"}
+	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:", Stdin: "Stdin:", Topics: "Help Topics:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -292,6 +313,7 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 	override(&hd.Examples, o.Examples)
 	override(&hd.Output, o.Output)
 	override(&hd.Stdin, o.Stdin)
+	override(&hd.Topics, o.Topics)
 	return hd
 }
 
@@ -313,7 +335,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		SeeAlso:     h.SeeAlso,
 	}
 	for _, e := range h.ExitStatus {
-		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, Output: shapeTypeName(e.Output)})
+		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, Output: shapeTypeName(e.Output), DocsURL: e.DocsUrl})
 	}
 	var cmds []templateDocCommandRow
 	for _, c := range children {
@@ -329,7 +351,8 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			Summary:    c.help.Summary,
 			Aliases:    aliases,
 			Group:      c.group,
-			Deprecated: deprecated,
+			Deprecated: withReplacement(deprecated, c.replacedBy.text),
+			Stability:  c.help.Stability,
 
 			DeprecatedSince: c.lifecycle.since, RemovedIn: c.lifecycle.removedIn,
 		})
@@ -363,6 +386,8 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			d.Environment = append(d.Environment, templateDocEnvRow{
 				Var:         envVarLabel(e, envPrefix),
 				Summary:     e.Summary,
+				Description: e.Description,
+				Stability:   e.Stability,
 				Type:        flagDisplayType(e.Schema),
 				Required:    e.Schema != nil && e.Schema.Required,
 				Default:     schemaDefaultString(e.Schema),
@@ -385,6 +410,8 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				Name:        c.Name,
 				Location:    configLocation(c),
 				Summary:     c.Summary,
+				Description: c.Description,
+				Stability:   c.Stability,
 				Type:        flagDisplayType(c.Schema),
 				Required:    c.Schema != nil && c.Schema.Required,
 				Default:     schemaDefaultString(c.Schema),
@@ -415,6 +442,8 @@ func argumentRow(a ArgumentInput, envPrefix string, readsConfig bool) templateDo
 	row := templateDocArgumentRow{
 		Name:        a.Name,
 		Summary:     withStreamNote(a.Summary, a.Schema),
+		Description: a.Description,
+		Stability:   a.Stability,
 		Required:    a.Schema != nil && a.Schema.Required,
 		Variadic:    isVariadicSchema(a.Schema),
 		Default:     schemaDefaultString(a.Schema),
@@ -429,6 +458,9 @@ func argumentRow(a ArgumentInput, envPrefix string, readsConfig bool) templateDo
 		DeprecatedSince: a.DeprecatedSince, RemovedIn: a.RemovedIn,
 	}
 	row.Env, row.ConfigKey = argumentFallback(a, envPrefix, readsConfig)
+	if len(row.Env) > 0 && a.Schema.VariableFile != "" {
+		row.Env = append(row.Env, a.Schema.VariableFile+fileVariableNote)
+	}
 	return row
 }
 
@@ -589,13 +621,15 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 	row := templateDocFlagRow{
 		Identifiers: shortFirst(negatableIdentifiers(f, ids)),
 		Summary:     withStreamNote(f.Summary, f.Schema),
+		Description: f.Description,
+		Stability:   f.Stability,
 		Group:       f.Group,
 		Type:        flagDisplayType(f.Schema),
 		Required:    f.Schema != nil && f.Schema.Required,
 		Default:     schemaDefaultString(f.Schema),
 		Enum:        enumOf(f.Schema),
 		EnumValues:  enumValuesOf(f.Schema),
-		Deprecated:  deprecated,
+		Deprecated:  withReplacement(deprecated, f.ReplacedBy),
 		Constraints: constraints,
 		Accepts:     acceptsNote(f.Schema),
 		Rules:       rules,
@@ -955,7 +989,7 @@ func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool
 			if len(hn.path) > 0 {
 				path = goStringSlice(hn.path)
 			}
-			h.Pages = append(h.Pages, templateFeaturePage{Name: hn.data.PageName, PathLiteral: path, Var: feat.varPrefix + hn.prefix})
+			h.Pages = append(h.Pages, templateFeaturePage{Name: hn.data.PageName, PathLiteral: path, Var: feat.varPrefix + hn.prefix, Topic: hn.topic})
 		}
 	}
 	for i, hn := range nodes {

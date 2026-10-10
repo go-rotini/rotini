@@ -28,15 +28,28 @@
          "") and .Retryable. Command, argument, flag, env and config rows carry
          .DeprecatedSince and .RemovedIn; deprecation .Deprecated .DeprecatedSince .RemovedIn
          renders "deprecated since 1.4.0, removed in 2.0.0: <message>".
+         Argument, flag, env and config rows carry .Description (the input's longer text,
+         paragraphs separated by blank lines) and .Stability ("experimental", "beta" or "" for
+         stable, as declared), and command rows carry .Stability. The page's own .Stability is
+         the command's, inherited from its ancestors; stabilityNote .Stability renders the line
+         saying what it promises. An exit status row carries .DocsURL, a link to more about the
+         code, or "".
+         The root's page carries .Topics[] {.Name .Summary}, its help topics. On a topic's page
+         .Topic is true: .Summary and .Description are the topic's, .Environment holds a
+         generated environment topic's rows, each with .Commands (the commands that read it),
+         and the rest is empty.
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last,
-                alsoSetBy, deprecation, listed, described. */ -}}
+                alsoSetBy, deprecation, stabilityNote, listed, described. */ -}}
 # {{.Invocation}}
 
 {{with .Summary}}{{.}}
 
 {{end -}}
 {{- with .Description}}{{.}}
+
+{{end -}}
+{{- with .Stability}}{{stabilityNote .}}
 
 {{end -}}
 {{- $usage := .Usage}}{{if not $usage}}{{$usage = .UsageDerived}}{{end -}}
@@ -54,39 +67,59 @@
 
 {{with .Description}}{{.}}
 
-{{end}}{{range .Commands}}- `{{.Name}}`{{with .Aliases}} (alias {{join . ", "}}){{end}} — {{.Summary}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}
+{{end}}{{range .Commands}}- `{{.Name}}`{{with .Aliases}} (alias {{join . ", "}}){{end}} — {{.Summary}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}
+{{end}}
+{{end -}}
+{{- with .Topics}}## Help Topics
+
+{{range .}}- `{{.Name}}` — {{.Summary}}
 {{end}}
 {{end -}}
 {{- with .Arguments}}## Arguments
 
-{{range .}}- {{if .Required}}`<{{.Name}}{{if .Variadic}}...{{end}}>`{{else}}`[{{.Name}}{{if .Variadic}}...{{end}}]`{{end}} — {{.Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
-{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
+{{range .}}- {{if .Required}}`<{{.Name}}{{if .Variadic}}...{{end}}>`{{else}}`[{{.Name}}{{if .Variadic}}...{{end}}]`{{end}} — {{.Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{with .Description}}
+{{indent 2 .}}
+
+{{end}}{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
 {{end}}{{end}}
 {{end -}}
 {{- range .FlagGroups}}## {{if .Title}}{{.Title}}{{else}}Flags{{end}}
 
 {{with .Description}}{{.}}
 
-{{end}}{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
-{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
+{{end}}{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{with .Description}}
+{{indent 2 .}}
+
+{{end}}{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
 {{end}}{{end}}
 {{end -}}
 {{- with .Cascading}}## Global Flags
 
-{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
-{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
+{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{with .Description}}
+{{indent 2 .}}
+
+{{end}}{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
 {{end}}{{end}}
 {{end -}}
 {{- with .Environment}}## Environment
 
-{{range .}}- `{{.Var}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
-{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
+{{range .}}- `{{.Var}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Commands}} (used by: {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
+{{with .Description}}
+{{indent 2 .}}
+
+{{end}}{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
 {{end}}{{end}}
 {{end -}}
 {{- with .Configuration}}## Configuration
 
-{{range .}}- `{{.Name}}`{{with .Location}} ({{.}}){{end}}{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
-{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
+{{range .}}- `{{.Name}}`{{with .Location}} ({{.}}){{end}}{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
+{{with .Description}}
+{{indent 2 .}}
+
+{{end}}{{range .EnumValues}}  - `{{.Value}}`{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
 {{end}}{{end}}
 {{end -}}
 {{- with .Examples}}## Examples
@@ -118,7 +151,7 @@ Reads {{if eq .Format "text"}}text{{else if eq .Format "lines"}}lines of text{{i
 {{end -}}
 {{- with .ExitStatus}}## Exit Status
 
-{{range .}}- `{{.Code}}`{{with .Name}} (`{{.}}`){{end}} — {{.Summary}}{{if .Retryable}} (retryable){{end}}{{with .Output}} (writes `{{.}}` to stdout){{end}}
+{{range .}}- `{{.Code}}`{{with .Name}} (`{{.}}`){{end}} — {{.Summary}}{{if .Retryable}} (retryable){{end}}{{with .Output}} (writes `{{.}}` to stdout){{end}}{{with .DocsURL}} ([docs]({{.}})){{end}}
 {{end}}
 {{end -}}
 {{- with .SeeAlso}}## See Also

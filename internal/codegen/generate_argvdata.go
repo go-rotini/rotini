@@ -31,6 +31,9 @@ func exitStatusLiteral(entries []ExitStatusEntry) string {
 		if e.Retryable {
 			b.WriteString(", Retryable: true")
 		}
+		if e.DocsUrl != "" {
+			fmt.Fprintf(b, ", DocsURL: %q", e.DocsUrl)
+		}
 	})
 	if l == "" {
 		return ""

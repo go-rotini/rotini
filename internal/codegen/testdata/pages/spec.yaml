@@ -1,7 +1,7 @@
 # Every page section that comes from declared data: group descriptions in the declared order,
 # long-only flags aligned with the long column, constraints on each input kind, a stdin
-# section for each format, and a passthrough command, described enum values, and a passthrough
-# argument.
+# section for each format, and a passthrough command, described enum values, a passthrough
+# argument, long input descriptions, stability markers, exit-code links and help topics.
 version: 0.0.0
 command:
   name: ops
@@ -41,6 +41,10 @@ command:
   env:
     - name: token
       summary: the API token
+      description: |-
+        Get one from the console.
+
+        .Keep it secret; a path such as C:\ops\token works too.
       schema: {type: string, minLength: 20}
     - name: log
       summary: the log level
@@ -50,10 +54,22 @@ command:
   config:
     - name: region
       summary: the default region
+      description: The region commands use when none is given.
+      stability: beta
       schema: {type: string, key: region, pattern: '^[a-z]+-[0-9]$', pattern_message: 'must look like eu-1'}
     - name: profile
       summary: the output profile
       schema: {type: string, key: profile, enum: [{value: short, summary: one line each}, {value: long, summary: every field}]}
+  topics:
+    - name: filters
+      summary: how filters work
+      body: |-
+        A filter is a word that narrows a list.
+
+        Filters combine with AND.
+    - name: environment
+      summary: the environment variables ops reads
+      generate: environment
   schemas:
     Task:
       type: object
@@ -70,9 +86,17 @@ command:
     - name: deploy
       summary: ship a service
       group: Deploying
+      stability: beta
+      exit_status:
+        - { code: 0, summary: shipped }
+        - { code: 4, name: rejected, summary: the cluster refused it, docs_url: "https://example.com/ops/rejected" }
       arguments:
         - name: service
           summary: the service to ship
+          description: |-
+            The service to ship, by its registry name.
+
+            Names are lowercase.
           schema: {type: string, required: true, minLength: 2, maxLength: 63, pattern: '^[a-z][a-z0-9-]*$'}
         - name: replicas
           summary: how many copies
@@ -80,10 +104,12 @@ command:
       flags:
         - name: port
           summary: listen port
+          description: The port the service listens on.
           identifiers: [--port, -p]
           schema: {type: int, default: 8080, minimum: 1, maximum: 65535}
         - name: ratio
           summary: traffic share
+          stability: experimental
           identifiers: [--ratio]
           schema: {type: float64, exclusiveMinimum: 0, maximum: 1}
         - name: step
@@ -110,6 +136,7 @@ command:
         schema: {$ref: TaskList, required: true}
     - name: upper
       summary: upper-case lines
+      stability: experimental
       group: Data
       stdin:
         format: lines

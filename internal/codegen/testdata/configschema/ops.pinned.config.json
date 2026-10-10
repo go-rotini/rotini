@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "allOf": [
+    {
+      "properties": {
+        "digest": {
+          "$ref": "#/definitions/Digest"
+        }
+      },
+      "type": "object"
+    }
+  ],
+  "definitions": {
+    "Digest": {
+      "pattern": "^sha256:[a-f0-9]+$",
+      "type": "string"
+    },
+    "Region": {
+      "enum": [
+        "eu",
+        "us"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "./ops.lock.yaml, read by ops and its sub-commands.",
+  "properties": {
+    "defaults": {
+      "properties": {
+        "region": {
+          "$ref": "#/definitions/Region",
+          "default": "eu",
+          "description": "The region commands use when none is given.",
+          "enum": [
+            "eu",
+            "us"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "deploy": {
+      "properties": {
+        "replicas": {
+          "description": "how many copies",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "digest": {
+      "description": "the pinned digest",
+      "type": "string"
+    },
+    "net": {
+      "properties": {
+        "retries": {
+          "description": "how often to retry",
+          "maximum": 9,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "token": {
+      "deprecated": true,
+      "deprecationMessage": "deprecated since 1.2.0: use auth.token",
+      "description": "the API token",
+      "type": "string"
+    },
+    "ui": {
+      "properties": {
+        "color": {
+          "default": "auto",
+          "description": "when to color",
+          "enum": [
+            "auto",
+            "always",
+            "never",
+            "tty"
+          ],
+          "enumDescriptions": [
+            "color on a terminal",
+            "",
+            "",
+            "same as auto"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": "ops configuration file \"pinned\"",
+  "type": "object"
+}

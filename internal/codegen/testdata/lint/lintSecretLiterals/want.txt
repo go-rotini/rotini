@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:14:7: command demo: flag "pin": is secret and refuses a value typed on the command line (its `from` leaves out `value`), so it can't have an `implicit_value`, which is one; remove `implicit_value`
+warning: spec: .rotini.spec.yaml:9:7: command demo: flag "token": is secret but accepts its value on the command line, where it shows in the process list and shell history; declare `from: [file]` or `from: [stdin]`, without `value`, to refuse it
+warning: spec: .rotini.spec.yaml:11:7: command demo: flag "key": is secret but accepts its value on the command line, where it shows in the process list and shell history; declare `from: [file]` or `from: [stdin]`, without `value`, to refuse it

@@ -1120,6 +1120,16 @@ func conformanceCases() []inputCase {
 				// "-" as an outputfile is stdout; an existing file is kept without Overwrite.
 				fileOutput(t)
 			}},
+
+		// ── flag sets, value rules, literal-free secrets, hidden spellings ──
+		{id: "FLAG-24", args: []string{"deploy"}, check: confFlagSetMember},
+		{id: "FLAG-25", args: []string{"deploy"}, check: confHiddenIdentifier},
+		{id: "DEP-01", args: []string{"deploy"}, check: confDependencyEquals},
+		{id: "DEP-02", args: []string{"deploy"}, check: confDependencyArgvOnly},
+		{id: "DEP-03", args: []string{"deploy"}, check: confDependencyForbids},
+		{id: "DEP-04", args: []string{"deploy"}, check: confDependencyUnless},
+		{id: "DEP-05", args: []string{"deploy"}, check: confDependencyTyped},
+		{id: "SEC-04", args: []string{"deploy"}, check: confSecretLiteralFree},
 	}
 }
 
@@ -1184,12 +1194,22 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"FILE-01", "FILE-02", "FILE-03",
 		"STDIN-08", "STDIN-09", "STDIN-10", "STDIN-11", "STDIN-12", "STDIN-13", "STDIN-14",
 		"LIST-01", "LIST-02", "LIST-03", "ENV-09", "ENV-10", "ENV-11", "PREC-05", "CFG-09", "CFG-10",
+		"FLAG-24", "FLAG-25", "DEP-01", "DEP-02", "DEP-03", "DEP-04", "DEP-05", "SEC-04",
+		"INJ-04", "PREC-06",
+		"FLAG-26", "ENV-12", "ENV-13", "CFG-11", "CFG-12", "ARG-20",
+		"OUT-01", "OUT-02", "OUT-03", "OUT-04",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {
 		seen[c.id]++
 	}
-	for _, c := range dataConformanceCases() {
+	for _, c := range append(dataConformanceCases(), runtimeConformanceCases()...) {
+		seen[c.id]++
+	}
+	for _, c := range pathConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range outputConformanceCases() {
 		seen[c.id]++
 	}
 	for _, id := range acceptanceMatrixIDs {

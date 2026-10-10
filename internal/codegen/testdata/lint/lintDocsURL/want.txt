@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:10:46: command demo: exit_status code 3: docs_url "https:///exit/3" is not an absolute http or https link with a host; write the full address, such as https://example.com/errors/3

@@ -21,3 +21,5 @@ command:
   arguments:
     - name: who
       schema: {type: string, variable_file: WHO_FILE}
+    - name: target
+      schema: {type: string, variable: APP_TARGET, variable_file: APP_TARGET_FILE}

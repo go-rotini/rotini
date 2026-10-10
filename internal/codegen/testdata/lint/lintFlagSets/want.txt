@@ -1,0 +1,9 @@
+spec: .rotini.spec.yaml:19:11: flag set Output: `flag_groups` entry (mutually_exclusive) references unknown flag "verbose"; it has no matching entry in this command's `flags`
+spec: .rotini.spec.yaml:14:11: flag set Output: flag "format": declared twice; each flag needs a unique name
+spec: .rotini.spec.yaml:10:11: flag set Paging: flag "limit": `default` "abc" is not a valid integer; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:27:12: command demo/list: flag "format" is declared by both the command's own flags and flag set Output; rename one
+spec: .rotini.spec.yaml:27:12: command demo/list: flags "dry-run" (the command's own flags) and "dry_run" (flag set Output) both generate the field DryRun; rename one
+spec: .rotini.spec.yaml:38:9: command demo/show: declares `flag_sets`, which only the root command can; move them to the root, where every command of the spec can `use` them
+spec: .rotini.spec.yaml:36:12: command demo/show: `use` names flag set "Outptu", which the root's `flag_sets` doesn't declare; did you mean "Output"?
+spec: .rotini.spec.yaml:19:11: flag set Output: names flag "verbose", which is not one of the set's flags; a set's rules can name only its own flags, so the rule holds wherever the set is used
+warning: spec: .rotini.spec.yaml:22:7: flag set Unused: is declared but no command uses it; add `use: [Unused]` to the commands that should have its flags, or remove it

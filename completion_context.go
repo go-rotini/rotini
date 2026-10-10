@@ -128,7 +128,7 @@ func partialArgvLayer(rtx *Context, v reflect.Value, chain []Command) (Presence,
 		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, _ reflect.Value) {
 			if vals, ok := si.flags[logical]; ok {
 				fd, _ := findFlagDef(frame.Flags, logical)
-				set[fieldPath(topName, "Flags", fieldName)] = InputSource{Layer: "argv", Raw: redactValue(strings.Join(vals, ", "), fd.Secret)}
+				set[fieldPath(topName, "Flags", fieldName)] = InputSource{Layer: "argv", Raw: redactValue(strings.Join(vals, ", "), fd.Secret), Origin: argvFlagOrigin(si, logical)}
 			}
 		})
 		argPresence(set, "argv", topName, ci, frame, si.args)

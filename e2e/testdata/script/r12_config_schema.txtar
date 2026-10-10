@@ -1,0 +1,91 @@
+# R12 — generate.schemas.config writes a JSON Schema for each config file the program reads, for
+# its users' editors: the keys its commands bind, nested by dot. A command reads its ancestors'
+# files and keys too. A dotenv file gets none, and a
+# schema for a file the spec no longer declares is removed.
+
+gomodinit example.com/cfg
+
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+exists schemas/config/cfg.user.config.json
+exists schemas/config/cfg-deploy.team.config.json
+! exists schemas/config/cfg.dotenv.config.json
+grep '"title": "cfg configuration file \\"user\\""' schemas/config/cfg.user.config.json
+grep '"region": \{' schemas/config/cfg.user.config.json
+grep '"description": "The region commands use when none is given\."' schemas/config/cfg.user.config.json
+grep '"enumDescriptions"' schemas/config/cfg.user.config.json
+grep '"replicas": \{' schemas/config/cfg.user.config.json
+grep '"replicas": \{' schemas/config/cfg-deploy.team.config.json
+grep '"region": \{' schemas/config/cfg-deploy.team.config.json
+
+# The program still builds, and a dry run after a real run plans nothing.
+exec go mod tidy
+exec go build ./...
+exec rotini generate --dry-run .rotini.spec.yaml --config .rotini.conf.yaml
+! stdout 'config.json'
+
+# Dropping a file removes its schema.
+cp no-team.spec.yaml .rotini.spec.yaml
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+! exists schemas/config/cfg-deploy.team.config.json
+exists schemas/config/cfg.user.config.json
+
+-- .rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: cfg
+  config_files:
+    - name: user
+      discover: {strategy: xdg, app: cfg, file: config.yaml}
+    - name: dotenv
+      path: .env
+      format: dotenv
+      as: env
+  config:
+    - name: region
+      summary: the default region
+      description: The region commands use when none is given.
+      schema:
+        type: string
+        key: defaults.region
+        enum: [{value: eu, summary: Europe}, {value: us, summary: the Americas}]
+    - name: token
+      summary: the API token
+      schema: {type: string, key: token, secret: true}
+  commands:
+    - name: deploy
+      summary: ship it
+      config_files:
+        - name: team
+          discover: {strategy: walk-up, file: .cfg-team.yaml}
+      flags:
+        - name: replicas
+          summary: how many copies
+          schema: {type: int, key: deploy.replicas, minimum: 1}
+-- no-team.spec.yaml --
+version: 0.0.0
+command:
+  name: cfg
+  config_files:
+    - name: user
+      discover: {strategy: xdg, app: cfg, file: config.yaml}
+  config:
+    - name: region
+      summary: the default region
+      schema: {type: string, key: defaults.region}
+  commands:
+    - name: deploy
+      summary: ship it
+      flags:
+        - name: replicas
+          summary: how many copies
+          schema: {type: int, key: deploy.replicas, minimum: 1}
+-- .rotini.conf.yaml --
+version: 0.0.0
+generate:
+  schemas:
+    config:
+      dir: schemas/config
+  packages:
+    - type: cmd
+      file: internal/cmd/cfg/zz_cfg.go
+      package: cfg

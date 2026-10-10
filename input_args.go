@@ -116,6 +116,12 @@ func argFallback(reg *recon.Registry, field reflect.Value, sf reflect.StructFiel
 		vals = vals[len(vals)-1:] // one value, the last, as a scalar flag's fallback reads
 	}
 	vals = argEnum(ad).canonical(vals)
+	if vals, err = expandFallback(vals, sf.Tag, source, label, rd); err != nil {
+		if waivable {
+			return nil, "", nil
+		}
+		return nil, "", usageBind(channelArgument, ad.Name, err.Error()+fromSource(origin), err)
+	}
 	probe := reflect.New(field.Type()).Elem()
 	if err := coerceTime(probe, vals, argTimeSpec(ad, rd.view.clockRef())); err != nil {
 		if waivable {
@@ -157,8 +163,9 @@ func recordArgFallbacks(set Presence, ci reflect.Value, frame Command, topName, 
 			return nil, err
 		}
 		set[fieldPath(topName, "Arguments", at.Field(i).Name)] = InputSource{
-			Layer: layerName,
-			Raw:   redactValue(strings.Join(vals, ", "), ad.Secret),
+			Layer:  layerName,
+			Raw:    redactValue(strings.Join(vals, ", "), ad.Secret),
+			Origin: fallbackValueOrigin(reg, rd.view, at.Field(i).Tag, reconKey(at.Field(i).Tag.Get("recon"))),
 		}
 		if placed == nil {
 			placed = map[int]string{}

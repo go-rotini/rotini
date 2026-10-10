@@ -1,0 +1,10 @@
+# multicall is read on the root, and routing needs commands or plugins to route to.
+version: 0.0.0
+command:
+  name: demo
+  multicall:
+    prefix: demo-
+  flags:
+    - name: verbose
+      schema:
+        type: bool

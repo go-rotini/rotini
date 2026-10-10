@@ -159,6 +159,12 @@ Directory (relative to the module root) where this feature's rendered files (hel
 
 When true, rotini generates this feature's outputs into the cmd package, with their variables and lookup function. Off by default.
 
+### `install_dir`
+
+`string`
+
+completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/&lt;name&gt;.bash, completions/_&lt;name&gt; (zsh), completions/&lt;name&gt;.fish and completions/&lt;name&gt;.ps1, and man/man&lt;section&gt;/&lt;page&gt;.&lt;section&gt;, where &lt;name&gt; is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone is removed. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error.
+
 ### `messages`
 
 `string` · one of `declared`, `all`
@@ -243,6 +249,12 @@ Where to write rotini's JSON Schemas into this project. Each entry is optional: 
 
 Where to write rotini's conf-schema (the schema for this .rotini.conf file).
 
+### `config`
+
+[`ConfigSchemasConfig`](#configschemasconfig)
+
+Where to write one JSON Schema per configuration file the spec declares, describing the keys your users may write in it, for completion and checking in their editor (`# yaml-language-server: $schema=…` in YAML, `#:schema …` in TOML, a `$schema` key in JSON).
+
 ### `output`
 
 [`OutputSchemasConfig`](#outputschemasconfig)
@@ -265,6 +277,17 @@ A single schema write target: the project-relative path the embedded JSON Schema
 `string` · **required**
 
 Module-root-relative path (no leading slash) ending in '.json' where the JSON Schema is written. Overwritten on every `generate`, and never removed. Point a document's `$schema:` key at it for completion and validation in your editor.
+
+
+## ConfigSchemasConfig
+
+A directory of JSON Schemas, '&lt;page-name&gt;.&lt;file-name&gt;.config.json' for each config_files entry (taskr.user.config.json for a file 'user' declared on the root, taskr-deploy.user.config.json for one declared on deploy). A schema lists every key a command that reads the file binds: config inputs and flags' config keys, with their types, enums and value summaries, defaults (never a secret's), bounds and deprecations. It doesn't forbid other keys, which rotini ignores. A file's own declared `schema` is included under allOf. dotenv files and files read as environment variables get none. Rewritten on every generate; a '\*.config.json' file in the directory that no entry produces any more is removed.
+
+### `dir`
+
+`string` · **required**
+
+Module-root-relative directory (no leading slash) the config file schemas are written to.
 
 
 ## OutputSchemasConfig

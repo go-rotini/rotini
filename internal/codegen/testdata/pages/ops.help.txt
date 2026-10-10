@@ -11,12 +11,16 @@ Commands:
 Data:
   Commands that read a document from standard input.
   import    import tasks
-  upper     upper-case lines
+  upper     upper-case lines (experimental)
 
 Deploying:
   Commands that change what runs where.
   Each one asks before it acts.
-  deploy    ship a service
+  deploy    ship a service (beta)
+
+Help Topics:
+  filters        how filters work
+  environment    the environment variables ops reads
 
 Flags:
   -h, --help    print help
@@ -34,7 +38,7 @@ Environment:
                         error    failures only
 
 Configuration:
-  region (region) string      the default region
+  region (region) string      the default region (beta)
   profile (profile) string    the output profile [short|long]
                                 short    one line each
                                 long     every field

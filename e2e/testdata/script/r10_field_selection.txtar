@@ -1,0 +1,229 @@
+# R10 — field selection and sorting: a flag takes its values from the output's fields
+# (values_from), and SelectFields and SortBy apply them.
+
+gomodinit example.com/taskr
+
+exec rotini generate cmd/taskr/.rotini.spec.yaml --config cmd/taskr/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o taskr$exe ./cmd/taskr
+
+# The whole output, in its own order.
+exec ./taskr$exe list
+cmp stdout full.json
+
+# Chosen fields, sorted by one of them; the envelope's total is kept.
+exec ./taskr$exe list --json id,title --sort-by title
+cmp stdout by_title.json
+
+# Descending, by a field that isn't selected; a task with no due date sorts last.
+exec ./taskr$exe list --json id --sort-by due --reverse
+cmp stdout by_due.json
+
+# A field the output doesn't have is a usage error that lists the fields.
+! exec ./taskr$exe list --json id,nope
+! stdout .
+stderr 'invalid value "nope" for --json \(one of: due, id, status, title\)'
+
+# Help, completion and the contract know the fields.
+exec ./taskr$exe list --help
+stdout '--json \[\]string .*\[due\|id\|status\|title\]'
+stdout '--sort-by string .*\[due\|id\|status\|title\]'
+exec ./taskr$exe __complete list --json id,
+stdout '^id,due$'
+stdout '^id,status$'
+! stdout '^id,id$'
+stdout '^:rotini:option nospace'
+grep '"values_from": "output.tasks"' cli-contract.json
+grep '"role": "fields"' cli-contract.json
+grep '"role": "sort"' cli-contract.json
+
+-- full.json --
+{
+  "tasks": [
+    {
+      "due": "2026-10-12T09:00:00Z",
+      "id": 1,
+      "status": "open",
+      "title": "write the spec"
+    },
+    {
+      "id": 2,
+      "status": "done",
+      "title": "argue about names"
+    },
+    {
+      "due": "2026-10-10T17:00:00+02:00",
+      "id": 3,
+      "status": "open",
+      "title": "ship it"
+    }
+  ],
+  "total": 3
+}
+-- by_title.json --
+{
+  "tasks": [
+    {
+      "id": 2,
+      "title": "argue about names"
+    },
+    {
+      "id": 3,
+      "title": "ship it"
+    },
+    {
+      "id": 1,
+      "title": "write the spec"
+    }
+  ],
+  "total": 3
+}
+-- by_due.json --
+{
+  "tasks": [
+    {
+      "id": 1
+    },
+    {
+      "id": 3
+    },
+    {
+      "id": 2
+    }
+  ],
+  "total": 3
+}
+-- cmd/taskr/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: taskr
+  summary: track tasks
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      schema: {type: bool}
+  schemas:
+    Task:
+      type: object
+      required: [id, title, status]
+      properties:
+        id: {type: integer}
+        title: {type: string}
+        status: {type: string, enum: [open, done]}
+        due: {type: string, description: "when it is due (RFC 3339)"}
+    TaskList:
+      type: object
+      required: [tasks, total]
+      properties:
+        tasks: {type: array, items: {$ref: "#/schemas/Task"}}
+        total: {type: integer}
+  commands:
+    - name: list
+      summary: list the tasks
+      output: {$ref: "#/schemas/TaskList"}
+      flags:
+        - name: json
+          summary: write these fields as json
+          identifiers: [--json]
+          role: fields
+          schema: {type: '[]string', separator: ',', values_from: output.tasks}
+        - name: sort-by
+          summary: sort by this field
+          identifiers: [--sort-by]
+          role: sort
+          schema: {type: string, values_from: output.tasks}
+        - name: reverse
+          summary: sort in descending order
+          identifiers: [--reverse]
+          schema: {type: bool}
+-- cmd/taskr/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+    - type: cmd
+      file: internal/cmd/taskr/zz_taskr.go
+      package: taskr
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+-- internal/cmd/taskr/taskr.go --
+package taskr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+type taskrHandler struct{ base }
+
+func (*taskrHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/taskr/taskr_list.go --
+package taskr
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrListHandler struct{ base }
+
+func (*taskrListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TaskrListInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Taskr.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	list := TaskrListOutput{Total: 3, Tasks: []Task{
+		{ID: 1, Title: "write the spec", Status: "open", Due: "2026-10-12T09:00:00Z"},
+		{ID: 2, Title: "argue about names", Status: "done"},
+		{ID: 3, Title: "ship it", Status: "open", Due: "2026-10-10T17:00:00+02:00"},
+	}}
+	flags := in.TaskrList.Flags
+	if flags.SortBy != "" {
+		if err := rotini.SortBy(list.Tasks, flags.SortBy, flags.Reverse); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+	if len(flags.JSON) > 0 {
+		sel, err := rotini.SelectFields(list, "tasks", flags.JSON)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		rtx.HaltWith(rtx.WriteOutput(sel, "json", nil))
+		return
+	}
+	rtx.HaltWith(rtx.WriteOutput(list, "json", nil))
+}
+-- cmd/taskr/main.go --
+package main
+
+import (
+	taskr "example.com/taskr/internal/cmd/taskr"
+)
+
+func main() {
+	taskr.NewProgram(taskr.Handlers()).WithOutputChecks(true).Execute()
+}

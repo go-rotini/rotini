@@ -31,6 +31,8 @@ func main() {
 | `WithoutSignalHandling()` | turn off the default Ctrl+C and SIGTERM handling |
 | `WithEnviron(env)` / `WithDir(dir)` | give a run its own environment and working directory instead of the process's, so tests can run in parallel |
 | `WithBufferedOutput(true)` | buffer stdout, flushed and checked before the reporter runs; see [buffered output](/docs#buffered-output) |
+| `WithTerminationTimeout(d)` | exit with the signal's code when a run is still going `d` after Ctrl+C or SIGTERM; see [a deadline after a signal](/docs#a-deadline-after-a-signal) |
+| `WithArgv0(name)` | set the name a `multicall` program dispatches on, for tests; see [one binary, several names](/docs#one-binary-several-names) |
 | `Execute()` | run with `os.Args` and exit with the resulting code |
 | `Run(argv)` | run once and return the exit code and error instead of exiting, for tests and embedding |
 
@@ -70,6 +72,8 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.HaltWith(err)` | fail: record the error and stop |
 | `rtx.Failed()` | whether anything has failed so far, for a teardown hook deciding to commit or roll back |
 | `rtx.Help()` / `rtx.Version()` | the command's help page and the program's version |
+| `rtx.Usage()` | the command's usage line, for a reporter to print after a usage error; see [printing the usage line](/docs#printing-the-usage-line) |
+| `rtx.InputsWithReport[T]()` | the inputs plus where each value came from; `report.Format(w)` prints it; see [explaining where values came from](/docs#explaining-where-values-came-from) |
 | `rtx.WriteOutput(v, format, render)` | write a command's [structured output](/docs#structured-output) |
 | `shape.Render(t)` | a renderer for `WriteOutput` that runs a `--format '{{…}}'` template, from the opt-in package `github.com/go-rotini/rotini/shape`; see [templates](/docs#templates) |
 | `rotini.OpenInput(rtx, path)` / `rotini.CreateOutput(rtx, path)` | open an `inputfile` or `outputfile` value, where `-` is stdin or stdout; see [files and the standard streams](/docs#files-and-the-standard-streams) |

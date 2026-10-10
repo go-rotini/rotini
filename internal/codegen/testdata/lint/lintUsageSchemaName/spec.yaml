@@ -1,0 +1,10 @@
+# A schema named Usage collides with the generated Usage function.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    Usage:
+      type: object
+      properties:
+        lines:
+          type: integer

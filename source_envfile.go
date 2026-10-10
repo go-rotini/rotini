@@ -200,9 +200,10 @@ func (b *InputReader) readDotenv(f ConfigFile, overrides map[string]string, waiv
 }
 
 // resolveFileVars reads the value of each variable_file variable set for the env inputs and
-// flag fallbacks of v, keyed by the plain variable (the first of an input's names) it stands
-// for. A pair resolves within one layer, the run's environment first: the layer that sets
-// either the plain names or the file variable decides, and setting both there is a usage error.
+// flag and argument fallbacks of v, keyed by the plain variable (the first of an input's names)
+// it stands for. A pair resolves within one layer, the run's environment first: the layer that
+// sets either the plain names or the file variable decides, and setting both there is a usage
+// error.
 // An empty variable counts as unset.
 func resolveFileVars(v reflect.Value, view *osView, waived bool) (map[string]envValue, error) {
 	out := map[string]envValue{}
@@ -243,8 +244,13 @@ func resolveFileVars(v reflect.Value, view *osView, waived bool) (map[string]env
 			}
 		}
 		if s := commandFlags(ci); s.IsValid() {
-			for f := range s.Type().Fields() {
+			for f := range typeLeaves(s.Type()) {
 				visit(channelFlag, f)
+			}
+		}
+		if s := commandArgs(ci); s.IsValid() {
+			for f := range s.Type().Fields() {
+				visit(channelArgument, f)
 			}
 		}
 	}

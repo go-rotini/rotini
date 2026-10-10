@@ -100,7 +100,9 @@ func reconcileConf(specPath, confPath string) (*reconciledConf, error) {
 type normalizer interface{ normalize() }
 
 func (s *Spec) normalize() {
+	expandFlagSets(s)
 	qualifySchemaRefs(reflect.ValueOf(s).Elem())
+	resolveValuesFrom(s)
 	inheritScalarRefConstraints(s)
 	hoistItemConstraints(s)
 	normalizeBounds(s)

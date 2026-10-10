@@ -9,7 +9,8 @@ import (
 
 // TestPages_golden pins every page of testdata/pages/spec.yaml in help, man and markdown, so
 // group descriptions and their order, flag alignment, constraint notes, the stdin section, the
-// passthrough notes and described enum values can't drift. Refresh with
+// passthrough notes, described enum values, input descriptions, stability markers, exit-code links
+// and help topics can't drift. Refresh with
 // `go test ./internal/codegen -run Pages_golden -update`.
 func TestPages_golden(t *testing.T) {
 	dir := filepath.Join("testdata", "pages")
@@ -43,6 +44,9 @@ func TestPages_golden(t *testing.T) {
 				t.Fatal(err)
 			}
 			file := strings.Join(append([]string{"ops"}, n.path...), "-") + feat.ext
+			if n.topic {
+				file = "ops.topic." + n.path[0] + feat.ext
+			}
 			if *updateGolden {
 				writeTestFile(t, dir, file, got)
 				continue

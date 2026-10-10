@@ -1,0 +1,30 @@
+# Help shows an input's summary and leaves its description to man and markdown, so an input
+# with a description needs a summary too, or its help row is empty.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Correct: a summary for help, a description for the pages. No problem.
+    - name: port
+      summary: listen port
+      description: |-
+        The port the server listens on.
+
+        Ports below 1024 need privileges.
+      schema: { type: int }
+    # A description with no summary, on each kind of input.
+    - name: host
+      description: The host to bind.
+      schema: { type: string }
+  arguments:
+    - name: file
+      description: The file to read.
+      schema: { type: string }
+  env:
+    - name: token
+      description: The API token.
+      schema: { type: string }
+  config:
+    - name: region
+      description: The default region.
+      schema: { type: string }

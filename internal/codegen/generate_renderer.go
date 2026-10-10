@@ -386,6 +386,7 @@ func inputFieldTag(f fieldDef) string {
 type templateInputBlock struct {
 	Prefix       string // PascalCase type prefix, e.g. "RotiniGenerate"
 	Flags        []templateInputField
+	Embeds       []string // flag set structs embedded in <Prefix>Flags
 	Arguments    []templateInputField
 	Env          []templateInputField
 	Config       []templateInputField
@@ -406,6 +407,7 @@ type templateFeaturePage struct {
 	Name        string // the page name, e.g. "taskr-add"
 	PathLiteral string // the command path as a Go literal: `[]string{"add"}`, or `nil` for the root
 	Var         string // the var holding the page
+	Topic       bool   // a help topic's page, not a command's
 }
 
 // templateFeatureCase is one resolver case.
@@ -453,6 +455,10 @@ type templateRotiniData struct {
 	Header       string // the target's conf `header:`; "" for none
 	ExitCodes    string // pre-rendered named exit-code constants (or their re-exports); "" when none
 	Contract     string // pre-rendered Contract variable (generate.contract.go); "" when off
+	UsageFunc    string // pre-rendered Usage function, always emitted; it imports "fmt" and "strings"
+
+	// FlagSets are the flag set structs; empty when the types are split into the models file.
+	FlagSets []templateFlagSet
 }
 
 func renderRotiniFile(data templateRotiniData) ([]byte, error) {
@@ -466,6 +472,7 @@ type templateModelsData struct {
 	Package     string
 	Imports     []string // pre-rendered import lines for the field types
 	Blocks      []templateInputBlock
+	FlagSets    []templateFlagSet
 	OutputTypes string // pre-rendered output type declarations; "" when none
 	ExitCodes   string // pre-rendered named exit-code constants; "" when none
 	Header      string // the target's conf `header:`; "" for none
@@ -478,7 +485,13 @@ func renderModelsFile(data templateModelsData) ([]byte, error) {
 // templateDocHeadings holds the resolved section headings, each rendered verbatim (the trailing
 // ":" is part of the value).
 type templateDocHeadings struct {
-	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples, Output, Stdin string
+	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples, Output, Stdin, Topics string
+}
+
+// templateDocTopicRow is one help topic in the root page's list of topics.
+type templateDocTopicRow struct {
+	Name    string
+	Summary string
 }
 
 // templateDocCommandGroup is one bucket of sub-commands in the Commands section. Title is the
@@ -496,6 +509,9 @@ type templateDocCommandRow struct {
 	Aliases    []string
 	Group      string // the child command's `group` (buckets it in the Commands section)
 	Deprecated string
+	// Stability is the declared stability of a command or input: "experimental", "beta", or
+	// "" for stable.
+	Stability string
 
 	// DeprecatedSince and RemovedIn are the planned lifecycle of a command, flag or input
 	// deprecated as a whole; "" when not planned.
@@ -505,6 +521,8 @@ type templateDocCommandRow struct {
 type templateDocArgumentRow struct {
 	Name        string
 	Summary     string
+	Description string // the input's longer text, paragraphs separated by blank lines; "" for none
+	Stability   string // see templateDocCommandRow
 	Required    bool
 	Variadic    bool
 	Default     string
@@ -527,6 +545,8 @@ type templateDocFlagRow struct {
 	// column when the flag has no short identifier but another flag on the page does.
 	Label       string
 	Summary     string
+	Description string // see templateDocArgumentRow
+	Stability   string // see templateDocCommandRow
 	Type        string // "" for bool and count flags, and when the token moved into an identifier
 	Required    bool
 	Default     string
@@ -558,6 +578,9 @@ type templateDocFlagGroup struct {
 type templateDocEnvRow struct {
 	Var         string
 	Summary     string
+	Description string   // see templateDocArgumentRow
+	Stability   string   // see templateDocCommandRow
+	Commands    []string // on the generated environment topic: the commands that read the variable; nil elsewhere
 	Type        string
 	Required    bool
 	Default     string
@@ -575,6 +598,8 @@ type templateDocConfigRow struct {
 	Name        string
 	Location    string // where the value is read from: "<file>.<key>", "<key>" or ""
 	Summary     string
+	Description string // see templateDocArgumentRow
+	Stability   string // see templateDocCommandRow
 	Type        string
 	Required    bool
 	Default     string
@@ -594,6 +619,7 @@ type templateDocExitRow struct {
 	Summary   string
 	Retryable bool   // running the command again may succeed
 	Output    string // the shape stdout carries with this code, as a type name; "" for none
+	DocsURL   string // a link to more about the code; "" for none
 }
 
 // templateHelpData is the per-command data shared by the help, man and markdown templates.
@@ -631,6 +657,14 @@ type templateHelpData struct {
 	// Passthrough is the command's name when every word after it is passed through unparsed
 	// (`passthrough: true`), so flags must come before it; "" otherwise.
 	Passthrough string
+	// Stability is the command's effective stability, the least stable of it and its
+	// ancestors: "experimental", "beta", or "" for stable.
+	Stability string
+	// Topic is true on a help topic's page: Summary and Description are the topic's, and
+	// Environment holds a generated environment topic's rows. Every other field is empty.
+	Topic bool
+	// Topics lists the help topics on the root's page; nil on every other page.
+	Topics []templateDocTopicRow
 }
 
 // parseDocTemplate parses doc-template text with the shared FuncMap.
@@ -754,6 +788,7 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 	d.Arguments = append([]templateDocArgumentRow(nil), d.Arguments...)
 	for i := range d.Arguments {
 		d.Arguments[i].Summary = clean(d.Arguments[i].Summary)
+		d.Arguments[i].Description = untab(d.Arguments[i].Description)
 		d.Arguments[i].Deprecated = clean(d.Arguments[i].Deprecated)
 		d.Arguments[i].Rules = cleanAll(d.Arguments[i].Rules)
 		d.Arguments[i].EnumValues = cleanEnum(d.Arguments[i].EnumValues)
@@ -762,6 +797,7 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 		rows = append([]templateDocFlagRow(nil), rows...)
 		for i := range rows {
 			rows[i].Summary = clean(rows[i].Summary)
+			rows[i].Description = untab(rows[i].Description)
 			rows[i].Deprecated = clean(rows[i].Deprecated)
 			rows[i].Rules = cleanAll(rows[i].Rules)
 			rows[i].EnumValues = cleanEnum(rows[i].EnumValues)
@@ -779,6 +815,7 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 	d.Environment = append([]templateDocEnvRow(nil), d.Environment...)
 	for i := range d.Environment {
 		d.Environment[i].Summary = clean(d.Environment[i].Summary)
+		d.Environment[i].Description = untab(d.Environment[i].Description)
 		d.Environment[i].Deprecated = clean(d.Environment[i].Deprecated)
 		d.Environment[i].Rules = cleanAll(d.Environment[i].Rules)
 		d.Environment[i].EnumValues = cleanEnum(d.Environment[i].EnumValues)
@@ -786,13 +823,14 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 	d.Configuration = append([]templateDocConfigRow(nil), d.Configuration...)
 	for i := range d.Configuration {
 		d.Configuration[i].Summary = clean(d.Configuration[i].Summary)
+		d.Configuration[i].Description = untab(d.Configuration[i].Description)
 		d.Configuration[i].Deprecated = clean(d.Configuration[i].Deprecated)
 		d.Configuration[i].Rules = cleanAll(d.Configuration[i].Rules)
 		d.Configuration[i].EnumValues = cleanEnum(d.Configuration[i].EnumValues)
 	}
 	d.ExitStatus = append([]templateDocExitRow(nil), d.ExitStatus...)
 	for i := range d.ExitStatus {
-		d.ExitStatus[i].Summary = clean(d.ExitStatus[i].Summary)
+		d.ExitStatus[i].Summary, d.ExitStatus[i].DocsURL = clean(d.ExitStatus[i].Summary), clean(d.ExitStatus[i].DocsURL)
 	}
 	if d.Output != nil {
 		out := *d.Output
@@ -816,7 +854,17 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 	for i := range d.SeeAlso {
 		d.SeeAlso[i] = clean(d.SeeAlso[i])
 	}
+	d.Topics = sanitizeTopics(d.Topics, clean)
 	return d
+}
+
+// sanitizeTopics returns a copy of the root page's topic rows with their summaries cleaned.
+func sanitizeTopics(rows []templateDocTopicRow, clean func(string) string) []templateDocTopicRow {
+	out := append([]templateDocTopicRow(nil), rows...)
+	for i := range out {
+		out[i].Summary = clean(out[i].Summary)
+	}
+	return out
 }
 
 // untab replaces tabs with spaces in a paragraph that sits beside aligned rows, keeping its
@@ -888,13 +936,16 @@ func templateFuncMap() template.FuncMap {
 		"alsoSetBy": alsoSetBy,
 		// "deprecated since 1.4.0, removed in 2.0.0: <message>", for a deprecated item's note.
 		"deprecation": deprecationNote,
-		"listed":      listedEnum,
-		"described":   describedEnum,
+		// "This command is experimental: …", the line a command's own page shows for its stability.
+		"stabilityNote": stabilityNote,
+		"listed":        listedEnum,
+		"described":     describedEnum,
 		// roff escaping, for man page templates (see generate_roff.go).
-		"roff":      roffInline,
-		"roffLines": roffLines,
-		"roffBlock": roffBlock,
-		"roffArg":   roffArg,
+		"roff":         roffInline,
+		"roffLines":    roffLines,
+		"roffBlock":    roffBlock,
+		"roffIndented": roffIndented,
+		"roffArg":      roffArg,
 	}
 }
 
@@ -992,4 +1043,17 @@ func deprecationNote(message, since, removedIn string) string {
 		note += ": " + message
 	}
 	return note
+}
+
+// stabilityNote is the line a command's own page shows for its stability: what "experimental"
+// or "beta" promises its users. It returns "" for a stable command.
+func stabilityNote(stability string) string {
+	switch stability {
+	case "experimental":
+		return "This command is experimental: it may change or be removed in any release."
+	case "beta":
+		return "This command is in beta: it may change in a minor release."
+	default:
+		return ""
+	}
 }

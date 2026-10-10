@@ -1,0 +1,6 @@
+spec: .rotini.spec.yaml:8:13: command demo: flag "dir": has role chdir but is not cascading; set `cascading: true`, so every command accepts it and documents it
+spec: .rotini.spec.yaml:8:13: command demo: flag "dir": has role chdir but is named by flag group 0; the directory flag is read before any rule is checked, so leave it out of flag groups and dependencies
+spec: .rotini.spec.yaml:10:15: command demo: flag "dir": has role chdir, so its type must be existingdir or string, one directory
+spec: .rotini.spec.yaml:11:18: command demo: flag "dir": has role chdir and sets `default`; the directory comes from the command line only
+spec: .rotini.spec.yaml:12:19: command demo: flag "dir": has role chdir and sets `variable`; the directory comes from the command line only
+spec: .rotini.spec.yaml:23:17: command demo/run: flag "work": has role chdir but is not on the root command; the run's directory is set once, before any command is chosen, so declare it on the root with `cascading: true`

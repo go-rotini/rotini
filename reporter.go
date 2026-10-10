@@ -163,11 +163,14 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 // interleaved with an error:
 //
 //	{"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"missing required input: <title>"}}
+//	{"error":{"candidates":["add","list","done"],"category":"usage","command":"taskr","exit_code":1,"kind":"unknown-command","message":"unknown command \"lst\" for \"taskr\"","token":"lst"}}
 //	{"warning":{"command":"taskr list","message":"the cache is stale"}}
 //
 // Infos and successes are written the same way, as {"info":{…}} and {"success":{…}}. A field
 // is present only when rotini knows it: kind, flag and token come from a [*ParseError], kind
-// from a [*PluginError] too, and token from any error [SuggestionFacts] reads. Each line's
+// from a [*PluginError] too, and token from any error [SuggestionFacts] reads. With such a
+// token, candidates lists the words it was checked against, as SuggestionFacts returns them,
+// unranked: a tool can offer the nearest, while rotini itself suggests nothing. Each line's
 // shape is described by schema-error.json in the rotini repository, and the contract document
 // includes it.
 //
@@ -222,9 +225,11 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 		} else if pe, ok := errors.AsType[*PluginError](err); ok {
 			body["kind"] = pe.Kind.String()
 		}
-		if _, has := body["token"]; !has {
-			if token, _, ok := SuggestionFacts(err); ok {
+		// Candidates go with the token they were checked against, so both come from one error.
+		if token, candidates, ok := SuggestionFacts(err); ok {
+			if have, has := body["token"]; !has || have == token {
 				body["token"] = token
+				body["candidates"] = candidates
 			}
 		}
 		return line
@@ -247,7 +252,7 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 	for _, line := range lines {
 		b, err := json.Marshal(line)
 		if err != nil {
-			continue // unreachable: every value is a string or an int
+			continue // unreachable: every value is a string, an int or a []string
 		}
 		fmt.Fprintf(rtx.Stderr, "%s\n", b)
 	}

@@ -116,6 +116,7 @@ rules:
 - **Rules** such as `required`, `default`, `enum`, `pattern`, `minimum` and `maximum`, lengths and
   item counts are checked when the handler reads its inputs with `rtx.Inputs`, which the generated
   handler does first. A bad value is a usage error naming the flag the user typed.
+  An empty value (`--name ""`, `--name=`, `''`) counts as given; add `minLength: 1` to refuse it.
 - **A flag works anywhere after the command that declares it**, including after a sub-command's
   name. A flag written *before* a sub-command's name belongs to a parent, which is what lets a
   parent and a sub-command both declare a flag with the same name. A *different* flag that
@@ -230,6 +231,39 @@ at or before that release, so a planned removal can't ship by accident. Set the 
 `validate.release_env` to the name of a variable your release job sets, and `rotini validate`
 reads the release from it; `--release` wins. `rotini generate` never runs this check.
 
+### Pointing at a replacement
+
+`replaced_by` beside `deprecated` names what to use instead: on a command, its path below the
+root (`purge`, `remote add`), without the program's name; on a flag, one of its identifiers. A
+command from a composed spec names a command of that spec, and rotini writes it under the path
+the parent mounts it at. Help, man and markdown add it to the note, `(deprecated: renamed; use
+todo purge instead)`, and `validate` checks that it exists and isn't deprecated itself:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+commands:
+  - name: clear
+    deprecated: renamed
+    replaced_by: purge
+    flags:
+      - name: out
+        deprecated: renamed
+        replaced_by: --output
+        schema: { type: string }
+{{< /code >}}
+
+Each `Deprecation` carries it as `ReplacedBy`, written as the user types it (`todo purge`,
+`--output`, or the enum value), so the handler can say it:
+
+{{< code title="internal/cmd/todo/todo.go" language="go" open="true" collapsible="false" copy="true" >}}
+for _, d := range rotini.Deprecations(rtx) {
+	if d.ReplacedBy != "" {
+		rtx.RecordWarning(fmt.Errorf("%w; use %s instead", d, d.ReplacedBy))
+		continue
+	}
+	rtx.RecordWarning(d)
+}
+{{< /code >}}
+
 ### Times, patterns and negated forms
 
 - **Several time layouts**, `layout: ['2006-01-02 15:04', '2006-01-02', unix]`, are tried in
@@ -281,6 +315,101 @@ schema:
   line, it is reported by `rotini.Deprecations` with `Deprecation.Value` set, as a deprecated
   alias is. Man and markdown pages list each value with its aliases and deprecation; help keeps
   its short list of the values to use.
+
+### Sharing flags between commands
+
+Flags that several commands take are declared once under the root's `flag_sets`, and each
+command adds them with `use:`. A set's flags come after the command's own, with the set's
+`flag_groups` and `flag_dependencies`, and from then on they are the command's flags: they
+parse, fall back, show in help and appear in the contract like any other. `group:` on the set
+lists its flags under one heading in help, unless a flag names its own:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: todo
+  flag_sets:
+    Output:
+      group: Output
+      flags:
+        - name: format
+          summary: how to print
+          schema: { type: string, enum: [text, json], default: text }
+  commands:
+    - name: list
+      use: [Output]
+    - name: show
+      use: [Output]
+{{< /code >}}
+
+The generated code has one struct per set, embedded in each command's flags, so a handler reads
+`in.TodoList.Flags.Format` whether the flag is the command's own or from a set, and moving a
+flag into a set changes no handler code. A helper that every using command shares can take the
+set's struct:
+
+{{< code title="internal/cmd/todo/print.go" language="go" open="true" collapsible="false" copy="true" >}}
+func print(rtx *rotini.Context, out TodoOutputFlagSet, items []Item) { /* … */ }
+
+print(rtx, in.TodoList.Flags.TodoOutputFlagSet, items)
+{{< /code >}}
+
+Set names are PascalCase, since each names a struct. A set belongs to the spec that declares
+it: a composed child uses its own sets. `validate` rejects a set flag whose name or generated
+field repeats one of the command's, and warns about a set no command uses.
+
+### Flags that depend on other flags
+
+`flag_groups` constrain which flags go together (`mutually_exclusive`, `required_together`,
+`one_of`, `at_least_one`). A `flag_dependencies` entry is a rule with a trigger and an effect:
+
+- **`when: <flag>`** triggers the rule when that flag is set, and **`equals: [...]`** narrows it
+  to some of the flag's values. The value is compared as the flag stores it, so `ignore_case`
+  and enum aliases apply, and a bool compares as `true` or `false` (`--no-x` is `false`).
+- **`unless: [...]`** turns the rule off when any of those flags is set. Without `when`, the
+  rule applies on every run unless one of them is set.
+- **`requires: [...]`** must then be set, and **`forbids: [...]`** can't be.
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+flag_dependencies:
+  - when: format
+    equals: [csv]
+    requires: [delimiter]
+  - when: all
+    forbids: [limit]
+  - unless: [anonymous]
+    requires: [token]
+{{< /code >}}
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ ./todo export --format csv
+Error: flag --delimiter is required when --format is csv
+$ ./todo export --all --limit 5
+Error: flag --limit can't be used when --all is set
+{{< /code >}}
+
+Only the command line counts, for groups and dependencies alike: a value from the environment,
+a config file or a default neither triggers a rule nor satisfies one. A short-circuit flag such
+as `--help` waives them, and `rtx.CheckInputs` applies them to values you collected yourself,
+comparing the typed values.
+
+### Hidden aliases and identifiers
+
+`hidden_aliases` on a command and `hidden_identifiers` on a flag are accepted on the command
+line but listed nowhere: not in help, completion or suggestions. Use them for an old spelling
+that scripts still use, without advertising it. The help resolvers accept a hidden alias too,
+the contract lists them as `hidden_aliases` and `hidden_identifiers`, and they may be listed in
+`deprecated_identifiers` to report their use:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+commands:
+  - name: remove
+    aliases: [rm]
+    hidden_aliases: [del]
+    flags:
+      - name: output
+        identifiers: [-o, --output]
+        hidden_identifiers: [--out]
+        schema: { type: string }
+{{< /code >}}
 
 ## Where values come from
 
@@ -460,6 +589,31 @@ config_files:
     as: env
 {{< /code >}}
 
+### Secrets on the command line
+
+A value typed on the command line shows in the process list and in shell history. A secret flag
+or argument whose `from:` leaves out `value` refuses one, so the secret can only come from a
+file or stdin:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+flags:
+  - name: token
+    schema: { type: string, secret: true, from: [file, stdin] }
+{{< /code >}}
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ ./todo login --token sk_live_123
+Error: --token takes @file or -, not a value
+$ ./todo login --token @token.txt
+$ ./todo login --token - < token.txt
+{{< /code >}}
+
+Environment variables and config files are still read as written, so `variable:` or
+`variable_file:` beside it keeps those routes open. `validate` warns about a secret flag that
+accepts a typed value; add `value` to `from` to keep accepting one on purpose. `rotini.ArgvOf`
+can't write such a flag, since it has no file to point at: pass it through a file or stdin
+yourself.
+
 ### Config directories
 
 `discover:` finds a config file at run time with one of four strategies:
@@ -473,6 +627,160 @@ config_files:
 
 Declare a system tier as its own entry after the user's: the first declared entry wins per key,
 so the user's file overrides the system one key by key.
+
+### Paths
+
+A value is taken as written unless its input declares `expand`. `home` expands a leading `~`
+(or `~name`) and `env` expands `$NAME` and `${NAME}`, in values from every source: the command
+line, environment variables, `.env` files, configuration files and the default. The expanded
+path is what gets checked and bound. An `existingfile` or `existingdir` input is checked on
+every channel, environment and configuration included:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+flags:
+  - name: file
+    identifiers: [--file]
+    schema: { type: existingfile, expand: [home, env] }
+config:
+  - name: cache
+    schema: { type: string, default: ~/.cache/todo, expand: [home], relative_to: config }
+{{< /code >}}
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ ./todo add --file '~/notes.txt'
+$ ./todo add --file '$NOTES/today.txt'
+Error: --file: $NOTES is not set (in "$NOTES/today.txt")
+{{< /code >}}
+
+- An unset or empty variable is an error, and so are shell operators such as `${NAME:-x}`.
+  Expansion is one pass: text a variable supplies is never expanded again.
+- A command-line path that doesn't exist is named as expanded and as written:
+  `--file: no such file: "/home/ada/x" (written as "~/x")`.
+- `~name` reads the system's user database, so an injected environment can't change it.
+- `%VAR%` is not expanded on Windows; `$NAME` and `~\` are.
+- There is no escape for a literal `$NAME`. Leave `env` out for inputs that need one.
+- `relative_to: config` resolves a relative value read from a configuration file against that
+  file's directory. Values from anywhere else stay relative to the run's directory.
+- A project file found by `walk-up` can set inputs it reads, so prefer `expand: [home]` there:
+  with `env`, a cloned repository's file could write a token from your environment into a
+  path. `rotini validate` warns about the combination. `expand` is refused on secret inputs.
+
+### Files your program keeps
+
+`rotini.AppDirs(rtx, app, strategy)` returns the config, data, cache and state directories for
+`app`, read through the run's environment. It creates nothing. `strategy` takes the words of
+`discover.strategy`: `xdg` for the XDG layout on every platform, or `native` for the
+platform's own (`~/Library` on macOS, `%AppData%` and `%LocalAppData%` on Windows). Use the
+same strategy as your config files, and create data and state directories with `0o700`:
+
+{{< code title="internal/cmd/todo/todo_sync.go" language="go" open="true" collapsible="false" copy="true" >}}
+dirs, err := rotini.AppDirs(rtx, "todo", "xdg")
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+if err := os.MkdirAll(dirs.State, 0o700); err != nil {
+	rtx.HaltWith(err)
+	return
+}
+{{< /code >}}
+
+### A directory flag (-C)
+
+`role: chdir` on a root flag gives a git-style `-C dir`: the program runs as if it had been
+started in that directory.
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: todo
+  flags:
+    - name: dir
+      summary: run as if started in this directory
+      identifiers: [-C, --dir]
+      role: chdir
+      cascading: true
+      schema: { type: existingdir }
+{{< /code >}}
+
+Rotini reads the flag before anything else, wherever it is typed on the command line. Walk-up
+config discovery starts from the directory, and relative config paths, `@file` values,
+`existingfile` and `existingdir` checks, and `rotini.OpenInput` and `rotini.CreateOutput` resolve
+against it. A plugin typed after it runs in it. A relative `-C` is resolved against the run's
+directory (`WithDir`, else the process's), and the flag binds as the absolute path. Given more
+than once, the last wins; one that isn't a directory is a usage error, even beside `--help`.
+
+The flag is read from the command line only, so `rotini validate` keeps it narrow: on the root,
+cascading, an `existingdir` or `string`, one per program, with no default, `key`, `variable` or
+`from:`, and outside flag groups and dependencies.
+
+Rotini never changes the process's working directory. `rtx.Dir()` returns the run's, so a
+handler that opens a relative path joins it first:
+
+{{< code title="opening a file" language="golang" open="true" collapsible="false" copy="true" >}}
+f, err := os.Open(filepath.Join(rtx.Dir(), name))
+{{< /code >}}
+
+A shell completes the words after `-C x` against its own directory; rotini's completers see
+`rtx.Dir()`.
+
+### Explaining where values came from
+
+`rtx.InputsWithReport` returns the inputs with an `InputReport`, and `report.Format(w)` writes one
+line per field a layer set: the value, where it came from, and what it overrode, nearest first.
+A secret prints `[redacted]`, whatever layer supplied it:
+
+```console
+$ todo deploy --explain-inputs
+TodoDeploy.Flags.Port = "9000" from env:TODO_PORT; overrides config:user#deploy.port "8000", default "8080"
+TodoDeploy.Flags.Token = [redacted] from argv:--token
+TodoDeploy.Arguments.Target = "prod" from argv:<target>
+```
+
+Each `InputSource` names its origin: `argv:<identifier as typed>`, `argv:<argument>`,
+`env:<VARIABLE>` (`env:TODO_HTTP__*` for a nested family), `config:<file name>#<key>`, `default`
+or `stdin`. A hand-built layer's origin is empty, and the line names its layer. A streamed stdin
+prints `(stream)` and is never read.
+
+To offer this to users, declare a hidden short-circuit flag on the command and print the report
+in its handler, before checking the error, since the run may be the one being explained:
+
+{{< code title="internal/cmd/todo/todo_deploy.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, report, err := rtx.InputsWithReport[TodoDeployInputs]()
+	if in.TodoDeploy.Flags.ExplainInputs {
+		_ = report.Format(rtx.Stdout)
+		return
+	}
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	// …
+}
+{{< /code >}}
+
+With a short-circuit flag set, the requirements are waived and a declared `stdin:` isn't read,
+so the explanation works on a command line that is still incomplete. Inputs belong to the
+running command, so the flag goes on each command that explains its own, not on the root.
+### Editor support for your users' config
+
+With `generate.schemas.config.dir` in the conf, `rotini generate` writes a JSON Schema for each
+config file the spec declares: `todo.user.config.json` for a file named `user` on the root,
+`todo-deploy.team.config.json` for one declared on `deploy`. It lists every key a command that
+reads the file binds, nested by dot, with its type, enum values and their summaries, default
+(never a secret's), bounds, description and deprecation. Other keys are allowed, since rotini
+ignores them. A file's own `schema:` is included, and dotenv files get none.
+
+{{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+generate:
+  schemas:
+    config:
+      dir: schemas/config
+{{< /code >}}
+
+Publish the files with your docs, and your users point their editor at them: a
+`# yaml-language-server: $schema=<url>` first line in YAML, `#:schema <url>` in TOML, or a
+`"$schema"` key in JSON.
 
 ## Handlers
 
@@ -668,6 +976,23 @@ func (h *todoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context)
 - **Calls from a teardown change nothing**, and the reporter always gets the run's context.
   `rtx.Context()` returns the running hook's context; read it in the hook.
 
+### A deadline after a signal
+
+On Ctrl-C or SIGTERM, rotini cancels the run's context and waits for the hooks and their
+teardowns to finish; a second signal exits at once with 130. A process that a supervisor stops
+with one SIGTERM can't send the second, so a handler that ignores its context would keep it
+running. `WithTerminationTimeout` bounds the wait:
+
+{{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
+cmd.NewProgram(cmd.Handlers()).WithTerminationTimeout(10 * time.Second).Execute()
+{{< /code >}}
+
+If the run hasn't returned 10 seconds after the first signal, the program exits with that
+signal's code (143 for SIGTERM, 130 for SIGINT), as a second signal would. The exit is abrupt:
+buffered stdout is flushed if it can be, but the remaining teardown doesn't run and the reporter
+may not have printed. The timeout covers the reporter too, and it has no effect when rotini
+traps no signals (`WithoutSignalHandling`, or `WithContext` without `WithSignals`).
+
 ## Errors and exit codes
 
 A handler that fails calls `rtx.HaltWith(err)`. The program's reporter runs once, after
@@ -770,6 +1095,96 @@ the conf declares one, re-exported in the cmd package. The check above reads a c
 number, and warns when a handler uses another command's constant: declare the code on the
 command that exits with it.
 
+### Linking exit codes to docs
+
+`docs_url` on an `exit_status` entry links the code to a page about it. The man and markdown EXIT
+STATUS sections show the link, and the contract carries it. Help and the default reporter don't
+print it. To print it when the command exits with that code, write a reporter: the generated
+Definition carries each code's link as `ExitStatusDef.DocsURL`.
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+- name: get
+  exit_status:
+    - { code: 3, name: not_found, summary: no such task, docs_url: "https://todo.example/errors/not-found" }
+{{< /code >}}
+
+A reporter can't read the code a handler set, so the handler records it with the error:
+
+{{< code title="internal/cmd/todo/report_links.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package todo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+// ExitError ends a command with one of its documented exit codes:
+// rtx.HaltWith(&ExitError{Code: TodoGetExitNotFound, Err: err}).
+type ExitError struct {
+	Code int
+	Err  error
+}
+
+func (e *ExitError) Error() string { return e.Err.Error() }
+func (e *ExitError) Unwrap() error { return e.Err }
+
+// ReportWithLinks prints warnings and errors to stderr, and after an ExitError the link its
+// code declares, then exits with that code (1 for any other failure).
+func ReportWithLinks(def rotini.Definition) rotini.Reporter {
+	return func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+		for _, w := range out.Warnings {
+			fmt.Fprintln(rtx.Stderr, "Warning:", w)
+		}
+		code := 0
+		for _, err := range out.Errors {
+			fmt.Fprintln(rtx.Stderr, "Error:", err)
+			var exit *ExitError
+			if errors.As(err, &exit) && code == 0 {
+				code = exit.Code
+				if url := docsURL(def, rtx.CommandChain(), code); url != "" {
+					fmt.Fprintln(rtx.Stderr, "See", url)
+				}
+			}
+		}
+		for _, p := range out.Panics {
+			fmt.Fprintln(rtx.Stderr, "Error:", p)
+		}
+		switch {
+		case !out.Failed() || ctx.Err() != nil:
+		case code != 0:
+			rtx.Exit(code)
+		default:
+			rtx.Exit(1)
+		}
+	}
+}
+
+// docsURL returns the docs_url the invoked command declares for code, or "".
+func docsURL(def rotini.Definition, chain []rotini.Command, code int) string {
+	exits, cmds := def.ExitStatus, def.Commands
+	for _, c := range chain[1:] {
+		for _, d := range cmds {
+			if d.Name == c.Name {
+				exits, cmds = d.ExitStatus, d.Commands
+				break
+			}
+		}
+	}
+	for _, e := range exits {
+		if e.Code == code {
+			return e.DocsURL
+		}
+	}
+	return ""
+}
+{{< /code >}}
+
+Install it with the program's own Definition: `p := cmd.NewProgram(cmd.Handlers())`, then
+`p.WithReporter(cmd.ReportWithLinks(p.Definition()))`.
+
 ### Handling errors in a handler
 
 An error about the user's input, from `rtx.Inputs`, the per-source methods, `rtx.CheckInputs` or
@@ -862,6 +1277,60 @@ if typed, candidates, ok := rotini.SuggestionFacts(err); ok {
 `WithMaxResults(n)` caps how many suggestions `For` returns, and `WithMinScore(s)` sets how close
 one must be, from 0 to 1. `Closest(typed, candidates)` returns the single nearest. A secret
 input's value is never offered for ranking. Rotini never prints a suggestion itself.
+
+### Printing the usage line
+
+`rtx.Usage()` returns the usage line of the command whose hook is running, the line its help
+prints under `Usage:` (`todo add [flags] <title>`): the spec's `usage:` when set, else the line
+rotini derives from the command's shape. The generated `Usage(path...)` returns any command's,
+by names or aliases, and is generated whether or not the help feature is on. Nothing prints the
+line by default. A reporter can print it after a usage error:
+
+{{< code title="internal/cmd/todo/report_usage.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+// ReportWithUsage prints warnings and errors to stderr, then the command's usage line after a
+// usage error, and exits 1 when the run failed.
+func ReportWithUsage(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, w := range out.Warnings {
+		fmt.Fprintln(rtx.Stderr, "Warning:", w)
+	}
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+	}
+	for _, p := range out.Panics {
+		fmt.Fprintln(rtx.Stderr, "Error:", p)
+	}
+	if len(out.Errors) > 0 && rotini.CategoryOf(out.Errors[0]) == rotini.CategoryUsage {
+		if u := rtx.Usage(); u != "" {
+			fmt.Fprintf(rtx.Stderr, "Usage: %s\n", u)
+		}
+		fmt.Fprintf(rtx.Stderr, "Run '%s --help' for more.\n", rtx.CommandPath())
+	}
+	if out.Failed() && ctx.Err() == nil {
+		rtx.Exit(1)
+	}
+}
+{{< /code >}}
+
+```console
+$ todo add
+Error: missing required input: <title>
+Usage: todo add [flags] <title>
+Run 'todo add --help' for more.
+```
+
+A command with a verbatim `help:` page still has the spec's line, so the two can differ. In a
+handler, use `rtx.Usage()` rather than the generated function: a command composed from another
+spec then reports the line of the program it runs in. A schema named `Usage` would collide with
+the generated function, and `rotini validate` reports it.
 
 ## Structured output
 
@@ -1051,6 +1520,92 @@ inputs value, which may hold secrets.
 Importing `shape` links Go's `text/template`, which makes the binary larger. A program that does
 not import it links no template code.
 
+### Choosing fields and order
+
+A `--json id,title` flag that writes only some fields, or a `--sort-by title` flag, takes its
+values from the output's field names. Declare `values_from:` instead of an `enum`, and give the
+flags their roles so a program driving the CLI knows what they do:
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+- name: list
+  output: { $ref: "#/schemas/TaskList" }
+  flags:
+    - name: json
+      summary: write these fields as json
+      role: fields
+      schema: { type: '[]string', separator: ',', values_from: output.tasks }
+    - name: sort-by
+      summary: sort by this field
+      role: sort
+      schema: { type: string, values_from: output.tasks }
+    - name: reverse
+      summary: sort in descending order
+      schema: { type: bool }
+{{< /code >}}
+
+`output` is the command's output, or one item when the output is a list or a stream.
+`output.tasks` is its `tasks` property, and a list on the way stands for its items, so here the
+values are Task's fields. They become the flag's enum, sorted by name: help shows
+`[id|status|title]`, completion offers them (after a comma too: `--json id,<TAB>` offers the
+rest), a name the output doesn't have is a usage error, and the contract lists them. Rename an
+output field and the flag follows. Only the item's own fields are listed, not nested ones.
+
+`rotini.SortBy` sorts a slice by one field, and `rotini.SelectFields` keeps the fields the user
+chose. Fields are named by their JSON names, the names `-o json` shows. Sort first, since the
+sort field need not be selected:
+
+{{< code title="internal/cmd/todo/todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
+list := TodoListOutput{Tasks: load()}
+flags := in.TodoList.Flags
+if flags.SortBy != "" {
+	if err := rotini.SortBy(list.Tasks, flags.SortBy, flags.Reverse); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+}
+if len(flags.JSON) > 0 {
+	sel, err := rotini.SelectFields(list, "tasks", flags.JSON)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	rtx.HaltWith(rtx.WriteOutput(sel, "json", nil))
+	return
+}
+rtx.HaltWith(rtx.WriteOutput(list, in.Todo.Flags.Output, renderTable))
+{{< /code >}}
+
+```console
+$ todo list --json id,title --sort-by title
+{
+  "tasks": [
+    {
+      "id": 2,
+      "title": "ship"
+    },
+    {
+      "id": 1,
+      "title": "write docs"
+    }
+  ]
+}
+```
+
+`SelectFields`' second argument is where the items are: `values_from` without its `output`
+prefix, so `""` for the output itself. Everything outside it, such as an envelope's `total`, is
+kept, and a field an item lacks is left out of that item. A dotted field (`owner.login`) reaches
+into a nested object, for a flag that declares such names in its own `enum`.
+
+`WriteOutput` and `WriteOutputItem` accept the `rotini.Selection` it returns in place of the
+output type. With output checks on, a selection is checked against the shape with every
+`required` removed, since it leaves fields out. `DecodeOutput` still checks the whole shape, so
+use it on full outputs only.
+
+`SortBy` compares numbers as numbers, strings that are all RFC 3339 times as times, other
+strings byte by byte, and `false` before `true`. Items without the field sort last in both
+directions, and items whose values in it are of different kinds are an error. Both helpers read
+the value through JSON, which is fine for the lists a command line prints.
+
 ### Check it
 
 `Program.WithOutputChecks(true)` makes every `WriteOutput` and `WriteOutputItem` call check its value
@@ -1101,12 +1656,22 @@ cmd.NewProgram(cmd.Handlers()).WithReporter(rotini.StructuredReporter(func(rtx *
 
 ```console
 $ todo list --json --bogus
-{"error":{"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
+{"error":{"candidates":["--json","--all"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
 ```
 
 Exit codes are decided exactly as the default reporter decides them. Each line's shape is
 described by
 [schema-error.json](https://github.com/go-rotini/rotini/blob/main/schema-error.json).
+
+#### Candidates
+
+When an error names the word at fault in `token`, the line also lists `candidates`: the words it
+was checked against, as `rotini.SuggestionFacts` returns them. For a mistyped command they are
+the command's visible sub-commands and their aliases, for an unknown flag its flag spellings, and
+for a value outside an enum the allowed values, from the command line, the environment or a
+config file. Rotini doesn't rank them or print a suggestion; a tool reading the line can offer the
+nearest. Hidden spellings and values never appear, and a secret input's error carries neither a
+token nor candidates.
 
 ### What gets generated
 
@@ -1274,6 +1839,121 @@ section as the extension (`todo-add.1`), so `cp renders/*.1 /usr/local/share/man
 them. The section is 1 unless the man feature sets `section:` (8 for a daemon or admin tool). The
 header's date stays empty, so regenerating never changes a page, unless `SOURCE_DATE_EPOCH` is set
 when you generate.
+
+### Long descriptions
+
+An input's `summary` is the one line help shows beside it. Give a flag, argument, environment
+variable or config value a `description` too, for the text that needs more room: man and
+markdown pages show it under the input, paragraphs separated by blank lines, and the contract
+uses it as the input's description in `parameters`. Help keeps the summary only; an editable help
+template can show both.
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+flags:
+  - name: retries
+    summary: how often to retry
+    description: |-
+      How many times a failed request is sent again, waiting twice as long each time.
+
+      0 sends each request once.
+    schema: { type: int, default: 3 }
+{{< /code >}}
+
+`rotini validate` warns about a description with no summary, which would leave the help row
+empty.
+
+### Stability
+
+Mark a command or input that may still change with `stability: experimental` (it may change or be
+removed in any release) or `stability: beta` (it may change in a minor release). Help, man and
+markdown show `(experimental)` or `(beta)` beside it, and a command's own pages add a line saying
+what the marker promises. The contract carries the marker for callers that care.
+
+A command's inputs and sub-commands are never more stable than it is, so a marker inherits:
+everything under an experimental command is experimental, and `rotini validate` warns about an
+item marked more stable than its command. It also warns about a required experimental input on a
+command that isn't experimental, since the command would depend on something that may go away.
+Nothing changes at run time; to keep an experimental command behind a switch, check for it in the
+handler.
+
+### Help topics
+
+Some help isn't about one command: how filter expressions work, which environment variables the
+program reads. Declare such pages as `topics:` on the root:
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: todo
+  topics:
+    - name: filters
+      summary: how filter expressions work
+      body: |-
+        A filter is a word that narrows a list: todo list urgent.
+
+        Several filters must all match.
+    - name: environment
+      summary: the environment variables todo reads
+      generate: environment
+{{< /code >}}
+
+The root's help lists them under `Help Topics:` (`headings.topics` renames it), and the generated
+`Help("filters")` returns the page, so a `help` command whose handler calls `Help(path...)` shows
+`todo help filters`. The man and markdown features write a page for each topic too, in the man
+feature's section (`todo-filters.1`), listed after the commands in `ManPages()` and
+`MarkdownPages()` with `Topic` set. `help <TAB>` completes topic names along with command names.
+
+`generate: environment` builds the page from the spec: every environment variable the program
+reads (env inputs, flag and argument fallbacks, `variable_file` names, the completion switches the
+conf declares, and the XDG variables config discovery uses), each with the commands that read it.
+
+A topic name can't also be a root command's name or alias, or a declared plugin's. With plugin
+discovery on, don't install an executable named after a topic (`todo-filters`): it would run as
+`todo filters` while `todo help filters` shows the topic.
+
+### Files ready to package
+
+Set `install_dir` on the completion or man feature, and `rotini generate` also writes the scripts
+and pages as files named the way packages install them, whether or not the feature embeds them:
+
+{{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+generate:
+  features:
+    - type: completion
+      enabled: true
+      install_dir: share
+    - type: man
+      enabled: true
+      install_dir: share
+{{< /code >}}
+
+```
+share/completions/todo.bash
+share/completions/_todo          # zsh
+share/completions/todo.fish
+share/completions/todo.ps1
+share/man/man1/todo.1
+share/man/man1/todo-add.1
+```
+
+Each file holds exactly what `Completion(shell)` or `Man(path...)` returns. A man page whose
+command or topic is gone is removed on the next generate, and hidden commands get none. Don't use
+GoReleaser's `dist/` directory, which it empties. Commit the files and let `rotini generate
+--dry-run` in CI keep them current, or generate them in the release job. A GoReleaser
+configuration then ships them:
+
+{{< code title=".goreleaser.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+archives:
+  - files: [share/completions/*, share/man/**/*]
+nfpms:
+  - contents:
+      - { src: share/completions/todo.bash, dst: /usr/share/bash-completion/completions/todo }
+      - { src: share/completions/_todo, dst: /usr/share/zsh/vendor-completions/_todo }
+      - { src: share/completions/todo.fish, dst: /usr/share/fish/vendor_completions.d/todo.fish }
+      - { src: share/man/man1/*, dst: /usr/share/man/man1/ }
+{{< /code >}}
+
+bash-completion loads a script by the command's name, so the package installs `todo.bash` as
+`todo`.
 
 ### Completion messages
 
@@ -1622,6 +2302,36 @@ The short spellings kubectl users type from habit parse as they expect: `-nfoo`,
 
 Flux's plugins follow the same pattern with Flux's conventions: `-n` falls back to
 `$FLUX_SYSTEM_NAMESPACE`, then to `flux-system`, not to the kubeconfig context's namespace.
+
+### One binary, several names
+
+The root's `multicall` key makes the program dispatch on the name its binary was invoked as, so
+one binary can be installed under several names with links or copies:
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: busybox
+  multicall: true   # a link named ls runs `busybox ls`
+{{< /code >}}
+
+```console
+$ ln -s busybox ls
+$ ./ls -l          # runs `busybox ls -l`
+```
+
+The object form sets `prefix`, stripped before the name is matched (`acme-ls` runs `ls` with
+`prefix: acme-`), and `complete`, a prefix that answers shell completion for the root instead of
+running it. That is kubectl's convention: it completes a plugin by running
+`kubectl_complete-<name>` with the words to complete. With `multicall: {complete:
+kubectl_complete-}`, install the plugin a second time as `kubectl_complete-ctx` and it answers in
+`rotini.PluginCompletion`'s format (or the one `WithCompletion` sets), with no check in `main.go`.
+
+The name is the base name the binary was run as, never a resolved symlink. On Windows a
+trailing `.exe` is dropped and names match without regard to case; a shim that runs the real
+binary passes the real name, so multicall doesn't apply. A name that matches no top-level command
+or plugin, the root's own name included, runs the root. Pages and `rtx.Usage()` still show the
+root's invocation (`busybox ls`), and shell completion scripts are registered for the root's
+name only. Tests set the invoked name with `Program.WithArgv0`.
 
 ## Testing
 

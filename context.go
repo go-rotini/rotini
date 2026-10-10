@@ -25,7 +25,8 @@ import (
 //     derived one to the hooks after it
 //   - command — [Context.Command] is the command whose hook is running (its Invoked field
 //     reports whether the user ran it), [Context.CommandPath] names it, and
-//     [Context.CommandChain] lists every command from the root to the invoked one
+//     [Context.CommandChain] lists every command from the root to the invoked one, and
+//     [Context.Usage] is its usage line
 //   - inputs — [Context.Inputs] returns the command's validated inputs,
 //     [Context.InputsWithReport] adds where each value came from, and the per-channel
 //     [Context.ArgvInputs], [Context.EnvInputs], [Context.FileInputs],

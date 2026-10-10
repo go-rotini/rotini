@@ -48,6 +48,17 @@ type Definition struct {
 	Inputs reflect.Type
 	// ExitStatus lists the exit codes the root command documents (the spec's exit_status).
 	ExitStatus []ExitStatusDef
+
+	// Usage is the root command's usage line: the spec's `usage` when set, else the line
+	// rotini derives from its shape ("taskr [flags]"). It is the line help prints under its
+	// Usage heading. See [Context.Usage].
+	Usage string
+	// Multicall dispatches on the name the binary was invoked as (the spec's root
+	// `multicall`); nil leaves it off. See [Program.WithArgv0].
+	Multicall *MulticallDef
+	// Topics lists the root's help topics (the spec's `topics:`), which completion offers
+	// with the root's sub-commands for a command path.
+	Topics []TopicDef
 }
 
 // ExitStatusDef is one exit code a command documents: the spec's `exit_status` entry.
@@ -56,6 +67,7 @@ type ExitStatusDef struct {
 	Name      string // the code's snake_case name (`not_found`); "" when none
 	Summary   string // what the code means; "" when none
 	Retryable bool   // running the same command again may succeed
+	DocsURL   string // a link to more about the code (the spec's docs_url); "" when none
 }
 
 // ResponseFilesDef is how a program reads response files (the spec's root `response_files`).
@@ -128,11 +140,18 @@ type FlagGroup struct {
 	Flags []string // logical flag names that make up the group
 }
 
-// FlagDependency is a conditional cross-flag requirement: when the When flag is set on argv,
-// every flag in Requires must be too. "Set" follows the same convention as [FlagGroup].
+// FlagDependency is a conditional cross-flag rule: when the When flag is set on argv (with one
+// of the Equals values, when there are any) and none of the Unless flags is, every flag in
+// Requires must be set too and none in Forbids may be. With no When, the rule applies unless an
+// Unless flag is set. "Set" follows the same convention as [FlagGroup].
 type FlagDependency struct {
-	When     string   // the flag whose presence triggers the requirement
-	Requires []string // flags that must also be set when When is set
+	When     string   // the flag whose presence triggers the rule; "" when only Unless decides
+	Requires []string // flags that must also be set when the rule triggers
+	// Equals narrows When to these values, compared as the flag's value is stored: an enum's
+	// main value, "true" or "false" for a bool. nil means any value.
+	Equals  []string
+	Unless  []string // flags any one of which, set on argv, turns the rule off
+	Forbids []string // flags that can't be set when the rule triggers
 }
 
 // PluginDef describes a co-located sub-command, kubectl/git plugin style: invoking it execs
@@ -173,6 +192,12 @@ type CommandDef struct {
 	DeprecatedSince                string
 	RemovedIn                      string
 	DeprecatedIdentifiersRemovedIn map[string]string
+	// ReplacedBy is the command to use instead of this deprecated one, as the user types it
+	// ("taskr purge"); [Deprecations] reports it. "" when the spec names none.
+	ReplacedBy string
+	// HiddenAliases are more names that invoke the command but are never listed: completion
+	// and suggestions leave them out.
+	HiddenAliases []string
 
 	Flags            []FlagDef
 	Arguments        []ArgDef
@@ -196,6 +221,10 @@ type CommandDef struct {
 	// ExitStatus lists the exit codes the command documents (the spec's exit_status). Each
 	// command lists its own; a sub-command doesn't inherit its parent's.
 	ExitStatus []ExitStatusDef
+
+	// Usage is the command's usage line, with its full invocation ("taskr add <title>
+	// [flags]"); see [Definition.Usage].
+	Usage string
 }
 
 // Constraints carries the validation bounds a spec may declare on a flag or argument. The
@@ -286,6 +315,13 @@ type FlagDef struct {
 	DeprecatedSince                string
 	RemovedIn                      string
 	DeprecatedIdentifiersRemovedIn map[string]string
+	// ReplacedBy is the identifier of the flag to use instead of this deprecated one
+	// ("--output"); [Deprecations] reports it. "" when the spec names none.
+	ReplacedBy string
+	// HiddenIdentifiers are more identifiers the command line accepts for the flag but that are
+	// never listed: completion and suggestions leave them out. A negatable flag's hidden long
+	// identifiers get their unlisted "--no-" forms too.
+	HiddenIdentifiers []string
 	// Negatable adds a "--no-<x>" form for every long identifier of a bool flag, which sets
 	// it false, overriding a true default, config value or environment variable.
 	Negatable bool
@@ -307,6 +343,10 @@ type FlagDef struct {
 	// complete:). The zero value means no hint.
 	Complete Completion
 	Constraints
+	// Role is what the flag means to a program driving the CLI (spec role:), "" for none.
+	// One role changes what the runtime does: "chdir" names the root flag whose directory the
+	// run resolves relative paths and config discovery against (see [Context.Dir]).
+	Role string
 }
 
 // Completion is a declarative hint about what an input's value is, for the shell to complete.

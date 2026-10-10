@@ -92,6 +92,13 @@ type program struct {
 	// contractGo is the contract document for the cmd file's Contract variable
 	// (generate.contract.go), set by emitContract; nil when that is off.
 	contractGo []byte
+
+	// flagSets are the spec's flag sets, flagSetBlocks the structs generated for the used ones (in
+	// first-use order), and flagSetEmitted their type names.
+	flagSets       map[string]FlagSet
+	rootFlagSets   []string // the flag set each of the root's flags came from; nil without sets
+	flagSetBlocks  []flagSetBlock
+	flagSetEmitted map[string]bool
 }
 
 // module is the Go module a spec lives in: the filesystem root (the directory holding
@@ -134,9 +141,11 @@ func (p *program) generate() error {
 		{"emit models file", p.emitModelsFile},
 		{"emit cmd file", p.emitCmdFile},
 		{"emit feature outputs", p.emitFeatures},
+		{"emit install files", p.emitInstallFiles},
 		{"emit handler stubs", p.emitStubs},
 		{"emit entrypoint", p.emitEntrypoint},
 		{"prune orphans", p.prune},
+		{"prune installed man pages", p.pruneInstallFiles},
 		{"audit handler hooks", p.auditHooks},
 	}
 	for _, s := range steps {
@@ -169,6 +178,7 @@ func (p *program) emitModelsFile() error {
 		Package:     p.layout.modelsPkgName,
 		Imports:     renderImports(imports),
 		Blocks:      blocks,
+		FlagSets:    flagSetTemplates(p),
 		OutputTypes: outputTypes,
 		ExitCodes:   exitConstantsDecl(p.exitConstants(), false),
 		Header:      p.layout.modelsHeader,
@@ -375,12 +385,14 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 	// only aliases re-exporting them, so handler code reads the same either way.
 	var modelsImport string
 	var aliases []string
+	var flagSets []templateFlagSet
 	outputTypes := ""
 	if lay.splitModels {
 		modelsImport = "models " + strconv.Quote(lay.modelsImport)
 		aliases = modelAliases(gp, blocks)
 		blocks, imports = nil, nil
 	} else {
+		flagSets = flagSetTemplates(gp)
 		var err error
 		if outputTypes, err = buildOutputTypes(gp, lay.cmdPkgName); err != nil {
 			return nil, err
@@ -405,12 +417,14 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		ModelsImport:  modelsImport,
 		ModelAliases:  aliases,
 		Blocks:        blocks,
+		FlagSets:      flagSets,
 		OutputTypes:   outputTypes,
 		InputSettings: renderInputSettings(gp),
 		Features:      features,
 		EmbedImport:   anyEmbed(features),
 		ExitCodes:     exitConstantsDecl(gp.exitConstants(), lay.splitModels),
 		Contract:      contractDecl(gp.contractGo),
+		UsageFunc:     usageFuncDecl(gp),
 	})
 }
 
@@ -432,6 +446,7 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 		blocks = append(blocks, templateInputBlock{
 			Prefix:       c.prefix,
 			Flags:        toTemplateFields(c.flags),
+			Embeds:       c.embeds,
 			Arguments:    toTemplateFields(c.args),
 			Env:          toTemplateFields(c.env),
 			Config:       toTemplateFields(c.config),
@@ -465,6 +480,7 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 		c.addImports(imports)
 	}
 
+	addFlagSetImports(gp, imports)
 	return blocks, imports
 }
 
@@ -486,6 +502,7 @@ func modelAliases(gp *program, blocks []templateInputBlock) []string {
 			out = append(out, b.Prefix+"Inputs")
 		}
 	}
+	out = append(out, flagSetTypeNames(gp)...)
 	out = append(out, outputTypeNames(gp)...)
 	return out
 }

@@ -1,0 +1,15 @@
+# A secret typed on the command line shows in the process list and shell history.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Correct: read from a file or stdin only.
+    - name: password
+      schema: { type: string, secret: true, from: [file, stdin] }
+    - name: token
+      schema: { type: string, secret: true }
+    - name: key
+      schema: { type: string, secret: true, from: [value, file] }
+    # An implicit value would be a literal.
+    - name: pin
+      schema: { type: string, secret: true, from: [file], implicit_value: "0000" }

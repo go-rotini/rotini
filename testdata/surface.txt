@@ -20,6 +20,10 @@ const ParseKindUnspecified
 const PluginNotFound
 const PluginStartFailed
 const PluginTimeout
+field AppDirectories.Cache
+field AppDirectories.Config
+field AppDirectories.Data
+field AppDirectories.State
 field ArgDef.Complete
 field ArgDef.Constraints
 field ArgDef.Default
@@ -64,6 +68,8 @@ field Command.PluginDiscovery
 field Command.PluginPath
 field Command.Plugins
 field Command.RemovedIn
+field Command.ReplacedBy
+field Command.Usage
 field CommandDef.Aliases
 field CommandDef.Arguments
 field CommandDef.Commands
@@ -77,6 +83,7 @@ field CommandDef.FlagGroups
 field CommandDef.Flags
 field CommandDef.Handler
 field CommandDef.Hidden
+field CommandDef.HiddenAliases
 field CommandDef.Inputs
 field CommandDef.Name
 field CommandDef.OptionsFirst
@@ -86,7 +93,9 @@ field CommandDef.PluginDiscovery
 field CommandDef.PluginPath
 field CommandDef.Plugins
 field CommandDef.RemovedIn
+field CommandDef.ReplacedBy
 field CommandDef.Summary
+field CommandDef.Usage
 field Completion.Extensions
 field Completion.Kind
 field Completion.Message
@@ -135,6 +144,7 @@ field Definition.FlagGroups
 field Definition.Flags
 field Definition.Handler
 field Definition.Inputs
+field Definition.Multicall
 field Definition.Name
 field Definition.OptionsFirst
 field Definition.Output
@@ -143,12 +153,15 @@ field Definition.PluginDiscovery
 field Definition.PluginPath
 field Definition.Plugins
 field Definition.ResponseFiles
+field Definition.Topics
+field Definition.Usage
 field DependencyError.Name
 field Deprecation.Identifier
 field Deprecation.Kind
 field Deprecation.Message
 field Deprecation.Name
 field Deprecation.RemovedIn
+field Deprecation.ReplacedBy
 field Deprecation.Since
 field Deprecation.Value
 field DiscoverDef.App
@@ -166,6 +179,7 @@ field EnumValue.ReplacedBy
 field EnumValue.Summary
 field EnumValue.Value
 field ExitStatusDef.Code
+field ExitStatusDef.DocsURL
 field ExitStatusDef.Name
 field ExitStatusDef.Retryable
 field ExitStatusDef.Summary
@@ -182,6 +196,7 @@ field FlagDef.Enum
 field FlagDef.EnumValues
 field FlagDef.From
 field FlagDef.Hidden
+field FlagDef.HiddenIdentifiers
 field FlagDef.Identifiers
 field FlagDef.IgnoreCase
 field FlagDef.ImplicitValue
@@ -195,13 +210,18 @@ field FlagDef.NoRepeat
 field FlagDef.ObjectSchema
 field FlagDef.Relative
 field FlagDef.RemovedIn
+field FlagDef.ReplacedBy
 field FlagDef.Required
+field FlagDef.Role
 field FlagDef.Secret
 field FlagDef.Separator
 field FlagDef.ShortCircuit
 field FlagDef.Summary
 field FlagDef.Type
+field FlagDependency.Equals
+field FlagDependency.Forbids
 field FlagDependency.Requires
+field FlagDependency.Unless
 field FlagDependency.When
 field FlagGroup.Flags
 field FlagGroup.Kind
@@ -219,10 +239,13 @@ field InputSettings.EnvPrefix
 field InputSettings.Sources
 field InputSettings.StdinSchemas
 field InputSource.Layer
+field InputSource.Origin
 field InputSource.Raw
 field LifecycleStep.Do
 field LifecycleStep.Name
 field LifecycleStep.Undo
+field MulticallDef.Complete
+field MulticallDef.Prefix
 field NoHooks.NoCascadingPostRun
 field NoHooks.NoCascadingPreRun
 field NoHooks.NoPostRun
@@ -238,6 +261,7 @@ field OutputDef.Type
 field Page.Content
 field Page.Name
 field Page.Path
+field Page.Topic
 field PanicError.Stack
 field PanicError.Value
 field ParseError.Candidates
@@ -270,9 +294,12 @@ field Resolution.Argv
 field Resolution.Chain
 field Resolution.Plugin
 field ResponseFilesDef.Prefix
+field TopicDef.Name
+field TopicDef.Summary
 field WiringError.Command
 field WiringError.Handler
 field WiringError.Msg
+func AppDirs(rtx *Context, app, strategy string) (AppDirectories, error)
 func ArgvOf[T any](def Definition, v T, set Presence, opts ...ArgvOption) (argv, env []string, err error)
 func ArgvPath(names ...string) ArgvOption
 func ArgvSecrets() ArgvOption
@@ -301,6 +328,8 @@ func Overwrite(enabled bool) OutputOption
 func PluginCompletion(w io.Writer, result CompletionResult) error
 func PresenceOf[T any](v T) Presence
 func Ptr[T any](v T) *T
+func SelectFields(v any, at string, fields []string) (Selection, error)
+func SortBy[E any](items []E, field string, desc bool) error
 func StripANSI(text string) string
 func StructuredReporter(structured func(rtx *Context) bool) Reporter
 func SuggestionFacts(err error) (token string, candidates []string, ok bool)
@@ -355,6 +384,7 @@ method Context.SetContext(ctx context.Context)
 method Context.SetDependencyIfAbsent[T any](dep Dependency[T], value T)
 method Context.SetDependency[T any](dep Dependency[T], value T)
 method Context.StdinInputs[T any]() (InputLayer[T], error)
+method Context.Usage() string
 method Context.Version() string
 method Context.WithClock(now func() time.Time) *Context
 method Context.WithDir(dir string) *Context
@@ -393,6 +423,7 @@ method InputError.Error() string
 method InputError.Unwrap() []error
 method InputReader.Read(rtx *Context, out any) error
 method InputReport.Fields() []FieldPath
+method InputReport.Format(w io.Writer) error
 method InputReport.History(path FieldPath) []InputSource
 method InputReport.Validate() error
 method InputReport.Winner(path FieldPath) (InputSource, bool)
@@ -422,6 +453,7 @@ method Program.Run(argv []string) (int, error)
 method Program.RunContext(ctx context.Context, argv []string) (int, error)
 method Program.With(opts ...Option) *Program
 method Program.WithArgs(args []string) *Program
+method Program.WithArgv0(name string) *Program
 method Program.WithBufferedOutput(enabled bool) *Program
 method Program.WithClock(now func() time.Time) *Program
 method Program.WithCompletion(format CompletionFormat) *Program
@@ -446,8 +478,12 @@ method Program.WithStderr(w io.Writer) *Program
 method Program.WithStdin(r io.Reader) *Program
 method Program.WithStdout(w io.Writer) *Program
 method Program.WithTeardownOnPanic(enabled bool) *Program
+method Program.WithTerminationTimeout(d time.Duration) *Program
 method Program.WithVersion(version string) *Program
 method Program.WithoutSignalHandling() *Program
+method Selection.MarshalJSON() ([]byte, error)
+method Selection.MarshalTOML() (any, error)
+method Selection.MarshalYAML() (any, error)
 method Suggestor.Closest(input string, candidates []string) (suggestion string, ok bool)
 method Suggestor.For(err error) []string
 method Suggestor.Suggest(input string, candidates []string) []string
@@ -455,6 +491,7 @@ method Suggestor.WithMaxResults(n int) *Suggestor
 method Suggestor.WithMinScore(score float64) *Suggestor
 method WiringError.Error() string
 method WiringError.Unwrap() error
+type AppDirectories
 type ArgDef
 type ArgValueCompleter
 type ArgvError
@@ -501,6 +538,7 @@ type InputSettings
 type InputSource
 type Lifecycle
 type LifecycleStep
+type MulticallDef
 type NoCascadingPostRun
 type NoCascadingPreRun
 type NoHooks
@@ -528,7 +566,9 @@ type Reporter
 type Resolution
 type Resolver
 type ResponseFilesDef
+type Selection
 type Suggestor
+type TopicDef
 type WiringError
 var ErrDependencyNotFound
 var ErrInternal

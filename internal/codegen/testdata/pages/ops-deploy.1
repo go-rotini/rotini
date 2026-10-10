@@ -3,10 +3,16 @@
 ops\-deploy \- ship a service
 .SH SYNOPSIS
 \fBops deploy\fR [flags] <service> [replicas]
+.SH DESCRIPTION
+This command is in beta: it may change in a minor release.
 .SH ARGUMENTS
 .TP
 \fI<service>\fR
 the service to ship (length 2..63)
+.sp
+The service to ship, by its registry name.
+.sp
+Names are lowercase.
 .br
 2 to 63 characters; matches \(ga^[a\-z][a\-z0\-9\-]*$\(ga
 .TP
@@ -18,11 +24,13 @@ at least 1
 .TP
 \fB\-p\fR, \fB\-\-port\fR \fIint\fR
 listen port (default 8080) (1..65535)
+.sp
+The port the service listens on.
 .br
 between 1 and 65535
 .TP
 \fB\-\-ratio\fR \fIfloat64\fR
-traffic share (> 0, <= 1)
+traffic share (> 0, <= 1) (experimental)
 .br
 greater than 0 and at most 1
 .TP
@@ -58,5 +66,14 @@ repeat to count: \-vvv
 .TP
 \fB\-\-color\fR \fIstring\fR
 when to color (default auto) [auto|always|never]
+.SH "EXIT STATUS"
+.TP
+\fB0\fR
+shipped
+.TP
+\fB4\fR (rejected)
+the cluster refused it
+.br
+See \fIhttps://example.com/ops/rejected\fR.
 .SH "SEE ALSO"
 \fBops\fR(1)

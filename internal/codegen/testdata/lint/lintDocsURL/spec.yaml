@@ -1,0 +1,10 @@
+# An exit code's docs_url is printed as a link in man and markdown, so it must be an absolute
+# http or https address with a host.
+version: 0.0.0
+command:
+  name: demo
+  exit_status:
+    # Correct. No problem.
+    - { code: 0, summary: success, docs_url: "https://example.com/exit/0" }
+    # No host.
+    - { code: 3, summary: partial, docs_url: "https:///exit/3" }

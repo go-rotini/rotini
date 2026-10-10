@@ -1,0 +1,59 @@
+# replaced_by names what to use instead of a deprecated command or flag, so it must exist.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: verbose
+      cascading: true
+      schema: { type: bool }
+  commands:
+    - name: purge
+    - name: remote
+      commands:
+        - name: add
+    # Correct: a command path below the root, and a nested one.
+    - name: old-purge
+      deprecated: renamed
+      replaced_by: purge
+    - name: old-add
+      deprecated: renamed
+      replaced_by: remote add
+    - name: wipe
+      deprecated: renamed
+      replaced_by: purgee
+    - name: clean
+      replaced_by: purge
+    - name: zap
+      deprecated: gone
+      replaced_by: wipe
+    - name: self
+      deprecated: gone
+      replaced_by: self
+    - name: sync
+      flags:
+        - name: output
+          schema: { type: string }
+        # Correct: a flag of this command, and an ancestor's cascading flag.
+        - name: out
+          deprecated: renamed
+          replaced_by: --output
+          schema: { type: string }
+        - name: loud
+          deprecated: renamed
+          replaced_by: --verbose
+          schema: { type: bool }
+        - name: o2
+          deprecated: renamed
+          replaced_by: --nope
+          schema: { type: string }
+        - name: o3
+          replaced_by: --output
+          schema: { type: string }
+        - name: o4
+          deprecated: renamed
+          replaced_by: --o4
+          schema: { type: string }
+        - name: o5
+          deprecated: renamed
+          replaced_by: --out
+          schema: { type: string }

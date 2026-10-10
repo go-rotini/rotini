@@ -1,0 +1,35 @@
+# The fields role marks a list of strings and the sort role a string, each with field names to
+# choose from.
+version: 0.0.0
+command:
+  name: demo
+  output:
+    type: object
+    properties:
+      id: { type: integer }
+      title: { type: string }
+  flags:
+    - name: json
+      role: fields
+      schema: { type: '[]string', separator: ',', values_from: output }
+    - name: sort-by
+      role: sort
+      schema: { type: string, enum: [id, title] }
+  commands:
+    - name: bad
+      output:
+        type: object
+        properties:
+          id: { type: integer }
+      flags:
+        - name: json
+          role: fields
+          schema: { type: string, values_from: output }
+        - name: sort-by
+          role: sort
+          schema: { type: string }
+    - name: worse
+      flags:
+        - name: sort-by
+          role: sort
+          schema: { type: '[]string', enum: [id] }

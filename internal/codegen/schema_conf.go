@@ -14,6 +14,12 @@ type Conf struct {
 	Version string `json:"version"`
 }
 
+// A directory of JSON Schemas, '<page-name>.<file-name>.config.json' for each config_files entry (taskr.user.config.json for a file 'user' declared on the root, taskr-deploy.user.config.json for one declared on deploy). A schema lists every key a command that reads the file binds: config inputs and flags' config keys, with their types, enums and value summaries, defaults (never a secret's), bounds and deprecations. It doesn't forbid other keys, which rotini ignores. A file's own declared `schema` is included under allOf. dotenv files and files read as environment variables get none. Rewritten on every generate; a '*.config.json' file in the directory that no entry produces any more is removed.
+type ConfigSchemasConfig struct {
+	// Module-root-relative directory (no leading slash) the config file schemas are written to.
+	Dir string `json:"dir"`
+}
+
 // Optional: write the contract document, one JSON file describing the whole CLI for scripts, tools and AI agents. Every command is listed, a hidden one marked `hidden: true`, with its arguments, flags (including inherited cascading flags), environment variables, configuration keys and stdin, each marked hidden where it is; a `parameters` JSON Schema combining its visible arguments and flags; its output shape where one is declared; and its exit statuses. The format is rotini's own, described by schema-contract.json in the rotini repository, and the shape of the error line rotini.StructuredReporter writes to stderr is included under `errors`. Validate a contract with the schema-contract.json from the rotini that wrote it: newer releases add fields, which an older copy of the schema rejects.
 type ContractConfig struct {
 	// Module-root-relative path (no leading slash) ending in '.json' the contract document is written to. Rewritten on every `generate`.
@@ -32,6 +38,8 @@ type Feature struct {
 	EmbedDir string `json:"embed_dir,omitempty"`
 	// When true, rotini generates this feature's outputs into the cmd package, with their variables and lookup function. Off by default.
 	Enabled bool `json:"enabled,omitempty"`
+	// completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/<name>.bash, completions/_<name> (zsh), completions/<name>.fish and completions/<name>.ps1, and man/man<section>/<page>.<section>, where <name> is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone is removed. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error.
+	InstallDir string `json:"install_dir,omitempty"`
 	// completion only: turns on completion messages, lines the shell shows while a value is being completed and there is nothing to offer. 'declared' shows the inputs' `complete.message` lines from the spec. 'all' also shows a line derived from the summary of every other flag and argument that has one, such as `--replicas <int>: how many instances`. Either way a completer can add its own with rtx.AddCompletionMessage, which take the place of the static line. Omitted, there are no messages. zsh and bash 4.4 or later show them; fish, PowerShell and older bash skip them, and the plugin hosts kubectl, Docker and Flux show them their own way. Setting it on any other feature is an error.
 	Messages string `json:"messages,omitempty"`
 	// completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide completion messages; unset or any other value leaves them on. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionMessages replaces this check with a rule of your own. Requires `messages`.
@@ -97,6 +105,8 @@ type SchemaConfig struct {
 type SchemasConfig struct {
 	// Where to write rotini's conf-schema (the schema for this .rotini.conf file).
 	Conf *SchemaConfig `json:"conf,omitempty"`
+	// Where to write one JSON Schema per configuration file the spec declares, describing the keys your users may write in it, for completion and checking in their editor (`# yaml-language-server: $schema=…` in YAML, `#:schema …` in TOML, a `$schema` key in JSON).
+	Config *ConfigSchemasConfig `json:"config,omitempty"`
 	// Where to write one JSON Schema per command output declared in the spec, so scripts and other tools can validate what a command writes.
 	Output *OutputSchemasConfig `json:"output,omitempty"`
 	// Where to write rotini's spec-schema (the schema for .rotini.spec files).

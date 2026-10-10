@@ -139,7 +139,7 @@ func presenceStore(v reflect.Value, chain []Command, anchor int, set Presence) *
 	store.span = &[2]int{anchor, anchor + v.NumField()}
 	walkCommandStructs(v, chain, anchor, func(top string, scope int, ci reflect.Value) {
 		frame := chain[scope]
-		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, _ reflect.Value) {
+		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, f reflect.Value) {
 			fd, ok := findFlagDef(frame.Flags, logical)
 			if !ok {
 				return
@@ -156,6 +156,7 @@ func presenceStore(v reflect.Value, chain []Command, anchor int, set Presence) *
 					store.argvSet[scope] = map[string]bool{}
 				}
 				store.argvSet[scope][logical] = true
+				store.scopes[scope].noteDependencyValue(logical, f)
 			}
 		})
 		if scope != len(chain)-1 {
@@ -205,6 +206,7 @@ func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anch
 	for i, si := range p.scopes {
 		cp := si
 		cp.flags = maps.Clone(si.flags)
+		cp.depValues = maps.Clone(si.depValues)
 		cp.args = append([]string(nil), si.args...)
 		out.scopes[i] = cp
 	}
@@ -213,7 +215,7 @@ func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anch
 	}
 	walkCommandStructs(merged, chain, anchor, func(top string, scope int, ci reflect.Value) {
 		si := &out.scopes[scope]
-		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, _ reflect.Value) {
+		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, f reflect.Value) {
 			if !handBuilt[fieldPath(top, "Flags", fieldName)] {
 				return
 			}
@@ -225,6 +227,7 @@ func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anch
 			}
 			si.flags[logical] = nil
 			si.presenceOnly[logical] = true
+			si.noteDependencyValue(logical, f)
 			if out.argvSet[scope] == nil {
 				out.argvSet[scope] = map[string]bool{}
 			}
@@ -395,7 +398,7 @@ func checkTypedArg(ad ArgDef, f reflect.Value, dir string) error {
 func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Value, view *osView) error {
 	c, has := channelConstraints(tag)
 	enum := channelEnum(tag)
-	if !has && !enum.declared() {
+	if !has && !enum.declared() && tag.Get("path") == "" {
 		return nil
 	}
 	body := tag.Get("recon")
@@ -419,7 +422,11 @@ func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Val
 	if err := checkChannelEnum(ch, label, enum, typedTexts(elems), secret); err != nil {
 		return err
 	}
-	return checkTypedConstraints(label, channelGoType(f.Type()), c, count, elems, secret, view.base())
+	typ := channelFieldType(tag, f.Type())
+	if isPathType(typ) && len(elems) == 1 && typedText(elems[0]) == "" {
+		typ = channelGoType(f.Type()) // an empty path is no path: nothing to check
+	}
+	return checkTypedConstraints(label, typ, c, count, elems, secret, view.base())
 }
 
 // checkTypedChannelPresence reports a required environment, config or stdin input the

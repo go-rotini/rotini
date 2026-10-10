@@ -23,6 +23,7 @@ command:
     stdin: "Stdin:"
     output: "Output:"
     examples: "Examples:"
+    topics: "Help Topics:"
   groups:
     - name: Deploying
       description: Commands that change what runs where.
@@ -36,9 +37,18 @@ command:
       name: partial
       retryable: true
       summary: some targets failed; stdout lists the ones that shipped
+      docs_url: https://example.com/deploy/partial
       output: { type: array, items: { $ref: "#/schemas/Target" } }
+  topics:
+    - name: environment
+      summary: the environment variables deploy reads
+      generate: environment
+    - name: targets
+      summary: how targets are written
+      body: A target is a host and an optional port.
   env_prefix: DEPLOY
   response_files: { prefix: "+" }
+  multicall: { prefix: "dp-" }
   plugin_path: ~/.deploy/plugins
   plugin_discovery:
     prefix: deploy-
@@ -107,6 +117,28 @@ command:
     - name: digest
       summary: the pinned image digest
       schema: { type: string, file: pinned, key: digest }
+    - name: cache
+      summary: where builds are cached; relative to the file that sets it
+      schema: { type: string, key: cache_dir, default: ~/.cache/deploy, expand: [home], relative_to: config }
+  flag_sets:
+    Paging:
+      summary: how long listings are paged
+      group: Output
+      flags:
+        - name: limit
+          summary: at most this many rows
+          identifiers: [--limit]
+          schema: { type: int, minimum: 1 }
+        - name: all
+          summary: every row
+          identifiers: [--all]
+          schema: { type: bool }
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [limit, all]
+      flag_dependencies:
+        - when: all
+          forbids: [limit]
   commands:
     - name: ship
       summary: ship a service
@@ -127,6 +159,8 @@ command:
       flags:
         - name: env
           summary: the environment
+          description: The environment to ship to. Each one has its own cluster and credentials.
+          stability: beta
           identifiers: [-e, --env]
           schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, repeatable: false, complete: { kind: none, message: "one of dev, staging or prod" } }
         - name: target
@@ -234,6 +268,13 @@ command:
         type: object
         properties:
           line: { type: string }
+          service: { type: string }
+      flags:
+        - name: fields
+          summary: write only these fields
+          identifiers: [--fields]
+          role: fields
+          schema: { type: '[]string', separator: ',', values_from: output }
     - name: exec
       summary: run a command in a service
       passthrough: true
@@ -273,3 +314,37 @@ command:
         .TH STATUS 1
       markdown: |
         # status
+    - name: history
+      summary: list a service's releases
+      hidden_aliases: [hist]
+      use: [Paging]
+      flags:
+        - name: format
+          summary: how to print the list
+          identifiers: [--format]
+          hidden_identifiers: [--output-format]
+          schema: { type: string, enum: [text, csv], default: text }
+        - name: delimiter
+          summary: the csv field separator
+          identifiers: [--delimiter]
+          schema: { type: string }
+        - name: since-release
+          summary: only releases after this one
+          identifiers: [--since-release]
+          schema: { type: string }
+        - name: after
+          summary: only releases after this one
+          identifiers: [--after]
+          deprecated: renamed
+          replaced_by: --since-release
+          schema: { type: string }
+      flag_dependencies:
+        - when: format
+          equals: [csv]
+          requires: [delimiter]
+        - unless: [all]
+          requires: [limit]
+    - name: releases
+      summary: list a service's releases
+      deprecated: renamed to history
+      replaced_by: history

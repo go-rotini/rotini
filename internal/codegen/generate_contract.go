@@ -13,7 +13,8 @@ import (
 )
 
 // This file emits the machine-readable contract: one JSON Schema file per declared output
-// (generate.schemas.output) and the contract document (generate.contract). Both are opt-in.
+// (generate.schemas.output), one per configuration file (generate.schemas.config, see
+// generate_configschema.go) and the contract document (generate.contract). Each is opt-in.
 // The output schema files leave hidden commands out; the contract lists them, marked hidden.
 
 // contractFormat names the contract document's format and version. Breaking changes bump
@@ -29,6 +30,8 @@ type contractDoc struct {
 	Errors        json.RawMessage        `json:"errors"`
 	Completion    *contractCompletion    `json:"completion,omitempty"`
 	ResponseFiles *contractResponseFiles `json:"response_files,omitempty"`
+	Multicall     *contractMulticall     `json:"multicall,omitempty"`
+	Topics        []contractTopic        `json:"topics,omitempty"` // the root's help topics
 }
 
 // contractResponseFiles is how the program reads response files: a word starting with Prefix
@@ -72,6 +75,11 @@ type contractCommand struct {
 	Output                any                      `json:"output,omitempty"`
 	Stream                bool                     `json:"stream,omitempty"` // output declares one item of a stream
 	ExitStatus            []contractExit           `json:"exit_status,omitempty"`
+
+	// Command facts from flag sets, hidden spellings and replacements; see contractParserFields.
+	HiddenAliases []string `json:"hidden_aliases,omitempty"` // names that run the command but are never listed
+	ReplacedBy    string   `json:"replaced_by,omitempty"`    // the command to use instead, as its path below the root
+	Stability     string   `json:"stability,omitempty"`      // as declared: experimental or beta; unset is stable
 }
 
 type contractArgument struct {
@@ -89,6 +97,9 @@ type contractArgument struct {
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
 	Relative        string                       `json:"relative,omitempty"`
+	VariableFile    string                       `json:"variable_file,omitempty"` // a variable naming a file that holds the fallback value
+	Expand          []string                     `json:"expand,omitempty"`
+	RelativeTo      string                       `json:"relative_to,omitempty"`
 	Secret          bool                         `json:"secret,omitempty"`
 	Hidden          bool                         `json:"hidden,omitempty"`
 	EnumValues      map[string]contractEnumValue `json:"enum_values,omitempty"`
@@ -96,6 +107,9 @@ type contractArgument struct {
 	DeprecatedSince string                       `json:"deprecated_since,omitempty"`
 	RemovedIn       string                       `json:"removed_in,omitempty"`
 	Schema          any                          `json:"schema"`
+	ValuesFrom      string                       `json:"values_from,omitempty"` // the output path its enum lists the fields of
+	Description     string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
+	Stability       string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
 }
 
 type contractFlag struct {
@@ -121,6 +135,8 @@ type contractFlag struct {
 	DottedKeys            bool                         `json:"dotted_keys,omitempty"`
 	Layouts               []string                     `json:"layouts,omitempty"`
 	Relative              string                       `json:"relative,omitempty"`
+	Expand                []string                     `json:"expand,omitempty"`
+	RelativeTo            string                       `json:"relative_to,omitempty"`
 	Secret                bool                         `json:"secret,omitempty"`
 	Hidden                bool                         `json:"hidden,omitempty"`
 	Deprecated            string                       `json:"deprecated,omitempty"`
@@ -130,7 +146,15 @@ type contractFlag struct {
 	IdentifiersRemovedIn  map[string]string            `json:"deprecated_identifiers_removed_in,omitempty"`
 	EnumValues            map[string]contractEnumValue `json:"enum_values,omitempty"`
 	Schema                any                          `json:"schema"`
-	Repeatable            *bool                        `json:"repeatable,omitempty"` // set only to false: a repeat is an error
+	Repeatable            *bool                        `json:"repeatable,omitempty"`  // set only to false: a repeat is an error
+	Description           string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
+	Stability             string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
+	ValuesFrom            string                       `json:"values_from,omitempty"`
+
+	// Flag facts from flag sets, hidden spellings and replacements; see contractParserFields.
+	HiddenIdentifiers []string `json:"hidden_identifiers,omitempty"` // identifiers accepted but never listed
+	ReplacedBy        string   `json:"replaced_by,omitempty"`        // the identifier of the flag to use instead
+	FlagSet           string   `json:"flag_set,omitempty"`           // the flag set it comes from
 }
 
 type contractEnv struct {
@@ -148,12 +172,16 @@ type contractEnv struct {
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
 	Relative        string                       `json:"relative,omitempty"`
+	Expand          []string                     `json:"expand,omitempty"`
+	RelativeTo      string                       `json:"relative_to,omitempty"`
 	Hidden          bool                         `json:"hidden,omitempty"`
 	Deprecated      string                       `json:"deprecated,omitempty"`
 	DeprecatedSince string                       `json:"deprecated_since,omitempty"`
 	RemovedIn       string                       `json:"removed_in,omitempty"`
 	EnumValues      map[string]contractEnumValue `json:"enum_values,omitempty"`
 	Schema          any                          `json:"schema"`
+	Description     string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
+	Stability       string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
 }
 
 type contractConfig struct {
@@ -167,6 +195,8 @@ type contractConfig struct {
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
 	Relative        string                       `json:"relative,omitempty"`
+	Expand          []string                     `json:"expand,omitempty"`
+	RelativeTo      string                       `json:"relative_to,omitempty"`
 	Secret          bool                         `json:"secret,omitempty"`
 	Hidden          bool                         `json:"hidden,omitempty"`
 	Deprecated      string                       `json:"deprecated,omitempty"`
@@ -174,6 +204,8 @@ type contractConfig struct {
 	RemovedIn       string                       `json:"removed_in,omitempty"`
 	EnumValues      map[string]contractEnumValue `json:"enum_values,omitempty"`
 	Schema          any                          `json:"schema"`
+	Description     string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
+	Stability       string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
 }
 
 // contractFlagGroup is a flag_groups entry: a rule over a set of the command's flags.
@@ -182,11 +214,14 @@ type contractFlagGroup struct {
 	Flags []string `json:"flags"`
 }
 
-// contractFlagDependency is a flag_dependencies entry: setting When requires every flag in
-// Requires.
+// contractFlagDependency is a flag_dependencies entry: when When is set (to one of Equals, when
+// given) and none of Unless is, every flag in Requires must be set and none in Forbids may be.
 type contractFlagDependency struct {
-	When     string   `json:"when"`
-	Requires []string `json:"requires"`
+	When     string   `json:"when,omitempty"`
+	Requires []string `json:"requires,omitempty"`
+	Equals   []any    `json:"equals,omitempty"`
+	Unless   []string `json:"unless,omitempty"`
+	Forbids  []string `json:"forbids,omitempty"`
 }
 
 // contractConfigFile is a configuration file a command declares: a fixed path, or how it is
@@ -256,6 +291,7 @@ type contractExit struct {
 	Summary   string `json:"summary,omitempty"`
 	Retryable bool   `json:"retryable,omitempty"`
 	Output    any    `json:"output,omitempty"`
+	DocsURL   string `json:"docs_url,omitempty"`
 }
 
 // contractNode is one command as described by the contract and output schema files.
@@ -276,6 +312,10 @@ type contractNode struct {
 	discovery     *PluginDiscovery
 	pluginHost    string       // the program its discovered plugins are named after; "" = this one
 	scope         *schemaScope // the named schemas its $refs name; nil = the root spec's
+
+	hiddenAliases []string    // names that run it but are never listed
+	replacedBy    replacement // the command to use instead of a deprecated one
+	flagSets      []string    // the flag set each of inputs.Flags came from; nil without sets
 }
 
 // contractNodes lists every command depth-first, root first. A hidden command and its
@@ -295,6 +335,7 @@ func (p *program) contractNodes() []contractNode {
 	nodes := []contractNode{{
 		path: []string{}, help: p.rootHelp, inputs: p.rootInputs, output: p.rootOutput, stream: p.rootStream,
 		plugins: p.rootPlugins, passthrough: p.rootPassthrough, discovery: p.rootDiscovery,
+		flagSets: p.rootFlagSets,
 	}}
 	var walk func(rs []rnode, path []string, inherited []FlagInput, hidden bool)
 	walk = func(rs []rnode, path []string, inherited []FlagInput, hidden bool) {
@@ -305,6 +346,7 @@ func (p *program) contractNodes() []contractNode {
 				aliases: n.aliases, plugins: n.plugins, inherited: inherited, deprecate: n.deprecated,
 				deprecatedIDs: n.deprecatedIdentifiers, lifecycle: n.lifecycle, hidden: hidden || n.hidden,
 				passthrough: n.passthrough, discovery: n.discovery, pluginHost: n.pluginHost, scope: n.scope,
+				hiddenAliases: n.hiddenAliases, replacedBy: n.replacedBy, flagSets: n.flagSets,
 			})
 			walk(n.children, names, append(cascading(n.inputs), inherited...), hidden || n.hidden)
 		}
@@ -323,6 +365,11 @@ func (p *program) emitContract() error {
 	nodes := (*program).contractNodes
 	if g.Schemas != nil && g.Schemas.Output != nil {
 		if err := p.writeOutputSchemas(g.Schemas.Output.Dir, nodes(p)); err != nil {
+			return err
+		}
+	}
+	if g.Schemas != nil && g.Schemas.Config != nil {
+		if err := p.writeConfigSchemas(g.Schemas.Config.Dir); err != nil {
 			return err
 		}
 	}
@@ -527,6 +574,10 @@ func (p *program) contract(nodes []contractNode) ([]byte, error) {
 	if rf := p.responseFiles(); rf != nil {
 		doc.ResponseFiles = &contractResponseFiles{Prefix: rf.Prefix}
 	}
+	if on, prefix, complete := p.multicall(); on {
+		doc.Multicall = &contractMulticall{Prefix: prefix, Complete: complete}
+	}
+	doc.Topics = contractTopics(p.rootHelp.Topics)
 	defs := p.contractDefinitions(nodes)
 	if len(defs.pool) > 0 {
 		doc.Definitions = defs.pool
@@ -568,6 +619,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		IdentifiersRemovedIn:  n.lifecycle.removedIDs,
 		Passthrough:           n.passthrough,
 		Stream:                n.stream,
+		Stability:             n.help.Stability,
 	}
 	in := n.inputs
 	if in == nil {
@@ -579,6 +631,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 	params := map[string]any{}
 	var required []string
 	seen := map[string]bool{}
+	// A parameter's description is the input's description, else its summary, as a command's prose is.
 	param := func(name, summary string, schema any, req, hidden bool) {
 		if seen[name] {
 			return // the nearest declaration wins, as on the command line
@@ -605,13 +658,15 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 			Name: a.Name, Summary: a.Summary, Type: f.typ, Kind: f.kind, Required: req, Variadic: isVariadicSchema(a.Schema),
 			Passthrough: a.Passthrough, Separator: f.separator, Glob: a.Schema != nil && a.Schema.Glob,
 			IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative,
+			VariableFile: f.variableFile, Expand: f.expand, RelativeTo: f.relativeTo,
 			Secret: f.secret, Hidden: a.Hidden, EnumValues: contractEnumValues(a.Schema),
 			Deprecated: a.Deprecated, DeprecatedSince: a.DeprecatedSince, RemovedIn: a.RemovedIn,
-			Schema: schemaOf(a.Schema),
+			Schema: schemaOf(a.Schema), Description: a.Description, Stability: a.Stability,
 		}
 		arg.Env, arg.ConfigKey = argumentFallback(a, p.envPrefix, readsConfig)
+		arg.ValuesFrom = valuesFrom(a.Schema)
 		c.Arguments = append(c.Arguments, arg)
-		param(a.Name, a.Summary, arg.Schema, req, a.Hidden)
+		param(a.Name, cmp.Or(a.Description, a.Summary), arg.Schema, req, a.Hidden)
 	}
 	declared := map[string]bool{}
 	for _, f := range slices.Concat(in.Flags, n.inherited) {
@@ -628,10 +683,12 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 			Cascading: f.Cascading && !inherited, Inherited: inherited, ShortCircuit: f.ShortCircuit, Role: f.Role,
 			ConfigSource: facts.configSource, Separator: facts.separator, From: facts.from, ImplicitValue: facts.implicitValue,
 			IgnoreCase: facts.ignoreCase, DottedKeys: facts.dottedKeys, Layouts: facts.layouts, Relative: facts.relative,
-			Secret: facts.secret, VariableFile: facts.variableFile,
+			Secret: facts.secret, VariableFile: facts.variableFile, Expand: facts.expand, RelativeTo: facts.relativeTo,
 			Hidden: f.Hidden, Deprecated: f.Deprecated, DeprecatedSince: f.DeprecatedSince, RemovedIn: f.RemovedIn,
 			DeprecatedIdentifiers: f.DeprecatedIdentifiers, IdentifiersRemovedIn: f.DeprecatedIdentifiersRemovedIn,
 			EnumValues: contractEnumValues(f.Schema), Schema: schemaOf(f.Schema),
+			ValuesFrom:  valuesFrom(f.Schema),
+			Description: f.Description, Stability: f.Stability,
 		}
 		if f.Schema != nil && f.Schema.Repeatable != nil && !*f.Schema.Repeatable {
 			cf.Repeatable = f.Schema.Repeatable
@@ -640,7 +697,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		row := withConfigKeys([]templateDocFlagRow{flagRow(f, p.envPrefix)}, readsConfig)[0]
 		cf.Env, cf.ConfigKey = row.Env, row.ConfigKey
 		c.Flags = append(c.Flags, cf)
-		param(f.Name, f.Summary, cf.Schema, req, f.Hidden)
+		param(f.Name, cmp.Or(f.Description, f.Summary), cf.Schema, req, f.Hidden)
 	}
 	for _, f := range in.Flags {
 		flag(f, false)
@@ -658,12 +715,13 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		c.Output = defs.schemaDoc(n.scope, *n.output)
 	}
 	for _, e := range n.help.ExitStatus {
-		x := contractExit{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable}
+		x := contractExit{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, DocsURL: e.DocsUrl}
 		if e.Output != nil {
 			x.Output = defs.schemaDoc(n.scope, *e.Output)
 		}
 		c.ExitStatus = append(c.ExitStatus, x)
 	}
+	p.contractParserFields(&c, n, in)
 	return c
 }
 
@@ -676,7 +734,7 @@ func (p *program) contractCommandRules(c *contractCommand, n contractNode, in *I
 		c.FlagGroups = append(c.FlagGroups, contractFlagGroup{Kind: g.Kind, Flags: g.Flags})
 	}
 	for _, d := range in.FlagDependencies {
-		c.FlagDependencies = append(c.FlagDependencies, contractFlagDependency{When: d.When, Requires: d.Requires})
+		c.FlagDependencies = append(c.FlagDependencies, contractFlagDependency{When: d.When, Requires: d.Requires, Equals: d.Equals, Unless: d.Unless, Forbids: d.Forbids})
 	}
 	for _, cf := range in.ConfigFiles {
 		file := contractConfigFile{Name: cf.Name, Format: cf.Format, Path: cf.Path, As: cf.As}
@@ -703,9 +761,10 @@ func (p *program) contractSources(c *contractCommand, in *Inputs, scope *schemaS
 			Name: e.Name, Variables: strings.Split(envVarName(e, p.envPrefix), ","), Summary: e.Summary,
 			Type: f.typ, Kind: f.kind, Required: e.Schema != nil && e.Schema.Required, Secret: f.secret,
 			VariableFile: f.variableFile, ConfigSource: f.configSource, Nesting: f.nesting, Separator: f.separator,
-			IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative,
+			IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative, Expand: f.expand, RelativeTo: f.relativeTo,
 			Hidden: e.Hidden, Deprecated: e.Deprecated, DeprecatedSince: e.DeprecatedSince, RemovedIn: e.RemovedIn,
 			EnumValues: contractEnumValues(e.Schema), Schema: defs.rename(scope, inputJSONSchema(e.Schema)),
+			Description: e.Description, Stability: e.Stability,
 		})
 	}
 	for _, cfg := range in.Config {
@@ -720,9 +779,11 @@ func (p *program) contractSources(c *contractCommand, in *Inputs, scope *schemaS
 		c.Config = append(c.Config, contractConfig{
 			Name: cfg.Name, Key: key, File: file, Summary: cfg.Summary, Type: f.typ, Kind: f.kind,
 			Required: cfg.Schema != nil && cfg.Schema.Required, IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative,
+			Expand: f.expand, RelativeTo: f.relativeTo,
 			Secret: f.secret, Hidden: cfg.Hidden, Deprecated: cfg.Deprecated, DeprecatedSince: cfg.DeprecatedSince,
 			RemovedIn: cfg.RemovedIn, EnumValues: contractEnumValues(cfg.Schema),
-			Schema: defs.rename(scope, inputJSONSchema(cfg.Schema)),
+			Schema:      defs.rename(scope, inputJSONSchema(cfg.Schema)),
+			Description: cfg.Description, Stability: cfg.Stability,
 		})
 	}
 	if in.Stdin != nil {

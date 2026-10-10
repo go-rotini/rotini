@@ -1,0 +1,2 @@
+conf: .rotini.conf.yaml:17:20: generate.features.man.install_dir: "share/../../outside" must resolve under the module root
+conf: .rotini.conf.yaml:21:20: generate.features.help.install_dir: `install_dir` writes installable completion scripts and man pages, so it applies only to the completion and man features; move it there or remove it

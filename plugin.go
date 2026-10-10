@@ -356,7 +356,7 @@ func discoveredFor(cmd Command) ([]DiscoveredPlugin, []error) {
 	declared := map[string]bool{}
 	for _, c := range cmd.Commands {
 		declared[c.Name] = true
-		for _, a := range c.Aliases {
+		for _, a := range slices.Concat(c.Aliases, c.HiddenAliases) {
 			declared[a] = true
 		}
 	}

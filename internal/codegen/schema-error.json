@@ -20,7 +20,8 @@
             "command": { "type": "string", "description": "The command the error happened in, as typed: \"taskr list\"." },
             "flag": { "type": "string", "description": "The flag involved, by the identifier the user typed." },
             "token": { "type": "string", "description": "The token or value at fault: a command-line token, an environment or config value outside its allowed values, or a mistyped plugin command. A secret value is redacted." },
-            "exit_code": { "type": "integer", "description": "The code the run exits with, decided as the default reporter decides it." }
+            "exit_code": { "type": "integer", "description": "The code the run exits with, decided as the default reporter decides it." },
+            "candidates": { "type": "array", "items": { "type": "string" }, "description": "The words token was checked against, as rotini.SuggestionFacts returns them: the command's visible sub-commands, its flag spellings, or an input's allowed values. Present only with token. Rotini doesn't rank them; a tool can offer the nearest. Hidden spellings, hidden values and a secret input's values never appear." }
           }
         }
       }

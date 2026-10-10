@@ -1,2 +1,13 @@
 spec: .rotini.spec.yaml:12:7: command demo: `flag_dependencies` entry references unknown flag "cert"; it has no matching entry in this command's `flags`
 spec: .rotini.spec.yaml:16:7: command demo: `flag_dependencies` entry makes flag "tls" require itself, which is always true; remove "tls" from `requires`
+spec: .rotini.spec.yaml:42:11: command demo/export: `flag_dependencies` entry has no trigger; give `when` (the flag that turns the rule on) or `unless` (flags that turn it off)
+spec: .rotini.spec.yaml:43:11: command demo/export: `flag_dependencies` entry has no effect; give `requires` (flags that must be set) or `forbids` (flags that can't be)
+spec: .rotini.spec.yaml:45:11: command demo/export: `flag_dependencies` entry sets `equals` without `when`; `equals` names values of the `when` flag
+spec: .rotini.spec.yaml:48:11: command demo/export: `flag_dependencies` entry sets `equals` on flag "tags", which is a []string; `equals` compares one value, so the `when` flag must hold a single value (a string, number, bool or enum)
+spec: .rotini.spec.yaml:51:11: command demo/export: `flag_dependencies` entry compares flag "format" with "xml", which is not one of its `enum` values (text, csv), so the rule never applies
+spec: .rotini.spec.yaml:54:11: command demo/export: `flag_dependencies` entry compares flag "limit" with a value it can't take: "ten" is not a valid integer, so the rule never applies
+spec: .rotini.spec.yaml:58:11: command demo/export: `flag_dependencies` entry both requires and forbids flag "delimiter"; keep it in one of `requires` and `forbids`
+spec: .rotini.spec.yaml:61:11: command demo/export: `flag_dependencies` entry forbids flag "all" when "all" is set, so it can never be set; remove "all" from `forbids`
+spec: .rotini.spec.yaml:61:11: command demo/export: `flag_dependencies` entry lists flag "all" in both `when` and `unless`, so it never applies; remove it from `unless`
+spec: .rotini.spec.yaml:64:11: command demo/export: `flag_dependencies` entry references unknown flag "nope"; it has no matching entry in this command's `flags`
+spec: .rotini.spec.yaml:64:11: command demo/export: `flag_dependencies` entry requires flag "limit", which also turns the rule off (`unless`), so the requirement can never fail; remove it from one of the two

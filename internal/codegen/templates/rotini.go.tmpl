@@ -11,10 +11,10 @@ import (
 {{- if .EmbedImport}}
 	_ "embed"
 {{- end}}
-{{- if .Features}}
+{{- if or .Features .UsageFunc}}
 	"fmt"
 {{- end}}
-{{- if .PathResolvers}}
+{{- if or .PathResolvers .UsageFunc}}
 	"strings"
 {{- end}}
 {{- if .ModelsImport}}
@@ -38,12 +38,23 @@ type ProgramHandlers interface {
 type {{.}} = models.{{.}}
 {{- end}}
 {{- end}}
+{{- range .FlagSets}}
+
+type {{.Type}} struct {
+{{- range .Fields}}
+	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
+{{- end}}
+}
+{{- end}}
 {{- range .Blocks}}
 
-{{if .Flags}}
+{{if or .Flags .Embeds}}
 type {{.Prefix}}Flags struct {
 {{- range .Flags}}
 	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
+{{- end}}
+{{- range .Embeds}}
+	{{.}}
 {{- end}}
 }
 {{- else}}
@@ -104,6 +115,9 @@ type {{.Prefix}}Inputs struct {
 {{.}}
 {{end}}
 {{- with .Contract}}
+{{.}}
+{{end}}
+{{- with .UsageFunc}}
 {{.}}
 {{end}}
 {{- with .InputSettings}}
@@ -200,12 +214,12 @@ func {{.Resolver}}(path ...string) (string, error) {
 {{- if .PagesFunc}}
 
 // {{.PagesFunc}} returns every command's {{.Noun}} page, root first in tree order, leaving out
-// hidden commands and the commands below them. Each page's Content is what {{.Resolver}}
-// returns for its Path.
+// hidden commands and the commands below them, then each help topic's page (Topic set). Each
+// page's Content is what {{.Resolver}} returns for its Path.
 func {{.PagesFunc}}() []rotini.Page {
 	return []rotini.Page{
 {{- range .Pages}}
-		{Name: {{printf "%q" .Name}}, Path: {{.PathLiteral}}, Content: {{.Var}}},
+		{Name: {{printf "%q" .Name}}, Path: {{.PathLiteral}}, Content: {{.Var}}{{if .Topic}}, Topic: true{{end}}},
 {{- end}}
 	}
 }

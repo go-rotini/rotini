@@ -7,6 +7,7 @@
        with "." or holding a "\" would be read as markup. Use:
          roff       one line of text (line breaks become spaces)
          roffBlock  paragraphs: lines escaped, blank lines become .PP breaks
+         roffIndented  the same, with .sp breaks, for text inside a .TP paragraph
          roffLines  lines kept as written, for inside .nf … .fi
          roffArg    one quoted argument of a request such as .TH or .SH
 
@@ -37,10 +38,21 @@
          "") and .Retryable. Command, argument, flag, env and config rows carry
          .DeprecatedSince and .RemovedIn; deprecation .Deprecated .DeprecatedSince .RemovedIn
          renders "deprecated since 1.4.0, removed in 2.0.0: <message>".
-       HELPERS: roff, roffBlock, roffLines, roffArg, join, upper, lower, title, trim,
-                trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
-                hasPrefix, hasSuffix, first, last, alsoSetBy, deprecation, listed, described. */ -}}
-{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}{{end -}}
+         Argument, flag, env and config rows carry .Description (the input's longer text,
+         paragraphs separated by blank lines; roffIndented keeps it inside the option's .TP)
+         and .Stability ("experimental", "beta" or "" for stable, as declared), and command rows
+         carry .Stability. The page's own .Stability is the command's, inherited from its
+         ancestors; stabilityNote .Stability renders the line saying what it promises. An exit
+         status row carries .DocsURL, a link to more about the code, or "".
+         The root's page carries .Topics[] {.Name .Summary}, its help topics. On a topic's page
+         .Topic is true: .Summary and .Description are the topic's, .Environment holds a
+         generated environment topic's rows, each with .Commands (the commands that read it),
+         and the rest is empty.
+       HELPERS: roff, roffBlock, roffIndented, roffLines, roffArg, join, upper, lower, title,
+                trim, trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
+                hasPrefix, hasSuffix, first, last, alsoSetBy, deprecation, stabilityNote, listed,
+                described. */ -}}
+{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}{{end -}}
 {{- define "rules"}}{{with .Rules}}.br
 {{roff (join . "; ")}}
 {{end}}{{end -}}
@@ -51,37 +63,47 @@
 {{end}}.RE
 .RE
 {{end}}{{end -}}
+{{- define "description"}}{{with .Description}}.sp
+{{roffIndented .}}
+{{end}}{{end -}}
 {{- define "flag"}}.TP
 {{range $i, $id := .Identifiers}}{{if $i}}, {{end}}\fB{{roff $id}}\fR{{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
-{{template "rules" .}}{{if or .Env .ConfigKey}}.br
+{{template "description" .}}{{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
 {{end}}{{template "values" .}}{{end -}}
-.TH {{roffArg (upper .PageName)}} {{.Section}} "{{.Date}}" {{roffArg .Source}} "User Commands"
+.TH {{roffArg (upper .PageName)}} {{.Section}} "{{.Date}}" {{roffArg .Source}} {{if .Topic}}"Miscellaneous"{{else}}"User Commands"{{end}}
 .SH NAME
 {{roff .PageName}}{{with .Summary}} \- {{roff .}}{{end}}
-.SH SYNOPSIS
+{{if not .Topic}}.SH SYNOPSIS
 {{if .Usage}}.nf
 {{roffLines .Usage}}
 .fi
 {{else}}\fB{{roff .Invocation}}\fR {{roff (trimPrefix .Invocation .UsageDerived)}}
-{{end}}{{with .Passthrough}}.PP
+{{end}}{{end}}{{with .Passthrough}}.PP
 Every word after \fB{{roff .}}\fR is passed through as written, so options go before \fB{{roff .}}\fR.
 {{end}}
-{{with .Description}}.SH DESCRIPTION
-{{roffBlock .}}
-{{end}}
+{{if or .Description .Stability}}.SH DESCRIPTION
+{{with .Description}}{{roffBlock .}}
+{{end}}{{with .Stability}}{{if $.Description}}.PP
+{{end}}{{roff (stabilityNote .)}}
+{{end}}{{end}}
 {{range .CommandGroups}}.SH {{roffArg (upper (default "Commands" .Title))}}
 {{with .Description}}{{roffBlock .}}
 {{end}}{{range .Commands}}.TP
 \fB{{roff .Name}}\fR{{range .Aliases}}, \fB{{roff .}}\fR{{end}}
-{{roff .Summary}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
+{{roff .Summary}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
+{{end}}{{end}}
+{{with .Topics}}.SH "HELP TOPICS"
+{{range .}}.TP
+\fB{{roff .Name}}\fR
+{{roff .Summary}}
 {{end}}{{end}}
 {{with .Arguments}}.SH ARGUMENTS
 {{range .}}.TP
 \fI{{if .Required}}<{{roff .Name}}{{if .Variadic}}...{{end}}>{{else}}[{{roff .Name}}{{if .Variadic}}...{{end}}]{{end}}\fR
-{{roff .Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
-{{template "rules" .}}{{if or .Env .ConfigKey}}.br
+{{roff .Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
+{{template "description" .}}{{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
 {{end}}{{template "values" .}}{{end}}{{end}}
 {{range .FlagGroups}}.SH {{roffArg (upper (default "Options" .Title))}}
@@ -92,13 +114,13 @@ Every word after \fB{{roff .}}\fR is passed through as written, so options go be
 {{with .Environment}}.SH ENVIRONMENT
 {{range .}}.TP
 \fB{{roff .Var}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
-{{roff .Summary}}{{template "notes" .}}
-{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
+{{roff .Summary}}{{with .Commands}} (used by: {{roff (join . ", ")}}){{end}}{{template "notes" .}}
+{{template "description" .}}{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
 {{with .Configuration}}.SH CONFIGURATION
 {{range .}}.TP
 \fB{{roff .Name}}\fR{{with .Location}} ({{roff .}}){{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}
-{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
+{{template "description" .}}{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
 {{with .Stdin}}.SH STDIN
 {{with .Description}}{{roffBlock .}}
 .PP
@@ -119,7 +141,9 @@ Every word after \fB{{roff .}}\fR is passed through as written, so options go be
 {{range .}}.TP
 \fB{{.Code}}\fR{{with .Name}} ({{roff .}}){{end}}
 {{roff .Summary}}{{if .Retryable}} (retryable){{end}}{{with .Output}} (writes \fB{{roff .}}\fR to standard output){{end}}
-{{end}}{{end}}
+{{with .DocsURL}}.br
+See \fI{{roff .}}\fR.
+{{end}}{{end}}{{end}}
 {{with .Examples}}.SH EXAMPLES
 .RS 4
 .nf

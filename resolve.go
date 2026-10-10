@@ -24,6 +24,7 @@ type Command struct {
 	Deprecated            string   // the command's deprecation message, when it is deprecated as a whole
 	DeprecatedSince       string   // the release that deprecated it; see [CommandDef.DeprecatedSince]
 	RemovedIn             string   // the release that will remove it
+	ReplacedBy            string   // the command to use instead; see [CommandDef.ReplacedBy]
 	Flags                 []FlagDef
 	Arguments             []ArgDef
 	FlagGroups            []FlagGroup
@@ -52,6 +53,9 @@ type Command struct {
 	// rtx.Command().Invoked distinguishes the invoked command from its ancestors.
 	Invoked bool
 
+	// Usage is the command's usage line; see [CommandDef.Usage] and [Context.Usage].
+	Usage string
+
 	// pluginPathRaw is PluginPath as declared, for re-expanding it against a run's injected
 	// environment; view is that run's environment, used by [Command.PluginBinary] and
 	// [Command.DiscoveredPlugins]. Both are set by the runtime; nil reads the process.
@@ -75,7 +79,7 @@ func rootFrame(def Definition) Command {
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Plugins: def.Plugins, PluginDiscovery: def.PluginDiscovery,
 		PluginPath: expandPluginPath(def.PluginPath), pluginPathRaw: def.PluginPath, Passthrough: def.Passthrough, OptionsFirst: def.OptionsFirst,
-		Output: def.Output,
+		Output: def.Output, Usage: def.Usage,
 	}
 }
 
@@ -83,12 +87,12 @@ func rootFrame(def Definition) Command {
 func cmdFrame(c CommandDef) Command {
 	return Command{
 		Name: c.Name, Handler: c.Handler, DeprecatedIdentifiers: c.DeprecatedIdentifiers, Deprecated: c.Deprecated,
-		DeprecatedSince: c.DeprecatedSince, RemovedIn: c.RemovedIn, DeprecatedIdentifiersRemovedIn: c.DeprecatedIdentifiersRemovedIn,
+		DeprecatedSince: c.DeprecatedSince, RemovedIn: c.RemovedIn, DeprecatedIdentifiersRemovedIn: c.DeprecatedIdentifiersRemovedIn, ReplacedBy: c.ReplacedBy,
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Plugins: c.Plugins, PluginDiscovery: c.PluginDiscovery,
 		PluginPath: expandPluginPath(c.PluginPath), pluginPathRaw: c.PluginPath, Passthrough: c.Passthrough, OptionsFirst: c.OptionsFirst,
-		Output: c.Output,
+		Output: c.Output, Usage: c.Usage,
 	}
 }
 
@@ -188,13 +192,10 @@ func splitFlag(tok string) (name, value string, hasValue bool) {
 	return tok, "", false
 }
 
-// findChild returns the sub-command of f matching tok by name or alias.
+// findChild returns the sub-command of f matching tok by name, alias or hidden alias.
 func findChild(f Command, tok string) (CommandDef, bool) {
 	for _, c := range f.Commands {
-		if c.Name == tok {
-			return c, true
-		}
-		if slices.Contains(c.Aliases, tok) {
+		if c.matches(tok) {
 			return c, true
 		}
 	}
@@ -233,7 +234,8 @@ type Resolver func(def Definition, argv []string) (Resolution, error)
 // A plugin receives only the words after its name, so flags typed before the name are checked
 // strictly: a short-circuit flag set there (such as --help) cancels the dispatch, and the run
 // answers it for the command the words before the plugin name resolve to, with [Resolution.Argv]
-// cut to those words. Any other flag there, or one that does not parse, is returned as a usage
+// cut to those words. The root's `role: chdir` flag may come there too: the plugin runs in its
+// directory. Any other flag there, or one that does not parse, is returned as a usage
 // [*ParseError].
 func DefaultResolver(def Definition, argv []string) (Resolution, error) {
 	chain, plugin := resolveChain(def, argv)
@@ -252,8 +254,10 @@ func DefaultResolver(def Definition, argv []string) (Resolution, error) {
 
 // pluginHostFlags checks the words before plugin's name (before) against chain, the commands
 // they resolved. It reports whether a short-circuit flag set there replaces the dispatch, and
-// fails on any other flag, which the plugin would never receive.
+// fails on any other flag, which the plugin would never receive. The root's `role: chdir` flag
+// is allowed there: the plugin runs in its directory.
 func pluginHostFlags(chain []Command, before []string, plugin string) (answer bool, err error) {
+	before = withoutChdir(chain, before)
 	first := slices.IndexFunc(before, flagIn(chain))
 	if first < 0 {
 		return false, nil

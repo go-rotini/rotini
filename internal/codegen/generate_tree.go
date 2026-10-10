@@ -57,6 +57,9 @@ type rnode struct {
 	stream                bool             // output_stream: the command writes a stream of output items
 	lifecycle             lifecycle        // deprecated_since, removed_in and per-alias removals
 	inputsType            string           // Go type of the command's inputs, qualified when composed; "" when none can be named
+	hiddenAliases         []string         // names that dispatch but are never listed
+	replacedBy            replacement      // the replacement of a deprecated command
+	flagSets              []string         // the flag set each of inputs.Flags came from, "" for its own; nil without sets
 	children              []rnode
 }
 
@@ -92,6 +95,11 @@ type composeCtx struct {
 	// nested marks a subtree grafted from a `$ref` inside a composed child; its types live in
 	// a package the parent doesn't import.
 	nested bool
+	// specRoot is the underscore path of the root command of the spec declaring the subtree, which
+	// a `replaced_by` path is relative to; "" for the program's own spec.
+	specRoot string
+	// flagSets are the flag sets of the spec declaring the subtree; nil for the program's own.
+	flagSets map[string]FlagSet
 }
 
 // scopedConfigFile is one config_files entry tagged with the path of the command that
@@ -158,6 +166,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		configFiles:     allScopedConfigFiles(spec),
 		envPrefix:       envPrefix,
 		adoptedPrefixes: map[string]string{},
+		flagSets:        spec.Command.FlagSets,
 	}
 	gp.root = genCommand{
 		prefix:         gp.rootPascal,
@@ -172,6 +181,8 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		exitCodes:      exitCodesOf(root.ExitStatus),
 		secret:         hasSecretInput(root.inputs()),
 	}
+	gp.embedFlagSets(&gp.root, &root)
+	gp.rootFlagSets = flagSetNames(&root, gp.flagSets)
 
 	absSpec := specPath
 	if a, err := filepath.Abs(specPath); err == nil {
@@ -263,6 +274,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				gc.delegateMethod = c.Handler.Convention
 				gc.filename = ""
 			}
+			gp.embedFlagSets(&gc, &c)
 			gp.own = append(gp.own, gc)
 		}
 
@@ -291,6 +303,9 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			stream:                c.OutputStream,
 			lifecycle:             lifecycleOf(&c),
 			inputsType:            inputsType,
+			hiddenAliases:         c.HiddenAliases,
+			replacedBy:            gp.commandReplacement(c.ReplacedBy, ctx.specRoot),
+			flagSets:              flagSetNames(&c, ctx.setsOr(gp.flagSets)),
 			children:              children,
 		})
 	}
@@ -333,6 +348,7 @@ func overlayCommand(child, parent Command) Command {
 	if parent.RemovedIn != "" {
 		m.RemovedIn = parent.RemovedIn
 	}
+	m.Stability = cmp.Or(parent.Stability, m.Stability)
 	if parent.Summary != "" {
 		m.Summary = parent.Summary
 	}
@@ -378,6 +394,7 @@ func overlayCommand(child, parent Command) Command {
 	if parent.PluginPath != "" {
 		m.PluginPath = parent.PluginPath
 	}
+	overlaySpellings(&m, parent)
 	return m
 }
 
@@ -455,7 +472,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	})
 
 	scope := &schemaScope{name: childRoot.Name, schemas: childRoot.Schemas}
-	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, pluginHost: childRoot.Name, scope: scope}
+	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, pluginHost: childRoot.Name, scope: scope, specRoot: composeRootPath, flagSets: childRoot.FlagSets}
 	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
@@ -483,7 +500,9 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		discovery: childRoot.PluginDiscovery, pluginPath: merged.PluginPath,
 		pluginHost: childRoot.Name, composed: true, children: children,
 		scope: scope, lifecycle: lifecycleOf(&merged),
-		inputsType: composedInputsType(ctx, delegateRoot),
+		inputsType:    composedInputsType(ctx, delegateRoot),
+		hiddenAliases: merged.HiddenAliases,
+		replacedBy:    gp.overlayReplacement(c.ReplacedBy, childRoot.ReplacedBy, "", composeRootPath),
 	}, nil
 }
 
@@ -549,9 +568,17 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	gcCtx.pluginHost = gc.Name
 	gcCtx.scope = &schemaScope{name: gc.Name, schemas: gc.Schemas}
 	gcCtx.nested = true
+	gcCtx.flagSets = gc.FlagSets
+	gcCtx.specRoot = synth.Name
+	if parentPath != "" {
+		gcCtx.specRoot = parentPath + "_" + synth.Name
+	}
 	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleName, seen, gcCtx)
 	if err != nil {
 		return nil, err
+	}
+	if len(nodes) == 1 {
+		nodes[0].replacedBy = gp.overlayReplacement(c.ReplacedBy, gc.ReplacedBy, ctx.specRoot, gcCtx.specRoot)
 	}
 	// `commands:` beside the nested `$ref` resolve against this spec's base, delegate to the
 	// direct child, and are grafted as children of the grandchild.
@@ -663,6 +690,7 @@ type inputFields struct {
 	args   []fieldDef
 	env    []fieldDef // <Prefix>Env fields (pure environment inputs)
 	config []fieldDef // <Prefix>Config fields (pure config-file inputs)
+	embeds []string   // the flag set structs embedded in <Prefix>Flags, after flags
 }
 
 // inputFieldsOf derives in's generated struct fields under the program's env prefix.

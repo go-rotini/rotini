@@ -100,6 +100,10 @@
         "output": {
           "$ref": "#/definitions/OutputSchemasConfig",
           "description": "Where to write one JSON Schema per command output declared in the spec, so scripts and other tools can validate what a command writes."
+        },
+        "config": {
+          "$ref": "#/definitions/ConfigSchemasConfig",
+          "description": "Where to write one JSON Schema per configuration file the spec declares, describing the keys your users may write in it, for completion and checking in their editor (`# yaml-language-server: $schema=…` in YAML, `#:schema …` in TOML, a `$schema` key in JSON)."
         }
       }
     },
@@ -251,6 +255,24 @@
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "examples": ["TASKR_COMPLETION_DESCRIPTIONS"],
           "description": "completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide the descriptions shown beside completion candidates, in every shell; unset or any other value leaves them on. Descriptions show by default: zsh, fish and PowerShell beside each candidate, and bash on the second TAB. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionDescriptions replaces this check with a rule of your own."
+        },
+        "install_dir": {
+          "type": "string",
+          "pattern": "^(\\.|[a-zA-Z0-9_][a-zA-Z0-9_./-]*)$", "examples": ["share", "."],
+          "description": "completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/<name>.bash, completions/_<name> (zsh), completions/<name>.fish and completions/<name>.ps1, and man/man<section>/<page>.<section>, where <name> is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone is removed. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error."
+        }
+      }
+    },
+    "ConfigSchemasConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dir"],
+      "description": "A directory of JSON Schemas, '<page-name>.<file-name>.config.json' for each config_files entry (taskr.user.config.json for a file 'user' declared on the root, taskr-deploy.user.config.json for one declared on deploy). A schema lists every key a command that reads the file binds: config inputs and flags' config keys, with their types, enums and value summaries, defaults (never a secret's), bounds and deprecations. It doesn't forbid other keys, which rotini ignores. A file's own declared `schema` is included under allOf. dotenv files and files read as environment variables get none. Rewritten on every generate; a '*.config.json' file in the directory that no entry produces any more is removed.",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "pattern": "^[^/\\\\].*$", "examples": ["schemas/config"],
+          "description": "Module-root-relative directory (no leading slash) the config file schemas are written to."
         }
       }
     }

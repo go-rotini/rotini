@@ -1,0 +1,27 @@
+# A hidden alias or identifier dispatches and parses like a listed one, so it can't repeat a
+# listed spelling or clash with another command's or flag's.
+version: 0.0.0
+command:
+  name: demo
+  hidden_aliases: [d]
+  commands:
+    # Correct: a hidden alias may be deprecated.
+    - name: remove
+      aliases: [rm]
+      hidden_aliases: [rm, del, erase]
+      deprecated_identifiers: [erase]
+      deprecated: use remove
+    - name: del
+    - name: get
+      flags:
+        - name: output
+          identifiers: [--output]
+          hidden_identifiers: [--output, --out]
+          schema: { type: string }
+        - name: other
+          identifiers: [--out]
+          schema: { type: string }
+        - name: color
+          identifiers: [--color]
+          hidden_identifiers: [--no-color]
+          schema: { type: bool, negatable: true }

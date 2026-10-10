@@ -57,6 +57,9 @@ func lintValuesParse(spec *Spec) []error {
 // built here.
 func runtimeRejects(schema *InputSchema, values []string) string {
 	defType := definitionType(schema, nil)
+	if len(schema.Expand) > 0 {
+		return "" // the default is expanded at run time, so its written form is not the value
+	}
 	if defType == "count" || strings.Contains(defType, "existingfile") || strings.Contains(defType, "existingdir") ||
 		strings.Contains(defType, "inputfile") || strings.Contains(defType, "outputfile") {
 		return ""

@@ -47,7 +47,7 @@ env TASKR_CHECKS=
 env TASKR_STRUCTURED=1
 ! exec ./taskr$exe list -o json --bogus
 ! stdout .
-stderr '^\{"error":\{"category":"usage","command":"taskr list","exit_code":2,"flag":"--bogus","kind":"unknown-flag","message":".*","token":"--bogus"\}\}$'
+stderr '^\{"error":\{"candidates":\[[^]]*"--output"[^]]*\],"category":"usage","command":"taskr list","exit_code":2,"flag":"--bogus","kind":"unknown-flag","message":".*","token":"--bogus"\}\}$'
 ! exec ./taskr$exe list -o table --bogus
 stderr '^Error: '
 env TASKR_STRUCTURED=

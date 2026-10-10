@@ -2,7 +2,9 @@
 package demo
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/go-rotini/rotini"
 )
@@ -19,6 +21,7 @@ var definition = rotini.Definition{
 		{Name: "verbose", Identifiers: []string{"--verbose", "-v"}, Summary: "verbose output", Type: "bool"},
 	},
 	Inputs: reflect.TypeFor[DemoInputs](),
+	Usage:  "demo [flags] <command>",
 	Commands: []rotini.CommandDef{
 		{Name: "build",
 			Handler: "DemoBuild",
@@ -31,6 +34,7 @@ var definition = rotini.Definition{
 				{Name: "target", Type: "string"},
 			},
 			Inputs: reflect.TypeFor[DemoBuildInputs](),
+			Usage:  "demo build [flags] [target]",
 		},
 	},
 }
@@ -74,6 +78,20 @@ type DemoBuildCommandInputs struct {
 type DemoBuildInputs struct {
 	Demo      DemoCommandInputs
 	DemoBuild DemoBuildCommandInputs
+}
+
+// Usage returns the usage line of the command identified by path (command names or
+// aliases; no arguments for the root), or an error when path names no command. A handler
+// uses rtx.Usage() instead, which is right for a composed command too.
+func Usage(path ...string) (string, error) {
+	switch strings.Join(path, " ") {
+	case "":
+		return "demo [flags] <command>", nil
+	case "build":
+		return "demo build [flags] [target]", nil
+	default:
+		return "", fmt.Errorf("no usage for command %q", strings.Join(path, " "))
+	}
 }
 
 // InputSettings is the generated descriptor the default input reader (rotini.InputReader) reads.

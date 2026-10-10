@@ -1,0 +1,6 @@
+spec: .rotini.spec.yaml:6:19: command demo: the root command cannot declare `hidden_aliases` ("d"); it is reached by invoking the binary, not by a routing token; declare them on sub-commands
+spec: .rotini.spec.yaml:21:11: command demo/get: flag "other": identifier "--out" is already declared by flag "output"
+spec: .rotini.spec.yaml:14:7: command demo: dispatch token "del" is claimed by both "remove" and "del"
+spec: .rotini.spec.yaml:11:23: command demo/remove: `hidden_aliases` entry "rm" is already the command's name or one of its `aliases`; a name is either listed or hidden, so remove it from one of the two
+spec: .rotini.spec.yaml:17:11: command demo/get: flag "output": `hidden_identifiers` entry "--output" is already one of its listed spellings; an identifier is either listed or hidden, so remove it from one of the two
+spec: .rotini.spec.yaml:24:11: command demo/get: flag "color": `hidden_identifiers` entry "--no-color" is already one of its listed spellings; an identifier is either listed or hidden, so remove it from one of the two

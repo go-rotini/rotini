@@ -55,7 +55,8 @@ const (
 //     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion],
 //     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions], and the environment and working directory a run reads,
 //     [Program.WithEnviron] and [Program.WithDir], and the clock relative times read,
-//     [Program.WithClock]
+//     [Program.WithClock]; [Program.WithTerminationTimeout] bounds the wait after a signal, and
+//     [Program.WithArgv0] sets the name a multicall program dispatches on
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
@@ -103,6 +104,9 @@ type Program struct {
 	signalSet       []os.Signal      // signals trapped when on; empty → trapSignals
 	completion      CompletionFormat // the format __complete answers in; nil → rotini's own. See WithCompletion.
 
+	terminationTimeout time.Duration // WithTerminationTimeout: 0 → wait for teardown or a second signal
+	argv0              string        // WithArgv0: the name the program was invoked as; read only for multicall
+
 	// completionMessages decides whether completion messages show; nil reads the declared
 	// environment variable. See WithCompletionMessages.
 	completionMessages func(rtx *Context) bool
@@ -145,6 +149,7 @@ func NewProgram(def Definition, handlers any) *Program {
 func newProgram(def Definition, lookup HandlerLookup) *Program {
 	return &Program{
 		args:            os.Args[1:],
+		argv0:           invokedName(),
 		def:             def,
 		lookup:          lookup,
 		rtx:             newContext(),
@@ -496,6 +501,14 @@ func (p *Program) RunContext(ctx context.Context, argv []string) (int, error) {
 // runWith is the shared core of Run and RunContext. hasCtx reports whether the caller
 // supplied the context, which decides the default signal trap.
 func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (int, error) {
+	argv, complete := p.multicall(argv)
+	if complete {
+		format := p.completion
+		if format == nil {
+			format = PluginCompletion
+		}
+		return p.complete(runCtx, argv, format)
+	}
 	if len(argv) > 0 && argv[0] == completeCommand {
 		return p.complete(runCtx, argv[1:], p.completion)
 	}
@@ -554,8 +567,21 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		}
 		return p.settle(ctx, rtx)
 	}
+	// The chdir flag is read before anything else uses the run's directory, plugins included.
 	if res.Plugin != nil {
+		before := argv[:max(len(argv)-len(res.Plugin.Args)-1, 0)]
+		if _, err := p.applyChdir(rtx, res.Chain, before); err != nil {
+			rtx.RecordError(err)
+			return p.settle(ctx, rtx)
+		}
 		return p.execPlugin(ctx, rtx, res.Chain, pluginDispatchFor(res.Chain, res.Plugin, rtx.view))
+	}
+	if res.Argv != nil {
+		argv = res.Argv
+	}
+	if argv, err = p.applyChdir(rtx, res.Chain, argv); err != nil {
+		rtx.RecordError(err)
+		return p.settle(ctx, rtx)
 	}
 	if len(res.Chain) == 0 {
 		// An empty chain violates the resolver contract.
@@ -564,9 +590,6 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	}
 
 	rtx.Argv = argv
-	if res.Argv != nil {
-		rtx.Argv = res.Argv
-	}
 	// Cloned so marking the invoked command never writes into a slice a custom resolver may
 	// share between runs.
 	chain := slices.Clone(res.Chain)
@@ -579,7 +602,9 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 // installTrap starts rotini's signal trap for one run and returns the function that removes
 // it. The first signal cancels the run with the signal's exit code as the cause, so dispatch
 // halts and teardown runs; a second calls the exit action with forceExitCode, skipping the
-// remaining teardown after beforeExit, a best-effort flush of buffered stdout.
+// remaining teardown after beforeExit, a best-effort flush of buffered stdout. With
+// WithTerminationTimeout, a run still going that long after the first signal exits the same
+// way, with the first signal's code.
 func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func()) (stop func()) {
 	sigs := p.signalSet
 	if len(sigs) == 0 {
@@ -589,17 +614,29 @@ func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func())
 	signal.Notify(sigCh, sigs...)
 
 	done := make(chan struct{})
+	timeout := p.terminationTimeout
 	go func() {
+		var code int
 		select {
 		case s := <-sigCh:
-			cancel(exitCodeError{code: signalExitCode(s), signal: true})
+			code = signalExitCode(s)
+			cancel(exitCodeError{code: code, signal: true})
 		case <-done:
 			return
+		}
+		var expired <-chan time.Time
+		if timeout > 0 {
+			t := time.NewTimer(timeout)
+			defer t.Stop()
+			expired = t.C
 		}
 		select {
 		case <-sigCh:
 			beforeExit()
 			p.exit(forceExitCode)
+		case <-expired:
+			beforeExit()
+			p.exit(code)
 		case <-done:
 		}
 	}()

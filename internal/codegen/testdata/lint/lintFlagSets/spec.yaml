@@ -1,0 +1,41 @@
+# Flag sets are declared on the root and used by name, and their flags become each using
+# command's own: names and generated fields can't repeat, and a set's rules name its own flags.
+version: 0.0.0
+command:
+  name: demo
+  flag_sets:
+    # Correct: used by two commands. Its bad default is reported once, at the set.
+    Paging:
+      flags:
+        - name: limit
+          schema: { type: int, default: abc }
+    Output:
+      flags:
+        - name: format
+          schema: { type: string, enum: [text, json] }
+        - name: dry_run
+          schema: { type: bool }
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [format, verbose]
+    Unused:
+      flags:
+        - name: x
+          schema: { type: bool }
+  commands:
+    - name: list
+      use: [Paging, Output]
+      flags:
+        - name: format
+          identifiers: [--fmt]
+          schema: { type: string }
+        - name: dry-run
+          identifiers: [--dry]
+          schema: { type: bool }
+    - name: show
+      use: [Paging, Outptu]
+      flag_sets:
+        Local:
+          flags:
+            - name: y
+              schema: { type: bool }

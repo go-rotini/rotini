@@ -79,6 +79,8 @@ func ArgvPath(names ...string) ArgvOption {
 //
 // A value no command line can supply is an [*ArgvError], never silently dropped:
 //   - a secret flag or argument, unless [ArgvSecrets] is passed;
+//   - a secret flag or argument that refuses a literal value (its from: leaves out value), even
+//     with [ArgvSecrets]: pass it through a file or stdin;
 //   - a config or stdin input (write the file, or supply stdin, yourself);
 //   - an argument of a command other than the invoked one, or one after an unset argument;
 //   - "-" on a flag or argument that reads stdin from it;
@@ -266,6 +268,9 @@ func argvIdentifier(fd FlagDef) string {
 
 // flag writes one set flag.
 func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
+	if literalFree(fd.Secret, fd.From) {
+		return &ArgvError{Field: p, Reason: secretTakesNoLiteral}
+	}
 	if fd.Secret && !w.cfg.secrets {
 		return &ArgvError{Field: p, Reason: "a secret is visible in the process list as argv; pass rotini.ArgvSecrets() to write it anyway"}
 	}
@@ -432,6 +437,9 @@ func (w *argvWriter) arguments(top string, ci reflect.Value, frame Command, leaf
 		given[j] = true
 		if !leaf {
 			return &ArgvError{Field: p, Reason: fmt.Sprintf("only the invoked command takes arguments; %q is an ancestor", frame.Name)}
+		}
+		if literalFree(defs[j].Secret, defs[j].From) {
+			return &ArgvError{Field: p, Reason: secretTakesNoLiteral}
 		}
 		if defs[j].Secret && !w.cfg.secrets {
 			return &ArgvError{Field: p, Reason: "a secret is visible in the process list as argv; pass rotini.ArgvSecrets() to write it anyway"}

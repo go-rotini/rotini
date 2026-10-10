@@ -9,12 +9,23 @@ import (
 {{- end}}
 )
 {{- end}}
+{{- range .FlagSets}}
+
+type {{.Type}} struct {
+{{- range .Fields}}
+	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
+{{- end}}
+}
+{{- end}}
 {{- range .Blocks}}
 
-{{if .Flags}}
+{{if or .Flags .Embeds}}
 type {{.Prefix}}Flags struct {
 {{- range .Flags}}
 	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
+{{- end}}
+{{- range .Embeds}}
+	{{.}}
 {{- end}}
 }
 {{- else}}

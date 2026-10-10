@@ -1,9 +1,9 @@
 package rotini
 
 // WithEnviron sets the environment a run reads, in exec.Cmd.Env's KEY=value form: env
-// inputs, flag env fallbacks, config_source variables, $VAR and ~ in configuration paths, the
-// XDG and home directories, plugin lookup and the plugin's own environment, and the completion
-// messages switch. nil (the default) reads the process environment live; a non-nil slice, even
+// inputs, flag env fallbacks, config_source variables, $VAR and ~ in configuration paths and in
+// inputs that declare expand, the XDG and home directories ([AppDirs] included), plugin lookup
+// and the plugin's own environment, and the completion messages switch. nil (the default) reads the process environment live; a non-nil slice, even
 // an empty one, is the whole environment. Later duplicates win; on Windows names match
 // case-insensitively.
 //

@@ -41,6 +41,17 @@ stdout 'canceled'
 stdout 'root teardown'
 ! stderr .
 
+# ── a termination timeout ────────────────────────────────────────────────────
+# A handler that ignores its context would keep the process alive. main sets
+# WithTerminationTimeout(200ms), so the process exits with the first signal's code once the
+# timeout passes, without waiting for the handler or its teardown.
+wantexit 143 ./shutdown$exe stuck
+
+! exec ./shutdown$exe stuck
+stdout 'stuck'
+! stdout 'NEVER'
+! stdout 'root teardown'
+
 -- term-order.txt --
 waiting
 canceled
@@ -62,6 +73,8 @@ command:
             type: string
             enum: [term, int]
             default: term
+    - name: stuck
+      summary: ignore the run context after a signal
 -- cmd/shutdown/.rotini.conf.yaml --
 version: 0.0.0
 generate:
@@ -142,9 +155,43 @@ func (*shutdownWaitHandler) Run(ctx context.Context, rtx *rotini.Context) {
 func (*shutdownWaitHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "wait teardown")
 }
+-- internal/cmd/shutdown/shutdown_stuck.go --
+package shutdown
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"syscall"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+type shutdownStuckHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+// Run sends itself SIGTERM and then ignores the canceled context, as a handler blocked in a
+// call that takes no context would.
+func (*shutdownStuckHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "stuck")
+	_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+	time.Sleep(5 * time.Second)
+	fmt.Fprintln(rtx.Stdout, "NEVER: the termination timeout did not end the process")
+}
 -- cmd/shutdown/main.go --
 package main
 
-import shutdown "example.com/shutdown/internal/cmd/shutdown"
+import (
+	"time"
 
-func main() { shutdown.NewProgram(shutdown.Handlers()).Execute() }
+	shutdown "example.com/shutdown/internal/cmd/shutdown"
+)
+
+func main() {
+	shutdown.NewProgram(shutdown.Handlers()).WithTerminationTimeout(200 * time.Millisecond).Execute()
+}

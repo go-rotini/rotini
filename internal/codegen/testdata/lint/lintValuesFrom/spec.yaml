@@ -1,0 +1,58 @@
+# values_from: flags and arguments of a command with an output, string types, no enum of their
+# own, not cascading, and a path that reaches an object whose field names have no dots.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    Task:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+    TaskList:
+      type: object
+      properties:
+        tasks: { type: array, items: { $ref: "#/schemas/Task" } }
+        total: { type: integer }
+  commands:
+    - name: list
+      output: { $ref: "#/schemas/TaskList" }
+      flags:
+        - name: json
+          schema: { type: '[]string', separator: ',', values_from: output.tasks }
+        - name: sort-by
+          schema: { type: string, values_from: output.tasks }
+        - name: top
+          schema: { type: string, values_from: output }
+        - name: bad-path
+          schema: { type: string, values_from: output.nope }
+        - name: scalar
+          schema: { type: string, values_from: output.total }
+        - name: number
+          schema: { type: int, values_from: output.tasks }
+        - name: own
+          schema: { type: string, enum: [id], values_from: output.tasks }
+        - name: wide
+          cascading: true
+          schema: { type: string, values_from: output.tasks }
+      env:
+        - name: cols
+          schema: { type: string, values_from: output.tasks }
+      commands:
+        - name: one
+          flags:
+            - name: field
+              schema: { type: string, values_from: output }
+    - name: rows
+      output: { type: array, items: { $ref: "#/schemas/Task" } }
+      arguments:
+        - name: field
+          schema: { type: string, values_from: output }
+    - name: dotted
+      output:
+        type: object
+        properties:
+          a.b: { type: string }
+      flags:
+        - name: field
+          schema: { type: string, values_from: output }

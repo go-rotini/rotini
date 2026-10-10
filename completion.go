@@ -96,6 +96,9 @@ type completionAnswer struct {
 	// keepOrder reports that the order is the program's, not alphabetical: a completer's own
 	// order, an enum's declared order, or unset required flags first.
 	keepOrder bool
+	// noSpace asks the shell to add no space after the inserted candidate: an item of a
+	// separated list, which more items may follow.
+	noSpace bool
 }
 
 // complete returns the candidates for the word currently being typed — the last element of
@@ -168,6 +171,8 @@ type valueCandidates struct {
 	// sorted marks a vocabulary with no order of its own (map keys, command names); otherwise
 	// the declared order is kept.
 	sorted bool
+	// noSpace marks the items of a separated list; see completionAnswer.
+	noSpace bool
 }
 
 // answer filters the candidates by prefix and orders them: sorted, or kept as given.
@@ -177,7 +182,7 @@ func (v valueCandidates) answer(prefix string) completionAnswer {
 		sort.Strings(out)
 		return completionAnswer{cands: out}
 	}
-	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (v.dynamic || !slices.IsSorted(out))}
+	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (v.dynamic || !slices.IsSorted(out)), noSpace: v.noSpace && len(out) > 0}
 }
 
 // completePendingFlagValue completes the separate-word form — "--flag <TAB>", and bash's
@@ -217,7 +222,7 @@ func completeFlagWord(cc completionContext, words []string, partial string, look
 		hidden, needed := groupEffects(v, cc.setAt(i))
 		var mine []string
 		for _, f := range v.Flags {
-			mine = append(append(mine, f.Identifiers...), negatedIdentifiers(f)...)
+			mine = append(mine, matchSpellings(f)...)
 			if !offerFlag(f, cc.setAt(i), hidden) {
 				continue
 			}
@@ -317,9 +322,12 @@ func groupEffects(frame Command, set map[string]bool) (hidden, needed map[string
 		}
 	}
 	for _, d := range frame.FlagDependencies {
-		if set[d.When] {
+		if dependencyOffers(d, set) {
 			for _, n := range d.Requires {
 				needed[n] = true
+			}
+			for _, n := range d.Forbids {
+				hidden[n] = !set[n]
 			}
 		}
 	}
@@ -506,7 +514,7 @@ func flagValueCandidates(lookup HandlerLookup, rtx *Context, chain []Command, wo
 		}
 		return valueCandidates{cands: keys, sorted: true}
 	}
-	return valueCandidates{cands: enumCandidates(flagEnum(fd))}
+	return enumListCandidates(flagEnum(fd), fd.Separator, partial)
 }
 
 // argValueCandidates returns the candidates for the argument the completed word would bind to
@@ -533,13 +541,17 @@ func argValueCandidates(def Definition, lookup HandlerLookup, rtx *Context, cc c
 		}
 		return valueCandidates{cands: commandPathCandidates(def, path), sorted: true}
 	}
-	return valueCandidates{cands: enumCandidates(argEnum(ad))}
+	return enumListCandidates(argEnum(ad), ad.Separator, partial)
 }
 
 // commandPathCandidates returns the visible sub-commands of the command path names below the
 // root, or nothing when a word names no command. The path is root-relative, as the program's
-// help is, whichever command the argument belongs to.
+// help is, whichever command the argument belongs to. An empty path also offers the help
+// topics.
 func commandPathCandidates(def Definition, path []string) []string {
+	if len(path) == 0 {
+		return append(commandNames(rootFrame(def)), topicCandidates(def)...)
+	}
 	cur := rootFrame(def)
 	for _, w := range path {
 		child, ok := findChild(cur, w)
@@ -566,6 +578,31 @@ func enumCandidates(enum enumSet) []string {
 		}
 	}
 	return out
+}
+
+// enumListCandidates returns the static enum candidates for a value. On an input with a
+// separator they complete the item after the last separator (`--json id,<TAB>`): each
+// candidate repeats the items typed before it, leaves out values already listed, and asks the
+// shell for no space, so another item may follow. A NUL separator splits only file and stdin
+// content, which is never completed.
+func enumListCandidates(enum enumSet, sep, partial string) valueCandidates {
+	cands := enumCandidates(enum)
+	if sep == "" || sep == "\x00" || len(cands) == 0 {
+		return valueCandidates{cands: cands}
+	}
+	i := strings.LastIndex(partial, sep)
+	if i < 0 {
+		return valueCandidates{cands: cands, noSpace: true}
+	}
+	head, typed := partial[:i+len(sep)], strings.Split(partial[:i], sep)
+	out := make([]string, 0, len(cands))
+	for _, c := range cands {
+		name, _, _ := strings.Cut(c, "\t")
+		if !slices.Contains(typed, name) {
+			out = append(out, head+c)
+		}
+	}
+	return valueCandidates{cands: out, noSpace: true}
 }
 
 // dynamicFlagValues asks the handler of chain frame idx, which declares the flag, for
@@ -902,13 +939,13 @@ type CompletionFormat func(w io.Writer, result CompletionResult) error
 
 // Complete answers one shell-completion request in the given format and returns the exit code,
 // the completion counterpart of [Program.Run]. It serves hosts that do not call the hidden
-// __complete entry; kubectl, for example, runs a separate kubectl_complete-<plugin> with only
-// the plugin's words:
+// __complete entry, from the program's own code:
 //
-//	if strings.Contains(filepath.Base(os.Args[0]), "_complete-") {
-//		code, _ := cmd.NewProgram(cmd.Handlers()).Complete(os.Args[1:], rotini.PluginCompletion)
-//		os.Exit(code)
-//	}
+//	code, _ := cmd.NewProgram(cmd.Handlers()).Complete(words, rotini.PluginCompletion)
+//
+// kubectl runs a separate kubectl_complete-<plugin> with only the plugin's words; a spec that
+// declares `multicall: {complete: kubectl_complete-}` answers it without code (see
+// [MulticallDef]).
 //
 // words are the words after the program's own name; the last is the word being completed,
 // empty when the cursor starts a new one, and no words at all completes a new first word. The
@@ -938,6 +975,7 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 	}
 	rtx := p.newRunContext()
 	rtx.ctx = ctx
+	p.completionChdir(rtx, words[:len(words)-1])
 	if rf := p.def.ResponseFiles; rf != nil {
 		var fileWord bool
 		if words, fileWord = completionWords(words, rf.Prefix, rtx.view); fileWord {
@@ -968,7 +1006,7 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 		result.Candidates = append(result.Candidates, CompletionCandidate{Value: value, Description: desc})
 	}
 	rtx.mu.RLock()
-	result.NoSpace = asked.NoSpace || allKeys
+	result.NoSpace = asked.NoSpace || allKeys || answer.noSpace
 	result.KeepOrder = asked.KeepOrder || answer.keepOrder
 	rtx.mu.RUnlock()
 	if p.def.CompletionMessages != nil && p.completionMessagesOn(rtx) {

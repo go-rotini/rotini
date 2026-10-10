@@ -92,6 +92,24 @@ The release that will remove this command (X.Y.Z), later than `deprecated_since`
 
 The release that removes each deprecated alias, by alias: `{remove: 2.0.0}` plans the removal of the alias `remove` while the command stays. Each key must be listed in `deprecated_identifiers`. `rotini validate --release` checks these like `removed_in`, and the contract carries them.
 
+#### `hidden_aliases`
+
+array of `string`
+
+Names that invoke this command but are never listed: help, completion, suggestions and the program's other pages show only `name` and `aliases`. Use them for old spellings kept for scripts, or for shorthands not worth documenting. The help resolvers accept them as the command line does. Sub-commands only, like `aliases`; a hidden alias can't repeat the name, an alias, or a sibling's name. May be listed in `deprecated_identifiers`.
+
+#### `replaced_by`
+
+`string`
+
+With `deprecated`: the command to use instead, as its path below this spec's root command (`purge`, `remote add`), without the program's name. Help, man and markdown add `use <program> purge instead` to the deprecation note, written with the name the program runs as, and rotini.Deprecations reports it as ReplacedBy. `rotini validate` checks that the command exists and isn't itself deprecated.
+
+#### `stability`
+
+`string` · one of `experimental`, `beta`
+
+How settled this command is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it in the parent's command list, and a line on its own pages; the contract carries it. Its inputs, sub-commands, output and exit codes are as unstable as it is. Nothing changes at run time: to gate an experimental command, check in its handler.
+
 ### Inputs
 
 #### `flags`
@@ -156,6 +174,20 @@ Conditional cross-flag requirements validated at parse time: when one flag is se
 
 Root only: read response files. A word starting with the prefix (`@args.rsp`) is replaced by the file's lines, one argument per line, before the command line is parsed.
 
+#### `flag_sets`
+
+`object`
+
+Root only: flags declared once, by set name, for commands to add with `use:`. A command that uses a set gets copies of its flags after its own, in `use` order, with its flag groups and dependencies; from then on they are ordinary flags of that command, for parsing, help, completion and the contract. The generated code has one struct per set, embedded in each using command's flags struct, so a handler reads `in.TaskrList.Flags.Format` whether the flag is its own or from a set.
+
+A set lives in the spec that declares it: a composed child uses its own sets, never its parent's.
+
+#### `use`
+
+array of `string`
+
+The `flag_sets` this command adds, by name, in order. Each set's flags come after the command's own. A set name and a flag of the command (or of another set it uses) can't declare the same flag name, identifier or generated field name. Not valid next to `$ref`.
+
 ### Sub-commands and composition
 
 #### `commands`
@@ -177,10 +209,10 @@ Git and https URLs are not accepted. Either way, the mounted command uses the ha
 
 The composed spec is the base, and the parent can adjust it where it is mounted:
 
-- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
+- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path, hidden_aliases, replaced_by) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
 - A 'commands:' list next to the $ref is added to the child's own sub-commands: its inline entries get their own handler files, and its $ref entries are mounted as further children.
 - `handler:` on a $ref command points it at a different handler package.
-- Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough, options_first) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
+- Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, use, output, plugins, plugin_discovery, passthrough, options_first) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
 
 The child's own plugins, plugin_discovery, passthrough and options_first travel with it. `rotini validate` and `generate` on the parent also check every spec composed by a relative path as its own document, reporting problems at their position in that file. A spec composed with mod:// is not checked that way: it belongs to its own module, which validates it.
 
@@ -229,6 +261,10 @@ Extra directory to search for this command's plugin binaries, in addition to the
 `string`
 
 Not supported on a local command and rejected by rotini validation: a timeout is a plugin-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a plugins[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)
+
+#### `multicall`
+
+Root only: dispatch on the name the binary was invoked as, so one binary serves several names through links or copies. `true` is busybox style: a binary named after a top-level command (a symlink `ls` to the binary) runs it, as if the user had typed `<root> ls`. The object form sets a prefix to strip first, a prefix that answers shell completion, or both. The name is the base name the binary was run as, never a resolved symlink; on Windows a trailing .exe is dropped and names match without regard to case. A name that matches no command, the root's own included, runs the root as usual. Help pages still show the root's invocation (`busybox ls`).
 
 ### Documentation
 
@@ -322,6 +358,12 @@ Exact, verbatim man page for this command, written in roff, the markup the man p
 
 Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it as given — byte-for-byte except that ANSI styling is removed; when unset, the page is rendered from the structured doc-fields through the markdown template.
 
+#### `topics`
+
+array of [`Topic`](#topic)
+
+Root only: help topics, pages that aren't commands. `<program> help <topic>` shows one through the generated Help function (as the seeded help command does), the root's help lists them, the man and markdown features write a page for each, and `help <TAB>` completes their names along with the commands'. A topic's name can't be a root command's name or alias.
+
 ### Output and shared types
 
 #### `output`
@@ -389,6 +431,12 @@ The release that removes each deprecated identifier, by identifier: `{--conf: 2.
 
 The release that deprecated this flag (X.Y.Z), shown beside the deprecation in help, man and markdown, written into the contract, and reported by rotini.Deprecations as Since. Needs `deprecated`.
 
+### `description`
+
+`string`
+
+Longer text about this flag, paragraphs separated by blank lines, shown under it in man and markdown pages and used as its description in the contract's parameters. Help shows `summary` only; an editable help template can show both, as .Description.
+
 ### `group`
 
 `string`
@@ -402,6 +450,12 @@ Presentation only: parsing, precedence and the generated field are unchanged. Us
 `boolean` · default `false`
 
 When true, the flag is omitted from generated help (it still parses on the command line).
+
+### `hidden_identifiers`
+
+array of `string`
+
+Identifiers the command line accepts for this flag but that are never listed: help, completion and suggestions show only `identifiers`. Use them for old spellings kept for scripts. A hidden long identifier of a negatable flag gets its `--no-` form too, unlisted as well. They follow the rules of `identifiers` (no clash on the command path), and may be listed in `deprecated_identifiers`.
 
 ### `identifiers`
 
@@ -417,11 +471,19 @@ A single dash and one digit (`-4`) declares a digit option, on a bool or count f
 
 The release that will remove this flag (X.Y.Z), later than `deprecated_since`. Shown like `deprecated_since` and reported as RemovedIn. `rotini validate --release <X.Y.Z>` (or the variable the conf's `validate.release_env` names) fails while the flag is still declared at or past that release. Needs `deprecated`.
 
+### `replaced_by`
+
+`string`
+
+With `deprecated`: the flag to use instead, as one of its identifiers (`--output`). It is a flag of this command or a cascading flag of an ancestor. Help, man and markdown add `use --output instead` to the deprecation note, and rotini.Deprecations reports it as ReplacedBy. `rotini validate` checks that the flag exists and isn't itself deprecated.
+
 ### `role`
 
-`string` · one of `force`
+`string` · one of `force`, `chdir`, `fields`, `sort`
 
-What this flag means to a program driving the CLI, such as an agent; it changes nothing at run time. 'force' marks the bool flag that lets the command replace existing output files (the handler passes it on, as in rotini.CreateOutput(rtx, path, rotini.Overwrite(in.Flags.Force))). At most one flag per command has a given role.
+What this flag means to a program driving the CLI, such as an agent. 'force' marks the bool flag that lets the command replace existing output files (the handler passes it on, as in rotini.CreateOutput(rtx, path, rotini.Overwrite(in.Flags.Force))). 'fields' marks the list flag that chooses which output fields are written (`--json id,title`, applied with rotini.SelectFields), and 'sort' the string flag that names the field to sort by (`--sort-by title`, applied with rotini.SortBy); each takes its values from an `enum` or `values_from`. These three change nothing at run time. At most one flag per command has a given role.
+
+'chdir' is the one role the runtime acts on: a git-style `-C dir` on the root, cascading, read from the command line only (no default, env or config fallback, or `from:`), one per program. Rotini reads it before anything else, and resolves walk-up config discovery, relative paths, `@file` values, path checks and the directory plugins run in against it (Context.Dir returns it). It never changes the process's working directory, so a handler joins relative paths with rtx.Dir(). A relative value is resolved against the run's directory, and given more than once, the last wins.
 
 ### `schema`
 
@@ -434,6 +496,12 @@ Type definition and input-level metadata (type, required, default, enum, nullabl
 `boolean` · default `false`
 
 When true, setting this flag on the command line waives every declared requirement of the invoked command chain: required inputs, enums, bounds, patterns, flag groups and flag dependencies are not checked, and rtx.Inputs succeeds. Use it for flags that replace the command's normal run, such as --help, --version or --print-schema. Errors in reading the command line (an unknown flag or command, a value of the wrong type, too many arguments) are still reported, as is an environment value of the wrong type. A configuration file that can't be found, parsed or read into its inputs is skipped for that run, so --help works in a broken directory. rotini takes no action of its own: your handler checks the flag and decides what to do. Only the command line sets it, never an environment variable, a configuration file or a default. Must be a bool, and can't be required, negatable, given a default of true, read from the environment or a configuration file (key, variable), or listed in a flag group or flag dependency.
+
+### `stability`
+
+`string` · one of `experimental`, `beta`
+
+How settled this flag is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. A flag is never more stable than its command: a flag of an experimental command is experimental too. Nothing changes at run time.
 
 ### `summary`
 
@@ -462,6 +530,12 @@ Deprecation message. The argument is annotated as deprecated in generated help, 
 
 The release that deprecated this argument (X.Y.Z), shown beside the deprecation in help, man and markdown, written into the contract, and reported by rotini.Deprecations as Since. Needs `deprecated`.
 
+### `description`
+
+`string`
+
+Longer text about this argument, paragraphs separated by blank lines, shown under it in man and markdown pages and used as its description in the contract's parameters. Help shows `summary` only; an editable help template can show both, as .Description.
+
 ### `hidden`
 
 `boolean` · default `false`
@@ -485,6 +559,12 @@ The release that will remove this argument (X.Y.Z), later than `deprecated_since
 [`InputSchema`](#inputschema)
 
 Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
+
+### `stability`
+
+`string` · one of `experimental`, `beta`
+
+How settled this argument is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An argument is never more stable than its command. Nothing changes at run time.
 
 ### `summary`
 
@@ -513,6 +593,12 @@ Deprecation message; the input is annotated as deprecated in generated help. (Ru
 
 The release that deprecated this input (X.Y.Z), shown beside the deprecation in help, man and markdown and written into the contract. Needs `deprecated`.
 
+### `description`
+
+`string`
+
+Longer text about this environment variable, paragraphs separated by blank lines, shown under it in man and markdown pages and in the contract. Help shows `summary` only; an editable help template can show both, as .Description.
+
 ### `hidden`
 
 `boolean` · default `false`
@@ -530,6 +616,12 @@ The release that will remove this input (X.Y.Z), later than `deprecated_since`. 
 [`InputSchema`](#inputschema)
 
 Type definition and input-level metadata (required, default, variable)
+
+### `stability`
+
+`string` · one of `experimental`, `beta`
+
+How settled this environment variable is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. Nothing changes at run time.
 
 ### `summary`
 
@@ -558,6 +650,12 @@ Deprecation message; the input is annotated as deprecated in generated help. (Ru
 
 The release that deprecated this input (X.Y.Z), shown beside the deprecation in help, man and markdown and written into the contract. Needs `deprecated`.
 
+### `description`
+
+`string`
+
+Longer text about this config value, paragraphs separated by blank lines, shown under it in man and markdown pages, in the contract and in the configuration file's JSON Schema. Help shows `summary` only; an editable help template can show both, as .Description.
+
 ### `hidden`
 
 `boolean` · default `false`
@@ -575,6 +673,12 @@ The release that will remove this input (X.Y.Z), later than `deprecated_since`. 
 [`InputSchema`](#inputschema)
 
 Type definition and input-level metadata (required, default, file, key)
+
+### `stability`
+
+`string` · one of `experimental`, `beta`
+
+How settled this config value is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. Nothing changes at run time.
 
 ### `summary`
 
@@ -682,19 +786,37 @@ The logical flag names the rule covers (at least two). Each must be a flag decla
 
 ## FlagDependency
 
-A conditional requirement: when the 'when' flag is explicitly set on the command line, every flag in 'requires' must also be set. Both reference flag logical names; 'set' means explicitly provided (a default or env/config fallback does not count).
+A conditional rule: when the 'when' flag is explicitly set on the command line (with one of the 'equals' values, if given), and none of the 'unless' flags is, every flag in 'requires' must also be set and no flag in 'forbids' may be. Every name is a flag's logical name; 'set' means explicitly provided (a default or env/config fallback neither triggers a rule nor satisfies one). Give 'when' or 'unless' (or both), and 'requires' or 'forbids' (or both).
 
-### `when`
+### `equals`
 
-`string` · **required**
+array of `string` or `number` or `boolean`
 
-The flag whose presence triggers the requirement.
+With 'when': trigger only when the 'when' flag's value is one of these (`when: format`, `equals: [csv, tsv]`). The value compared is the one given on the command line, the last one if the flag is repeated, as the flag's enum stores it (so `ignore_case` and enum aliases match). For a bool flag, true or false (`--no-x` gives false). Valid on a single-value flag, not a list, map or count; each value must parse as the flag's type and be in its enum.
+
+### `forbids`
+
+array of `string`
+
+Flags that can't be set when the rule triggers (`when: tls`, `forbids: [insecure]`).
 
 ### `requires`
 
-array of `string` · **required**
+array of `string`
 
-Flags that must also be set when 'when' is set.
+Flags that must also be set when the rule triggers.
+
+### `unless`
+
+array of `string`
+
+Flags any one of which, set on the command line, turns the rule off. Without 'when', the rule applies on every run unless one of these is set (`unless: [config]`, `requires: [token]`).
+
+### `when`
+
+`string`
+
+The flag whose presence triggers the rule.
 
 
 ## ResponseFiles
@@ -776,6 +898,12 @@ Executable-name prefix to discover. Default: the host binary name followed by '-
 `integer` · **required**
 
 The exit status code being documented (0-255 — the range a process can actually return).
+
+### `docs_url`
+
+`string`
+
+An absolute http or https link to more about this exit code, shown in the man and markdown EXIT STATUS sections and carried into the contract. Help and the default reporter don't show it; a reporter of your own can print it, from the generated Definition's ExitStatusDef.DocsURL.
 
 ### `name`
 
@@ -877,11 +1005,46 @@ Heading rendered above the Output section, which describes what the command writ
 
 Heading rendered above the Stdin section, which describes what the command reads from standard input when it declares `stdin:`. Rendered verbatim — include any trailing ':' you want. Default: "Stdin:".
 
+### `topics`
+
+`string`
+
+Heading rendered above the root page's list of help topics (`topics:`). Rendered verbatim — include any trailing ':' you want. Default: "Help Topics:".
+
 ### `usage`
 
 `string`
 
 Heading rendered above the usage section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Usage:".
+
+
+## Topic
+
+A help topic: a page that isn't a command, with its text written here (`body`) or generated (`generate`).
+
+### `name`
+
+`string` · **required**
+
+The word after `help` that shows the topic (`demo help filters`). Its man page is &lt;program&gt;-&lt;name&gt; in the man feature's section.
+
+### `summary`
+
+`string` · **required**
+
+A one-line description, shown beside the name in the root's list of topics, in the man page's NAME line and at the top of the markdown page. The help page shows the body, or this summary when the topic has none.
+
+### `body`
+
+`string`
+
+The topic's text, paragraphs separated by blank lines. Set exactly one of `body` and `generate`.
+
+### `generate`
+
+`string` · one of `environment`
+
+Build the topic's text from the spec. 'environment' lists every environment variable the program reads: env inputs, flag fallbacks, config_source and variable_file names, the completion switches the conf declares, and the XDG variables config discovery reads, each with the commands that read it. Set exactly one of `body` and `generate`.
 
 
 ## Schema
@@ -924,6 +1087,7 @@ document instead; see [StdinSpec](#stdinspec).
 | `enum` | ✓ | ✓ | ✓ | ✓ |
 | `exclusiveMaximum` | ✓ | ✓ | ✓ | ✓ |
 | `exclusiveMinimum` | ✓ | ✓ | ✓ | ✓ |
+| `expand` | ✓ | ✓ | ✓ | ✓ |
 | `file` | — | — | — | ✓ |
 | `from` | ✓ | ✓ | — | — |
 | `glob` | — | ✓ | — | — |
@@ -948,14 +1112,16 @@ document instead; see [StdinSpec](#stdinspec).
 | `placeholder` | ✓ | ✓ | ✓ | ✓ |
 | `properties` | ✓ | — | — | — |
 | `relative` | ✓ | ✓ | ✓ | ✓ |
+| `relative_to` | ✓ | ✓ | — | ✓ |
 | `repeatable` | ✓ | — | — | — |
 | `required` | ✓ | ✓ | ✓ | ✓ |
-| `secret` | ✓ | ✓ | ✓ | ✓ |
+| `secret` | — | ✓ | ✓ | ✓ |
 | `separator` | ✓ | ✓ | ✓ | — |
 | `type` | ✓ | ✓ | ✓ | ✓ |
 | `uniqueItems` | ✓ | ✓ | ✓ | ✓ |
+| `values_from` | ✓ | ✓ | — | — |
 | `variable` | ✓ | ✓ | ✓ | — |
-| `variable_file` | ✓ | — | ✓ | — |
+| `variable_file` | ✓ | ✓ | ✓ | — |
 
 ### `complete`
 
@@ -987,6 +1153,17 @@ How help, man and markdown pages show the default, in place of the value itself.
 
 Map-typed flags only, and only with 'any' values ('map'/'object' → map[string]any). When true, a '.'-separated key in a key=value pair assigns into nested maps, helm-style: --set image.tag=v2 → map[image][tag]=v2. Opt-in because '.' is a legal character in plain map keys — without it, --label a.b=c stores the literal key 'a.b'. Each assignment overwrites whatever is at its path (creating intermediate maps as needed), so later pairs win and --set a=1 --set a.b=2 leaves a nested map under 'a'. A value is read as its JSON spelling would be — true/false, null and JSON numbers are booleans, null and numbers; anything else is text — so --set replicas=3 stores the number 3, as a config file's replicas: 3 does. Declare 'properties' on the flag's schema to give shell completion the known key paths (offered up to the '=').
 
+### `expand`
+
+array of `string`
+
+Path inputs (string, existingfile, existingdir, inputfile, outputfile, and lists of them): expand what a shell would in values from every source (the command line, environment variables, configuration files, .env files, variable_file files and the declared default), before the value is checked or bound. Help shows the default as written.
+
+- 'home' — a value that is exactly `~`, or starts with `~/`, becomes the home directory plus the rest; `~name/...` becomes that user's home directory, read from the system's user database. A `~` anywhere else is kept.
+- 'env' — `$NAME` and `${NAME}` become that variable's value, from the run's environment (including .env files). An unset or empty variable is a usage error naming it, and `${NAME:-x}` and the other shell operators are errors. A `$` not followed by a name is kept (`C$`, `$1`).
+
+`~` is expanded first, then variables, in one pass: text a variable supplies is never expanded again. Each item of a list is expanded after the value is split on its `separator`. `%VAR%` is not expanded on Windows (cmd and PowerShell expand their own syntax), but `~\` is. There is no escape for a literal `$NAME`, so leave 'env' out for inputs that need one. A project configuration file found by walk-up discovery can then read the user's environment into a path, so prefer `[home]` for inputs such a file sets. Not valid on secret inputs.
+
 ### `file`
 
 `string`
@@ -1001,7 +1178,7 @@ Flags, and arguments before any variadic one: where the input's value may come f
 
 - 'file' — a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file). To pass a literal value that starts with `@`, double it: `--to @@alice` gives `@alice`, and `@./@name` reads a file whose name starts with `@`
 - 'stdin' — a value of exactly '-' is replaced by what is piped on stdin (`-f -`); empty stdin is then a usage error, and stdin can be read once, so one input on a command path may take it: a from:stdin flag or argument, or the command's stdin: input
-- 'value' — always allowed; listing it is documentation only. Any value that does not match an enabled marker stays literal
+- 'value' — a value typed on the command line. Literal values are always allowed, except on a secret input: with `secret: true`, a 'from' list without 'value' refuses a literal (`--token takes @file or -, not a value`), so the secret never shows in the process list or shell history. On other inputs listing it is documentation only. Any value that does not match an enabled marker stays literal
 
 Text read from a file or stdin has one trailing line ending removed (leading and interior whitespace is kept), then goes through the normal type, enum and constraint checks: the flag's value is that text. On an object-valued flag the text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the whole command belongs in the command's stdin: input. On a list or map flag, the file's (or stdin's) lines are separate values; blank lines are skipped, and each line is split on the flag's `separator`.
 
@@ -1073,6 +1250,12 @@ Time inputs only (time, datetime, date, and lists of them): also accept a time m
 
 Durations take Go units plus `d` (24h) and `w`. Words are read in any case. On a date the result is the calendar date it falls on, and an offset must be whole days. Times are measured from the run's clock, read once per run, so every relative value in a run agrees; Program.WithClock sets it for tests, and rtx.Now() returns the same reading. `today` and the date a value falls on follow the clock's time zone (the process's, by default). A flag's or argument's `default` may be relative (`default: 24h`) and is measured at run time; an env or config input's default is absolute.
 
+### `relative_to`
+
+`string` · one of `config`
+
+'config': a relative path read from a configuration file is resolved against that file's directory, so `cache: ./cache` in ~/.config/app/config.yaml means ~/.config/app/cache. Applied after `expand`. Absolute values, and values from the command line, environment variables, .env files and the default, are kept as they are and stay relative to the run's directory. Valid on config inputs, and on flags and arguments with a configuration fallback (`key:`).
+
 ### `repeatable`
 
 `boolean` or `null`
@@ -1083,19 +1266,25 @@ On a single-value flag: `repeatable: false` makes giving the flag more than once
 
 `boolean` · default `false`
 
-When true, the input must be provided (or stdin must not be empty for stdin inputs). Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
+When true, the input must be provided (or stdin must not be empty for stdin inputs). On the command line an empty value (`--name ""`, `--name=`, or `''` as an argument) is provided; add `minLength: 1` to refuse it. An env input set to the empty string is provided too, while a flag's environment fallback set to the empty string counts as unset. Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
 
 ### `secret`
 
 `boolean` · default `false`
 
-When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input.
+When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input. A secret flag or argument whose from: list leaves out value refuses a value typed on the command line, which would show in the process list and shell history; `rotini validate` warns about a secret flag that accepts one.
 
 ### `separator`
 
 `string`
 
 List and map flags, a variadic argument, and an env list or map input: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. The word `nul` splits on NUL bytes, as `find -print0` writes them; since command-line and environment values can't contain a NUL, it applies only to content rotini reads itself, so it is valid only on a list or map flag with `from: [file]` or `from: [stdin]`, whose file or piped content is split on NUL instead of lines, byte for byte. Splitting is CSV-style: an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Without a separator, each occurrence is one value, used as is. An env list or map input splits its variable on commas (TAGS=a,b) unless it declares a separator (`separator: ':'` reads PATHS=a:b): a plain split that trims spaces, with no quoting. A map's separator splits pairs; each pair still splits on `=`. Not valid on config inputs: a configuration file writes a list as a list.
+
+### `values_from`
+
+`string`
+
+Flags and arguments only: take the input's allowed values from the field names of the command's declared `output:`, for a `--json id,title` or `--sort-by title` flag. `output` is the output itself, or one item when it is an array (or the command writes a stream, `output_stream`); `output.tasks` is the `tasks` property of the output, and each further segment names a property below it. An array met on the way is stepped through to its items, so `values_from: output.tasks` on a `{tasks: [Task]}` output lists Task's fields. The place reached must be an object with `properties`, and its property names, sorted by name, become the input's enum: help, completion, validation and the contract list them like any enum, and renaming an output field changes the flag's values too. Only that object's own properties are listed, not nested ones. The input's type is `string` or a list of strings (`[]string`, with a `separator` for `--json id,title`), it declares no `enum` of its own, and it is not `cascading`. The handler applies the values with rotini.SelectFields and rotini.SortBy.
 
 ### `variable`
 
@@ -1288,7 +1477,7 @@ Value types parse a kind of value and generate the matching Go field:
 - 'base64bytes' — rotini.Base64Bytes; standard or URL-safe, padded or not
 - 'regexp' — \*regexp.Regexp, compiled when parsed; Go's RE2 syntax, which has no backreferences or lookaround
 - 'glob' — rotini.Glob, a path.Match pattern checked when parsed (`*`, `?`, `[a-z]`, `\` escapes) with a Match method; `**` is not recursive. It keeps the pattern as a value; `glob: true` instead expands a pattern into file names
-- 'existingfile' / 'existingdir' — a plain string field, checked at parse time to exist and be that kind of thing, so a bad path is a usage error naming the flag the user typed. The check is existence and kind only: expanding '~', cleaning, following symlinks and creating a missing file are the handler's policy. A relative path is checked against the run's directory (Program.WithDir, by default the working directory) and bound as typed, so a handler opens it joined to rtx.Dir()
+- 'existingfile' / 'existingdir' — a plain string field, checked at parse time to exist and be that kind of thing, so a bad path is a usage error naming the flag the user typed. The check is existence and kind only: cleaning, following symlinks and creating a missing file are the handler's policy, and `~` and `$VAR` are expanded only when the input declares `expand`. A relative path is checked against the run's directory (Program.WithDir, by default the working directory) and bound as typed, so a handler opens it joined to rtx.Dir()
 - 'inputfile' — a plain string field, checked like 'existingfile', except that '-' means stdin: rotini.OpenInput(rtx, path) opens either (`cat a.txt - b.txt`). Only one '-' may be given per run, across every inputfile value. Unlike `from: [stdin]`, where '-' replaces the value with stdin's text, the value stays '-' and the handler reads the stream. Help adds '(- for stdin)'
 - 'outputfile' — a plain string field: a file to write, where '-' means stdout. Checked at parse time to be no directory and to sit in an existing directory; rotini.CreateOutput(rtx, path) writes it atomically and refuses to replace an existing file unless given rotini.Overwrite(true). Help adds '(- for stdout)'
 
@@ -1309,4 +1498,54 @@ A NAMED OBJECT schema is different: a flag whose schema is `$ref: '#/schemas/DB'
 `boolean`
 
 On a list input (a list flag, a variadic argument, or a list env or config input): reject a list that holds the same value twice. Values compare as their type reads them, so `01` and `1` are the same int, `1h` and `60m` the same duration, `1Ki` and `1024` the same bytesize, and `::1` and `0:0:0:0:0:0:0:1` the same ip; a time compares as the instant it names, read with its layout; a list of objects compares whole objects; a case-insensitive enum compares its declared spellings. Checked on every channel and by CheckInputs, and a list default may not repeat a value. Rejected on scalar, map and count inputs, and inside items. On output, stdin and named schemas it is the JSON Schema keyword.
+
+
+## FlagSet
+
+Flags declared once under the root's `flag_sets`, for commands to add with `use:`.
+
+### `flags`
+
+array of [`FlagInput`](#flaginput) · **required**
+
+The set's flags, declared as on a command.
+
+### `flag_dependencies`
+
+array of [`FlagDependency`](#flagdependency)
+
+Flag dependencies over the set's own flags, added to each command that uses the set.
+
+### `flag_groups`
+
+array of [`FlagGroup`](#flaggroup)
+
+Flag groups over the set's own flags, added to each command that uses the set.
+
+### `group`
+
+`string`
+
+The help group of every flag in the set that names no `group` of its own, so a set's flags are listed under one heading (`group: Output`).
+
+### `summary`
+
+`string`
+
+What the set is for, for the spec's readers; it isn't shown on any page.
+
+
+## Multicall
+
+### `complete`
+
+`string`
+
+An invoked name starting with this answers shell completion for the root instead of running it: the arguments are the words to complete, as kubectl passes them to a `kubectl_complete-<plugin>` executable. The answer is written in the format Program.WithCompletion sets, else rotini.PluginCompletion, the plugin hosts' format.
+
+### `prefix`
+
+`string`
+
+Stripped from the invoked name before it is matched against the root's commands: with 'acme-', a binary run as acme-ls runs `ls`. A name without the prefix runs the root.
 

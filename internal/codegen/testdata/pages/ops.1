@@ -20,13 +20,20 @@ Commands that read a document from standard input.
 import tasks
 .TP
 \fBupper\fR
-upper\-case lines
+upper\-case lines (experimental)
 .SH "DEPLOYING"
 Commands that change what runs where.
 Each one asks before it acts.
 .TP
 \fBdeploy\fR
-ship a service
+ship a service (beta)
+.SH "HELP TOPICS"
+.TP
+\fBfilters\fR
+how filters work
+.TP
+\fBenvironment\fR
+the environment variables ops reads
 .SH "OPTIONS"
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -45,6 +52,10 @@ when to color (default auto) [auto|always|never]
 .TP
 \fBOPS_TOKEN\fR \fIstring\fR
 the API token (length >= 20)
+.sp
+Get one from the console.
+.sp
+\&.Keep it secret; a path such as C:\eops\etoken works too.
 .br
 at least 20 characters
 .TP
@@ -62,7 +73,9 @@ the log level [debug|info|error]
 .SH CONFIGURATION
 .TP
 \fBregion\fR (region) \fIstring\fR
-the default region
+the default region (beta)
+.sp
+The region commands use when none is given.
 .br
 must look like eu\-1
 .TP
@@ -77,4 +90,5 @@ the output profile [short|long]
 .RE
 .SH "SEE ALSO"
 \fBops\-deploy\fR(1), \fBops\-import\fR(1), \fBops\-upper\fR(1),
-\fBops\-note\fR(1), \fBops\-exec\fR(1), \fBops\-run\fR(1)
+\fBops\-note\fR(1), \fBops\-exec\fR(1), \fBops\-run\fR(1),
+\fBops\-filters\fR(1), \fBops\-environment\fR(1)
