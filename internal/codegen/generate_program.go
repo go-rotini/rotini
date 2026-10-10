@@ -127,9 +127,10 @@ type agentProgram struct {
 
 // agentDoc is the subset of the contract document the agent outputs read.
 type agentDoc struct {
-	Name        string             `json:"name"`
-	Commands    []agentContractCmd `json:"commands"`
-	Definitions map[string]any     `json:"definitions"`
+	Name          string                 `json:"name"`
+	Commands      []agentContractCmd     `json:"commands"`
+	Definitions   map[string]any         `json:"definitions"`
+	ResponseFiles *contractResponseFiles `json:"response_files"`
 }
 
 type agentContractCmd struct {
@@ -178,6 +179,7 @@ type agentInput struct {
 	Key                   string                       `json:"key"`
 	From                  []string                     `json:"from"`
 	Separator             string                       `json:"separator"`
+	DottedKeys            bool                         `json:"dotted_keys"`
 	Secret                bool                         `json:"secret"`
 	Hidden                bool                         `json:"hidden"`
 	Deprecated            string                       `json:"deprecated"`

@@ -221,7 +221,7 @@ func exampleFlagDefs(c *Command, prefix string, schemas map[string]Schema) []rot
 	for _, f := range c.Flags {
 		fd := rotini.FlagDef{
 			Name: f.Name, Identifiers: flagIdentifiers(f), HiddenIdentifiers: f.HiddenIdentifiers,
-			DeprecatedIdentifiers: f.DeprecatedIdentifiers, Type: definitionType(f.Schema, schemas),
+			DeprecatedIdentifiers: f.DeprecatedIdentifiers, Type: exampleType(definitionType(f.Schema, schemas)),
 			Hidden: f.Hidden, Deprecated: f.Deprecated, ShortCircuit: f.ShortCircuit,
 		}
 		if s := f.Schema; s != nil {
@@ -244,12 +244,23 @@ func exampleFlagDefs(c *Command, prefix string, schemas map[string]Schema) []rot
 	return out
 }
 
+// exampleType is typ with the path kinds, which a run checks against the file system, read as
+// strings: an example's paths name files on the user's machine, not the spec author's.
+func exampleType(typ string) string {
+	base := strings.TrimPrefix(typ, "[]")
+	switch base {
+	case "existingfile", "existingdir", "inputfile", "outputfile":
+		return strings.TrimSuffix(typ, base) + "string"
+	}
+	return typ
+}
+
 // exampleArgDefs builds a command's ArgDefs.
 func exampleArgDefs(c *Command, prefix string, schemas map[string]Schema) []rotini.ArgDef {
 	out := make([]rotini.ArgDef, 0, len(c.Arguments))
 	stdinFallback := c.Stdin != nil && c.Stdin.UnlessArgument != ""
 	for _, a := range c.Arguments {
-		ad := rotini.ArgDef{Name: a.Name, Type: definitionType(a.Schema, schemas), Hidden: a.Hidden, Passthrough: a.Passthrough}
+		ad := rotini.ArgDef{Name: a.Name, Type: exampleType(definitionType(a.Schema, schemas)), Hidden: a.Hidden, Passthrough: a.Passthrough}
 		ad.Variadic = strings.HasPrefix(ad.Type, "[]")
 		if s := a.Schema; s != nil {
 			env, _ := argumentFallback(a, prefix, true)

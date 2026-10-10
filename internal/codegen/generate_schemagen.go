@@ -152,18 +152,18 @@ func eachOwnNode(nodes []rnode, visit func(n *rnode)) {
 func collectOutputDefs(gp *program) map[string]any {
 	defs := map[string]any{}
 	for name, sch := range gp.schemas {
-		defs[name] = schemaToDoc(sch)
+		defs[name] = jsonSchemaTypes(schemaToDoc(sch))
 	}
 	add := func(prefix string, out *Schema) {
 		if out != nil {
-			defs[prefix+"Output"] = schemaToDoc(*out)
+			defs[prefix+"Output"] = jsonSchemaTypes(schemaToDoc(*out))
 		}
 	}
 	// Only the stdin schema's BaseSchema is type structure; required, default, etc. are
 	// input metadata.
 	addStdin := func(prefix string, in *Inputs) {
 		if in != nil && in.Stdin != nil && in.Stdin.Schema != nil && !rawStdinFormat(in.Stdin.Format) {
-			defs[prefix+"Stdin"] = schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema})
+			defs[prefix+"Stdin"] = jsonSchemaTypes(schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema}))
 		}
 	}
 	add(gp.rootPascal, gp.rootOutput)
@@ -207,9 +207,10 @@ func collectStdinSchemas(gp *program) map[string]string {
 
 // validationSchema renders a self-contained JSON Schema for runtime validation of stdin
 // payloads, config files, and object flags: the declared shape plus the document's named
-// schemas as definitions, so "#/schemas/X" refs resolve. It returns "" on failure.
+// schemas as definitions, so "#/schemas/X" refs resolve. Rotini type names (int, bool,
+// duration) are written as JSON Schema. It returns "" on failure.
 func validationSchema(schema Schema, docSchemas map[string]Schema) string {
-	body, ok := schemaToDoc(schema).(map[string]any)
+	body, ok := jsonSchemaTypes(schemaToDoc(schema)).(map[string]any)
 	if !ok {
 		return ""
 	}
@@ -217,7 +218,7 @@ func validationSchema(schema Schema, docSchemas map[string]Schema) string {
 	if len(docSchemas) > 0 {
 		defs := map[string]any{}
 		for name, s := range docSchemas {
-			defs[name] = schemaToDoc(s)
+			defs[name] = jsonSchemaTypes(schemaToDoc(s))
 		}
 		body["definitions"] = defs
 	}

@@ -14,13 +14,12 @@ import (
 // TestImportCobraInterrupt pins that Ctrl-C during an import stops it and leaves no temporary
 // directory behind, and the program's tree as it was.
 func TestImportCobraInterrupt(t *testing.T) {
-	shim := importShim(t)
 	bin := rotiniBin(t)
-	dir := copyFixture(t, filepath.Join(shim, "cobra", "testdata", "corpus", "demo"))
+	dir := importFixture(t, "corpus/demo")
 	before := treeHash(t, dir)
 	tmp := t.TempDir()
 
-	cmd := exec.Command(bin, "import", "cobra", "--importer-version", shim, ".")
+	cmd := exec.Command(bin, importCmd(t, ".")...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
 	if err := cmd.Start(); err != nil {

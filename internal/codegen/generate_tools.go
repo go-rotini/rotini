@@ -47,14 +47,15 @@ type tool struct {
 // toolInvoke is what a server needs to turn a tool call back into a command line. It rides in
 // the MCP tool's _meta, under toolsMetaKey.
 type toolInvoke struct {
-	Path        []string                  `json:"path"`
-	Arguments   []toolInvokeArgument      `json:"arguments,omitempty"`
-	Flags       map[string]toolInvokeFlag `json:"flags,omitempty"`
-	Fixed       []string                  `json:"fixed,omitempty"` // added to every call: the machine-output flag
-	Stdin       *toolInvokeStdin          `json:"stdin,omitempty"`
-	Passthrough bool                      `json:"passthrough,omitempty"` // the command is passthrough: every word after it is an argument; no "--"
-	Stream      bool                      `json:"stream,omitempty"`      // stdout is a stream of output items, one per line
-	Wrapped     bool                      `json:"wrapped,omitempty"`     // structured content is {"result": <stdout>}
+	Path           []string                  `json:"path"`
+	Arguments      []toolInvokeArgument      `json:"arguments,omitempty"`
+	Flags          map[string]toolInvokeFlag `json:"flags,omitempty"`
+	Fixed          []string                  `json:"fixed,omitempty"` // added to every call: the machine-output flag
+	Stdin          *toolInvokeStdin          `json:"stdin,omitempty"`
+	Passthrough    bool                      `json:"passthrough,omitempty"`     // the command is passthrough: every word after it is an argument; no "--"
+	Stream         bool                      `json:"stream,omitempty"`          // stdout is a stream of output items, one per line
+	Wrapped        bool                      `json:"wrapped,omitempty"`         // structured content is {"result": <stdout>}
+	ResponsePrefix string                    `json:"response_prefix,omitempty"` // the program reads response files: double this prefix on a raw word before the first "--"
 }
 
 // toolInvokeArgument is a positional argument, in command-line order.
@@ -65,6 +66,7 @@ type toolInvokeArgument struct {
 	Passthrough bool     `json:"passthrough,omitempty"` // it and every later word are taken as typed; "--" still comes before the first argument
 	Secret      bool     `json:"secret,omitempty"`      // the value is a secret
 	From        []string `json:"from,omitempty"`        // file: a leading @ reads a file (@@ is a literal @); stdin: - reads stdin
+	Separator   string   `json:"separator,omitempty"`   // quote each item, its own word, as a list item split on this separator (csv rules)
 }
 
 // toolInvokeFlag is how one flag parameter is written on the command line.
@@ -78,6 +80,7 @@ type toolInvokeFlag struct {
 	Secret     bool     `json:"secret,omitempty"`      // the value is a secret
 	From       []string `json:"from,omitempty"`        // file: a leading @ reads a file (@@ is a literal @); stdin: - reads stdin
 	HasDefault bool     `json:"has_default,omitempty"` // a count with a default: leaving it out is not 0
+	DottedKeys bool     `json:"dotted_keys,omitempty"` // a map whose nested keys are written as dotted a.b=value pairs
 }
 
 // toolInvokeStdin is the parameter that carries what the command reads on stdin.
@@ -171,6 +174,9 @@ func buildTool(a *agentProgram, c agentCommand, wrapOutput bool) (tool, string, 
 	if t.invoke.Path == nil {
 		t.invoke.Path = []string{}
 	}
+	if rf := a.doc.ResponseFiles; rf != nil {
+		t.invoke.ResponsePrefix = rf.Prefix
+	}
 	serverEnv, skip := t.addInputs(cmd)
 	if skip != "" {
 		return t, skip, nil
@@ -225,6 +231,10 @@ func (t *tool) addInputs(cmd agentContractCmd) (serverEnv []string, skip string)
 		}
 		return fmt.Sprintf("its required %s %q isn't a tool parameter (it is hidden, deprecated, secret or read from a file); give it `agent: true` or a fallback the server can supply", inputChannel(in), in.Name)
 	}
+	// rotini.ArgvOf quotes a variadic's items for its separator unless its words are raw or fixed
+	// arguments follow it.
+	v := slices.IndexFunc(cmd.Arguments, func(in agentInput) bool { return in.Variadic })
+	tail := v >= 0 && v < len(cmd.Arguments)-1
 	seen := map[string]bool{}
 	for _, in := range cmd.Arguments {
 		seen[in.Name] = true
@@ -235,7 +245,11 @@ func (t *tool) addInputs(cmd agentContractCmd) (serverEnv []string, skip string)
 			continue
 		}
 		t.addParam(in)
-		t.invoke.Arguments = append(t.invoke.Arguments, toolInvokeArgument{Name: in.Name, Kind: in.Kind, Variadic: in.Variadic, Passthrough: in.Passthrough, Secret: in.Secret, From: in.From})
+		arg := toolInvokeArgument{Name: in.Name, Kind: in.Kind, Variadic: in.Variadic, Passthrough: in.Passthrough, Secret: in.Secret, From: in.From}
+		if in.Variadic && in.Separator != "" && !in.Passthrough && !cmd.Passthrough && !tail {
+			arg.Separator = runtimeSeparator(in.Separator)
+		}
+		t.invoke.Arguments = append(t.invoke.Arguments, arg)
 	}
 	for _, in := range cmd.Flags {
 		if seen[in.Name] {
@@ -255,7 +269,7 @@ func (t *tool) addInputs(cmd agentContractCmd) (serverEnv []string, skip string)
 		if t.invoke.Flags == nil {
 			t.invoke.Flags = map[string]toolInvokeFlag{}
 		}
-		fl := toolInvokeFlag{Flag: longIdentifier(in), Kind: in.Kind, Type: in.Type, Separator: in.Separator, Role: in.Role, Secret: in.Secret, From: in.From}
+		fl := toolInvokeFlag{Flag: longIdentifier(in), Kind: in.Kind, Type: in.Type, Separator: runtimeSeparator(in.Separator), Role: in.Role, Secret: in.Secret, From: in.From, DottedKeys: in.DottedKeys}
 		if _, ok := in.Schema["default"]; ok && in.Kind == "count" {
 			fl.HasDefault = true
 		}

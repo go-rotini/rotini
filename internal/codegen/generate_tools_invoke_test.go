@@ -50,3 +50,59 @@ func TestToolInvoke_facts(t *testing.T) {
 		t.Error("a passthrough command's invoke facts lack passthrough")
 	}
 }
+
+// TestToolInvoke_argvQuoting pins the invoke facts that match how rotini.ArgvOf spells values:
+// the response-file prefix on every tool, a variadic's separator only when ArgvOf quotes its
+// items, and dotted keys on a map flag.
+func TestToolInvoke_argvQuoting(t *testing.T) {
+	build := func(doc agentDoc, cmd agentContractCmd) toolInvoke {
+		t.Helper()
+		tl, skip, err := buildTool(&agentProgram{doc: doc}, agentCommand{c: cmd, leaf: true, offered: true, invocation: "app run"}, false)
+		if err != nil || skip != "" {
+			t.Fatal(err, skip)
+		}
+		return tl.invoke
+	}
+	cmd := agentContractCmd{Path: []string{"run"}}
+	if got := build(agentDoc{Name: "app"}, cmd).ResponsePrefix; got != "" {
+		t.Errorf("response_prefix without response files = %q", got)
+	}
+	if got := build(agentDoc{Name: "app", ResponseFiles: &contractResponseFiles{Prefix: "@"}}, cmd).ResponsePrefix; got != "@" {
+		t.Errorf("response_prefix = %q, want @", got)
+	}
+
+	tags := agentInput{Name: "tags", Kind: "list", Variadic: true, Separator: ","}
+	for _, tc := range []struct {
+		name string
+		cmd  agentContractCmd
+		want string
+	}{
+		{"quoted", agentContractCmd{Arguments: []agentInput{tags}}, ","},
+		{"nul", agentContractCmd{Arguments: []agentInput{{Name: "tags", Kind: "list", Variadic: true, Separator: "nul"}}}, "\x00"},
+		{"no separator", agentContractCmd{Arguments: []agentInput{{Name: "tags", Kind: "list", Variadic: true}}}, ""},
+		{"not variadic", agentContractCmd{Arguments: []agentInput{{Name: "tags", Kind: "scalar", Separator: ","}}}, ""},
+		{"passthrough argument", agentContractCmd{Arguments: []agentInput{{Name: "tags", Kind: "list", Variadic: true, Passthrough: true, Separator: ","}}}, ""},
+		{"passthrough command", agentContractCmd{Passthrough: true, Arguments: []agentInput{tags}}, ""},
+		{"fixed tail", agentContractCmd{Arguments: []agentInput{tags, {Name: "dst", Kind: "scalar", Required: true}}}, ""},
+	} {
+		inv := build(agentDoc{Name: "app"}, tc.cmd)
+		if got := inv.Arguments[0].Separator; got != tc.want {
+			t.Errorf("%s: separator = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	inv := build(agentDoc{Name: "app"}, agentContractCmd{Flags: []agentInput{
+		{Name: "set", Identifiers: []string{"--set"}, Kind: "map", Type: "map[string]any", DottedKeys: true},
+		{Name: "label", Identifiers: []string{"--label"}, Kind: "map", Type: "map[string]string"},
+	}})
+	if !inv.Flags["set"].DottedKeys || inv.Flags["label"].DottedKeys {
+		t.Errorf("dotted_keys: set %v, label %v; want true, false", inv.Flags["set"].DottedKeys, inv.Flags["label"].DottedKeys)
+	}
+	got, err := json.Marshal(inv.Flags["set"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"flag":"--set","kind":"map","type":"map[string]any","dotted_keys":true}`; string(got) != want {
+		t.Errorf("set = %s, want %s", got, want)
+	}
+}

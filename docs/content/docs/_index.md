@@ -2481,7 +2481,10 @@ generate:
   codes and the variables the server's environment must supply. Each tool's
   `_meta["dev.rotini/invoke"]` holds what a server needs to rebuild the command line: the
   command path, each parameter's identifier and kind (and whether it is secret or read `from:` a
-  file or stdin), whether the command is passthrough, and the machine-output flag to add. It is
+  file or stdin), whether the command is passthrough, and the machine-output flag to add. It also
+  carries what quoting needs: the response-file prefix (`response_prefix`) to double on a raw
+  word before the first `--`, the `separator` of a variadic argument whose items are each quoted
+  as list items, and `dotted_keys` on a map flag written as `a.b=value` pairs. It is
   written for MCP 2026-07-28; `mcp_revision: 2025-11-25` wraps an output that isn't an object,
   as that revision requires. With `go: true` the generated package also holds it as
   `var ToolsMCP string`, so the binary can serve itself; the go-rotini/mcp module serves it.

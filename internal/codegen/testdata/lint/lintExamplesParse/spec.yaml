@@ -4,8 +4,8 @@ command:
   name: taskr
   display_name: kubectl taskr
   examples:
-    # Correct: prose, other programs, placeholders, expansions, pipelines, env assignments and
-    # fallbacks. No problem.
+    # Correct: prose, other programs, placeholders, expansions, pipelines, env assignments,
+    # fallbacks and paths that exist only on the user's machine. No problem.
     - Run taskr with no arguments to list everything.
     - echo hi | taskr add "buy milk" | sort
     - TASKR_TOKEN=abc ./taskr sync --status "$STATUS"
@@ -14,6 +14,7 @@ command:
     - taskr ls --fmt && taskr add 'a b' --prio=3
     - taskr list --status open; taskr old
     - taskr remote anything --at all
+    - taskr sync --token abc --cert certs/missing.pem --out no-such-dir/out.txt
     # Wrong: an unknown command, an unknown flag, a bad enum value, a missing argument, a
     # mutually exclusive pair, an extra argument in a later segment, an unclosed quote.
     - taskr lst
@@ -59,6 +60,12 @@ command:
         - name: token
           identifiers: [--token]
           schema: { type: string, required: true, variable: TASKR_TOKEN }
+        - name: cert
+          identifiers: [--cert]
+          schema: { type: existingfile }
+        - name: out
+          identifiers: [--out]
+          schema: { type: outputfile }
     - name: old
       hidden_aliases: [older]
       deprecated: use list

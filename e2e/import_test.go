@@ -17,29 +17,37 @@ import (
 	"time"
 )
 
-// importShim returns the local checkout of github.com/go-rotini/import that `rotini import`
-// runs, from ROTINI_IMPORT_SHIM, or skips the test. The import adds the importer to a
-// temporary go.mod, so the run needs it published or checked out.
-func importShim(t *testing.T) string {
+// importCmd returns the `rotini import cobra` command line, ending with args. The import runs
+// the release of github.com/go-rotini/import that rotini pins, downloaded into a temporary
+// go.mod, or the local checkout ROTINI_IMPORT_SHIM names. The programs it reads are copies of
+// that repository's corpus, under testdata/import.
+func importCmd(t *testing.T, args ...string) []string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("runs go test and go build in imported modules; skipped under -short")
 	}
-	shim := os.Getenv("ROTINI_IMPORT_SHIM")
-	if shim == "" {
-		t.Skip("set ROTINI_IMPORT_SHIM to a checkout of github.com/go-rotini/import to run the import tests")
+	cmd := []string{"import", "cobra"}
+	if shim := os.Getenv("ROTINI_IMPORT_SHIM"); shim != "" {
+		if _, err := os.Stat(filepath.Join(shim, "go.mod")); err != nil {
+			t.Fatalf("ROTINI_IMPORT_SHIM: %v", err)
+		}
+		cmd = append(cmd, "--importer-version", shim)
 	}
-	if _, err := os.Stat(filepath.Join(shim, "cobra", "testdata", "corpus")); err != nil {
-		t.Fatalf("ROTINI_IMPORT_SHIM: %v", err)
-	}
-	return shim
+	return append(cmd, args...)
+}
+
+// importFixture copies the corpus program name ("corpus/demo", "network/delve") to a
+// temporary directory and returns it.
+func importFixture(t *testing.T, name string) string {
+	t.Helper()
+	return copyFixture(t, filepath.Join("testdata", "import", filepath.FromSlash(name)))
 }
 
 // TestImportCobra imports each of the importer's own corpus programs, then validates,
 // regenerates, builds and runs the imported CLI. The program's own files, go.mod and go.sum
 // must be byte-identical after the import.
 func TestImportCobra(t *testing.T) {
-	shim := importShim(t)
+	importCmd(t)
 	bin := rotiniBin(t)
 	root := repoRoot(t)
 	cases := []struct {
@@ -54,12 +62,12 @@ func TestImportCobra(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.fixture, func(t *testing.T) {
-			dir := copyFixture(t, filepath.Join(shim, "cobra", "testdata", "corpus", tc.fixture))
+			dir := importFixture(t, "corpus/"+tc.fixture)
 			before := treeHash(t, dir)
 			run := runIn(t, dir)
 
 			// A dry run writes nothing.
-			cmd := exec.Command(bin, append([]string{"import", "cobra", "--importer-version", shim, "--dry-run", tc.pkg}, tc.args...)...)
+			cmd := exec.Command(bin, importCmd(t, append([]string{"--dry-run", tc.pkg}, tc.args...)...)...)
 			cmd.Dir = dir
 			if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "dry run:") {
 				t.Fatalf("import --dry-run: %v\n%s", err, out)
@@ -68,7 +76,7 @@ func TestImportCobra(t *testing.T) {
 				t.Fatal("a dry run changed the module")
 			}
 
-			out := run(bin, append([]string{"import", "cobra", "--importer-version", shim, tc.pkg}, tc.args...)...)
+			out := run(bin, importCmd(t, append([]string{tc.pkg}, tc.args...)...)...)
 			if !strings.Contains(out, "spec: cmd/"+tc.cli+"/.rotini.spec.yaml") || !strings.Contains(out, "imported ") {
 				t.Fatalf("import output:\n%s", out)
 			}
@@ -108,18 +116,17 @@ func TestImportCobra(t *testing.T) {
 // TestImportCobraFailures pins the explained failures: flag.Parse in an init function, and a
 // package with no root to find.
 func TestImportCobraFailures(t *testing.T) {
-	shim := importShim(t)
 	bin := rotiniBin(t)
 
-	dir := copyFixture(t, filepath.Join(shim, "cobra", "testdata", "corpus", "flagparse"))
-	cmd := exec.Command(bin, "import", "cobra", "--importer-version", shim, ".")
+	dir := importFixture(t, "corpus/flagparse")
+	cmd := exec.Command(bin, importCmd(t, ".")...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "flag.Parse in an init function") {
 		t.Errorf("flag.Parse in init: %v\n%s", err, out)
 	}
 
-	dir = copyFixture(t, filepath.Join(shim, "cobra", "testdata", "corpus", "cobracli"))
-	cmd = exec.Command(bin, "import", "cobra", "--importer-version", shim, ".")
+	dir = importFixture(t, "corpus/cobracli")
+	cmd = exec.Command(bin, importCmd(t, ".")...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "point at the package that declares rootCmd") {
 		t.Errorf("no root: %v\n%s", err, out)
@@ -133,7 +140,7 @@ func TestImportCobraFailures(t *testing.T) {
 // then validates, regenerates and builds the imported CLI and prints its help. Their modules
 // are downloaded, so it also needs ROTINI_IMPORT_NETWORK=1. Each step's time is logged.
 func TestImportCobraNetwork(t *testing.T) {
-	shim := importShim(t)
+	importCmd(t)
 	if os.Getenv("ROTINI_IMPORT_NETWORK") != "1" {
 		t.Skip("set ROTINI_IMPORT_NETWORK=1 to import the importer's pinned real programs")
 	}
@@ -148,7 +155,7 @@ func TestImportCobraNetwork(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.fixture, func(t *testing.T) {
-			dir := copyFixture(t, filepath.Join(shim, "cobra", "testdata", "network", tc.fixture))
+			dir := importFixture(t, "network/"+tc.fixture)
 			before := treeHash(t, dir)
 			run := runIn(t, dir)
 			step := func(what string, f func()) {
@@ -161,7 +168,7 @@ func TestImportCobraNetwork(t *testing.T) {
 			spec := filepath.Join("cmd", tc.cli, ".rotini.spec.yaml")
 			conf := filepath.Join("cmd", tc.cli, ".rotini.conf.yaml")
 			step("import", func() {
-				out := run(bin, "import", "cobra", "--importer-version", shim, ".")
+				out := run(bin, importCmd(t, ".")...)
 				if !strings.Contains(out, "spec: cmd/"+tc.cli+"/.rotini.spec.yaml") {
 					t.Fatalf("import output:\n%s", out)
 				}
