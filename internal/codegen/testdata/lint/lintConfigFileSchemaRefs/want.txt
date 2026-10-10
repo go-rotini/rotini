@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:18:15: command demo: config file "user": its schema's `$ref` "#/schemas/Setings" points to an undeclared schema (no "Setings" under the root command's `schemas`); did you mean "Settings"?
+spec: .rotini.spec.yaml:24:42: command demo: config file "team": its schema's `$ref` "#/schemas/Member" points to an undeclared schema (no "Member" under the root command's `schemas`)

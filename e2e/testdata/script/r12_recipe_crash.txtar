@@ -1,0 +1,154 @@
+# R12 — the crash report recipe: a reporter that, only when the user sets CRASHDEMO_CRASH_DIR,
+# writes a panic's value, stack, version and platform to a file there and says where. The
+# reporter and main.go are the ones the recipes page shows.
+
+gomodinit example.com/crashdemo
+
+exec rotini generate cmd/crashdemo/.rotini.spec.yaml --config cmd/crashdemo/.rotini.conf.yaml
+cp report.go.txt internal/cmd/crashdemo/report.go
+cp main.go.txt cmd/crashdemo/main.go
+cp boom.go.txt internal/cmd/crashdemo/crashdemo_boom.go
+exec go mod tidy
+exec go build -o crashdemo$exe ./cmd/crashdemo
+
+# Off by default: the panic is reported, with how to turn reports on, and nothing is written.
+wantexit 1 ./crashdemo$exe boom --note private-note
+stderr '^Error: runtime error: index out of range'
+stderr 'set CRASHDEMO_CRASH_DIR'
+! exists crashes
+
+# On: the report holds the stack and the version, never the command line.
+mkdir crashes
+env CRASHDEMO_CRASH_DIR=$WORK/crashes
+wantexit 1 ./crashdemo$exe boom --note private-note
+stderr '^Error: runtime error: index out of range'
+stderr 'crash report written to .*crashdemo-.*\.txt'
+[unix] exec sh -c 'cat crashes/crashdemo-*.txt'
+[unix] stdout '^version: 1\.0\.0$'
+[unix] stdout 'goroutine'
+[unix] stdout 'crashdemo_boom\.go'
+[unix] ! stdout 'private-note'
+
+-- report.go.txt --
+package crashdemo
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"runtime"
+
+	"github.com/go-rotini/rotini"
+)
+
+// Report prints what the run recorded to stderr and exits 1 when it failed. After a panic it
+// writes a crash report, but only when the user set CRASHDEMO_CRASH_DIR: the report holds the
+// panic, its stack, the version and the platform, never the command line or inputs, which may
+// hold secrets.
+func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, w := range out.Warnings {
+		fmt.Fprintln(rtx.Stderr, "Warning:", w)
+	}
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+	}
+	for _, p := range out.Panics {
+		fmt.Fprintln(rtx.Stderr, "Error:", p)
+	}
+	if len(out.Panics) > 0 {
+		if dir, ok := rtx.LookupEnv("CRASHDEMO_CRASH_DIR"); ok && dir != "" {
+			if path, err := writeCrash(dir, rtx.Version(), out.Panics[0]); err != nil {
+				fmt.Fprintln(rtx.Stderr, "could not write a crash report:", err)
+			} else {
+				fmt.Fprintln(rtx.Stderr, "crash report written to", path)
+			}
+		} else {
+			fmt.Fprintln(rtx.Stderr, "This is a bug. To save a crash report to attach to an issue, set CRASHDEMO_CRASH_DIR to a directory.")
+		}
+	}
+	if out.Failed() && ctx.Err() == nil {
+		rtx.Exit(1)
+	}
+}
+
+func writeCrash(dir, version string, p *rotini.PanicError) (string, error) {
+	f, err := os.CreateTemp(dir, "crashdemo-*.txt")
+	if err != nil {
+		return "", err
+	}
+	_, err = fmt.Fprintf(f, "panic: %v\nversion: %s\nplatform: %s/%s %s\n\n%s",
+		p.Value, version, runtime.GOOS, runtime.GOARCH, runtime.Version(), p.Stack)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return f.Name(), err
+}
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	cmd "example.com/crashdemo/internal/cmd/crashdemo"
+)
+
+var version = "1.0.0"
+
+func main() {
+	cmd.NewProgram(cmd.Handlers()).
+		WithVersion(version).
+		WithReporter(cmd.Report).
+		Execute()
+}
+-- boom.go.txt --
+package crashdemo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*crashdemoBoomHandler)(nil)
+
+type crashdemoBoomHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*crashdemoBoomHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[CrashdemoBoomInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	var tasks []string
+	_ = tasks[len(rtx.Argv)]
+}
+-- cmd/crashdemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: crashdemo
+  summary: save a crash report when asked to
+  env:
+    - name: crash-dir
+      summary: a directory to save a crash report in after a crash
+      schema: { type: string, variable: CRASHDEMO_CRASH_DIR }
+  commands:
+    - name: boom
+      summary: crash
+      flags:
+        - name: note
+          summary: a note to keep
+          identifiers: [--note]
+          schema: { type: string }
+-- cmd/crashdemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/crashdemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/crashdemo/zz_crashdemo.go
+      package: crashdemo

@@ -10,8 +10,9 @@
 # Multi-token completion is asserted by the candidates it returns, not only by the absence of
 # a leaked directive: a script that drops tokens returns nothing, which an absence check passes.
 #
-# Each shell's block runs only if that shell is installed. CI installs all four on ubuntu and
-# macos (see the e2e job in .github/workflows/ci.yml).
+# Each shell's block runs only if that shell is installed. CI installs bash, zsh, fish and
+# PowerShell on ubuntu and macos (see the e2e job in .github/workflows/ci.yml); the Nushell
+# block needs Nushell 0.116 or later.
 
 gomodinit example.com/shells
 
@@ -24,6 +25,7 @@ cp internal/cmd/app/renders/completion_bash.txt completion_bash.sh
 cp internal/cmd/app/renders/completion_zsh.txt completion_zsh.sh
 cp internal/cmd/app/renders/completion_fish.txt completion_fish.fish
 cp internal/cmd/app/renders/completion_powershell.txt completion_powershell.ps1
+cp internal/cmd/app/renders/completion_nushell.txt completion_nushell.nu
 
 # Sanity: the binary answers the protocol the scripts speak.
 exec ./app$exe __complete ''
@@ -57,6 +59,16 @@ stdout '^:rotini:file yaml yml$'
 [exec:fish] stdout 'CONFIG: .*a\.yaml'
 [exec:fish] stdout 'CONFIG: .*b\.yml'
 [exec:fish] ! stdout 'CONFIG: .*c\.txt'
+
+[exec:nu] exec nu --no-config-file drive-nu.nu
+[exec:nu] stdout '^CANDIDATES: deploy status$'
+[exec:nu] stdout '^DESCRIBED: deploy=deploy it status=show status$'
+[exec:nu] stdout '^ENUM: json text yaml$'
+[exec:nu] stdout '^ORDER: low high$'
+[exec:nu] stdout '^DEEP: json text yaml$'
+[exec:nu] stdout '^CONFIG: a.yaml b.yml '
+[exec:nu] ! stdout 'CONFIG: .*c\.txt'
+[exec:nu] ! stdout ':rotini:'
 
 # PowerShell reads a config file under the user's home at startup, and testscript hands every
 # script a home that does not exist: $HOME, and on Windows $USERPROFILE. It also expects the
@@ -178,6 +190,19 @@ set -l joined (string join ' ' (for l in $cfg; string split -f1 \t -- $l; end))
 echo "CONFIG: $joined"
 
 echo "OK: fish separated the directive"
+-- drive-nu.nu --
+# Nushell 0.116 or later: `commandline complete` asks for the completions of a line the way TAB
+# does, through the completer the script attaches to the app extern.
+$env.PATH = ($env.PATH | prepend $env.PWD)
+source completion_nushell.nu
+
+def values [line: string] { $line | commandline complete | str join ' ' }
+print $"CANDIDATES: (values 'app ')"
+print $"DESCRIBED: ('app ' | commandline complete --detailed | each {|c| $'($c.value)=($c.description)' } | str join ' ')"
+print $"ENUM: (values 'app --format ')"
+print $"ORDER: (values 'app --level ')"
+print $"DEEP: (values 'app deploy --format ')"
+print $"CONFIG: (values 'app --config ')"
 -- drive-pwsh.ps1 --
 # PowerShell has no way to invoke a registered native completer directly without a live
 # host, so this exercises the same split the script performs: run __complete, separate the

@@ -1,0 +1,72 @@
+# R0 — `rotini init --template suite`: two binaries, each composing a shared child command
+# from its own spec.
+
+gomodinit example.com/demo
+
+wantexit 2 rotini init demo --template suite --dry-run
+stderr 'create cmd/status/\.rotini\.spec\.yaml'
+stderr 'create cmd/demo/main\.go'
+stderr 'create cmd/demo-admin/main\.go'
+! exists cmd
+
+exec rotini init demo --template suite
+stdout '^spec: cmd[/\\]demo[/\\]\.rotini\.spec\.yaml$'
+stdout '^spec: cmd[/\\]status[/\\]\.rotini\.spec\.yaml$'
+stdout '^spec: cmd[/\\]demo-admin[/\\]\.rotini\.spec\.yaml$'
+! exists cmd/status/main.go
+
+# The first binary's go:generate regenerates the shared child before itself.
+grep '^//go:generate go tool rotini generate \.\./status/\.rotini\.spec\.yaml' cmd/demo/main.go
+
+exec go mod tidy
+exec go build -o demo$exe ./cmd/demo
+exec go build -o demo-admin$exe ./cmd/demo-admin
+
+exec ./demo$exe --help
+stdout 'status'
+! stdout 'reset'
+exec ./demo-admin$exe --help
+stdout 'status'
+stdout 'reset'
+
+exec ./demo$exe status --verbose
+stdout 'Verbose:true'
+exec ./demo-admin$exe status --help
+stdout 'demo-admin status \[flags\]'
+
+# A shared child that declares its own --help answers it with its own page.
+cp status-help.spec.yaml cmd/status/.rotini.spec.yaml
+rm internal/cmd/status/status.go
+exec rotini generate cmd/status/.rotini.spec.yaml --config cmd/status/.rotini.conf.yaml
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe status --help
+stdout 'Show the current status'
+! stderr .
+
+# Every format works: the $ref uses the chosen extension.
+mkdir second
+cd second
+gomodinit example.com/second
+exec rotini init app --template suite --format jsonc
+grep '"\$ref": "\.\./status/\.rotini\.spec\.jsonc"' cmd/app/.rotini.spec.jsonc
+exec go mod tidy
+exec go build ./...
+-- status-help.spec.yaml --
+$schema: ./.rotini-schema.spec.json
+version: 0.1.0
+command:
+  name: status
+  summary: show the current status
+  description: Show the current status.
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: verbose
+      identifiers: [--verbose]
+      summary: show more detail
+      schema: { type: bool }

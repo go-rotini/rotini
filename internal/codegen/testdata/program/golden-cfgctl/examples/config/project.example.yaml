@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../schemas/cfgctl.project.config.json
+## project: .cfgctl.yaml in the working directory or the nearest parent holding one, read by cfgctl and its sub-commands.
+## Each line starting with "# " is a key: remove the "# " to set it.
+## Keys any configuration file may hold are listed once, in app.example.yaml.
+
+# deploy:
+##   which registry to push to (string)
+#   registry: ""

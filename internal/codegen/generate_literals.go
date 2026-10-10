@@ -120,6 +120,7 @@ func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile
 			renderPathFrom(b, c)
 		}
 		renderProfiles(b, gp, f)
+		renderConfigKeys(b, gp, f)
 		b.WriteString("},\n")
 	}
 	b.WriteString("},\n")
@@ -600,15 +601,16 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	if r := relative(schema); r != "" {
 		fmt.Fprintf(b, ", Relative: %q", r)
 	}
-	if c := constraintsLiteral(schema); c != "" {
-		fmt.Fprintf(b, ", Constraints: %s", c)
+	if c := constraintFields(schema); c != "" {
+		b.WriteString(", ")
+		b.WriteString(c)
 	}
 }
 
-// constraintsLiteral renders a rotini.Constraints{…} literal from a schema's declared bounds,
-// or "" when none are set. Numeric bounds are emitted as rotini.Ptr literals, so a declared 0
-// is kept; length and count bounds treat 0 as unset.
-func constraintsLiteral(schema *InputSchema) string {
+// constraintFields renders a schema's declared bounds as the promoted rotini.Constraints fields of
+// a FlagDef, ArgDef or ConfigKey literal, or "" when none are set. Numeric bounds are emitted as
+// rotini.Ptr literals, so a declared 0 is kept; length and count bounds treat 0 as unset.
+func constraintFields(schema *InputSchema) string {
 	var parts []string
 	eachConstraint(schema, func(_, field, _, litVal string) {
 		parts = append(parts, field+": "+litVal)
@@ -616,7 +618,7 @@ func constraintsLiteral(schema *InputSchema) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return rotiniPkgName + ".Constraints{" + strings.Join(parts, ", ") + "}"
+	return strings.Join(parts, ", ")
 }
 
 // definitionType resolves an input schema to the type string on the emitted FlagDef/ArgDef,

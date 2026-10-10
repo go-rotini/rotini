@@ -11,7 +11,7 @@ import (
 {{- if .EmbedImport}}
 	_ "embed"
 {{- end}}
-{{- if or .Features .UsageFunc}}
+{{- if or .Features .UsageFunc .NeedsFmt}}
 	"fmt"
 {{- end}}
 {{- if or .PathResolvers .UsageFunc}}
@@ -213,7 +213,7 @@ func {{.Resolver}}(path ...string) (string, error) {
 }
 {{- if .PagesFunc}}
 
-// {{.PagesFunc}} returns every command's {{.Noun}} page, root first in tree order, leaving out
+// {{.PagesFunc}} returns every command's {{.Noun}}, root first in tree order, leaving out
 // hidden commands and the commands below them, then each help topic's page (Topic set). Each
 // page's Content is what {{.Resolver}} returns for its Path.
 func {{.PagesFunc}}() []rotini.Page {

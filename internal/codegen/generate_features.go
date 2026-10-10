@@ -59,7 +59,7 @@ var (
 		// Help is a terminal surface, so spec-authored styling is kept.
 	}
 	manFeatureDesc = docFeature{
-		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
+		name: "man", noun: "man page", varPrefix: "Man", resolver: "Man",
 		tmplFile: manTemplateName, embedded: templateMan,
 		verbatim:  func(h cmdHelp) string { return h.Man },
 		strip:     true, // a roff man page carries no legitimate SGR
@@ -67,7 +67,7 @@ var (
 		pagesFunc: "ManPages",
 	}
 	markdownFeatureDesc = docFeature{
-		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
+		name: "markdown", noun: "markdown page", varPrefix: "Markdown", resolver: "Markdown",
 		ext: ".md", filePrefix: "markdown_", tmplFile: markdownTemplateName, embedded: templateMarkdown,
 		verbatim:  func(h cmdHelp) string { return h.Markdown },
 		strip:     true, // a markdown file carries no legitimate SGR
@@ -82,7 +82,7 @@ var (
 )
 
 // completionShells are the shells completionScript supports, in generation order.
-var completionShells = []string{"bash", "zsh", "fish", "powershell"}
+var completionShells = []string{"bash", "zsh", "fish", "powershell", "nushell"}
 
 // helpNode is one command's page for one feature: its embed var and resolver identity plus the
 // verbatim page or the data to render it from.

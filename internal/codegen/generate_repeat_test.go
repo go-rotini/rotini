@@ -39,7 +39,7 @@ func TestDefinitionLiteral_repeatFacts(t *testing.T) {
 	got := renderDefinition(repeatProgram(t))
 	for _, want := range []string{
 		`Name: "name", Identifiers: []string{"--name"}, Type: "string", NoRepeat: true`,
-		`Constraints: rotini.Constraints{UniqueItems: true}`,
+		`UniqueItems: true`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("definition lacks %q:\n%s", want, got)

@@ -1,0 +1,138 @@
+# R12 — the verbosity recipe: a counted -v flag sets the level of a slog logger the root's
+# CascadingPreRun builds, and commands log through it, to stderr. The root handler file is the
+# one the recipes page shows.
+
+gomodinit example.com/logdemo
+
+exec rotini generate cmd/logdemo/.rotini.spec.yaml --config cmd/logdemo/.rotini.conf.yaml
+cp root.go.txt internal/cmd/logdemo/logdemo.go
+cp run.go.txt internal/cmd/logdemo/logdemo_run.go
+exec go mod tidy
+exec go build -o logdemo$exe ./cmd/logdemo
+
+# Warnings only by default; stdout keeps the command's own output.
+exec ./logdemo$exe run
+stdout '^done$'
+stderr 'level=WARN'
+! stderr 'level=INFO'
+! stderr 'level=DEBUG'
+
+exec ./logdemo$exe run -v
+stderr 'level=INFO'
+! stderr 'level=DEBUG'
+
+exec ./logdemo$exe -vv run
+stderr 'level=DEBUG msg="loading tasks"'
+stdout '^done$'
+
+-- root.go.txt --
+package logdemo
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*logdemoHandler)(nil)
+
+// Logger is the run's logger, set by the root's CascadingPreRun before any command runs.
+var Logger = rotini.NewDependency[*slog.Logger]("logdemo.logger")
+
+type logdemoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*logdemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[LogdemoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	flags := inputs.Logdemo.Flags
+
+	var level slog.LevelVar // the zero value is Info
+	switch {
+	case flags.Verbose >= 2:
+		level.Set(slog.LevelDebug)
+	case flags.Verbose == 1:
+		level.Set(slog.LevelInfo)
+	default:
+		level.Set(slog.LevelWarn)
+	}
+	logger := slog.New(slog.NewTextHandler(rtx.Stderr, &slog.HandlerOptions{Level: &level}))
+	rtx.SetDependency(Logger, logger)
+
+	if flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		rtx.HaltWithCode(0)
+	}
+}
+
+func (*logdemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+-- run.go.txt --
+package logdemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*logdemoRunHandler)(nil)
+
+type logdemoRunHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*logdemoRunHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	log := rtx.MustGetDependency(Logger)
+	log.Debug("loading tasks", "file", "tasks.json")
+	log.Info("3 tasks to run")
+	log.Warn("the cache is stale")
+	fmt.Fprintln(rtx.Stdout, "done")
+}
+-- cmd/logdemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: logdemo
+  summary: log at the level -v asks for
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: verbose
+      summary: log more; repeat for more detail
+      identifiers: [-v, --verbose]
+      cascading: true
+      schema: { type: count }
+  commands:
+    - name: run
+      summary: run the tasks
+-- cmd/logdemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/logdemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/logdemo/zz_logdemo.go
+      package: logdemo
+  features:
+    - type: help
+      enabled: true

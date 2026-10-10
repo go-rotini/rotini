@@ -1,0 +1,7 @@
+spec: .rotini.spec.yaml:19:7: command taskr: example "taskr lst" does not parse: unknown command "lst" for "taskr"
+spec: .rotini.spec.yaml:20:7: command taskr: example "taskr list --colour" does not parse: unknown flag "--colour"
+spec: .rotini.spec.yaml:21:7: command taskr: example "taskr list --status closed" does not parse: invalid value "closed" for --status (one of: open, done)
+spec: .rotini.spec.yaml:22:7: command taskr: example "taskr add" does not parse: missing required input: <title>
+spec: .rotini.spec.yaml:23:7: command taskr: example "taskr list --json --status open" does not parse: flags --json and --status are mutually exclusive
+spec: .rotini.spec.yaml:24:7: command taskr: example "echo x | taskr add one two" does not parse: "add" accepts at most 1 argument (got 2)
+warning: spec: .rotini.spec.yaml:25:7: command taskr: example "taskr add \"unclosed" has an unclosed quote

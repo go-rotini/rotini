@@ -1,0 +1,187 @@
+# R12 — the profiling recipe: hidden --cpuprofile and --trace flags start the profiler and the
+# tracer in the root's CascadingPreRun and stop them in its CascadingPostRun, which runs after
+# a failed command too. The root handler file is the one the recipes page shows.
+
+gomodinit example.com/profdemo
+
+exec rotini generate cmd/profdemo/.rotini.spec.yaml --config cmd/profdemo/.rotini.conf.yaml
+cp root.go.txt internal/cmd/profdemo/profdemo.go
+cp work.go.txt internal/cmd/profdemo/profdemo_work.go
+exec go mod tidy
+exec go build -o profdemo$exe ./cmd/profdemo
+
+exec ./profdemo$exe work --cpuprofile cpu.prof --trace trace.out
+stdout '^worked$'
+exists cpu.prof
+exists trace.out
+exec go tool pprof -top profdemo$exe cpu.prof
+stdout 'Type: cpu'
+
+# A failed command still writes its profile.
+rm cpu.prof
+wantexit 1 ./profdemo$exe work --fail --cpuprofile cpu.prof
+exists cpu.prof
+
+# The flags are hidden from help.
+exec ./profdemo$exe --help
+! stdout cpuprofile
+
+-- root.go.txt --
+package profdemo
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime/pprof"
+	"runtime/trace"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*profdemoHandler)(nil)
+
+type profdemoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+
+	// The files stay open from CascadingPreRun until CascadingPostRun closes them.
+	cpu, trace *os.File
+}
+
+func (h *profdemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[ProfdemoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	flags := inputs.Profdemo.Flags
+	if flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		rtx.HaltWithCode(0)
+		return
+	}
+	if flags.Cpuprofile != "" {
+		if h.cpu, err = os.Create(filepath.Join(rtx.Dir(), flags.Cpuprofile)); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		if err := pprof.StartCPUProfile(h.cpu); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+	if flags.Trace != "" {
+		if h.trace, err = os.Create(filepath.Join(rtx.Dir(), flags.Trace)); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		if err := trace.Start(h.trace); err != nil {
+			rtx.HaltWith(err)
+		}
+	}
+}
+
+// CascadingPostRun runs after the command, even when it failed or panicked, so the profile
+// and the trace are always complete.
+func (h *profdemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	if h.cpu != nil {
+		pprof.StopCPUProfile()
+		if err := h.cpu.Close(); err != nil {
+			rtx.RecordError(err)
+		}
+	}
+	if h.trace != nil {
+		trace.Stop()
+		if err := h.trace.Close(); err != nil {
+			rtx.RecordError(err)
+		}
+	}
+}
+
+func (*profdemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+-- work.go.txt --
+package profdemo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*profdemoWorkHandler)(nil)
+
+type profdemoWorkHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*profdemoWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[ProfdemoWorkInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	n := 0
+	for i := range 20_000_000 {
+		n += i % 7
+	}
+	if inputs.ProfdemoWork.Flags.Fail {
+		rtx.HaltWith(errors.New("failed on purpose"))
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, "worked")
+}
+-- cmd/profdemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: profdemo
+  summary: profile any command
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: cpuprofile
+      summary: write a CPU profile to this file
+      identifiers: [--cpuprofile]
+      cascading: true
+      hidden: true
+      schema: { type: string }
+    - name: trace
+      summary: write an execution trace to this file
+      identifiers: [--trace]
+      cascading: true
+      hidden: true
+      schema: { type: string }
+  commands:
+    - name: work
+      summary: do some work
+      flags:
+        - name: fail
+          summary: fail after the work
+          identifiers: [--fail]
+          schema: { type: bool }
+-- cmd/profdemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/profdemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/profdemo/zz_profdemo.go
+      package: profdemo
+  features:
+    - type: help
+      enabled: true

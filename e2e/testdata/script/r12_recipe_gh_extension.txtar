@@ -1,0 +1,51 @@
+# R12 — the gh extension recipe: a binary named gh-hello whose pages read as the command the user
+# types, `gh hello`, through display_name. The spec is the one the recipes page shows.
+
+gomodinit example.com/gh-hello
+
+cp spec.yaml.txt cmd/gh-hello/.rotini.spec.yaml
+exec rotini generate cmd/gh-hello/.rotini.spec.yaml --config cmd/gh-hello/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o gh-hello$exe ./cmd/gh-hello
+
+exec ./gh-hello$exe --help
+stdout '^  gh hello \[flags\] <command>'
+! stdout 'gh-hello'
+
+exec ./gh-hello$exe greet --help
+stdout '^  gh hello greet$'
+
+-- spec.yaml.txt --
+version: 0.0.0
+command:
+  name: gh-hello
+  display_name: gh hello
+  summary: say hello from a gh extension
+  env:
+    - name: host
+      summary: the GitHub host gh is talking to
+      schema: { type: string, variable: GH_HOST, default: github.com }
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: greet
+      summary: print a greeting
+-- cmd/gh-hello/.rotini.spec.yaml --
+-- cmd/gh-hello/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/gh-hello/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/ghhello/zz_ghhello.go
+      package: ghhello
+  features:
+    - type: help
+      enabled: true

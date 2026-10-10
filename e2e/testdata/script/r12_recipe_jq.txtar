@@ -1,0 +1,87 @@
+# R12 — the jq recipe: a command's -o json output, filtered by jq with the expression the
+# recipes page shows.
+
+[!exec:jq] skip 'needs jq'
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+cp list.go.txt internal/cmd/todo/todo_list.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+exec ./todo$exe list -o json
+cp stdout tasks.json
+exec jq -r '.tasks[] | select(.status == "open") | .title' tasks.json
+cmp stdout want.txt
+
+-- want.txt --
+write docs
+fix the build
+-- list.go.txt --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoListHandler)(nil)
+
+type todoListHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoListInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	list := TodoListOutput{Tasks: []Task{
+		{ID: 1, Title: "write docs", Status: "open"},
+		{ID: 2, Title: "ship", Status: "done"},
+		{ID: 3, Title: "fix the build", Status: "open"},
+	}}
+	rtx.HaltWith(rtx.WriteOutput(list, in.TodoList.Flags.Output, nil))
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  schemas:
+    Task:
+      type: object
+      required: [id, title, status]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        status: { type: string, enum: [open, done] }
+    TaskList:
+      type: object
+      properties:
+        tasks: { type: array, items: { $ref: "#/schemas/Task" } }
+  commands:
+    - name: list
+      summary: list tasks
+      output: { $ref: "#/schemas/TaskList" }
+      flags:
+        - name: output
+          summary: how to write the result
+          identifiers: [-o, --output]
+          schema: { type: string, default: json, enum: [json, yaml] }
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo

@@ -1,0 +1,14 @@
+/// editor: ./editor.jsonc, read by cfgctl and its sub-commands.
+/// Each line starting with "// " is a key: remove the "// " to set it.
+/// Keys any configuration file may hold are listed once, in app.example.yaml.
+
+{
+//   "ui": {
+//     "font": {
+///      the font size (int; default 12)
+//       "size": 12
+//     },
+///    the color theme (string; one of dark, light; default dark)
+//     "theme": "dark"
+//   }
+}

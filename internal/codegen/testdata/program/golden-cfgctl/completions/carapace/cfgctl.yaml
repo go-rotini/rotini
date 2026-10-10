@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://carapace.sh/schemas/command.json
+name: cfgctl
+description: "deploy services, configured from everywhere"
+flags:
+  "-v, --version": print version
+persistentflags:
+  "-h, --help": print help
+  "-c, --config-file=": read secrets from this file instead of ./secrets.json
+  "--profile=": the configuration profile to use
+completion:
+  flag:
+    config-file:
+      - "$files([.json])"
+commands:
+  - name: deploy
+    description: deploy a service
+    flags:
+      "--print-plan": "print the resolved plan and stop, without deploying"
+      "-r, --replicas=": how many instances
+      "--api-token=": token for the registry
+      "-e, --env=": which environment
+    completion:
+      flag:
+        env:
+          - staging
+          - production
+  - name: doctor
+    description: show where every value came from
+    flags:
+      "-r, --replicas=": how many instances
+  - name: show
+    description: resolve one channel at a time
+    flags:
+      "--order=*": "the precedence order, low to high"
+      "-r, --replicas=": how many instances
+  - name: help
+    description: print help
+  - name: version
+    description: print version

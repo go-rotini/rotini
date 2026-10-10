@@ -48,6 +48,12 @@ type Presence map[FieldPath]InputSource
 // participates in overlay, provenance and validation: the fields its Set names count as
 // supplied, and their values are checked the way [Context.CheckInputs] checks them. A nil or
 // empty Set means the layer supplied nothing: overlaying it leaves every field as it was.
+//
+// In a merged [InputReport], a hand-built layer's field whose [InputSource] leaves Layer empty
+// (or "custom", as [PresenceOf] writes it) is attributed to the layer's Name, and an empty Raw
+// is filled with the supplied value's text. A field the spec marks secret shows Raw as
+// "[redacted]" whatever the layer gave. Both need a rotini layer in the merge, which says what
+// the spec declares.
 type InputLayer[T any] struct {
 	Name   string
 	Values T
@@ -210,15 +216,16 @@ func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport) {
 	dst := reflect.ValueOf(&out).Elem()
 	rep := InputReport{set: Presence{}, history: map[FieldPath][]InputSource{}}
 
+	var hand []handBuiltSource
 	for _, l := range layers {
 		src := reflect.ValueOf(l.Values)
 		for _, path := range sortedPaths(l.Set) {
 			copyFieldByPath(dst, src, path)
 			prov := l.Set[path]
-			rep.set[path] = prov
-			rep.history[path] = append(rep.history[path], prov)
 			// Track which kind of layer won each field: a later rotini layer takes it back.
 			if l.core == nil {
+				prov = handBuiltProvenance(prov, l.Name)
+				hand = append(hand, handBuiltSource{path: path, at: len(rep.history[path]), values: src})
 				if rep.handBuilt == nil {
 					rep.handBuilt = map[FieldPath]bool{}
 				}
@@ -226,11 +233,14 @@ func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport) {
 			} else {
 				delete(rep.handBuilt, path)
 			}
+			rep.set[path] = prov
+			rep.history[path] = append(rep.history[path], prov)
 		}
 		rep.absorb(l.core)
 	}
 	rep.finalize()
 	rep.merged = reflect.ValueOf(out)
+	rep.fillHandBuiltRaw(hand)
 	return out, rep
 }
 

@@ -1,0 +1,259 @@
+# R1 — `config set`, `config unset` and `config path` commands built on SetConfigValue,
+# UnsetConfigValue and ConfigFilePath.
+#
+# The first write creates the file under $XDG_CONFIG_HOME. A write into an existing file keeps
+# its comments and layout. A bad value is a usage error that leaves the file as it was. With a
+# profile selected, the value goes into that profile. The recipes page shows set.go.txt.
+
+gomodinit example.com/cfgctl
+
+exec rotini generate cmd/cfgctl/.rotini.spec.yaml --config cmd/cfgctl/.rotini.conf.yaml
+cp set.go.txt internal/cmd/cfgctl/cfgctl_config_set.go
+cp unset.go.txt internal/cmd/cfgctl/cfgctl_config_unset.go
+cp path.go.txt internal/cmd/cfgctl/cfgctl_config_path.go
+exec go mod tidy
+exec go build -o cfgctl$exe ./cmd/cfgctl
+
+env XDG_CONFIG_HOME=$WORK/xdg
+
+# Nothing exists yet: the first write creates the file where the program reads it.
+exec ./cfgctl$exe config path
+stdout '^.*xdg[/\\]cfgctl[/\\]config\.yaml \(not created yet\)$'
+exec ./cfgctl$exe config set region eu-west-1
+cmp xdg/cfgctl/config.yaml created.yaml
+exec ./cfgctl$exe
+stdout '^region=eu-west-1 level= timeout=0s$'
+
+# An existing file keeps its comments, order and layout.
+cp commented.yaml xdg/cfgctl/config.yaml
+exec ./cfgctl$exe config set level warn
+exec ./cfgctl$exe config set deploy.timeout 90s
+exec ./cfgctl$exe config unset region
+cmp xdg/cfgctl/config.yaml commented.golden
+exec ./cfgctl$exe
+stdout '^region= level=warn timeout=1m30s$'
+
+# A value the spec doesn't allow, or a key it doesn't declare, changes nothing.
+! exec ./cfgctl$exe config set level loud
+stderr '^Error: invalid value "loud" for config key level \(one of: debug, info, warn\)$'
+! exec ./cfgctl$exe config set regoin x
+stderr '^Error: unknown config key regoin \(keys: deploy.timeout, level, region\)$'
+cmp xdg/cfgctl/config.yaml commented.golden
+
+# With a profile selected, the value goes into it.
+exec ./cfgctl$exe config set --profile prod region us-east-1
+cmp xdg/cfgctl/config.yaml profiled.golden
+exec ./cfgctl$exe --profile prod
+stdout '^region=us-east-1 level=warn timeout=1m30s$'
+
+# The key argument completes from the file's key table.
+exec ./cfgctl$exe __complete config set ''
+stdout '^deploy\.timeout$'
+stdout '^level$'
+stdout '^region$'
+
+-- created.yaml --
+region: eu-west-1
+-- commented.yaml --
+# cfgctl settings
+region: eu-west-1   # the default region
+
+deploy:
+  # how long a deploy may take
+  timeout: 30s
+-- commented.golden --
+# cfgctl settings
+
+deploy:
+  # how long a deploy may take
+  timeout: 90s
+level: warn
+-- profiled.golden --
+# cfgctl settings
+
+deploy:
+  # how long a deploy may take
+  timeout: 90s
+level: warn
+profiles:
+  prod:
+    region: us-east-1
+-- set.go.txt --
+package cfgctl
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*cfgctlConfigSetHandler)(nil)
+
+type cfgctlConfigSetHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgctlConfigSetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.ArgvInputs[CfgctlConfigSetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	args := in.Values.CfgctlConfigSet.Arguments
+	if err := rotini.SetConfigValue(rtx, "user", args.Key, args.Value); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+
+// CompleteArgValue offers the keys the configuration file may hold.
+func (*cfgctlConfigSetHandler) CompleteArgValue(_ *rotini.Context, arg, _ string) []string {
+	if arg != "key" {
+		return nil
+	}
+	var keys []string
+	for _, f := range InputSettings.ConfigFiles {
+		if f.Name == "user" {
+			for _, k := range f.Keys {
+				keys = append(keys, k.Key)
+			}
+		}
+	}
+	return keys
+}
+-- unset.go.txt --
+package cfgctl
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*cfgctlConfigUnsetHandler)(nil)
+
+type cfgctlConfigUnsetHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgctlConfigUnsetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.ArgvInputs[CfgctlConfigUnsetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if err := rotini.UnsetConfigValue(rtx, "user", in.Values.CfgctlConfigUnset.Arguments.Key); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- path.go.txt --
+package cfgctl
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*cfgctlConfigPathHandler)(nil)
+
+type cfgctlConfigPathHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgctlConfigPathHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	path, exists, err := rotini.ConfigFilePath(rtx, "user")
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if !exists {
+		path += " (not created yet)"
+	}
+	fmt.Fprintln(rtx.Stdout, path)
+}
+-- cmd/cfgctl/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: cfgctl
+  config_files:
+    - name: user
+      discover: { strategy: xdg, file: config.yaml, app: cfgctl }
+      profiles: { under: profiles, select: profile }
+  flags:
+    - name: profile
+      summary: the configuration profile to use
+      identifiers: [--profile]
+      cascading: true
+      schema: { type: string, variable: CFGCTL_PROFILE }
+  config:
+    - name: region
+      schema: { type: string }
+    - name: level
+      schema: { type: string, enum: [debug, info, warn] }
+    - name: timeout
+      schema: { type: duration, key: deploy.timeout }
+  commands:
+    - name: config
+      summary: read and write the configuration file
+      commands:
+        - name: set
+          summary: set a configuration value
+          arguments:
+            - name: key
+              schema: { type: string, required: true }
+            - name: value
+              schema: { type: string, required: true }
+        - name: unset
+          summary: remove a configuration value
+          arguments:
+            - name: key
+              schema: { type: string, required: true }
+        - name: path
+          summary: print the configuration file's path
+-- cmd/cfgctl/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/cfgctl/main.go
+    - type: cmd
+      file: internal/cmd/cfgctl/zz_cfgctl.go
+      package: cfgctl
+-- internal/cmd/cfgctl/cfgctl.go --
+package cfgctl
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*cfgctlHandler)(nil)
+
+type cfgctlHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgctlHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[CfgctlInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	c := in.Cfgctl.Config
+	fmt.Fprintf(rtx.Stdout, "region=%s level=%s timeout=%s\n", c.Region, c.Level, c.Timeout)
+}

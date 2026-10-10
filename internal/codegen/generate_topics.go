@@ -142,6 +142,24 @@ func (t envTopic) add(variable string, row templateDocEnvRow, command string) {
 	}
 }
 
+// addNames records the variables one input reads, in lookup order: each name after the first
+// notes the first as the name it shares the input with.
+func (t envTopic) addNames(names []string, row templateDocEnvRow, command string) {
+	first := ""
+	for _, v := range names {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		r := row
+		r.AliasOf = first
+		t.add(v, r, command)
+		if first == "" {
+			first = v
+		}
+	}
+}
+
 // fileRow describes a variable that names a file holding an input's value.
 func fileRow(summary string) templateDocEnvRow {
 	if summary == "" {
@@ -153,7 +171,7 @@ func fileRow(summary string) templateDocEnvRow {
 // envRow describes a variable an input reads.
 func envRow(summary string, schema *InputSchema, deprecated, since, removedIn, stability string) templateDocEnvRow {
 	return templateDocEnvRow{
-		Summary: summary, Type: flagDisplayType(schema), Default: schemaDefaultString(schema),
+		Summary: summary, Type: flagDisplayType(schema), Default: schemaDefaultString(schema), Secret: schema != nil && schema.Secret,
 		Deprecated: deprecated, DeprecatedSince: since, RemovedIn: removedIn, Stability: stability,
 	}
 }
@@ -169,9 +187,10 @@ func (t envTopic) inputs(command string, in *Inputs) {
 			continue
 		}
 		row := envRow(e.Summary, e.Schema, e.Deprecated, e.DeprecatedSince, e.RemovedIn, e.Stability)
-		for v := range strings.SplitSeq(envVarName(e, t.prefix), ",") {
-			t.add(v, row, command)
+		if e.Schema != nil {
+			row.Nesting = e.Schema.Nesting
 		}
+		t.addNames(strings.Split(envVarName(e, t.prefix), ","), row, command)
 		if e.Schema != nil && e.Schema.VariableFile != "" {
 			t.add(e.Schema.VariableFile, fileRow(e.Summary), command)
 		}
@@ -181,9 +200,7 @@ func (t envTopic) inputs(command string, in *Inputs) {
 			continue
 		}
 		row := envRow(f.Summary, f.Schema, f.Deprecated, f.DeprecatedSince, f.RemovedIn, f.Stability)
-		for v := range strings.SplitSeq(flagEnvVar(f.Schema, flagReconKey(f.Name, f.Schema), t.prefix), ",") {
-			t.add(v, row, command)
-		}
+		t.addNames(strings.Split(flagEnvVar(f.Schema, flagReconKey(f.Name, f.Schema), t.prefix), ","), row, command)
 		if f.Schema != nil && f.Schema.VariableFile != "" {
 			t.add(f.Schema.VariableFile, fileRow(f.Summary), command)
 		}
@@ -194,9 +211,7 @@ func (t envTopic) inputs(command string, in *Inputs) {
 		}
 		env, _ := argumentFallback(a, t.prefix, false)
 		row := envRow(a.Summary, a.Schema, a.Deprecated, a.DeprecatedSince, a.RemovedIn, a.Stability)
-		for _, v := range env {
-			t.add(v, row, command)
-		}
+		t.addNames(env, row, command)
 	}
 }
 

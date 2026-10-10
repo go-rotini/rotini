@@ -1,7 +1,8 @@
 # R0 — init, generate and validate report success the same way.
 #
 # Each prints the spec it read, the conf beside it, and a timing line, and nothing else on
-# success. A "next steps" block or a count added to one of them would drift the three apart;
+# success, except one `created:` line per new file `generate` writes that the author owns. A
+# "next steps" block or a count added to one of them would drift the three apart;
 # this script holds them to one shape. init prints the paths it wrote; generate and validate
 # print the ones they were given, so a leading ./ is kept. Paths are the OS's own, so the
 # separator is \ on Windows.
@@ -19,3 +20,38 @@ stdout '\Aspec: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.spec\.yaml\nconf: (\.[/\\])
 exec rotini validate ./cmd/demo/.rotini.spec.yaml --config ./cmd/demo/.rotini.conf.yaml
 stdout '\Aspec: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.spec\.yaml\nconf: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.conf\.yaml\n\[\d\d:\d\d:\d\d\] \S+\n\z'
 ! stderr .
+
+# A generate that creates a file the author owns lists it before the timing line.
+cp greet.yaml cmd/demo/greet.yaml
+exec rotini generate ./cmd/demo/greet.yaml --config ./cmd/demo/.rotini.conf.yaml
+stdout '\Aspec: (\.[/\\])?cmd[/\\]demo[/\\]greet\.yaml\nconf: (\.[/\\])?cmd[/\\]demo[/\\]\.rotini\.conf\.yaml\ncreated: internal[/\\]cmd[/\\]demo[/\\]demo_greet\.go\n\[\d\d:\d\d:\d\d\] \S+\n\z'
+! stderr .
+
+-- greet.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+    - name: greet
+      summary: say hello

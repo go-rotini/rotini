@@ -24,6 +24,7 @@ type configKeyEntry struct {
 	key         string   // the dotted key in the file
 	schema      any      // the value's JSON Schema
 	description string   // the input's description, else its summary
+	summary     string   // the input's summary
 	deprecated  string   // the deprecation note, "" when not deprecated
 	commands    []string // the commands that read it, as typed
 	scope       *schemaScope
@@ -98,7 +99,7 @@ func (p *program) configFileKeys(cf scopedConfigFile) []configKeyEntry {
 					continue
 				}
 				add(configKey(cfg), configKeyEntry{
-					schema: inputJSONSchema(cfg.Schema), description: cmp.Or(cfg.Description, cfg.Summary),
+					schema: inputJSONSchema(cfg.Schema), description: cmp.Or(cfg.Description, cfg.Summary), summary: cfg.Summary,
 					deprecated: deprecatedNote(cfg.Deprecated, cfg.DeprecatedSince, cfg.RemovedIn), scope: scope, input: cfg.Schema,
 				}, c.typed)
 			}
@@ -108,7 +109,7 @@ func (p *program) configFileKeys(cf scopedConfigFile) []configKeyEntry {
 					continue
 				}
 				add(key, configKeyEntry{
-					schema: inputJSONSchema(f.Schema), description: cmp.Or(f.Description, f.Summary),
+					schema: inputJSONSchema(f.Schema), description: cmp.Or(f.Description, f.Summary), summary: f.Summary,
 					deprecated: deprecatedNote(f.Deprecated, f.DeprecatedSince, f.RemovedIn), scope: scope, input: f.Schema,
 				}, c.typed)
 			}
@@ -118,7 +119,7 @@ func (p *program) configFileKeys(cf scopedConfigFile) []configKeyEntry {
 					continue
 				}
 				add(key, configKeyEntry{
-					schema: inputJSONSchema(a.Schema), description: cmp.Or(a.Description, a.Summary),
+					schema: inputJSONSchema(a.Schema), description: cmp.Or(a.Description, a.Summary), summary: a.Summary,
 					deprecated: deprecatedNote(a.Deprecated, a.DeprecatedSince, a.RemovedIn), scope: scope, input: a.Schema,
 				}, c.typed)
 			}

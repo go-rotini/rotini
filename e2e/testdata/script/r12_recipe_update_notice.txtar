@@ -1,0 +1,235 @@
+# R12 — the update-notice recipe: the root's CascadingPostRun says on stderr, at most once a day
+# and only at a terminal, that a newer release exists, and the declared opt-out and CI turn it
+# off. notify.go is the file the recipes page shows; selftest.go is test scaffolding, not on the
+# page: it stands in for a terminal and the release server.
+
+gomodinit example.com/updemo
+
+exec rotini generate cmd/updemo/.rotini.spec.yaml --config cmd/updemo/.rotini.conf.yaml
+cp notify.go.txt internal/cmd/updemo/notify.go
+cp root.go.txt internal/cmd/updemo/updemo.go
+cp hello.go.txt internal/cmd/updemo/updemo_hello.go
+cp selftest.go.txt internal/cmd/updemo/selftest.go
+exec go mod tidy
+exec go build -o updemo$exe ./cmd/updemo
+
+env XDG_CACHE_HOME=$WORK/cache
+
+# Not at a terminal: no notice, no check, nothing cached.
+exec ./updemo$exe hello
+stdout '^hello$'
+! stderr .
+! exists cache/updemo/update-check
+
+# The opt-out and CI keep it quiet even at a terminal.
+env UPDEMO_SELFTEST=1
+env UPDEMO_NO_UPDATE_NOTIFIER=1
+exec ./updemo$exe hello
+! stderr .
+env UPDEMO_NO_UPDATE_NOTIFIER=false
+env CI=true
+exec ./updemo$exe hello
+! stderr .
+env CI=
+
+# At a terminal the notice goes to stderr, after the output, once a day.
+exec ./updemo$exe hello
+stdout '^hello$'
+stderr '^A new release of updemo is available: 0.0.0 → 9.9.9$'
+exists cache/updemo/update-check
+exec ./updemo$exe hello
+! stderr .
+
+-- notify.go.txt --
+package updemo
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+// These are variables so a test can replace them.
+var (
+	latestVersion = fetchLatestVersion
+	isTerminal    = rotini.IsTerminal
+)
+
+// CascadingPostRun runs after every command. At most once a day, and only for a person at a
+// terminal, it says on stderr that a newer release exists.
+func (*updemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[UpdemoInputs]()
+	if err != nil || in.Updemo.Env.NoUpdateNotifier || in.Updemo.Env.Ci != "" || !isTerminal(rtx.Stderr) {
+		return
+	}
+	dirs, err := rotini.AppDirs(rtx, "updemo", "xdg")
+	if err != nil {
+		return
+	}
+	stamp := filepath.Join(dirs.Cache, "update-check")
+	if info, err := os.Stat(stamp); err == nil && time.Since(info.ModTime()) < 24*time.Hour {
+		return
+	}
+	// Record the check before making it, so a failing check isn't retried on every run.
+	if os.MkdirAll(dirs.Cache, 0o700) != nil || os.WriteFile(stamp, nil, 0o600) != nil {
+		return
+	}
+	latest, err := latestVersion(ctx)
+	if err != nil || latest == "" || latest == rtx.Version() {
+		return
+	}
+	fmt.Fprintf(rtx.Stderr, "A new release of updemo is available: %s → %s\n", rtx.Version(), latest)
+	fmt.Fprintln(rtx.Stderr, "Set UPDEMO_NO_UPDATE_NOTIFIER=1 to stop these notices.")
+}
+
+// fetchLatestVersion asks the release server for the newest version, giving up after two
+// seconds so a slow network never holds up the command.
+func fetchLatestVersion(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com/updemo/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("release server: %s", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	return strings.TrimSpace(string(body)), err
+}
+-- root.go.txt --
+package updemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*updemoHandler)(nil)
+
+type updemoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+}
+
+func (*updemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[UpdemoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
+	if inputs.Updemo.Flags.Help {
+		var path []string
+		for _, c := range rtx.CommandChain()[1:] {
+			path = append(path, c.Name)
+		}
+
+		page, err := Help(path...)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		rtx.HaltWithCode(0)
+		return
+	}
+}
+
+func (*updemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+-- hello.go.txt --
+package updemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*updemoHelloHandler)(nil)
+
+type updemoHelloHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*updemoHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "hello")
+}
+-- selftest.go.txt --
+package updemo
+
+import (
+	"context"
+	"os"
+)
+
+// With UPDEMO_SELFTEST set, stderr counts as a terminal and the release server answers 9.9.9,
+// so the test reaches the notice without a terminal or a network.
+func init() {
+	if os.Getenv("UPDEMO_SELFTEST") == "" {
+		return
+	}
+	isTerminal = func(any) bool { return true }
+	latestVersion = func(context.Context) (string, error) { return "9.9.9", nil }
+}
+-- cmd/updemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: updemo
+  summary: tell the user, once a day, when a newer release exists
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  env:
+    - name: no-update-notifier
+      summary: set to stop update notices
+      schema: { type: bool, variable: UPDEMO_NO_UPDATE_NOTIFIER }
+    - name: ci
+      summary: set by CI systems; no notices there
+      schema: { type: string, variable: CI }
+  commands:
+    - name: hello
+      summary: print a greeting
+-- cmd/updemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/updemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/updemo/zz_updemo.go
+      package: updemo
+  features:
+    - type: help
+      enabled: true

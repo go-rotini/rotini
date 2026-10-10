@@ -50,6 +50,7 @@ type rnode struct {
 	deprecatedIdentifiers []string         // deprecated aliases of this command (runtime Deprecations)
 	passthrough           bool             // every token after this command is a raw positional
 	composed              bool             // grafted from a $ref'd child (its types live in the child's cmd)
+	ref                   string           // the $ref as written, on a composed root ("" otherwise)
 	plugins               []PluginSpec     // plugins declared on this command
 	pluginHost            string           // program name plugin binaries are named after ("" = this program's)
 	pluginPath            string           // extra directory searched for BOTH this command's kinds of plugin
@@ -249,18 +250,19 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			})
 		} else {
 			gc := genCommand{
-				prefix:         prefix,
-				invocation:     gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
-				handler:        lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handler",
-				filename:       commandStubFilename(gp.rootName, path, c.Filename),
-				dashedFilename: dashedStubFilename(gp.rootName, path, c.Filename),
-				inputFields:    gp.inputFieldsOf(c.inputs()),
-				stdinType:      stdinTypeExpr(prefix, c.inputs()),
-				stdinFormat:    stdinFormatExpr(c.inputs()),
-				inputs:         inputsFields(gp.rootPascal, path),
-				exitCodes:      exitCodesOf(c.ExitStatus),
-				hasChildren:    len(c.Commands) > 0 || len(c.Plugins) > 0 || c.PluginDiscovery != nil,
-				secret:         hasSecretInput(c.inputs()),
+				prefix:          prefix,
+				invocation:      gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
+				handler:         lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handler",
+				filename:        commandStubFilename(gp.rootName, path, c.Filename),
+				dashedFilename:  dashedStubFilename(gp.rootName, path, c.Filename),
+				inputFields:     gp.inputFieldsOf(c.inputs()),
+				stdinType:       stdinTypeExpr(prefix, c.inputs()),
+				stdinFormat:     stdinFormatExpr(c.inputs()),
+				inputs:          inputsFields(gp.rootPascal, path),
+				exitCodes:       exitCodesOf(c.ExitStatus),
+				hasChildren:     len(c.Commands) > 0 || len(c.Plugins) > 0 || c.PluginDiscovery != nil,
+				secret:          hasSecretInput(c.inputs()),
+				completionShell: isCompletionCommand(&c),
 			}
 			if c.Handler != nil {
 				// Inline passthrough: an own command whose handler lives in another
@@ -499,7 +501,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		deprecated: merged.Deprecated, deprecatedIdentifiers: merged.DeprecatedIdentifiers,
 		passthrough: childRoot.Passthrough, plugins: childRoot.Plugins,
 		discovery: childRoot.PluginDiscovery, pluginPath: merged.PluginPath,
-		pluginHost: childRoot.Name, composed: true, children: children,
+		pluginHost: childRoot.Name, composed: true, ref: c.Ref, children: children,
 		scope: scope, lifecycle: lifecycleOf(&merged),
 		inputsType:    composedInputsType(ctx, delegateRoot),
 		hiddenAliases: merged.HiddenAliases,
@@ -580,6 +582,7 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	}
 	if len(nodes) == 1 {
 		nodes[0].replacedBy = gp.overlayReplacement(c.ReplacedBy, gc.ReplacedBy, ctx.specRoot, gcCtx.specRoot)
+		nodes[0].ref = c.Ref
 	}
 	// `commands:` beside the nested `$ref` resolve against this spec's base, delegate to the
 	// direct child, and are grafted as children of the grandchild.
@@ -733,6 +736,9 @@ type genCommand struct {
 	exitCodes      []int      // the codes its spec's exit_status lists, for the handler audit
 	hasChildren    bool       // it declares sub-commands, plugins or plugin discovery
 	secret         bool       // one of its own inputs is secret, so its stub never prints inputs
+	// completionShell: a command named completion whose one argument is a required shell
+	// name, so a new stub prints that shell's completion script.
+	completionShell bool
 
 	// Inline passthrough: the command's types are generated locally, but the rollup
 	// returns delegateAlias.delegateMethod() instead of a stub, and no stub is seeded.

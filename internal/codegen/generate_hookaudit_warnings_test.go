@@ -10,17 +10,28 @@ import (
 func TestHookAudit_keepsEarlierWarnings(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	// A composed child's config file names a schema of its own spec, which the parent's config
+	// schema can't reach.
 	writeTestFile(t, dir, ".rotini.spec.yaml", `version: 0.0.0
 command:
   name: demo
+  commands:
+    - $ref: ./child/.rotini.spec.yaml
+`)
+	writeTestFile(t, dir, "child/.rotini.spec.yaml", `version: 0.0.0
+command:
+  name: child
+  schemas:
+    Settings: { type: object }
   config_files:
     - name: app
       path: ./app.yaml
-      schema: { $ref: Missing }
+      schema: { $ref: Settings }
   config:
     - name: region
       schema: { type: string }
 `)
+	writeTestFile(t, dir, "child/.rotini.conf.yaml", "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/child/zz_child.go\n      package: child\n")
 	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf+"  schemas:\n    config:\n      dir: schemas\n")
 	t.Chdir(dir)
 

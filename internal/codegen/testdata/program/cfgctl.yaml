@@ -1,0 +1,289 @@
+version: 0.0.0
+
+command:
+  name: cfgctl
+  summary: deploy services, configured from everywhere
+  description: |
+    cfgctl exists to answer one question well: where did this value come from?
+
+    Every input it takes is reachable from four places — a default, a configuration
+    file, the environment, and the command line — and `cfgctl doctor` prints which
+    one actually won for each.
+  footer: Use "cfgctl help <command>" for more information about a command.
+  examples:
+    - cfgctl deploy web --replicas 5
+    - CFGCTL_DEPLOY_REPLICAS=9 cfgctl deploy web
+    - cfgctl doctor --config-file ./secrets.json
+
+  # Every derived environment name is scoped under this. An input that names its own
+  # `variable:` is exempt — it is already exact.
+  env_prefix: CFGCTL
+
+  # ── configuration SOURCES, declared on the root so they cascade to every command ──
+  config_files:
+    # A fixed path. Absent is simply absent.
+    - name: app
+      path: ./cfgctl.yaml
+      format: yaml
+      # Load-time validation: the file is checked against this shape before a single
+      # value is read out of it.
+      schema:
+        type: object
+        properties:
+          deploy:
+            type: object
+            properties:
+              timeout: { type: string }
+              retries: { type: integer, minimum: 0, maximum: 10 }
+              replicas: { type: integer, minimum: 1 }
+              registry: { type: string }
+
+    # Project-local, git-style: search upward from the working directory.
+    - name: project
+      discover:
+        strategy: walk-up
+        file: .cfgctl.yaml
+
+    # The conventional per-user location. XDG-literal on every platform.
+    - name: user
+      discover:
+        strategy: xdg
+        app: cfgctl
+        file: config.yaml
+
+    # A file whose PATH arrives at run time, from the flag below. A path supplied that
+    # way must exist — the user asked for it by name.
+    - name: secrets
+      path: ./secrets.json
+      format: json
+
+    # The same keys, in TOML, JSONC and dotenv, and a file with profiles.
+    - name: tuning
+      path: ./tuning.toml
+    - name: editor
+      path: ./editor.jsonc
+    - name: local
+      path: ./local.env
+    - name: stages
+      path: ./stages.yaml
+      profiles: { under: profiles, select: profile, default: dev }
+
+  flags:
+    # Every command accepts --help (cascading), and it and --version skip the run's
+    # validation (short_circuit), so the root handler's CascadingPreRun answers both even
+    # when a required input is missing.
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [-v, --version]
+      short_circuit: true
+      schema: { type: bool }
+
+    # The declarative two-phase parse: argv and env are read first, then the file
+    # channel opens whatever they pointed at.
+    - name: config-file
+      summary: read secrets from this file instead of ./secrets.json
+      cascading: true
+      identifiers: [-c, --config-file]
+      schema:
+        type: string
+        config_source: secrets
+        complete: { kind: file, extensions: [json] }
+    - name: profile
+      summary: the configuration profile to use
+      identifiers: [--profile]
+      cascading: true
+      schema: { type: string, variable: [CFGCTL_PROFILE, CFGCTL_STAGE] }
+
+  commands:
+    - name: deploy
+      summary: deploy a service
+      description: Deploy one service, with every input reconciled across all four channels.
+      arguments:
+        - name: service
+          summary: which service to deploy
+          schema:
+            type: string
+            required: true
+            placeholder: SERVICE
+            # Shown at TAB when there is nothing to offer. The handler's completer offers
+            # the names in ./services.txt, and says so when that file is missing.
+            complete: { kind: none, message: a service name from services.txt }
+
+      # The codes deploy exits with. rotini generate checks the handler against this list.
+      exit_status:
+        - { code: 0, summary: "deployed, or the plan was printed" }
+        - { code: 1, summary: the deploy failed }
+        - { code: 2, summary: "the service to deploy is missing; the usage line is printed" }
+
+      flags:
+        # A command-local short-circuit: it waives the required <service>, so the plan
+        # prints whatever is resolved so far.
+        - name: print-plan
+          summary: print the resolved plan and stop, without deploying
+          identifiers: [--print-plan]
+          short_circuit: true
+          schema: { type: bool }
+
+        # key: makes this flag participate in the fallback chain — argv > env
+        # (CFGCTL_DEPLOY_REPLICAS, the SNAKE_UPPER of the key under env_prefix) >
+        # config (deploy.replicas) > default.
+        - name: replicas
+          summary: how many instances
+          identifiers: [-r, --replicas]
+          schema:
+            type: int
+            key: deploy.replicas
+            default: 1
+            minimum: 1
+            maximum: 100
+
+        # variable: names an EXACT variable instead, exempt from env_prefix — this is
+        # GITHUB_TOKEN, not CFGCTL_GITHUB_TOKEN.
+        - name: api-token
+          summary: token for the registry
+          identifiers: [--api-token]
+          schema:
+            type: string
+            variable: GITHUB_TOKEN
+            secret: true
+
+        - name: env
+          summary: which environment
+          identifiers: [-e, --env]
+          schema:
+            type: string
+            default: staging
+            enum: [staging, production]
+
+      # ── values read BY KEY from the cascading config sources ──
+      config:
+        - name: timeout
+          summary: how long a deploy may take
+          schema:
+            type: duration
+            key: deploy.timeout
+            default: 5m
+
+        - name: retries
+          summary: how many times to retry
+          schema:
+            type: int
+            key: deploy.retries
+            default: 0
+            minimum: 0
+            maximum: 10
+
+        # PINNED to one source: read from `project` only, never from the merged chain,
+        # so a value in another file does not satisfy it.
+        - name: registry
+          summary: which registry to push to
+          schema:
+            type: string
+            key: deploy.registry
+            file: project
+
+        # Pinned to the TOML, JSONC and dotenv files.
+        - name: workers
+          summary: worker threads
+          schema: { type: int, key: pool.workers, default: 4, minimum: 1, file: tuning }
+        - name: owner
+          summary: who owns the service
+          schema: { type: string, key: owner, file: tuning }
+        - name: theme
+          summary: the color theme
+          schema: { type: string, key: ui.theme, enum: [dark, light], default: dark, file: editor }
+        - name: font-size
+          summary: the font size
+          schema: { type: int, key: ui.font.size, default: 12, file: editor }
+        - name: debug
+          summary: log every step
+          schema: { type: bool, key: debug, default: false, file: local }
+
+      # ── the environment ──
+      env:
+        - name: region
+          summary: deployment region
+          schema:
+            # No `variable:`, so the name is DERIVED: CFGCTL_REGION.
+            type: string
+            default: us-east-1
+
+        - name: deploy-token
+          summary: a token read from an exactly-named variable
+          schema:
+            type: string
+            variable: DEPLOY_TOKEN
+            secret: true
+
+        - name: http
+          summary: HTTP tuning, as a family of variables
+          schema:
+            # CFGCTL_HTTP__TIMEOUT=30 and CFGCTL_HTTP__RETRY__MAX=9 bind as
+            # {timeout: "30", retry: {max: "9"}}.
+            type: map
+            nesting: '__'
+
+    - name: doctor
+      summary: show where every value came from
+      description: |
+        Print each input, the value that won, and which channel supplied it —
+        the question every configuration system eventually has to answer.
+      flags:
+        - name: replicas
+          summary: how many instances
+          identifiers: [-r, --replicas]
+          schema:
+            type: int
+            key: deploy.replicas
+            default: 1
+            minimum: 1
+            maximum: 100
+      config:
+        - name: timeout
+          summary: how long a deploy may take
+          schema: { type: duration, key: deploy.timeout, default: 5m }
+      env:
+        - name: region
+          summary: deployment region
+          schema: { type: string, default: us-east-1 }
+        # A secret, so that the REPORT can be checked: provenance must carry
+        # "[redacted]" rather than the value.
+        - name: token
+          summary: a secret, to prove provenance redacts it
+          schema: { type: string, variable: DOCTOR_TOKEN, secret: true }
+
+    - name: show
+      summary: resolve one channel at a time
+      description: |
+        The per-channel API, for a program that wants its own precedence: each
+        channel parsed separately, then overlaid in the order this command chooses.
+      flags:
+        - name: order
+          summary: the precedence order, low to high
+          identifiers: [--order]
+          schema:
+            type: '[]string'
+            # No default: a repeatable input cannot declare a multi-value one (rotini
+            # rejects it rather than mangling it — finding E-06). The handler seeds it.
+        - name: replicas
+          summary: how many instances
+          identifiers: [-r, --replicas]
+          schema: { type: int, key: deploy.replicas, default: 1, minimum: 1 }
+
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+
+    - name: version
+      summary: print version
+      description: Print the cfgctl version.

@@ -1,0 +1,152 @@
+# R12 — the show-origin recipe: a config list command reads InputsWithReport and lists each
+# setting with the layer that won, as text or as its declared json output. The handler file is
+# the one the recipes page shows.
+
+gomodinit example.com/origindemo
+
+exec rotini generate cmd/origindemo/.rotini.spec.yaml --config cmd/origindemo/.rotini.conf.yaml
+cp list.go.txt internal/cmd/origindemo/origindemo_config_list.go
+exec go mod tidy
+exec go build -o origindemo$exe ./cmd/origindemo
+
+# Defaults alone.
+exec ./origindemo$exe config list --show-origin
+stdout '^Region = eu-1\t\(default\)$'
+stdout '^Timeout = 30s\t\(default\)$'
+
+# The config file, the environment and the command line each win where they set a value.
+cp settings.yaml origindemo.yaml
+env ORIGINDEMO_REGION=us-2
+exec ./origindemo$exe config list --show-origin
+stdout '^Region = us-2\t\(env:ORIGINDEMO_REGION\)$'
+stdout '^Timeout = 5s\t\(config:user#timeout\)$'
+
+exec ./origindemo$exe config list -o json --region ap-3
+stdout '"source": "argv:--region"'
+stdout '"value": "ap-3"'
+
+# Without --show-origin, only the values.
+exec ./origindemo$exe config list
+stdout '^Region = us-2$'
+! stdout 'env:'
+
+-- settings.yaml --
+timeout: 5s
+-- list.go.txt --
+package origindemo
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*origindemoConfigListHandler)(nil)
+
+type origindemoConfigListHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+// listing names the flags that shape the listing rather than settings, so they aren't listed.
+var listing = map[string]bool{"Help": true, "ShowOrigin": true, "Output": true}
+
+func (*origindemoConfigListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, report, err := rtx.InputsWithReport[OrigindemoConfigListInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	var list OrigindemoConfigListOutput
+	for _, path := range report.Fields() {
+		key := string(path[strings.LastIndex(string(path), ".")+1:])
+		src, ok := report.Winner(path)
+		if !ok || listing[key] {
+			continue
+		}
+		origin := src.Origin
+		if origin == "" {
+			origin = src.Layer // a layer you built yourself names only itself
+		}
+		list = append(list, Setting{Key: key, Value: src.Raw, Source: origin})
+	}
+	flags := in.OrigindemoConfigList.Flags
+	rtx.HaltWith(rtx.WriteOutput(list, flags.Output, func(w io.Writer, _ string, v OrigindemoConfigListOutput) error {
+		for _, s := range v {
+			line := fmt.Sprintf("%s = %s", s.Key, s.Value)
+			if flags.ShowOrigin {
+				line += "\t(" + s.Source + ")"
+			}
+			if _, err := fmt.Fprintln(w, line); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+}
+-- cmd/origindemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: origindemo
+  summary: show where each setting came from
+  env_prefix: ORIGINDEMO
+  config_files:
+    - name: user
+      path: origindemo.yaml
+  schemas:
+    Setting:
+      type: object
+      required: [key, value, source]
+      properties:
+        key: { type: string }
+        value: { type: string }
+        source: { type: string }
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: config
+      summary: work with settings
+      commands:
+        - name: list
+          summary: list the settings in effect
+          output: { type: array, items: { $ref: "#/schemas/Setting" } }
+          flags:
+            - name: show-origin
+              summary: also show where each value came from
+              identifiers: [--show-origin]
+              schema: { type: bool }
+            - name: output
+              summary: how to write the list
+              identifiers: [-o, --output]
+              schema: { type: string, default: text, enum: [text, json] }
+            - name: region
+              summary: the region to use
+              identifiers: [--region]
+              schema: { type: string, default: eu-1, key: region }
+            - name: timeout
+              summary: how long to wait
+              identifiers: [--timeout]
+              schema: { type: duration, default: 30s, key: timeout }
+-- cmd/origindemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/origindemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/origindemo/zz_origindemo.go
+      package: origindemo
+  features:
+    - type: help
+      enabled: true

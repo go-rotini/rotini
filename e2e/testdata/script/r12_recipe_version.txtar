@@ -1,0 +1,79 @@
+# R12 — the build-info version recipe: go build in a tagged git checkout stamps the tag into the
+# binary, local edits add +dirty, and -ldflags still wins. main.go is the one the guide's
+# Versions section shows.
+
+[!exec:git] skip 'needs git'
+
+gomodinit github.com/me/todo
+exec rotini init todo
+cp main.go.txt cmd/todo/main.go
+exec go mod tidy
+
+env GIT_CONFIG_NOSYSTEM=1
+env GIT_CONFIG_GLOBAL=$WORK/.gitconfig
+exec git init -q
+exec git add -A
+exec git -c user.name=t -c user.email=t@example.com commit -q -m init
+exec git tag v0.1.0
+
+# A clean, tagged checkout: the tag.
+exec go build -o todo$exe ./cmd/todo
+exec ./todo$exe --version
+stdout '^todo v0\.1\.0$'
+
+# A local edit: the tag, marked +dirty.
+cp edit.txt notes.txt
+exec go build -o todo$exe ./cmd/todo
+exec ./todo$exe --version
+stdout '^todo v0\.1\.0\+dirty$'
+
+# A commit after the tag: a pseudo-version for the next patch release.
+exec git add -A
+exec git -c user.name=t -c user.email=t@example.com commit -q -m edit
+exec go build -o todo$exe ./cmd/todo
+exec ./todo$exe --version
+stdout '^todo v0\.1\.1-0\.[0-9]{14}-[0-9a-f]{12}$'
+
+# -ldflags wins over the build info.
+exec go build -ldflags '-X main.version=1.2.3' -o todo$exe ./cmd/todo
+exec ./todo$exe --version
+stdout '^todo 1\.2\.3$'
+
+# go run stamps no version control information: (devel).
+exec go run ./cmd/todo --version
+stdout '^todo \(devel\)$'
+
+# Nor does a build with -buildvcs=false.
+exec go build -buildvcs=false -o todo$exe ./cmd/todo
+exec ./todo$exe --version
+stdout '^todo \(devel\)$'
+
+-- .gitignore --
+/todo
+/todo.exe
+/.tmp/
+/.gitconfig
+-- edit.txt --
+an uncommitted change
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	"runtime/debug"
+
+	cmd "github.com/me/todo/internal/cmd/todo"
+)
+
+// version is set with -ldflags "-X main.version=1.2.3" when building outside version control.
+var version = ""
+
+func main() {
+	v := version
+	if info, ok := debug.ReadBuildInfo(); ok && v == "" {
+		v = info.Main.Version // a tag, a pseudo-version (+dirty with local edits), or (devel)
+	}
+	cmd.NewProgram(cmd.Handlers()).
+		WithVersion(v).
+		Execute()
+}

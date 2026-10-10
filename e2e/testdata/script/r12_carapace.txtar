@@ -1,0 +1,77 @@
+# R12 — the carapace feature writes a carapace-spec file for the program, named after it, from
+# the spec's static facts: commands, flags with their modifiers, enum values with summaries,
+# completion hints and exclusive flags. It adds nothing to the binary.
+
+gomodinit example.com/kit
+
+exec rotini generate cmd/kit/.rotini.spec.yaml --config cmd/kit/.rotini.conf.yaml
+exists completions/carapace/kit.yaml
+grep '^# yaml-language-server: \$schema=https://carapace.sh/schemas/command.json$' completions/carapace/kit.yaml
+grep '^name: kit$' completions/carapace/kit.yaml
+grep '^  "-v, --verbose\*": say more$' completions/carapace/kit.yaml
+grep '^      "-o, --format=": the output format$' completions/carapace/kit.yaml
+grep '^      "--color\?": when to color$' completions/carapace/kit.yaml
+grep '^      - \[json, format\]$' completions/carapace/kit.yaml
+grep '^          - "yaml\\thuman-friendly"$' completions/carapace/kit.yaml
+grep '^          - "\$files\(\[.yaml, .yml\]\)"$' completions/carapace/kit.yaml
+grep '^    parsing: disabled$' completions/carapace/kit.yaml
+! grep 'Carapace' internal/cmd/kit/zz_kit.go
+
+exec go mod tidy
+exec go build ./...
+
+-- cmd/kit/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kit
+  summary: a toolkit
+  flags:
+    - name: verbose
+      summary: say more
+      identifiers: [-v, --verbose]
+      cascading: true
+      schema: { type: count }
+  commands:
+    - name: build
+      summary: build an artifact
+      flag_groups:
+        - { kind: mutually_exclusive, flags: [json, format] }
+      flags:
+        - name: format
+          summary: the output format
+          identifiers: [-o, --format]
+          schema:
+            type: string
+            enum:
+              - { value: text, summary: aligned columns }
+              - { value: yaml, summary: human-friendly }
+        - name: json
+          summary: write JSON
+          identifiers: [--json]
+          schema: { type: bool }
+        - name: color
+          summary: when to color
+          identifiers: [--color]
+          schema: { type: string, implicit_value: always, enum: [always, never] }
+        - name: config
+          summary: a config file
+          identifiers: [-c, --config]
+          schema: { type: string, complete: { kind: file, extensions: [yaml, yml] } }
+    - name: exec
+      summary: run anything
+      passthrough: true
+      arguments:
+        - name: argv
+          schema: { type: '[]string' }
+-- cmd/kit/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kit/main.go
+    - type: cmd
+      file: internal/cmd/kit/zz_kit.go
+      package: kit
+  features:
+    - type: carapace
+      enabled: true

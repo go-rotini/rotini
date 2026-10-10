@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/go-rotini/rotini"
 )
@@ -17,8 +18,11 @@ type ProgramHandlers interface {
 	RotiniFmt() rotini.Handler
 	RotiniGenerate() rotini.Handler
 	RotiniHelp() rotini.Handler
+	RotiniImport() rotini.Handler
+	RotiniImportCobra() rotini.Handler
 	RotiniInitialize() rotini.Handler
 	RotiniMan() rotini.Handler
+	RotiniTree() rotini.Handler
 	RotiniValidate() rotini.Handler
 	RotiniVersion() rotini.Handler
 }
@@ -31,7 +35,7 @@ var definition = rotini.Definition{
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool", ShortCircuit: true},
 	},
 	Inputs: reflect.TypeFor[RotiniInputs](),
-	Usage:  "rotini [flags] <command> <arguments>\n      [-v | --version] [-h | --help]\n",
+	Usage:  "rotini [flags] <command>",
 	Commands: []rotini.CommandDef{
 		{Name: "initialize",
 			Handler: "RotiniInitialize",
@@ -39,14 +43,48 @@ var definition = rotini.Definition{
 			Aliases: []string{"init"},
 			Flags: []rotini.FlagDef{
 				{Name: "format", Identifiers: []string{"--format"}, Summary: "the created rotini spec file format", Type: "string", Default: "yaml", Enum: []string{"yaml", "yml", "json", "jsonc", "toml"}, Complete: rotini.Completion{Message: "--format string: the created rotini spec file format"}},
+				{Name: "template", Identifiers: []string{"--template"}, Summary: "start from a shape other than the plain seed", Type: "string", Enum: []string{"plugin", "daemon", "suite"}, EnumValues: []rotini.EnumValue{
+					{Value: "plugin", Summary: "a kubectl-style plugin named <host>-<plugin>, with completion through the host"},
+					{Value: "daemon", Summary: "a long-running serve command that stops cleanly on a signal"},
+					{Value: "suite", Summary: "two binaries composing one shared command from its own spec"},
+				}, Complete: rotini.Completion{Message: "--template string: start from a shape other than the plain seed"}},
 				{Name: "force", Identifiers: []string{"--force"}, Summary: "replace an existing spec and conf with the seed (never deletes a file)", Type: "bool"},
-				{Name: "dry-run", Identifiers: []string{"-n", "--dry-run"}, Summary: "show what init would write, and change nothing", Type: "bool"},
+				{Name: "dry-run", Identifiers: []string{"-n", "--dry-run"}, Summary: "show what init would write, and change nothing", Type: "bool", Negatable: true},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "name", Type: "string", Required: true, Complete: rotini.Completion{Message: "<name>: the root command name written to the created spec file (expected binary name)"}},
 			},
 			Inputs: reflect.TypeFor[RotiniInitializeInputs](),
 			Usage:  "rotini initialize [flags] <name>",
+		},
+		{Name: "import",
+			Handler: "RotiniImport",
+			Summary: "build a rotini spec from an existing cli",
+			Inputs:  reflect.TypeFor[RotiniImportInputs](),
+			Usage:   "rotini import <command>",
+			Commands: []rotini.CommandDef{
+				{Name: "cobra",
+					Handler: "RotiniImportCobra",
+					Summary: "import a Cobra program",
+					Flags: []rotini.FlagDef{
+						{Name: "root", Identifiers: []string{"--root"}, Summary: "a Go expression, evaluated in the package, that yields a command of the tree", Type: "string", Complete: rotini.Completion{Message: "--root EXPR: a Go expression, evaluated in the package, that yields a command of the tree"}},
+						{Name: "name", Identifiers: []string{"--name"}, Summary: "the CLI's name (default the program's root command name)", Type: "string", Complete: rotini.Completion{Message: "--name string: the CLI's name (default the program's root command name)"}},
+						{Name: "dir", Identifiers: []string{"--dir"}, Summary: "the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)", Type: "string", Complete: rotini.Completion{Message: "--dir string: the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)"}},
+						{Name: "strict", Identifiers: []string{"--strict"}, Summary: "give a command with no argument rule only the arguments its usage line names, not any number more", Type: "bool"},
+						{Name: "format", Identifiers: []string{"--format"}, Summary: "the created rotini spec file format", Type: "string", Default: "yaml", Enum: []string{"yaml", "yml", "json", "jsonc", "toml"}, Complete: rotini.Completion{Message: "--format string: the created rotini spec file format"}},
+						{Name: "tags", Identifiers: []string{"--tags"}, Summary: "build tags for go test, comma separated", Type: "string", Complete: rotini.Completion{Message: "--tags string: build tags for go test, comma separated"}},
+						{Name: "timeout", Identifiers: []string{"--timeout"}, Summary: "how long the import's go test may run", Type: "time.Duration", Default: "2m", Complete: rotini.Completion{Message: "--timeout duration: how long the import's go test may run"}},
+						{Name: "importer_version", Identifiers: []string{"--importer-version"}, Summary: "the github.com/go-rotini/import version to run (default v0.1.0), or the path of a local checkout", Type: "string", Complete: rotini.Completion{Message: "--importer-version string: the github.com/go-rotini/import version to run (default v0.1.0), or the path of a local checkout"}},
+						{Name: "force", Identifiers: []string{"--force"}, Summary: "replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate", Type: "bool"},
+						{Name: "dry-run", Identifiers: []string{"-n", "--dry-run"}, Summary: "show what the import would write, and change nothing", Type: "bool", Negatable: true},
+					},
+					Arguments: []rotini.ArgDef{
+						{Name: "package", Type: "string", Required: true, Complete: rotini.Completion{Message: "<package>: the Go package that builds the command tree, such as ./cmd"}},
+					},
+					Inputs: reflect.TypeFor[RotiniImportCobraInputs](),
+					Usage:  "rotini import cobra [flags] <package>",
+				},
+			},
 		},
 		{Name: "generate",
 			Handler: "RotiniGenerate",
@@ -80,6 +118,16 @@ var definition = rotini.Definition{
 			Output: &rotini.OutputDef{Type: reflect.TypeFor[RotiniValidateOutput](), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.","properties":{"problems":{"description":"the problems, errors first, each as it is reported in text","items":{"properties":{"col":{"description":"the column, from 1","type":"integer"},"document":{"description":"the document the problem is in","enum":["spec","conf"],"type":"string"},"file":{"description":"the document's path","type":"string"},"hint":{"description":"what to do about it","type":"string"},"line":{"description":"the line, from 1","type":"integer"},"message":{"description":"what is wrong","type":"string"},"pointer":{"description":"the JSON pointer of the key at fault","type":"string"},"severity":{"description":"an error fails validation; a warning does not","enum":["error","warning"],"type":"string"}},"required":["severity","message"],"type":"object"},"type":"array"}},"required":["problems"],"type":"object"}`},
 			Inputs: reflect.TypeFor[RotiniValidateInputs](),
 			Usage:  "rotini validate [flags] [spec_file_path]",
+		},
+		{Name: "tree",
+			Handler: "RotiniTree",
+			Summary: "print a spec's command tree",
+			Arguments: []rotini.ArgDef{
+				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
+			},
+			Inputs:  reflect.TypeFor[RotiniTreeInputs](),
+			Usage:   "rotini tree [spec_file_path]",
+			Effects: &rotini.Effects{Kind: "read", Idempotent: new(true)},
 		},
 		{Name: "explain",
 			Handler: "RotiniExplain",
@@ -116,14 +164,18 @@ var definition = rotini.Definition{
 		{Name: "version",
 			Handler: "RotiniVersion",
 			Summary: "print version",
-			Inputs:  reflect.TypeFor[RotiniVersionInputs](),
-			Usage:   "rotini version",
+			Flags: []rotini.FlagDef{
+				{Name: "format", Identifiers: []string{"--format"}, Summary: "output format", Type: "string", Default: "text", Enum: []string{"text", "json"}, Complete: rotini.Completion{Message: "--format string: output format"}, Role: "machine-output"},
+			},
+			Output: &rotini.OutputDef{Type: reflect.TypeFor[RotiniVersionOutput](), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"The version and build of the rotini binary.","properties":{"go_version":{"description":"the Go toolchain that built the binary, such as go1.27.1","type":"string"},"module_path":{"description":"the main module path from the build info","type":"string"},"module_version":{"description":"the main module version from the build info: a release, a pseudo-version (with +dirty when built from a modified checkout), or (devel)","type":"string"},"version":{"description":"what rotini version prints, such as v1.4.0","type":"string"}},"required":["version","go_version"],"type":"object"}`},
+			Inputs: reflect.TypeFor[RotiniVersionInputs](),
+			Usage:  "rotini version [flags]",
 		},
 		{Name: "completion",
 			Handler: "RotiniCompletion",
 			Summary: "print a shell completion script",
 			Arguments: []rotini.ArgDef{
-				{Name: "shell", Type: "string", Required: true, Enum: []string{"bash", "zsh", "fish", "powershell"}, Complete: rotini.Completion{Message: "<shell>: the shell to print the script for"}},
+				{Name: "shell", Type: "string", Required: true, Enum: []string{"bash", "zsh", "fish", "powershell", "nushell"}, Complete: rotini.Completion{Message: "<shell>: the shell to print the script for"}},
 			},
 			Inputs: reflect.TypeFor[RotiniCompletionInputs](),
 			Usage:  "rotini completion <shell>",
@@ -293,10 +345,53 @@ type RotiniHelpInputs struct {
 	RotiniHelp RotiniHelpCommandInputs
 }
 
+type RotiniImportFlags struct{}
+
+type RotiniImportArguments struct{}
+
+type RotiniImportCommandInputs struct {
+	Flags     RotiniImportFlags
+	Arguments RotiniImportArguments
+}
+
+type RotiniImportInputs struct {
+	Rotini       RotiniCommandInputs
+	RotiniImport RotiniImportCommandInputs
+}
+
+type RotiniImportCobraFlags struct {
+	Root            string        `rotini:"root"`
+	Name            string        `rotini:"name"`
+	Dir             string        `rotini:"dir"`
+	Strict          bool          `rotini:"strict"`
+	Format          string        `rotini:"format"`
+	Tags            string        `rotini:"tags"`
+	Timeout         time.Duration `rotini:"timeout"`
+	ImporterVersion string        `rotini:"importer_version"`
+	Force           bool          `rotini:"force"`
+	DryRun          bool          `rotini:"dry-run"`
+}
+
+type RotiniImportCobraArguments struct {
+	Package string `rotini:"package"`
+}
+
+type RotiniImportCobraCommandInputs struct {
+	Flags     RotiniImportCobraFlags
+	Arguments RotiniImportCobraArguments
+}
+
+type RotiniImportCobraInputs struct {
+	Rotini            RotiniCommandInputs
+	RotiniImport      RotiniImportCommandInputs
+	RotiniImportCobra RotiniImportCobraCommandInputs
+}
+
 type RotiniInitializeFlags struct {
-	Format string `rotini:"format"`
-	Force  bool   `rotini:"force"`
-	DryRun bool   `rotini:"dry-run"`
+	Format   string `rotini:"format"`
+	Template string `rotini:"template"`
+	Force    bool   `rotini:"force"`
+	DryRun   bool   `rotini:"dry-run"`
 }
 
 type RotiniInitializeArguments struct {
@@ -331,6 +426,22 @@ type RotiniManInputs struct {
 	RotiniMan RotiniManCommandInputs
 }
 
+type RotiniTreeFlags struct{}
+
+type RotiniTreeArguments struct {
+	SpecFilePath string `rotini:"spec_file_path"`
+}
+
+type RotiniTreeCommandInputs struct {
+	Flags     RotiniTreeFlags
+	Arguments RotiniTreeArguments
+}
+
+type RotiniTreeInputs struct {
+	Rotini     RotiniCommandInputs
+	RotiniTree RotiniTreeCommandInputs
+}
+
 type RotiniValidateFlags struct {
 	ConfFilePath string `rotini:"conf_file_path"`
 	Fail         string `rotini:"fail"`
@@ -353,7 +464,9 @@ type RotiniValidateInputs struct {
 	RotiniValidate RotiniValidateCommandInputs
 }
 
-type RotiniVersionFlags struct{}
+type RotiniVersionFlags struct {
+	Format string `rotini:"format"`
+}
 
 type RotiniVersionArguments struct{}
 
@@ -434,6 +547,18 @@ type RotiniValidateOutputProblemsItem struct {
 	Severity string `json:"severity"`
 }
 
+// The version and build of the rotini binary.
+type RotiniVersionOutput struct {
+	// the Go toolchain that built the binary, such as go1.27.1
+	GoVersion string `json:"go_version"`
+	// the main module path from the build info
+	ModulePath string `json:"module_path,omitempty"`
+	// the main module version from the build info: a release, a pseudo-version (with +dirty when built from a modified checkout), or (devel)
+	ModuleVersion string `json:"module_version,omitempty"`
+	// what rotini version prints, such as v1.4.0
+	Version string `json:"version"`
+}
+
 // Named exit codes, from each command's exit_status, for rtx.HaltWithCode and rtx.Exit.
 const (
 	RotiniDiffExitOk       = 0 // "rotini diff": ok
@@ -447,13 +572,19 @@ const (
 func Usage(path ...string) (string, error) {
 	switch strings.Join(path, " ") {
 	case "":
-		return "rotini [flags] <command> <arguments>\n      [-v | --version] [-h | --help]\n", nil
+		return "rotini [flags] <command>", nil
 	case "initialize", "init":
 		return "rotini initialize [flags] <name>", nil
+	case "import":
+		return "rotini import <command>", nil
+	case "import cobra":
+		return "rotini import cobra [flags] <package>", nil
 	case "generate", "gen":
 		return "rotini generate [flags] [spec_file_path]", nil
 	case "validate", "val":
 		return "rotini validate [flags] [spec_file_path]", nil
+	case "tree":
+		return "rotini tree [spec_file_path]", nil
 	case "explain":
 		return "rotini explain <key>", nil
 	case "fmt":
@@ -461,7 +592,7 @@ func Usage(path ...string) (string, error) {
 	case "help":
 		return "rotini help [command...]", nil
 	case "version":
-		return "rotini version", nil
+		return "rotini version [flags]", nil
 	case "completion":
 		return "rotini completion <shell>", nil
 	case "man":
@@ -496,10 +627,16 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 			return handlers.RotiniGenerate(), true
 		case "RotiniHelp":
 			return handlers.RotiniHelp(), true
+		case "RotiniImport":
+			return handlers.RotiniImport(), true
+		case "RotiniImportCobra":
+			return handlers.RotiniImportCobra(), true
 		case "RotiniInitialize":
 			return handlers.RotiniInitialize(), true
 		case "RotiniMan":
 			return handlers.RotiniMan(), true
+		case "RotiniTree":
+			return handlers.RotiniTree(), true
 		case "RotiniValidate":
 			return handlers.RotiniValidate(), true
 		case "RotiniVersion":
@@ -558,12 +695,24 @@ func (*handlers) RotiniHelp() rotini.Handler {
 	return &rotiniHelpHandler{}
 }
 
+func (*handlers) RotiniImport() rotini.Handler {
+	return &rotiniImportHandler{}
+}
+
+func (*handlers) RotiniImportCobra() rotini.Handler {
+	return &rotiniImportCobraHandler{}
+}
+
 func (*handlers) RotiniInitialize() rotini.Handler {
 	return &rotiniInitializeHandler{}
 }
 
 func (*handlers) RotiniMan() rotini.Handler {
 	return &rotiniManHandler{}
+}
+
+func (*handlers) RotiniTree() rotini.Handler {
+	return &rotiniTreeHandler{}
 }
 
 func (*handlers) RotiniValidate() rotini.Handler {
@@ -574,13 +723,19 @@ func (*handlers) RotiniVersion() rotini.Handler {
 	return &rotiniVersionHandler{}
 }
 
-var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini [flags] <command> <arguments>\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize, init    scaffold a cli program\n  generate, gen       generate a cli program\n  validate, val       validate a spec and conf\n  explain             describe a spec or conf key\n  fmt                 format a spec and conf\n  help                print help\n  version             print version\n  completion          print a shell completion script\n  man                 print or install the man pages\n  diff                compare two versions of a cli's contract\n\nFlags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotini = "The companion CLI for Rotini, the spec-first Go CLI framework: scaffold, validate and generate a CLI from its spec.\n\nDocumentation: https://rotini.dev\n\nUsage:\n  rotini [flags] <command>\n\nCommands:\n  initialize, init    scaffold a cli program\n  import              build a rotini spec from an existing cli\n  generate, gen       generate a cli program\n  validate, val       validate a spec and conf\n  tree                print a spec's command tree\n  explain             describe a spec or conf key\n  fmt                 format a spec and conf\n  help                print help\n  version             print version\n  completion          print a shell completion script\n  man                 print or install the man pages\n  diff                compare two versions of a cli's contract\n\nFlags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniInitialize = "Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize [flags] <name>\n\nArguments:\n  <name>    the root command name written to the created spec file (expected binary name)\n\nFlags:\n      --format string    the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --force            replace an existing spec and conf with the seed (never deletes a file)\n  -n, --dry-run          show what init would write, and change nothing\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n  rotini init mycli --dry-run\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniInitialize = "Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize [flags] <name>\n\nArguments:\n  <name>    the root command name written to the created spec file (expected binary name)\n\nFlags:\n      --format string      the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --template string    start from a shape other than the plain seed [plugin|daemon|suite]\n                             plugin    a kubectl-style plugin named <host>-<plugin>, with completion through the host\n                             daemon    a long-running serve command that stops cleanly on a signal\n                             suite     two binaries composing one shared command from its own spec\n      --force              replace an existing spec and conf with the seed (never deletes a file)\n  -n, --[no-]dry-run       show what init would write, and change nothing\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n  rotini init mycli --dry-run\n  rotini init kubectl-hello --template plugin\n\nUse \"rotini help <command>\" for more information about a command."
+
+var HelpRotiniImport = "Build a rotini spec, conf and handler stubs from an existing Go command-line program, read from the command tree it builds.\n\nUsage:\n  rotini import <command>\n\nCommands:\n  cobra    import a Cobra program\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini import cobra ./cmd\n\nUse \"rotini help <command>\" for more information about a command."
+
+var HelpRotiniImportCobra = "Read the command tree a Cobra program builds in <package> and write a rotini spec and\nconf for it under cmd/<dir>, then generate, seeding handler stubs that match the\nimported spec. Anything that can't be carried across exactly is reported on stderr,\none line per item, and in comments in a YAML spec, with the file and line of each\nhook to port.\n\nThe import runs go test in the package with a test file added through -overlay and\nthe importer added to a temporary copy of go.mod, so the program's files and go.mod\nare left as they are. The package's init functions run, as they do in its tests. The\nroot is found from the package's code: a package-level command variable, or a root\nconstructor such as NewRootCmd(); --root names it otherwise.\n\nUsage:\n  rotini import cobra [flags] <package>\n\nArguments:\n  <package>    the Go package that builds the command tree, such as ./cmd\n\nFlags:\n      --root EXPR                  a Go expression, evaluated in the package, that yields a command of the tree\n      --name string                the CLI's name (default the program's root command name)\n      --dir string                 the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)\n      --strict                     give a command with no argument rule only the arguments its usage line names, not any number more\n      --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --tags string                build tags for go test, comma separated\n      --timeout duration           how long the import's go test may run (default 2m)\n      --importer-version string    the github.com/go-rotini/import version to run (default v0.1.0), or the path of a local checkout\n      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate\n  -n, --[no-]dry-run               show what the import would write, and change nothing\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini import cobra ./cmd\n  rotini import cobra --root 'cmds.New(false)' --name dlv ./pkg/terminal/cmds\n  rotini import cobra ./cmd --dir acme-rotini --strict\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniGenerate = "Generate a cli program from a rotini spec file and its conf.\n\nUsage:\n  rotini generate [flags] [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n  -w, --watch            watch the spec and conf for changes and re-generate\n  -n, --[no-]dry-run     show what would be written, created or removed, and change nothing; exits 2 when something would change\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini generate\n  rotini generate ./path/to/.rotini.spec.json --watch\n  rotini generate --dry-run\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniValidate = "Validate a rotini spec file and its conf for correctness.\n\nUsage:\n  rotini validate [flags] [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n      --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]\n  -w, --watch            watch the spec and conf for changes and re-validate\n      --release X.Y.Z    fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names\n      --format string    how to report problems — text, or json (one object listing every problem, on stdout) (default text) [text|json]\n\nGlobal Flags:\n  -h, --help    print help\n\nOutput:\n  Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.\n  object\n    problems []object    the problems, errors first, each as it is reported in text (required)\n\nExamples:\n  rotini validate\n  rotini val ./path/to/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
+
+var HelpRotiniTree = "Print the command tree of a rotini spec, with composed children ($ref) resolved: each\ncommand's name and aliases, indented under its parent, with markers for hidden, deprecated,\npassthrough and composed commands and declared plugins.\n\nA mod:// child is downloaded through the module cache, as generate does, so it needs a\ngo.mod and may use the network. A spec with errors is refused; rotini validate explains them.\n\nEffects: read, idempotent\n\nUsage:\n  rotini tree [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini tree\n  rotini tree ./cmd/musak/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniExplain = "Print what a spec or conf key means: its description, type, allowed values, default and examples, read from the same schemas as the reference pages. Write the keys from the document's top, separated by dots and without list positions: command.flags.schema.from. A key both documents have, such as version, is shown for each.\n\nEffects: read, idempotent, local only\n\nUsage:\n  rotini explain <key>\n\nArguments:\n  <key>    the key path, such as command.flags.schema.from\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini explain command.flags.role\n  rotini explain generate.features.targets\n\nUse \"rotini help <command>\" for more information about a command."
 
@@ -588,9 +743,9 @@ var HelpRotiniFmt = "Rewrite rotini spec, conf and composed command files in can
 
 var HelpRotiniHelp = "Print help for a specific command.\n\nUsage:\n  rotini help [command...]\n\nArguments:\n  [command...]    name of the command to print help for\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini help\n  rotini help generate\n  rotini help init\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniVersion = "Print the rotini cli version.\n\nUsage:\n  rotini version\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini version\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniVersion = "Print the rotini cli version. With --format json, print the version, the Go version that built\nthe binary, and the module path and version from its build info, as one JSON object.\n\nUsage:\n  rotini version [flags]\n\nFlags:\n      --format string    output format (default text) [text|json]\n\nGlobal Flags:\n  -h, --help    print help\n\nOutput:\n  The version and build of the rotini binary.\n  object\n    go_version string        the Go toolchain that built the binary, such as go1.27.1 (required)\n    module_path string       the main module path from the build info\n    module_version string    the main module version from the build info: a release, a pseudo-version (with +dirty when built from a modified checkout), or (devel)\n    version string           what rotini version prints, such as v1.4.0 (required)\n\nExamples:\n  rotini version\n  rotini version --format json\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniCompletion = "Print the completion script for a shell. Load it once per session, or install it so\nevery new shell has it:\n\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out-String | Invoke-Expression\n              add that line to $PROFILE to load it in every session\n\nUsage:\n  rotini completion <shell>\n\nArguments:\n  <shell>    the shell to print the script for [bash|zsh|fish|powershell]\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini completion bash\n  rotini completion zsh > \"${fpath[1]}/_rotini\"\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniCompletion = "Print the completion script for a shell. Load it once per session, or install it so\nevery new shell has it:\n\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out-String | Invoke-Expression\n              add that line to $PROFILE to load it in every session\n  nushell     rotini completion nushell | save -f ($nu.user-autoload-dirs | first | path join rotini.nu)\n              Nushell 0.116 or later; create the directory first if it is missing\n\nUsage:\n  rotini completion <shell>\n\nArguments:\n  <shell>    the shell to print the script for [bash|zsh|fish|powershell|nushell]\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini completion bash\n  rotini completion zsh > \"${fpath[1]}/_rotini\"\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniMan = "Print a command's man page as roff, the markup the man program reads, or write every\npage into a directory with --dir. With no command, it prints the page for rotini itself.\n\nThe pages are named after the command path, rotini-generate.1, so a directory written\nwith --dir can be added to MANPATH or copied into a man1 directory.\n\nUsage:\n  rotini man [flags] [command...]\n\nArguments:\n  [command...]    the command whose page to print (default rotini itself)\n\nFlags:\n      --dir string    write every page into this directory instead of printing one\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini man generate > rotini-generate.1\n  rotini man --dir ~/.local/share/man/man1\n\nUse \"rotini help <command>\" for more information about a command."
 
@@ -605,10 +760,16 @@ func Help(path ...string) (string, error) {
 		return HelpRotini, nil
 	case "initialize", "init":
 		return HelpRotiniInitialize, nil
+	case "import":
+		return HelpRotiniImport, nil
+	case "import cobra":
+		return HelpRotiniImportCobra, nil
 	case "generate", "gen":
 		return HelpRotiniGenerate, nil
 	case "validate", "val":
 		return HelpRotiniValidate, nil
+	case "tree":
+		return HelpRotiniTree, nil
 	case "explain":
 		return HelpRotiniExplain, nil
 	case "fmt":
@@ -628,13 +789,19 @@ func Help(path ...string) (string, error) {
 	}
 }
 
-var ManRotini = ".TH \"ROTINI\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\n.SH SYNOPSIS\n.nf\nrotini [flags] <command> <arguments>\n      [\\-v | \\-\\-version] [\\-h | \\-\\-help]\n.fi\n.SH DESCRIPTION\nThe rotini cli framework companion cli.\n.PP\nFind more information at: https://rotini.dev\n.SH \"COMMANDS\"\n.TP\n\\fBinitialize\\fR, \\fBinit\\fR\nscaffold a cli program\n.TP\n\\fBgenerate\\fR, \\fBgen\\fR\ngenerate a cli program\n.TP\n\\fBvalidate\\fR, \\fBval\\fR\nvalidate a spec and conf\n.TP\n\\fBexplain\\fR\ndescribe a spec or conf key\n.TP\n\\fBfmt\\fR\nformat a spec and conf\n.TP\n\\fBhelp\\fR\nprint help\n.TP\n\\fBversion\\fR\nprint version\n.TP\n\\fBcompletion\\fR\nprint a shell completion script\n.TP\n\\fBman\\fR\nprint or install the man pages\n.TP\n\\fBdiff\\fR\ncompare two versions of a cli\\(aqs contract\n.SH \"OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH ENVIRONMENT\n.TP\n\\fBROTINI_COMPLETION_MESSAGES\\fR\nset to 0, false or off to hide completion messages\n.SH EXAMPLES\n.RS 4\n.nf\nrotini init mycli\n.sp\nrotini validate .rotini.spec.yaml\n.sp\nrotini generate ./path/to/.rotini.spec.json\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-initialize\\fR(1), \\fBrotini\\-generate\\fR(1),\n\\fBrotini\\-validate\\fR(1), \\fBrotini\\-explain\\fR(1), \\fBrotini\\-fmt\\fR(1),\n\\fBrotini\\-help\\fR(1), \\fBrotini\\-version\\fR(1), \\fBrotini\\-completion\\fR(1),\n\\fBrotini\\-man\\fR(1), \\fBrotini\\-diff\\fR(1)\n"
+var ManRotini = ".TH \"ROTINI\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini \\- scaffold, validate and generate rotini CLIs\n.SH SYNOPSIS\n\\fBrotini\\fR [flags] <command>\n.SH DESCRIPTION\nThe companion CLI for Rotini, the spec\\-first Go CLI framework: scaffold,\nvalidate and generate a CLI from its spec.\n.PP\nDocumentation: https://rotini.dev\n.SH \"COMMANDS\"\n.TP\n\\fBinitialize\\fR, \\fBinit\\fR\nscaffold a cli program\n.TP\n\\fBimport\\fR\nbuild a rotini spec from an existing cli\n.TP\n\\fBgenerate\\fR, \\fBgen\\fR\ngenerate a cli program\n.TP\n\\fBvalidate\\fR, \\fBval\\fR\nvalidate a spec and conf\n.TP\n\\fBtree\\fR\nprint a spec\\(aqs command tree\n.TP\n\\fBexplain\\fR\ndescribe a spec or conf key\n.TP\n\\fBfmt\\fR\nformat a spec and conf\n.TP\n\\fBhelp\\fR\nprint help\n.TP\n\\fBversion\\fR\nprint version\n.TP\n\\fBcompletion\\fR\nprint a shell completion script\n.TP\n\\fBman\\fR\nprint or install the man pages\n.TP\n\\fBdiff\\fR\ncompare two versions of a cli\\(aqs contract\n.SH \"OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH ENVIRONMENT\n.TP\n\\fBROTINI_COMPLETION_MESSAGES\\fR\nset to 0, false or off to hide completion messages\n.SH EXAMPLES\n.RS 4\n.nf\nrotini init mycli\n.sp\nrotini validate .rotini.spec.yaml\n.sp\nrotini generate ./path/to/.rotini.spec.json\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-initialize\\fR(1), \\fBrotini\\-import\\fR(1), \\fBrotini\\-generate\\fR(1),\n\\fBrotini\\-validate\\fR(1), \\fBrotini\\-tree\\fR(1), \\fBrotini\\-explain\\fR(1),\n\\fBrotini\\-fmt\\fR(1), \\fBrotini\\-help\\fR(1), \\fBrotini\\-version\\fR(1),\n\\fBrotini\\-completion\\fR(1), \\fBrotini\\-man\\fR(1), \\fBrotini\\-diff\\fR(1)\n"
 
-var ManRotiniInitialize = ".TH \"ROTINI\\-INITIALIZE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-initialize \\- scaffold a cli program\n.SH SYNOPSIS\n\\fBrotini initialize\\fR [flags] <name>\n.SH DESCRIPTION\nScaffold a new rotini cli \\[u2014] write the spec + conf, then run the first\ngenerate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n.SH ARGUMENTS\n.TP\n\\fI<name>\\fR\nthe root command name written to the created spec file (expected binary name)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf with the seed (never deletes a file)\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-dry\\-run\\fR\nshow what init would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini initialize mycli\n.sp\nrotini init mycli \\-\\-format json\n.sp\nrotini init mycli \\-\\-force\n.sp\nrotini init mycli \\-\\-dry\\-run\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniInitialize = ".TH \"ROTINI\\-INITIALIZE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-initialize \\- scaffold a cli program\n.SH SYNOPSIS\n\\fBrotini initialize\\fR [flags] <name>\n.SH DESCRIPTION\nScaffold a new rotini cli \\[u2014] write the spec + conf, then run the first\ngenerate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n.SH ARGUMENTS\n.TP\n\\fI<name>\\fR\nthe root command name written to the created spec file (expected binary name)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-template\\fR \\fIstring\\fR\nstart from a shape other than the plain seed [plugin|daemon|suite]\n.RS\n.RS 2\n\\fBplugin\\fR \\- a kubectl\\-style plugin named <host>\\-<plugin>, with completion\nthrough the host\n.br\n\\fBdaemon\\fR \\- a long\\-running serve command that stops cleanly on a signal\n.br\n\\fBsuite\\fR \\- two binaries composing one shared command from its own spec\n.RE\n.RE\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf with the seed (never deletes a file)\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what init would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini initialize mycli\n.sp\nrotini init mycli \\-\\-format json\n.sp\nrotini init mycli \\-\\-force\n.sp\nrotini init mycli \\-\\-dry\\-run\n.sp\nrotini init kubectl\\-hello \\-\\-template plugin\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+
+var ManRotiniImport = ".TH \"ROTINI\\-IMPORT\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-import \\- build a rotini spec from an existing cli\n.SH SYNOPSIS\n\\fBrotini import\\fR <command>\n.SH DESCRIPTION\nBuild a rotini spec, conf and handler stubs from an existing Go command\\-line\nprogram, read from the command tree it builds.\n.SH \"COMMANDS\"\n.TP\n\\fBcobra\\fR\nimport a Cobra program\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini import cobra ./cmd\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1), \\fBrotini\\-import\\-cobra\\fR(1)\n"
+
+var ManRotiniImportCobra = ".TH \"ROTINI\\-IMPORT\\-COBRA\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-import\\-cobra \\- import a Cobra program\n.SH SYNOPSIS\n\\fBrotini import cobra\\fR [flags] <package>\n.SH DESCRIPTION\nRead the command tree a Cobra program builds in <package> and write a rotini\nspec and\nconf for it under cmd/<dir>, then generate, seeding handler stubs that match the\nimported spec. Anything that can\\(aqt be carried across exactly is reported on\nstderr,\none line per item, and in comments in a YAML spec, with the file and line of\neach\nhook to port.\n.PP\nThe import runs go test in the package with a test file added through \\-overlay\nand\nthe importer added to a temporary copy of go.mod, so the program\\(aqs files and\ngo.mod\nare left as they are. The package\\(aqs init functions run, as they do in its\ntests. The\nroot is found from the package\\(aqs code: a package\\-level command variable, or\na root\nconstructor such as NewRootCmd(); \\-\\-root names it otherwise.\n.SH ARGUMENTS\n.TP\n\\fI<package>\\fR\nthe Go package that builds the command tree, such as ./cmd\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-root\\fR \\fIEXPR\\fR\na Go expression, evaluated in the package, that yields a command of the tree\n.TP\n\\fB\\-\\-name\\fR \\fIstring\\fR\nthe CLI\\(aqs name (default the program\\(aqs root command name)\n.TP\n\\fB\\-\\-dir\\fR \\fIstring\\fR\nthe directory under cmd/ and internal/cmd/ to write to (default the CLI\\(aqs\nname)\n.TP\n\\fB\\-\\-strict\\fR\ngive a command with no argument rule only the arguments its usage line names,\nnot any number more\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-tags\\fR \\fIstring\\fR\nbuild tags for go test, comma separated\n.TP\n\\fB\\-\\-timeout\\fR \\fIduration\\fR\nhow long the import\\(aqs go test may run (default 2m)\n.TP\n\\fB\\-\\-importer\\-version\\fR \\fIstring\\fR\nthe github.com/go\\-rotini/import version to run (default v0.1.0), or the path of\na local checkout\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf, and write into an internal/cmd/<dir> rotini\ndidn\\(aqt generate\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what the import would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini import cobra ./cmd\n.sp\nrotini import cobra \\-\\-root \\(aqcmds.New(false)\\(aq \\-\\-name dlv ./pkg/terminal/cmds\n.sp\nrotini import cobra ./cmd \\-\\-dir acme\\-rotini \\-\\-strict\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-import\\fR(1)\n"
 
 var ManRotiniGenerate = ".TH \"ROTINI\\-GENERATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-generate \\- generate a cli program\n.SH SYNOPSIS\n\\fBrotini generate\\fR [flags] [spec_file_path]\n.SH DESCRIPTION\nGenerate a cli program from a rotini spec file and its conf.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-generate\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what would be written, created or removed, and change nothing; exits 2 when\nsomething would change\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini generate\n.sp\nrotini generate ./path/to/.rotini.spec.json \\-\\-watch\n.sp\nrotini generate \\-\\-dry\\-run\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 var ManRotiniValidate = ".TH \"ROTINI\\-VALIDATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-validate \\- validate a spec and conf\n.SH SYNOPSIS\n\\fBrotini validate\\fR [flags] [spec_file_path]\n.SH DESCRIPTION\nValidate a rotini spec file and its conf for correctness.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-\\-fail\\fR \\fIstring\\fR\nfailure reporting \\[u2014] fast (first problem) or collect (all); defaults to\nvalidate.fail in the conf, else collect [fast|collect]\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-validate\n.TP\n\\fB\\-\\-release\\fR \\fIX.Y.Z\\fR\nfail for each item whose removed_in is at or below this release; defaults to the\nvariable validate.release_env names\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nhow to report problems \\[u2014] text, or json (one object listing every problem,\non stdout) (default text) [text|json]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH OUTPUT\nEvery problem validate found. Exits 1 when any is an error, 0 when there are\nonly warnings or none.\n.PP\nWrites \\fBobject\\fR to standard output.\n.TP\n\\fBproblems\\fR \\fI[]object\\fR\nthe problems, errors first, each as it is reported in text (required)\n.SH EXAMPLES\n.RS 4\n.nf\nrotini validate\n.sp\nrotini val ./path/to/.rotini.spec.yaml\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+
+var ManRotiniTree = ".TH \"ROTINI\\-TREE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-tree \\- print a spec\\(aqs command tree\n.SH SYNOPSIS\n\\fBrotini tree\\fR [spec_file_path]\n.SH DESCRIPTION\nPrint the command tree of a rotini spec, with composed children ($ref) resolved:\neach\ncommand\\(aqs name and aliases, indented under its parent, with markers for\nhidden, deprecated,\npassthrough and composed commands and declared plugins.\n.PP\nA mod:// child is downloaded through the module cache, as generate does, so it\nneeds a\ngo.mod and may use the network. A spec with errors is refused; rotini validate\nexplains them.\n.PP\nEffects: read, idempotent\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini tree\n.sp\nrotini tree ./cmd/musak/.rotini.spec.yaml\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 var ManRotiniExplain = ".TH \"ROTINI\\-EXPLAIN\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-explain \\- describe a spec or conf key\n.SH SYNOPSIS\n\\fBrotini explain\\fR <key>\n.SH DESCRIPTION\nPrint what a spec or conf key means: its description, type, allowed values,\ndefault and examples, read from the same schemas as the reference pages. Write\nthe keys from the document\\(aqs top, separated by dots and without list\npositions: command.flags.schema.from. A key both documents have, such as\nversion, is shown for each.\n.PP\nEffects: read, idempotent, local only\n.SH ARGUMENTS\n.TP\n\\fI<key>\\fR\nthe key path, such as command.flags.schema.from\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini explain command.flags.role\n.sp\nrotini explain generate.features.targets\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
@@ -642,9 +809,9 @@ var ManRotiniFmt = ".TH \"ROTINI\\-FMT\" 1 \"\" \"rotini\" \"User Commands\"\n.S
 
 var ManRotiniHelp = ".TH \"ROTINI\\-HELP\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-help \\- print help\n.SH SYNOPSIS\n\\fBrotini help\\fR [command...]\n.SH DESCRIPTION\nPrint help for a specific command.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nname of the command to print help for\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini help\n.sp\nrotini help generate\n.sp\nrotini help init\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniVersion = ".TH \"ROTINI\\-VERSION\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-version \\- print version\n.SH SYNOPSIS\n\\fBrotini version\\fR\n.SH DESCRIPTION\nPrint the rotini cli version.\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini version\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniVersion = ".TH \"ROTINI\\-VERSION\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-version \\- print version\n.SH SYNOPSIS\n\\fBrotini version\\fR [flags]\n.SH DESCRIPTION\nPrint the rotini cli version. With \\-\\-format json, print the version, the Go\nversion that built\nthe binary, and the module path and version from its build info, as one JSON\nobject.\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\noutput format (default text) [text|json]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH OUTPUT\nThe version and build of the rotini binary.\n.PP\nWrites \\fBobject\\fR to standard output.\n.TP\n\\fBgo_version\\fR \\fIstring\\fR\nthe Go toolchain that built the binary, such as go1.27.1 (required)\n.TP\n\\fBmodule_path\\fR \\fIstring\\fR\nthe main module path from the build info\n.TP\n\\fBmodule_version\\fR \\fIstring\\fR\nthe main module version from the build info: a release, a pseudo\\-version (with\n+dirty when built from a modified checkout), or (devel)\n.TP\n\\fBversion\\fR \\fIstring\\fR\nwhat rotini version prints, such as v1.4.0 (required)\n.SH EXAMPLES\n.RS 4\n.nf\nrotini version\n.sp\nrotini version \\-\\-format json\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniCompletion = ".TH \"ROTINI\\-COMPLETION\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-completion \\- print a shell completion script\n.SH SYNOPSIS\n\\fBrotini completion\\fR <shell>\n.SH DESCRIPTION\nPrint the completion script for a shell. Load it once per session, or install it\nso\nevery new shell has it:\n.PP\n.nf\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash\\-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out\\-String | Invoke\\-Expression\n              add that line to $PROFILE to load it in every session\n.fi\n.SH ARGUMENTS\n.TP\n\\fI<shell>\\fR\nthe shell to print the script for [bash|zsh|fish|powershell]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini completion bash\n.sp\nrotini completion zsh > \"${fpath[1]}/_rotini\"\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniCompletion = ".TH \"ROTINI\\-COMPLETION\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-completion \\- print a shell completion script\n.SH SYNOPSIS\n\\fBrotini completion\\fR <shell>\n.SH DESCRIPTION\nPrint the completion script for a shell. Load it once per session, or install it\nso\nevery new shell has it:\n.PP\n.nf\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash\\-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out\\-String | Invoke\\-Expression\n              add that line to $PROFILE to load it in every session\n  nushell     rotini completion nushell | save \\-f ($nu.user\\-autoload\\-dirs | first | path join rotini.nu)\n              Nushell 0.116 or later; create the directory first if it is missing\n.fi\n.SH ARGUMENTS\n.TP\n\\fI<shell>\\fR\nthe shell to print the script for [bash|zsh|fish|powershell|nushell]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini completion bash\n.sp\nrotini completion zsh > \"${fpath[1]}/_rotini\"\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 var ManRotiniMan = ".TH \"ROTINI\\-MAN\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-man \\- print or install the man pages\n.SH SYNOPSIS\n\\fBrotini man\\fR [flags] [command...]\n.SH DESCRIPTION\nPrint a command\\(aqs man page as roff, the markup the man program reads, or\nwrite every\npage into a directory with \\-\\-dir. With no command, it prints the page for\nrotini itself.\n.PP\nThe pages are named after the command path, rotini\\-generate.1, so a directory\nwritten\nwith \\-\\-dir can be added to MANPATH or copied into a man1 directory.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nthe command whose page to print (default rotini itself)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-dir\\fR \\fIstring\\fR\nwrite every page into this directory instead of printing one\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini man generate > rotini\\-generate.1\n.sp\nrotini man \\-\\-dir ~/.local/share/man/man1\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
@@ -654,7 +821,7 @@ var ManRotiniDiff = ".TH \"ROTINI\\-DIFF\" 1 \"\" \"rotini\" \"User Commands\"\n
 // page's file name (<page-name>.1) and in the cross-references between pages.
 const ManSection = "1"
 
-// Man returns the generated man text for the command identified by path
+// Man returns the generated man page text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
 // error when path does not match a known command.
 func Man(path ...string) (string, error) {
@@ -663,10 +830,16 @@ func Man(path ...string) (string, error) {
 		return ManRotini, nil
 	case "initialize", "init":
 		return ManRotiniInitialize, nil
+	case "import":
+		return ManRotiniImport, nil
+	case "import cobra":
+		return ManRotiniImportCobra, nil
 	case "generate", "gen":
 		return ManRotiniGenerate, nil
 	case "validate", "val":
 		return ManRotiniValidate, nil
+	case "tree":
+		return ManRotiniTree, nil
 	case "explain":
 		return ManRotiniExplain, nil
 	case "fmt":
@@ -682,7 +855,7 @@ func Man(path ...string) (string, error) {
 	case "diff":
 		return ManRotiniDiff, nil
 	default:
-		return "", fmt.Errorf("no man for command %q", strings.Join(path, " "))
+		return "", fmt.Errorf("no man page for command %q", strings.Join(path, " "))
 	}
 }
 
@@ -693,8 +866,11 @@ func ManPages() []rotini.Page {
 	return []rotini.Page{
 		{Name: "rotini", Path: nil, Content: ManRotini},
 		{Name: "rotini-initialize", Path: []string{"initialize"}, Content: ManRotiniInitialize},
+		{Name: "rotini-import", Path: []string{"import"}, Content: ManRotiniImport},
+		{Name: "rotini-import-cobra", Path: []string{"import", "cobra"}, Content: ManRotiniImportCobra},
 		{Name: "rotini-generate", Path: []string{"generate"}, Content: ManRotiniGenerate},
 		{Name: "rotini-validate", Path: []string{"validate"}, Content: ManRotiniValidate},
+		{Name: "rotini-tree", Path: []string{"tree"}, Content: ManRotiniTree},
 		{Name: "rotini-explain", Path: []string{"explain"}, Content: ManRotiniExplain},
 		{Name: "rotini-fmt", Path: []string{"fmt"}, Content: ManRotiniFmt},
 		{Name: "rotini-help", Path: []string{"help"}, Content: ManRotiniHelp},
@@ -713,6 +889,8 @@ var CompletionFish = "# fish completion for rotini\n# Set ROTINI_COMPLETION_MESS
 
 var CompletionPowershell = "# PowerShell completion for rotini\n# Set ROTINI_COMPLETION_MESSAGES=off to hide completion messages.\nRegister-ArgumentCompleter -Native -CommandName rotini -ScriptBlock {\n    param($wordToComplete, $commandAst, $cursorPosition)\n    $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })\n    # Pass the empty current word; before PowerShell 7.3, and with Legacy argument passing, an\n    # empty argument only survives as '\"\"'.\n    if ($wordToComplete -eq '') {\n        $legacy = $PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy'\n        $tokens += $(if ($legacy) { '\"\"' } else { '' })\n    }\n    $lines = @(rotini __complete @tokens 2>$null)\n    # Output: candidates as \"name<TAB>description\", then \":rotini:message <text>\" lines (not\n    # shown in PowerShell), then a \":rotini:option <word>...\" line, then a \":rotini:<directive>\"\n    # line (none, file, file <exts>, directory, executable, user, group, host). PowerShell shows\n    # the candidates in the order given and adds no space after one.\n    $lines = @($lines | Where-Object { $_ -notlike ':rotini:message *' -and $_ -notlike ':rotini:option *' })\n    $directive = ($lines | Where-Object { $_ -like ':rotini:*' } | Select-Object -Last 1)\n    $candidates = $lines | Where-Object { $_ -notlike ':rotini:*' }\n\n    $candidates | ForEach-Object {\n        $parts = $_ -split \"`t\", 2\n        $text = $parts[0]\n        $tip = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { $text }\n        [System.Management.Automation.CompletionResult]::new($text, $text, 'ParameterValue', $tip)\n    }\n\n    if ($directive) {\n        $hint = $directive -replace '^:rotini:', ''\n        # The names for executable, user and group; PowerShell has no host completer, and lists\n        # users and groups on Windows only.\n        $names = $null\n        switch -Wildcard ($hint) {\n            # An empty string stops PowerShell's fallback to file names.\n            'none' { if (-not $candidates) { '' }; return }\n            'directory' {\n                Get-ChildItem -Directory -Filter \"$wordToComplete*\" -ErrorAction SilentlyContinue |\n                    ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderContainer', $_.FullName) }\n            }\n            'file *' {\n                Get-ChildItem -Directory -Filter \"$wordToComplete*\" -ErrorAction SilentlyContinue |\n                    ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderContainer', $_.FullName) }\n                foreach ($ext in ($hint -replace '^file ', '') -split ' ') {\n                    Get-ChildItem -File -Filter \"$wordToComplete*.$ext\" -ErrorAction SilentlyContinue |\n                        ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderItem', $_.FullName) }\n                }\n            }\n            'file' {\n                Get-ChildItem -Filter \"$wordToComplete*\" -ErrorAction SilentlyContinue |\n                    ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderItem', $_.FullName) }\n            }\n            'executable' {\n                $names = @(Get-Command -CommandType Application -Name \"$wordToComplete*\" -ErrorAction SilentlyContinue |\n                    ForEach-Object { $_.Name } | Sort-Object -Unique)\n            }\n            'user' {\n                $names = @()\n                if (Get-Command Get-LocalUser -ErrorAction SilentlyContinue) {\n                    $names = @(Get-LocalUser -ErrorAction SilentlyContinue | Where-Object { $_.Name -like \"$wordToComplete*\" } | ForEach-Object { $_.Name })\n                }\n            }\n            'group' {\n                $names = @()\n                if (Get-Command Get-LocalGroup -ErrorAction SilentlyContinue) {\n                    $names = @(Get-LocalGroup -ErrorAction SilentlyContinue | Where-Object { $_.Name -like \"$wordToComplete*\" } | ForEach-Object { $_.Name })\n                }\n            }\n            'host' { $names = @() }\n        }\n        if ($null -ne $names) {\n            $names | ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }\n            if (-not $names -and -not $candidates) { '' }\n        }\n    }\n}\n"
 
+var CompletionNushell = "# Nushell completion for rotini\n# Set ROTINI_COMPLETION_MESSAGES=off to hide completion messages.\n# Needs Nushell 0.116 or later. Nushell runs the files in its autoload directory at startup:\n#   mkdir ($nu.user-autoload-dirs | first)\n#   rotini completion nushell | save -f ($nu.user-autoload-dirs | first | path join rotini.nu)\n\n# Output: candidates as \"name<TAB>description\", then \":rotini:message <text>\" lines (Nushell\n# doesn't show them), then a \":rotini:option <word>...\" line (nospace, keep-order), then a\n# \":rotini:<directive>\" line (none, file, file <exts>, directory, executable, user, group,\n# host). Nushell has no completer for program, user, group or host names, so those offer\n# nothing.\ndef \"nu-complete rotini\" [place: record] {\n    let words = ($place.command | skip 1)\n    let partial = ($words | last)\n    let lines = (^rotini __complete ...$words | complete | get stdout | lines)\n    let options = ($lines | where ($it | str starts-with ':rotini:option ') | each { str substring 15.. | split row ' ' } | flatten)\n    let directive = ($lines | where ($it | str starts-with ':rotini:') and not ($it | str starts-with ':rotini:message ') and not ($it | str starts-with ':rotini:option ') | each { str substring 8.. } | append '' | first)\n    let space = not ('nospace' in $options)\n    mut found = ($lines | where not ($it | str starts-with ':rotini:') | each {|line|\n        let parts = ($line | split row --number 2 \"\\t\")\n        if ($parts | length) > 1 and ($parts.1 | is-not-empty) {\n            {value: $parts.0, description: $parts.1, append_whitespace: $space}\n        } else {\n            {value: $parts.0, append_whitespace: $space}\n        }\n    })\n    let words = ($directive | split row ' ')\n    match $words.0 {\n        'directory' => {\n            $found = ($found | append ($partial | commandline complete --type directory | each {|p| {value: $p, append_whitespace: false} }))\n        }\n        'file' => {\n            let exts = ($words | skip 1)\n            if ($exts | is-empty) {\n                if ($found | is-empty) { return null }\n                $found = ($found | append ($partial | commandline complete --type path | each {|p| {value: $p, append_whitespace: false} }))\n            } else {\n                let paths = ($partial | commandline complete --type path | where {|p| ($p | str ends-with '/') or (($p | path parse | get extension) in $exts) })\n                $found = ($found | append ($paths | each {|p| {value: $p, append_whitespace: (not ($p | str ends-with '/'))} }))\n            }\n        }\n        '' => {\n            if ($found | is-empty) { return null }\n        }\n    }\n    {completions: $found, options: {sort: (not ('keep-order' in $options))}}\n}\n\n@complete \"nu-complete rotini\"\nextern rotini [...args: string]\n"
+
 // Completion returns the embedded completion script for shell, or an error when
 // shell is not one rotini generated a script for.
 func Completion(shell string) (string, error) {
@@ -725,6 +903,8 @@ func Completion(shell string) (string, error) {
 		return CompletionFish, nil
 	case "powershell":
 		return CompletionPowershell, nil
+	case "nushell":
+		return CompletionNushell, nil
 	default:
 		return "", fmt.Errorf("no completion for shell %q", shell)
 	}

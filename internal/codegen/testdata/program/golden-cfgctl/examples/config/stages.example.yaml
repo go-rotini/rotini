@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../schemas/cfgctl.stages.config.json
+## stages: ./stages.yaml, read by cfgctl and its sub-commands.
+## Each line starting with "# " is a key: remove the "# " to set it.
+## Keys any configuration file may hold are listed once, in app.example.yaml.
+
+# profiles:
+##   Named profiles, one chosen per run by --profile or CFGCTL_PROFILE or CFGCTL_STAGE. A profile's keys win over the same keys at the top of the file, which every profile shares. Without a choice, "dev" is used.
+#   dev: {}

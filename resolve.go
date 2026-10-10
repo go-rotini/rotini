@@ -218,7 +218,9 @@ type Resolution struct {
 }
 
 // Resolver is the resolve phase: it matches argv against the [Definition] to decide what this
-// invocation targets. An error is reported as a fault and fails the run. See
+// invocation targets. An error fails the run: a usage error is reported as one, anything else
+// as a fault. With an error, [Resolution.Chain] may hold the commands resolved so far, which
+// [Context.CommandPath] then reports to the reporter; without one it reports the root. See
 // [DefaultResolver].
 //
 // The Definition is passed by value, but its slices are the program's own and shared by every
@@ -236,14 +238,14 @@ type Resolver func(def Definition, argv []string) (Resolution, error)
 // answers it for the command the words before the plugin name resolve to, with [Resolution.Argv]
 // cut to those words. The root's `role: chdir` flag may come there too: the plugin runs in its
 // directory. Any other flag there, or one that does not parse, is returned as a usage
-// [*ParseError].
+// [*ParseError], with the commands before the plugin name as the Chain.
 func DefaultResolver(def Definition, argv []string) (Resolution, error) {
 	chain, plugin := resolveChain(def, argv)
 	if plugin != nil {
 		before := argv[:len(argv)-len(plugin.Args)-1]
 		answer, err := pluginHostFlags(chain, before, plugin.Def.Name)
 		if err != nil {
-			return Resolution{}, err
+			return Resolution{Chain: chain}, err
 		}
 		if answer {
 			return Resolution{Chain: chain, Argv: before}, nil

@@ -61,6 +61,9 @@ func readRaw(path string) (fileFormat, []byte, error) {
 	if format == formatUnknown {
 		return formatUnknown, nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
+	if data, ok := seedOverlayRead(path); ok {
+		return format, data, nil
+	}
 	data, err := fs.ReadFile(path)
 	if err != nil {
 		// The fs error repeats the path; report a missing file plainly.

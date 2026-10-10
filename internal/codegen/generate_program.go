@@ -19,10 +19,13 @@ import (
 //   - text pages render from a Go template over templateProgramData, seeded into
 //     template_dir with `template: true` exactly as help's is (skill, llms);
 //   - structured exports are built in Go from the contract document, never from a template
-//     (tools, permissions).
+//     (tools, permissions);
+//   - the user-facing files are built in Go from the command tree (carapace, config_example,
+//     env_example).
 //
-// Program features add no Go code to the cmd package (tools' `go: true` is the exception) and
-// are never pruned: turning one off leaves its files, as with the contract file.
+// Program features add no Go code to the cmd package (tools' `go: true`, and config_example
+// and env_example's ConfigExample and EnvExample, are the exceptions) and are never pruned:
+// turning one off leaves its files, as with the contract file.
 
 // programFeature describes one whole-program feature.
 type programFeature struct {
@@ -30,6 +33,7 @@ type programFeature struct {
 	file     string // the default `file`: a directory when it ends in "/"
 	tmplFile string // editable template file name; "" for a structured export
 	embedded string // the built-in template text
+	accessor bool   // it also puts its text in the cmd package, which embed and embed_dir store
 	// render returns the feature's files, keyed by path relative to its resolved `file`
 	// ("" for the file itself), and any notices.
 	render func(p *program, f *Feature, a *agentProgram, tmpl *template.Template) (map[string][]byte, []error, error)
@@ -41,6 +45,9 @@ var programFeatures = []programFeature{
 	{name: "skill", file: "skills/", tmplFile: skillTemplateName, embedded: templateSkill, render: renderSkill},
 	{name: "llms", file: "llms.txt", tmplFile: llmsTemplateName, embedded: templateLLMS, render: renderLLMS},
 	{name: "permissions", file: "agents/", render: renderPermissions},
+	{name: "carapace", file: "completions/carapace/", render: renderCarapace},
+	{name: "config_example", file: "examples/config/", render: renderConfigExample, accessor: true},
+	{name: "env_example", file: ".env.example", render: renderEnvExample, accessor: true},
 }
 
 // programFeatureOf returns the whole-program feature with the given conf type.
@@ -150,33 +157,34 @@ type agentContractCmd struct {
 
 // agentInput is an argument, flag, env or config input of the contract.
 type agentInput struct {
-	Name         string         `json:"name"`
-	Summary      string         `json:"summary"`
-	Description  string         `json:"description"`
-	Type         string         `json:"type"`
-	Kind         string         `json:"kind"`
-	Required     bool           `json:"required"`
-	Variadic     bool           `json:"variadic"`
-	Passthrough  bool           `json:"passthrough"`
-	Identifiers  []string       `json:"identifiers"`
-	Negated      []string       `json:"negated"`
-	ShortCircuit bool           `json:"short_circuit"`
-	Role         string         `json:"role"`
-	RoleValue    string         `json:"role_value"`
-	Inherited    bool           `json:"inherited"`
-	Env          []string       `json:"env"`
-	ConfigKey    string         `json:"config_key"`
-	Variables    []string       `json:"variables"`
-	Key          string         `json:"key"`
-	From         []string       `json:"from"`
-	Separator    string         `json:"separator"`
-	Secret       bool           `json:"secret"`
-	Hidden       bool           `json:"hidden"`
-	Deprecated   string         `json:"deprecated"`
-	Stability    string         `json:"stability"`
-	Effects      *Effects       `json:"effects"`
-	Agent        *bool          `json:"agent"`
-	Schema       map[string]any `json:"schema"`
+	Name                  string         `json:"name"`
+	Summary               string         `json:"summary"`
+	Description           string         `json:"description"`
+	Type                  string         `json:"type"`
+	Kind                  string         `json:"kind"`
+	Required              bool           `json:"required"`
+	Variadic              bool           `json:"variadic"`
+	Passthrough           bool           `json:"passthrough"`
+	Identifiers           []string       `json:"identifiers"`
+	DeprecatedIdentifiers []string       `json:"deprecated_identifiers"`
+	Negated               []string       `json:"negated"`
+	ShortCircuit          bool           `json:"short_circuit"`
+	Role                  string         `json:"role"`
+	RoleValue             string         `json:"role_value"`
+	Inherited             bool           `json:"inherited"`
+	Env                   []string       `json:"env"`
+	ConfigKey             string         `json:"config_key"`
+	Variables             []string       `json:"variables"`
+	Key                   string         `json:"key"`
+	From                  []string       `json:"from"`
+	Separator             string         `json:"separator"`
+	Secret                bool           `json:"secret"`
+	Hidden                bool           `json:"hidden"`
+	Deprecated            string         `json:"deprecated"`
+	Stability             string         `json:"stability"`
+	Effects               *Effects       `json:"effects"`
+	Agent                 *bool          `json:"agent"`
+	Schema                map[string]any `json:"schema"`
 }
 
 // agentCommand is one command of the program, with its agent-facing facts resolved.
@@ -247,9 +255,9 @@ func (p *program) agentProgram() (*agentProgram, error) {
 					ac.machine = machineOutputArgv(f)
 				}
 			case "dry-run":
-				ac.dryRun = longIdentifier(f.Identifiers)
+				ac.dryRun = longIdentifier(f)
 			case "confirm":
-				ac.confirm = longIdentifier(f.Identifiers)
+				ac.confirm = longIdentifier(f)
 			}
 		}
 		ac.effects = worstEffects(c.Effects, flagEffects)
@@ -306,22 +314,26 @@ func inputOffered(in agentInput, outByDefault bool) bool {
 // machineOutputArgv is what a caller adds to the command line for JSON output: the bool flag
 // itself, or the string flag with its role_value attached.
 func machineOutputArgv(f agentInput) []string {
-	id := longIdentifier(f.Identifiers)
+	id := longIdentifier(f)
 	if f.RoleValue != "" {
 		return []string{id + "=" + f.RoleValue}
 	}
 	return []string{id}
 }
 
-// longIdentifier returns a flag's first long identifier, else its first.
-func longIdentifier(ids []string) string {
-	for _, id := range ids {
-		if strings.HasPrefix(id, "--") {
-			return id
+// longIdentifier returns the identifier a caller writes for a flag, as rotini.ArgvOf picks it:
+// its first long identifier that isn't deprecated, else its first short one that isn't, else
+// its first.
+func longIdentifier(f agentInput) string {
+	for _, long := range []bool{true, false} {
+		for _, id := range f.Identifiers {
+			if strings.HasPrefix(id, "--") == long && !slices.Contains(f.DeprecatedIdentifiers, id) {
+				return id
+			}
 		}
 	}
-	if len(ids) > 0 {
-		return ids[0]
+	if len(f.Identifiers) > 0 {
+		return f.Identifiers[0]
 	}
 	return ""
 }

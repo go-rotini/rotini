@@ -171,11 +171,13 @@ One generated feature, chosen by 'type' (help, completion, man, markdown): an on
 
 ### `type`
 
-`string` · **required** · one of `help`, `completion`, `man`, `markdown`, `tools`, `skill`, `llms`, `permissions`
+`string` · **required** · one of `help`, `completion`, `man`, `markdown`, `tools`, `skill`, `llms`, `permissions`, `carapace`, `config_example`, `env_example`
 
-Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion&lt;Shell&gt;' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.
+Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell, nushell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion&lt;Shell&gt;' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.
 
 tools, skill, llms and permissions are files for AI agents and their tools, one set for the whole program, written under 'file' (relative to the module root) and never removed: tools writes tool definitions for each of 'targets' (tools/mcp.json, tools/openai.json, tools/gemini.json), skill an Agent Skills page (skills/&lt;name&gt;/SKILL.md), llms an llms.txt, and permissions permission rules for each of 'harnesses'. They add no Go code, except `go: true` on tools. skill and llms render from an editable template, as help does; tools and permissions are built from the contract and have none. 'embed' and 'embed_dir' don't apply to them.
+
+carapace, config_example and env_example are files for the program's users, also written under 'file' and never removed. carapace writes a carapace-spec completion file (completions/carapace/&lt;name&gt;.yaml) from the spec's static facts: commands, flags, enum values and completion hints. config_example writes an example of each configuration file the spec declares (examples/config/&lt;name&gt;.example.&lt;ext&gt;), in the file's format, with every key commented out above its summary, type and default; env_example writes .env.example, every environment variable the program reads, commented out. config_example and env_example also generate 'ConfigExample(name string) (string, error)' and 'EnvExample() string', so a command can print them; 'embed' and 'embed_dir' choose how that text is stored, as for help. All three are built in Go, with no editable template.
 
 ### `base_url`
 
@@ -217,7 +219,7 @@ When true, rotini generates this feature's outputs into the cmd package, with th
 
 `string`
 
-tools, skill, llms and permissions only: where the files are written, relative to the module root. A directory for tools (default 'tools/'), skill (default 'skills/', which gets &lt;name&gt;/SKILL.md) and permissions (default 'agents/'); a file for llms (default 'llms.txt'). Rewritten on every generate; turning the feature off leaves the files in place. Setting it on any other feature is an error.
+tools, skill, llms, permissions, carapace, config_example and env_example only: where the files are written, relative to the module root. A directory for tools (default 'tools/'), skill (default 'skills/', which gets &lt;name&gt;/SKILL.md), permissions (default 'agents/') and config_example (default 'examples/config/'); a file for llms (default 'llms.txt'), carapace (default 'completions/carapace/&lt;name&gt;.yaml', where &lt;name&gt; is the root command's name, which carapace requires as the file name) and env_example (default '.env.example'). Rewritten on every generate; turning the feature off leaves the files in place. Setting it on any other feature is an error.
 
 ### `go`
 
@@ -235,7 +237,7 @@ permissions only: which agent harnesses to write permission rules for, from the 
 
 `string`
 
-completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/&lt;name&gt;.bash, completions/_&lt;name&gt; (zsh), completions/&lt;name&gt;.fish and completions/&lt;name&gt;.ps1, and man/man&lt;section&gt;/&lt;page&gt;.&lt;section&gt;, where &lt;name&gt; is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone is removed. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error.
+completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/&lt;name&gt;.bash, completions/_&lt;name&gt; (zsh), completions/&lt;name&gt;.fish, completions/&lt;name&gt;.ps1 and completions/&lt;name&gt;.nu, and man/man&lt;section&gt;/&lt;page&gt;.&lt;section&gt;, where &lt;name&gt; is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone is removed. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error.
 
 ### `mcp_revision`
 
@@ -247,7 +249,7 @@ tools only: the MCP revision mcp.json is written for. 2026-07-28 (the default) a
 
 `string` · one of `declared`, `all`
 
-completion only: turns on completion messages, lines the shell shows while a value is being completed and there is nothing to offer. 'declared' shows the inputs' `complete.message` lines from the spec. 'all' also shows a line derived from the summary of every other flag and argument that has one, such as `--replicas <int>: how many instances`. Either way a completer can add its own with rtx.AddCompletionMessage, which take the place of the static line. Omitted, there are no messages. zsh and bash 4.4 or later show them; fish, PowerShell and older bash skip them, and the plugin hosts kubectl, Docker and Flux show them their own way. Setting it on any other feature is an error.
+completion only: turns on completion messages, lines the shell shows while a value is being completed and there is nothing to offer. 'declared' shows the inputs' `complete.message` lines from the spec. 'all' also shows a line derived from the summary of every other flag and argument that has one, such as `--replicas <int>: how many instances`. Either way a completer can add its own with rtx.AddCompletionMessage, which take the place of the static line. Omitted, there are no messages. zsh and bash 4.4 or later show them; fish, PowerShell, Nushell and older bash skip them, and the plugin hosts kubectl, Docker and Flux show them their own way. Setting it on any other feature is an error.
 
 ### `messages_env`
 

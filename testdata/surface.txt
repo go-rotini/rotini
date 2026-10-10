@@ -114,12 +114,24 @@ field CompletionResult.NoSpace
 field ConfigFile.As
 field ConfigFile.Discover
 field ConfigFile.Format
+field ConfigFile.Keys
 field ConfigFile.Name
 field ConfigFile.Path
 field ConfigFile.PathFrom
 field ConfigFile.Profiles
 field ConfigFile.Schema
 field ConfigFile.Scope
+field ConfigKey.Constraints
+field ConfigKey.Enum
+field ConfigKey.EnumValues
+field ConfigKey.IgnoreCase
+field ConfigKey.Key
+field ConfigKey.Layout
+field ConfigKey.Layouts
+field ConfigKey.Object
+field ConfigKey.Secret
+field ConfigKey.Separator
+field ConfigKey.Type
 field Constraints.ExclusiveMaximum
 field Constraints.ExclusiveMinimum
 field Constraints.MaxItems
@@ -310,12 +322,14 @@ field TopicDef.Summary
 field WiringError.Command
 field WiringError.Handler
 field WiringError.Msg
+func AllowSecretWrite() ConfigWriteOption
 func AppDirs(rtx *Context, app, strategy string) (AppDirectories, error)
 func ArgvOf[T any](def Definition, v T, set Presence, opts ...ArgvOption) (argv, env []string, err error)
 func ArgvPath(names ...string) ArgvOption
 func ArgvSecrets() ArgvOption
 func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func CategoryOf(err error) Category
+func ConfigFilePath(rtx *Context, file string) (path string, exists bool, err error)
 func ConfigProfiles(rtx *Context, file string) ([]string, error)
 func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile, error)
 func DecodeOutput[T any](p *Program, data []byte, format string) (T, error)
@@ -337,14 +351,19 @@ func NewProgramFunc(def Definition, lookup HandlerLookup) *Program
 func NewSuggestor() *Suggestor
 func OpenInput(rtx *Context, path string) (io.ReadCloser, error)
 func Overwrite(enabled bool) OutputOption
+func ParseConfigValue(fn func(raw string) error) ConfigWriteOption
 func PluginCompletion(w io.Writer, result CompletionResult) error
 func PresenceOf[T any](v T) Presence
 func Ptr[T any](v T) *T
 func SelectFields(v any, at string, fields []string) (Selection, error)
+func SetConfigValue(rtx *Context, file, key, raw string, opts ...ConfigWriteOption) error
 func SortBy[E any](items []E, field string, desc bool) error
 func StripANSI(text string) string
 func StructuredReporter(structured func(rtx *Context) bool) Reporter
 func SuggestionFacts(err error) (token string, candidates []string, ok bool)
+func ToProfile(name string) ConfigWriteOption
+func ToSharedKeys() ConfigWriteOption
+func UnsetConfigValue(rtx *Context, file, key string, opts ...ConfigWriteOption) error
 func UsageError(err error) error
 func WithDependency[T any](dep Dependency[T], value T) Option
 method ArgValueCompleter.CompleteArgValue
@@ -521,6 +540,8 @@ type CompletionMessagesDef
 type CompletionOptions
 type CompletionResult
 type ConfigFile
+type ConfigKey
+type ConfigWriteOption
 type Constraints
 type Context
 type Definition

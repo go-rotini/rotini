@@ -1,0 +1,64 @@
+# Examples that run the program must parse against the spec.
+version: 0.0.0
+command:
+  name: taskr
+  display_name: kubectl taskr
+  examples:
+    # Correct: prose, other programs, placeholders, expansions, pipelines, env assignments and
+    # fallbacks. No problem.
+    - Run taskr with no arguments to list everything.
+    - echo hi | taskr add "buy milk" | sort
+    - TASKR_TOKEN=abc ./taskr sync --status "$STATUS"
+    - $ taskr list --status <status> > tasks.txt 2>&1
+    - kubectl taskr list -s open
+    - taskr ls --fmt && taskr add 'a b' --prio=3
+    - taskr list --status open; taskr old
+    - taskr remote anything --at all
+    # Wrong: an unknown command, an unknown flag, a bad enum value, a missing argument, a
+    # mutually exclusive pair, an extra argument in a later segment, an unclosed quote.
+    - taskr lst
+    - taskr list --colour
+    - taskr list --status closed
+    - taskr add
+    - taskr list --json --status open
+    - echo x | taskr add one two
+    - taskr add "unclosed
+  plugins:
+    - name: remote
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: list
+      aliases: [ls]
+      flag_groups:
+        - { kind: mutually_exclusive, flags: [json, status] }
+      flags:
+        - name: status
+          identifiers: [-s, --status]
+          schema: { type: string, enum: [open, done] }
+        - name: json
+          identifiers: [--json]
+          hidden_identifiers: [--fmt]
+          schema: { type: bool }
+    - name: add
+      flags:
+        - name: prio
+          identifiers: [--prio]
+          schema: { type: int }
+      arguments:
+        - name: title
+          schema: { type: string, required: true }
+    - name: sync
+      flags:
+        - name: status
+          identifiers: [--status]
+          schema: { type: string }
+        - name: token
+          identifiers: [--token]
+          schema: { type: string, required: true, variable: TASKR_TOKEN }
+    - name: old
+      hidden_aliases: [older]
+      deprecated: use list

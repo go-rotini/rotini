@@ -397,16 +397,41 @@ type resolvedConfigFile struct {
 // files and directory) and selects its profile from the command line and the environment. The
 // caller closes src.
 func resolveConfigFile(rtx *Context, name string) (resolvedConfigFile, error) {
-	chain, err := layerChain(rtx)
+	lf, err := locateConfigFile(rtx, name)
 	if err != nil {
 		return resolvedConfigFile{}, err
 	}
-	b := readerFor(rtx)
-	i := slices.IndexFunc(b.chainFiles(chain, false), func(f ConfigFile) bool { return f.Name == name })
-	if i < 0 {
-		return resolvedConfigFile{}, internalBind(channelConfig, name, fmt.Sprintf("no configuration file %q is in scope for this command", name), nil)
+	out := resolvedConfigFile{file: lf.file, profile: lf.profile}
+	if out.src, out.path, err = lf.reader.openFileSource(lf.file, lf.paths, lf.view); err != nil {
+		return resolvedConfigFile{}, err
 	}
-	f := b.chainFiles(chain, false)[i]
+	return out, nil
+}
+
+// locatedConfigFile is a config_files entry in scope for the running command, with what
+// locating it needs, before the file is opened.
+type locatedConfigFile struct {
+	file    ConfigFile
+	profile profileChoice
+	reader  *InputReader
+	paths   map[string]string // the config_source paths, by logical name
+	view    *osView
+}
+
+// locateConfigFile finds the named config_files entry for the running command and selects its
+// profile, as [resolveConfigFile] does, without opening the file.
+func locateConfigFile(rtx *Context, name string) (locatedConfigFile, error) {
+	chain, err := layerChain(rtx)
+	if err != nil {
+		return locatedConfigFile{}, err
+	}
+	b := readerFor(rtx)
+	files := b.chainConfigFiles(chain)
+	i := slices.IndexFunc(files, func(f ConfigFile) bool { return f.Name == name })
+	if i < 0 {
+		return locatedConfigFile{}, internalBind(channelConfig, name, fmt.Sprintf("no configuration file %q is in scope for this command", name), nil)
+	}
+	f := files[i]
 	store, err := parseInto(chain, rtx.Argv, rtx.argvAcq())
 	if err != nil {
 		store = nil // a command line that cannot be parsed selects nothing
@@ -417,12 +442,9 @@ func resolveConfigFile(rtx *Context, name string) (resolvedConfigFile, error) {
 		view = layered
 		paths = b.pathOverrides(chain, store, view)
 	}
-	out := resolvedConfigFile{file: f}
+	out := locatedConfigFile{file: f, reader: b, paths: paths, view: view}
 	if f.Profiles != nil {
 		out.profile = selectProfile(f.Profiles, chain, store, view)
-	}
-	if out.src, out.path, err = b.openFileSource(f, paths, view); err != nil {
-		return resolvedConfigFile{}, err
 	}
 	return out, nil
 }

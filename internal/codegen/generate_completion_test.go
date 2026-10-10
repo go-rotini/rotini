@@ -40,6 +40,11 @@ func TestCompletionScripts_preserveEveryToken(t *testing.T) {
 			want:  `$tokens += $(if ($legacy) { '""' } else { '' })`,
 			why:   "the empty current word must reach the binary, and Windows PowerShell 5.1 drops a bare '' argument",
 		},
+		{
+			shell: "nushell",
+			want:  `let words = ($place.command | skip 1)`,
+			why:   "Nushell 0.116 passes the words with the partial one last (an empty string after a space) in place.command",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.shell, func(t *testing.T) {
@@ -88,6 +93,7 @@ func TestCompletionScripts_parseInTheirOwnShell(t *testing.T) {
 		{"bash", "bash", []string{"-n"}},
 		{"zsh", "zsh", []string{"-n"}},
 		{"fish", "fish", []string{"--no-execute"}},
+		{"nushell", "nu", []string{"--no-config-file"}},
 	}
 	for _, c := range checks {
 		t.Run(c.shell, func(t *testing.T) {
@@ -132,6 +138,11 @@ func TestCompletionScripts_readTheProtocol(t *testing.T) {
 		},
 		"powershell": {
 			`$_ -notlike ':rotini:option *'`, `Get-Command -CommandType Application`, `Get-LocalUser`, `Get-LocalGroup`, `'host' { $names = @() }`,
+		},
+		"nushell": {
+			`str starts-with ':rotini:option '`, `append_whitespace: $space`, `options: {sort: (not ('keep-order' in $options))}`,
+			`commandline complete --type directory`, `commandline complete --type path`, `@complete "nu-complete PROG"`,
+			`extern PROG [...args: string]`,
 		},
 	}
 	for shell, idioms := range want {

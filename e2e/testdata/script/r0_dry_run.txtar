@@ -17,6 +17,11 @@ stderr '^dry run: \d+ changes not written$'
 ! exists cmd/demo/.rotini.spec.yaml
 ! exists internal/cmd/demo
 
+# ── --no-dry-run, given last, runs a real init ───────────────────────────────
+exec rotini init demo2 --dry-run --no-dry-run
+exists cmd/demo2/.rotini.spec.yaml
+exists internal/cmd/demo2/zz_rotini.go
+
 # ── a generated tree is up to date ───────────────────────────────────────────
 mkdir app
 cp spec.yaml app/.rotini.spec.yaml

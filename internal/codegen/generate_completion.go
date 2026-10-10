@@ -43,8 +43,8 @@ func completionEnvRows(conf *Conf) []templateDocEnvRow {
 	return rows
 }
 
-// completionScript returns the completion script for prog in shell (bash, zsh, fish or
-// powershell). Each script delegates to the binary's hidden __complete command, so completions
+// completionScript returns the completion script for prog in shell (bash, zsh, fish, powershell
+// or nushell). Each script delegates to the binary's hidden __complete command, so completions
 // track the live command tree. The completion feature renders one script per shell at
 // generate time. The script's header names the variables in envs for the users who install it.
 func completionScript(prog, shell string, envs completionEnvs) (string, error) {
@@ -58,10 +58,12 @@ func completionScript(prog, shell string, envs completionEnvs) (string, error) {
 		tmpl = fishCompletionTemplate
 	case "powershell":
 		tmpl = powershellCompletionTemplate
+	case "nushell":
+		tmpl = nushellCompletionTemplate
 	case "":
-		return "", errors.New("a shell is required (bash, zsh, fish, or powershell)")
+		return "", errors.New("a shell is required (bash, zsh, fish, powershell, or nushell)")
 	default:
-		return "", fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish, powershell)", shell)
+		return "", fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish, powershell, nushell)", shell)
 	}
 	script := strings.ReplaceAll(tmpl, "PROG", prog)
 	var header string
@@ -422,4 +424,55 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
         }
     }
 }
+`
+
+const nushellCompletionTemplate = `# Nushell completion for PROG
+# Needs Nushell 0.116 or later. Nushell runs the files in its autoload directory at startup:
+#   mkdir ($nu.user-autoload-dirs | first)
+#   PROG completion nushell | save -f ($nu.user-autoload-dirs | first | path join PROG.nu)
+
+# Output: candidates as "name<TAB>description", then ":rotini:message <text>" lines (Nushell
+# doesn't show them), then a ":rotini:option <word>..." line (nospace, keep-order), then a
+# ":rotini:<directive>" line (none, file, file <exts>, directory, executable, user, group,
+# host). Nushell has no completer for program, user, group or host names, so those offer
+# nothing.
+def "nu-complete PROG" [place: record] {
+    let words = ($place.command | skip 1)
+    let partial = ($words | last)
+    let lines = (^PROG __complete ...$words | complete | get stdout | lines)
+    let options = ($lines | where ($it | str starts-with ':rotini:option ') | each { str substring 15.. | split row ' ' } | flatten)
+    let directive = ($lines | where ($it | str starts-with ':rotini:') and not ($it | str starts-with ':rotini:message ') and not ($it | str starts-with ':rotini:option ') | each { str substring 8.. } | append '' | first)
+    let space = not ('nospace' in $options)
+    mut found = ($lines | where not ($it | str starts-with ':rotini:') | each {|line|
+        let parts = ($line | split row --number 2 "\t")
+        if ($parts | length) > 1 and ($parts.1 | is-not-empty) {
+            {value: $parts.0, description: $parts.1, append_whitespace: $space}
+        } else {
+            {value: $parts.0, append_whitespace: $space}
+        }
+    })
+    let words = ($directive | split row ' ')
+    match $words.0 {
+        'directory' => {
+            $found = ($found | append ($partial | commandline complete --type directory | each {|p| {value: $p, append_whitespace: false} }))
+        }
+        'file' => {
+            let exts = ($words | skip 1)
+            if ($exts | is-empty) {
+                if ($found | is-empty) { return null }
+                $found = ($found | append ($partial | commandline complete --type path | each {|p| {value: $p, append_whitespace: false} }))
+            } else {
+                let paths = ($partial | commandline complete --type path | where {|p| ($p | str ends-with '/') or (($p | path parse | get extension) in $exts) })
+                $found = ($found | append ($paths | each {|p| {value: $p, append_whitespace: (not ($p | str ends-with '/'))} }))
+            }
+        }
+        '' => {
+            if ($found | is-empty) { return null }
+        }
+    }
+    {completions: $found, options: {sort: (not ('keep-order' in $options))}}
+}
+
+@complete "nu-complete PROG"
+extern PROG [...args: string]
 `

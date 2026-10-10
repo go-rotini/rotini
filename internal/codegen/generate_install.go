@@ -18,6 +18,7 @@ var completionInstallNames = map[string]func(name string) string{
 	"zsh":        func(name string) string { return "_" + name },
 	"fish":       func(name string) string { return name + ".fish" },
 	"powershell": func(name string) string { return name + ".ps1" },
+	"nushell":    func(name string) string { return name + ".nu" },
 }
 
 // installDir returns the module-root-relative install_dir of the feature, or "".

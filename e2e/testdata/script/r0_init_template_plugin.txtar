@@ -1,0 +1,45 @@
+# R0 — `rotini init --template plugin`: a kubectl-style plugin that builds, answers --help
+# under its display name, and answers the host's completion requests through multicall.
+
+gomodinit example.com/demo
+
+# A plugin is named after its host: <host>-<plugin>.
+! exec rotini init hello --template plugin
+stderr 'a plugin''s name is <host>-<plugin>'
+
+wantexit 2 rotini init kubectl-hello --template plugin --dry-run
+stderr 'create cmd/kubectl-hello/\.rotini\.spec\.yaml'
+! exists cmd/kubectl-hello
+
+exec rotini init kubectl-hello --template plugin
+stdout '^spec: cmd[/\\]kubectl-hello[/\\]\.rotini\.spec\.yaml$'
+grep 'display_name: kubectl hello' cmd/kubectl-hello/.rotini.spec.yaml
+grep 'complete: kubectl_complete-' cmd/kubectl-hello/.rotini.spec.yaml
+
+# Every format works; a second plugin in TOML shares the module.
+exec rotini init kubectl-world --template plugin --format toml
+exists cmd/kubectl-world/.rotini.spec.toml
+
+exec go mod tidy
+exec go build -o kubectl-hello$exe ./cmd/kubectl-hello
+exec go build -o kubectl-world$exe ./cmd/kubectl-world
+
+exec ./kubectl-hello$exe --help
+stdout 'kubectl hello \[flags\]'
+stdout '--output'
+! stderr .
+
+exec ./kubectl-hello$exe --version
+stdout '^kubectl-hello 0\.0\.0$'
+
+exec ./kubectl-hello$exe -o json
+stdout 'Output:json'
+
+# Run as kubectl_complete-hello, the same binary answers kubectl's completion request.
+cp kubectl-hello$exe kubectl_complete-hello$exe
+exec ./kubectl_complete-hello$exe -o ''
+stdout '^text$'
+stdout '^json$'
+
+exec ./kubectl-world$exe --help
+stdout 'kubectl world \[flags\]'

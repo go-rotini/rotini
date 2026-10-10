@@ -1,0 +1,143 @@
+# R12 — the fuzzing recipe: a fuzz test runs the program in-process on generated command lines
+# and fails only on a panic. Here it runs its seed corpus, as `go test` does without -fuzz. The
+# test file is the one the recipes page shows.
+
+gomodinit example.com/fuzzdemo
+
+exec rotini generate cmd/fuzzdemo/.rotini.spec.yaml --config cmd/fuzzdemo/.rotini.conf.yaml
+cp add.go.txt internal/cmd/fuzzdemo/fuzzdemo_add.go
+cp fuzz_test.go.txt internal/cmd/fuzzdemo/fuzz_test.go
+exec go mod tidy
+exec go test -run=FuzzRun -v ./internal/cmd/fuzzdemo
+stdout '--- PASS: FuzzRun'
+
+# A handler that panics on some input is caught by the same seeds.
+cp add_panics.go.txt internal/cmd/fuzzdemo/fuzzdemo_add.go
+! exec go test -run=FuzzRun ./internal/cmd/fuzzdemo
+stdout 'panic on "add\\x00--priority\\x00high\\x00x": high is not ready'
+
+-- fuzz_test.go.txt --
+package fuzzdemo
+
+import (
+	"errors"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/go-rotini/rotini"
+)
+
+// FuzzRun runs the program on generated command lines, its words joined by NUL bytes. A usage
+// error is a correct answer to a bad command line; only a panic fails the test.
+func FuzzRun(f *testing.F) {
+	f.Add("add\x00buy milk")
+	f.Add("add\x00--priority\x00high\x00x")
+	f.Add("--help")
+	home := f.TempDir()
+	f.Fuzz(func(t *testing.T, joined string) {
+		p := NewProgram(Handlers()).
+			WithEnviron([]string{"HOME=" + home}).
+			WithDir(home).
+			WithStdin(strings.NewReader("")).
+			WithStdout(io.Discard).
+			WithStderr(io.Discard)
+		_, err := p.Run(strings.Split(joined, "\x00"))
+		var pe *rotini.PanicError
+		if errors.As(err, &pe) {
+			t.Fatalf("panic on %q: %v\n%s", joined, pe.Value, pe.Stack)
+		}
+	})
+}
+-- add.go.txt --
+package fuzzdemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*fuzzdemoAddHandler)(nil)
+
+type fuzzdemoAddHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*fuzzdemoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FuzzdemoAddInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "added %q (%s)\n", in.FuzzdemoAdd.Arguments.Title, in.FuzzdemoAdd.Flags.Priority)
+}
+-- add_panics.go.txt --
+package fuzzdemo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*fuzzdemoAddHandler)(nil)
+
+type fuzzdemoAddHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*fuzzdemoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FuzzdemoAddInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.FuzzdemoAdd.Flags.Priority == "high" {
+		panic("high is not ready")
+	}
+}
+-- cmd/fuzzdemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: fuzzdemo
+  summary: a program under a fuzz test
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          summary: the task title
+          schema: { type: string, required: true }
+      flags:
+        - name: priority
+          summary: how urgent
+          identifiers: [-p, --priority]
+          schema: { type: string, default: normal, enum: [low, normal, high] }
+-- cmd/fuzzdemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/fuzzdemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/fuzzdemo/zz_fuzzdemo.go
+      package: fuzzdemo
+  features:
+    - type: help
+      enabled: true

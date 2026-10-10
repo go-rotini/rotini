@@ -131,6 +131,8 @@ var specLints = []func(*Spec) []error{
 	lintEffects,
 	lintFlagRoles,
 	lintAgent,
+	lintExamplesParse,
+	lintConfigFileSchemaRefs,
 }
 
 // lintRootCommand requires the root command, which is the binary itself, to have a

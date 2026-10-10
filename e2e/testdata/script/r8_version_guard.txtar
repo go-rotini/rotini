@@ -14,6 +14,12 @@ exec go build -o rotini123$exe github.com/go-rotini/rotini/cmd/rotini
 exec ./rotini123$exe version
 stdout '1\.2\.3'
 
+# The JSON form carries the same version, plus the Go version and the build info.
+exec ./rotini123$exe version --format json
+stdout '"version": "v1\.2\.3"'
+stdout '"go_version": "go1\.'
+stdout '"module_version": "v1\.2\.3"'
+
 # Exactly the binary's version: accepted, the obvious case.
 exec ./rotini123$exe validate same.spec.yaml --config same.conf.yaml
 

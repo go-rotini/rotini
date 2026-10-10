@@ -3,6 +3,9 @@ package {{.Package}}
 import (
 	"context"
 	"fmt"
+{{- if and .RootHook .RootHelpFlag}}
+	"strings"
+{{- end}}
 
 	{{.RuntimeImport}}
 )
@@ -29,7 +32,7 @@ func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Contex
 
 	if inputs.{{.Prefix}}.Flags.{{.RootHelpFlag}} {
 		var path []string
-		for _, c := range rtx.CommandChain()[1:] {
+		for _, c := range rtx.CommandChain()[len(strings.Fields(rtx.CommandPath())):] {
 			path = append(path, c.Name)
 		}
 
@@ -194,6 +197,19 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 {{- else}}
 	fmt.Fprintln(rtx.Stdout, page)
+{{- end}}
+{{- else if .CompletionArg}}
+	script, err := {{.CompletionFunc}}(inputs.{{.Prefix}}.Arguments.{{.CompletionArg}})
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+{{if .NewShape}}
+	if _, err := fmt.Fprint(rtx.Stdout, script); err != nil {
+		rtx.HaltWith(err)
+	}
+{{- else}}
+	fmt.Fprint(rtx.Stdout, script)
 {{- end}}
 {{- else if .VersionOnly}}
 	version := rtx.Version()

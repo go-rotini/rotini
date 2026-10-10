@@ -1,0 +1,106 @@
+version: 0.0.0
+command:
+  name: kit
+  summary: a toolkit
+  plugins:
+    - name: sync
+      summary: sync through a plugin
+  flags:
+    - name: help
+      summary: show help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: verbose
+      summary: say more
+      identifiers: [-v, --verbose]
+      cascading: true
+      schema: { type: count }
+  commands:
+    - name: build
+      summary: build an artifact
+      aliases: [b, mk]
+      hidden_aliases: [bld]
+      deprecated_identifiers: [mk]
+      examples:
+        - kit build --format yaml --owner me ./out
+        - kit b -o text --color=never --no-cache --owner me out | tee log
+      flag_groups:
+        - { kind: mutually_exclusive, flags: [json, format] }
+      flags:
+        - name: format
+          summary: the output format
+          identifiers: [-o, --format, --output]
+          hidden_identifiers: [--fmt]
+          schema:
+            type: string
+            enum:
+              - { value: text, summary: aligned columns }
+              - { value: yaml, summary: human-friendly }
+              - { value: xml, deprecated: use yaml }
+              - { value: raw, hidden: true }
+        - name: json
+          summary: write JSON
+          identifiers: [--json]
+          schema: { type: bool }
+        - name: cache
+          summary: use the build cache
+          identifiers: [--cache]
+          schema: { type: bool, negatable: true, default: true }
+        - name: color
+          summary: when to color
+          identifiers: [--color]
+          schema: { type: string, implicit_value: always, enum: [always, never, auto] }
+        - name: config
+          summary: a config file
+          identifiers: [-c, --config]
+          schema: { type: string, complete: { kind: file, extensions: [yaml, yml] } }
+        - name: workdir
+          summary: the work directory
+          identifiers: [--workdir, --wd]
+          deprecated_identifiers: [--wd]
+          schema: { type: string, complete: { kind: directory } }
+        - name: define
+          summary: build variables
+          identifiers: [-D, --define]
+          schema: { type: 'map[string]string' }
+        - name: owner
+          summary: who owns it
+          identifiers: [--owner]
+          schema: { type: string, required: true, complete: { kind: user } }
+        - name: shell
+          summary: the shell to run steps in
+          identifiers: [--shell]
+          hidden: true
+          schema: { type: string, complete: { kind: executable } }
+      arguments:
+        - name: out
+          summary: where to write
+          schema: { type: string, required: true, complete: { kind: directory } }
+    - name: run
+      summary: run a program
+      arguments:
+        - name: program
+          summary: the program
+          schema: { type: string, required: true, complete: { kind: executable } }
+        - name: args
+          summary: its arguments
+          passthrough: true
+          schema: { type: '[]string' }
+    - name: exec
+      summary: run anything
+      passthrough: true
+      arguments:
+        - name: argv
+          summary: the command line
+          schema: { type: '[]string' }
+    - name: legacy
+      summary: the old way
+      deprecated: use build
+    - name: help
+      summary: show help for a command
+      arguments:
+        - name: command
+          summary: the command
+          schema: { type: '[]string', complete: { kind: command } }

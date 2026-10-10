@@ -12,7 +12,10 @@ var (
 	validateDep   = rotini.NewDependency[codegen.ValidateFn]("rotini.validate")
 	initializeDep = rotini.NewDependency[codegen.InitializeFn]("rotini.initialize")
 	explainDep    = rotini.NewDependency[codegen.ExplainFn]("rotini.explain")
+	treeDep       = rotini.NewDependency[codegen.TreeFn]("rotini.tree")
+	importDep     = rotini.NewDependency[codegen.ImportFn]("rotini.import")
 
 	generateDryRunDep   = rotini.NewDependency[codegen.GenerateDryRunFn]("rotini.generate.dry-run")
 	initializeDryRunDep = rotini.NewDependency[codegen.InitializeDryRunFn]("rotini.initialize.dry-run")
+	importDryRunDep     = rotini.NewDependency[codegen.ImportFn]("rotini.import.dry-run")
 )

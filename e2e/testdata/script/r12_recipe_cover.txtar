@@ -1,0 +1,106 @@
+# R12 — the coverage recipe: a binary built with -cover writes its counters to GOCOVERDIR on
+# every run, a recovered panic included, and covdata reports them. cover.sh is the shell block
+# the recipes page shows.
+
+[!exec:sh] skip 'runs the page''s shell block'
+
+gomodinit example.com/covdemo
+
+exec rotini generate cmd/covdemo/.rotini.spec.yaml --config cmd/covdemo/.rotini.conf.yaml
+cp hello.go.txt internal/cmd/covdemo/covdemo_hello.go
+cp boom.go.txt internal/cmd/covdemo/covdemo_boom.go
+exec go mod tidy
+
+exec sh cover.sh.txt
+stdout 'coverage: [0-9.]+% of statements'
+stdout 'total:'
+exists cover.out
+
+# A run that panics still exits through os.Exit, so its counters are written too.
+env GOCOVERDIR=$WORK/panic
+mkdir panic
+wantexit 1 ./covdemo$exe boom
+exec go tool covdata percent -i=panic
+stdout 'coverage: [0-9.]+% of statements'
+
+-- cover.sh.txt --
+go build -cover -coverpkg=./... -o covdemo ./cmd/covdemo
+mkdir -p cover
+GOCOVERDIR=cover ./covdemo hello
+GOCOVERDIR=cover ./covdemo --help
+go tool covdata percent -i=cover
+go tool covdata textfmt -i=cover -o cover.out
+go tool cover -func=cover.out | tail -1
+-- hello.go.txt --
+package covdemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*covdemoHelloHandler)(nil)
+
+type covdemoHelloHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*covdemoHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "hello")
+}
+-- boom.go.txt --
+package covdemo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*covdemoBoomHandler)(nil)
+
+type covdemoBoomHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*covdemoBoomHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	panic("boom")
+}
+-- cmd/covdemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: covdemo
+  summary: a program measured with coverage
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: hello
+      summary: print a greeting
+    - name: boom
+      summary: panic
+-- cmd/covdemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/covdemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/covdemo/zz_covdemo.go
+      package: covdemo
+  features:
+    - type: help
+      enabled: true

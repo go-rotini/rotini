@@ -151,7 +151,7 @@ func constraintTags(schema *InputSchema) string {
 
 // eachConstraint visits every present validation constraint on schema in a stable order,
 // passing its tag name, its Constraints field name, and its value rendered for a struct tag
-// and for a Go literal. constraintTags and constraintsLiteral both use it so they cannot drift.
+// and for a Go literal. constraintTags and constraintFields both use it so they cannot drift.
 // Numeric bounds, maxLength and maxItems are present when non-nil, so a 0 is kept; minLength
 // and minItems only when non-zero.
 func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal string)) {

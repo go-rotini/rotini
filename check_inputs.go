@@ -86,7 +86,8 @@ func (rtx *Context) CheckInputs[T any](v T, set Presence) error {
 // PresenceOf returns a [Presence] marking every non-zero input field of v as supplied, in the
 // shape [Context.CheckInputs] and a hand-built [InputLayer] read. A field holding its zero value
 // (false, 0, "") is not marked, so build the Presence by hand when a zero value must count as
-// supplied. A non-nil pointer to a zero value (a nullable input) is marked.
+// supplied. A non-nil pointer to a zero value (a nullable input) is marked. Each field's source
+// is Layer "custom"; in a merge, the hand-built [InputLayer]'s Name replaces it.
 func PresenceOf[T any](v T) Presence {
 	set := Presence{}
 	rv := reflect.ValueOf(v)

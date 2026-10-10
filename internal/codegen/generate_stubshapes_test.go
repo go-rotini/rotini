@@ -40,8 +40,12 @@ func TestStubShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			conf := stubShapesConf
+			if b, err := os.ReadFile(filepath.Join(dir, "conf.yaml")); err == nil {
+				conf = string(b) // the case turns on more features
+			}
 			got := map[string]string{}
-			for name, body := range emitInModule(t, string(spec), stubShapesConf) {
+			for name, body := range emitInModule(t, string(spec), conf) {
 				if !strings.HasPrefix(filepath.Base(name), "zz_") {
 					got[filepath.ToSlash(name)] = body
 				}

@@ -23,7 +23,7 @@ func TestInitialize_endToEnd(t *testing.T) {
 	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
 	t.Chdir(dir)
 
-	if _, err := NewProcessor("0.0.0").Initialize("demo", "", false); err != nil {
+	if _, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{}); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 
@@ -61,7 +61,7 @@ func initDemo(t *testing.T) string {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
 	t.Chdir(dir)
-	if _, err := NewProcessor("0.0.0").Initialize("demo", "", false); err != nil {
+	if _, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{}); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 	return dir
@@ -74,7 +74,7 @@ func TestInitialize_forceNeverDeletes(t *testing.T) {
 	handler := filepath.Join(dir, "internal", "cmd", "demo", "demo_extra.go")
 	writeTestFile(t, filepath.Dir(handler), "demo_extra.go", "package demo\n\n"+stubMarker+"*demoExtraHandler)(nil)\n\n// edited by hand\n")
 
-	if _, err := NewProcessor("0.0.0").Initialize("demo", "", true); err != nil {
+	if _, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{Force: true}); err != nil {
 		t.Fatalf("Initialize --force: %v", err)
 	}
 	if _, err := os.Stat(handler); err != nil {
@@ -142,5 +142,51 @@ func TestGenerate_findsTheConfBesideTheSpec(t *testing.T) {
 	}
 	if want := filepath.Join("cmd", "demo", ".rotini.conf.yaml"); conf != want {
 		t.Errorf("ResolvePaths(%s) conf = %q, want %q", spec, conf, want)
+	}
+}
+
+// TestInitialize_templates pins that every template's seeds validate and generate in every
+// format, writing nothing in a dry run.
+func TestInitialize_templates(t *testing.T) {
+	names := map[string]string{"plugin": "kubectl-hello", "daemon": "demo", "suite": "demo"}
+	for _, template := range initTemplateNames {
+		for _, format := range []string{"yaml", "json", "jsonc", "toml"} {
+			t.Run(template+"/"+format, func(t *testing.T) {
+				dir := t.TempDir()
+				writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
+				t.Chdir(dir)
+				out, err := NewProcessor("0.0.0").InitializeDryRun(names[template], InitOptions{Format: format, Template: template})
+				if err != nil {
+					t.Fatalf("InitializeDryRun: %v", err)
+				}
+				if want := "cmd/" + names[template] + "/.rotini.spec." + format; filepath.ToSlash(out.Spec) != want {
+					t.Errorf("Spec = %q, want %q", out.Spec, want)
+				}
+				if template == "suite" && len(out.Also) != 2 {
+					t.Errorf("Also = %v, want the shared child and the admin binary", out.Also)
+				}
+				if entries, err := os.ReadDir(dir); err != nil || len(entries) != 1 {
+					t.Errorf("a dry run wrote files: %v", entries)
+				}
+			})
+		}
+	}
+}
+
+// TestInitialize_templateRefusals pins the names a template refuses.
+func TestInitialize_templateRefusals(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
+	t.Chdir(dir)
+	for _, c := range []struct{ name, template, want string }{
+		{"hello", "plugin", "<host>-<plugin>"},
+		{"kubectl-", "plugin", "<host>-<plugin>"},
+		{"status", "suite", `can't be named "status"`},
+		{"demo", "nope", `unknown template "nope"`},
+	} {
+		_, err := NewProcessor("0.0.0").InitializeDryRun(c.name, InitOptions{Template: c.template})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("init %s --template %s = %v, want an error containing %q", c.name, c.template, err, c.want)
+		}
 	}
 }

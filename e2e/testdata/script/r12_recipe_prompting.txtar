@@ -1,0 +1,135 @@
+# R12 — the prompting recipe: a missing --name is asked for only when stdin is a terminal and
+# --no-input is unset, and the answer is checked with CheckInputs like a typed value. The
+# handler file is the one the recipes page shows.
+
+gomodinit example.com/promptdemo
+
+exec rotini generate cmd/promptdemo/.rotini.spec.yaml --config cmd/promptdemo/.rotini.conf.yaml
+cp greet.go.txt internal/cmd/promptdemo/promptdemo_greet.go
+exec go mod tidy
+exec go build -o promptdemo$exe ./cmd/promptdemo
+
+# Given on the command line, nothing is asked.
+exec ./promptdemo$exe greet --name ada
+stdout '^hello, ada$'
+! stderr .
+
+# Stdin from a file is not a terminal: no prompt, and the missing input is a usage error.
+stdin answer.txt
+wantexit 1 ./promptdemo$exe greet
+stderr '^Error: missing required input: --name$'
+! stderr 'Name:'
+! stdout .
+
+# On a terminal it asks on stderr and checks the answer.
+[unix] ttyin -stdin answer.txt
+[unix] exec ./promptdemo$exe greet
+[unix] stderr 'Name: '
+[unix] stdout '^hello, ada$'
+
+# --no-input, or its variable, turns the prompt off even on a terminal.
+[unix] ttyin -stdin answer.txt
+[unix] wantexit 1 ./promptdemo$exe greet --no-input
+[unix] stderr 'missing required input: --name'
+[unix] ! stderr 'Name:'
+
+[unix] env PROMPTDEMO_NO_INPUT=1
+[unix] ttyin -stdin answer.txt
+[unix] wantexit 1 ./promptdemo$exe greet
+[unix] ! stderr 'Name:'
+
+-- answer.txt --
+ada
+-- greet.go.txt --
+package promptdemo
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*promptdemoGreetHandler)(nil)
+
+type promptdemoGreetHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*promptdemoGreetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	// Read what was given, without checking it: a missing input is not an error yet.
+	argv, err := rtx.ArgvInputs[PromptdemoGreetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	env, err := rtx.EnvInputs[PromptdemoGreetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	in := rotini.MergeInputs(env, argv)
+
+	// Ask only when someone can answer: stdin is a terminal and --no-input isn't set.
+	flags := &in.PromptdemoGreet.Flags
+	if flags.Name == "" && !in.Promptdemo.Flags.NoInput && rotini.IsTerminal(rtx.Stdin) {
+		flags.Name = ask(rtx, "Name: ")
+	}
+
+	// Check the result against the spec, as if every value had been typed.
+	if err := rtx.CheckInputs(in, rotini.PresenceOf(in)); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "hello, %s\n", flags.Name)
+}
+
+// ask writes the prompt to stderr, so stdout keeps only the command's output, and reads one line.
+func ask(rtx *rotini.Context, prompt string) string {
+	fmt.Fprint(rtx.Stderr, prompt)
+	line, _ := bufio.NewReader(rtx.Stdin).ReadString('\n')
+	return strings.TrimSpace(line)
+}
+-- cmd/promptdemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: promptdemo
+  summary: ask for what the command line leaves out
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: no-input
+      summary: never prompt; fail when an input is missing
+      identifiers: [--no-input]
+      cascading: true
+      schema: { type: bool, variable: PROMPTDEMO_NO_INPUT }
+  commands:
+    - name: greet
+      summary: greet someone
+      flags:
+        - name: name
+          summary: who to greet
+          identifiers: [--name]
+          schema: { type: string, required: true, minLength: 1 }
+-- cmd/promptdemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/promptdemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/promptdemo/zz_promptdemo.go
+      package: promptdemo
+  features:
+    - type: help
+      enabled: true

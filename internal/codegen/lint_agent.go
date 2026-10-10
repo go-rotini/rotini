@@ -264,7 +264,7 @@ var programFeatureKeys = []struct {
 	types []string
 	set   func(Feature) bool
 }{
-	{"file", []string{"tools", "skill", "llms", "permissions"}, func(f Feature) bool { return f.File != "" }},
+	{"file", []string{"tools", "skill", "llms", "permissions", "carapace", "config_example", "env_example"}, func(f Feature) bool { return f.File != "" }},
 	{"targets", []string{"tools"}, func(f Feature) bool { return len(f.Targets) > 0 }},
 	{"mcp_revision", []string{"tools"}, func(f Feature) bool { return f.McpRevision != "" }},
 	{"go", []string{"tools"}, func(f Feature) bool { return f.Go }},
@@ -309,12 +309,10 @@ func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []e
 	if clean := path.Clean(filepath.ToSlash(f.File)); f.File != "" && (clean == ".." || strings.HasPrefix(clean, "../")) {
 		add("file", severityError, fmt.Sprintf("%q must resolve under the module root", f.File))
 	}
-	if f.Embed || f.EmbedDir != "" {
-		add("embed", severityError, f.Type+" writes files for agents into the repository, not into the binary; `embed` and `embed_dir` don't apply, so remove them (use `file` to choose where they go)")
-	}
+	problems = append(problems, embedKnobProblems(i, f, pf)...)
 	switch {
 	case pf.tmplFile == "" && (f.Template || f.TemplateDir != ""):
-		add("template", severityWarning, f.Type+" is built from the contract and has no editable template; `template` and `template_dir` have no effect here")
+		add("template", severityWarning, f.Type+" is built in Go and has no editable template; `template` and `template_dir` have no effect here")
 	case f.TemplateDir != "" && !f.Template:
 		add("template_dir", severityWarning, "is set but `template` is false; `template_dir` is used only when the editable template is seeded (`template: true`); it is otherwise ignored")
 	}
@@ -329,4 +327,19 @@ func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []e
 		add("base_url", severityWarning, "llms.txt links each command to its markdown page, but without `base_url` the links are relative and the markdown feature doesn't write its pages (it needs `enabled: true` and `embed: true`); set `base_url` to where the pages are published")
 	}
 	return problems
+}
+
+// embedKnobProblems checks `embed` and `embed_dir` on a whole-program feature: only
+// config_example and env_example put text in the binary, so only they take them.
+func embedKnobProblems(i int, f Feature, pf programFeature) []error {
+	at := func(key string, sev severity, msg string) error {
+		return &problem{kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg}
+	}
+	switch {
+	case pf.accessor && f.EmbedDir != "" && !f.Embed:
+		return []error{at("embed_dir", severityWarning, "is set but `embed` is false; `embed_dir` is used only in embed mode (//go:embed); inline content writes no file, so it is ignored")}
+	case !pf.accessor && (f.Embed || f.EmbedDir != ""):
+		return []error{at("embed", severityError, f.Type+" writes files for agents into the repository, not into the binary; `embed` and `embed_dir` don't apply, so remove them (use `file` to choose where they go)")}
+	}
+	return nil
 }

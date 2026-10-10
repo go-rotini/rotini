@@ -97,6 +97,10 @@ type program struct {
 	// feature's `go: true`), set by emitProgramFeatures; nil when that is off.
 	toolsGo []byte
 
+	// examples are the config_example and env_example texts behind the cmd file's ConfigExample
+	// and EnvExample, set by emitProgramFeatures.
+	examples exampleAccessors
+
 	// agentNotices are the whole-program features' warnings, such as a command left out of a
 	// tool export. Reported as notices.
 	agentNotices []error
@@ -430,9 +434,10 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		OutputTypes:   outputTypes,
 		InputSettings: renderInputSettings(gp),
 		Features:      features,
-		EmbedImport:   anyEmbed(features),
+		EmbedImport:   anyEmbed(features) || examplesEmbed(gp.examples),
+		NeedsFmt:      gp.examples.configOn,
 		ExitCodes:     exitConstantsDecl(gp.exitConstants(), lay.splitModels),
-		Contract:      contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo),
+		Contract:      contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo) + examplesDecl(gp.examples),
 		UsageFunc:     usageFuncDecl(gp),
 	})
 }
@@ -717,11 +722,13 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		d.HelpPathArg = variadicStringArgField(c)
 	case name == "version" && !isRoot && len(c.args) == 0:
 		d.VersionOnly = true
+	case !isRoot && completionStub(gp, c):
+		d.CompletionArg, d.CompletionFunc = c.args[0].Field, completionFeatureDesc.resolver
 	case helpOn && len(c.args) == 0 && ((isRoot && len(gp.own)+len(gp.composed) > 0) || (!isRoot && c.hasChildren)):
 		// A dispatch-only root or group shows its help when invoked bare.
 		d.PrintHelpWhenBare = true
 	}
-	d.Redact = d.HelpPathArg == "" && !d.VersionOnly && !d.PrintHelpWhenBare && chainHasSecret(gp, c)
+	d.Redact = d.HelpPathArg+d.CompletionArg == "" && !d.VersionOnly && !d.PrintHelpWhenBare && chainHasSecret(gp, c)
 
 	// NeedsInputs: the body calls rtx.Inputs, which also reports unknown flags.
 	// UsesInputs: the body reads the result; otherwise it is discarded to `_`.

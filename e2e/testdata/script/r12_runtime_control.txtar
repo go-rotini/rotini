@@ -1,0 +1,170 @@
+# R12 — the guide's Runtime control section: a main.go that stops a run with its own exit code
+# through ExitCause while still trapping Ctrl-C and SIGTERM, and a client built per run from
+# the parsed flags, which a test's registration overrides. main.go and client.go are the blocks
+# the guide shows.
+
+gomodinit github.com/me/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+cp main.go.txt cmd/todo/main.go
+cp client.go.txt internal/cmd/todo/client.go
+cp root.go.txt internal/cmd/todo/todo.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# Each run builds its client from its own flags.
+exec ./todo$exe ping
+stdout '^https://todo.example.com$'
+exec ./todo$exe ping --endpoint http://localhost:8080
+stdout '^http://localhost:8080$'
+env TODO_ENDPOINT=http://staging
+exec ./todo$exe ping
+stdout '^http://staging$'
+
+# A client the test registers stays.
+exec go test ./internal/cmd/todo
+stdout '^ok'
+
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	"context"
+	"os"
+	"syscall"
+	"time"
+
+	"github.com/go-rotini/rotini"
+	cmd "github.com/me/todo/internal/cmd/todo"
+)
+
+var version = "0.0.0"
+
+// main stops a run that takes longer than ten minutes with exit code 124, and still stops on
+// Ctrl-C and SIGTERM.
+func main() {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	time.AfterFunc(10*time.Minute, func() { cancel(rotini.ExitCause(124)) })
+
+	cmd.NewProgram(cmd.Handlers()).
+		WithContext(ctx).
+		WithSignals(os.Interrupt, syscall.SIGTERM).
+		WithVersion(version).
+		Execute()
+}
+-- client.go.txt --
+package todo
+
+import "github.com/go-rotini/rotini"
+
+// Client talks to the server --endpoint names.
+type Client struct{ Endpoint string }
+
+// clientDep is the run's client. Each run sets its own, so two runs in one process, such as
+// parallel tests, never share one.
+var clientDep = rotini.NewDependency[*Client]("todo.client")
+
+// connect builds the run's client from its flags, from the root's CascadingPreRun. A client
+// that a test registered with Program.WithDependency stays.
+func connect(rtx *rotini.Context, in TodoInputs) {
+	rtx.SetDependencyIfAbsent(clientDep, &Client{Endpoint: in.Todo.Flags.Endpoint})
+}
+-- root.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoHandler)(nil)
+
+type todoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[TodoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	connect(rtx, inputs)
+}
+
+func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, "usage: todo ping")
+	rtx.HaltWithCode(1)
+}
+-- internal/cmd/todo/todo_ping.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoPingHandler)(nil)
+
+type todoPingHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoPingHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, rtx.MustGetDependency(clientDep).Endpoint)
+}
+-- internal/cmd/todo/todo_test.go --
+package todo
+
+import (
+	"bytes"
+	"testing"
+)
+
+func TestPingUsesTheTestClient(t *testing.T) {
+	var out bytes.Buffer
+	code, err := NewProgram(Handlers()).
+		WithDependency(clientDep, &Client{Endpoint: "fake"}).
+		WithStdout(&out).
+		Run([]string{"ping", "--endpoint", "http://ignored"})
+	if err != nil || code != 0 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+	if out.String() != "fake\n" {
+		t.Errorf("stdout = %q", out.String())
+	}
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  flags:
+    - name: endpoint
+      summary: the server to talk to
+      identifiers: [--endpoint]
+      cascading: true
+      schema: { type: string, default: https://todo.example.com, variable: TODO_ENDPOINT }
+  commands:
+    - name: ping
+      summary: print the server this run talks to
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo

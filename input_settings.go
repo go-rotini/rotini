@@ -45,6 +45,9 @@ type ConfigFile struct {
 	As string
 	// Profiles selects one named section of the file per run; nil when the file has none.
 	Profiles *ProfilesDef
+	// Keys is every key an input reads from this file, sorted by key, one entry per declaring
+	// input: what [SetConfigValue] checks a value against, and what a key completer offers.
+	Keys []ConfigKey
 }
 
 // ProfilesDef selects one named section of a [ConfigFile] per run. The section's keys are read

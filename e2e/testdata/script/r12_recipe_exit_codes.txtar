@@ -1,0 +1,218 @@
+# R12 — the guide's exit-code reporter: 2 for a usage error, 127 for a plugin that isn't there,
+# 126 for one that can't be run, and a signal's 128+n kept as it is. report.go is the block the
+# guide shows under "Errors and exit codes".
+
+[windows] skip 'a file without the execute bit is still runnable on Windows'
+
+gomodinit github.com/me/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+cp report.go.txt internal/cmd/todo/report.go
+cp main.go.txt cmd/todo/main.go
+exec go mod tidy
+mkdir bin
+exec go build -o bin/todo$exe ./cmd/todo
+
+# A usage error exits 2 and points at help.
+wantexit 2 bin/todo$exe add
+stderr '^Error: missing required input: <title>$'
+stderr '^Run ''todo add --help'' for usage.$'
+
+# A declared plugin that isn't installed exits 127.
+wantexit 127 bin/todo$exe sync
+stderr '"todo-sync" not found'
+
+# A mistyped word at a command with plugin discovery is a plugin that isn't there, too, and
+# a usage error, so it points at the help of the command it was typed after.
+wantexit 127 bin/todo$exe snyc
+stderr '"todo-snyc" not found'
+stderr '^Run ''todo --help'' for usage.$'
+
+# A plugin file that can't be run exits 126.
+cp plugin.txt bin/todo-report
+wantexit 126 bin/todo$exe report
+
+# A signal keeps its own code: 130 for SIGINT, with nothing reported.
+wantexit 130 bin/todo$exe wait
+! stderr .
+
+exec bin/todo$exe add 'buy milk'
+stdout '^added "buy milk"$'
+
+-- plugin.txt --
+not a program
+-- report.go.txt --
+package todo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+// Exit codes: 2 for a usage error (BSD's sysexits.h uses 64, EX_USAGE), 70 (EX_SOFTWARE) for
+// a fault in the program, and the shell's 127 and 126 for a plugin that is missing or can't
+// be run.
+const (
+	exitUsage         = 2
+	exitInternal      = 70
+	exitNotExecutable = 126
+	exitNotFound      = 127
+)
+
+// Report prints warnings and errors to stderr, points at help after a usage error, and sets the
+// exit code from the first error.
+func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	if ctx.Err() != nil {
+		return // stopped by a signal: keep the 128+n exit code the run already set
+	}
+	for _, w := range out.Warnings {
+		fmt.Fprintln(rtx.Stderr, "Warning:", w)
+	}
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+	}
+	for _, p := range out.Panics {
+		fmt.Fprintln(rtx.Stderr, "Error:", p)
+	}
+	if !out.Failed() {
+		return
+	}
+	if len(out.Errors) > 0 && rotini.CategoryOf(out.Errors[0]) == rotini.CategoryUsage {
+		fmt.Fprintf(rtx.Stderr, "Run '%s --help' for usage.\n", rtx.CommandPath())
+	}
+	rtx.Exit(exitCode(out))
+}
+
+func exitCode(out rotini.Outcome) int {
+	if len(out.Errors) == 0 {
+		return exitInternal // only panics
+	}
+	err := out.Errors[0]
+	var pe *rotini.PluginError
+	if errors.As(err, &pe) { // before the category: a mistyped plugin name is also a usage error
+		switch pe.Kind {
+		case rotini.PluginNotFound:
+			return exitNotFound
+		case rotini.PluginStartFailed:
+			return exitNotExecutable
+		}
+	}
+	switch rotini.CategoryOf(err) {
+	case rotini.CategoryUsage:
+		return exitUsage
+	case rotini.CategoryInternal:
+		return exitInternal
+	}
+	return 1
+}
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	cmd "github.com/me/todo/internal/cmd/todo"
+)
+
+var version = "0.0.0"
+
+func main() {
+	cmd.NewProgram(cmd.Handlers()).
+		WithReporter(cmd.Report).
+		WithVersion(version).
+		Execute()
+}
+-- internal/cmd/todo/todo_add.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoAddHandler)(nil)
+
+type todoAddHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoAddInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "added %q\n", in.TodoAdd.Arguments.Title)
+}
+-- internal/cmd/todo/todo_wait.go --
+package todo
+
+import (
+	"context"
+	"os"
+	"syscall"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoWaitHandler)(nil)
+
+type todoWaitHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+// Run sends itself SIGINT, as Ctrl-C would, and fails with the canceled context.
+func (*todoWaitHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	p, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if err := p.Signal(syscall.SIGINT); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	<-ctx.Done()
+	rtx.HaltWith(ctx.Err())
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  plugins:
+    - name: sync
+      summary: synchronize with the server
+    - name: report
+      summary: render a report
+  plugin_discovery:
+    prefix: todo-
+  commands:
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          summary: the task title
+          schema: { type: string, required: true }
+    - name: wait
+      summary: wait for Ctrl-C
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo

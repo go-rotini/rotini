@@ -51,27 +51,32 @@ type toolInvoke struct {
 	Flags       map[string]toolInvokeFlag `json:"flags,omitempty"`
 	Fixed       []string                  `json:"fixed,omitempty"` // added to every call: the machine-output flag
 	Stdin       *toolInvokeStdin          `json:"stdin,omitempty"`
-	Passthrough bool                      `json:"passthrough,omitempty"` // every word after the command is an argument; no "--"
+	Passthrough bool                      `json:"passthrough,omitempty"` // the command is passthrough: every word after it is an argument; no "--"
 	Stream      bool                      `json:"stream,omitempty"`      // stdout is a stream of output items, one per line
 	Wrapped     bool                      `json:"wrapped,omitempty"`     // structured content is {"result": <stdout>}
 }
 
 // toolInvokeArgument is a positional argument, in command-line order.
 type toolInvokeArgument struct {
-	Name        string `json:"name"`
-	Kind        string `json:"kind"`
-	Variadic    bool   `json:"variadic,omitempty"`
-	Passthrough bool   `json:"passthrough,omitempty"` // it and every later word are taken as typed
+	Name        string   `json:"name"`
+	Kind        string   `json:"kind"`
+	Variadic    bool     `json:"variadic,omitempty"`
+	Passthrough bool     `json:"passthrough,omitempty"` // it and every later word are taken as typed; "--" still comes before the first argument
+	Secret      bool     `json:"secret,omitempty"`      // the value is a secret
+	From        []string `json:"from,omitempty"`        // file: a leading @ reads a file (@@ is a literal @); stdin: - reads stdin
 }
 
 // toolInvokeFlag is how one flag parameter is written on the command line.
 type toolInvokeFlag struct {
-	Flag      string `json:"flag"`                // the identifier to write
-	Kind      string `json:"kind"`                // scalar, count, list, map or object
-	Type      string `json:"type,omitempty"`      // the rotini type, such as bool or []string
-	Negated   string `json:"negated,omitempty"`   // a negatable bool's --no- form, for false
-	Separator string `json:"separator,omitempty"` // a list's separator, when it has one
-	Role      string `json:"role,omitempty"`      // the flag's role (dry-run, confirm, page, force, fields, sort), when it has one
+	Flag       string   `json:"flag"`                  // the identifier to write
+	Kind       string   `json:"kind"`                  // scalar, count, list, map or object
+	Type       string   `json:"type,omitempty"`        // the rotini type, such as bool or []string
+	Negated    string   `json:"negated,omitempty"`     // a negatable bool's --no- form, for false
+	Separator  string   `json:"separator,omitempty"`   // a list's separator, when it has one
+	Role       string   `json:"role,omitempty"`        // the flag's role (dry-run, confirm, page, force, fields, sort), when it has one
+	Secret     bool     `json:"secret,omitempty"`      // the value is a secret
+	From       []string `json:"from,omitempty"`        // file: a leading @ reads a file (@@ is a literal @); stdin: - reads stdin
+	HasDefault bool     `json:"has_default,omitempty"` // a count with a default: leaving it out is not 0
 }
 
 // toolInvokeStdin is the parameter that carries what the command reads on stdin.
@@ -225,8 +230,7 @@ func (t *tool) addInputs(cmd agentContractCmd) (serverEnv []string, skip string)
 			continue
 		}
 		t.addParam(in)
-		t.invoke.Arguments = append(t.invoke.Arguments, toolInvokeArgument{Name: in.Name, Kind: in.Kind, Variadic: in.Variadic, Passthrough: in.Passthrough})
-		t.invoke.Passthrough = t.invoke.Passthrough || in.Passthrough
+		t.invoke.Arguments = append(t.invoke.Arguments, toolInvokeArgument{Name: in.Name, Kind: in.Kind, Variadic: in.Variadic, Passthrough: in.Passthrough, Secret: in.Secret, From: in.From})
 	}
 	for _, in := range cmd.Flags {
 		if seen[in.Name] {
@@ -246,7 +250,10 @@ func (t *tool) addInputs(cmd agentContractCmd) (serverEnv []string, skip string)
 		if t.invoke.Flags == nil {
 			t.invoke.Flags = map[string]toolInvokeFlag{}
 		}
-		fl := toolInvokeFlag{Flag: longIdentifier(in.Identifiers), Kind: in.Kind, Type: in.Type, Separator: in.Separator, Role: in.Role}
+		fl := toolInvokeFlag{Flag: longIdentifier(in), Kind: in.Kind, Type: in.Type, Separator: in.Separator, Role: in.Role, Secret: in.Secret, From: in.From}
+		if _, ok := in.Schema["default"]; ok && in.Kind == "count" {
+			fl.HasDefault = true
+		}
 		if len(in.Negated) > 0 {
 			fl.Negated = in.Negated[0]
 		}

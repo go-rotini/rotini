@@ -551,6 +551,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		expanded, err := expandResponseFiles(argv, rf.Prefix, rtx.view, false)
 		if err != nil {
 			rtx.RecordError(err)
+			rtx.bindChain([]Command{rootFrame(p.def)})
 			return p.settle(ctx, rtx)
 		}
 		argv = expanded
@@ -565,10 +566,17 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		} else {
 			rtx.recordFault(asFault(internalUnlessTagged(fmt.Errorf("resolve: %w", err))))
 		}
+		chain := res.Chain
+		if len(chain) == 0 {
+			chain = []Command{rootFrame(p.def)}
+		}
+		rtx.bindChain(chain)
 		return p.settle(ctx, rtx)
 	}
 	// The chdir flag is read before anything else uses the run's directory, plugins included.
 	if res.Plugin != nil {
+		// The reporter sees the commands before the plugin's name, for a "--help" hint.
+		rtx.bindChain(res.Chain)
 		before := argv[:max(len(argv)-len(res.Plugin.Args)-1, 0)]
 		if _, err := p.applyChdir(rtx, res.Chain, before); err != nil {
 			rtx.RecordError(err)
@@ -586,17 +594,23 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	if len(res.Chain) == 0 {
 		// An empty chain violates the resolver contract.
 		rtx.recordFault(asFault(InternalError(errors.New("resolver returned an empty chain; the root frame is always resolvable"))))
+		rtx.bindChain([]Command{rootFrame(p.def)})
 		return p.settle(ctx, rtx)
 	}
 
 	rtx.Argv = argv
-	// Cloned so marking the invoked command never writes into a slice a custom resolver may
-	// share between runs.
-	chain := slices.Clone(res.Chain)
+	return p.dispatch(ctx, rtx.bindChain(res.Chain), rtx)
+}
+
+// bindChain makes a copy of chain the run's command chain, its last command marked invoked,
+// and returns the copy. The copy keeps marking the invoked command from writing into a slice a
+// custom resolver may share between runs.
+func (rtx *Context) bindChain(chain []Command) []Command {
+	chain = slices.Clone(chain)
 	markInvoked(chain)
 	bindChainView(chain, rtx.view)
 	rtx.chain = chain
-	return p.dispatch(ctx, chain, rtx)
+	return chain
 }
 
 // installTrap starts rotini's signal trap for one run and returns the function that removes

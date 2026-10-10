@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -66,6 +67,9 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 		{"completion", "tcsh", "--help"},
 		{"man", "--help"},
 		{"man", "--dir", "/nonexistent/must-not-be-created", "--help"},
+		{"tree", "--help"},
+		{"import", "--help"},
+		{"import", "cobra", "--help"},
 	} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			p, out, _ := newTestCLI(t)
@@ -78,9 +82,17 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 				t.Error("--help ran the validate work")
 				return nil
 			}))
-			p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+			p.WithDependency(initializeDep, codegen.InitializeFn(func(string, codegen.InitOptions) (codegen.Initialized, error) {
 				t.Error("--help ran the initialize work")
 				return codegen.Initialized{}, nil
+			}))
+			p.WithDependency(importDep, codegen.ImportFn(func(context.Context, codegen.ImportOptions) (codegen.Imported, error) {
+				t.Error("--help ran the import work")
+				return codegen.Imported{}, nil
+			}))
+			p.WithDependency(treeDep, codegen.TreeFn(func(string) (string, error) {
+				t.Error("--help ran the tree work")
+				return "", nil
 			}))
 
 			if _, err := p.Run(argv); err != nil {
@@ -252,8 +264,8 @@ func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	t.Chdir(t.TempDir()) // no go.mod requiring rotini, so the runtime warning is due
 
 	p, _, errb := newTestCLI(t)
-	p.WithDependency(initializeDep, codegen.InitializeFn(func(name, format string, force bool) (codegen.Initialized, error) {
-		gotName, gotFormat, gotForce = name, format, force
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(name string, opt codegen.InitOptions) (codegen.Initialized, error) {
+		gotName, gotFormat, gotForce = name, opt.Format, opt.Force
 		return codegen.Initialized{}, nil
 	}))
 
@@ -278,7 +290,7 @@ func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 	}
 	t.Chdir(dir)
 	p, out, errb := newTestCLI(t)
-	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, codegen.InitOptions) (codegen.Initialized, error) {
 		return codegen.Initialized{
 			Spec:   "cmd/mycli/.rotini.spec.yaml",
 			Conf:   "cmd/mycli/.rotini.conf.yaml",
@@ -300,7 +312,7 @@ func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 // init requires the name argument.
 func TestCLI_initializeRequiresAName(t *testing.T) {
 	p, _, errb := newTestCLI(t)
-	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, codegen.InitOptions) (codegen.Initialized, error) {
 		t.Error("initialize ran without a name")
 		return codegen.Initialized{}, nil
 	}))
@@ -357,7 +369,10 @@ func TestCLI_aliases(t *testing.T) {
 				ran = true
 				return nil
 			})
-			p.WithDependency(initializeDep, func(string, string, bool) (codegen.Initialized, error) { ran = true; return codegen.Initialized{}, nil })
+			p.WithDependency(initializeDep, func(string, codegen.InitOptions) (codegen.Initialized, error) {
+				ran = true
+				return codegen.Initialized{}, nil
+			})
 
 			argv := []string{tc.alias, "x"}
 			if _, err := p.Run(argv); err != nil {
@@ -587,6 +602,7 @@ func TestCLI_suggestsNearestSpelling(t *testing.T) {
 		{argv: []string{"validate", "--fial", "fast"}, want: `unknown flag "--fial"; did you mean "--fail"?`},
 		{argv: []string{"init", "x", "--format", "jsn"}, want: `did you mean "json"?`},
 		{argv: []string{"help", "genrate"}, want: `no help for command "genrate"; did you mean "generate"?`},
+		{argv: []string{"man", "genrate"}, want: `no man page for command "genrate"; did you mean "generate"?`},
 		{argv: []string{"kubernetes"}},
 		{argv: []string{"init", "x", "--bogus"}},
 	}
@@ -667,7 +683,7 @@ func TestCLI_manDir(t *testing.T) {
 	if code, err := p.Run([]string{"man", "--dir", dir}); code != 0 || err != nil {
 		t.Fatalf("man --dir = (%d, %v)", code, err)
 	}
-	if !strings.Contains(errb.String(), "wrote 11 man pages to "+dir) {
+	if !strings.Contains(errb.String(), "wrote 14 man pages to "+dir) {
 		t.Errorf("stderr = %q, want it to say what it wrote", errb.String())
 	}
 	entries, err := os.ReadDir(dir)
@@ -678,8 +694,8 @@ func TestCLI_manDir(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	want := []string{"rotini-completion.1", "rotini-diff.1", "rotini-explain.1", "rotini-fmt.1", "rotini-generate.1", "rotini-help.1", "rotini-initialize.1",
-		"rotini-man.1", "rotini-validate.1", "rotini-version.1", "rotini.1"}
+	want := []string{"rotini-completion.1", "rotini-diff.1", "rotini-explain.1", "rotini-fmt.1", "rotini-generate.1", "rotini-help.1", "rotini-import-cobra.1", "rotini-import.1", "rotini-initialize.1",
+		"rotini-man.1", "rotini-tree.1", "rotini-validate.1", "rotini-version.1", "rotini.1"}
 	if !slices.Equal(names, want) {
 		t.Errorf("wrote %q, want %q", names, want)
 	}

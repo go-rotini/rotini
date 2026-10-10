@@ -150,6 +150,15 @@ func seedComments(yamlBytes []byte) (map[string][]string, error) {
 					}
 					out[at] = append(out[at], commentLines(key.HeadComment)...)
 				}
+				// A comment above a key holding a mapping parses onto the mapping's first key;
+				// when that key sits on the next line, nothing came between, so it is the
+				// outer key's.
+				if val.Kind == yaml.MappingNode && len(val.Children) > 0 && key.HeadComment == "" {
+					if first := val.Children[0]; first.HeadComment != "" && first.Pos.Line == key.Pos.Line+1 {
+						out[child] = append(out[child], commentLines(first.HeadComment)...)
+						first.HeadComment = ""
+					}
+				}
 				walk(val, child, false)
 			}
 		}
@@ -305,6 +314,8 @@ type templateHandlerData struct {
 	Header            string // the target's conf `header:`; "" for none
 	HelpPathArg       string // Go field of the variadic path argument on a command named `help`; "" otherwise
 	VersionOnly       bool   // a command named `version` whose whole job is to print it
+	CompletionArg     string // Go field of a `completion` command's shell argument; "" otherwise
+	CompletionFunc    string // the generated function returning a shell's completion script
 	PrintHelpWhenBare bool   // a dispatcher root or group: sub-commands, no own arguments, help feature on
 	NeedsInputs       bool   // the body calls Inputs (for its result or its validation)
 	Redact            bool   // the inputs chain holds a secret, so the default body prints only the command path
@@ -446,6 +457,7 @@ type templateRotiniData struct {
 	InputSettings string // pre-rendered InputSettings declaration; "" when none
 	Features      []templateFeature
 	EmbedImport   bool // emit `import _ "embed"`: some feature uses //go:embed
+	NeedsFmt      bool // emit `import "fmt"` for ConfigExample, even without a doc feature
 	// PathResolvers is true when some feature emits a path-keyed resolver (help, man,
 	// markdown), which imports "strings". The shell-keyed completion resolver does not.
 	PathResolvers bool
@@ -582,6 +594,9 @@ type templateDocEnvRow struct {
 	Description string   // see templateDocArgumentRow
 	Stability   string   // see templateDocCommandRow
 	Commands    []string // on the generated environment topic: the commands that read the variable; nil elsewhere
+	Secret      bool     // its value is secret (the .env example leaves it blank)
+	Nesting     string   // a map's nesting separator: one variable per key, <Var><Nesting><KEY>
+	AliasOf     string   // when Var is one of an input's later names, its first name; "" otherwise
 	Type        string
 	Required    bool
 	Default     string

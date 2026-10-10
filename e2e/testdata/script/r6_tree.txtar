@@ -1,0 +1,63 @@
+# R6 — `rotini tree` prints a composed spec's command tree, with the child spec resolved.
+#
+# The output is the tree alone, so it pipes to grep; a spec with errors prints no tree.
+
+gomodinit example.com/musak
+
+exec rotini tree musak/.rotini.spec.yaml
+cmp stdout want.txt
+! stderr .
+
+# With no argument, the spec in the working directory.
+cd musak
+exec rotini tree
+cmp stdout ../want.txt
+cd ..
+
+! exec rotini tree broken.yaml
+! stdout .
+stderr 'Error:'
+
+-- want.txt --
+musak
+  artists  [$ref ../artists/.rotini.spec.yaml]
+    list, ls
+    show
+  debug  [hidden]
+  remove, rm, delete (deprecated alias)  [deprecated]
+  exec  [passthrough]
+  cloud  [plugin]
+-- artists/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: artists
+  commands:
+    - name: list
+      aliases: [ls]
+    - name: show
+-- musak/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: musak
+  commands:
+    - $ref: ../artists/.rotini.spec.yaml
+    - name: debug
+      hidden: true
+    - name: remove
+      aliases: [rm, delete]
+      deprecated_identifiers: [delete]
+      deprecated: use rm
+    - name: exec
+      passthrough: true
+      arguments:
+        - name: args
+          schema: { type: '[]string' }
+  plugins:
+    - name: cloud
+-- broken.yaml --
+version: 0.0.0
+command:
+  name: broken
+  flags:
+    - name: x
+      schema: { type: nosuchtype }

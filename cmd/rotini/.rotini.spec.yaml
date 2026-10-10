@@ -2,10 +2,8 @@
 version: 0.0.0
 command:
   name: rotini
-  description: "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev"
-  usage: |
-    rotini [flags] <command> <arguments>
-          [-v | --version] [-h | --help]
+  summary: scaffold, validate and generate rotini CLIs
+  description: "The companion CLI for Rotini, the spec-first Go CLI framework: scaffold, validate and generate a CLI from its spec.\n\nDocumentation: https://rotini.dev"
   examples:
     - rotini init mycli
     - rotini validate .rotini.spec.yaml
@@ -40,6 +38,7 @@ command:
         - rotini init mycli --format json
         - rotini init mycli --force
         - rotini init mycli --dry-run
+        - rotini init kubectl-hello --template plugin
       footer: Use "rotini help <command>" for more information about a command.
       flags:
         - name: format
@@ -55,6 +54,19 @@ command:
               - jsonc
               - toml
             default: yaml
+        - name: template
+          identifiers:
+            - --template
+          summary: start from a shape other than the plain seed
+          schema:
+            type: string
+            enum:
+              - value: plugin
+                summary: a kubectl-style plugin named <host>-<plugin>, with completion through the host
+              - value: daemon
+                summary: a long-running serve command that stops cleanly on a signal
+              - value: suite
+                summary: two binaries composing one shared command from its own spec
         - name: force
           identifiers:
             - --force
@@ -68,12 +80,117 @@ command:
           summary: show what init would write, and change nothing
           schema:
             type: bool
+            negatable: true
       arguments:
         - name: name
           summary: the root command name written to the created spec file (expected binary name)
           schema:
             type: string
             required: true
+    - name: import
+      summary: build a rotini spec from an existing cli
+      description: Build a rotini spec, conf and handler stubs from an existing Go command-line program, read from the command tree it builds.
+      examples:
+        - rotini import cobra ./cmd
+      footer: Use "rotini help <command>" for more information about a command.
+      commands:
+        - name: cobra
+          summary: import a Cobra program
+          description: |-
+            Read the command tree a Cobra program builds in <package> and write a rotini spec and
+            conf for it under cmd/<dir>, then generate, seeding handler stubs that match the
+            imported spec. Anything that can't be carried across exactly is reported on stderr,
+            one line per item, and in comments in a YAML spec, with the file and line of each
+            hook to port.
+
+            The import runs go test in the package with a test file added through -overlay and
+            the importer added to a temporary copy of go.mod, so the program's files and go.mod
+            are left as they are. The package's init functions run, as they do in its tests. The
+            root is found from the package's code: a package-level command variable, or a root
+            constructor such as NewRootCmd(); --root names it otherwise.
+          examples:
+            - rotini import cobra ./cmd
+            - rotini import cobra --root 'cmds.New(false)' --name dlv ./pkg/terminal/cmds
+            - rotini import cobra ./cmd --dir acme-rotini --strict
+          footer: Use "rotini help <command>" for more information about a command.
+          flags:
+            - name: root
+              identifiers:
+                - --root
+              summary: a Go expression, evaluated in the package, that yields a command of the tree
+              schema:
+                type: string
+                placeholder: EXPR
+            - name: name
+              identifiers:
+                - --name
+              summary: the CLI's name (default the program's root command name)
+              schema:
+                type: string
+            - name: dir
+              identifiers:
+                - --dir
+              summary: the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)
+              schema:
+                type: string
+            - name: strict
+              identifiers:
+                - --strict
+              summary: give a command with no argument rule only the arguments its usage line names, not any number more
+              schema:
+                type: bool
+            - name: format
+              identifiers:
+                - --format
+              summary: the created rotini spec file format
+              schema:
+                type: string
+                enum:
+                  - yaml
+                  - yml
+                  - json
+                  - jsonc
+                  - toml
+                default: yaml
+            - name: tags
+              identifiers:
+                - --tags
+              summary: build tags for go test, comma separated
+              schema:
+                type: string
+            - name: timeout
+              identifiers:
+                - --timeout
+              summary: how long the import's go test may run
+              schema:
+                type: duration
+                default: 2m
+            - name: importer_version
+              identifiers:
+                - --importer-version
+              summary: the github.com/go-rotini/import version to run (default v0.1.0), or the path of a local checkout
+              schema:
+                type: string
+            - name: force
+              identifiers:
+                - --force
+              summary: replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
+              schema:
+                type: bool
+            - name: dry-run
+              identifiers:
+                - -n
+                - --dry-run
+              summary: show what the import would write, and change nothing
+              schema:
+                type: bool
+                negatable: true
+          arguments:
+            - name: package
+              summary: the Go package that builds the command tree, such as ./cmd
+              schema:
+                type: string
+                required: true
     - name: generate
       aliases:
         - gen
@@ -189,6 +306,27 @@ command:
             description: "the problems, errors first, each as it is reported in text"
         description: Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.
         required: [problems]
+    - name: tree
+      summary: print a spec's command tree
+      description: |-
+        Print the command tree of a rotini spec, with composed children ($ref) resolved: each
+        command's name and aliases, indented under its parent, with markers for hidden, deprecated,
+        passthrough and composed commands and declared plugins.
+
+        A mod:// child is downloaded through the module cache, as generate does, so it needs a
+        go.mod and may use the network. A spec with errors is refused; rotini validate explains them.
+      examples:
+        - rotini tree
+        - rotini tree ./cmd/musak/.rotini.spec.yaml
+      footer: Use "rotini help <command>" for more information about a command.
+      effects:
+        kind: read
+        idempotent: true
+      arguments:
+        - name: spec_file_path
+          summary: path to the spec file (default the .rotini.spec.* in the working directory)
+          schema:
+            type: string
     - name: explain
       summary: describe a spec or conf key
       description: "Print what a spec or conf key means: its description, type, allowed values, default and examples, read from the same schemas as the reference pages. Write the keys from the document's top, separated by dots and without list positions: command.flags.schema.from. A key both documents have, such as version, is shown for each."
@@ -268,10 +406,35 @@ command:
               kind: command
     - name: version
       summary: print version
-      description: Print the rotini cli version.
+      description: |-
+        Print the rotini cli version. With --format json, print the version, the Go version that built
+        the binary, and the module path and version from its build info, as one JSON object.
       examples:
         - rotini version
+        - rotini version --format json
       footer: Use "rotini help <command>" for more information about a command.
+      flags:
+        - name: format
+          identifiers:
+            - --format
+          summary: output format
+          role: machine-output
+          role_value: json
+          schema:
+            type: string
+            enum:
+              - text
+              - json
+            default: text
+      output:
+        type: object
+        properties:
+          version: { type: string, description: "what rotini version prints, such as v1.4.0" }
+          go_version: { type: string, description: "the Go toolchain that built the binary, such as go1.27.1" }
+          module_path: { type: string, description: the main module path from the build info }
+          module_version: { type: string, description: "the main module version from the build info: a release, a pseudo-version (with +dirty when built from a modified checkout), or (devel)" }
+        description: The version and build of the rotini binary.
+        required: [version, go_version]
     - name: completion
       summary: print a shell completion script
       description: |-
@@ -285,6 +448,8 @@ command:
           fish        rotini completion fish > ~/.config/fish/completions/rotini.fish
           powershell  rotini completion powershell | Out-String | Invoke-Expression
                       add that line to $PROFILE to load it in every session
+          nushell     rotini completion nushell | save -f ($nu.user-autoload-dirs | first | path join rotini.nu)
+                      Nushell 0.116 or later; create the directory first if it is missing
       examples:
         - rotini completion bash
         - rotini completion zsh > "${fpath[1]}/_rotini"
@@ -299,6 +464,7 @@ command:
               - zsh
               - fish
               - powershell
+              - nushell
             required: true
     - name: man
       summary: print or install the man pages

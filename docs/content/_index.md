@@ -25,8 +25,8 @@ title: "rotini"
 | **Stdin** | A typed payload piped on stdin, as a JSON, YAML, JSONC or TOML document, as text, or as lines. |
 | **Secrets** | Inputs marked secret are redacted from errors and from the record of where each value came from. |
 | **Help** | `--help` and `help <command>` pages with usage, examples and see-also links, under headings you can rename, or a page you write yourself. |
-| **Version** | `--version` and a `version` command, stamped at build time. |
-| **Shell completion** | Scripts for bash, zsh, fish and PowerShell, with completion hints for values such as files and directories. |
+| **Version** | `--version` and a `version` command, from Go's build information or stamped at build time. |
+| **Shell completion** | Scripts for bash, zsh, fish, PowerShell and Nushell, with completion hints for values such as files and directories. |
 | **Man and markdown pages** | Roff man pages and markdown reference pages, ready to install or publish. |
 | **Structured output** | A JSON Schema for each command's output and a contract document describing the whole CLI, for scripts and agents. |
 | **Errors and exit codes** | Consistent `Error:` messages and a non-zero exit code. Errors carry a usage or internal category you can map to your own exit codes, and errors can be reported as JSON for scripts. |

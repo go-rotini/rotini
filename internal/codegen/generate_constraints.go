@@ -13,7 +13,8 @@ import (
 // row's note without parentheses (`1..65535`, `length 3..20, repeatable`), "" when none; rules
 // are the same constraints as sentences for man and markdown, plus the pattern and separator,
 // which help leaves out. channel is the input's channel ("flag", "argument", "env", "config");
-// only a flag repeats, so only a flag is marked repeatable.
+// only a flag repeats, so only a flag is marked repeatable, or `once` when it may not repeat. A
+// list whose values must differ (uniqueItems) is marked `unique`.
 func constraintText(s *InputSchema, channel string) (compact string, rules []string) {
 	if s == nil {
 		return "", nil
@@ -52,11 +53,16 @@ func constraintText(s *InputSchema, channel string) (compact string, rules []str
 	}
 	if channel == "flag" {
 		switch {
+		case s.Repeatable != nil && !*s.Repeatable:
+			add("once", "given at most once")
 		case s.Type == "count":
 			add("repeatable", "repeat to count")
 		case repeated:
 			add("repeatable", "repeatable")
 		}
+	}
+	if list && s.UniqueItems {
+		add("unique", "each value at most once")
 	}
 	return strings.Join(parts, ", "), rules
 }

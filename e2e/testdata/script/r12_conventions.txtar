@@ -1,0 +1,275 @@
+# R12 — the guide's Conventions section: json when stdout isn't a terminal, --color with
+# NO_COLOR and TERM=dumb, --no-input, and a reporter that prints a crash's stack only when
+# TODO_DEBUG is set. conventions.go and report_debug.go are the blocks the guide shows.
+
+gomodinit github.com/me/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+cp conventions.go.txt internal/cmd/todo/conventions.go
+cp report_debug.go.txt internal/cmd/todo/report_debug.go
+cp root.go.txt internal/cmd/todo/todo.go
+cp main.go.txt cmd/todo/main.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# stdout is a file here, not a terminal, so the default is json.
+exec ./todo$exe list
+stdout '^\{"tasks":\["write docs"\]\}$'
+
+# -o wins, and auto color stays off: stdout isn't a terminal, and the harness sets NO_COLOR.
+exec ./todo$exe list -o table
+stdout '^TASK$'
+! stdout '\x1b'
+
+# --color alone means always.
+exec ./todo$exe list -o table --color
+stdout '\x1b\[1mTASK\x1b\[0m'
+
+# Prompts need a terminal and no --no-input; stdin is not a terminal here.
+exec ./todo$exe list -o table --no-input
+stdout 'prompts: false'
+
+# A crash prints a bug-report link, and the stack only with TODO_DEBUG set.
+wantexit 1 ./todo$exe crash
+stderr '^Error: out of tasks$'
+stderr 'issues/new\?body=version%3A\+1\.2\.3'
+! stderr 'goroutine '
+
+env TODO_DEBUG=1
+wantexit 1 ./todo$exe crash
+stderr 'goroutine '
+! stderr 'issues/new'
+
+-- conventions.go.txt --
+package todo
+
+import "github.com/go-rotini/rotini"
+
+// Style is how this run writes its output, and whether it may prompt.
+type Style struct {
+	Format string // table or json
+	Color  bool
+	Prompt bool
+}
+
+var styleDep = rotini.NewDependency[Style]("todo.style")
+
+// decideStyle applies the conventions once per run, from the root's CascadingPreRun: json
+// when -o isn't given and stdout isn't a terminal; color for --color=always, or for auto on a
+// terminal unless NO_COLOR is set or TERM is dumb; prompts only on a terminal, without
+// --no-input.
+func decideStyle(rtx *rotini.Context, in TodoInputs) {
+	flags := in.Todo.Flags
+	s := Style{Format: flags.Output}
+	if s.Format == "" {
+		s.Format = "table"
+		if !rotini.IsTerminal(rtx.Stdout) {
+			s.Format = "json"
+		}
+	}
+	term, _ := rtx.LookupEnv("TERM")
+	switch flags.Color {
+	case "always":
+		s.Color = true
+	case "auto":
+		s.Color = in.Todo.Env.NoColor == "" && term != "dumb" && rotini.IsTerminal(rtx.Stdout)
+	}
+	s.Prompt = !flags.NoInput && rotini.IsTerminal(rtx.Stdin)
+	rtx.SetDependency(styleDep, s)
+}
+-- report_debug.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"runtime"
+
+	"github.com/go-rotini/rotini"
+)
+
+// ReportWithStacks reports warnings and errors to stderr. After a crash it prints the stack
+// when TODO_DEBUG is set, and otherwise a link that opens a bug report.
+func ReportWithStacks(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, w := range out.Warnings {
+		fmt.Fprintln(rtx.Stderr, "Warning:", w)
+	}
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+	}
+	debug, _ := rtx.LookupEnv("TODO_DEBUG")
+	for _, p := range out.Panics {
+		fmt.Fprintln(rtx.Stderr, "Error:", p)
+		if debug != "" {
+			fmt.Fprintf(rtx.Stderr, "%s", p.Stack)
+			continue
+		}
+		// No arguments or inputs: they may hold secrets.
+		body := fmt.Sprintf("version: %s\nplatform: %s/%s\npanic: %v",
+			rtx.Version(), runtime.GOOS, runtime.GOARCH, p.Value)
+		fmt.Fprintln(rtx.Stderr, "This is a bug; please report it:")
+		fmt.Fprintln(rtx.Stderr, "https://github.com/me/todo/issues/new?body="+url.QueryEscape(body))
+	}
+	if out.Failed() && ctx.Err() == nil {
+		rtx.Exit(1)
+	}
+}
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	cmd "github.com/me/todo/internal/cmd/todo"
+)
+
+var version = "1.2.3"
+
+func main() {
+	cmd.NewProgram(cmd.Handlers()).
+		WithReporter(cmd.ReportWithStacks).
+		WithVersion(version).
+		Execute()
+}
+-- root.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoHandler)(nil)
+
+type todoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[TodoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if inputs.Todo.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		rtx.HaltWithCode(0)
+		return
+	}
+	decideStyle(rtx, inputs)
+}
+
+func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+-- internal/cmd/todo/todo_list.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoListHandler)(nil)
+
+type todoListHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	style := rtx.MustGetDependency(styleDep)
+	if style.Format == "json" {
+		fmt.Fprintln(rtx.Stdout, `{"tasks":["write docs"]}`)
+		return
+	}
+	header := "TASK"
+	if style.Color {
+		header = "\x1b[1m" + header + "\x1b[0m"
+	}
+	fmt.Fprintln(rtx.Stdout, header)
+	fmt.Fprintln(rtx.Stdout, "write docs")
+	fmt.Fprintf(rtx.Stdout, "prompts: %t\n", style.Prompt)
+}
+-- internal/cmd/todo/todo_crash.go --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoCrashHandler)(nil)
+
+type todoCrashHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoCrashHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	panic("out of tasks")
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: output
+      summary: how to write the result; json when stdout isn't a terminal
+      identifiers: [-o, --output]
+      cascading: true
+      schema: { type: string, enum: [table, json] }
+    - name: color
+      summary: when to color the output
+      identifiers: [--color]
+      cascading: true
+      schema: { type: string, enum: [auto, always, never], default: auto, implicit_value: always }
+    - name: no-input
+      summary: never prompt; fail when a value is missing
+      identifiers: [--no-input]
+      cascading: true
+      schema: { type: bool, variable: TODO_NO_INPUT }
+  env:
+    - name: no-color
+      summary: turns color off when set to anything but an empty value
+      schema: { type: string, variable: NO_COLOR }
+    - name: debug
+      summary: print the stack of a crash when set
+      schema: { type: string, variable: TODO_DEBUG }
+  commands:
+    - name: list
+      summary: list tasks
+    - name: crash
+      summary: fail the way a bug does
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+  features:
+    - type: help
+      enabled: true

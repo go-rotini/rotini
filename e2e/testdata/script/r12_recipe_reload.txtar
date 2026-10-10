@@ -1,0 +1,140 @@
+# R12 — the SIGHUP recipe: a long-running serve command rereads its configuration on SIGHUP
+# and stops on SIGTERM through rotini's trap, exiting 143. The handler file is the one the
+# recipes page shows; selftest.go is test scaffolding, not on the page: it edits the config
+# file and signals its own process, as r5_signal_shutdown does.
+
+[!unix] skip 'sends real signals to its own process'
+
+gomodinit example.com/reloaddemo
+
+exec rotini generate cmd/reloaddemo/.rotini.spec.yaml --config cmd/reloaddemo/.rotini.conf.yaml
+cp serve.go.txt internal/cmd/reloaddemo/reloaddemo_serve.go
+cp selftest.go.txt internal/cmd/reloaddemo/selftest.go
+exec go mod tidy
+exec go build -o reloaddemo$exe ./cmd/reloaddemo
+
+cp first.yaml reloaddemo.yaml
+env RELOADDEMO_SELFTEST=1
+wantexit 143 ./reloaddemo$exe serve
+cmp stdout want.txt
+! stderr .
+
+-- first.yaml --
+greeting: hello
+-- want.txt --
+serving: hello
+reloaded: hi
+stopped
+-- serve.go.txt --
+package reloaddemo
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*reloaddemoServeHandler)(nil)
+
+type reloaddemoServeHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*reloaddemoServeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ReloaddemoServeInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	cfg := in.ReloaddemoServe.Config
+
+	// Rotini traps SIGINT and SIGTERM, which cancel ctx. SIGHUP is the program's own.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+
+	fmt.Fprintln(rtx.Stdout, "serving:", cfg.Greeting)
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Fprintln(rtx.Stdout, "stopped")
+			return
+		case <-hup:
+			next, err := rtx.Inputs[ReloaddemoServeInputs]()
+			if err != nil {
+				// A bad edit keeps the settings in use; the server stays up.
+				fmt.Fprintln(rtx.Stderr, "reload failed, keeping the old configuration:", err)
+				continue
+			}
+			cfg = next.ReloaddemoServe.Config
+			fmt.Fprintln(rtx.Stdout, "reloaded:", cfg.Greeting)
+		}
+	}
+}
+-- selftest.go.txt --
+package reloaddemo
+
+import (
+	"os"
+	"syscall"
+	"time"
+)
+
+// With RELOADDEMO_SELFTEST set, the process edits its configuration, sends itself SIGHUP, then
+// SIGTERM, so the test needs no outside signal sender.
+func init() {
+	if os.Getenv("RELOADDEMO_SELFTEST") == "" {
+		return
+	}
+	go func() {
+		time.Sleep(time.Second)
+		if err := os.WriteFile("reloaddemo.yaml", []byte("greeting: hi\n"), 0o600); err != nil {
+			panic(err)
+		}
+		_ = syscall.Kill(os.Getpid(), syscall.SIGHUP)
+		time.Sleep(time.Second)
+		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+	}()
+}
+-- cmd/reloaddemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: reloaddemo
+  summary: a server that rereads its configuration on SIGHUP
+  config_files:
+    - name: main
+      path: reloaddemo.yaml
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: serve
+      summary: serve until stopped; SIGHUP rereads the configuration
+      config:
+        - name: greeting
+          summary: what to greet with
+          schema: { type: string, default: hello, key: greeting }
+-- cmd/reloaddemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/reloaddemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/reloaddemo/zz_reloaddemo.go
+      package: reloaddemo
+  features:
+    - type: help
+      enabled: true

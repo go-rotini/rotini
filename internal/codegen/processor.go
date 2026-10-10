@@ -44,21 +44,34 @@ func NewProcessor(version string) *Processor {
 
 // Generate reconciles, validates and emits the program, once or, with watch, on every spec
 // or conf change until interrupted. onGenerate (optional) receives a "[HH:MM:SS] <took>"
-// summary and each pass's error; without watch the pass's error is also returned. onNotices
-// (optional) receives each pass's non-fatal findings: validation warnings, pruned files, and
-// hook-audit warnings about handler files.
+// summary, preceded by one "created: <path>" line per file the pass created that the author
+// owns from then on (handler stubs, main.go, editable templates), and each pass's error;
+// without watch the pass's error is also returned. onNotices (optional) receives each pass's
+// non-fatal findings: validation warnings, pruned files, and hook-audit warnings about
+// handler files.
 func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error {
 	if onGenerate == nil {
 		onGenerate = func(string, error) {}
 	}
+	var created string
 	pass := func(specPath, confPath string) (warnings []error, err error) {
+		created = ""
 		rs, rc, err := p.reconcile(specPath, confPath)
 		if err != nil {
 			return nil, err
 		}
-		return p.validateAndEmit(rs, rc, true, newPlanner(false))
+		pl := newPlanner(false)
+		warnings, err = p.validateAndEmit(rs, rc, true, pl)
+		created = pl.createdLines()
+		return warnings, err
 	}
-	return p.run(specPath, confPath, watch, pass, onGenerate, onNotices)
+	report := func(result string, err error) {
+		if err == nil {
+			result = created + result
+		}
+		onGenerate(result, err)
+	}
+	return p.run(specPath, confPath, watch, pass, report, onNotices)
 }
 
 // GenerateDryRunFn is the signature of [Processor.GenerateDryRun].
@@ -123,30 +136,34 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode, re
 	return p.run(specPath, confPath, watch, pass, onValidate, onWarnings)
 }
 
-// Initialize scaffolds a new CLI named name: it writes the seed spec and conf in format,
-// then validates and generates a ready-to-build program. force replaces an existing seed
-// spec and conf. It never deletes files; stale handlers are pruned by the next generate.
-func (p *Processor) Initialize(name, format string, force bool) (Initialized, error) {
-	return p.initializeWith(name, format, force, newPlanner(false))
+// Initialize scaffolds a new CLI named name: it writes the seed spec and conf in opt.Format
+// (or, with opt.Template, every CLI that template declares), then validates and generates a
+// ready-to-build program. opt.Force replaces an existing seed spec and conf. It never deletes
+// files; stale handlers are pruned by the next generate.
+func (p *Processor) Initialize(name string, opt InitOptions) (Initialized, error) {
+	return p.initializeWith(name, opt, newPlanner(false))
 }
 
 // InitializeDryRun plans everything [Processor.Initialize] would write, and writes nothing.
 // The result's Changes lists each file it would create or replace.
-func (p *Processor) InitializeDryRun(name, format string, force bool) (Initialized, error) {
-	return p.initializeWith(name, format, force, newPlanner(true))
+func (p *Processor) InitializeDryRun(name string, opt InitOptions) (Initialized, error) {
+	return p.initializeWith(name, opt, newPlanner(true))
 }
 
 // initializeWith runs init through pl and reports what it wrote, or in a dry run would write.
-func (p *Processor) initializeWith(name, format string, force bool, pl *planner) (Initialized, error) {
+func (p *Processor) initializeWith(name string, opt InitOptions, pl *planner) (Initialized, error) {
 	start := time.Now()
-	specPath, confPath, err := p.initialize(name, format, force, pl)
+	seeds, err := p.initialize(name, opt, pl)
 	if err != nil {
 		return Initialized{}, err
 	}
 	out := Initialized{
-		Spec:   displayPath(specPath),
-		Conf:   displayPath(confPath),
+		Spec:   displayPath(seeds[0].Spec),
+		Conf:   displayPath(seeds[0].Conf),
 		Result: reportTiming(start),
+	}
+	for _, s := range seeds[1:] {
+		out.Also = append(out.Also, SeedFiles{Spec: displayPath(s.Spec), Conf: displayPath(s.Conf)})
 	}
 	if pl.dry {
 		out.Changes = pl.Changes()
