@@ -19,8 +19,8 @@ import (
 // --importer-version names another.
 const ImporterVersion = "v0.1.0"
 
-// importerModule is the importer's root module; each framework's importer is a module
-// nested in it (importerModule + "/cobra").
+// importerModule is the importer's module; each framework's importer is a package in it
+// (importerModule + "/cobra").
 const importerModule = "github.com/go-rotini/import"
 
 // importTestTemplate is the test file an import adds to the program's package, through
@@ -140,16 +140,15 @@ func (r *importRun) prepareModfile() error {
 		if err != nil {
 			return fmt.Errorf("--importer-version %s: %w", version, err)
 		}
-		if _, err := os.Stat(filepath.Join(abs, "cobra", "go.mod")); err != nil {
+		if _, err := os.Stat(filepath.Join(abs, "go.mod")); err != nil {
 			return fmt.Errorf("--importer-version %s is not a checkout of %s: %w", version, importerModule, err)
 		}
 		_, err = r.goOutput("mod", "edit", "-modfile="+r.modfile,
-			"-require="+importerModule+"/cobra@v0.0.0", "-replace="+importerModule+"/cobra="+filepath.Join(abs, "cobra"),
 			"-require="+importerModule+"@v0.0.0", "-replace="+importerModule+"="+abs)
 		return err
 	}
-	if _, err := r.goOutput("get", "-modfile="+r.modfile, importerModule+"/cobra@"+version); err != nil {
-		return fmt.Errorf("add the importer %s/cobra@%s (this needs the network or the module cache): %w", importerModule, version, err)
+	if _, err := r.goOutput("get", "-modfile="+r.modfile, importerModule+"@"+version); err != nil {
+		return fmt.Errorf("add the importer %s@%s (this needs the network or the module cache): %w", importerModule, version, err)
 	}
 	return nil
 }
