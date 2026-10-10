@@ -1,0 +1,46 @@
+-- in --
+# yaml-language-server: $schema=./schema.json
+# a spec
+
+command:
+  # the commands
+  commands:
+    - summary: second key first
+      name: deploy   # the name
+      # flags of deploy
+      flags:
+        - schema: { type: bool }
+          name: force
+          # trailing comment of force
+
+    # about status
+    - name: status
+  summary: the tool  # one line
+  name: tool
+  # foot of command
+version: 1.0.0   # version
+$schema: ./schema.json
+# end of file
+-- out --
+# yaml-language-server: $schema=./schema.json
+# a spec
+
+$schema: ./schema.json
+version: 1.0.0   # version
+command:
+  name: tool
+  summary: the tool  # one line
+  # the commands
+  commands:
+    - name: deploy   # the name
+      summary: second key first
+      # flags of deploy
+      flags:
+        - name: force
+          schema: { type: bool }
+          # trailing comment of force
+
+    # about status
+    - name: status
+  # foot of command
+# end of file

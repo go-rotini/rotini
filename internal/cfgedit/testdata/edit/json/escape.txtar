@@ -1,0 +1,18 @@
+-- in --
+{
+  "deploy": {
+    "timeout": "5m",
+    "retries": 3
+  },
+  "log": "info"
+}
+-- op --
+set log "tab\there\u00e9"
+-- out --
+{
+  "deploy": {
+    "timeout": "5m",
+    "retries": 3
+  },
+  "log": "tab\thereé"
+}

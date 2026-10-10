@@ -8,7 +8,9 @@
 #   FuzzValidateSpec   the spec loader: four codecs, schema, lint rules, source locator
 #   FuzzValidateConf   the same for the conf
 #   FuzzTemplate       shape templates: parsing, round-trips, execution errors
-FUZZ_TARGETS := .:FuzzParse .:FuzzArgvOf .:FuzzSuggest .:FuzzSuggestionFacts ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf ./shape:FuzzTemplate
+#   FuzzEdit           config file splices: a successful edit reads back as intended
+#   FuzzFormat         rotini fmt: never changes a value, and formatting twice is a no-op
+FUZZ_TARGETS := .:FuzzParse .:FuzzArgvOf .:FuzzSuggest .:FuzzSuggestionFacts ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf ./shape:FuzzTemplate ./internal/cfgedit:FuzzEdit ./internal/codegen:FuzzFormat
 
 # The version `rotini-build` stamps into the dogfood binary: the checkout's own, from git.
 # v1.2.0 on a tagged commit; v1.2.0-3-gabc1234 between tags, which rotini reads as the last

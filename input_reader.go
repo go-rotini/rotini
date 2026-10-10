@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -103,16 +104,18 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	waived := shortCircuited(chain, store)
 	view := rtx.osView()
 
-	// 1b. Two-phase bootstrap: a config_source flag or env names the file step 4 reads. The
-	// .env files in scope join the environment inputs read (under the run's own), and
-	// variable_file variables are read, before any other config_source path is looked up.
-	overrides := b.pathOverrides(chain, store, view)
-	if view, err = b.inputView(chain, v, overrides, waived, view); err != nil {
+	// 1b. Two-phase bootstrap: a config_source flag or env names the file step 4 reads, and a
+	// profile selector names the profile it reads. The .env files in scope join the environment
+	// inputs read (under the run's own), and variable_file variables are read, before any other
+	// config_source path is looked up or any profile selected.
+	boot := fileBootstrap{paths: b.pathOverrides(chain, store, view)}
+	if view, err = b.inputView(chain, v, boot.paths, waived, view); err != nil {
 		return err
 	}
 	if view.hasInputEnv() {
-		overrides = b.pathOverrides(chain, store, view)
+		boot.paths = b.pathOverrides(chain, store, view)
 	}
+	boot.profiles = b.profileChoices(chain, store, view)
 
 	// 1c. Declared path expansion of the argv values and defaults, then binding them into
 	//     Flags and Arguments.
@@ -126,7 +129,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
-	if err := b.reconcileFlags(v, chain, store, overrides, anchor, waived, view); err != nil {
+	if err := b.reconcileFlags(v, chain, store, boot, anchor, waived, view); err != nil {
 		return err
 	}
 
@@ -142,6 +145,9 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 
 	// Checked after argv validation so a bad command line reports itself first.
 	if err := checkFrameFit(v, chain, rtx.frameIndex()); err != nil {
+		return err
+	}
+	if err := b.checkProfiles(v, chain, boot, waived, view); err != nil {
 		return err
 	}
 
@@ -161,7 +167,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 
 	var cfg *cfgRegs
 	if hasConfigChannel(v) {
-		if cfg, err = b.configRegs(chain, overrides, v, waived, view); err != nil {
+		if cfg, err = b.configRegs(chain, boot, v, waived, view); err != nil {
 			return err
 		}
 		defer cfg.Close()
@@ -453,12 +459,14 @@ func readStdin(r io.Reader) ([]byte, error) {
 // reconcileFlags overrides each fallback flag with its reconciled value: argv-set > env >
 // config files. A flag present in no source keeps what the Parser bound, and argv-only flags
 // are untouched. Each reconciled value is written back into store so the deferred validate
-// pass sees it as present.
-func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *parsedInputs, overrides map[string]string, anchor int, waived bool, view *osView) error {
+// pass sees it as present. A profile selector flag is never read from a configuration file: it
+// takes the profile the bootstrap selected.
+func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *parsedInputs, boot fileBootstrap, anchor int, waived bool, view *osView) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
-	files, err := b.fileSources(b.chainFiles(chain, false), overrides, waived, view)
+	cfgFiles := b.chainFiles(chain, false)
+	files, err := b.fileSources(cfgFiles, boot, waived, view)
 	if err != nil {
 		return err
 	}
@@ -475,12 +483,19 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 	if anchor < 0 {
 		return nil // a struct that does not fit the chain; checkFrameFit reports it
 	}
+	selectors := boot.selectorFlags(cfgFiles)
 	for i := range v.NumField() {
 		flags := commandFlags(v.Field(i))
 		if !flags.IsValid() {
 			continue
 		}
 		for sf, f := range structLeaves(flags) {
+			if choice, ok := selectors[sf.Tag.Get("rotini")]; ok {
+				if err := applySelector(f, sf.Tag.Get("rotini"), chain, store, anchor+i, choice, view); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := reconcileFlag(reg, f, sf, chain, store, anchor+i, rd); err != nil {
 				return err
 			}
@@ -519,6 +534,7 @@ type fallbackRead struct {
 	view       *osView
 	waiveFiles bool
 	files      map[string]string
+	selectors  map[string]profileChoice // profile selector flags, which a configuration file never sets
 }
 
 // reconcileFlag binds one fallback flag, at chain frame idx, from the registry: argv > env >
@@ -731,6 +747,9 @@ func fallbackOrigin(rd fallbackRead, source, envVar, key string) string {
 	if file == "" {
 		return fmt.Sprintf("configuration source %q", source)
 	}
+	if profile := sourceProfile(source); profile != "" {
+		file += " (profile " + profile + ")"
+	}
 	return fmt.Sprintf("configuration file %s, key %s", file, key)
 }
 
@@ -908,9 +927,10 @@ func hasConfigChannel(v reflect.Value) bool {
 }
 
 // configRegistry builds a recon registry over the config_files, first (highest
-// precedence) to last as declared. overrides carries any config_source-supplied paths.
-func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
-	srcs, err := b.fileSources(files, overrides, waived, view)
+// precedence) to last as declared. boot carries any config_source-supplied paths and the
+// selected profiles.
+func (b *InputReader) configRegistry(files []ConfigFile, boot fileBootstrap, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
+	srcs, err := b.fileSources(files, boot, waived, view)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -928,28 +948,28 @@ func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]st
 // cfgRegs is the config channel's registries for one bind: the merged precedence chain plus
 // lazily-built single-file registries for inputs the spec pins to one file.
 type cfgRegs struct {
-	reader    *InputReader
-	files     []ConfigFile // sources in scope for the invoked chain, nearest-wins order
-	overrides map[string]string
-	keys      valueKeys // how config fields' text is read; see spellings
-	merged    *recon.Registry
-	perFile   map[string]*recon.Registry
-	waived    bool // a short-circuited run: a file that cannot be read, or a bad value, is skipped
-	view      *osView
-	paths     map[string]string // each source's file, by logical name, for messages
+	reader  *InputReader
+	files   []ConfigFile // sources in scope for the invoked chain, nearest-wins order
+	boot    fileBootstrap
+	keys    valueKeys // how config fields' text is read; see spellings
+	merged  *recon.Registry
+	perFile map[string]*recon.Registry
+	waived  bool // a short-circuited run: a file that cannot be read, or a bad value, is skipped
+	view    *osView
+	paths   map[string]string // each source's file, by logical name, for messages
 }
 
 // configRegs builds the merged config registry and the lazy per-file cache over the sources in
 // scope for chain. waived marks a short-circuited run ([shortCircuited]): a file that cannot be
 // read or parsed is skipped, and none is checked against its schema.
-func (b *InputReader) configRegs(chain []Command, overrides map[string]string, v reflect.Value, waived bool, view *osView) (*cfgRegs, error) {
+func (b *InputReader) configRegs(chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) (*cfgRegs, error) {
 	files := b.chainFiles(chain, false)
 	keys := channelValueKeys(v, "Config")
-	merged, paths, err := b.configRegistry(files, overrides, keys, waived, view)
+	merged, paths, err := b.configRegistry(files, boot, keys, waived, view)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{reader: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived, view: view, paths: paths}, nil
+	return &cfgRegs{reader: b, files: files, boot: boot, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived, view: view, paths: paths}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
@@ -991,17 +1011,18 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		if f.Name != name {
 			continue
 		}
-		src, err := c.reader.readFileSource(f, c.overrides, c.waived, c.view)
+		srcs, err := c.reader.readFileSource(nil, f, c.boot, c.waived, c.view)
 		if err != nil {
 			return nil, err
 		}
-		if ns, ok := src.(namedSource); ok && ns.path != "" {
-			if c.paths == nil {
-				c.paths = map[string]string{}
-			}
-			c.paths[name] = ns.path
+		if c.paths == nil {
+			c.paths = map[string]string{}
 		}
-		reg, err := recon.New(recon.WithSource(spellings{Source: src, keys: c.keys, clock: c.view.clockRef()}))
+		maps.Copy(c.paths, sourcePaths(srcs))
+		for i, src := range srcs {
+			srcs[i] = spellings{Source: src, keys: c.keys, clock: c.view.clockRef()}
+		}
+		reg, err := recon.New(recon.WithSources(srcs...))
 		if err != nil {
 			return nil, internalBind(channelConfig, name, fmt.Sprintf("could not build the registry for configuration file %q", name), err)
 		}
@@ -1114,14 +1135,13 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 // containing the file winning. A path supplied through config_source is not optional, so a
 // missing one is an error. Custom InputSettings.Sources follow the declared files and so rank
 // below them.
-func (b *InputReader) fileSources(files []ConfigFile, overrides map[string]string, waived bool, view *osView) ([]recon.Source, error) {
+func (b *InputReader) fileSources(files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
 	srcs := make([]recon.Source, 0, len(files)+len(b.sources))
 	for _, f := range files {
-		src, err := b.readFileSource(f, overrides, waived, view)
-		if err != nil {
+		var err error
+		if srcs, err = b.readFileSource(srcs, f, boot, waived, view); err != nil {
 			return nil, err
 		}
-		srcs = append(srcs, src)
 	}
 	return append(srcs, b.sources...), nil
 }
@@ -1152,27 +1172,50 @@ func sourcePaths(srcs []recon.Source) map[string]string {
 // fileSource builds the recon source for one config_files entry, schema-checked, reading the
 // process environment and working directory.
 func (b *InputReader) fileSource(f ConfigFile, overrides map[string]string) (recon.Source, error) {
-	return b.readFileSource(f, overrides, false, nil)
+	srcs, err := b.readFileSource(nil, f, fileBootstrap{paths: overrides}, false, nil)
+	if err != nil {
+		return nil, err
+	}
+	return srcs[0], nil
 }
 
 // readFileSource is [InputReader.fileSource] for a run: paths are expanded and made absolute
-// with the run's view. In a short-circuited run (waived) a file that cannot be located, read or
-// parsed is skipped, standing in as an empty source under its own name so precedence holds,
-// and no file is checked against its schema.
-func (b *InputReader) readFileSource(f ConfigFile, overrides map[string]string, waived bool, view *osView) (recon.Source, error) {
-	src, path, err := b.openFileSource(f, overrides, view)
+// with the run's view. It appends to dst the sources the file contributes, highest first: one,
+// or for a file with profiles the selected profile's keys and then the shared keys. In a
+// short-circuited run (waived) a file that cannot be located, read or parsed is skipped,
+// standing in as an empty source under its own name so precedence holds, and no file is checked
+// against its schema.
+func (b *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+	skipped := func() []recon.Source {
+		return append(dst, namedSource{Source: recon.NewMapSource(f.Name, nil), name: f.Name})
+	}
+	src, path, err := b.openFileSource(f, boot.paths, view)
 	if err != nil {
 		if waived {
-			return namedSource{Source: recon.NewMapSource(f.Name, nil), name: f.Name}, nil
+			return skipped(), nil
 		}
 		return nil, err
 	}
-	if !waived {
-		if err := validateConfigFile(f, src); err != nil {
+	var names []string
+	choice := boot.profiles[f.Name]
+	if f.Profiles != nil {
+		if names, err = profileNames(f, src, path); err != nil {
+			src.Close()
+			if waived {
+				return skipped(), nil
+			}
 			return nil, err
 		}
 	}
-	return namedSource{Source: src, name: f.Name, path: path}, nil
+	if !waived {
+		if err := validateConfigFileAs(f, src, choice.name); err != nil {
+			return nil, err
+		}
+	}
+	if f.Profiles != nil {
+		return append(dst, profiledSources(f, src, path, names, choice)...), nil
+	}
+	return append(dst, namedSource{Source: src, name: f.Name, path: path}), nil
 }
 
 // openFileSource locates and parses one config_files entry, returning the source and the file
@@ -1278,6 +1321,13 @@ func absPath(view *osView, p string) (string, error) {
 // recon actually resolved. An absent optional file passes vacuously: shape validation gates
 // what is loaded, and absence is the per-input required marker's concern.
 func validateConfigFile(f ConfigFile, src recon.Source) error {
+	return validateConfigFileAs(f, src, "")
+}
+
+// validateConfigFileAs is [validateConfigFile] for a run that selected profile: a file with
+// profiles is checked as the run reads it, its shared keys merged with the selected profile's
+// (see effectiveDocument). Profiles that aren't selected are not checked.
+func validateConfigFileAs(f ConfigFile, src recon.Source, profile string) error {
 	if f.Schema == "" {
 		return nil
 	}
@@ -1302,14 +1352,21 @@ func validateConfigFile(f ConfigFile, src recon.Source) error {
 	if err != nil {
 		return usageBind(channelConfig, f.Name, configFileProblem(path, err), err)
 	}
+	if f.Profiles != nil {
+		m = effectiveDocument(m, f.Profiles.Under, profile)
+	}
 	validator, err := schemaValidator(f.Schema)
 	if err != nil {
 		return internalBind(channelConfig, f.Name, fmt.Sprintf("invalid schema for configuration file %q", f.Name), err)
 	}
 	if err := validator.Validate(m); err != nil {
 		applyPatternMessages(f.Schema, err)
+		where := path
+		if f.Profiles != nil && profile != "" {
+			where += " (profile " + profile + ")"
+		}
 		return usageBind(channelConfig, f.Name,
-			fmt.Sprintf("configuration file %s is invalid: %s", path, schemaDetail(err)), err)
+			fmt.Sprintf("configuration file %s is invalid: %s", where, schemaDetail(err)), err)
 	}
 	return nil
 }

@@ -44,6 +44,9 @@
          carry .Stability. The page's own .Stability is the command's, inherited from its
          ancestors; stabilityNote .Stability renders the line saying what it promises. An exit
          status row carries .DocsURL, a link to more about the code, or "".
+         The page's .Effects says what running the command does, as declared ("destructive,
+         not idempotent, open world"), "" when it declares none; a flag row's .Effects says what
+         giving the flag adds ("destructive").
          The root's page carries .Topics[] {.Name .Summary}, its help topics. On a topic's page
          .Topic is true: .Summary and .Description are the topic's, .Environment holds a
          generated environment topic's rows, each with .Commands (the commands that read it),
@@ -68,7 +71,7 @@
 {{end}}{{end -}}
 {{- define "flag"}}.TP
 {{range $i, $id := .Identifiers}}{{if $i}}, {{end}}\fB{{roff $id}}\fR{{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
-{{roff .Summary}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
+{{roff .Summary}}{{with .Effects}} ({{.}}){{end}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
 {{template "description" .}}{{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
 {{end}}{{template "values" .}}{{end -}}
@@ -83,10 +86,12 @@
 {{end}}{{end}}{{with .Passthrough}}.PP
 Every word after \fB{{roff .}}\fR is passed through as written, so options go before \fB{{roff .}}\fR.
 {{end}}
-{{if or .Description .Stability}}.SH DESCRIPTION
+{{if or .Description .Stability .Effects}}.SH DESCRIPTION
 {{with .Description}}{{roffBlock .}}
 {{end}}{{with .Stability}}{{if $.Description}}.PP
 {{end}}{{roff (stabilityNote .)}}
+{{end}}{{with .Effects}}{{if or $.Description $.Stability}}.PP
+{{end}}Effects: {{.}}
 {{end}}{{end}}
 {{range .CommandGroups}}.SH {{roffArg (upper (default "Commands" .Title))}}
 {{with .Description}}{{roffBlock .}}

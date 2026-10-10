@@ -6,6 +6,8 @@ package codegen
 type Conf struct {
 	// Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.3.0/schema-conf.json — note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL.
 	Schema string `json:"$schema,omitempty"`
+	// Controls `rotini diff`, which compares two versions of the cli's contract: the changes this release makes on purpose.
+	Diff *DiffConfig `json:"diff,omitempty"`
 	// Controls `rotini generate`: the generated packages and features. When omitted entirely, the defaults apply: one generated file under internal/cmd/<root>, and every feature off.
 	Generate *GenerateConfig `json:"generate,omitempty"`
 	// Controls how `rotini validate` and `rotini generate` report problems (collect everything vs. fail fast), and which opt-in warnings they add.
@@ -28,8 +30,28 @@ type ContractConfig struct {
 	Go bool `json:"go,omitempty"`
 }
 
+// One acknowledged change: `{rule: COMMAND_NO_DELETE, where: "taskr compact", reason: "replaced by purge"}`.
+type DiffAccept struct {
+	// Why the change is intended; shown beside the accepted finding.
+	Reason string `json:"reason"`
+	// The finding's rule ID, as `rotini diff` prints it.
+	Rule string `json:"rule"`
+	// The finding's where, exactly as `rotini diff` prints it: the item in the old contract, written as on the command line.
+	Where string `json:"where"`
+}
+
+// Controls `rotini diff`. An acknowledgement belongs to one release, not to the interface, so it lives here rather than in the spec.
+type DiffConfig struct {
+	// The changes this release makes on purpose. Each entry acknowledges one finding, by its exact rule and where: the finding is reported as accepted and doesn't fail the run. An entry that matches no finding fails the run, naming the entry, so the list doesn't outlive its release. There is no blanket ignore by rule.
+	Accept []DiffAccept `json:"accept,omitempty"`
+}
+
 // One generated feature, chosen by 'type' (help, completion, man, markdown): an on/off switch ('enabled') plus two independent options. 'embed' chooses how the content is stored: a rendered file in 'embed_dir' loaded with //go:embed, or a string literal in the generated code. 'template' chooses how it is rendered: from an editable template seeded into 'template_dir', or from rotini's built-in one. The directories default to '<cmd-package>/renders' and '<cmd-package>/templates'. With embed on, embed_dir must be inside the cmd package, since //go:embed cannot reach outside it; template_dir may be anywhere. Output files never collide: help pages are 'help_*.txt', man pages '<page-name>.<section>' (taskr-add.1), markdown pages 'markdown_*.md' and completion scripts 'completion_<shell>.txt', and each feature removes only its own files.
 type Feature struct {
+	// llms only: the address the markdown pages are published at. llms.txt links each command to <base_url><page>.md (taskr-add.md). Without it, the links are relative to llms.txt and point at the markdown feature's files, which needs the markdown feature on with `embed: true`. Setting it on any other feature is an error.
+	BaseUrl string `json:"base_url,omitempty"`
+	// skill only: when an agent should use the skill, added after the root's summary in SKILL.md's `description` (at most 1024 characters together). Setting it on any other feature is an error.
+	Description string `json:"description,omitempty"`
 	// completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide the descriptions shown beside completion candidates, in every shell; unset or any other value leaves them on. Descriptions show by default: zsh, fish and PowerShell beside each candidate, and bash on the second TAB. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionDescriptions replaces this check with a rule of your own.
 	DescriptionsEnv string `json:"descriptions_env,omitempty"`
 	// How this feature's content is stored in the cmd package. true: the rendered content is written to a file under 'embed_dir' and loaded with a //go:embed directive. false (the default): no file is written, and the content is a string literal in the generated code, so the generated file is self-contained. The variable names and the lookup function are the same either way.
@@ -38,19 +60,33 @@ type Feature struct {
 	EmbedDir string `json:"embed_dir,omitempty"`
 	// When true, rotini generates this feature's outputs into the cmd package, with their variables and lookup function. Off by default.
 	Enabled bool `json:"enabled,omitempty"`
+	// tools, skill, llms and permissions only: where the files are written, relative to the module root. A directory for tools (default 'tools/'), skill (default 'skills/', which gets <name>/SKILL.md) and permissions (default 'agents/'); a file for llms (default 'llms.txt'). Rewritten on every generate; turning the feature off leaves the files in place. Setting it on any other feature is an error.
+	File string `json:"file,omitempty"`
+	// tools only: also put mcp.json in the generated cmd package as the string variable ToolsMCP, so the binary can serve itself over MCP (with the MCP companion module) without reading a file. Needs 'mcp' in 'targets'. Setting it on any other feature is an error.
+	Go bool `json:"go,omitempty"`
+	// permissions only: which agent harnesses to write permission rules for, from the commands' `effects`. 'claude' writes claude-settings.json, a fragment to merge into Claude Code's .claude/settings.json. 'codex' writes <name>.rules, Codex prefix rules. 'gemini' writes <name>-policy.toml, a Gemini CLI policy. Read commands are allowed and destructive ones ask first; write commands get no rule, so the harness asks as it does by default. Default: all three. Setting it on any other feature is an error.
+	Harnesses []string `json:"harnesses,omitempty"`
 	// completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/<name>.bash, completions/_<name> (zsh), completions/<name>.fish and completions/<name>.ps1, and man/man<section>/<page>.<section>, where <name> is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone is removed. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error.
 	InstallDir string `json:"install_dir,omitempty"`
+	// tools only: the MCP revision mcp.json is written for. 2026-07-28 (the default) allows any JSON value as a tool's output; with 2025-11-25, which requires an object, an output that isn't one is described wrapped as {"result": …}, and the MCP companion wraps it the same way. Setting it on any other feature is an error.
+	McpRevision string `json:"mcp_revision,omitempty"`
 	// completion only: turns on completion messages, lines the shell shows while a value is being completed and there is nothing to offer. 'declared' shows the inputs' `complete.message` lines from the spec. 'all' also shows a line derived from the summary of every other flag and argument that has one, such as `--replicas <int>: how many instances`. Either way a completer can add its own with rtx.AddCompletionMessage, which take the place of the static line. Omitted, there are no messages. zsh and bash 4.4 or later show them; fish, PowerShell and older bash skip them, and the plugin hosts kubectl, Docker and Flux show them their own way. Setting it on any other feature is an error.
 	Messages string `json:"messages,omitempty"`
 	// completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide completion messages; unset or any other value leaves them on. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionMessages replaces this check with a rule of your own. Requires `messages`.
 	MessagesEnv string `json:"messages_env,omitempty"`
+	// skill only: the skill's name, its directory under 'file' and its SKILL.md `name`: lowercase letters, digits and single hyphens, at most 64 characters. Defaults to the root command's name, lowercased, with '_' written '-'. Setting it on any other feature is an error.
+	Name string `json:"name,omitempty"`
 	// man only: the man page section the pages are generated for, a single digit 1-9 (default 1, user commands; 8 is administration tools and daemons). It is the section in each page's header, the extension of each page file (taskr-add.8), and the section in cross-references between pages, and the generated ManSection constant holds it. One value for the whole program. Setting it on any other feature is an error.
 	Section int `json:"section,omitempty"`
+	// tools only: which tool-definition files to write. 'mcp' writes mcp.json, a Model Context Protocol tools/list result whose tools carry annotations from `effects` and the facts a server needs to run each one (the MCP companion module serves it). 'openai-strict' writes openai.json, OpenAI Responses API function tools in strict mode. 'gemini' writes gemini.json, Gemini function declarations. Default: mcp. Setting it on any other feature is an error.
+	Targets []string `json:"targets,omitempty"`
 	// Whether the editable template (help.txt.tmpl, man.txt.tmpl or markdown.md.tmpl) is seeded into 'template_dir' for you to customize. true: the template is written when missing, and pages render from it. false (the default): no template is written, and pages render from rotini's built-in one. Has no effect on completion, which has no template; rotini validation warns if you set it there. A template you have edited is never removed: setting this back to false leaves it in place, unused.
 	Template bool `json:"template,omitempty"`
 	// Directory (relative to the module root) where this feature's editable template (help.txt.tmpl, man.txt.tmpl or markdown.md.tmpl) is written when template is true. Templates are not embedded, so it may be anywhere. Unused when no template is seeded (template false, or completion, which has none); rotini validation warns if you set it then. Defaults to '<cmd-package>/templates'.
 	TemplateDir string `json:"template_dir,omitempty"`
 	// Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion<Shell>' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.
+	//
+	// tools, skill, llms and permissions are files for AI agents and their tools, one set for the whole program, written under 'file' (relative to the module root) and never removed: tools writes tool definitions for each of 'targets' (tools/mcp.json, tools/openai.json, tools/gemini.json), skill an Agent Skills page (skills/<name>/SKILL.md), llms an llms.txt, and permissions permission rules for each of 'harnesses'. They add no Go code, except `go: true` on tools. skill and llms render from an editable template, as help does; tools and permissions are built from the contract and have none. 'embed' and 'embed_dir' don't apply to them.
 	Type string `json:"type"`
 }
 

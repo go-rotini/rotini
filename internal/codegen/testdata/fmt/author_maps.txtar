@@ -1,0 +1,42 @@
+-- in --
+version: 1.0.0
+command:
+  name: tool
+  headings:
+    flags: Options
+    usage: Synopsis
+  schemas:
+    Zed:
+      type: object
+      properties:
+        zeta: { type: string }
+        alpha: { type: integer }
+    Alpha:
+      type: string
+  flags:
+    - name: level
+      schema:
+        enum: [z, a]
+        type: string
+        default: z
+-- out --
+version: 1.0.0
+command:
+  name: tool
+  headings:
+    flags: Options
+    usage: Synopsis
+  schemas:
+    Zed:
+      type: object
+      properties:
+        zeta: { type: string }
+        alpha: { type: integer }
+    Alpha:
+      type: string
+  flags:
+    - name: level
+      schema:
+        type: string
+        enum: [z, a]
+        default: z

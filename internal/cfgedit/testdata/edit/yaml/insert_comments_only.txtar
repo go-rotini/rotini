@@ -1,0 +1,7 @@
+-- in --
+# just a comment
+-- op --
+set a 1
+-- out --
+# just a comment
+a: 1

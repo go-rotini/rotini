@@ -84,6 +84,24 @@ the committed code matches the spec, run `go tool rotini generate --dry-run`: it
 lists what would change, and exits 2 if anything would. See
 [the companion CLI](/cli#rotini-generate) for its exit codes and the `dry_run_env` conf key.
 
+### Keeping specs tidy
+
+`go tool rotini fmt` rewrites the spec and conf in one canonical layout: keys in reading order
+(a command's name and documentation, then its inputs, output and sub-commands), two-space
+indentation, and lists indented under their key. Comments move with the entries they describe, and every value is kept exactly as written,
+quotes and block scalars included. With no file it formats the spec in the working directory
+and the conf beside it; name files to format others, such as a composed command's file.
+
+In CI, `--check` writes nothing and exits 2 when a file isn't formatted:
+
+{{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
+go tool rotini validate ./cmd/todo/.rotini.spec.yaml
+go tool rotini fmt --check ./cmd/todo/.rotini.spec.yaml ./cmd/todo/.rotini.conf.yaml
+go tool rotini generate --dry-run ./cmd/todo/.rotini.spec.yaml
+{{< /code >}}
+
+Only YAML files can be formatted for now.
+
 ## Commands, flags and arguments
 
 The root command is the binary, and `commands:` nests sub-commands to any depth. Each command
@@ -627,6 +645,61 @@ yourself.
 
 Declare a system tier as its own entry after the user's: the first declared entry wins per key,
 so the user's file overrides the system one key by key.
+
+### Profiles
+
+One config file can hold several named sets of settings, with a flag or variable choosing one per
+run, like `--profile prod`. Declare where the profiles live and which input chooses:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: todo
+  config_files:
+    - name: user
+      discover: { strategy: xdg, app: todo, file: config.yaml }
+      profiles: { under: profiles, select: profile, default: default }
+  flags:
+    - name: profile
+      summary: the configuration profile to use
+      identifiers: [--profile]
+      cascading: true
+      schema: { type: string, variable: TODO_PROFILE }
+{{< /code >}}
+
+{{< code title="~/.config/todo/config.yaml" language="yaml" open="true" collapsible="false" copy="false" >}}
+server: { host: todo.example.com, port: 443 }
+profiles:
+  default: {}
+  local:
+    server: { host: localhost }
+{{< /code >}}
+
+The chosen profile's keys are read as if they sat at the top of the file, and win over the
+file's other top-level keys, which every profile shares. With `--profile local`, the host is
+`localhost` and the port still `443`. Merging is per key: a list in a profile replaces the shared
+list, and a map's entries merge.
+
+- **The choice:** `--profile` on the command line, then the first set variable (the flag's own
+  `variable:` names, then an env input named by `select`), then the default. A `.env` file can set
+  the variable. The choice is never read from a config file, so the selector can't declare `key:`.
+- **Precedence** is otherwise unchanged: command line, environment, config files (the chosen
+  profile, then the shared keys), default.
+- **An unknown profile** chosen on the command line or in the environment is a usage error that
+  lists the defined ones, and carries them as `SuggestionFacts` candidates:
+  `--profile: profile "lcoal" is not defined in configuration file /home/ada/.config/todo/config.yaml (profiles: default, local)`.
+  A default that a file doesn't define just leaves the shared keys, and `--help` never fails on a
+  bad choice.
+- **Several files** may share a selector: a profile is unknown only when none of them defines it.
+- **The file's `schema:`** checks the shared keys merged with the chosen profile, without the
+  `profiles` key. Profiles that aren't chosen aren't read or checked.
+- **Provenance** names the profile: `config:user#profiles.local.server.host` for a key the
+  profile set, `config:user#server.port` for a shared one.
+
+Profiles are a single top-level key of named maps; a kubeconfig-style list of contexts isn't
+supported. The generated [config schema](#editor-support-for-your-users-config) describes the
+profiles key, and leaves out the file's own `schema:`, which checks the merged view instead.
+`rotini.ConfigProfiles(rtx, "user")` lists the defined names for a
+[completer](/recipes#a---profile-flag-with-completion).
 
 ### Paths
 
@@ -1656,7 +1729,7 @@ cmd.NewProgram(cmd.Handlers()).WithReporter(rotini.StructuredReporter(func(rtx *
 
 ```console
 $ todo list --json --bogus
-{"error":{"candidates":["--json","--all"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
+{"schema_version":1,"error":{"candidates":["--json","--all"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
 ```
 
 Exit codes are decided exactly as the default reporter decides them. Each line's shape is
@@ -1790,6 +1863,167 @@ such words on Windows only, relative to the run's directory. A word naming an ex
 kept, and a pattern matching nothing is passed through, so the path check reports it as a POSIX
 shell would. Matching is case-sensitive and `**` is not supported.
 
+## Agent-ready CLIs
+
+An AI agent runs a CLI the way a script does, and needs the same things: output it can parse,
+errors it can read, and exit codes that mean something. It also needs to know what a command
+will do before it runs it. Rotini turns what the spec declares into the files agents and their
+tools read. Nothing appears unless you declare it, and none of it adds a flag or changes a run.
+
+### Streams, errors and exit codes
+
+- **Keep stdout for the output.** Write the declared output with `rtx.WriteOutput`, and leave
+  messages to the reporter, which writes errors and warnings to stderr. Success and info
+  messages go to stdout after the output, so an agent reading JSON should get none:
+  record them only for people, or use `StructuredReporter`.
+- **Errors as JSON.** `StructuredReporter` (see [Errors scripts can read](#errors-scripts-can-read))
+  writes each error to stderr as one JSON line, starting with `"schema_version":1`. The version
+  changes only when a line's shape changes in a way that breaks a reader. Pick it from a
+  variable you name, so an agent's harness can ask for it:
+
+  {{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
+cmd.NewProgram(cmd.Handlers()).WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
+	return os.Getenv("TODO_AGENT") == "1"
+})).Execute()
+{{< /code >}}
+
+- **Exit codes** are yours to compose in the reporter (see
+  [Errors and exit codes](#errors-and-exit-codes)); list them in `exit_status` with a `name` and
+  `retryable`, and every agent output below carries them.
+- **JSON when stdout isn't a terminal** is a choice your handler makes:
+  `if !rotini.IsTerminal(rtx.Stdout) { format = "json" }`.
+- **A stream** of results is JSON Lines when the command declares `output_stream: true`, so a
+  reader knows to read one value per line.
+- **The contract as a command:** with `generate.contract.go: true`, a command such as
+  `describe` can print `Contract`, so the binary describes itself (see
+  [What gets generated](#what-gets-generated)).
+
+### Effects
+
+`effects` says what running a command does: `read` changes nothing, `write` creates or changes
+things, `destructive` deletes or overwrites what can't be got back. `idempotent` and
+`open_world` (it reaches the network or other systems) are optional. Help, man and markdown
+show a line (`Effects: destructive, idempotent`); the contract and the generated
+`CommandDef.Effects` carry it.
+
+A flag can raise its command's effects for the run that gives it, never lower them, so a
+preview flag is a role, not a `read` flag:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+- name: sync
+  effects: { kind: write, idempotent: true, open_world: true }
+  flags:
+    - name: prune
+      summary: also delete tasks the server doesn't have
+      effects: { kind: destructive }   # sync --prune is destructive
+    - name: dry-run
+      role: dry-run
+{{< /code >}}
+
+A run's effect is the highest of the command's and every given flag's; it is idempotent only
+when every stated value says so, and reaches outside the machine when any does. Sub-commands
+don't inherit effects. Where the actual command line isn't known (tool annotations, permission
+rules, the skill page), the worst case over the command and its flags is used. A command without
+`effects` says nothing, and agents assume the worst.
+
+### Roles agents read
+
+`role` on a flag tells a program driving the CLI what the flag is for. Beside `force`, `fields`,
+`sort` and `chdir`:
+
+- `dry-run`: the bool flag that previews without changing anything;
+- `confirm`: the bool flag that answers yes, so the command never prompts;
+- `machine-output`: the flag that writes the declared output as JSON: a bool flag, or a string
+  flag with an `enum` and `role_value: json` naming the value that does it;
+- `page`: the flag that selects a page of results.
+
+A command has each role at most once, counting the cascading flags it inherits. `rotini
+validate` warns about a destructive command with neither a `dry-run` nor a `confirm` flag.
+
+### Keeping things from agents
+
+Some commands and inputs are left out of everything below by default: hidden and deprecated
+ones; a command with sub-commands (it prints help) or a passthrough command (it would run
+whatever it is given); and inputs that are secret (a value an agent types lands in the model's
+context), read `from:` a file or stdin (an agent could read the host's files), or short-circuit
+(`--help`). `agent: true` brings one back; `agent: false` keeps a command, with its
+sub-commands, or an input out while it stays in help. On env and config inputs, which are never
+tool parameters, `agent` only decides whether the skill page lists them.
+
+### Tool definitions
+
+The `tools` feature writes tool definitions for each target, from the contract:
+
+{{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+generate:
+  features:
+    - type: tools
+      enabled: true
+      file: tools/              # the default
+      targets: [mcp, openai-strict, gemini]
+{{< /code >}}
+
+- **`mcp.json`** is a Model Context Protocol `tools/list` result. Each tool is named after the
+  command path (`todo_remote_add`), its parameters are the command's arguments and flags, plus a
+  `stdin` parameter when it reads stdin, and its `outputSchema` is the declared output (an array
+  of items for a stream). Annotations come from `effects`, and the description lists the exit
+  codes and the variables the server's environment must supply. Each tool's
+  `_meta["dev.rotini/invoke"]` holds what a server needs to rebuild the command line: the
+  command path, each parameter's identifier and kind, and the machine-output flag to add. It is
+  written for MCP 2026-07-28; `mcp_revision: 2025-11-25` wraps an output that isn't an object,
+  as that revision requires. With `go: true` the generated package also holds it as
+  `var ToolsMCP string`, so the binary can serve itself; the go-rotini/mcp module serves it.
+- **`openai.json`** holds OpenAI Responses API function tools in strict mode: every property
+  required, optional ones nullable, and constraints strict mode doesn't take (lengths, defaults)
+  written into the description. A command with a map flag can't be expressed and is left out,
+  with a warning.
+- **`gemini.json`** holds Gemini function declarations with JSON Schema parameters, references
+  inlined, and `-` in parameter names written `_` (`dry-run` is `dry_run`).
+
+Env and config inputs are never parameters; on a server they come from its environment. A
+command whose required input can't be a parameter is left out with a warning, unless it is a
+secret the server's environment can supply. Env inputs are listed for the server.
+
+### Agent pages
+
+- **`skill`** writes `skills/<name>/SKILL.md`, an [Agent Skills](https://agentskills.io) page:
+  the commands with their effects, how to call them (command words first, the JSON flag, the
+  confirm flag instead of a prompt), the exit codes and error kinds, the environment, and each
+  command's details and examples. `allowed-tools` lists the read-only commands. With the
+  markdown feature on, each command's page goes in `references/`. `name` sets the skill's name
+  (the root's, lowercased, by default) and `description` adds when to use it.
+- **`llms`** writes an [llms.txt](https://llmstxt.org): the program's name and summary, then a
+  link to each command's markdown page at `base_url`.
+
+Both render from editable templates (`template: true` seeds `skill.md.tmpl` and
+`llms.txt.tmpl`), like help.
+
+### Permission rules
+
+The `permissions` feature writes rules for agent harnesses from `effects`: read commands are
+allowed, destructive ones ask first, and write commands get no rule, so the harness asks as it
+does by default.
+
+{{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+generate:
+  features:
+    - type: permissions
+      enabled: true
+      file: agents/             # the default
+      harnesses: [claude, codex, gemini]
+{{< /code >}}
+
+`claude-settings.json` is a fragment to merge into Claude Code's `.claude/settings.json`,
+`<name>.rules` holds Codex prefix rules, and `<name>-policy.toml` is a Gemini CLI policy. Rules
+name leaf commands and all their aliases, never the root or a group, since harnesses match the
+start of the command text and a rule for `todo remote` would also allow every command under it.
+That also means a flag written before the command defeats a rule; it fails safe, since the
+harness then asks. A flag that makes a command destructive gets its own ask rule where the
+harness can match it. Gemini CLI treats `ask_user` as deny when it runs non-interactively.
+
+These features write files into the repository, rewrite them on every generate, and never remove
+them; turning one off leaves its files in place.
+
 ## Help, completion and docs
 
 The conf's `generate.features:` turn on output generated from the spec. Each adds functions to the
@@ -1801,6 +2035,10 @@ generated package:
 | `completion` | `Completion(shell)` scripts for bash, zsh, fish and PowerShell |
 | `man` | `Man(path...)` man pages in roff, `ManPages()` for all of them, and a `ManSection` constant |
 | `markdown` | `Markdown(path...)` reference pages and `MarkdownPages()` for all of them |
+| `tools` | tool definitions for AI agents (MCP, OpenAI, Gemini) in the repository; with `go: true`, `ToolsMCP` (see [Tool definitions](#tool-definitions)) |
+| `skill` | an Agent Skills page, `skills/<name>/SKILL.md` (see [Agent pages](#agent-pages)) |
+| `llms` | an `llms.txt` (see [Agent pages](#agent-pages)) |
+| `permissions` | permission rules for agent harnesses (see [Permission rules](#permission-rules)) |
 
 To expose one, add a command for it to the spec and call the function from its handler; for
 example, a `completion` command whose handler prints the script `Completion(shell)` returns.
@@ -2454,6 +2692,209 @@ process list. A value no command line can supply is a `*rotini.ArgvError` naming
 config and stdin inputs, an argument of a command other than the invoked one, `-` on a flag that
 reads stdin from it, an explicit empty list on a flag without a separator, and a time its layout
 can't show exactly.
+
+## Checking for breaking changes
+
+`rotini diff` compares two versions of your CLI's contract and reports what changed for the
+people and scripts using it. Each change is **breaking** (something that worked stops working),
+**possibly breaking** (it may), **expected** (a removal you planned for this release) or **safe**.
+It compares commands, flags, arguments, environment variables, config keys and files, stdin, output
+shapes and exit statuses, so a renamed output field or a dropped exit code is caught as surely as
+a removed flag.
+
+### In CI
+
+1. Turn on the contract with `generate.contract.file`, and commit the file it writes.
+2. `rotini generate --dry-run` fails when the committed contract is stale.
+3. `rotini diff git:<last release tag>` fails on breaking changes since that release.
+
+{{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+generate:
+  contract:
+    file: cli-contract.json
+{{< /code >}}
+
+{{< code title=".github/workflows/ci.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0 # git:<ref> reads the tag locally and never fetches
+- run: go tool rotini generate --dry-run
+- run: go tool rotini diff "git:$(git describe --tags --abbrev=0)"
+{{< /code >}}
+
+Compare against the last release tag rather than the main branch: an intended break you
+acknowledge in one pull request is then still a change on the next one, until you release.
+
+`<old>` is a file, `git:<ref>` (the conf's `generate.contract.file` as committed at that
+revision), `git:<ref>:<path>` (another module-root-relative file at that revision), or
+`mod://<module>@<version>/<path>`. A `mod://` contract is read from the module cache, downloaded
+first when it isn't there, and verified by `go.sum`, or by the checksum database for a version
+`go.sum` doesn't list, such as an older version of your own module. `<new>` defaults to the
+contract built from your current spec and conf.
+
+The exit status is 0 when nothing is at or above `--fail-on`, 2 when something is, and 1 on an
+error. `--fail-on possibly` also fails on possibly breaking changes; `--fail-on never` only
+reports. `--format json` writes one document: `findings` (each with `severity`, `rule`,
+`where`, `message`, `note` and, when acknowledged, `accepted`), `unmatched_accepts` and
+`summary`.
+
+Commit a baseline contract written by rotini 1.4 or later. An older contract records fewer facts,
+so the new one is compared only on what the old one states; it can still show a few false
+findings (rotini 1.3 left out a stdin `required`, for example).
+
+### Acknowledging a break
+
+When a break is intended, acknowledge it in the conf, one entry per finding, with the `rule` and
+`where` exactly as `rotini diff` prints them:
+
+{{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+diff:
+  accept:
+    - rule: COMMAND_NO_DELETE
+      where: taskr compact
+      reason: replaced by purge
+{{< /code >}}
+
+The finding is then reported as accepted, with its reason, and doesn't fail the run. An entry
+that matches no finding fails the run, naming the entry, so the list doesn't outlive its release:
+clear it when you release. There is no way to ignore a rule everywhere.
+
+A removal you planned needs no entry. Give the item `removed_in` (see
+[deprecating a command or flag](#deprecating-a-command-or-flag)) and pass the release you're
+preparing with `--release 2.0.0`, or name a variable holding it with the conf's
+`validate.release_env`: an item whose `removed_in` is at or below that release is reported as
+expected. Without a release it stays breaking, with a note to pass one. A command, flag or enum
+value removed with a `replaced_by` that names something still there is an expected rename.
+
+### How changes are matched and rated
+
+Commands match by path, flags by identifier (so a lost short form is caught and a renamed
+logical name isn't a removal), arguments by position, environment variables by variable, and
+config entries by key. What a caller passes and what the program writes are rated in opposite
+directions: narrowing an input (a new enum, a tighter bound, a new required property) breaks
+callers, and widening an output (a new enum value, a property that may be absent) may break
+readers. A changed default is possibly breaking, since the same command line now behaves
+differently. A schema in `definitions` is compared once, where it's defined, with a note naming
+the commands that use it.
+
+Stability lowers the rating: on an item that is `experimental` in the old contract (or under an
+experimental command) every finding is safe, and on a `beta` one a breaking finding is possibly
+breaking. Removing a hidden item is possibly breaking, and adding a hidden one is not reported.
+
+A finding's `where` names the item in the old contract, written as on the command line:
+
+| Item | `where` |
+|---|---|
+| a command | `taskr compact` |
+| an alias | `taskr list alias ls` |
+| a flag, or one identifier | `taskr add --priority`, `taskr add -p` |
+| an argument | `taskr done <ids>` |
+| an environment variable | `taskr list $TASKR_STORE` |
+| a config key | `taskr list config store.path` |
+| an enum value | `taskr add --priority value low` |
+| a field inside an input, stdin or output | `taskr add --meta.owner`, `taskr upper stdin.items[]`, `taskr list output.tasks[].status` |
+| an exit status, or its output | `taskr get exit 3`, `taskr get exit 3 output.reason` |
+| a flag group or dependency | `taskr add group mutually_exclusive(json,yaml)`, `taskr add dependency force unless dry-run` |
+| a config file, plugin discovery, stdin | `taskr config_files user`, `taskr plugin_discovery`, `taskr upper stdin` |
+| a profile selector variable | `taskr config_files user $TASKR_PROFILE` |
+| a shared schema | `definitions.Task.status` |
+| program-wide | `multicall`, `response_files`, `completion.messages_env`, `taskr help env`, `errors` |
+
+### Rules
+
+Rule IDs are stable; `diff.accept` entries name them. A rule's rating can depend on the direction
+or on what the old contract planned.
+
+| Rule | Change | Rating |
+|---|---|---|
+| `ROOT_RENAMED` | the program's name | breaking |
+| `ERRORS_CHANGED` | the error-line schema (another rotini release) | safe |
+| `MULTICALL_NO_DELETE`, `MULTICALL_CHANGED`, `MULTICALL_ADDED` | dispatch on the invoked name removed, its prefix or completion name changed, or added | breaking, breaking, safe |
+| `TOPIC_REMOVED`, `TOPIC_ADDED` | a help topic | possibly breaking, safe |
+| `COMPLETION_ENV_REMOVED`, `COMPLETION_ENV_CHANGED`, `COMPLETION_ENV_ADDED` | a completion switch variable | possibly breaking, possibly breaking, safe |
+| `RESPONSE_FILES_ADDED`, `RESPONSE_FILES_PREFIX_CHANGED`, `RESPONSE_FILES_REMOVED` | response files | breaking, breaking, possibly breaking |
+| `COMMAND_NO_DELETE` | a command removed | breaking; expected when planned; possibly breaking when it was hidden |
+| `COMMAND_REPLACED` | a command removed for the `replaced_by` it named | expected |
+| `COMMAND_RENAMED_ALIAS_KEPT` | renamed, the old name kept as an alias | safe |
+| `COMMAND_ADDED`, `PLUGIN_ADDED` | a command or plugin added | safe |
+| `PLUGIN_NO_DELETE` | a declared plugin removed | breaking |
+| `COMMAND_HIDDEN`, `COMMAND_UNHIDDEN` | a command hidden or shown | possibly breaking, safe |
+| `ALIAS_NO_DELETE`, `HIDDEN_ALIAS_NO_DELETE` | an alias removed | breaking; expected when planned |
+| `ALIAS_ADDED`, `HIDDEN_ALIAS_ADDED`, `ALIAS_MOVED` | an alias added, or moved between listed and hidden | safe |
+| `OPTIONS_FIRST_CHANGED`, `COMMAND_PASSTHROUGH_CHANGED` | how the command line is read | breaking |
+| `DIGIT_FLAG_ADDED` | a flag like `-4` on a command with arguments | possibly breaking |
+| `FLAG_GROUP_ADDED`, `FLAG_GROUP_TIGHTENED` | a flag group added, or accepting fewer command lines | breaking |
+| `FLAG_GROUP_REMOVED`, `FLAG_GROUP_LOOSENED` | a flag group removed, or accepting more | safe |
+| `FLAG_DEPENDENCY_ADDED`, `FLAG_DEPENDENCY_TIGHTENED` | a dependency added; `requires` or `forbids` grown, `equals` widened | breaking |
+| `FLAG_DEPENDENCY_REMOVED`, `FLAG_DEPENDENCY_LOOSENED` | a dependency removed; `requires` or `forbids` shrunk, `equals` narrowed | safe |
+| `CONFIG_FILE_NO_DELETE`, `CONFIG_FILE_MOVED`, `CONFIG_FILE_AS_CHANGED` | a config file removed, moved (path, discovery, format), or read as variables | breaking |
+| `CONFIG_FILE_ADDED` | a config file added | safe |
+| `PLUGIN_DISCOVERY_NO_DELETE`, `PLUGIN_DISCOVERY_PREFIX_CHANGED`, `PLUGIN_DISCOVERY_ADDED` | plugin discovery | breaking, breaking, safe |
+| `STDIN_ADDED` | starts reading stdin | possibly breaking |
+| `STDIN_NO_DELETE`, `STDIN_FORMAT_CHANGED`, `STDIN_REQUIRED_ADDED`, `STDIN_TYPE_CHANGED`, `STDIN_SEPARATOR_CHANGED` | stdin removed, or read differently | breaking |
+| `STDIN_REQUIRED_REMOVED` | stdin no longer required | safe |
+| `STDIN_UNLESS_ARGUMENT_CHANGED` | the argument that replaces stdin | possibly breaking |
+| `OUTPUT_NO_DELETE`, `OUTPUT_STREAM_CHANGED` | an output removed, or a stream turned on or off | breaking |
+| `OUTPUT_ADDED` | an output declared | safe |
+| `EXIT_STATUS_NO_DELETE`, `EXIT_SUMMARY_CHANGED`, `EXIT_NAME_CHANGED`, `EXIT_RETRYABLE_REMOVED` | an exit status removed, reworded, renamed, or no longer retryable | possibly breaking |
+| `EXIT_STATUS_ADDED`, `EXIT_NAME_ADDED`, `EXIT_RETRYABLE_ADDED` | an exit status added, named, or now retryable | safe |
+| `DEPRECATION_ADDED`, `DEPRECATION_CHANGED`, `DEPRECATION_REMOVED`, `LIFECYCLE_CHANGED`, `REPLACED_BY_CHANGED` | deprecation, planned removal and replacement | safe |
+| `STABILITY_PROMOTED`, `STABILITY_DEMOTED` | stability | safe, possibly breaking |
+| `FLAG_NO_DELETE` | a flag removed | breaking; expected when planned; possibly breaking when it was hidden |
+| `FLAG_REPLACED` | a flag removed for the `replaced_by` it named | expected |
+| `FLAG_ADDED`, `FLAG_REQUIRED_ADDED` | a flag added, optional or required (a short-circuit flag is never required) | safe, breaking |
+| `FLAG_REQUIRED_REMOVED` | no longer required | safe |
+| `FLAG_NAME_CHANGED` | the logical name, same identifiers | possibly breaking |
+| `FLAG_IDENTIFIER_NO_DELETE`, `FLAG_HIDDEN_IDENTIFIER_NO_DELETE`, `FLAG_NEGATED_NO_DELETE` | an identifier or a negated form removed | breaking; expected when planned |
+| `FLAG_IDENTIFIER_ADDED`, `FLAG_HIDDEN_IDENTIFIER_ADDED`, `FLAG_IDENTIFIER_MOVED`, `FLAG_NEGATED_ADDED` | an identifier or negated form added, or moved | safe |
+| `FLAG_NO_LONGER_CASCADES`, `FLAG_CASCADES` | sub-commands stop or start accepting it | breaking, safe |
+| `FLAG_SHORT_CIRCUIT_REMOVED`, `FLAG_SHORT_CIRCUIT_ADDED` | it waives the command's requirements | possibly breaking, safe |
+| `FLAG_REPEAT_FORBIDDEN`, `FLAG_REPEAT_ALLOWED` | giving it twice | breaking, safe |
+| `FLAG_ROLE_ADDED`, `FLAG_ROLE_CHANGED` | a `role` declared, or changed or removed (declaring `chdir` counts as a change) | safe, possibly breaking |
+| `FLAG_ROLE_VALUE_CHANGED` | the `role_value` that selects JSON | safe when added, possibly breaking when changed or removed |
+| `ARGUMENT_NO_DELETE` | an argument removed | breaking; expected when planned |
+| `ARGUMENT_ADDED`, `ARGUMENT_REQUIRED_ADDED`, `ARGUMENT_REQUIRED_REMOVED` | an optional one added at the end; a required one added, or now required; no longer required | safe, breaking, safe |
+| `ARGUMENT_NAME_CHANGED`, `ARGUMENT_VARIADIC_ADDED`, `ARGUMENT_GLOB_CHANGED` | renamed, now variadic, or patterns expanded on Windows | possibly breaking |
+| `ARGUMENT_VARIADIC_REMOVED`, `ARGUMENT_PASSTHROUGH_CHANGED` | no longer variadic, or raw words start elsewhere | breaking |
+| `ENV_NO_DELETE`, `ENV_VARIABLE_NO_DELETE`, `ENV_REQUIRED_ADDED`, `ENV_NESTING_CHANGED` | a variable removed or renamed, now required, or nested differently | breaking |
+| `ENV_ADDED`, `ENV_VARIABLE_ADDED`, `ENV_REQUIRED_REMOVED` | a variable added, or no longer required | safe |
+| `CONFIG_NO_DELETE`, `CONFIG_MOVED`, `CONFIG_REQUIRED_ADDED` | a config key removed, moved to another file, or now required | breaking |
+| `CONFIG_ADDED`, `CONFIG_REQUIRED_REMOVED` | a config key added, or no longer required | safe |
+| `INPUT_TYPE_CHANGED`, `INPUT_TYPE_WIDENED`, `INPUT_TYPE_NOW_DESCRIBED` | an input's type narrowed or changed (`int` → `int8`, `[]int` → `int`), widened, or newly stated where it was open | breaking, safe, safe |
+| `INPUT_KIND_CHANGED`, `INPUT_SEPARATOR_CHANGED` | how the value is supplied or split | breaking |
+| `INPUT_FROM_NO_DELETE`, `INPUT_FROM_ADDED` | where a typed value may come from (`@file`, `-`) | breaking, possibly breaking |
+| `INPUT_IMPLICIT_VALUE_ADDED`, `INPUT_IMPLICIT_VALUE_REMOVED`, `INPUT_IMPLICIT_VALUE_CHANGED` | an optional value | breaking, breaking, possibly breaking |
+| `INPUT_IGNORE_CASE_REMOVED`, `INPUT_IGNORE_CASE_ADDED` | enum case matching | breaking, safe |
+| `INPUT_LAYOUT_NO_DELETE`, `INPUT_LAYOUT_ADDED`, `INPUT_LAYOUT_FIRST_CHANGED` | time layouts | breaking, safe, possibly breaking |
+| `INPUT_RELATIVE_ADDED`, `INPUT_RELATIVE_CHANGED`, `INPUT_RELATIVE_TO_CHANGED` | relative times, or what relative paths resolve against | safe, breaking, breaking |
+| `INPUT_EXPAND_ADDED`, `INPUT_EXPAND_REMOVED` | `~` or `$VAR` expansion | possibly breaking, breaking |
+| `INPUT_VALUES_FROM_ADDED`, `INPUT_VALUES_FROM_REMOVED`, `INPUT_VALUES_FROM_CHANGED` | an enum that follows output fields | breaking, safe, possibly breaking |
+| `INPUT_ENV_NO_DELETE`, `INPUT_ENV_ADDED`, `INPUT_CONFIG_KEY_CHANGED`, `INPUT_CONFIG_KEY_ADDED`, `INPUT_VARIABLE_FILE_NO_DELETE`, `INPUT_VARIABLE_FILE_ADDED` | a fallback variable, config key or file variable | breaking when removed or renamed, safe when added |
+| `INPUT_CONFIG_SOURCE_CHANGED`, `INPUT_DOTTED_KEYS_CHANGED` | where a config path comes from, or how dotted keys nest | breaking |
+| `INPUT_SECRET_CHANGED` | the value is or isn't a secret | safe |
+| `INPUT_HIDDEN`, `INPUT_UNHIDDEN` | an input hidden or shown | possibly breaking, safe |
+| `INPUT_DEFAULT_CHANGED`, `INPUT_DEFAULT_REMOVED`, `INPUT_DEFAULT_ADDED` | a default | possibly breaking, possibly breaking, safe |
+| `INPUT_ENUM_ADDED`, `INPUT_ENUM_REMOVED` | an input limited to a set of values, or no longer | breaking, safe |
+| `ENUM_VALUE_NO_DELETE`, `ENUM_VALUE_REPLACED`, `ENUM_VALUE_ADDED` | an input enum value removed, removed for its `replaced_by`, or added | breaking (expected when planned), expected, safe |
+| `ENUM_ALIAS_NO_DELETE`, `ENUM_ALIAS_ADDED` | an enum value's alias | breaking, safe |
+| `ENUM_VALUE_HIDDEN`, `ENUM_VALUE_UNHIDDEN` | an enum value hidden or shown | possibly breaking, safe |
+| `INPUT_BOUND_ADDED`, `INPUT_BOUND_NARROWED`, `INPUT_BOUND_WIDENED`, `INPUT_BOUND_REMOVED` | bounds, lengths, item counts, `multipleOf`, `uniqueItems` | breaking, breaking, safe, safe |
+| `INPUT_PATTERN_ADDED`, `INPUT_PATTERN_CHANGED`, `INPUT_PATTERN_REMOVED` | a pattern | breaking, possibly breaking, safe |
+| `INPUT_FORMAT_CHANGED`, `INPUT_FORMAT_REMOVED` | a JSON Schema `format` | possibly breaking, safe |
+| `INPUT_PROPERTY_REQUIRED_ADDED`, `INPUT_PROPERTY_NO_DELETE`, `INPUT_ADDITIONAL_PROPERTIES_REMOVED` | an object input: a property now required, removed while unknown ones are refused, or unknown ones now refused | breaking |
+| `INPUT_PROPERTY_ADDED` | an optional property added | safe |
+| `SCHEMA_COMPOSITION_CHANGED` | a different number of `anyOf`, `oneOf` or `allOf` branches | possibly breaking |
+| `OUTPUT_TYPE_CHANGED`, `OUTPUT_PROPERTY_NO_DELETE`, `OUTPUT_PROPERTY_REQUIRED_REMOVED` | an output value's type, a property removed, or no longer always written | breaking |
+| `OUTPUT_PROPERTY_ADDED`, `OUTPUT_ENUM_ADDED`, `OUTPUT_ENUM_VALUE_REMOVED` | a property added; an output value limited to fewer values | safe |
+| `OUTPUT_ENUM_VALUE_ADDED`, `OUTPUT_ENUM_REMOVED` | an output value that may now be something new | possibly breaking |
+| `EFFECTS_ADDED`, `EFFECTS_REMOVED` | a command's or flag's `effects` declared, or no longer declared (agents then assume the worst) | safe, possibly breaking |
+| `EFFECTS_RAISED`, `EFFECTS_LOWERED` | a riskier kind, no longer idempotent or no longer local; or the reverse | possibly breaking, safe |
+| `AGENT_REMOVED`, `AGENT_ADDED` | a command or input kept from AI agents (`agent: false`, or `agent: true` dropped); or offered again | possibly breaking, safe |
+| `PROFILES_ADDED` | a config file gains profiles | safe; possibly breaking with a `default`, which a run that selects none now reads |
+| `PROFILES_NO_DELETE`, `PROFILES_UNDER_CHANGED` | profiles no longer read, or read under another key | breaking |
+| `PROFILES_FLAG_NO_DELETE`, `PROFILES_ENV_NO_DELETE` | a flag or variable no longer selects a profile | breaking |
+| `PROFILES_FLAG_ADDED`, `PROFILES_ENV_ADDED` | a flag or variable now selects a profile | safe |
+| `PROFILES_DEFAULT_CHANGED` | the profile a run reads when none is selected | possibly breaking |
 
 ## Composing CLIs
 

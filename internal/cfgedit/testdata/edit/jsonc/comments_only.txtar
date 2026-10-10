@@ -1,0 +1,9 @@
+-- in --
+// nothing yet
+-- op --
+set a 1
+-- out --
+// nothing yet
+{
+  "a": 1
+}

@@ -27,14 +27,15 @@ var definition = rotini.Definition{
 			Handler: "DemoBuild",
 			Summary: "build the target",
 			Flags: []rotini.FlagDef{
-				{Name: "out", Identifiers: []string{"--out", "-o"}, Summary: "output path", Type: "string"},
+				{Name: "out", Identifiers: []string{"--out", "-o"}, Summary: "output path", Type: "string", Effects: &rotini.Effects{Kind: "destructive", OpenWorld: new(false)}},
 				{Name: "sort-by", Identifiers: []string{"--sort-by"}, Summary: "ordering", Type: "string"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "target", Type: "string"},
 			},
-			Inputs: reflect.TypeFor[DemoBuildInputs](),
-			Usage:  "demo build [flags] [target]",
+			Inputs:  reflect.TypeFor[DemoBuildInputs](),
+			Usage:   "demo build [flags] [target]",
+			Effects: &rotini.Effects{Kind: "write", Idempotent: new(true)},
 		},
 	},
 }

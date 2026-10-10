@@ -1,0 +1,20 @@
+-- in --
+version: 1.0.0
+command:
+  commands:
+    - summary: &s shared summary
+      name: a
+    - name: b
+      summary: *s
+  name: tool
+  description: x
+-- out --
+version: 1.0.0
+command:
+  name: tool
+  description: x
+  commands:
+    - name: a
+      summary: &s shared summary
+    - name: b
+      summary: *s

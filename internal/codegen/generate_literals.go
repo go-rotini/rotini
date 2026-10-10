@@ -48,6 +48,7 @@ func renderDefinition(gp *program) string {
 	b.WriteString(inputsTypeLiteral(gp.rootPascal + "Inputs"))
 	b.WriteString(exitStatusLiteral(gp.rootHelp.ExitStatus))
 	fmt.Fprintf(&b, "Usage: %q,\n", rootUsage(gp))
+	b.WriteString(effectsField(gp.rootHelp.Effects))
 	b.WriteString(multicallLiteral(gp))
 	if cl := rnodesLiteral(gp.rootName, gp.rootDisplay, gp.tree, gp.schemas); cl != "" {
 		fmt.Fprintf(&b, "Commands: %s,\n", cl)
@@ -118,6 +119,7 @@ func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile
 		if c, ok := pathFrom[f.Name]; ok {
 			renderPathFrom(b, c)
 		}
+		renderProfiles(b, gp, f)
 		b.WriteString("},\n")
 	}
 	b.WriteString("},\n")
@@ -297,6 +299,7 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if f.Role != "" {
 			fmt.Fprintf(b, ", Role: %q", f.Role)
 		}
+		b.WriteString(flagEffectsField(f.Effects))
 	})
 }
 
@@ -537,6 +540,7 @@ func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Sc
 		b.WriteString(inputsTypeLiteral(n.inputsType))
 		b.WriteString(exitStatusLiteral(n.help.ExitStatus))
 		fmt.Fprintf(b, "Usage: %q,\n", nodeUsage(invocation, n))
+		b.WriteString(effectsField(n.help.Effects))
 		if cl := rnodesLiteral(host, usageInvocation(invocation, n), n.children, schemas); cl != "" {
 			fmt.Fprintf(b, "Commands: %s,\n", cl)
 		}

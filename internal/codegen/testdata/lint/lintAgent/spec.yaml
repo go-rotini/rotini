@@ -1,0 +1,60 @@
+# `agent` keys that change nothing.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    # Correct: each brings back something left out by default. No problem.
+    - name: exec
+      passthrough: true
+      agent: true
+      arguments:
+        - name: argv
+          schema: { type: '[]string' }
+    - name: old
+      deprecated: use new
+      agent: true
+      flags:
+        - name: token
+          agent: true
+          schema: { type: string, secret: true, from: [stdin] }
+        - name: spec
+          agent: true
+          schema: { type: string, from: [file] }
+      env:
+        - name: debug
+          hidden: true
+          agent: true
+          schema: { type: bool }
+    # Each of these is offered to agents already.
+    - name: list
+      agent: true
+      flags:
+        - name: limit
+          agent: true
+          schema: { type: int }
+      arguments:
+        - name: filter
+          agent: true
+          schema: { type: string }
+      env:
+        - name: home
+          agent: true
+          schema: { type: string }
+      config:
+        - name: color
+          agent: true
+          schema: { type: bool }
+    # A subtree kept from agents can't be opted back into from below.
+    - name: admin
+      agent: false
+      commands:
+        - name: reset
+          agent: true
+    # The directory flag and the JSON switch are never tool parameters.
+    - name: build
+      output: { type: object, properties: { id: { type: integer } } }
+      flags:
+        - name: json
+          role: machine-output
+          agent: true
+          schema: { type: bool }

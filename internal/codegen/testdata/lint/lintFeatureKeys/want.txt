@@ -1,0 +1,7 @@
+conf: .rotini.conf.yaml:11:7: generate.features.help.targets: `targets` applies only to the tools feature; move it there or remove it
+conf: .rotini.conf.yaml:15:7: generate.features.tools.embed: tools writes files for agents into the repository, not into the binary; `embed` and `embed_dir` don't apply, so remove them (use `file` to choose where they go)
+conf: .rotini.conf.yaml:15:7: generate.features.tools.go: puts mcp.json in the generated code, but `targets` doesn't include mcp; add mcp or remove `go`
+conf: .rotini.conf.yaml:25:7: generate.features.llms.file: "../llms.txt" must resolve under the module root
+warning: conf: .rotini.conf.yaml:21:7: generate.features.skill.type: the skill's references/ folder holds the markdown pages, but the markdown feature is off, so the skill has none; turn markdown on (it needn't embed)
+warning: conf: .rotini.conf.yaml:25:7: generate.features.llms.base_url: llms.txt links each command to its markdown page, but without `base_url` the links are relative and the markdown feature doesn't write its pages (it needs `enabled: true` and `embed: true`); set `base_url` to where the pages are published
+warning: conf: .rotini.conf.yaml:29:7: generate.features.permissions.template: permissions is built from the contract and has no editable template; `template` and `template_dir` have no effect here

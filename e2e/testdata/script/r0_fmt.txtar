@@ -1,0 +1,111 @@
+# R0 — `rotini fmt` rewrites a spec and conf in canonical form and keeps every comment and
+# value; `--check` is the CI signal.
+#
+# Exit codes: 0 when every file is formatted, 2 from --check when one isn't (listed on stderr),
+# 1 for an error such as a file it can't format.
+
+gomodinit example.com/demo
+
+# ── --check finds the untidy files and changes nothing ────────────────────────
+wantexit 2 rotini fmt --check
+stdout '^spec: \.rotini\.spec\.yaml$'
+stderr '^would reformat \.rotini\.spec\.yaml$'
+stderr '^would reformat \.rotini\.conf\.yaml$'
+stderr '^check: 2 files not formatted$'
+cmp .rotini.spec.yaml before.spec.yaml
+
+# ── fmt rewrites them ─────────────────────────────────────────────────────────
+exec rotini fmt
+stdout '^formatted \.rotini\.spec\.yaml$'
+stdout '^formatted \.rotini\.conf\.yaml$'
+cmp .rotini.spec.yaml want.spec.yaml
+cmp .rotini.conf.yaml want.conf.yaml
+
+# Formatting is idempotent, and the result still validates.
+exec rotini fmt
+! stdout formatted
+exec rotini fmt --check
+! stderr .
+exec rotini validate
+! stderr .
+
+# ── a composed command's file, named explicitly ───────────────────────────────
+exec rotini fmt child.yaml
+stdout '^formatted child\.yaml$'
+cmp child.yaml want.child.yaml
+
+# ── what it can't format is an error ──────────────────────────────────────────
+wantexit 1 rotini fmt app.json
+stderr 'app\.json: formatting JSON files isn''t supported yet'
+wantexit 1 rotini fmt --check multi.yaml
+stderr 'more than one YAML document'
+! stderr 'would reformat'
+
+-- .rotini.spec.yaml --
+# yaml-language-server: $schema=./schema.json
+command:
+    # sub-commands
+    commands:
+      - summary: say hello
+        name: greet # the greeting
+        flags:
+          - schema: { type: string, default: world }
+            identifiers: [--name]
+            name: name
+    description: |
+        A demo program.
+          Indented text stays.
+    name: demo
+version: 0.0.0
+-- before.spec.yaml --
+# yaml-language-server: $schema=./schema.json
+command:
+    # sub-commands
+    commands:
+      - summary: say hello
+        name: greet # the greeting
+        flags:
+          - schema: { type: string, default: world }
+            identifiers: [--name]
+            name: name
+    description: |
+        A demo program.
+          Indented text stays.
+    name: demo
+version: 0.0.0
+-- want.spec.yaml --
+# yaml-language-server: $schema=./schema.json
+version: 0.0.0
+command:
+  name: demo
+  description: |
+    A demo program.
+      Indented text stays.
+  # sub-commands
+  commands:
+    - name: greet # the greeting
+      summary: say hello
+      flags:
+        - name: name
+          identifiers: [--name]
+          schema: { type: string, default: world }
+-- .rotini.conf.yaml --
+validate:
+  fail: collect
+version: 0.0.0
+-- want.conf.yaml --
+version: 0.0.0
+validate:
+  fail: collect
+-- child.yaml --
+summary: a composed command
+name: child
+-- want.child.yaml --
+name: child
+summary: a composed command
+-- app.json --
+{"version": "0.0.0"}
+-- multi.yaml --
+version: 0.0.0
+---
+version: 0.0.0

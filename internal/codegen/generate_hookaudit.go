@@ -74,7 +74,7 @@ func (p *program) auditHooks() error {
 		return nil
 	}
 
-	p.auditWarnings = nearMissHooks(fset, files, handlerTypes, p.module.root)
+	p.auditWarnings = append(p.auditWarnings, nearMissHooks(fset, files, handlerTypes, p.module.root)...)
 
 	expected, known := p.inputsTypeExpectations()
 	p.auditWarnings = append(p.auditWarnings, wrongInputsTypes(fset, files, expected, known, p.module.root)...)

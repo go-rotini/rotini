@@ -36,6 +36,7 @@ command:
   commands:
     - name: deploy
       summary: deploy it
+      effects: { kind: write, idempotent: true, open_world: true }
       config_files:
         - name: deploy
           path: ./deploy.yaml
@@ -55,6 +56,11 @@ command:
           summary: where
           identifiers: [--region]
           schema: { type: string, key: region, variable: DEPLOY_REGION }
+        - name: prune
+          summary: remove old releases
+          identifiers: [--prune]
+          effects: { kind: destructive, idempotent: false }
+          schema: { type: bool }
       commands:
         - name: canary
           summary: a canary deploy

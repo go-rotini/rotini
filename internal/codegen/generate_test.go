@@ -237,6 +237,7 @@ command:
   commands:
     - name: build
       summary: build the target
+      effects: {kind: write, idempotent: true}
       arguments:
         - name: target
           summary: what to build
@@ -245,6 +246,7 @@ command:
         - name: out
           summary: output path
           identifiers: [--out, -o]
+          effects: {kind: destructive, open_world: false}
           schema: {type: string}
         # A flag whose env fallback is derived from a recon key with an underscore inside a
         # segment — the same defect on the flag channel.

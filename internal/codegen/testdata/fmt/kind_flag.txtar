@@ -1,0 +1,8 @@
+-- kind --
+command
+-- in --
+summary: a child
+name: child
+-- out --
+name: child
+summary: a child

@@ -164,9 +164,12 @@ func readsEnv(v reflect.Value) bool {
 }
 
 // envPathSource reports whether a configuration file in scope takes its path from an
-// environment variable (config_source on an env input).
+// environment variable (config_source on an env input), or its profile (a profile selector's
+// variables).
 func (b *InputReader) envPathSource(chain []Command) bool {
-	return slices.ContainsFunc(b.chainConfigFiles(chain), func(f ConfigFile) bool { return f.PathFrom != nil && f.PathFrom.Env != "" })
+	return slices.ContainsFunc(b.chainConfigFiles(chain), func(f ConfigFile) bool {
+		return (f.PathFrom != nil && f.PathFrom.Env != "") || (f.Profiles != nil && f.Profiles.Env != "")
+	})
 }
 
 // readDotenv reads one .env file into a layer, or nil when the file is absent.
@@ -207,6 +210,9 @@ func (b *InputReader) readDotenv(f ConfigFile, overrides map[string]string, waiv
 // An empty variable counts as unset.
 func resolveFileVars(v reflect.Value, view *osView, waived bool) (map[string]envValue, error) {
 	out := map[string]envValue{}
+	if v.Kind() != reflect.Struct {
+		return out, nil
+	}
 	var firstErr error
 	visit := func(channel string, f reflect.StructField) {
 		file := f.Tag.Get("envfile")

@@ -2,6 +2,8 @@
 
 deploy it
 
+Effects: write, idempotent, open world
+
 ## Usage
 
 ```
@@ -21,6 +23,7 @@ app deploy [flags] <command> <target> [stage]
 
 - `-r, --replicas` `int` — how many (default `1`); also set by `APP_DEPLOY_REPLICAS` or config key `deploy.replicas`
 - `--region` `string` — where; also set by `DEPLOY_REGION` or config key `region`
+- `--prune` — remove old releases (destructive, not idempotent)
 
 ## Global Flags
 

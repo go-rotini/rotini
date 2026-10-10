@@ -162,9 +162,9 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 // JSON object per line, and leaves stdout alone, so a partial result there is never
 // interleaved with an error:
 //
-//	{"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"missing required input: <title>"}}
-//	{"error":{"candidates":["add","list","done"],"category":"usage","command":"taskr","exit_code":1,"kind":"unknown-command","message":"unknown command \"lst\" for \"taskr\"","token":"lst"}}
-//	{"warning":{"command":"taskr list","message":"the cache is stale"}}
+//	{"schema_version":1,"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"missing required input: <title>"}}
+//	{"schema_version":1,"error":{"candidates":["add","list","done"],"category":"usage","command":"taskr","exit_code":1,"kind":"unknown-command","message":"unknown command \"lst\" for \"taskr\"","token":"lst"}}
+//	{"schema_version":1,"warning":{"command":"taskr list","message":"the cache is stale"}}
 //
 // Infos and successes are written the same way, as {"info":{…}} and {"success":{…}}. A field
 // is present only when rotini knows it: kind, flag and token come from a [*ParseError], kind
@@ -195,6 +195,10 @@ func StructuredReporter(structured func(rtx *Context) bool) Reporter {
 }
 
 // reportStructured writes the outcome as JSON lines on stderr.
+// structuredSchemaVersion is the version of StructuredReporter's line format, written first on
+// every line. It changes only when a line's shape changes in a way that breaks a reader.
+const structuredSchemaVersion = 1
+
 func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 	// A non-zero code a handler set is kept, as in the default reporter.
 	errs, exitCode := settleReported(ctx, rtx, out)
@@ -250,11 +254,13 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 		lines = append(lines, message("success", s))
 	}
 	for _, line := range lines {
-		b, err := json.Marshal(line)
-		if err != nil {
-			continue // unreachable: every value is a string, an int or a []string
+		for kind, body := range line { // one kind per line
+			b, err := json.Marshal(body)
+			if err != nil {
+				continue // unreachable: every value is a string, an int or a []string
+			}
+			fmt.Fprintf(rtx.Stderr, "{\"schema_version\":%d,%q:%s}\n", structuredSchemaVersion, kind, b)
 		}
-		fmt.Fprintf(rtx.Stderr, "%s\n", b)
 	}
 }
 

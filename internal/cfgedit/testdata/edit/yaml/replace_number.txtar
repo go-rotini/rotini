@@ -1,0 +1,46 @@
+-- in --
+# config for the app
+
+# deploy settings
+deploy:
+  # how long a deploy may take
+  timeout: 5m # line comment
+  region: 'us-east-1'
+  retries: 3
+  notes: |
+    first line
+    second line
+  # foot of deploy
+
+# logging
+log:
+  level: info
+  file: "/var/log/app.log"
+servers:
+  - a
+  - b
+# end
+-- op --
+set deploy.retries 7
+-- out --
+# config for the app
+
+# deploy settings
+deploy:
+  # how long a deploy may take
+  timeout: 5m # line comment
+  region: 'us-east-1'
+  retries: 7
+  notes: |
+    first line
+    second line
+  # foot of deploy
+
+# logging
+log:
+  level: info
+  file: "/var/log/app.log"
+servers:
+  - a
+  - b
+# end

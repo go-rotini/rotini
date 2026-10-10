@@ -1,0 +1,6 @@
+-- in --
+[1, 2]
+-- op --
+set a 1
+-- err --
+root must be an object

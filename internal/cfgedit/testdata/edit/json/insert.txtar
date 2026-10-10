@@ -1,0 +1,19 @@
+-- in --
+{
+  "deploy": {
+    "timeout": "5m",
+    "retries": 3
+  },
+  "log": "info"
+}
+-- op --
+set deploy.parallel false
+-- out --
+{
+  "deploy": {
+    "timeout": "5m",
+    "retries": 3,
+    "parallel": false
+  },
+  "log": "info"
+}

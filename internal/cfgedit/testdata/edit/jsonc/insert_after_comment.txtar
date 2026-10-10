@@ -1,0 +1,27 @@
+-- in --
+// app config
+{
+  // where to deploy
+  "deploy": {
+    "timeout": "5m", // line comment
+    "retries": 3,
+    "tags": ["a", "b"]
+  },
+  /* logging */
+  "log": {"level": "info"}
+}
+-- op --
+set deploy.parallel true
+-- out --
+// app config
+{
+  // where to deploy
+  "deploy": {
+    "timeout": "5m", // line comment
+    "retries": 3,
+    "tags": ["a", "b"],
+    "parallel": true
+  },
+  /* logging */
+  "log": {"level": "info"}
+}

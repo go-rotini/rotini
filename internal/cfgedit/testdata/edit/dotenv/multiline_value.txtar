@@ -1,0 +1,9 @@
+-- in --
+A="one
+two" # c
+B=1
+-- op --
+set A "x"
+-- out --
+A=x # c
+B=1

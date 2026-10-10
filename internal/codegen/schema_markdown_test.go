@@ -219,6 +219,7 @@ var commandKeyGroups = []struct {
 	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "groups", "header", "footer", "headings", "help", "man", "markdown", "topics"}},
 	{"Output and shared types", []string{"output", "output_stream", "schemas"}},
 	{"Generated code", []string{"filename"}},
+	{"Agents", []string{"effects", "agent"}},
 }
 
 // renderGroupedKeys renders the Command section under commandKeyGroups' headings.

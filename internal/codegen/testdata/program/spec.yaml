@@ -1,0 +1,161 @@
+version: 0.0.0
+command:
+  name: taskr
+  summary: keep a list of tasks
+  description: Taskr keeps a list of tasks in a file and syncs it with a server.
+  env_prefix: TASKR
+  flags:
+    - name: verbose
+      summary: say more
+      identifiers: [-v, --verbose]
+      cascading: true
+      schema: { type: count }
+    - name: dir
+      summary: run as if started in this directory
+      identifiers: [-C, --dir]
+      cascading: true
+      role: chdir
+      schema: { type: existingdir }
+    - name: help
+      summary: show help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  env:
+    - name: token
+      summary: the server token
+      schema: { type: string, required: true, secret: true, variable: TASKR_TOKEN }
+  schemas:
+    Task:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        done: { type: bool }
+  commands:
+    - name: add
+      summary: add a task
+      effects: { kind: write }
+      examples:
+        - taskr add "buy milk" --tag home
+      arguments:
+        - name: title
+          summary: what to do
+          schema: { type: string, required: true, minLength: 1 }
+      flags:
+        - name: tag
+          summary: tags for the task
+          identifiers: [-t, --tag]
+          schema: { type: '[]string', uniqueItems: true }
+        - name: priority
+          summary: how urgent it is
+          identifiers: [--priority]
+          stability: experimental
+          schema: { type: string, enum: [low, high], default: low }
+        - name: due
+          summary: when it is due
+          identifiers: [--due]
+          schema: { type: date }
+      output: { $ref: Task }
+      exit_status:
+        - { code: 3, name: duplicate, summary: a task with this title exists }
+    - name: list
+      summary: list tasks
+      aliases: [ls]
+      effects: { kind: read, idempotent: true }
+      flags:
+        - name: format
+          summary: the output format
+          identifiers: [--format]
+          role: machine-output
+          role_value: json
+          schema: { type: string, enum: [text, json], default: text }
+        - name: page
+          summary: the page token from the last call
+          identifiers: [--page]
+          role: page
+          schema: { type: string }
+        - name: label
+          summary: only tasks with these labels
+          identifiers: [--label]
+          schema: { type: 'map[string]string' }
+      output: { type: '[]Task' }
+    - name: purge
+      summary: delete finished tasks
+      effects: { kind: destructive, idempotent: true }
+      flags:
+        - name: dry-run
+          summary: list what would be deleted
+          identifiers: [--dry-run]
+          role: dry-run
+          schema: { type: bool }
+        - name: yes
+          summary: delete without asking
+          identifiers: [-y, --yes]
+          role: confirm
+          schema: { type: bool }
+      exit_status:
+        - { code: 75, name: busy, summary: the list is locked, retryable: true }
+    - name: import
+      summary: add tasks read from stdin
+      effects: { kind: write }
+      stdin:
+        format: json
+        schema: { type: '[]Task', required: true }
+    - name: remote
+      summary: work with the server
+      commands:
+        - name: sync
+          summary: sync with the server
+          effects: { kind: write, open_world: true }
+          flags:
+            - name: prune
+              summary: also delete tasks the server doesn't have
+              identifiers: [--prune]
+              effects: { kind: destructive }
+              schema: { type: bool }
+            - name: key
+              summary: a server key
+              identifiers: [--key]
+              schema: { type: string, secret: true, required: true, variable: TASKR_KEY, from: [stdin] }
+        - name: show
+          summary: show the server's address
+          effects: { kind: read }
+        - name: login
+          summary: log in with a key file
+          effects: { kind: write, open_world: true }
+          flags:
+            - name: keyfile
+              summary: the key, from a file
+              identifiers: [--keyfile]
+              schema: { type: string, required: true, from: [file] }
+    - name: exec
+      summary: run a command with the list's directory
+      passthrough: true
+      arguments:
+        - name: argv
+          summary: the command and its arguments
+          schema: { type: '[]string' }
+    - name: old
+      summary: an old way to list
+      deprecated: use list
+      effects: { kind: read }
+    - name: debug
+      summary: dump internal state
+      hidden: true
+      effects: { kind: read }
+    - name: admin
+      summary: administer the server
+      agent: false
+      commands:
+        - name: reset
+          summary: reset the server
+          effects: { kind: destructive }
+          flags:
+            - name: yes
+              summary: reset without asking
+              identifiers: [--yes]
+              role: confirm
+              schema: { type: bool }

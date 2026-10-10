@@ -65,6 +65,9 @@
                           or "" (stable), as declared. On the page itself: the command's
                           stability, inherited from its ancestors; stabilityNote .Stability
                           renders the line saying what it promises
+         .Effects        on the page: what running the command does, as declared ("destructive,
+                          not idempotent, open world"), "" when it declares none; on a flag
+                          row: what giving the flag adds ("destructive")
          .Topics[]        {.Name .Summary} — the help topics, on the root's page only
          .Headings.Topics resolved heading above .Topics
          .Topic           true on a help topic's page (`help <topic>`): .Summary and .Description
@@ -86,6 +89,9 @@
 
 {{end -}}
 {{- with .Stability}}{{stabilityNote .}}
+
+{{end -}}
+{{- with .Effects}}Effects: {{.}}
 
 {{end -}}
 {{- $usage := .Usage}}{{if not $usage}}{{$usage = .UsageDerived}}{{end -}}
@@ -112,7 +118,7 @@
 {{end -}}
 {{- range .FlagGroups}}{{if .Title}}{{.Title}}:{{else}}{{$.Headings.Flags}}{{end}}
 {{with .Description}}{{indent 2 .}}
-{{end}}{{range .Flags}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
+{{end}}{{range .Flags}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{with .Effects}} ({{.}}){{end}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
 {{end}}{{template "values" .}}{{end}}
 {{end -}}
@@ -125,7 +131,7 @@
 {{template "values" .}}{{end}}
 {{end -}}
 {{- with .Cascading}}{{$.Headings.Cascading}}
-{{range .}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
+{{range .}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{with .Effects}} ({{.}}){{end}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
 {{end}}{{template "values" .}}{{end}}
 {{end -}}

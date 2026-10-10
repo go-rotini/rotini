@@ -1,0 +1,35 @@
+{{- /* rotini llms.txt template (default — edit freely). It renders the program's llms.txt
+       (https://llmstxt.org): a title, a summary, and links to each command's markdown page.
+       After rendering, rotini trims trailing whitespace, collapses blank-line runs and ends
+       the file with a newline.
+
+       DATA:
+         .Name .Display .Summary .Description   the root command's name (the binary), the
+                          name pages show, and its summary and description
+         .BaseURL         where the markdown pages are published ("" when links are relative)
+         .Commands[]      the commands offered to agents, root first:
+                          {.Invocation .Summary .Description .Aliases .Effects .Kind .Stability
+                          .Deprecated .JSON .DryRun .Confirm .Examples .ExitStatus .Link};
+                          .Link is its markdown page, "" when there is none
+         .Optional[]      the other visible commands (groups, deprecated and passthrough
+                          commands), same shape
+         .Env[] .Config[] {.Name .Summary .Required .Secret .Commands}
+       HELPERS: quote, join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
+                indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
+# {{.Display}}
+{{with .Summary}}
+> {{.}}
+{{end}}
+{{with .Description}}{{.}}
+{{end}}
+## Commands
+
+{{range .Commands}}- {{if .Link}}[{{.Invocation}}]({{.Link}}){{else}}`{{.Invocation}}`{{end}}{{with .Summary}}: {{.}}{{end}}
+{{end}}
+{{- with .Optional}}
+
+## Optional
+
+{{range .}}- {{if .Link}}[{{.Invocation}}]({{.Link}}){{else}}`{{.Invocation}}`{{end}}{{with .Summary}}: {{.}}{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{- end}}

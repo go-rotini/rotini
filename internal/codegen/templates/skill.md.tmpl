@@ -1,0 +1,109 @@
+{{- /* rotini Agent Skills template (default — edit freely). It renders the program's
+       SKILL.md, the page an AI agent reads to learn how to use the CLI
+       (https://agentskills.io/specification). Keep it short: the format recommends under
+       500 lines, and the per-command details live in references/. After rendering, rotini
+       trims trailing whitespace, collapses blank-line runs and ends the page with a newline.
+
+       DATA:
+         .Name .Display .Summary .Description   the root command's name (the binary), the
+                          name pages show, and its summary and description
+         .SkillName       the skill's name, which is also its directory
+         .SkillDescription  the frontmatter description: the root's summary, then the
+                          feature's `description`
+         .AllowedTools    Claude Code rules for the read-only leaf commands ("" for none)
+         .Commands[]      the commands offered to agents, root first:
+                          {.Invocation .Summary .Description .Aliases .Effects .Kind .Stability
+                          .Deprecated .JSON .DryRun .Confirm .Examples .ExitStatus .Link}.
+                          .Effects is the worst case over the command and its flags, in words,
+                          and .Kind its kind (read, write, destructive, or "" when undeclared);
+                          .JSON is what to add for JSON output; .DryRun and .Confirm are flags;
+                          .ExitStatus rows are {.Code .Name .Summary .Retryable .DocsURL};
+                          .Link is its reference page, "" when the markdown feature is off
+         .Env[] .Config[] {.Name .Summary .Required .Secret .Commands} — what the commands read
+                          from the environment and config files
+         .JSON .Previews  some command has a JSON flag; some has a dry-run or confirm flag
+       HELPERS: quote (a YAML/JSON string), join, upper, lower, title, trim, trimPrefix,
+                trimSuffix, replace, indent, repeat, default, contains, hasPrefix, hasSuffix,
+                first, last. */ -}}
+---
+name: {{.SkillName}}
+description: {{quote .SkillDescription}}
+{{- with .AllowedTools}}
+allowed-tools: {{quote .}}
+{{- end}}
+---
+
+# {{.Display}}
+
+{{with .Description}}{{.}}{{else}}{{.Summary}}{{end}}
+
+## Commands
+
+{{range .Commands}}- `{{.Invocation}}`{{with .Summary}}: {{.}}{{end}}{{with .Effects}} ({{.}}){{end}}{{with .Stability}} ({{.}}){{end}}
+{{end}}
+## How to call it
+
+- Write the command's words first, then its flags: `{{.Name}} <command> [flags] [arguments]`. Permission rules match the start of the command line, so a flag written before the command can make a harmless call need approval.
+- Never wait for a prompt. A command that would ask for confirmation takes its confirm flag instead, listed below.
+{{- if .JSON}}
+- For output you can parse, add the command's JSON flag, listed below. It writes JSON to stdout; messages and errors go to stderr.
+{{- end}}
+{{- if .Previews}}
+- Before running a destructive command, run it with its dry-run flag to see what it would do.
+{{- end}}
+- Effects say what a command does: read changes nothing, write creates or changes things, and destructive deletes or overwrites what can't be got back. A command with no effects listed may do any of these.
+
+## Exit codes and errors
+
+- 0: success.
+- 1: an error: the command line or its inputs were wrong, a check failed, or the command failed. The message on stderr says which.
+- 128 + n: stopped by signal n (130 for Ctrl-C).
+- When the program writes structured errors, each is one JSON line on stderr, `{"schema_version":1,"error":{…}}`. Its `category` is `usage` (fix the command line and try again; `kind` says how: unknown-flag, unknown-command, needs-value, invalid-value, enum-violation, constraint-violation, missing-required, too-many-arguments, misplaced-flag), `internal` (a bug or misconfiguration; don't retry) or `none`. `candidates` lists the words a mistyped `token` was checked against.
+{{- with .Env}}
+
+## Environment
+
+{{range .}}- `{{.Name}}`{{with .Summary}}: {{.}}{{end}}{{if .Required}} (required){{end}}{{if .Secret}} (secret: set it in the environment; never write it on the command line){{end}}
+{{end}}
+{{- end}}
+{{- with .Config}}
+
+## Configuration
+
+{{range .}}- `{{.Name}}`{{with .Summary}}: {{.}}{{end}}{{if .Required}} (required){{end}}{{if .Secret}} (secret){{end}}
+{{end}}
+{{- end}}
+{{range .Commands}}
+## `{{.Invocation}}`
+
+{{with .Description}}{{.}}{{else}}{{.Summary}}{{end}}
+{{with .Aliases}}
+- Also: {{range $i, $a := .}}{{if $i}}, {{end}}`{{$a}}`{{end}}
+{{- end}}
+{{- with .Effects}}
+- Effects: {{.}}
+{{- end}}
+{{- with .Deprecated}}
+- Deprecated: {{.}}
+{{- end}}
+{{- with .JSON}}
+- JSON output: add `{{.}}`
+{{- end}}
+{{- with .DryRun}}
+- Preview: `{{.}}`
+{{- end}}
+{{- with .Confirm}}
+- Confirm without a prompt: `{{.}}`
+{{- end}}
+{{- range .ExitStatus}}
+- Exit {{.Code}}{{with .Name}} ({{.}}){{end}}{{with .Summary}}: {{.}}{{end}}{{if .Retryable}} (running it again may succeed){{end}}
+{{- end}}
+{{- with .Link}}
+- Reference: [{{.}}]({{.}})
+{{- end}}
+{{with .Examples}}
+```
+{{range .}}{{.}}
+{{end}}```
+{{end}}
+{{- end}}

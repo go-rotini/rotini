@@ -100,7 +100,9 @@
         "exit_status": { "type": "array", "items": { "$ref": "#/definitions/ExitStatus" } },
         "hidden_aliases": { "type": "array", "items": { "type": "string" }, "description": "More names that run the command but that help, completion and suggestions never list." },
         "replaced_by": { "type": "string", "description": "With `deprecated`: the command to use instead, as its command names below the root joined by spaces (\"purge\", \"remote add\")." },
-        "stability": { "$ref": "#/definitions/Stability", "description": "How settled the command is, as declared. Its inputs, sub-commands, output and exit codes are at most as stable as it is." }
+        "stability": { "$ref": "#/definitions/Stability", "description": "How settled the command is, as declared. Its inputs, sub-commands, output and exit codes are at most as stable as it is." },
+        "effects": { "$ref": "#/definitions/Effects", "description": "What running the command does, as declared. Absent says nothing: assume the worst (destructive, reaching outside the machine). Sub-commands don't inherit it; a flag's `effects` can raise it for a run that gives the flag." },
+        "agent": { "$ref": "#/definitions/Agent" }
       }
     },
     "Argument": {
@@ -134,7 +136,8 @@
         "relative_to": { "$ref": "#/definitions/RelativeTo" },
         "values_from": { "type": "string", "pattern": "^output(\\.[A-Za-z_][A-Za-z0-9_-]*)*$", "description": "The place in the command's output whose field names are this input's allowed values (`output`, `output.tasks`): the enum in its `schema` (on `items` for a list) lists them, sorted, and changes when the output's fields do." },
         "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
-        "stability": { "$ref": "#/definitions/Stability" }
+        "stability": { "$ref": "#/definitions/Stability" },
+        "agent": { "$ref": "#/definitions/Agent" }
       }
     },
     "Flag": {
@@ -173,7 +176,10 @@
         "repeatable": { "type": "boolean", "description": "false when giving the flag more than once on the command line is an error rather than the last value winning. Absent means repeats are accepted." },
         "relative": { "$ref": "#/definitions/Relative" },
         "variable_file": { "$ref": "#/definitions/VariableFile" },
-        "role": { "enum": ["force", "chdir", "fields", "sort"], "description": "What the flag means to a program driving the CLI. force: the bool flag that lets the command replace existing output files. fields: the list flag that chooses which output fields are written. sort: the flag that names the output field to sort by. These three change nothing at run time. chdir: the root flag naming the directory the run resolves relative paths and config discovery against, read from the command line only; a caller passes an absolute path, or one relative to its own directory." },
+        "role": { "enum": ["force", "chdir", "fields", "sort", "dry-run", "confirm", "machine-output", "page"], "description": "What the flag means to a program driving the CLI. force: the bool flag that lets the command replace existing output files. fields: the list flag that chooses which output fields are written. sort: the flag that names the output field to sort by. These three change nothing at run time. chdir: the root flag naming the directory the run resolves relative paths and config discovery against, read from the command line only; a caller passes an absolute path, or one relative to its own directory. dry-run: the bool flag that previews a run without changing anything. confirm: the bool flag that answers yes for a command that would otherwise refuse or prompt. machine-output: the flag that makes the command write its output as JSON, a bool flag or a string flag whose `role_value` selects JSON. page: the flag that selects a page of results." },
+        "role_value": { "type": "string", "description": "With role machine-output on a string flag: the value that selects JSON (`--format=json`)." },
+        "effects": { "$ref": "#/definitions/Effects", "description": "What giving the flag adds to its command's effects, as declared: a run's kind is the highest of its command's and every given flag's; it is idempotent only when every stated value is, and reaches outside the machine when any does. A cascading flag raises whichever command it is given to." },
+        "agent": { "$ref": "#/definitions/Agent" },
         "hidden_identifiers": { "type": "array", "items": { "type": "string" }, "description": "More identifiers the command line accepts for the flag, which help, completion and suggestions never list. A negatable flag's hidden long identifiers have unlisted --no- forms too." },
         "replaced_by": { "type": "string", "description": "With `deprecated`: the identifier of the flag to use instead (\"--output\")." },
         "flag_set": { "type": "string", "description": "The flag set the flag comes from, when the spec declares it once in a set that several commands use. The flag works like the command's own." },
@@ -212,7 +218,8 @@
         "expand": { "$ref": "#/definitions/Expand" },
         "relative_to": { "$ref": "#/definitions/RelativeTo" },
         "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
-        "stability": { "$ref": "#/definitions/Stability" }
+        "stability": { "$ref": "#/definitions/Stability" },
+        "agent": { "$ref": "#/definitions/Agent" }
       }
     },
     "Config": {
@@ -240,7 +247,8 @@
         "expand": { "$ref": "#/definitions/Expand" },
         "relative_to": { "$ref": "#/definitions/RelativeTo" },
         "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
-        "stability": { "$ref": "#/definitions/Stability" }
+        "stability": { "$ref": "#/definitions/Stability" },
+        "agent": { "$ref": "#/definitions/Agent" }
       }
     },
     "Stdin": {
@@ -350,7 +358,26 @@
             "file": { "type": "string", "description": "The file name looked for." }
           }
         },
-        "as": { "enum": ["env"], "description": "env: a dotenv file whose entries are environment variables, under the real environment (which wins); it supplies no config keys." }
+        "as": { "enum": ["env"], "description": "env: a dotenv file whose entries are environment variables, under the real environment (which wins); it supplies no config keys." },
+        "profiles": {
+          "type": "object",
+          "required": ["under", "select"],
+          "additionalProperties": false,
+          "description": "The file holds named profiles, one chosen per run. The chosen profile's keys win over the file's other top-level keys, which every profile shares.",
+          "properties": {
+            "under": { "type": "string", "description": "The top-level key holding the profiles." },
+            "select": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "What chooses the profile: the flag set on the command line, then the first set variable.",
+              "properties": {
+                "flag": { "type": "string", "description": "The selector flag's name." },
+                "env": { "type": "array", "items": { "type": "string" }, "description": "The variables read, first preferred." }
+              }
+            },
+            "default": { "type": "string", "description": "The profile used when nothing chooses one; without it, only the shared keys apply." }
+          }
+        }
       }
     },
     "PluginDiscovery": {
@@ -395,6 +422,20 @@
         "body": { "type": "string", "description": "The topic's text, when it is written in the spec." },
         "generate": { "enum": ["environment"], "description": "What the topic's text is built from, when it is generated. environment: every environment variable the program reads." }
       }
+    },
+    "Effects": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["read", "write", "destructive"], "description": "read: changes nothing. write: creates or changes things. destructive: deletes or overwrites what can't be got back." },
+        "idempotent": { "type": "boolean", "description": "Whether running it again with the same inputs changes nothing more. Absent says nothing." },
+        "open_world": { "type": "boolean", "description": "Whether it reaches the network or other systems outside the machine. Absent says nothing: assume it does." }
+      }
+    },
+    "Agent": {
+      "type": "boolean",
+      "description": "As declared: true offers the item to AI agents (tool exports, the agent skill page, permission snippets) where it would be left out by default; false keeps it, and a command's sub-commands, from them. Absent follows the defaults."
     }
   }
 }

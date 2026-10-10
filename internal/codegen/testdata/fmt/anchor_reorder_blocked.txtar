@@ -1,0 +1,10 @@
+-- in --
+version: 1.0.0
+command:
+  summary: &n tool
+  name: *n
+-- out --
+version: 1.0.0
+command:
+  summary: &n tool
+  name: *n

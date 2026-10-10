@@ -647,27 +647,33 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 		return nil, nil, err
 	}
 	view := rtx.osView()
-	overrides := map[string]string{}
+	boot := fileBootstrap{paths: map[string]string{}}
 	waived := false
 	store, perr := parseInto(chain, rtx.Argv, rtx.argvAcq())
 	if perr == nil {
-		overrides = b.pathOverrides(chain, store, view)
+		boot.paths = b.pathOverrides(chain, store, view)
 		waived = shortCircuited(chain, store)
 	}
-	if view, err = b.inputView(chain, v, overrides, waived, view); err != nil {
+	if view, err = b.inputView(chain, v, boot.paths, waived, view); err != nil {
 		return nil, nil, err
 	}
-	if perr == nil && view.hasInputEnv() {
-		overrides = b.pathOverrides(chain, store, view)
+	if perr == nil {
+		if view.hasInputEnv() {
+			boot.paths = b.pathOverrides(chain, store, view)
+		}
+		boot.profiles = b.profileChoices(chain, store, view)
 	}
 	var reg *recon.Registry
 	var cfg *cfgRegs
 	if hasConfigChannel(v) || (v.Kind() == reflect.Struct && hasReconFlags(v)) {
-		if cfg, err = b.configRegs(chain, overrides, v, waived, view); err != nil {
+		if cfg, err = b.configRegs(chain, boot, v, waived, view); err != nil {
 			return nil, nil, err
 		}
 		defer cfg.Close()
 		reg = cfg.merged
+		if err := b.checkProfiles(v, chain, boot, waived, view); err != nil {
+			return nil, nil, err
+		}
 	}
 	anchor, err := layerAnchor(rtx, v, chain)
 	if err != nil {
@@ -702,6 +708,9 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 		}
 		if flagReg != nil {
 			rd := fallbackRead{view: view, waiveFiles: waived, files: labels.files}
+			if cfg != nil {
+				rd.selectors = cfg.boot.selectorFlags(cfg.files)
+			}
 			if err := recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg, rd); err != nil {
 				bindErr = err
 				return
@@ -813,7 +822,7 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 			return
 		}
 		key := reconKey(tag.Get("recon"))
-		if key == "" {
+		if _, selector := rd.selectors[logical]; key == "" || selector {
 			return
 		}
 		fd, _ := findFlagDef(chain[scope].Flags, logical)

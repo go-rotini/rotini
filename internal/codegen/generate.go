@@ -93,6 +93,14 @@ type program struct {
 	// (generate.contract.go), set by emitContract; nil when that is off.
 	contractGo []byte
 
+	// toolsGo is the MCP tools document for the cmd file's ToolsMCP variable (the tools
+	// feature's `go: true`), set by emitProgramFeatures; nil when that is off.
+	toolsGo []byte
+
+	// agentNotices are the whole-program features' warnings, such as a command left out of a
+	// tool export. Reported as notices.
+	agentNotices []error
+
 	// flagSets are the spec's flag sets, flagSetBlocks the structs generated for the used ones (in
 	// first-use order), and flagSetEmitted their type names.
 	flagSets       map[string]FlagSet
@@ -138,6 +146,7 @@ func (p *program) generate() error {
 	}{
 		{"emit schemas", p.emitSchemas},
 		{"emit contract", p.emitContract},
+		{"emit program features", p.emitProgramFeatures},
 		{"emit models file", p.emitModelsFile},
 		{"emit cmd file", p.emitCmdFile},
 		{"emit feature outputs", p.emitFeatures},
@@ -423,7 +432,7 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		Features:      features,
 		EmbedImport:   anyEmbed(features),
 		ExitCodes:     exitConstantsDecl(gp.exitConstants(), lay.splitModels),
-		Contract:      contractDecl(gp.contractGo),
+		Contract:      contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo),
 		UsageFunc:     usageFuncDecl(gp),
 	})
 }

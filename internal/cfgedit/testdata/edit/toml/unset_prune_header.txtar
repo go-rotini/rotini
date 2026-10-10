@@ -1,0 +1,36 @@
+-- in --
+# app config
+title = "app" # the title
+db.host = "localhost"
+
+# deploy settings
+[deploy]
+timeout = "5m" # how long
+retries = 3
+tags = ["a", "b"]
+limits = { cpu = 2 }
+
+# nested
+[deploy.notify]
+email = "ops@example.com"
+
+[[hooks]]
+name = "one"
+-- op --
+unset deploy.notify.email
+-- out --
+# app config
+title = "app" # the title
+db.host = "localhost"
+
+# deploy settings
+[deploy]
+timeout = "5m" # how long
+retries = 3
+tags = ["a", "b"]
+limits = { cpu = 2 }
+
+# nested
+
+[[hooks]]
+name = "one"

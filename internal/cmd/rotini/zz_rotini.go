@@ -12,6 +12,9 @@ import (
 type ProgramHandlers interface {
 	Rotini() rotini.Handler
 	RotiniCompletion() rotini.Handler
+	RotiniDiff() rotini.Handler
+	RotiniExplain() rotini.Handler
+	RotiniFmt() rotini.Handler
 	RotiniGenerate() rotini.Handler
 	RotiniHelp() rotini.Handler
 	RotiniInitialize() rotini.Handler
@@ -69,12 +72,37 @@ var definition = rotini.Definition{
 				{Name: "fail", Identifiers: []string{"--fail"}, Summary: "failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect", Type: "string", Enum: []string{"fast", "collect"}, Complete: rotini.Completion{Message: "--fail string: failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect"}},
 				{Name: "watch", Identifiers: []string{"-w", "--watch"}, Summary: "watch the spec and conf for changes and re-validate", Type: "bool"},
 				{Name: "release", Identifiers: []string{"--release"}, Summary: "fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names", Type: "string", Complete: rotini.Completion{Message: "--release X.Y.Z: fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names"}},
+				{Name: "format", Identifiers: []string{"--format"}, Summary: "how to report problems — text, or json (one object listing every problem, on stdout)", Type: "string", Default: "text", Enum: []string{"text", "json"}, Complete: rotini.Completion{Message: "--format string: how to report problems — text, or json (one object listing every problem, on stdout)"}, Role: "machine-output"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
 			},
+			Output: &rotini.OutputDef{Type: reflect.TypeFor[RotiniValidateOutput](), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.","properties":{"problems":{"description":"the problems, errors first, each as it is reported in text","items":{"properties":{"col":{"description":"the column, from 1","type":"integer"},"document":{"description":"the document the problem is in","enum":["spec","conf"],"type":"string"},"file":{"description":"the document's path","type":"string"},"hint":{"description":"what to do about it","type":"string"},"line":{"description":"the line, from 1","type":"integer"},"message":{"description":"what is wrong","type":"string"},"pointer":{"description":"the JSON pointer of the key at fault","type":"string"},"severity":{"description":"an error fails validation; a warning does not","enum":["error","warning"],"type":"string"}},"required":["severity","message"],"type":"object"},"type":"array"}},"required":["problems"],"type":"object"}`},
 			Inputs: reflect.TypeFor[RotiniValidateInputs](),
 			Usage:  "rotini validate [flags] [spec_file_path]",
+		},
+		{Name: "explain",
+			Handler: "RotiniExplain",
+			Summary: "describe a spec or conf key",
+			Arguments: []rotini.ArgDef{
+				{Name: "key", Type: "string", Required: true, Complete: rotini.Completion{Message: "<key>: the key path, such as command.flags.schema.from"}},
+			},
+			Inputs:  reflect.TypeFor[RotiniExplainInputs](),
+			Usage:   "rotini explain <key>",
+			Effects: &rotini.Effects{Kind: "read", Idempotent: new(true), OpenWorld: new(false)},
+		},
+		{Name: "fmt",
+			Handler: "RotiniFmt",
+			Summary: "format a spec and conf",
+			Flags: []rotini.FlagDef{
+				{Name: "check", Identifiers: []string{"--check"}, Summary: "write nothing; exit 2 when a file isn't formatted", Type: "bool"},
+				{Name: "kind", Identifiers: []string{"--kind"}, Summary: "what the files are, when their keys and names don't tell", Type: "string", Enum: []string{"spec", "conf", "command"}, Complete: rotini.Completion{Message: "--kind string: what the files are, when their keys and names don't tell"}},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "files", Type: "[]string", Variadic: true, Complete: rotini.Completion{Kind: "file", Extensions: []string{"yaml", "yml"}, Message: "<files>: the files to format (default the spec in the working directory and its conf)"}},
+			},
+			Inputs: reflect.TypeFor[RotiniFmtInputs](),
+			Usage:  "rotini fmt [flags] [files...]",
 		},
 		{Name: "help",
 			Handler: "RotiniHelp",
@@ -112,6 +140,29 @@ var definition = rotini.Definition{
 			Inputs: reflect.TypeFor[RotiniManInputs](),
 			Usage:  "rotini man [flags] [command...]",
 		},
+		{Name: "diff",
+			Handler: "RotiniDiff",
+			Summary: "compare two versions of a cli's contract",
+			Flags: []rotini.FlagDef{
+				{Name: "spec_file_path", Identifiers: []string{"--spec"}, Summary: "path to the spec file (default the .rotini.spec.* in the working directory)", Type: "string", Complete: rotini.Completion{Message: "--spec string: path to the spec file (default the .rotini.spec.* in the working directory)"}},
+				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Summary: "path to the rotini conf file (default the .rotini.conf.* beside the spec)", Type: "string", Complete: rotini.Completion{Message: "--config string: path to the rotini conf file (default the .rotini.conf.* beside the spec)"}},
+				{Name: "release", Identifiers: []string{"--release"}, Summary: "report a removal the old contract planned for this release or earlier as expected; defaults to the variable validate.release_env names", Type: "string", Complete: rotini.Completion{Message: "--release X.Y.Z: report a removal the old contract planned for this release or earlier as expected; defaults to the variable validate.release_env names"}},
+				{Name: "fail_on", Identifiers: []string{"--fail-on"}, Summary: "the least severe change that fails the run", Type: "string", Default: "breaking", Enum: []string{"breaking", "possibly", "never"}, Complete: rotini.Completion{Message: "--fail-on string: the least severe change that fails the run"}},
+				{Name: "format", Identifiers: []string{"--format"}, Summary: "how to write the findings", Type: "string", Default: "text", Enum: []string{"text", "json"}, Complete: rotini.Completion{Message: "--format string: how to write the findings"}},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "old", Type: "string", Required: true, Complete: rotini.Completion{Message: "<old>: the earlier contract: a file, git:<ref>[:<path>] or mod://<module>@<version>/<path>"}},
+				{Name: "new", Type: "string", Complete: rotini.Completion{Message: "<new>: the later contract (default the one built from the current spec and conf)"}},
+			},
+			Output: &rotini.OutputDef{Type: reflect.TypeFor[RotiniDiffOutput](), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"Every change between the contracts, the acknowledgements that matched none, and the counts.","properties":{"findings":{"description":"The changes, most severe first, then by where.","items":{"properties":{"accepted":{"description":"The diff.accept entry that acknowledges the change.","properties":{"reason":{"type":"string"}},"required":["reason"],"type":"object"},"message":{"type":"string"},"note":{"type":"string"},"rule":{"description":"The rule ID, which a diff.accept entry names.","type":"string"},"severity":{"enum":["breaking","possibly_breaking","expected","safe"],"type":"string"},"where":{"description":"The item in the old contract, written as on the command line.","type":"string"}},"required":["severity","rule","where","message"],"type":"object"},"type":"array"},"summary":{"description":"The changes by severity; an accepted change counts only as accepted.","properties":{"accepted":{"type":"integer"},"breaking":{"type":"integer"},"expected":{"type":"integer"},"possibly_breaking":{"type":"integer"},"safe":{"type":"integer"}},"required":["breaking","possibly_breaking","expected","safe","accepted"],"type":"object"},"unmatched_accepts":{"description":"The diff.accept entries that matched no change.","items":{"properties":{"reason":{"type":"string"},"rule":{"type":"string"},"where":{"type":"string"}},"required":["rule","where","reason"],"type":"object"},"type":"array"}},"required":["findings","unmatched_accepts","summary"],"type":"object"}`},
+			Inputs: reflect.TypeFor[RotiniDiffInputs](),
+			ExitStatus: []rotini.ExitStatusDef{
+				{Code: 0, Name: "ok", Summary: "no change at or above --fail-on"},
+				{Code: 1, Name: "error", Summary: "a contract, the spec or the conf could not be read"},
+				{Code: 2, Name: "breaking", Summary: "a change at or above --fail-on, or a diff.accept entry that matched no finding"},
+			},
+			Usage: "rotini diff [flags] <old> [new]",
+		},
 	},
 	CompletionMessages: &rotini.CompletionMessagesDef{Env: "ROTINI_COMPLETION_MESSAGES"},
 }
@@ -146,6 +197,64 @@ type RotiniCompletionCommandInputs struct {
 type RotiniCompletionInputs struct {
 	Rotini           RotiniCommandInputs
 	RotiniCompletion RotiniCompletionCommandInputs
+}
+
+type RotiniDiffFlags struct {
+	SpecFilePath string `rotini:"spec_file_path"`
+	ConfFilePath string `rotini:"conf_file_path"`
+	Release      string `rotini:"release"`
+	FailOn       string `rotini:"fail_on"`
+	Format       string `rotini:"format"`
+}
+
+type RotiniDiffArguments struct {
+	Old string `rotini:"old"`
+	New string `rotini:"new"`
+}
+
+type RotiniDiffCommandInputs struct {
+	Flags     RotiniDiffFlags
+	Arguments RotiniDiffArguments
+}
+
+type RotiniDiffInputs struct {
+	Rotini     RotiniCommandInputs
+	RotiniDiff RotiniDiffCommandInputs
+}
+
+type RotiniExplainFlags struct{}
+
+type RotiniExplainArguments struct {
+	Key string `rotini:"key"`
+}
+
+type RotiniExplainCommandInputs struct {
+	Flags     RotiniExplainFlags
+	Arguments RotiniExplainArguments
+}
+
+type RotiniExplainInputs struct {
+	Rotini        RotiniCommandInputs
+	RotiniExplain RotiniExplainCommandInputs
+}
+
+type RotiniFmtFlags struct {
+	Check bool   `rotini:"check"`
+	Kind  string `rotini:"kind"`
+}
+
+type RotiniFmtArguments struct {
+	Files []string `rotini:"files"`
+}
+
+type RotiniFmtCommandInputs struct {
+	Flags     RotiniFmtFlags
+	Arguments RotiniFmtArguments
+}
+
+type RotiniFmtInputs struct {
+	Rotini    RotiniCommandInputs
+	RotiniFmt RotiniFmtCommandInputs
 }
 
 type RotiniGenerateFlags struct {
@@ -227,6 +336,7 @@ type RotiniValidateFlags struct {
 	Fail         string `rotini:"fail"`
 	Watch        bool   `rotini:"watch"`
 	Release      string `rotini:"release"`
+	Format       string `rotini:"format"`
 }
 
 type RotiniValidateArguments struct {
@@ -257,6 +367,80 @@ type RotiniVersionInputs struct {
 	RotiniVersion RotiniVersionCommandInputs
 }
 
+// Every change between the contracts, the acknowledgements that matched none, and the counts.
+type RotiniDiffOutput struct {
+	// The changes, most severe first, then by where.
+	Findings []RotiniDiffOutputFindingsItem `json:"findings"`
+	// The changes by severity; an accepted change counts only as accepted.
+	Summary RotiniDiffOutputSummary `json:"summary"`
+	// The diff.accept entries that matched no change.
+	UnmatchedAccepts []RotiniDiffOutputUnmatchedAcceptsItem `json:"unmatched_accepts"`
+}
+
+type RotiniDiffOutputFindingsItem struct {
+	// The diff.accept entry that acknowledges the change.
+	Accepted *RotiniDiffOutputFindingsItemAccepted `json:"accepted,omitempty"`
+	Message  string                                `json:"message"`
+	Note     string                                `json:"note,omitempty"`
+	// The rule ID, which a diff.accept entry names.
+	Rule     string `json:"rule"`
+	Severity string `json:"severity"`
+	// The item in the old contract, written as on the command line.
+	Where string `json:"where"`
+}
+
+// The diff.accept entry that acknowledges the change.
+type RotiniDiffOutputFindingsItemAccepted struct {
+	Reason string `json:"reason"`
+}
+
+// The changes by severity; an accepted change counts only as accepted.
+type RotiniDiffOutputSummary struct {
+	Accepted         int `json:"accepted"`
+	Breaking         int `json:"breaking"`
+	Expected         int `json:"expected"`
+	PossiblyBreaking int `json:"possibly_breaking"`
+	Safe             int `json:"safe"`
+}
+
+type RotiniDiffOutputUnmatchedAcceptsItem struct {
+	Reason string `json:"reason"`
+	Rule   string `json:"rule"`
+	Where  string `json:"where"`
+}
+
+// Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.
+type RotiniValidateOutput struct {
+	// the problems, errors first, each as it is reported in text
+	Problems []RotiniValidateOutputProblemsItem `json:"problems"`
+}
+
+type RotiniValidateOutputProblemsItem struct {
+	// the column, from 1
+	Col int `json:"col,omitempty"`
+	// the document the problem is in
+	Document string `json:"document,omitempty"`
+	// the document's path
+	File string `json:"file,omitempty"`
+	// what to do about it
+	Hint string `json:"hint,omitempty"`
+	// the line, from 1
+	Line int `json:"line,omitempty"`
+	// what is wrong
+	Message string `json:"message"`
+	// the JSON pointer of the key at fault
+	Pointer string `json:"pointer,omitempty"`
+	// an error fails validation; a warning does not
+	Severity string `json:"severity"`
+}
+
+// Named exit codes, from each command's exit_status, for rtx.HaltWithCode and rtx.Exit.
+const (
+	RotiniDiffExitOk       = 0 // "rotini diff": ok
+	RotiniDiffExitError    = 1 // "rotini diff": error
+	RotiniDiffExitBreaking = 2 // "rotini diff": breaking
+)
+
 // Usage returns the usage line of the command identified by path (command names or
 // aliases; no arguments for the root), or an error when path names no command. A handler
 // uses rtx.Usage() instead, which is right for a composed command too.
@@ -270,6 +454,10 @@ func Usage(path ...string) (string, error) {
 		return "rotini generate [flags] [spec_file_path]", nil
 	case "validate", "val":
 		return "rotini validate [flags] [spec_file_path]", nil
+	case "explain":
+		return "rotini explain <key>", nil
+	case "fmt":
+		return "rotini fmt [flags] [files...]", nil
 	case "help":
 		return "rotini help [command...]", nil
 	case "version":
@@ -278,6 +466,8 @@ func Usage(path ...string) (string, error) {
 		return "rotini completion <shell>", nil
 	case "man":
 		return "rotini man [flags] [command...]", nil
+	case "diff":
+		return "rotini diff [flags] <old> [new]", nil
 	default:
 		return "", fmt.Errorf("no usage for command %q", strings.Join(path, " "))
 	}
@@ -296,6 +486,12 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 			return handlers.Rotini(), true
 		case "RotiniCompletion":
 			return handlers.RotiniCompletion(), true
+		case "RotiniDiff":
+			return handlers.RotiniDiff(), true
+		case "RotiniExplain":
+			return handlers.RotiniExplain(), true
+		case "RotiniFmt":
+			return handlers.RotiniFmt(), true
 		case "RotiniGenerate":
 			return handlers.RotiniGenerate(), true
 		case "RotiniHelp":
@@ -342,6 +538,18 @@ func (*handlers) RotiniCompletion() rotini.Handler {
 	return &rotiniCompletionHandler{}
 }
 
+func (*handlers) RotiniDiff() rotini.Handler {
+	return &rotiniDiffHandler{}
+}
+
+func (*handlers) RotiniExplain() rotini.Handler {
+	return &rotiniExplainHandler{}
+}
+
+func (*handlers) RotiniFmt() rotini.Handler {
+	return &rotiniFmtHandler{}
+}
+
 func (*handlers) RotiniGenerate() rotini.Handler {
 	return &rotiniGenerateHandler{}
 }
@@ -366,13 +574,17 @@ func (*handlers) RotiniVersion() rotini.Handler {
 	return &rotiniVersionHandler{}
 }
 
-var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini [flags] <command> <arguments>\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize, init    scaffold a cli program\n  generate, gen       generate a cli program\n  validate, val       validate a spec and conf\n  help                print help\n  version             print version\n  completion          print a shell completion script\n  man                 print or install the man pages\n\nFlags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini [flags] <command> <arguments>\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize, init    scaffold a cli program\n  generate, gen       generate a cli program\n  validate, val       validate a spec and conf\n  explain             describe a spec or conf key\n  fmt                 format a spec and conf\n  help                print help\n  version             print version\n  completion          print a shell completion script\n  man                 print or install the man pages\n  diff                compare two versions of a cli's contract\n\nFlags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniInitialize = "Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize [flags] <name>\n\nArguments:\n  <name>    the root command name written to the created spec file (expected binary name)\n\nFlags:\n      --format string    the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --force            replace an existing spec and conf with the seed (never deletes a file)\n  -n, --dry-run          show what init would write, and change nothing\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n  rotini init mycli --dry-run\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniGenerate = "Generate a cli program from a rotini spec file and its conf.\n\nUsage:\n  rotini generate [flags] [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n  -w, --watch            watch the spec and conf for changes and re-generate\n  -n, --[no-]dry-run     show what would be written, created or removed, and change nothing; exits 2 when something would change\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini generate\n  rotini generate ./path/to/.rotini.spec.json --watch\n  rotini generate --dry-run\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniValidate = "Validate a rotini spec file and its conf for correctness.\n\nUsage:\n  rotini validate [flags] [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n      --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]\n  -w, --watch            watch the spec and conf for changes and re-validate\n      --release X.Y.Z    fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini validate\n  rotini val ./path/to/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniValidate = "Validate a rotini spec file and its conf for correctness.\n\nUsage:\n  rotini validate [flags] [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n      --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]\n  -w, --watch            watch the spec and conf for changes and re-validate\n      --release X.Y.Z    fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names\n      --format string    how to report problems — text, or json (one object listing every problem, on stdout) (default text) [text|json]\n\nGlobal Flags:\n  -h, --help    print help\n\nOutput:\n  Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.\n  object\n    problems []object    the problems, errors first, each as it is reported in text (required)\n\nExamples:\n  rotini validate\n  rotini val ./path/to/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
+
+var HelpRotiniExplain = "Print what a spec or conf key means: its description, type, allowed values, default and examples, read from the same schemas as the reference pages. Write the keys from the document's top, separated by dots and without list positions: command.flags.schema.from. A key both documents have, such as version, is shown for each.\n\nEffects: read, idempotent, local only\n\nUsage:\n  rotini explain <key>\n\nArguments:\n  <key>    the key path, such as command.flags.schema.from\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini explain command.flags.role\n  rotini explain generate.features.targets\n\nUse \"rotini help <command>\" for more information about a command."
+
+var HelpRotiniFmt = "Rewrite rotini spec, conf and composed command files in canonical form: keys in\nreading order (a command's name and docs, then its inputs, output and sub-commands;\nan input's name and docs, then its behavior, then its schema); two-space indentation,\nwith lists indented under their key; and runs of blank lines folded into one.\nComments stay with the entries they describe, and every value is kept exactly as\nwritten.\n\nWith no file, it formats the .rotini.spec.* in the working directory and the conf\nbeside it. --check writes nothing and exits 2 when a file isn't formatted, for CI.\nOnly YAML files can be formatted for now.\n\nUsage:\n  rotini fmt [flags] [files...]\n\nArguments:\n  [files...]    the files to format (default the spec in the working directory and its conf)\n\nFlags:\n      --check          write nothing; exit 2 when a file isn't formatted\n      --kind string    what the files are, when their keys and names don't tell [spec|conf|command]\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini fmt\n  rotini fmt cmd/app/.rotini.spec.yaml cmd/app/.rotini.conf.yaml\n  rotini fmt --check\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniHelp = "Print help for a specific command.\n\nUsage:\n  rotini help [command...]\n\nArguments:\n  [command...]    name of the command to print help for\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini help\n  rotini help generate\n  rotini help init\n\nUse \"rotini help <command>\" for more information about a command."
 
@@ -381,6 +593,8 @@ var HelpRotiniVersion = "Print the rotini cli version.\n\nUsage:\n  rotini versi
 var HelpRotiniCompletion = "Print the completion script for a shell. Load it once per session, or install it so\nevery new shell has it:\n\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out-String | Invoke-Expression\n              add that line to $PROFILE to load it in every session\n\nUsage:\n  rotini completion <shell>\n\nArguments:\n  <shell>    the shell to print the script for [bash|zsh|fish|powershell]\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini completion bash\n  rotini completion zsh > \"${fpath[1]}/_rotini\"\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniMan = "Print a command's man page as roff, the markup the man program reads, or write every\npage into a directory with --dir. With no command, it prints the page for rotini itself.\n\nThe pages are named after the command path, rotini-generate.1, so a directory written\nwith --dir can be added to MANPATH or copied into a man1 directory.\n\nUsage:\n  rotini man [flags] [command...]\n\nArguments:\n  [command...]    the command whose page to print (default rotini itself)\n\nFlags:\n      --dir string    write every page into this directory instead of printing one\n\nGlobal Flags:\n  -h, --help    print help\n\nExamples:\n  rotini man generate > rotini-generate.1\n  rotini man --dir ~/.local/share/man/man1\n\nUse \"rotini help <command>\" for more information about a command."
+
+var HelpRotiniDiff = "Compare two versions of a cli's contract and report each change for the people and\nscripts using it: breaking, possibly breaking, expected (a removal planned for this\nrelease) or safe. Findings are written to stdout, grouped by severity.\n\n<old> is a contract file, git:<ref> (the conf's generate.contract.file at that\nrevision, read with git show), git:<ref>:<path> (a module-root-relative file at that\nrevision) or mod://<module>@<version>/<path>. <new> takes the same forms and defaults\nto the contract built from the current spec and conf. Because both arguments are\ncontracts, the spec is given with --spec.\n\nThe conf's diff.accept entries acknowledge intended changes, one finding each; an entry\nthat matches no finding fails the run.\n\nUsage:\n  rotini diff [flags] <old> [new]\n\nArguments:\n  <old>    the earlier contract: a file, git:<ref>[:<path>] or mod://<module>@<version>/<path>\n  [new]    the later contract (default the one built from the current spec and conf)\n\nFlags:\n      --spec string       path to the spec file (default the .rotini.spec.* in the working directory)\n  -c, --config string     path to the rotini conf file (default the .rotini.conf.* beside the spec)\n      --release X.Y.Z     report a removal the old contract planned for this release or earlier as expected; defaults to the variable validate.release_env names\n      --fail-on string    the least severe change that fails the run (default breaking) [breaking|possibly|never]\n      --format string     how to write the findings (default text) [text|json]\n\nGlobal Flags:\n  -h, --help    print help\n\nOutput:\n  Every change between the contracts, the acknowledgements that matched none, and the counts.\n  object\n    findings []object             The changes, most severe first, then by where. (required)\n    summary object                The changes by severity; an accepted change counts only as accepted. (required)\n    unmatched_accepts []object    The diff.accept entries that matched no change. (required)\n\nExamples:\n  rotini diff git:v1.2.0\n  rotini diff git:v1.2.0 --release 2.0.0\n  rotini diff old/cli-contract.json cli-contract.json --format json\n\nUse \"rotini help <command>\" for more information about a command."
 
 // Help returns the generated help text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
@@ -395,6 +609,10 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniGenerate, nil
 	case "validate", "val":
 		return HelpRotiniValidate, nil
+	case "explain":
+		return HelpRotiniExplain, nil
+	case "fmt":
+		return HelpRotiniFmt, nil
 	case "help":
 		return HelpRotiniHelp, nil
 	case "version":
@@ -403,18 +621,24 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniCompletion, nil
 	case "man":
 		return HelpRotiniMan, nil
+	case "diff":
+		return HelpRotiniDiff, nil
 	default:
 		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
 	}
 }
 
-var ManRotini = ".TH \"ROTINI\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\n.SH SYNOPSIS\n.nf\nrotini [flags] <command> <arguments>\n      [\\-v | \\-\\-version] [\\-h | \\-\\-help]\n.fi\n.SH DESCRIPTION\nThe rotini cli framework companion cli.\n.PP\nFind more information at: https://rotini.dev\n.SH \"COMMANDS\"\n.TP\n\\fBinitialize\\fR, \\fBinit\\fR\nscaffold a cli program\n.TP\n\\fBgenerate\\fR, \\fBgen\\fR\ngenerate a cli program\n.TP\n\\fBvalidate\\fR, \\fBval\\fR\nvalidate a spec and conf\n.TP\n\\fBhelp\\fR\nprint help\n.TP\n\\fBversion\\fR\nprint version\n.TP\n\\fBcompletion\\fR\nprint a shell completion script\n.TP\n\\fBman\\fR\nprint or install the man pages\n.SH \"OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH ENVIRONMENT\n.TP\n\\fBROTINI_COMPLETION_MESSAGES\\fR\nset to 0, false or off to hide completion messages\n.SH EXAMPLES\n.RS 4\n.nf\nrotini init mycli\n.sp\nrotini validate .rotini.spec.yaml\n.sp\nrotini generate ./path/to/.rotini.spec.json\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-initialize\\fR(1), \\fBrotini\\-generate\\fR(1),\n\\fBrotini\\-validate\\fR(1), \\fBrotini\\-help\\fR(1), \\fBrotini\\-version\\fR(1),\n\\fBrotini\\-completion\\fR(1), \\fBrotini\\-man\\fR(1)\n"
+var ManRotini = ".TH \"ROTINI\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\n.SH SYNOPSIS\n.nf\nrotini [flags] <command> <arguments>\n      [\\-v | \\-\\-version] [\\-h | \\-\\-help]\n.fi\n.SH DESCRIPTION\nThe rotini cli framework companion cli.\n.PP\nFind more information at: https://rotini.dev\n.SH \"COMMANDS\"\n.TP\n\\fBinitialize\\fR, \\fBinit\\fR\nscaffold a cli program\n.TP\n\\fBgenerate\\fR, \\fBgen\\fR\ngenerate a cli program\n.TP\n\\fBvalidate\\fR, \\fBval\\fR\nvalidate a spec and conf\n.TP\n\\fBexplain\\fR\ndescribe a spec or conf key\n.TP\n\\fBfmt\\fR\nformat a spec and conf\n.TP\n\\fBhelp\\fR\nprint help\n.TP\n\\fBversion\\fR\nprint version\n.TP\n\\fBcompletion\\fR\nprint a shell completion script\n.TP\n\\fBman\\fR\nprint or install the man pages\n.TP\n\\fBdiff\\fR\ncompare two versions of a cli\\(aqs contract\n.SH \"OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH ENVIRONMENT\n.TP\n\\fBROTINI_COMPLETION_MESSAGES\\fR\nset to 0, false or off to hide completion messages\n.SH EXAMPLES\n.RS 4\n.nf\nrotini init mycli\n.sp\nrotini validate .rotini.spec.yaml\n.sp\nrotini generate ./path/to/.rotini.spec.json\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-initialize\\fR(1), \\fBrotini\\-generate\\fR(1),\n\\fBrotini\\-validate\\fR(1), \\fBrotini\\-explain\\fR(1), \\fBrotini\\-fmt\\fR(1),\n\\fBrotini\\-help\\fR(1), \\fBrotini\\-version\\fR(1), \\fBrotini\\-completion\\fR(1),\n\\fBrotini\\-man\\fR(1), \\fBrotini\\-diff\\fR(1)\n"
 
 var ManRotiniInitialize = ".TH \"ROTINI\\-INITIALIZE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-initialize \\- scaffold a cli program\n.SH SYNOPSIS\n\\fBrotini initialize\\fR [flags] <name>\n.SH DESCRIPTION\nScaffold a new rotini cli \\[u2014] write the spec + conf, then run the first\ngenerate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n.SH ARGUMENTS\n.TP\n\\fI<name>\\fR\nthe root command name written to the created spec file (expected binary name)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf with the seed (never deletes a file)\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-dry\\-run\\fR\nshow what init would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini initialize mycli\n.sp\nrotini init mycli \\-\\-format json\n.sp\nrotini init mycli \\-\\-force\n.sp\nrotini init mycli \\-\\-dry\\-run\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 var ManRotiniGenerate = ".TH \"ROTINI\\-GENERATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-generate \\- generate a cli program\n.SH SYNOPSIS\n\\fBrotini generate\\fR [flags] [spec_file_path]\n.SH DESCRIPTION\nGenerate a cli program from a rotini spec file and its conf.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-generate\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what would be written, created or removed, and change nothing; exits 2 when\nsomething would change\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini generate\n.sp\nrotini generate ./path/to/.rotini.spec.json \\-\\-watch\n.sp\nrotini generate \\-\\-dry\\-run\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniValidate = ".TH \"ROTINI\\-VALIDATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-validate \\- validate a spec and conf\n.SH SYNOPSIS\n\\fBrotini validate\\fR [flags] [spec_file_path]\n.SH DESCRIPTION\nValidate a rotini spec file and its conf for correctness.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-\\-fail\\fR \\fIstring\\fR\nfailure reporting \\[u2014] fast (first problem) or collect (all); defaults to\nvalidate.fail in the conf, else collect [fast|collect]\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-validate\n.TP\n\\fB\\-\\-release\\fR \\fIX.Y.Z\\fR\nfail for each item whose removed_in is at or below this release; defaults to the\nvariable validate.release_env names\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini validate\n.sp\nrotini val ./path/to/.rotini.spec.yaml\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+var ManRotiniValidate = ".TH \"ROTINI\\-VALIDATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-validate \\- validate a spec and conf\n.SH SYNOPSIS\n\\fBrotini validate\\fR [flags] [spec_file_path]\n.SH DESCRIPTION\nValidate a rotini spec file and its conf for correctness.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-\\-fail\\fR \\fIstring\\fR\nfailure reporting \\[u2014] fast (first problem) or collect (all); defaults to\nvalidate.fail in the conf, else collect [fast|collect]\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-validate\n.TP\n\\fB\\-\\-release\\fR \\fIX.Y.Z\\fR\nfail for each item whose removed_in is at or below this release; defaults to the\nvariable validate.release_env names\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nhow to report problems \\[u2014] text, or json (one object listing every problem,\non stdout) (default text) [text|json]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH OUTPUT\nEvery problem validate found. Exits 1 when any is an error, 0 when there are\nonly warnings or none.\n.PP\nWrites \\fBobject\\fR to standard output.\n.TP\n\\fBproblems\\fR \\fI[]object\\fR\nthe problems, errors first, each as it is reported in text (required)\n.SH EXAMPLES\n.RS 4\n.nf\nrotini validate\n.sp\nrotini val ./path/to/.rotini.spec.yaml\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+
+var ManRotiniExplain = ".TH \"ROTINI\\-EXPLAIN\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-explain \\- describe a spec or conf key\n.SH SYNOPSIS\n\\fBrotini explain\\fR <key>\n.SH DESCRIPTION\nPrint what a spec or conf key means: its description, type, allowed values,\ndefault and examples, read from the same schemas as the reference pages. Write\nthe keys from the document\\(aqs top, separated by dots and without list\npositions: command.flags.schema.from. A key both documents have, such as\nversion, is shown for each.\n.PP\nEffects: read, idempotent, local only\n.SH ARGUMENTS\n.TP\n\\fI<key>\\fR\nthe key path, such as command.flags.schema.from\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini explain command.flags.role\n.sp\nrotini explain generate.features.targets\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+
+var ManRotiniFmt = ".TH \"ROTINI\\-FMT\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-fmt \\- format a spec and conf\n.SH SYNOPSIS\n\\fBrotini fmt\\fR [flags] [files...]\n.SH DESCRIPTION\nRewrite rotini spec, conf and composed command files in canonical form: keys in\nreading order (a command\\(aqs name and docs, then its inputs, output and\nsub\\-commands;\nan input\\(aqs name and docs, then its behavior, then its schema); two\\-space\nindentation,\nwith lists indented under their key; and runs of blank lines folded into one.\nComments stay with the entries they describe, and every value is kept exactly as\nwritten.\n.PP\nWith no file, it formats the .rotini.spec.* in the working directory and the\nconf\nbeside it. \\-\\-check writes nothing and exits 2 when a file isn\\(aqt formatted,\nfor CI.\nOnly YAML files can be formatted for now.\n.SH ARGUMENTS\n.TP\n\\fI[files...]\\fR\nthe files to format (default the spec in the working directory and its conf)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-check\\fR\nwrite nothing; exit 2 when a file isn\\(aqt formatted\n.TP\n\\fB\\-\\-kind\\fR \\fIstring\\fR\nwhat the files are, when their keys and names don\\(aqt tell [spec|conf|command]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini fmt\n.sp\nrotini fmt cmd/app/.rotini.spec.yaml cmd/app/.rotini.conf.yaml\n.sp\nrotini fmt \\-\\-check\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 var ManRotiniHelp = ".TH \"ROTINI\\-HELP\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-help \\- print help\n.SH SYNOPSIS\n\\fBrotini help\\fR [command...]\n.SH DESCRIPTION\nPrint help for a specific command.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nname of the command to print help for\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini help\n.sp\nrotini help generate\n.sp\nrotini help init\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
@@ -423,6 +647,8 @@ var ManRotiniVersion = ".TH \"ROTINI\\-VERSION\" 1 \"\" \"rotini\" \"User Comman
 var ManRotiniCompletion = ".TH \"ROTINI\\-COMPLETION\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-completion \\- print a shell completion script\n.SH SYNOPSIS\n\\fBrotini completion\\fR <shell>\n.SH DESCRIPTION\nPrint the completion script for a shell. Load it once per session, or install it\nso\nevery new shell has it:\n.PP\n.nf\n  bash        source <(rotini completion bash)\n              or save it to ~/.local/share/bash\\-completion/completions/rotini\n  zsh         rotini completion zsh > \"${fpath[1]}/_rotini\"\n              then start a new shell (compinit must be enabled)\n  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish\n  powershell  rotini completion powershell | Out\\-String | Invoke\\-Expression\n              add that line to $PROFILE to load it in every session\n.fi\n.SH ARGUMENTS\n.TP\n\\fI<shell>\\fR\nthe shell to print the script for [bash|zsh|fish|powershell]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini completion bash\n.sp\nrotini completion zsh > \"${fpath[1]}/_rotini\"\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 var ManRotiniMan = ".TH \"ROTINI\\-MAN\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-man \\- print or install the man pages\n.SH SYNOPSIS\n\\fBrotini man\\fR [flags] [command...]\n.SH DESCRIPTION\nPrint a command\\(aqs man page as roff, the markup the man program reads, or\nwrite every\npage into a directory with \\-\\-dir. With no command, it prints the page for\nrotini itself.\n.PP\nThe pages are named after the command path, rotini\\-generate.1, so a directory\nwritten\nwith \\-\\-dir can be added to MANPATH or copied into a man1 directory.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nthe command whose page to print (default rotini itself)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-dir\\fR \\fIstring\\fR\nwrite every page into this directory instead of printing one\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini man generate > rotini\\-generate.1\n.sp\nrotini man \\-\\-dir ~/.local/share/man/man1\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+
+var ManRotiniDiff = ".TH \"ROTINI\\-DIFF\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-diff \\- compare two versions of a cli\\(aqs contract\n.SH SYNOPSIS\n\\fBrotini diff\\fR [flags] <old> [new]\n.SH DESCRIPTION\nCompare two versions of a cli\\(aqs contract and report each change for the\npeople and\nscripts using it: breaking, possibly breaking, expected (a removal planned for\nthis\nrelease) or safe. Findings are written to stdout, grouped by severity.\n.PP\n<old> is a contract file, git:<ref> (the conf\\(aqs generate.contract.file at\nthat\nrevision, read with git show), git:<ref>:<path> (a module\\-root\\-relative file\nat that\nrevision) or mod://<module>@<version>/<path>. <new> takes the same forms and\ndefaults\nto the contract built from the current spec and conf. Because both arguments are\ncontracts, the spec is given with \\-\\-spec.\n.PP\nThe conf\\(aqs diff.accept entries acknowledge intended changes, one finding\neach; an entry\nthat matches no finding fails the run.\n.SH ARGUMENTS\n.TP\n\\fI<old>\\fR\nthe earlier contract: a file, git:<ref>[:<path>] or\nmod://<module>@<version>/<path>\n.TP\n\\fI[new]\\fR\nthe later contract (default the one built from the current spec and conf)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-spec\\fR \\fIstring\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-\\-release\\fR \\fIX.Y.Z\\fR\nreport a removal the old contract planned for this release or earlier as\nexpected; defaults to the variable validate.release_env names\n.TP\n\\fB\\-\\-fail\\-on\\fR \\fIstring\\fR\nthe least severe change that fails the run (default breaking)\n[breaking|possibly|never]\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nhow to write the findings (default text) [text|json]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH OUTPUT\nEvery change between the contracts, the acknowledgements that matched none, and\nthe counts.\n.PP\nWrites \\fBobject\\fR to standard output.\n.TP\n\\fBfindings\\fR \\fI[]object\\fR\nThe changes, most severe first, then by where. (required)\n.TP\n\\fBsummary\\fR \\fIobject\\fR\nThe changes by severity; an accepted change counts only as accepted. (required)\n.TP\n\\fBunmatched_accepts\\fR \\fI[]object\\fR\nThe diff.accept entries that matched no change. (required)\n.SH \"EXIT STATUS\"\n.TP\n\\fB0\\fR (ok)\nno change at or above \\-\\-fail\\-on\n.TP\n\\fB1\\fR (error)\na contract, the spec or the conf could not be read\n.TP\n\\fB2\\fR (breaking)\na change at or above \\-\\-fail\\-on, or a diff.accept entry that matched no\nfinding\n.SH EXAMPLES\n.RS 4\n.nf\nrotini diff git:v1.2.0\n.sp\nrotini diff git:v1.2.0 \\-\\-release 2.0.0\n.sp\nrotini diff old/cli\\-contract.json cli\\-contract.json \\-\\-format json\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 // ManSection is the man section these pages were generated for: the number after the dot in a
 // page's file name (<page-name>.1) and in the cross-references between pages.
@@ -441,6 +667,10 @@ func Man(path ...string) (string, error) {
 		return ManRotiniGenerate, nil
 	case "validate", "val":
 		return ManRotiniValidate, nil
+	case "explain":
+		return ManRotiniExplain, nil
+	case "fmt":
+		return ManRotiniFmt, nil
 	case "help":
 		return ManRotiniHelp, nil
 	case "version":
@@ -449,6 +679,8 @@ func Man(path ...string) (string, error) {
 		return ManRotiniCompletion, nil
 	case "man":
 		return ManRotiniMan, nil
+	case "diff":
+		return ManRotiniDiff, nil
 	default:
 		return "", fmt.Errorf("no man for command %q", strings.Join(path, " "))
 	}
@@ -463,10 +695,13 @@ func ManPages() []rotini.Page {
 		{Name: "rotini-initialize", Path: []string{"initialize"}, Content: ManRotiniInitialize},
 		{Name: "rotini-generate", Path: []string{"generate"}, Content: ManRotiniGenerate},
 		{Name: "rotini-validate", Path: []string{"validate"}, Content: ManRotiniValidate},
+		{Name: "rotini-explain", Path: []string{"explain"}, Content: ManRotiniExplain},
+		{Name: "rotini-fmt", Path: []string{"fmt"}, Content: ManRotiniFmt},
 		{Name: "rotini-help", Path: []string{"help"}, Content: ManRotiniHelp},
 		{Name: "rotini-version", Path: []string{"version"}, Content: ManRotiniVersion},
 		{Name: "rotini-completion", Path: []string{"completion"}, Content: ManRotiniCompletion},
 		{Name: "rotini-man", Path: []string{"man"}, Content: ManRotiniMan},
+		{Name: "rotini-diff", Path: []string{"diff"}, Content: ManRotiniDiff},
 	}
 }
 

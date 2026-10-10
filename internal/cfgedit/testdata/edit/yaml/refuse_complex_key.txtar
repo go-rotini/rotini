@@ -1,0 +1,7 @@
+-- in --
+? a
+: 1
+-- op --
+set a 2
+-- err --
+edit the file by hand

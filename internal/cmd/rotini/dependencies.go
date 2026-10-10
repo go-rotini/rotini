@@ -11,6 +11,7 @@ var (
 	generateDep   = rotini.NewDependency[codegen.GenerateFn]("rotini.generate")
 	validateDep   = rotini.NewDependency[codegen.ValidateFn]("rotini.validate")
 	initializeDep = rotini.NewDependency[codegen.InitializeFn]("rotini.initialize")
+	explainDep    = rotini.NewDependency[codegen.ExplainFn]("rotini.explain")
 
 	generateDryRunDep   = rotini.NewDependency[codegen.GenerateDryRunFn]("rotini.generate.dry-run")
 	initializeDryRunDep = rotini.NewDependency[codegen.InitializeDryRunFn]("rotini.initialize.dry-run")

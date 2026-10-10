@@ -328,6 +328,7 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prun
 		notices = append(notices, fmt.Errorf("restored %s; its command is back in the spec", name))
 	}
 	notices = append(notices, prog.auditWarnings...)
+	notices = append(notices, prog.agentNotices...)
 	return notices, err
 }
 

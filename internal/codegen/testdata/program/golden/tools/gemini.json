@@ -1,0 +1,152 @@
+{
+  "functionDeclarations": [
+    {
+      "description": "add a task\n\nEffects: write.\n\nExit codes: 3 (duplicate): a task with this title exists.",
+      "name": "taskr_add",
+      "parametersJsonSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "due": {
+            "description": "when it is due",
+            "format": "date",
+            "type": "string"
+          },
+          "priority": {
+            "description": "how urgent it is (experimental). default: \"low\".",
+            "enum": [
+              "low",
+              "high"
+            ],
+            "type": "string"
+          },
+          "tag": {
+            "description": "tags for the task. no repeated items.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "description": "what to do. at least 1 characters.",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "list tasks\n\nEffects: read, idempotent.",
+      "name": "taskr_list",
+      "parametersJsonSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "only tasks with these labels",
+            "type": "object"
+          },
+          "page": {
+            "description": "the page token from the last call",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "description": "delete finished tasks\n\nEffects: destructive, idempotent.\n\nExit codes: 75 (busy, retryable): the list is locked.",
+      "name": "taskr_purge",
+      "parametersJsonSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "dry_run": {
+            "description": "list what would be deleted",
+            "type": "boolean"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "yes": {
+            "description": "delete without asking",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "description": "add tasks read from stdin\n\nEffects: write.",
+      "name": "taskr_import",
+      "parametersJsonSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "stdin": {
+            "description": "What the command reads on stdin, as a JSON value.",
+            "items": {},
+            "type": "array"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stdin"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "sync with the server\n\nEffects: destructive, open world.\n\nRequires TASKR_KEY in the server's environment.",
+      "name": "taskr_remote_sync",
+      "parametersJsonSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "prune": {
+            "description": "also delete tasks the server doesn't have",
+            "type": "boolean"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "description": "show the server's address\n\nEffects: read.",
+      "name": "taskr_remote_show",
+      "parametersJsonSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  ]
+}

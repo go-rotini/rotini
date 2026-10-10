@@ -1,0 +1,9 @@
+-- in --
+profiles:
+  prod: # p
+    region: x
+-- op --
+unset profiles.prod.region keep 2
+-- out --
+profiles:
+  prod: {} # p

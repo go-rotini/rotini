@@ -3,6 +3,8 @@
 app\-deploy \- deploy it
 .SH SYNOPSIS
 \fBapp deploy\fR [flags] <command> <target> [stage]
+.SH DESCRIPTION
+Effects: write, idempotent, open world
 .SH "COMMANDS"
 .TP
 \fBcanary\fR
@@ -27,6 +29,9 @@ also set by \fBAPP_DEPLOY_REPLICAS\fR or config key \fBdeploy.replicas\fR
 where
 .br
 also set by \fBDEPLOY_REGION\fR or config key \fBregion\fR
+.TP
+\fB\-\-prune\fR
+remove old releases (destructive, not idempotent)
 .SH "GLOBAL OPTIONS"
 .TP
 \fB\-\-verbose\fR

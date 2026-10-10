@@ -1,0 +1,16 @@
+-- in --
+// app config
+{
+  // where to deploy
+  "deploy": {
+    "timeout": "5m", // line comment
+    "retries": 3,
+    "tags": ["a", "b"]
+  },
+  /* logging */
+  "log": {"level": "info"}
+}
+-- op --
+set deploy.retries.x 1
+-- err --
+holds a value, not an object

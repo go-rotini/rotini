@@ -23,6 +23,10 @@
     "validate": {
       "$ref": "#/definitions/ValidateConfig",
       "description": "Controls how `rotini validate` and `rotini generate` report problems (collect everything vs. fail fast), and which opt-in warnings they add."
+    },
+    "diff": {
+      "$ref": "#/definitions/DiffConfig",
+      "description": "Controls `rotini diff`, which compares two versions of the cli's contract: the changes this release makes on purpose."
     }
   },
   "definitions": {
@@ -206,8 +210,8 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["help", "completion", "man", "markdown"],
-          "description": "Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion<Shell>' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command."
+          "enum": ["help", "completion", "man", "markdown", "tools", "skill", "llms", "permissions"],
+          "description": "Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion<Shell>' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.\n\ntools, skill, llms and permissions are files for AI agents and their tools, one set for the whole program, written under 'file' (relative to the module root) and never removed: tools writes tool definitions for each of 'targets' (tools/mcp.json, tools/openai.json, tools/gemini.json), skill an Agent Skills page (skills/<name>/SKILL.md), llms an llms.txt, and permissions permission rules for each of 'harnesses'. They add no Go code, except `go: true` on tools. skill and llms render from an editable template, as help does; tools and permissions are built from the contract and have none. 'embed' and 'embed_dir' don't apply to them."
         },
         "enabled": {
           "type": "boolean",
@@ -260,6 +264,52 @@
           "type": "string",
           "pattern": "^(\\.|[a-zA-Z0-9_][a-zA-Z0-9_./-]*)$", "examples": ["share", "."],
           "description": "completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/<name>.bash, completions/_<name> (zsh), completions/<name>.fish and completions/<name>.ps1, and man/man<section>/<page>.<section>, where <name> is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone is removed. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error."
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.][a-zA-Z0-9_./-]*$", "examples": ["tools/", "llms.txt"],
+          "description": "tools, skill, llms and permissions only: where the files are written, relative to the module root. A directory for tools (default 'tools/'), skill (default 'skills/', which gets <name>/SKILL.md) and permissions (default 'agents/'); a file for llms (default 'llms.txt'). Rewritten on every generate; turning the feature off leaves the files in place. Setting it on any other feature is an error."
+        },
+        "targets": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["mcp", "openai-strict", "gemini"] },
+          "minItems": 1,
+          "uniqueItems": true,
+          "examples": [["mcp", "openai-strict", "gemini"]],
+          "description": "tools only: which tool-definition files to write. 'mcp' writes mcp.json, a Model Context Protocol tools/list result whose tools carry annotations from `effects` and the facts a server needs to run each one (the MCP companion module serves it). 'openai-strict' writes openai.json, OpenAI Responses API function tools in strict mode. 'gemini' writes gemini.json, Gemini function declarations. Default: mcp. Setting it on any other feature is an error."
+        },
+        "mcp_revision": {
+          "type": "string",
+          "enum": ["2026-07-28", "2025-11-25"],
+          "description": "tools only: the MCP revision mcp.json is written for. 2026-07-28 (the default) allows any JSON value as a tool's output; with 2025-11-25, which requires an object, an output that isn't one is described wrapped as {\"result\": …}, and the MCP companion wraps it the same way. Setting it on any other feature is an error."
+        },
+        "go": {
+          "type": "boolean",
+          "description": "tools only: also put mcp.json in the generated cmd package as the string variable ToolsMCP, so the binary can serve itself over MCP (with the MCP companion module) without reading a file. Needs 'mcp' in 'targets'. Setting it on any other feature is an error."
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "examples": ["taskr"],
+          "description": "skill only: the skill's name, its directory under 'file' and its SKILL.md `name`: lowercase letters, digits and single hyphens, at most 64 characters. Defaults to the root command's name, lowercased, with '_' written '-'. Setting it on any other feature is an error."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "examples": ["Use when the user asks to add, list or finish tasks."],
+          "description": "skill only: when an agent should use the skill, added after the root's summary in SKILL.md's `description` (at most 1024 characters together). Setting it on any other feature is an error."
+        },
+        "base_url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s]+$", "examples": ["https://taskr.dev/docs/cli/"],
+          "description": "llms only: the address the markdown pages are published at. llms.txt links each command to <base_url><page>.md (taskr-add.md). Without it, the links are relative to llms.txt and point at the markdown feature's files, which needs the markdown feature on with `embed: true`. Setting it on any other feature is an error."
+        },
+        "harnesses": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["claude", "codex", "gemini"] },
+          "minItems": 1,
+          "uniqueItems": true,
+          "examples": [["claude", "codex", "gemini"]],
+          "description": "permissions only: which agent harnesses to write permission rules for, from the commands' `effects`. 'claude' writes claude-settings.json, a fragment to merge into Claude Code's .claude/settings.json. 'codex' writes <name>.rules, Codex prefix rules. 'gemini' writes <name>-policy.toml, a Gemini CLI policy. Read commands are allowed and destructive ones ask first; write commands get no rule, so the harness asks as it does by default. Default: all three. Setting it on any other feature is an error."
         }
       }
     },
@@ -273,6 +323,41 @@
           "type": "string",
           "pattern": "^[^/\\\\].*$", "examples": ["schemas/config"],
           "description": "Module-root-relative directory (no leading slash) the config file schemas are written to."
+        }
+      }
+    },
+    "DiffConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Controls `rotini diff`. An acknowledgement belongs to one release, not to the interface, so it lives here rather than in the spec.",
+      "properties": {
+        "accept": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/DiffAccept" },
+          "description": "The changes this release makes on purpose. Each entry acknowledges one finding, by its exact rule and where: the finding is reported as accepted and doesn't fail the run. An entry that matches no finding fails the run, naming the entry, so the list doesn't outlive its release. There is no blanket ignore by rule."
+        }
+      }
+    },
+    "DiffAccept": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "where", "reason"],
+      "description": "One acknowledged change: `{rule: COMMAND_NO_DELETE, where: \"taskr compact\", reason: \"replaced by purge\"}`.",
+      "properties": {
+        "rule": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$", "examples": ["COMMAND_NO_DELETE", "FLAG_REQUIRED_ADDED"],
+          "description": "The finding's rule ID, as `rotini diff` prints it."
+        },
+        "where": {
+          "type": "string",
+          "minLength": 1, "examples": ["taskr compact", "taskr add --priority", "taskr list output.tasks[].status"],
+          "description": "The finding's where, exactly as `rotini diff` prints it: the item in the old contract, written as on the command line."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why the change is intended; shown beside the accepted finding."
         }
       }
     }

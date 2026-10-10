@@ -36,6 +36,9 @@ func valueOrigin(view *osView, source, envVars, key string) string {
 		}
 		return "env:" + chosenEnv(view, envVars)
 	}
+	if strings.Contains(source, "#") {
+		return "config:" + source + "." + key // a profile's source: config:app#profiles.prod.region
+	}
 	return "config:" + source + "#" + key
 }
 

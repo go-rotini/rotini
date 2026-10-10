@@ -560,6 +560,7 @@ type templateDocFlagRow struct {
 	Constraints string   // the declared constraints as a short note (1..65535, repeatable); "" for none
 	Accepts     string   // the forms a time input accepts beyond RFC 3339, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
+	Effects     string   // what giving the flag adds to its command's effects ("destructive"); "" for none
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 
@@ -665,6 +666,9 @@ type templateHelpData struct {
 	Topic bool
 	// Topics lists the help topics on the root's page; nil on every other page.
 	Topics []templateDocTopicRow
+	// Effects describes what running the command does, stating only what the spec states
+	// ("destructive, not idempotent"); "" when it declares no effects.
+	Effects string
 }
 
 // parseDocTemplate parses doc-template text with the shared FuncMap.
@@ -940,6 +944,8 @@ func templateFuncMap() template.FuncMap {
 		"stabilityNote": stabilityNote,
 		"listed":        listedEnum,
 		"described":     describedEnum,
+		// A JSON string, which is also a YAML double-quoted string, for frontmatter values.
+		"quote": quoteString,
 		// roff escaping, for man page templates (see generate_roff.go).
 		"roff":         roffInline,
 		"roffLines":    roffLines,

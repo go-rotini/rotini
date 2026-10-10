@@ -1,0 +1,159 @@
+# R1 — a configuration file with named profiles, one chosen per run.
+#
+# --profile, then ACME_PROFILE, then the default chooses the profile; its keys win over the
+# file's shared keys. An unknown profile chosen explicitly is a usage error whose facts name the
+# defined profiles; --help still runs. A completer offers the names with ConfigProfiles: the
+# recipes page shows complete.go.txt.
+
+gomodinit example.com/prof
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+cp complete.go.txt internal/cmd/app/app_complete.go
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# The default profile, then each selector.
+exec ./app$exe
+stdout '^region=eu-west-1 host=db.shared profile=$'
+exec ./app$exe --profile prod
+stdout '^region=us-east-1 host=db.prod profile=prod$'
+env ACME_PROFILE=prod
+exec ./app$exe
+stdout '^region=us-east-1 host=db.prod profile=prod$'
+exec ./app$exe --profile default
+stdout '^region=eu-west-1 host=db.shared profile=default$'
+
+# A typo is a usage error listing the profiles, and carries the facts a suggestion needs.
+env ACME_PROFILE=prdo
+! exec ./app$exe
+! stdout .
+stderr '^Error: ACME_PROFILE: profile "prdo" is not defined in configuration file .*app\.yaml \(profiles: default, prod\)$'
+stderr '^did you mean "prod"\?$'
+! exec ./app$exe --profile stage
+stderr '^Error: --profile: profile "stage" is not defined'
+
+# --help doesn't fail on a bad profile.
+exec ./app$exe --help
+stdout '^help$'
+
+# Completion offers the profiles the file defines.
+env ACME_PROFILE=
+exec ./app$exe __complete --profile ''
+stdout '^default$'
+stdout '^prod$'
+
+-- complete.go.txt --
+package app
+
+import "github.com/go-rotini/rotini"
+
+// CompleteFlagValue offers the profiles the configuration file defines for --profile.
+func (*appHandler) CompleteFlagValue(rtx *rotini.Context, flag, _ string) []string {
+	if flag != "profile" {
+		return nil
+	}
+	names, err := rotini.ConfigProfiles(rtx, "app")
+	if err != nil {
+		return nil
+	}
+	return names
+}
+-- app.yaml --
+region: eu-west-1
+db: { host: db.shared }
+profiles:
+  default: {}
+  prod:
+    region: us-east-1
+    db: { host: db.prod }
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  config_files:
+    - name: app
+      path: ./app.yaml
+      profiles: { under: profiles, select: profile, default: default }
+  flags:
+    - name: help
+      identifiers: [--help]
+      short_circuit: true
+      schema: { type: bool }
+    - name: profile
+      summary: the configuration profile to use
+      identifiers: [--profile]
+      schema: { type: string, variable: ACME_PROFILE }
+  config:
+    - name: region
+      schema: { type: string }
+    - name: host
+      schema: { type: string, key: db.host }
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- cmd/app/main.go --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	"context"
+	"fmt"
+
+	cmd "example.com/prof/internal/cmd/app"
+	"github.com/go-rotini/rotini"
+)
+
+var suggestor = rotini.NewSuggestor()
+
+func report(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+		if hits := suggestor.For(err); len(hits) > 0 {
+			fmt.Fprintf(rtx.Stderr, "did you mean %q?\n", hits[0])
+		}
+	}
+	if out.Failed() {
+		rtx.Exit(1)
+	}
+}
+
+func main() {
+	cmd.NewProgram(cmd.Handlers()).WithReporter(report).Execute()
+}
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AppInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.App.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, "help")
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "region=%s host=%s profile=%s\n", in.App.Config.Region, in.App.Config.Host, in.App.Flags.Profile)
+}

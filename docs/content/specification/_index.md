@@ -108,7 +108,7 @@ With `deprecated`: the command to use instead, as its path below this spec's roo
 
 `string` · one of `experimental`, `beta`
 
-How settled this command is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it in the parent's command list, and a line on its own pages; the contract carries it. Its inputs, sub-commands, output and exit codes are as unstable as it is. Nothing changes at run time: to gate an experimental command, check in its handler.
+How settled this command is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it in the parent's command list, and a line on its own pages; the contract carries it. Its inputs, sub-commands, output and exit codes are as unstable as it is. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time: to gate an experimental command, check in its handler.
 
 ### Inputs
 
@@ -392,6 +392,20 @@ Document-level (root only): reusable named schema definitions. Referenced elsewh
 
 Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('&lt;root&gt;_&lt;path&gt;.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'&lt;GOOS&gt;'/'&lt;GOARCH&gt;' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_&lt;GOOS&gt;.go', '_&lt;GOARCH&gt;.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
 
+### Agents
+
+#### `effects`
+
+[`Effects`](#effects)
+
+What running this command does, for the people and the programs (such as AI agents) that run it. Help, man and markdown show it as a line (`Effects: destructive, not idempotent`), and the contract, the generated Definition (CommandDef.Effects), tool exports, the agent skill page and permission snippets carry it. Unset says nothing, and a program reading the contract then assumes the worst: destructive, reaching outside the machine. Sub-commands don't inherit it. A flag's own `effects` raises it for a run that gives the flag. Not allowed on a `$ref` node: the child spec, whose handler runs, declares it. Nothing changes at run time.
+
+#### `agent`
+
+`boolean` or `null`
+
+Whether this command and its sub-commands are offered to AI agents: in tool exports, the agent skill page, llms.txt, permission snippets and the MCP companion. `false` leaves the subtree out, while it stays in help. `true` brings back a command left out by default: a hidden or deprecated one, one with sub-commands (which prints help when run bare), or a passthrough command (which would run whatever it is given). Unset follows those defaults. Nothing changes at run time.
+
 
 ## FlagInput
 
@@ -400,6 +414,12 @@ Override the name of this command's generated handler-stub .go file (in the cli 
 `string` · **required**
 
 Logical name for the flag
+
+### `agent`
+
+`boolean` or `null`
+
+Whether this flag is a tool parameter for AI agents (tool exports and the MCP companion). `false` leaves it out, while it stays in help. `true` brings back a flag left out by default: a hidden, deprecated, secret or short-circuit flag, or one that reads `from:` a file or stdin (which would let an agent read the host's files, or put a secret in the model's context). Unset follows those defaults.
 
 ### `cascading`
 
@@ -436,6 +456,12 @@ The release that deprecated this flag (X.Y.Z), shown beside the deprecation in h
 `string`
 
 Longer text about this flag, paragraphs separated by blank lines, shown under it in man and markdown pages and used as its description in the contract's parameters. Help shows `summary` only; an editable help template can show both, as .Description.
+
+### `effects`
+
+[`Effects`](#effects)
+
+What giving this flag adds to its command's `effects`. A run's effect is the highest of its command's and every given flag's (read, then write, then destructive); it is idempotent only when every stated value says so, and reaches outside the machine when any does. A flag can only raise its command's effect, so its command must declare `effects` with a lower kind; mark a preview flag with `role: dry-run` instead. A cascading flag raises whichever command it is given to. Help, man and markdown show the kind beside the flag (`(destructive)`), and the contract and the generated FlagDef.Effects carry it.
 
 ### `group`
 
@@ -479,11 +505,19 @@ With `deprecated`: the flag to use instead, as one of its identifiers (`--output
 
 ### `role`
 
-`string` · one of `force`, `chdir`, `fields`, `sort`
+`string` · one of `force`, `chdir`, `fields`, `sort`, `dry-run`, `confirm`, `machine-output`, `page`
 
 What this flag means to a program driving the CLI, such as an agent. 'force' marks the bool flag that lets the command replace existing output files (the handler passes it on, as in rotini.CreateOutput(rtx, path, rotini.Overwrite(in.Flags.Force))). 'fields' marks the list flag that chooses which output fields are written (`--json id,title`, applied with rotini.SelectFields), and 'sort' the string flag that names the field to sort by (`--sort-by title`, applied with rotini.SortBy); each takes its values from an `enum` or `values_from`. These three change nothing at run time. At most one flag per command has a given role.
 
 'chdir' is the one role the runtime acts on: a git-style `-C dir` on the root, cascading, read from the command line only (no default, env or config fallback, or `from:`), one per program. Rotini reads it before anything else, and resolves walk-up config discovery, relative paths, `@file` values, path checks and the directory plugins run in against it (Context.Dir returns it). It never changes the process's working directory, so a handler joins relative paths with rtx.Dir(). A relative value is resolved against the run's directory, and given more than once, the last wins.
+
+'dry-run' marks the bool flag that previews a run without changing anything, and 'confirm' the bool flag that answers yes for a command that would otherwise refuse or prompt. 'machine-output' marks the flag that makes the command write its declared `output` as JSON: a bool flag, or a string flag with an `enum` and `role_value` naming the value that selects JSON (`--format json`). 'page' marks the flag that selects a page of results. They change nothing at run time either; the contract, tool exports and the agent skill page read them, and a command has each at most once, counting the cascading flags it inherits.
+
+### `role_value`
+
+`string`
+
+With `role: machine-output` on a string flag: the `enum` value that selects JSON output (`json` for `--format json`). Tool exports and the MCP companion add `--format=json` to the command line themselves and leave the flag out of the tool's parameters. Only on a machine-output flag with an enum that lists it.
 
 ### `schema`
 
@@ -501,7 +535,7 @@ When true, setting this flag on the command line waives every declared requireme
 
 `string` · one of `experimental`, `beta`
 
-How settled this flag is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. A flag is never more stable than its command: a flag of an experimental command is experimental too. Nothing changes at run time.
+How settled this flag is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. A flag is never more stable than its command: a flag of an experimental command is experimental too. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time.
 
 ### `summary`
 
@@ -517,6 +551,12 @@ Short one-liner shown next to this flag in the Flags section of generated help.
 `string` · **required**
 
 Logical name for the argument
+
+### `agent`
+
+`boolean` or `null`
+
+Whether this argument is a tool parameter for AI agents (tool exports and the MCP companion). `false` leaves it out, while it stays in help. `true` brings back an argument left out by default: a hidden, deprecated or secret one, or one that reads `from:` a file or stdin. Unset follows those defaults. A required argument left out leaves its command out of the tool exports, with a warning.
 
 ### `deprecated`
 
@@ -564,7 +604,7 @@ Type definition and input-level metadata (type, required, default, enum, nullabl
 
 `string` · one of `experimental`, `beta`
 
-How settled this argument is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An argument is never more stable than its command. Nothing changes at run time.
+How settled this argument is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An argument is never more stable than its command. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time.
 
 ### `summary`
 
@@ -580,6 +620,12 @@ Short one-liner shown next to this argument in the Arguments section of generate
 `string` · **required**
 
 Logical name for this env var input
+
+### `agent`
+
+`boolean` or `null`
+
+Environment variables are never tool parameters: on an MCP server they come from the server's own environment, where secrets belong. `false` leaves this variable out of the agent skill page's list of variables, and `true` lists it there when it is hidden. The contract carries it.
 
 ### `deprecated`
 
@@ -621,7 +667,7 @@ Type definition and input-level metadata (required, default, variable)
 
 `string` · one of `experimental`, `beta`
 
-How settled this environment variable is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. Nothing changes at run time.
+How settled this environment variable is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time.
 
 ### `summary`
 
@@ -637,6 +683,12 @@ Short one-liner shown next to this input in the generated Environment/Configurat
 `string` · **required**
 
 Logical name for this config value
+
+### `agent`
+
+`boolean` or `null`
+
+Config values are never tool parameters: on an MCP server they are the server's own configuration. `false` leaves this value out of the agent skill page's list of configuration, and `true` lists it there when it is hidden. The contract carries it.
 
 ### `deprecated`
 
@@ -678,7 +730,7 @@ Type definition and input-level metadata (required, default, file, key)
 
 `string` · one of `experimental`, `beta`
 
-How settled this config value is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. Nothing changes at run time.
+How settled this config value is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time.
 
 ### `summary`
 
@@ -759,6 +811,12 @@ The file's format. When omitted, the format is inferred from the file extension;
 `string`
 
 File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.
+
+### `profiles`
+
+[`ConfigurationFileProfiles`](#configurationfileprofiles)
+
+Named sets of settings in this file, one chosen per run by a declared input (`--profile prod`, `ACME_PROFILE=prod`). The keys under `<under>.<name>` are read as if they sat at the top of the file and win over the file's other top-level keys, which every profile shares. Merging is per key: a list is replaced, not joined, and a map's entries merge. Precedence is otherwise unchanged: command line, environment, configuration files (the selected profile, then the shared keys), default. Profiles that aren't selected are not read or checked, and the file's `schema` checks the shared keys merged with the selected profile, without the `<under>` key. Not allowed on a `format: dotenv` or `as: env` file.
 
 ### `schema`
 
@@ -1064,6 +1122,29 @@ array of `string`
 Required property names for object schemas (standard JSON Schema semantics).
 
 
+## Effects
+
+What a command does when it runs, or what a flag adds to that. Programs that run the CLI for someone, such as AI agents and their permission rules, read it to decide what needs asking first.
+
+### `kind`
+
+`string` · **required** · one of `read`, `write`, `destructive`
+
+'read': changes nothing. 'write': creates or changes things, without destroying what was there. 'destructive': deletes or overwrites something that can't be got back.
+
+### `idempotent`
+
+`boolean` or `null`
+
+Running it again with the same inputs changes nothing more. Unset says nothing.
+
+### `open_world`
+
+`boolean` or `null`
+
+It reaches the network or other systems outside the machine. Unset says nothing, and a program reading the contract then assumes it does.
+
+
 ## InputSchema
 
 Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.
@@ -1334,6 +1415,29 @@ The file name to look for in each searched directory (e.g. '.acme.toml', 'config
 `string`
 
 The application directory under the config root: the '&lt;app&gt;' in $XDG_CONFIG_HOME/&lt;app&gt; (or the native or system directory). Required by the 'xdg', 'native' and 'xdg-system' strategies and rejected by 'walk-up', which has no such directory. `rotini validate` enforces both, so its message can say which strategy needs it and what it is for.
+
+
+## ConfigurationFileProfiles
+
+Where a configuration file keeps its named profiles and which input chooses one.
+
+### `under`
+
+`string` · **required**
+
+The top-level key holding the named profiles: `profiles: {prod: {region: eu-west-1}}` is `under: profiles`. One key, not a dotted path. It must not be the first segment of a key a config input or fallback reads from this file.
+
+### `select`
+
+`string` · **required**
+
+The name of the string input that chooses the profile: a flag with this name, an env input with this name, or both, declared on this command or an ancestor. The flag set on the command line wins, then the first set variable (the flag's own `variable:` names, then the env input's), then the default. The selector is read before any configuration file, so it can't come from one: the flag can't declare `key:` or `config_source`. An unknown profile chosen on the command line or in the environment is a usage error listing the defined ones; a defaulted profile that a file doesn't define just leaves the shared keys.
+
+### `default`
+
+`string`
+
+The profile used when neither the command line nor the environment chooses one. Declare the default in one place only: here, on the selector flag or on the selector env input. With no default and no selection, only the shared keys apply.
 
 
 ## BaseSchema

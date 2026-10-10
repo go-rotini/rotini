@@ -1,0 +1,7 @@
+-- in --
+a: &x 1
+c: *x
+-- op --
+set c 2
+-- err --
+anchor or alias

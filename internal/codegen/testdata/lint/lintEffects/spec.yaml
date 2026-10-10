@@ -1,0 +1,34 @@
+# A flag's effects can only raise its command's, which must declare its own; a $ref node takes
+# the child's.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    # Correct: the flag raises write to destructive, and another adds open world. No problem.
+    - name: sync
+      effects: { kind: write, idempotent: true }
+      flags:
+        - name: prune
+          effects: { kind: destructive }
+          schema: { type: bool }
+        - name: remote
+          effects: { kind: write, open_world: true }
+          schema: { type: bool }
+    # The command declares no effects for the flag to raise.
+    - name: list
+      flags:
+        - name: refresh
+          effects: { kind: write }
+          schema: { type: bool }
+    # A read flag on a destructive command changes nothing: a preview is a role.
+    - name: purge
+      effects: { kind: destructive }
+      flags:
+        - name: dry-run
+          effects: { kind: read }
+          role: dry-run
+          schema: { type: bool }
+    # A $ref node takes its effects from the child spec.
+    - name: db
+      $ref: ./child.yaml
+      effects: { kind: read }

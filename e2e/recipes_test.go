@@ -23,6 +23,7 @@ var recipeBlocks = []struct{ title, script, file string }{
 	{"internal/cmd/tracedemo/tracedemo.go", "r12_recipe_otel.txtar", "root.go.txt"},
 	{"internal/cmd/tracedemo/tracedemo_work.go", "r12_recipe_otel.txtar", "work.go.txt"},
 	{"internal/cmd/teedemo/teedemo_export.go", "r12_recipe_tee.txtar", "export.go.txt"},
+	{"internal/cmd/app/app_complete.go", "r1_config_profiles.txtar", "complete.go.txt"},
 }
 
 func TestRecipeBlocksMatchScripts(t *testing.T) {

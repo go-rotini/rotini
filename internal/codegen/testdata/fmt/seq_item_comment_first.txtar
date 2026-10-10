@@ -1,0 +1,20 @@
+-- in --
+version: 1.0.0
+command:
+  name: tool
+  flags:
+    - # leading comment
+      summary: s
+      name: a
+    -
+      name: b
+-- out --
+version: 1.0.0
+command:
+  name: tool
+  flags:
+    - # leading comment
+      name: a
+      summary: s
+    -
+      name: b

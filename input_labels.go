@@ -97,6 +97,9 @@ func (l channelLabels) name(channel, path string) string {
 // supplied, or "" when the source is not a known file.
 func (l channelLabels) origin(source string) string {
 	if p := l.files[source]; p != "" {
+		if profile := sourceProfile(source); profile != "" {
+			p += ", profile " + profile
+		}
 		return " (from configuration file " + p + ")"
 	}
 	return ""

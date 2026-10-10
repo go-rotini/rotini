@@ -77,6 +77,7 @@ field CommandDef.Deprecated
 field CommandDef.DeprecatedIdentifiers
 field CommandDef.DeprecatedIdentifiersRemovedIn
 field CommandDef.DeprecatedSince
+field CommandDef.Effects
 field CommandDef.ExitStatus
 field CommandDef.FlagDependencies
 field CommandDef.FlagGroups
@@ -116,6 +117,7 @@ field ConfigFile.Format
 field ConfigFile.Name
 field ConfigFile.Path
 field ConfigFile.PathFrom
+field ConfigFile.Profiles
 field ConfigFile.Schema
 field ConfigFile.Scope
 field Constraints.ExclusiveMaximum
@@ -138,6 +140,7 @@ field Definition.Arguments
 field Definition.Commands
 field Definition.CompletionDescriptions
 field Definition.CompletionMessages
+field Definition.Effects
 field Definition.ExitStatus
 field Definition.FlagDependencies
 field Definition.FlagGroups
@@ -169,6 +172,9 @@ field DiscoverDef.File
 field DiscoverDef.Strategy
 field DiscoveredPlugin.Name
 field DiscoveredPlugin.Path
+field Effects.Idempotent
+field Effects.Kind
+field Effects.OpenWorld
 field EnumValue.Aliases
 field EnumValue.Deprecated
 field EnumValue.DeprecatedAliases
@@ -192,6 +198,7 @@ field FlagDef.DeprecatedIdentifiers
 field FlagDef.DeprecatedIdentifiersRemovedIn
 field FlagDef.DeprecatedSince
 field FlagDef.DottedKeys
+field FlagDef.Effects
 field FlagDef.Enum
 field FlagDef.EnumValues
 field FlagDef.From
@@ -290,6 +297,10 @@ field PluginError.Kind
 field PluginError.Msg
 field PluginError.Name
 field PluginError.Timeout
+field ProfilesDef.Default
+field ProfilesDef.Env
+field ProfilesDef.Flag
+field ProfilesDef.Under
 field Resolution.Argv
 field Resolution.Chain
 field Resolution.Plugin
@@ -305,6 +316,7 @@ func ArgvPath(names ...string) ArgvOption
 func ArgvSecrets() ArgvOption
 func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func CategoryOf(err error) Category
+func ConfigProfiles(rtx *Context, file string) ([]string, error)
 func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile, error)
 func DecodeOutput[T any](p *Program, data []byte, format string) (T, error)
 func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep
@@ -517,6 +529,7 @@ type DependencyError
 type Deprecation
 type DiscoverDef
 type DiscoveredPlugin
+type Effects
 type EnumValue
 type ExitStatusDef
 type FieldPath
@@ -561,6 +574,7 @@ type PluginDispatch
 type PluginError
 type PluginErrorKind
 type Presence
+type ProfilesDef
 type Program
 type Reporter
 type Resolution

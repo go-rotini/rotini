@@ -1,0 +1,32 @@
+# Each feature-specific key belongs on its own feature, and the whole-program features check
+# their own settings.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    # A tools key on help.
+    - type: help
+      enabled: true
+      targets: [mcp]
+    # go without the mcp target, and embed, which doesn't apply.
+    - type: tools
+      enabled: true
+      targets: [gemini]
+      go: true
+      embed: true
+    # The skill's references need the markdown feature, which is off.
+    - type: skill
+      enabled: true
+      description: Use when the user asks for a demo.
+    # Relative links to markdown pages that aren't written.
+    - type: llms
+      enabled: true
+      file: ../llms.txt
+    # Built from the contract: no template.
+    - type: permissions
+      enabled: true
+      template: true
+      harnesses: [claude]

@@ -212,10 +212,15 @@ func (p *program) configSchemaDoc(cf scopedConfigFile) map[string]any {
 		}
 		setNested(props, strings.Split(e.key, "."), s)
 	}
+	if cf.Profiles != nil {
+		props[cf.Profiles.Under] = p.profilesSchema(cf, props)
+	}
 	if len(props) > 0 {
 		doc["properties"] = props
 	}
-	if cf.Schema != nil {
+	// A profiled file's declared schema checks the shared keys merged with the selected
+	// profile, which a schema of the file itself can't express, so it is left out.
+	if cf.Schema != nil && cf.Profiles == nil {
 		declared, _ := standardSchema(schemaToDoc(*cf.Schema)).(map[string]any)
 		if found, ok := reachableDefinitions(declared, p.schemas); ok && declared != nil {
 			doc["allOf"] = []any{declared}
@@ -228,6 +233,41 @@ func (p *program) configSchemaDoc(cf scopedConfigFile) map[string]any {
 		doc["definitions"] = defs
 	}
 	return doc
+}
+
+// profilesSchema describes the key holding cf's profiles: each profile may hold the same keys
+// as the top of the file (props).
+func (p *program) profilesSchema(cf scopedConfigFile, props map[string]any) map[string]any {
+	section := map[string]any{"type": "object"}
+	if len(props) > 0 {
+		section["properties"] = maps.Clone(props)
+	}
+	sel := findProfileSelector(p.scopeChain(cf.Scope), cf.Profiles.Select)
+	var by []string
+	if sel.flag != nil {
+		by = append(by, longestIdentifier(sel.flag.Identifiers))
+	}
+	by = append(by, sel.variables(p.envPrefix)...)
+	desc := "Named profiles, one chosen per run"
+	if len(by) > 0 {
+		desc += " by " + strings.Join(by, " or ")
+	}
+	desc += ". A profile's keys win over the same keys at the top of the file, which every profile shares."
+	if d := sel.defaultFor(cf.Profiles); d != "" {
+		desc += fmt.Sprintf(" Without a choice, %q is used.", d)
+	}
+	return map[string]any{"type": "object", "description": desc, "additionalProperties": section}
+}
+
+// longestIdentifier is the flag identifier a description names: its longest spelling.
+func longestIdentifier(ids []string) string {
+	best := ""
+	for _, id := range ids {
+		if len(id) > len(best) {
+			best = id
+		}
+	}
+	return best
 }
 
 // setNested places schema at the dotted path in props, creating the objects between.

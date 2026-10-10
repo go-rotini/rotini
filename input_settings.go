@@ -43,6 +43,19 @@ type ConfigFile struct {
 	// environment, which wins variable by variable, and never configuration inputs. "" (or
 	// "config") is a configuration file.
 	As string
+	// Profiles selects one named section of the file per run; nil when the file has none.
+	Profiles *ProfilesDef
+}
+
+// ProfilesDef selects one named section of a [ConfigFile] per run. The section's keys are read
+// as if they sat at the top of the file, winning over the file's other top-level keys, which
+// every profile shares. The selection is the flag set on argv, then the first variable of Env
+// that is set, then Default.
+type ProfilesDef struct {
+	Under   string // the top-level key holding the named sections
+	Flag    string // logical name of the selector flag, searched across the chain; "" when none
+	Env     string // variables read directly, comma-separated, the first one set winning
+	Default string // the profile used when argv and the environment select none; "" means the shared keys only
 }
 
 // PathFromDef names the runtime inputs that supply a [ConfigFile]'s path — the declarative

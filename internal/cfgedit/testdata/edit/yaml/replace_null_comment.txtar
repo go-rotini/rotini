@@ -1,0 +1,8 @@
+-- in --
+a: 1
+b: # c
+-- op --
+set b "v"
+-- out --
+a: 1
+b: v # c

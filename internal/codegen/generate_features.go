@@ -116,6 +116,8 @@ type cmdHelp struct {
 	Markdown    string            // verbatim markdown reference page (command.markdown)
 	Stability   string            // command.stability as declared: "experimental", "beta" or "" (stable)
 	Topics      []Topic           // command.topics: help topics, read from the root only
+	Effects     *Effects          // command.effects: what running it does; nil when undeclared
+	Agent       *bool             // command.agent: offered to AI agents (true), kept from them (false), or unset
 }
 
 // commandHelp gathers the doc fields of a command.
@@ -126,6 +128,7 @@ func commandHelp(c Command) cmdHelp {
 		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso, Groups: c.Groups,
 		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
 		Stability: c.Stability, Topics: c.Topics,
+		Effects: c.Effects, Agent: c.Agent,
 	}
 }
 
@@ -333,6 +336,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Cascading:   withConfigKeys(ancestorCascading, readsConfig),
 		Examples:    h.Examples,
 		SeeAlso:     h.SeeAlso,
+		Effects:     effectsText(h.Effects),
 	}
 	for _, e := range h.ExitStatus {
 		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, Output: shapeTypeName(e.Output), DocsURL: e.DocsUrl})
@@ -634,6 +638,7 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		Accepts:     acceptsNote(f.Schema),
 		Rules:       rules,
 		key:         flagReconKey(f.Name, f.Schema),
+		Effects:     effectsText(f.Effects),
 
 		DeprecatedSince: f.DeprecatedSince, RemovedIn: f.RemovedIn,
 	}

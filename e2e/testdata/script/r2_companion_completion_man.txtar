@@ -41,16 +41,19 @@ stderr 'did you mean "generate"'
 
 # ── man --dir: every page ────────────────────────────────────────────────────
 exec rotini man --dir share/man/man1
-stderr 'wrote 8 man pages to share/man/man1'
+stderr 'wrote 11 man pages to share/man/man1'
 exists share/man/man1/rotini.1
 exists share/man/man1/rotini-generate.1
 exists share/man/man1/rotini-man.1
 exists share/man/man1/rotini-completion.1
+exists share/man/man1/rotini-diff.1
+exists share/man/man1/rotini-explain.1
+exists share/man/man1/rotini-fmt.1
 
 # The written pages are what `rotini man <command>` prints, and a man page checker accepts them.
 exec rotini man completion
 cmp stdout share/man/man1/rotini-completion.1
-[exec:mandoc] exec mandoc -Tlint -W error share/man/man1/rotini.1 share/man/man1/rotini-generate.1 share/man/man1/rotini-completion.1 share/man/man1/rotini-man.1
+[exec:mandoc] exec mandoc -Tlint -W error share/man/man1/rotini.1 share/man/man1/rotini-generate.1 share/man/man1/rotini-completion.1 share/man/man1/rotini-man.1 share/man/man1/rotini-diff.1 share/man/man1/rotini-explain.1 share/man/man1/rotini-fmt.1
 [exec:mandoc] ! stdout .
 
 ! exec rotini man generate --dir elsewhere

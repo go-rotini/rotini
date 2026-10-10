@@ -1,0 +1,11 @@
+spec: .rotini.spec.yaml:12:44: command demo: config_files "nosel": profiles.select names "nosuch", but no flag or env input of that name is declared on this command or an ancestor
+spec: .rotini.spec.yaml:15:44: command demo: config_files "typed": profiles.select names flag "count", whose type is int; a profile name is a string
+spec: .rotini.spec.yaml:18:44: command demo: config_files "sourced": profiles.select names flag "conf", which sets `config_source`; a selector chooses a profile, not a file
+spec: .rotini.spec.yaml:21:44: command demo: config_files "keyed": profiles.select names flag "keyed", which sets `key`; the selector is read before any configuration file, so it can't come from one
+spec: .rotini.spec.yaml:27:26: command demo: config_files "collide": profiles.under is "db", the first segment of key "db.host" (config "host"); profiles need a key of their own
+spec: .rotini.spec.yaml:30:62: command demo: config_files "twice": the profile's default is declared more than once (flag "profile" default "base", profiles.default "other"); declare it in one place
+spec: .rotini.spec.yaml:33:54: command demo: config_files "outside": profiles.default "nope" is not one of flag "env"'s values
+spec: .rotini.spec.yaml:38:26: command demo: config_files "dotenv": sets `profiles` on a dotenv file, whose KEY=value lines have no sections to choose from; remove `profiles`
+warning: spec: .rotini.spec.yaml:24:44: command demo: config_files "local": profiles.select names flag "local", which isn't cascading; it still parses after a sub-command, but the sub-commands' help won't list it; set `cascading: true`
+warning: spec: .rotini.spec.yaml:30:44: command demo: config_files "twice": profiles.select "profile" is also the selector of config_files "collide", which keeps its profiles under "db", not "profiles"; one selector usually reads one key
+warning: spec: .rotini.spec.yaml:71:48: command demo/sub: config_files "subfile": profiles.select "profile" is also the selector of config_files "collide", which keeps its profiles under "db", not "contexts"; one selector usually reads one key

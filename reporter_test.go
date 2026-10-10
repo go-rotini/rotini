@@ -42,12 +42,12 @@ func TestStructuredReporter_machine(t *testing.T) {
 		t.Errorf("exit = %d, want the default reporter's floor of 1", code)
 	}
 	want := []string{
-		`{"info":{"command":"taskr list","message":"reading tasks"}}`,
-		`{"warning":{"command":"taskr list","message":"the cache is stale"}}`,
-		`{"error":{"category":"usage","command":"taskr list","exit_code":1,"flag":"--status","kind":"enum-violation","message":"invalid value \"bogus\" for --status","token":"bogus"}}`,
-		`{"error":{"category":"internal","command":"taskr list","exit_code":1,"message":"the store is gone"}}`,
-		`{"error":{"category":"internal","command":"taskr list","exit_code":1,"message":"boom"}}`,
-		`{"success":{"command":"taskr list","message":"done"}}`,
+		`{"schema_version":1,"info":{"command":"taskr list","message":"reading tasks"}}`,
+		`{"schema_version":1,"warning":{"command":"taskr list","message":"the cache is stale"}}`,
+		`{"schema_version":1,"error":{"category":"usage","command":"taskr list","exit_code":1,"flag":"--status","kind":"enum-violation","message":"invalid value \"bogus\" for --status","token":"bogus"}}`,
+		`{"schema_version":1,"error":{"category":"internal","command":"taskr list","exit_code":1,"message":"the store is gone"}}`,
+		`{"schema_version":1,"error":{"category":"internal","command":"taskr list","exit_code":1,"message":"boom"}}`,
+		`{"schema_version":1,"success":{"command":"taskr list","message":"done"}}`,
 	}
 	got := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

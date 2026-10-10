@@ -1,0 +1,18 @@
+-- in --
+{
+  "deploy": {
+    "timeout": "5m",
+    "retries": 3
+  },
+  "log": "info"
+}
+-- op --
+set deploy.timeout "1h"
+-- out --
+{
+  "deploy": {
+    "timeout": "1h",
+    "retries": 3
+  },
+  "log": "info"
+}

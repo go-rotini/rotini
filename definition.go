@@ -59,6 +59,8 @@ type Definition struct {
 	// Topics lists the root's help topics (the spec's `topics:`), which completion offers
 	// with the root's sub-commands for a command path.
 	Topics []TopicDef
+	// Effects is what running the root command does (spec effects:); nil when undeclared.
+	Effects *Effects
 }
 
 // ExitStatusDef is one exit code a command documents: the spec's `exit_status` entry.
@@ -225,6 +227,9 @@ type CommandDef struct {
 	// Usage is the command's usage line, with its full invocation ("taskr add <title>
 	// [flags]"); see [Definition.Usage].
 	Usage string
+	// Effects is what running the command does (spec effects:); nil when undeclared. Not
+	// inherited by sub-commands.
+	Effects *Effects
 }
 
 // Constraints carries the validation bounds a spec may declare on a flag or argument. The
@@ -347,6 +352,9 @@ type FlagDef struct {
 	// One role changes what the runtime does: "chdir" names the root flag whose directory the
 	// run resolves relative paths and config discovery against (see [Context.Dir]).
 	Role string
+	// Effects is what giving the flag adds to its command's effects (spec effects:); nil when
+	// undeclared. A run's effect is the highest of its command's and every given flag's.
+	Effects *Effects
 }
 
 // Completion is a declarative hint about what an input's value is, for the shell to complete.

@@ -43,10 +43,13 @@ Commands:
   initialize, init    scaffold a cli program
   generate, gen       generate a cli program
   validate, val       validate a spec and conf
+  explain             describe a spec or conf key
+  fmt                 format a spec and conf
   help                print help
   version             print version
   completion          print a shell completion script
   man                 print or install the man pages
+  diff                compare two versions of a cli's contract
 
 Flags:
   -v, --version    print version
@@ -197,6 +200,11 @@ Without the flag, the variable the conf's `validate.release_env` names is read i
 nothing is checked. A prerelease such as `2.0.0-rc.1` counts as `2.0.0`, so the check fails early.
 Specs composed from another module (`mod://`) are left out: they follow that module's releases.
 
+`--format json` writes one JSON object to stdout instead, listing every problem with its
+`severity`, `document`, `file`, `line`, `col`, JSON `pointer`, `message` and `hint` (what to do
+about it), for an editor or an agent to read. The exit code is the same: 1 when any problem is an
+error. It can't be combined with `--watch`.
+
 {{< code title="$ rotini help validate" language="text" open="true" collapsible="false" copy="false" >}}
 Validate a rotini spec file and its conf for correctness.
 
@@ -211,13 +219,175 @@ Flags:
       --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]
   -w, --watch            watch the spec and conf for changes and re-validate
       --release X.Y.Z    fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names
+      --format string    how to report problems — text, or json (one object listing every problem, on stdout) (default text) [text|json]
+
+Global Flags:
+  -h, --help    print help
+
+Output:
+  Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.
+  object
+    problems []object    the problems, errors first, each as it is reported in text (required)
+
+Examples:
+  rotini validate
+  rotini val ./path/to/.rotini.spec.yaml
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
+## rotini diff
+
+Compares two versions of a CLI's contract (the document `generate.contract.file` writes) and
+reports what changed for the people and scripts using the CLI. Each finding has a severity:
+
+- **breaking**: a command line, script or reader that worked before stops working, such as a
+  removed flag, a new required argument or an output property that's gone;
+- **possibly breaking**: it may, such as a changed default, a new output enum value or a newly
+  hidden command;
+- **expected**: a removal the old contract planned with `removed_in` at or below `--release`;
+- **safe**: nothing that worked stops working.
+
+On an `experimental` item every finding is safe, and on a `beta` item a breaking one is possibly
+breaking. See [checking for breaking changes](/docs#checking-for-breaking-changes) for the CI
+recipe and every rule.
+
+`<old>` is a contract file, `git:<ref>` (the conf's `generate.contract.file` as committed at that
+revision, read with `git show`, which never fetches), `git:<ref>:<path>` (a module-root-relative
+file at that revision), or `mod://<module>@<version>/<path>`. `<new>` takes the same forms and
+defaults to the contract built from the current spec and conf, whether or not the conf writes a
+contract file. Because both arguments are contracts, the spec is given with `--spec`, unlike
+`generate` and `validate`.
+
+It exits 0 when nothing is at or above `--fail-on` (`breaking` by default), 2 when something is,
+and 1 on an error. A `diff.accept` entry in the conf acknowledges one intended change; an entry
+that matches no change also exits 2, so the list doesn't outlive its release. `--format json`
+writes the findings as one JSON document, described by the command's `output` in the
+companion's own contract. `--release` falls back to the variable `validate.release_env` names.
+
+{{< code title="$ rotini help diff" language="text" open="true" collapsible="false" copy="false" >}}
+Compare two versions of a cli's contract and report each change for the people and
+scripts using it: breaking, possibly breaking, expected (a removal planned for this
+release) or safe. Findings are written to stdout, grouped by severity.
+
+<old> is a contract file, git:<ref> (the conf's generate.contract.file at that
+revision, read with git show), git:<ref>:<path> (a module-root-relative file at that
+revision) or mod://<module>@<version>/<path>. <new> takes the same forms and defaults
+to the contract built from the current spec and conf. Because both arguments are
+contracts, the spec is given with --spec.
+
+The conf's diff.accept entries acknowledge intended changes, one finding each; an entry
+that matches no finding fails the run.
+
+Usage:
+  rotini diff [flags] <old> [new]
+
+Arguments:
+  <old>    the earlier contract: a file, git:<ref>[:<path>] or mod://<module>@<version>/<path>
+  [new]    the later contract (default the one built from the current spec and conf)
+
+Flags:
+      --spec string       path to the spec file (default the .rotini.spec.* in the working directory)
+  -c, --config string     path to the rotini conf file (default the .rotini.conf.* beside the spec)
+      --release X.Y.Z     report a removal the old contract planned for this release or earlier as expected; defaults to the variable validate.release_env names
+      --fail-on string    the least severe change that fails the run (default breaking) [breaking|possibly|never]
+      --format string     how to write the findings (default text) [text|json]
+
+Global Flags:
+  -h, --help    print help
+
+Output:
+  Every change between the contracts, the acknowledgements that matched none, and the counts.
+  object
+    findings []object             The changes, most severe first, then by where. (required)
+    summary object                The changes by severity; an accepted change counts only as accepted. (required)
+    unmatched_accepts []object    The diff.accept entries that matched no change. (required)
+
+Examples:
+  rotini diff git:v1.2.0
+  rotini diff git:v1.2.0 --release 2.0.0
+  rotini diff old/cli-contract.json cli-contract.json --format json
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
+## rotini explain
+
+Prints what a spec or conf key means: its description, type, allowed values, default, examples
+and pattern, read from the same schemas as the [spec](/specification) and
+[conf](/configuration) reference pages. Write the keys from the top of the document, separated
+by dots, without list positions: `command.flags.schema.from`. A key both documents have, such as
+`version`, is shown for each. The argument completes one key at a time.
+
+{{< code title="$ rotini help explain" language="text" open="true" collapsible="false" copy="false" >}}
+Print what a spec or conf key means: its description, type, allowed values, default and examples, read from the same schemas as the reference pages. Write the keys from the document's top, separated by dots and without list positions: command.flags.schema.from. A key both documents have, such as version, is shown for each.
+
+Effects: read, idempotent, local only
+
+Usage:
+  rotini explain <key>
+
+Arguments:
+  <key>    the key path, such as command.flags.schema.from
 
 Global Flags:
   -h, --help    print help
 
 Examples:
-  rotini validate
-  rotini val ./path/to/.rotini.spec.yaml
+  rotini explain command.flags.role
+  rotini explain generate.features.targets
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
+## rotini fmt
+
+Rewrites rotini spec, conf and composed command files in one canonical layout, so specs read
+the same across a project and diffs show real changes. Keys go in reading order: a command
+starts with its name, aliases and documentation, then its inputs, its output and its
+sub-commands; an input starts with its name, identifiers and documentation, then how it
+behaves, then its `schema:`, where `type` comes first. Indentation is two spaces, with lists
+indented under their key, and runs of blank lines fold into one. Comments move with the entries they sit above or beside, and every
+value is copied exactly as written: quoting, flow collections like `{ type: bool }` and block
+scalar text are untouched. A mapping whose order matters to the author, such as `headings`, or
+whose reordering would put an alias before its anchor, keeps its order.
+
+With no file it formats the spec in the working directory and the conf beside it, found the way
+`validate` finds them. A file's kind comes from its keys (`command:` for a spec, `generate:` or
+`validate:` for a conf, `name:` for a composed command), then from its name; `--kind` settles a
+file that has neither. `--check` writes nothing and exits 2 when a file isn't formatted, 0 when
+all are, and 1 on an error. Only YAML files can be formatted for now; JSON, JSONC and TOML files
+are reported as not supported yet.
+
+{{< code title="$ rotini help fmt" language="text" open="true" collapsible="false" copy="false" >}}
+Rewrite rotini spec, conf and composed command files in canonical form: keys in
+reading order (a command's name and docs, then its inputs, output and sub-commands;
+an input's name and docs, then its behavior, then its schema); two-space indentation,
+with lists indented under their key; and runs of blank lines folded into one.
+Comments stay with the entries they describe, and every value is kept exactly as
+written.
+
+With no file, it formats the .rotini.spec.* in the working directory and the conf
+beside it. --check writes nothing and exits 2 when a file isn't formatted, for CI.
+Only YAML files can be formatted for now.
+
+Usage:
+  rotini fmt [flags] [files...]
+
+Arguments:
+  [files...]    the files to format (default the spec in the working directory and its conf)
+
+Flags:
+      --check          write nothing; exit 2 when a file isn't formatted
+      --kind string    what the files are, when their keys and names don't tell [spec|conf|command]
+
+Global Flags:
+  -h, --help    print help
+
+Examples:
+  rotini fmt
+  rotini fmt cmd/app/.rotini.spec.yaml cmd/app/.rotini.conf.yaml
+  rotini fmt --check
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}

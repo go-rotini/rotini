@@ -1,0 +1,52 @@
+# R7 — the companion for agents and editors: `rotini validate --format json` writes one object
+# listing every problem on stdout (and nothing else there), and `rotini explain` describes a key.
+
+gomodinit example.com/bad
+
+! exec rotini validate .rotini.spec.yaml --format json
+! stderr .
+stdout '^\{$'
+stdout '"severity": "error"'
+stdout '"document": "spec"'
+stdout '"pointer": "/command/commands/0/flags/0/role"'
+stdout '"message": "command bad/purge: flag \\"dry-run\\": has role dry-run but is a string"'
+stdout '"hint": "the dry-run role marks a bool flag"'
+! stdout '^spec: '
+
+# Only warnings: exit 0.
+cp warn.spec.yaml .rotini.spec.yaml
+exec rotini validate .rotini.spec.yaml --format json
+stdout '"severity": "warning"'
+! stdout '"severity": "error"'
+
+! exec rotini validate .rotini.spec.yaml --format json --watch
+stderr 'can.t be combined with --watch'
+
+exec rotini explain command.effects.kind
+stdout '^spec: command.effects.kind$'
+stdout '^  values: +"read", "write", "destructive"$'
+
+! exec rotini explain command.efects
+stderr 'did you mean "command.effects"\?'
+
+-- .rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  commands:
+    - name: purge
+      summary: delete everything
+      effects: {kind: destructive}
+      flags:
+        - name: dry-run
+          summary: preview
+          role: dry-run
+          schema: {type: string}
+-- warn.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  commands:
+    - name: purge
+      summary: delete everything
+      effects: {kind: destructive}

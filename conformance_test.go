@@ -1198,6 +1198,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"INJ-04", "PREC-06",
 		"FLAG-26", "ENV-12", "ENV-13", "CFG-11", "CFG-12", "ARG-20",
 		"OUT-01", "OUT-02", "OUT-03", "OUT-04",
+		"PROF-01", "PROF-02", "PROF-03", "PROF-04", "PROF-05", "PROF-06", "PROF-07", "PROF-08", "PROF-09",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {
@@ -1210,6 +1211,9 @@ func TestConformance_matrixComplete(t *testing.T) {
 		seen[c.id]++
 	}
 	for _, c := range outputConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range profileConformanceCases() {
 		seen[c.id]++
 	}
 	for _, id := range acceptanceMatrixIDs {

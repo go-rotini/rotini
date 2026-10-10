@@ -24,6 +24,10 @@ func (*rotiniValidateHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	args := inputs.RotiniValidate.Arguments
 	flags := inputs.RotiniValidate.Flags
+	if flags.Format == "json" {
+		validateJSON(rtx, args.SpecFilePath, flags)
+		return
+	}
 
 	spec, conf, ok := resolveInputs(rtx, args.SpecFilePath, flags.ConfFilePath)
 	if !ok {

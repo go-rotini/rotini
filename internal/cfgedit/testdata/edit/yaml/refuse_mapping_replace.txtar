@@ -1,0 +1,7 @@
+-- in --
+a:
+  b: 1
+-- op --
+set a 2
+-- err --
+holds a mapping

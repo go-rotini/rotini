@@ -7,14 +7,14 @@ command:
   footer: Use "{{.Package}} help <command>" for more information about a command.
   flags:
     - name: help
-      summary: print help
       identifiers: [-h, --help]
+      summary: print help
       cascading: true
       short_circuit: true
       schema: { type: bool }
     - name: version
-      summary: print version
       identifiers: [--version]
+      summary: print version
       cascading: true
       short_circuit: true
       schema: { type: bool }

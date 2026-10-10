@@ -1,0 +1,6 @@
+-- in --
+a: {b: 1}
+-- op --
+set a.c 2
+-- err --
+flow style

@@ -80,6 +80,9 @@ type contractCommand struct {
 	HiddenAliases []string `json:"hidden_aliases,omitempty"` // names that run the command but are never listed
 	ReplacedBy    string   `json:"replaced_by,omitempty"`    // the command to use instead, as its path below the root
 	Stability     string   `json:"stability,omitempty"`      // as declared: experimental or beta; unset is stable
+
+	Effects *Effects `json:"effects,omitempty"` // what running it does, as declared
+	Agent   *bool    `json:"agent,omitempty"`   // offered to AI agents (true) or kept from them (false), as declared
 }
 
 type contractArgument struct {
@@ -110,6 +113,7 @@ type contractArgument struct {
 	ValuesFrom      string                       `json:"values_from,omitempty"` // the output path its enum lists the fields of
 	Description     string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
 	Stability       string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
+	Agent           *bool                        `json:"agent,omitempty"`       // as declared: offered to AI agents (true) or kept from them (false)
 }
 
 type contractFlag struct {
@@ -155,6 +159,10 @@ type contractFlag struct {
 	HiddenIdentifiers []string `json:"hidden_identifiers,omitempty"` // identifiers accepted but never listed
 	ReplacedBy        string   `json:"replaced_by,omitempty"`        // the identifier of the flag to use instead
 	FlagSet           string   `json:"flag_set,omitempty"`           // the flag set it comes from
+
+	RoleValue string   `json:"role_value,omitempty"` // with role machine-output: the enum value that selects JSON
+	Effects   *Effects `json:"effects,omitempty"`    // what giving it adds to its command's effects, as declared
+	Agent     *bool    `json:"agent,omitempty"`      // a tool parameter (true) or not (false), as declared
 }
 
 type contractEnv struct {
@@ -182,6 +190,7 @@ type contractEnv struct {
 	Schema          any                          `json:"schema"`
 	Description     string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
 	Stability       string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
+	Agent           *bool                        `json:"agent,omitempty"`       // as declared: offered to AI agents (true) or kept from them (false)
 }
 
 type contractConfig struct {
@@ -206,6 +215,7 @@ type contractConfig struct {
 	Schema          any                          `json:"schema"`
 	Description     string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
 	Stability       string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
+	Agent           *bool                        `json:"agent,omitempty"`       // as declared: offered to AI agents (true) or kept from them (false)
 }
 
 // contractFlagGroup is a flag_groups entry: a rule over a set of the command's flags.
@@ -232,6 +242,7 @@ type contractConfigFile struct {
 	Path     string                  `json:"path,omitempty"`
 	As       string                  `json:"as,omitempty"` // "env": the file supplies environment variables
 	Discover *contractConfigDiscover `json:"discover,omitempty"`
+	Profiles *contractProfiles       `json:"profiles,omitempty"`
 }
 
 type contractConfigDiscover struct {
@@ -620,6 +631,8 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		Passthrough:           n.passthrough,
 		Stream:                n.stream,
 		Stability:             n.help.Stability,
+		Effects:               n.help.Effects,
+		Agent:                 n.help.Agent,
 	}
 	in := n.inputs
 	if in == nil {
@@ -662,6 +675,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 			Secret: f.secret, Hidden: a.Hidden, EnumValues: contractEnumValues(a.Schema),
 			Deprecated: a.Deprecated, DeprecatedSince: a.DeprecatedSince, RemovedIn: a.RemovedIn,
 			Schema: schemaOf(a.Schema), Description: a.Description, Stability: a.Stability,
+			Agent: a.Agent,
 		}
 		arg.Env, arg.ConfigKey = argumentFallback(a, p.envPrefix, readsConfig)
 		arg.ValuesFrom = valuesFrom(a.Schema)
@@ -689,6 +703,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 			EnumValues: contractEnumValues(f.Schema), Schema: schemaOf(f.Schema),
 			ValuesFrom:  valuesFrom(f.Schema),
 			Description: f.Description, Stability: f.Stability,
+			RoleValue: f.RoleValue, Effects: f.Effects, Agent: f.Agent,
 		}
 		if f.Schema != nil && f.Schema.Repeatable != nil && !*f.Schema.Repeatable {
 			cf.Repeatable = f.Schema.Repeatable
@@ -741,6 +756,7 @@ func (p *program) contractCommandRules(c *contractCommand, n contractNode, in *I
 		if d := cf.Discover; d != nil {
 			file.Discover = &contractConfigDiscover{Strategy: d.Strategy, App: d.App, File: d.File}
 		}
+		file.Profiles = p.contractProfilesOf(n.path, cf)
 		c.ConfigFiles = append(c.ConfigFiles, file)
 	}
 	if n.discovery != nil {
@@ -765,6 +781,7 @@ func (p *program) contractSources(c *contractCommand, in *Inputs, scope *schemaS
 			Hidden: e.Hidden, Deprecated: e.Deprecated, DeprecatedSince: e.DeprecatedSince, RemovedIn: e.RemovedIn,
 			EnumValues: contractEnumValues(e.Schema), Schema: defs.rename(scope, inputJSONSchema(e.Schema)),
 			Description: e.Description, Stability: e.Stability,
+			Agent: e.Agent,
 		})
 	}
 	for _, cfg := range in.Config {
@@ -784,6 +801,7 @@ func (p *program) contractSources(c *contractCommand, in *Inputs, scope *schemaS
 			RemovedIn: cfg.RemovedIn, EnumValues: contractEnumValues(cfg.Schema),
 			Schema:      defs.rename(scope, inputJSONSchema(cfg.Schema)),
 			Description: cfg.Description, Stability: cfg.Stability,
+			Agent: cfg.Agent,
 		})
 	}
 	if in.Stdin != nil {

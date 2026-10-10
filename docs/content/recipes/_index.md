@@ -331,3 +331,31 @@ teedemo export -o report.json --force
 
 `io.MultiWriter` stops at the first writer that fails, so a closed stdout also ends the file,
 and `Close` is never reached. With `-o -` the output goes to stdout twice.
+
+### A --profile flag with completion
+
+A configuration file with [profiles](/docs#profiles) names them under one key, so the selector
+flag can offer them. `rotini.ConfigProfiles` reads the file the running command would read,
+through its `config_source` path or `discover` search, and returns the names sorted. Implement
+`CompleteFlagValue` on the handler of the command that declares the flag:
+
+{{< code title="internal/cmd/app/app_complete.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package app
+
+import "github.com/go-rotini/rotini"
+
+// CompleteFlagValue offers the profiles the configuration file defines for --profile.
+func (*appHandler) CompleteFlagValue(rtx *rotini.Context, flag, _ string) []string {
+	if flag != "profile" {
+		return nil
+	}
+	names, err := rotini.ConfigProfiles(rtx, "app")
+	if err != nil {
+		return nil
+	}
+	return names
+}
+{{< /code >}}
+
+A file that doesn't exist yet offers nothing, and a file that can't be read offers nothing
+rather than an error, since completion runs on every keystroke.

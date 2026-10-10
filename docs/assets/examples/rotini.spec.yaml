@@ -3,15 +3,18 @@ $schema: ./.rotini-schema.spec.json
 version: 1.3.0
 command:
   name: deploy
+  display_name: acme deploy
   summary: ship services to environments
   description: Deploy builds, ships and rolls back services.
   usage: deploy [flags] <command>
-  display_name: acme deploy
-  header: deploy — internal tooling
-  footer: Use "deploy help <command>" for more about a command.
   examples:
     - deploy ship api --env prod
-  see_also: [kubectl, helm]
+  groups:
+    - name: Deploying
+      description: Commands that change what runs where.
+    - name: Output
+  header: deploy — internal tooling
+  footer: Use "deploy help <command>" for more about a command.
   headings:
     usage: "Usage:"
     commands: "Commands:"
@@ -24,21 +27,6 @@ command:
     output: "Output:"
     examples: "Examples:"
     topics: "Help Topics:"
-  groups:
-    - name: Deploying
-      description: Commands that change what runs where.
-    - name: Output
-  exit_status:
-    - code: 0
-      summary: success
-    - code: 1
-      summary: the deploy failed
-    - code: 3
-      name: partial
-      retryable: true
-      summary: some targets failed; stdout lists the ones that shipped
-      docs_url: https://example.com/deploy/partial
-      output: { type: array, items: { $ref: "#/schemas/Target" } }
   topics:
     - name: environment
       summary: the environment variables deploy reads
@@ -46,62 +34,71 @@ command:
     - name: targets
       summary: how targets are written
       body: A target is a host and an optional port.
+  see_also: [kubectl, helm]
+  exit_status:
+    - code: 0
+      summary: success
+    - code: 1
+      summary: the deploy failed
+    - name: partial
+      code: 3
+      summary: some targets failed; stdout lists the ones that shipped
+      output: { type: array, items: { $ref: "#/schemas/Target" } }
+      retryable: true
+      docs_url: https://example.com/deploy/partial
   env_prefix: DEPLOY
-  response_files: { prefix: "+" }
-  multicall: { prefix: "dp-" }
-  plugin_path: ~/.deploy/plugins
-  plugin_discovery:
-    prefix: deploy-
-    hidden: false
-  plugins:
-    - name: audit
-      summary: run the audit plugin
-      aliases: [au]
-      timeout: 30s
   schemas:
     Target:
       type: object
-      description: Where a service is shipped.
-      required: [host]
       properties:
         host: { type: string, pattern: '^[a-z0-9.-]+$', pattern_message: must be a lowercase hostname }
         port: { type: integer, minimum: 1, maximum: 65535 }
         tags: { type: array, items: { type: string }, minItems: 1, maxItems: 8 }
+      description: Where a service is shipped.
+      required: [host]
     Region:
       type: string
       enum: [eu, us, ap]
-  config_files:
-    - name: project
-      discover: { strategy: walk-up, file: .deploy.yaml }
-      format: yaml
-    - name: user
-      discover: { strategy: xdg, app: deploy, file: config.yaml }
-    - name: dotenv
-      path: .env
-      format: dotenv
-      as: env
-    - name: pinned
-      path: ./deploy.lock.yaml
-      schema:
-        type: object
-        properties:
-          digest: { type: string }
+  flag_sets:
+    Paging:
+      summary: how long listings are paged
+      group: Output
+      flags:
+        - name: limit
+          identifiers: [--limit]
+          summary: at most this many rows
+          schema: { type: int, minimum: 1 }
+        - name: all
+          identifiers: [--all]
+          summary: every row
+          schema: { type: bool }
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [limit, all]
+      flag_dependencies:
+        - when: all
+          forbids: [limit]
   flags:
     - name: help
-      summary: print help
       identifiers: [-h, --help]
+      summary: print help
       cascading: true
       short_circuit: true
       schema: { type: bool }
     - name: config
-      summary: a config file to read instead of discovering one
       identifiers: [--config]
+      summary: a config file to read instead of discovering one
       schema: { type: existingfile, config_source: project }
-    - name: verbose
-      summary: more output (repeat for more)
-      identifiers: [-v, --verbose]
+    - name: profile
+      identifiers: [--profile]
+      summary: the profile of the user config file to use
       cascading: true
+      schema: { type: string, variable: DEPLOY_PROFILE }
+    - name: verbose
+      identifiers: [-v, --verbose]
+      summary: more output (repeat for more)
       group: Output
+      cascading: true
       schema: { type: count }
   env:
     - name: token
@@ -120,34 +117,108 @@ command:
     - name: cache
       summary: where builds are cached; relative to the file that sets it
       schema: { type: string, key: cache_dir, default: ~/.cache/deploy, expand: [home], relative_to: config }
-  flag_sets:
-    Paging:
-      summary: how long listings are paged
-      group: Output
-      flags:
-        - name: limit
-          summary: at most this many rows
-          identifiers: [--limit]
-          schema: { type: int, minimum: 1 }
-        - name: all
-          summary: every row
-          identifiers: [--all]
-          schema: { type: bool }
-      flag_groups:
-        - kind: mutually_exclusive
-          flags: [limit, all]
-      flag_dependencies:
-        - when: all
-          forbids: [limit]
+  config_files:
+    - name: project
+      format: yaml
+      discover: { strategy: walk-up, file: .deploy.yaml }
+    - name: user
+      discover: { strategy: xdg, app: deploy, file: config.yaml }
+      profiles: { under: profiles, select: profile, default: default }
+    - name: dotenv
+      path: .env
+      format: dotenv
+      as: env
+    - name: pinned
+      path: ./deploy.lock.yaml
+      schema:
+        type: object
+        properties:
+          digest: { type: string }
+  response_files: { prefix: "+" }
   commands:
     - name: ship
-      summary: ship a service
       aliases: [s, push]
       deprecated_identifiers: [push]
       deprecated_identifiers_removed_in: { push: 2.0.0 }
-      deprecated: use ship
+      summary: ship a service
       group: Deploying
-      filename: ship.go
+      deprecated: use ship
+      effects: { kind: write, idempotent: true, open_world: true }
+      flags:
+        - name: env
+          identifiers: [-e, --env]
+          summary: the environment
+          description: The environment to ship to. Each one has its own cluster and credentials.
+          stability: beta
+          schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, repeatable: false, complete: { kind: none, message: "one of dev, staging or prod" } }
+        - name: target
+          identifiers: [--target]
+          summary: where to ship
+          schema: { $ref: Target, from: [file] }
+        - name: color
+          identifiers: [--color]
+          summary: color output
+          schema: { type: string, implicit_value: always, enum: [always, never, { value: auto, summary: color when stdout is a terminal, aliases: [tty] }] }
+        - name: cache
+          identifiers: [--cache]
+          summary: use the build cache
+          schema: { type: bool, negatable: true, default: true }
+        - name: tag
+          identifiers: [--tag]
+          summary: image tags
+          schema: { type: '[]string', separator: ',', minItems: 1, uniqueItems: true }
+        - name: set
+          identifiers: [--set]
+          summary: override values (a.b=c)
+          schema: { type: map, dotted_keys: true, properties: { replicas: { type: integer } } }
+        - name: timeout
+          identifiers: [--timeout]
+          summary: how long to wait
+          schema: { type: duration, minimum: 1s, maximum: 1h, default: 5m }
+        - name: when
+          identifiers: [--when]
+          summary: when to ship
+          schema: { type: date, layout: '2006-01-02', nullable: true }
+        - name: since
+          identifiers: [--since]
+          summary: ship changes made since this time
+          schema: { type: time, layout: ['2006-01-02 15:04', '2006-01-02'], relative: past }
+        - name: replicas
+          identifiers: [--replicas]
+          summary: how many replicas
+          schema: { type: int, exclusiveMinimum: 0, exclusiveMaximum: 100, multipleOf: 1 }
+        - name: id
+          identifiers: [--id]
+          summary: a request id
+          schema: { type: uuid.UUID, import: github.com/google/uuid }
+        - name: force
+          identifiers: [--force]
+          deprecated_identifiers: [--force]
+          summary: skip safety checks
+          hidden: true
+          deprecated: no longer needed
+          deprecated_since: 1.2.0
+          removed_in: 2.0.0
+          schema: { type: bool }
+        - name: dry-run
+          identifiers: [--dry-run]
+          summary: print instead of shipping
+          role: dry-run
+          schema: { type: bool }
+        - name: plan
+          identifiers: [--plan]
+          summary: write the plan to this file
+          schema: { type: string, complete: { kind: file, extensions: [json] } }
+        - name: replace
+          identifiers: [--replace]
+          summary: replace an existing plan file
+          role: force
+          schema: { type: bool }
+        - name: prune
+          identifiers: [--prune]
+          summary: also delete old releases
+          effects: { kind: destructive }
+          schema: { type: bool }
       arguments:
         - name: service
           summary: the service to ship
@@ -156,75 +227,6 @@ command:
           summary: extra build arguments
           hidden: true
           schema: { type: '[]string', glob: true }
-      flags:
-        - name: env
-          summary: the environment
-          description: The environment to ship to. Each one has its own cluster and credentials.
-          stability: beta
-          identifiers: [-e, --env]
-          schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, repeatable: false, complete: { kind: none, message: "one of dev, staging or prod" } }
-        - name: target
-          summary: where to ship
-          identifiers: [--target]
-          schema: { $ref: Target, from: [file] }
-        - name: color
-          summary: color output
-          identifiers: [--color]
-          schema: { type: string, implicit_value: always, enum: [always, never, { value: auto, summary: color when stdout is a terminal, aliases: [tty] }] }
-        - name: cache
-          summary: use the build cache
-          identifiers: [--cache]
-          schema: { type: bool, negatable: true, default: true }
-        - name: tag
-          summary: image tags
-          identifiers: [--tag]
-          schema: { type: '[]string', separator: ',', minItems: 1, uniqueItems: true }
-        - name: set
-          summary: override values (a.b=c)
-          identifiers: [--set]
-          schema: { type: map, dotted_keys: true, properties: { replicas: { type: integer } } }
-        - name: timeout
-          summary: how long to wait
-          identifiers: [--timeout]
-          schema: { type: duration, minimum: 1s, maximum: 1h, default: 5m }
-        - name: when
-          summary: when to ship
-          identifiers: [--when]
-          schema: { type: date, layout: '2006-01-02', nullable: true }
-        - name: since
-          summary: ship changes made since this time
-          identifiers: [--since]
-          schema: { type: time, layout: ['2006-01-02 15:04', '2006-01-02'], relative: past }
-        - name: replicas
-          summary: how many replicas
-          identifiers: [--replicas]
-          schema: { type: int, exclusiveMinimum: 0, exclusiveMaximum: 100, multipleOf: 1 }
-        - name: id
-          summary: a request id
-          identifiers: [--id]
-          schema: { type: uuid.UUID, import: github.com/google/uuid }
-        - name: force
-          summary: skip safety checks
-          identifiers: [--force]
-          hidden: true
-          deprecated: no longer needed
-          deprecated_since: 1.2.0
-          removed_in: 2.0.0
-          deprecated_identifiers: [--force]
-          schema: { type: bool }
-        - name: dry-run
-          summary: print instead of shipping
-          identifiers: [--dry-run]
-          schema: { type: bool }
-        - name: plan
-          summary: write the plan to this file
-          identifiers: [--plan]
-          schema: { type: string, complete: { kind: file, extensions: [json] } }
-        - name: replace
-          summary: replace an existing plan file
-          identifiers: [--replace]
-          role: force
-          schema: { type: bool }
       flag_groups:
         - kind: mutually_exclusive
           flags: [dry-run, force]
@@ -236,15 +238,16 @@ command:
         properties:
           service: { type: string }
           url: { type: string }
+      filename: ship.go
     - name: apply
       summary: apply a manifest read from stdin
       stdin:
-        format: yaml
         schema:
           type: object
-          required: true
           properties:
             service: { type: string }
+          required: true
+        format: yaml
     - name: grep
       summary: print the lines of a log that match a pattern
       arguments:
@@ -260,35 +263,42 @@ command:
         unless_argument: files
     - name: logs
       summary: stream a service's logs
-      handler:
-        import: github.com/example/deploy/internal/logs
-        convention: Logs
-      output_stream: true
+      flags:
+        - name: fields
+          identifiers: [--fields]
+          summary: write only these fields
+          role: fields
+          schema: { type: '[]string', separator: ',', values_from: output }
+        - name: format
+          identifiers: [--format]
+          summary: the output format
+          role: machine-output
+          role_value: json
+          agent: false
+          schema: { type: string, enum: [text, json], default: text }
       output:
         type: object
         properties:
           line: { type: string }
           service: { type: string }
-      flags:
-        - name: fields
-          summary: write only these fields
-          identifiers: [--fields]
-          role: fields
-          schema: { type: '[]string', separator: ',', values_from: output }
+      output_stream: true
+      handler:
+        import: github.com/example/deploy/internal/logs
+        convention: Logs
     - name: exec
       summary: run a command in a service
-      passthrough: true
+      agent: false
       arguments:
         - name: argv
           summary: the command and its arguments
           schema: { type: '[]string' }
+      passthrough: true
     - name: run
       summary: run a one-off task in a service
-      options_first: true
       flags:
         - name: ipv4
-          summary: connect over IPv4
           identifiers: ['-4', --ipv4]
+          summary: connect over IPv4
           schema: { type: bool }
       arguments:
         - name: service
@@ -298,6 +308,7 @@ command:
           summary: the command to run, and its arguments
           passthrough: true
           schema: { type: '[]string', complete: { kind: executable } }
+      options_first: true
     - name: help
       summary: show help for a command
       arguments:
@@ -315,36 +326,46 @@ command:
       markdown: |
         # status
     - name: history
-      summary: list a service's releases
       hidden_aliases: [hist]
+      summary: list a service's releases
       use: [Paging]
       flags:
         - name: format
-          summary: how to print the list
           identifiers: [--format]
           hidden_identifiers: [--output-format]
+          summary: how to print the list
           schema: { type: string, enum: [text, csv], default: text }
         - name: delimiter
-          summary: the csv field separator
           identifiers: [--delimiter]
+          summary: the csv field separator
           schema: { type: string }
         - name: since-release
-          summary: only releases after this one
           identifiers: [--since-release]
+          summary: only releases after this one
           schema: { type: string }
         - name: after
-          summary: only releases after this one
           identifiers: [--after]
+          summary: only releases after this one
           deprecated: renamed
           replaced_by: --since-release
           schema: { type: string }
       flag_dependencies:
         - when: format
-          equals: [csv]
           requires: [delimiter]
-        - unless: [all]
-          requires: [limit]
+          equals: [csv]
+        - requires: [limit]
+          unless: [all]
     - name: releases
       summary: list a service's releases
       deprecated: renamed to history
       replaced_by: history
+  plugins:
+    - name: audit
+      aliases: [au]
+      summary: run the audit plugin
+      timeout: 30s
+  plugin_discovery:
+    prefix: deploy-
+    hidden: false
+  plugin_path: ~/.deploy/plugins
+  multicall: { prefix: "dp-" }

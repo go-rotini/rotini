@@ -3,18 +3,14 @@ $schema: ./.rotini-schema.conf.json
 version: 1.3.0
 generate:
   schemas:
-    spec:
-      file: cmd/deploy/.rotini-schema.spec.json
     conf:
       file: cmd/deploy/.rotini-schema.conf.json
+    spec:
+      file: cmd/deploy/.rotini-schema.spec.json
     output:
       dir: cmd/deploy/schemas/output
     config:
       dir: cmd/deploy/schemas/config
-  dry_run_env: CI
-  contract:
-    file: cmd/deploy/cli-contract.json
-    go: true
   packages:
     - type: main
       file: cmd/deploy/main.go
@@ -43,9 +39,36 @@ generate:
       enabled: false
       section: 1
     - type: markdown
-      enabled: false
+      enabled: true
+    - type: tools
+      enabled: true
+      file: tools/
+      targets: [mcp, openai-strict, gemini]
+      mcp_revision: 2026-07-28
+      go: true
+    - type: skill
+      enabled: true
+      name: deploy
+      description: Use when the user asks to ship, roll back or inspect a service.
+    - type: llms
+      enabled: true
+      file: llms.txt
+      base_url: https://deploy.example.com/docs/cli/
+    - type: permissions
+      enabled: true
+      file: agents/
+      harnesses: [claude, codex, gemini]
+  contract:
+    file: cmd/deploy/cli-contract.json
+    go: true
+  dry_run_env: CI
 validate:
   fail: collect
   flags_first: false
   posix_names: false
   release_env: RELEASE
+diff:
+  accept:
+    - rule: COMMAND_NO_DELETE
+      where: deploy rollback
+      reason: replaced by deploy undo

@@ -5,9 +5,10 @@
   "type": "object",
   "oneOf": [
     {
-      "required": ["error"],
+      "required": ["schema_version", "error"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "error": {
           "type": "object",
           "description": "An error. The run exits with exit_code.",
@@ -27,9 +28,10 @@
       }
     },
     {
-      "required": ["warning"],
+      "required": ["schema_version", "warning"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "warning": {
           "type": "object",
           "description": "A warning. It does not change the exit code.",
@@ -43,9 +45,10 @@
       }
     },
     {
-      "required": ["info"],
+      "required": ["schema_version", "info"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "info": {
           "type": "object",
           "description": "A message the default reporter would print to stdout before everything else.",
@@ -59,9 +62,10 @@
       }
     },
     {
-      "required": ["success"],
+      "required": ["schema_version", "success"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "success": {
           "type": "object",
           "description": "A message the default reporter would print to stdout after everything else.",

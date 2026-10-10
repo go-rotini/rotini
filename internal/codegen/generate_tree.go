@@ -349,6 +349,7 @@ func overlayCommand(child, parent Command) Command {
 		m.RemovedIn = parent.RemovedIn
 	}
 	m.Stability = cmp.Or(parent.Stability, m.Stability)
+	m.Agent = cmp.Or(parent.Agent, m.Agent)
 	if parent.Summary != "" {
 		m.Summary = parent.Summary
 	}

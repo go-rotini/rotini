@@ -1,0 +1,12 @@
+-- in --
+$schema: ./s.json
+version: 1.0.0
+command:
+  name: tool
+  summary: s
+-- out --
+$schema: ./s.json
+version: 1.0.0
+command:
+  name: tool
+  summary: s

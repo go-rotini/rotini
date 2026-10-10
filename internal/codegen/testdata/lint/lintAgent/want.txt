@@ -1,0 +1,7 @@
+warning: spec: .rotini.spec.yaml:30:14: command demo/list: has `agent: true`, which has no effect: the command is offered to agents already; `agent: true` brings back a hidden, deprecated, passthrough or group command
+warning: spec: .rotini.spec.yaml:33:18: command demo/list: flag "limit": has `agent: true`, which has no effect: the flag is a tool parameter already; `agent: true` brings back a hidden, deprecated, secret, short-circuit or `from:` flag
+warning: spec: .rotini.spec.yaml:37:18: command demo/list: argument "filter": has `agent: true`, which has no effect: the argument is a tool parameter already; `agent: true` brings back a hidden, deprecated, secret or `from:` argument
+warning: spec: .rotini.spec.yaml:41:18: command demo/list: env "home": has `agent: true`, which has no effect: environment variables are never tool parameters, and a visible one is listed on the agent skill page already
+warning: spec: .rotini.spec.yaml:45:18: command demo/list: config "color": has `agent: true`, which has no effect: config values are never tool parameters, and a visible one is listed on the agent skill page already
+warning: spec: .rotini.spec.yaml:52:18: command demo/admin/reset: has `agent: true`, which has no effect: command "admin" has `agent: false`, which keeps its whole subtree from agents
+warning: spec: .rotini.spec.yaml:59:18: command demo/build: flag "json": has `agent: true`, which has no effect: tool exports select JSON with the machine-output flag themselves, so it is never a tool parameter

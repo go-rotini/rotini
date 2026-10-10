@@ -34,6 +34,9 @@
          the command's, inherited from its ancestors; stabilityNote .Stability renders the line
          saying what it promises. An exit status row carries .DocsURL, a link to more about the
          code, or "".
+         The page's .Effects says what running the command does, as declared ("destructive,
+         not idempotent, open world"), "" when it declares none; a flag row's .Effects says what
+         giving the flag adds ("destructive").
          The root's page carries .Topics[] {.Name .Summary}, its help topics. On a topic's page
          .Topic is true: .Summary and .Description are the topic's, .Environment holds a
          generated environment topic's rows, each with .Commands (the commands that read it),
@@ -50,6 +53,9 @@
 
 {{end -}}
 {{- with .Stability}}{{stabilityNote .}}
+
+{{end -}}
+{{- with .Effects}}Effects: {{.}}
 
 {{end -}}
 {{- $usage := .Usage}}{{if not $usage}}{{$usage = .UsageDerived}}{{end -}}
@@ -88,7 +94,7 @@
 
 {{with .Description}}{{.}}
 
-{{end}}{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{end}}{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Effects}} ({{.}}){{end}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 
@@ -97,7 +103,7 @@
 {{end -}}
 {{- with .Cascading}}## Global Flags
 
-{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Effects}} ({{.}}){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 

@@ -13,18 +13,18 @@ command:
   footer: Use "rotini help <command>" for more information about a command.
   flags:
     - name: version
-      summary: print version
       identifiers:
         - -v
         - --version
+      summary: print version
       short_circuit: true
       schema:
         type: bool
     - name: help
-      summary: print help
       identifiers:
         - -h
         - --help
+      summary: print help
       cascading: true
       short_circuit: true
       schema:
@@ -41,39 +41,39 @@ command:
         - rotini init mycli --force
         - rotini init mycli --dry-run
       footer: Use "rotini help <command>" for more information about a command.
-      arguments:
-        - name: name
-          summary: the root command name written to the created spec file (expected binary name)
-          schema:
-            type: string
-            required: true
       flags:
         - name: format
-          summary: the created rotini spec file format
           identifiers:
             - --format
+          summary: the created rotini spec file format
           schema:
             type: string
-            default: yaml
             enum:
               - yaml
               - yml
               - json
               - jsonc
               - toml
+            default: yaml
         - name: force
-          summary: replace an existing spec and conf with the seed (never deletes a file)
           identifiers:
             - --force
+          summary: replace an existing spec and conf with the seed (never deletes a file)
           schema:
             type: bool
         - name: dry-run
-          summary: show what init would write, and change nothing
           identifiers:
             - -n
             - --dry-run
+          summary: show what init would write, and change nothing
           schema:
             type: bool
+      arguments:
+        - name: name
+          summary: the root command name written to the created spec file (expected binary name)
+          schema:
+            type: string
+            required: true
     - name: generate
       aliases:
         - gen
@@ -84,34 +84,34 @@ command:
         - rotini generate ./path/to/.rotini.spec.json --watch
         - rotini generate --dry-run
       footer: Use "rotini help <command>" for more information about a command.
+      flags:
+        - name: conf_file_path
+          identifiers:
+            - -c
+            - --config
+          summary: path to the rotini conf file (default the .rotini.conf.* beside the spec)
+          schema:
+            type: string
+        - name: watch
+          identifiers:
+            - -w
+            - --watch
+          summary: watch the spec and conf for changes and re-generate
+          schema:
+            type: bool
+        - name: dry-run
+          identifiers:
+            - -n
+            - --dry-run
+          summary: show what would be written, created or removed, and change nothing; exits 2 when something would change
+          schema:
+            type: bool
+            negatable: true
       arguments:
         - name: spec_file_path
           summary: path to the spec file (default the .rotini.spec.* in the working directory)
           schema:
             type: string
-      flags:
-        - name: conf_file_path
-          summary: path to the rotini conf file (default the .rotini.conf.* beside the spec)
-          identifiers:
-            - -c
-            - --config
-          schema:
-            type: string
-        - name: watch
-          summary: watch the spec and conf for changes and re-generate
-          identifiers:
-            - -w
-            - --watch
-          schema:
-            type: bool
-        - name: dry-run
-          summary: show what would be written, created or removed, and change nothing; exits 2 when something would change
-          identifiers:
-            - -n
-            - --dry-run
-          schema:
-            type: bool
-            negatable: true
     - name: validate
       aliases:
         - val
@@ -121,42 +121,136 @@ command:
         - rotini validate
         - rotini val ./path/to/.rotini.spec.yaml
       footer: Use "rotini help <command>" for more information about a command.
-      arguments:
-        - name: spec_file_path
-          summary: path to the spec file (default the .rotini.spec.* in the working directory)
-          schema:
-            type: string
       flags:
         - name: conf_file_path
-          summary: path to the rotini conf file (default the .rotini.conf.* beside the spec)
           identifiers:
             - -c
             - --config
+          summary: path to the rotini conf file (default the .rotini.conf.* beside the spec)
           schema:
             type: string
         - name: fail
-          summary: failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect
           identifiers:
             - --fail
+          summary: failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect
           schema:
             type: string
             enum:
               - fast
               - collect
         - name: watch
-          summary: watch the spec and conf for changes and re-validate
           identifiers:
             - -w
             - --watch
+          summary: watch the spec and conf for changes and re-validate
           schema:
             type: bool
         - name: release
-          summary: fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names
           identifiers:
             - --release
+          summary: fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names
           schema:
             type: string
             placeholder: X.Y.Z
+        - name: format
+          identifiers:
+            - --format
+          summary: how to report problems — text, or json (one object listing every problem, on stdout)
+          role: machine-output
+          role_value: json
+          schema:
+            type: string
+            enum:
+              - text
+              - json
+            default: text
+      arguments:
+        - name: spec_file_path
+          summary: path to the spec file (default the .rotini.spec.* in the working directory)
+          schema:
+            type: string
+      output:
+        type: object
+        properties:
+          problems:
+            type: array
+            items:
+              type: object
+              properties:
+                severity: { type: string, enum: [error, warning], description: "an error fails validation; a warning does not" }
+                document: { type: string, enum: [spec, conf], description: the document the problem is in }
+                file: { type: string, description: the document's path }
+                line: { type: integer, description: "the line, from 1" }
+                col: { type: integer, description: "the column, from 1" }
+                pointer: { type: string, description: the JSON pointer of the key at fault }
+                message: { type: string, description: what is wrong }
+                hint: { type: string, description: what to do about it }
+              required: [severity, message]
+            description: "the problems, errors first, each as it is reported in text"
+        description: Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.
+        required: [problems]
+    - name: explain
+      summary: describe a spec or conf key
+      description: "Print what a spec or conf key means: its description, type, allowed values, default and examples, read from the same schemas as the reference pages. Write the keys from the document's top, separated by dots and without list positions: command.flags.schema.from. A key both documents have, such as version, is shown for each."
+      examples:
+        - rotini explain command.flags.role
+        - rotini explain generate.features.targets
+      footer: Use "rotini help <command>" for more information about a command.
+      effects:
+        kind: read
+        idempotent: true
+        open_world: false
+      arguments:
+        - name: key
+          summary: the key path, such as command.flags.schema.from
+          schema:
+            type: string
+            required: true
+    - name: fmt
+      summary: format a spec and conf
+      description: |-
+        Rewrite rotini spec, conf and composed command files in canonical form: keys in
+        reading order (a command's name and docs, then its inputs, output and sub-commands;
+        an input's name and docs, then its behavior, then its schema); two-space indentation,
+        with lists indented under their key; and runs of blank lines folded into one.
+        Comments stay with the entries they describe, and every value is kept exactly as
+        written.
+
+        With no file, it formats the .rotini.spec.* in the working directory and the conf
+        beside it. --check writes nothing and exits 2 when a file isn't formatted, for CI.
+        Only YAML files can be formatted for now.
+      examples:
+        - rotini fmt
+        - rotini fmt cmd/app/.rotini.spec.yaml cmd/app/.rotini.conf.yaml
+        - rotini fmt --check
+      footer: Use "rotini help <command>" for more information about a command.
+      flags:
+        - name: check
+          identifiers:
+            - --check
+          summary: write nothing; exit 2 when a file isn't formatted
+          schema:
+            type: bool
+        - name: kind
+          identifiers:
+            - --kind
+          summary: what the files are, when their keys and names don't tell
+          schema:
+            type: string
+            enum:
+              - spec
+              - conf
+              - command
+      arguments:
+        - name: files
+          summary: the files to format (default the spec in the working directory and its conf)
+          schema:
+            type: array
+            complete:
+              kind: file
+              extensions:
+                - yaml
+                - yml
     - name: help
       summary: print help
       description: Print help for a specific command.
@@ -200,12 +294,12 @@ command:
           summary: the shell to print the script for
           schema:
             type: string
-            required: true
             enum:
               - bash
               - zsh
               - fish
               - powershell
+            required: true
     - name: man
       summary: print or install the man pages
       description: |-
@@ -218,15 +312,157 @@ command:
         - rotini man generate > rotini-generate.1
         - rotini man --dir ~/.local/share/man/man1
       footer: Use "rotini help <command>" for more information about a command.
+      flags:
+        - name: dir
+          identifiers:
+            - --dir
+          summary: write every page into this directory instead of printing one
+          schema:
+            type: string
       arguments:
         - name: command
           summary: the command whose page to print (default rotini itself)
           schema:
             type: array
+    - name: diff
+      summary: compare two versions of a cli's contract
+      description: |-
+        Compare two versions of a cli's contract and report each change for the people and
+        scripts using it: breaking, possibly breaking, expected (a removal planned for this
+        release) or safe. Findings are written to stdout, grouped by severity.
+
+        <old> is a contract file, git:<ref> (the conf's generate.contract.file at that
+        revision, read with git show), git:<ref>:<path> (a module-root-relative file at that
+        revision) or mod://<module>@<version>/<path>. <new> takes the same forms and defaults
+        to the contract built from the current spec and conf. Because both arguments are
+        contracts, the spec is given with --spec.
+
+        The conf's diff.accept entries acknowledge intended changes, one finding each; an entry
+        that matches no finding fails the run.
+      examples:
+        - rotini diff git:v1.2.0
+        - rotini diff git:v1.2.0 --release 2.0.0
+        - rotini diff old/cli-contract.json cli-contract.json --format json
+      footer: Use "rotini help <command>" for more information about a command.
+      exit_status:
+        - name: ok
+          code: 0
+          summary: no change at or above --fail-on
+        - name: error
+          code: 1
+          summary: a contract, the spec or the conf could not be read
+        - name: breaking
+          code: 2
+          summary: a change at or above --fail-on, or a diff.accept entry that matched no finding
       flags:
-        - name: dir
-          summary: write every page into this directory instead of printing one
+        - name: spec_file_path
           identifiers:
-            - --dir
+            - --spec
+          summary: path to the spec file (default the .rotini.spec.* in the working directory)
           schema:
             type: string
+        - name: conf_file_path
+          identifiers:
+            - -c
+            - --config
+          summary: path to the rotini conf file (default the .rotini.conf.* beside the spec)
+          schema:
+            type: string
+        - name: release
+          identifiers:
+            - --release
+          summary: report a removal the old contract planned for this release or earlier as expected; defaults to the variable validate.release_env names
+          schema:
+            type: string
+            placeholder: X.Y.Z
+        - name: fail_on
+          identifiers:
+            - --fail-on
+          summary: the least severe change that fails the run
+          schema:
+            type: string
+            enum:
+              - breaking
+              - possibly
+              - never
+            default: breaking
+        - name: format
+          identifiers:
+            - --format
+          summary: how to write the findings
+          schema:
+            type: string
+            enum:
+              - text
+              - json
+            default: text
+      arguments:
+        - name: old
+          summary: "the earlier contract: a file, git:<ref>[:<path>] or mod://<module>@<version>/<path>"
+          schema:
+            type: string
+            required: true
+        - name: new
+          summary: the later contract (default the one built from the current spec and conf)
+          schema:
+            type: string
+      output:
+        type: object
+        properties:
+          findings:
+            type: array
+            items:
+              type: object
+              properties:
+                severity:
+                  type: string
+                  enum: [breaking, possibly_breaking, expected, safe]
+                rule:
+                  type: string
+                  description: The rule ID, which a diff.accept entry names.
+                where:
+                  type: string
+                  description: The item in the old contract, written as on the command line.
+                message:
+                  type: string
+                note:
+                  type: string
+                accepted:
+                  type: object
+                  properties:
+                    reason:
+                      type: string
+                  description: The diff.accept entry that acknowledges the change.
+                  required: [reason]
+              required: [severity, rule, where, message]
+            description: The changes, most severe first, then by where.
+          unmatched_accepts:
+            type: array
+            items:
+              type: object
+              properties:
+                rule:
+                  type: string
+                where:
+                  type: string
+                reason:
+                  type: string
+              required: [rule, where, reason]
+            description: The diff.accept entries that matched no change.
+          summary:
+            type: object
+            properties:
+              breaking:
+                type: integer
+              possibly_breaking:
+                type: integer
+              expected:
+                type: integer
+              safe:
+                type: integer
+              accepted:
+                type: integer
+            description: The changes by severity; an accepted change counts only as accepted.
+            required: [breaking, possibly_breaking, expected, safe, accepted]
+        description: Every change between the contracts, the acknowledgements that matched none, and the counts.
+        required: [findings, unmatched_accepts, summary]

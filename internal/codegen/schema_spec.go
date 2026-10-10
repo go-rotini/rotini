@@ -13,6 +13,8 @@ type Spec struct {
 }
 
 type ArgumentInput struct {
+	// Whether this argument is a tool parameter for AI agents (tool exports and the MCP companion). `false` leaves it out, while it stays in help. `true` brings back an argument left out by default: a hidden, deprecated or secret one, or one that reads `from:` a file or stdin. Unset follows those defaults. A required argument left out leaves its command out of the tool exports, with a warning.
+	Agent *bool `json:"agent,omitempty"`
 	// Deprecation message. The argument is annotated as deprecated in generated help, and supplying it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing).
 	Deprecated string `json:"deprecated,omitempty"`
 	// The release that deprecated this argument (X.Y.Z), shown beside the deprecation in help, man and markdown, written into the contract, and reported by rotini.Deprecations as Since. Needs `deprecated`.
@@ -29,7 +31,7 @@ type ArgumentInput struct {
 	RemovedIn string `json:"removed_in,omitempty"`
 	// Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 	Schema *InputSchema `json:"schema,omitempty"`
-	// How settled this argument is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An argument is never more stable than its command. Nothing changes at run time.
+	// How settled this argument is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An argument is never more stable than its command. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time.
 	Stability string `json:"stability,omitempty"`
 	// Short one-liner shown next to this argument in the Arguments section of generated help.
 	Summary string `json:"summary,omitempty"`
@@ -140,6 +142,8 @@ type Command struct {
 	//
 	// The child's own plugins, plugin_discovery, passthrough and options_first travel with it. `rotini validate` and `generate` on the parent also check every spec composed by a relative path as its own document, reporting problems at their position in that file. A spec composed with mod:// is not checked that way: it belongs to its own module, which validates it.
 	Ref string `json:"$ref,omitempty"`
+	// Whether this command and its sub-commands are offered to AI agents: in tool exports, the agent skill page, llms.txt, permission snippets and the MCP companion. `false` leaves the subtree out, while it stays in help. `true` brings back a command left out by default: a hidden or deprecated one, one with sub-commands (which prints help when run bare), or a passthrough command (which would run whatever it is given). Unset follows those defaults. Nothing changes at run time.
+	Agent *bool `json:"agent,omitempty"`
 	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases. Sub-commands only: the root command is reached by invoking the binary (argv[0] is not a routing token), so rotini validation rejects aliases there.
 	Aliases []string `json:"aliases,omitempty"`
 	// Positional argument inputs for this command
@@ -162,6 +166,8 @@ type Command struct {
 	Description string `json:"description,omitempty"`
 	// Root only: the name the generated help, man and markdown pages show for the program, in place of the root's 'name'. For a plugin, which a host runs as `<host>-<name>` but the user types as `<host> <name>`: with name: kubectl-ctx and display_name: "kubectl ctx", every derived usage line reads `kubectl ctx use [flags] <name>`, the man page's SYNOPSIS `kubectl ctx use …` and the markdown title `# kubectl ctx use`. It may contain spaces. It changes presentation only: 'name' still matches the binary and names the generated page files and man pages (kubectl-ctx-use.1), completion scripts still register for 'name' (the shell completes the binary), and routing, handler names and Context.CommandPath() are unaffected. Text the author writes verbatim (usage, footer, examples, a verbatim help/man/markdown page) is not rewritten. A composed child's display_name is ignored; the composing parent's root decides.
 	DisplayName string `json:"display_name,omitempty"`
+	// What running this command does, for the people and the programs (such as AI agents) that run it. Help, man and markdown show it as a line (`Effects: destructive, not idempotent`), and the contract, the generated Definition (CommandDef.Effects), tool exports, the agent skill page and permission snippets carry it. Unset says nothing, and a program reading the contract then assumes the worst: destructive, reaching outside the machine. Sub-commands don't inherit it. A flag's own `effects` raises it for a run that gives the flag. Not allowed on a `$ref` node: the child spec, whose handler runs, declares it. Nothing changes at run time.
+	Effects *Effects `json:"effects,omitempty"`
 	// Environment-variable inputs for this command
 	Env []EnvInput `json:"env,omitempty"`
 	// Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
@@ -238,7 +244,7 @@ type Command struct {
 	Schemas map[string]Schema `json:"schemas,omitempty"`
 	// Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.
 	SeeAlso []string `json:"see_also,omitempty"`
-	// How settled this command is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it in the parent's command list, and a line on its own pages; the contract carries it. Its inputs, sub-commands, output and exit codes are as unstable as it is. Nothing changes at run time: to gate an experimental command, check in its handler.
+	// How settled this command is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it in the parent's command list, and a line on its own pages; the contract carries it. Its inputs, sub-commands, output and exit codes are as unstable as it is. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time: to gate an experimental command, check in its handler.
 	Stability string `json:"stability,omitempty"`
 	// Declares expected stdin format and schema for this command
 	Stdin *StdinSpec `json:"stdin,omitempty"`
@@ -255,6 +261,8 @@ type Command struct {
 }
 
 type ConfigInput struct {
+	// Config values are never tool parameters: on an MCP server they are the server's own configuration. `false` leaves this value out of the agent skill page's list of configuration, and `true` lists it there when it is hidden. The contract carries it.
+	Agent *bool `json:"agent,omitempty"`
 	// Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries — commands, flags and arguments.)
 	Deprecated string `json:"deprecated,omitempty"`
 	// The release that deprecated this input (X.Y.Z), shown beside the deprecation in help, man and markdown and written into the contract. Needs `deprecated`.
@@ -269,7 +277,7 @@ type ConfigInput struct {
 	RemovedIn string `json:"removed_in,omitempty"`
 	// Type definition and input-level metadata (required, default, file, key)
 	Schema *InputSchema `json:"schema,omitempty"`
-	// How settled this config value is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. Nothing changes at run time.
+	// How settled this config value is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time.
 	Stability string `json:"stability,omitempty"`
 	// Short one-liner shown next to this input in the generated Environment/Configuration help section.
 	Summary string `json:"summary,omitempty"`
@@ -286,6 +294,8 @@ type ConfigurationFile struct {
 	Name string `json:"name"`
 	// File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.
 	Path string `json:"path,omitempty"`
+	// Named sets of settings in this file, one chosen per run by a declared input (`--profile prod`, `ACME_PROFILE=prod`). The keys under `<under>.<name>` are read as if they sat at the top of the file and win over the file's other top-level keys, which every profile shares. Merging is per key: a list is replaced, not joined, and a map's entries merge. Precedence is otherwise unchanged: command line, environment, configuration files (the selected profile, then the shared keys), default. Profiles that aren't selected are not read or checked, and the file's `schema` checks the shared keys merged with the selected profile, without the `<under>` key. Not allowed on a `format: dotenv` or `as: env` file.
+	Profiles *ConfigurationFileProfiles `json:"profiles,omitempty"`
 	// Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/<Name>". No typed struct is generated from this — typed access to config values is the config: inputs channel.
 	Schema *Schema `json:"schema,omitempty"`
 }
@@ -308,7 +318,29 @@ type ConfigurationFileDiscover struct {
 	Strategy string `json:"strategy"`
 }
 
+// Where a configuration file keeps its named profiles and which input chooses one.
+type ConfigurationFileProfiles struct {
+	// The profile used when neither the command line nor the environment chooses one. Declare the default in one place only: here, on the selector flag or on the selector env input. With no default and no selection, only the shared keys apply.
+	Default string `json:"default,omitempty"`
+	// The name of the string input that chooses the profile: a flag with this name, an env input with this name, or both, declared on this command or an ancestor. The flag set on the command line wins, then the first set variable (the flag's own `variable:` names, then the env input's), then the default. The selector is read before any configuration file, so it can't come from one: the flag can't declare `key:` or `config_source`. An unknown profile chosen on the command line or in the environment is a usage error listing the defined ones; a defaulted profile that a file doesn't define just leaves the shared keys.
+	Select string `json:"select"`
+	// The top-level key holding the named profiles: `profiles: {prod: {region: eu-west-1}}` is `under: profiles`. One key, not a dotted path. It must not be the first segment of a key a config input or fallback reads from this file.
+	Under string `json:"under"`
+}
+
+// What a command does when it runs, or what a flag adds to that. Programs that run the CLI for someone, such as AI agents and their permission rules, read it to decide what needs asking first.
+type Effects struct {
+	// Running it again with the same inputs changes nothing more. Unset says nothing.
+	Idempotent *bool `json:"idempotent,omitempty"`
+	// 'read': changes nothing. 'write': creates or changes things, without destroying what was there. 'destructive': deletes or overwrites something that can't be got back.
+	Kind string `json:"kind"`
+	// It reaches the network or other systems outside the machine. Unset says nothing, and a program reading the contract then assumes it does.
+	OpenWorld *bool `json:"open_world,omitempty"`
+}
+
 type EnvInput struct {
+	// Environment variables are never tool parameters: on an MCP server they come from the server's own environment, where secrets belong. `false` leaves this variable out of the agent skill page's list of variables, and `true` lists it there when it is hidden. The contract carries it.
+	Agent *bool `json:"agent,omitempty"`
 	// Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries — commands, flags and arguments.)
 	Deprecated string `json:"deprecated,omitempty"`
 	// The release that deprecated this input (X.Y.Z), shown beside the deprecation in help, man and markdown and written into the contract. Needs `deprecated`.
@@ -323,7 +355,7 @@ type EnvInput struct {
 	RemovedIn string `json:"removed_in,omitempty"`
 	// Type definition and input-level metadata (required, default, variable)
 	Schema *InputSchema `json:"schema,omitempty"`
-	// How settled this environment variable is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. Nothing changes at run time.
+	// How settled this environment variable is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time.
 	Stability string `json:"stability,omitempty"`
 	// Short one-liner shown next to this input in the generated Environment/Configuration help section.
 	Summary string `json:"summary,omitempty"`
@@ -367,6 +399,8 @@ type FlagGroup struct {
 }
 
 type FlagInput struct {
+	// Whether this flag is a tool parameter for AI agents (tool exports and the MCP companion). `false` leaves it out, while it stays in help. `true` brings back a flag left out by default: a hidden, deprecated, secret or short-circuit flag, or one that reads `from:` a file or stdin (which would let an agent read the host's files, or put a secret in the model's context). Unset follows those defaults.
+	Agent *bool `json:"agent,omitempty"`
 	// When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: at run time a flag may be written anywhere after the name of the command that declares it — after its sub-commands' names too — regardless of this setting, but never before that name (a flag written before a sub-command's name belongs to an ancestor, which is how two commands may declare the same flag). cascading controls whether descendants document it.
 	Cascading bool `json:"cascading,omitempty"`
 	// Deprecation message. The flag is annotated as deprecated in generated help, and using it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those spellings report — the others are the ones to move to (`identifiers: [--db, --database]`, `deprecated_identifiers: [--database]`, `deprecated: use --db`); without, the whole flag is deprecated and every spelling reports.
@@ -379,6 +413,8 @@ type FlagInput struct {
 	DeprecatedSince string `json:"deprecated_since,omitempty"`
 	// Longer text about this flag, paragraphs separated by blank lines, shown under it in man and markdown pages and used as its description in the contract's parameters. Help shows `summary` only; an editable help template can show both, as .Description.
 	Description string `json:"description,omitempty"`
+	// What giving this flag adds to its command's `effects`. A run's effect is the highest of its command's and every given flag's (read, then write, then destructive); it is idempotent only when every stated value says so, and reaches outside the machine when any does. A flag can only raise its command's effect, so its command must declare `effects` with a lower kind; mark a preview flag with `role: dry-run` instead. A cascading flag raises whichever command it is given to. Help, man and markdown show the kind beside the flag (`(destructive)`), and the contract and the generated FlagDef.Effects carry it.
+	Effects *Effects `json:"effects,omitempty"`
 	// Group label that puts this flag under its own heading in generated help, the way a command's 'group' does in the Commands list: flags sharing a group appear together, and ungrouped flags fall under the default Flags heading. Groups appear in the order their first member is declared, unless the command declares `groups`: then the ungrouped flags come first, then the groups it lists, in its order, then any others.
 	//
 	// Presentation only: parsing, precedence and the generated field are unchanged. Use it on a command with many flags, so its help page is easy to scan. Not to be confused with 'flag_groups', which validates combinations of flags.
@@ -400,12 +436,16 @@ type FlagInput struct {
 	// What this flag means to a program driving the CLI, such as an agent. 'force' marks the bool flag that lets the command replace existing output files (the handler passes it on, as in rotini.CreateOutput(rtx, path, rotini.Overwrite(in.Flags.Force))). 'fields' marks the list flag that chooses which output fields are written (`--json id,title`, applied with rotini.SelectFields), and 'sort' the string flag that names the field to sort by (`--sort-by title`, applied with rotini.SortBy); each takes its values from an `enum` or `values_from`. These three change nothing at run time. At most one flag per command has a given role.
 	//
 	// 'chdir' is the one role the runtime acts on: a git-style `-C dir` on the root, cascading, read from the command line only (no default, env or config fallback, or `from:`), one per program. Rotini reads it before anything else, and resolves walk-up config discovery, relative paths, `@file` values, path checks and the directory plugins run in against it (Context.Dir returns it). It never changes the process's working directory, so a handler joins relative paths with rtx.Dir(). A relative value is resolved against the run's directory, and given more than once, the last wins.
+	//
+	// 'dry-run' marks the bool flag that previews a run without changing anything, and 'confirm' the bool flag that answers yes for a command that would otherwise refuse or prompt. 'machine-output' marks the flag that makes the command write its declared `output` as JSON: a bool flag, or a string flag with an `enum` and `role_value` naming the value that selects JSON (`--format json`). 'page' marks the flag that selects a page of results. They change nothing at run time either; the contract, tool exports and the agent skill page read them, and a command has each at most once, counting the cascading flags it inherits.
 	Role string `json:"role,omitempty"`
+	// With `role: machine-output` on a string flag: the `enum` value that selects JSON output (`json` for `--format json`). Tool exports and the MCP companion add `--format=json` to the command line themselves and leave the flag out of the tool's parameters. Only on a machine-output flag with an enum that lists it.
+	RoleValue string `json:"role_value,omitempty"`
 	// Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 	Schema *InputSchema `json:"schema,omitempty"`
 	// When true, setting this flag on the command line waives every declared requirement of the invoked command chain: required inputs, enums, bounds, patterns, flag groups and flag dependencies are not checked, and rtx.Inputs succeeds. Use it for flags that replace the command's normal run, such as --help, --version or --print-schema. Errors in reading the command line (an unknown flag or command, a value of the wrong type, too many arguments) are still reported, as is an environment value of the wrong type. A configuration file that can't be found, parsed or read into its inputs is skipped for that run, so --help works in a broken directory. rotini takes no action of its own: your handler checks the flag and decides what to do. Only the command line sets it, never an environment variable, a configuration file or a default. Must be a bool, and can't be required, negatable, given a default of true, read from the environment or a configuration file (key, variable), or listed in a flag group or flag dependency.
 	ShortCircuit bool `json:"short_circuit,omitempty"`
-	// How settled this flag is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. A flag is never more stable than its command: a flag of an experimental command is experimental too. Nothing changes at run time.
+	// How settled this flag is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. A flag is never more stable than its command: a flag of an experimental command is experimental too. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time.
 	Stability string `json:"stability,omitempty"`
 	// Short one-liner shown next to this flag in the Flags section of generated help.
 	Summary string `json:"summary,omitempty"`
