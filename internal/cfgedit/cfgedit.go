@@ -76,7 +76,7 @@ func KeepParents(n int) Option {
 // Strings are written plainly when that reads back as the same string, and quoted otherwise.
 //
 // Every byte outside the edited span is kept. A layout that can't be edited safely returns an
-// error matching [ErrRefused]; TOML before support is built returns [ErrUnsupported].
+// error matching [ErrRefused]; a format cfgedit can't write returns [ErrUnsupported].
 func Set(src []byte, format Format, path []string, value any) ([]byte, error) {
 	if !validPath(path) {
 		return nil, fmt.Errorf("cfgedit: invalid key path %q", strings.Join(path, "."))
@@ -172,7 +172,7 @@ func editorFor(format Format) (editor, error) {
 	case Dotenv:
 		return dotenvEditor{}, nil
 	case TOML:
-		return newTOMLEditor()
+		return tomlEditor{}, nil
 	}
 	return nil, fmt.Errorf("cfgedit: format %q: %w", format, ErrUnsupported)
 }

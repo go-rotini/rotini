@@ -259,7 +259,7 @@ func decodeJSONLRecord(raw []byte, line int, schema string, out any) error {
 		return notJSONRecord(raw, line)
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: could not bind the record: %s", line, describeDecodeError(err, raw).msg), err)
+		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: could not bind the record: %s", line, decodeMessage(err)), err)
 	}
 	return nil
 }
@@ -271,7 +271,7 @@ func notJSONRecord(raw []byte, line int) error {
 	if err == nil {
 		err = errors.New("more than one JSON value on the line")
 	}
-	return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: not a JSON record: %s", line, describeDecodeError(err, raw).msg), err)
+	return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: not a JSON record: %s", line, decodeMessage(err)), err)
 }
 
 // splitStdinLines splits a slurped lines payload: on NUL bytes with every byte kept, or on

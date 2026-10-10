@@ -1,5 +1,3 @@
-//go:build cfgedittoml
-
 package cfgedit
 
 import (
@@ -14,8 +12,6 @@ import (
 
 // tomlEditor splices TOML through go-rotini/toml's node spans (Node.Span, Node.KeySpan).
 type tomlEditor struct{}
-
-func newTOMLEditor() (editor, error) { return tomlEditor{}, nil }
 
 type tomlEdit struct {
 	src  []byte

@@ -19,7 +19,7 @@
 //	wantexit 2 ./app --bad     run a command and assert its exact exit status
 //
 // wantexit, execout, gomodinit, nodeps, sizebelow, writebytes, genlines, heldstdin and rssbelow
-// are rotini's own commands, and leandeps and pinnedgo its own conditions; `! exec` only proves
+// are rotini's own commands, and pinnedgo its own condition; `! exec` only proves
 // a non-zero exit.
 //
 // # Script names
@@ -129,10 +129,7 @@ func TestScripts(t *testing.T) {
 			return nil
 		},
 		Condition: func(cond string) (bool, error) {
-			switch cond {
-			case "leandeps":
-				return leanRuntimeDeps, nil
-			case "pinnedgo":
+			if cond == "pinnedgo" {
 				return pinnedToolchain(root)
 			}
 			return false, fmt.Errorf("unknown condition %q", cond)
@@ -237,12 +234,6 @@ func TestScripts(t *testing.T) {
 		RequireUniqueNames:  true,
 	})
 }
-
-// leanRuntimeDeps turns on r11_lean_runtime's forbidden-package check and its tighter size
-// budget. It stays false while rotini's go.mod requires go-rotini module releases that still
-// link those packages; set it, and leanRuntimeDeps in deps_test.go, to true in the change that
-// requires releases free of them.
-const leanRuntimeDeps = false
 
 // pinnedToolchain reports whether the go command scripts run is the toolchain go.mod names,
 // which the linker-output and size checks are calibrated against.

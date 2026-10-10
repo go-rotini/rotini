@@ -211,13 +211,13 @@ func partialEnvLayer(b *InputReader, rtx *Context, v reflect.Value, chain []Comm
 	var envReg, flagReg *recon.Registry
 	var err error
 	if hasEnvChannel(v) {
-		if envReg, err = recon.New(recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
+		if envReg, err = recon.New(recon.WithoutWatch(), recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
 			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
 		}
 		defer envReg.Close()
 	}
 	if v.Kind() == reflect.Struct && hasReconFlags(v) {
-		if flagReg, err = recon.New(recon.WithSource(flagEnvSource(v, b.envPrefix, view))); err != nil {
+		if flagReg, err = recon.New(recon.WithoutWatch(), recon.WithSource(flagEnvSource(v, b.envPrefix, view))); err != nil {
 			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
 		}
 		defer flagReg.Close()

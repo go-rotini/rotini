@@ -445,6 +445,8 @@ func TestInputErrorTexts_configParse(t *testing.T) {
 	cases := []struct{ ext, body, want string }{
 		{"yaml", "defaults: [\n", ":1:11: "},
 		{"json", "{\"a\":\n", ":2:1: "},
+		{"json", "{\"a\": 1 \"b\": 2}\n", ":1:9: invalid character '\"' after object key:value pair"},
+		{"json", "[1]\n", ": the top level must be a mapping"},
 		{"toml", "a = \n", ":1:"},
 		{"jsonc", "{\"a\": // c\n", ":"},
 		{"env", "A=\"unterminated\n", ":"},

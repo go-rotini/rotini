@@ -10,7 +10,7 @@ exec go mod tidy
 
 # The forbidden packages (testdata/forbidden_deps.txt), on every platform.
 exec go list -deps ./cmd/app
-[leandeps] nodeps
+nodeps
 
 exec go build -o app$exe ./cmd/app
 exec ./app$exe build --name x --count 2 --timeout 5s --tag a tgt
@@ -29,8 +29,7 @@ stdout 'Usage:'
 # The stripped linux/amd64 binary stays under its budget, which belongs to the go.mod toolchain.
 [linux] [pinnedgo] env GOOS=linux GOARCH=amd64
 [linux] [pinnedgo] exec go build -ldflags '-s -w' -o app-stripped ./cmd/app
-[linux] [pinnedgo] [!leandeps] sizebelow app-stripped 10000000
-[linux] [pinnedgo] [leandeps] sizebelow app-stripped 6500000
+[linux] [pinnedgo] sizebelow app-stripped 7000000
 
 -- cmd/app/.rotini.conf.yaml --
 version: 0.0.0

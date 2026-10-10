@@ -11,12 +11,6 @@ import (
 	"testing"
 )
 
-// leanRuntimeDeps turns on the failure in TestRuntimeDependencies. While it is false the test
-// only logs the forbidden packages it finds: rotini's go.mod still requires go-rotini module
-// releases that link them. Set it, and leanRuntimeDeps in e2e/e2e_test.go, to true in the change
-// that requires releases free of them.
-const leanRuntimeDeps = false
-
 // forbiddenDeps reads testdata/forbidden_deps.txt, one import path per line.
 func forbiddenDeps(t *testing.T, path string) []string {
 	t.Helper()
@@ -55,13 +49,8 @@ func TestRuntimeDependencies(t *testing.T) {
 			}
 			deps := strings.Fields(string(out))
 			for _, pkg := range forbidden {
-				if !slices.Contains(deps, pkg) {
-					continue
-				}
-				if leanRuntimeDeps {
+				if slices.Contains(deps, pkg) {
 					t.Errorf("the runtime links %s", pkg)
-				} else {
-					t.Logf("the runtime links %s (not yet enforced)", pkg)
 				}
 			}
 		})

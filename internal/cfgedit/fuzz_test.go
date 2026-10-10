@@ -14,10 +14,7 @@ import (
 // (or gone), and making the same edit again changes nothing. A verification failure is an
 // allowed outcome: it is the safety net refusing an edit whose result would read back wrong.
 func FuzzEdit(f *testing.F) {
-	formats := []Format{YAML, JSON, JSONC, Dotenv}
-	if _, err := newTOMLEditor(); err == nil {
-		formats = append(formats, TOML)
-	}
+	formats := []Format{YAML, JSON, JSONC, Dotenv, TOML}
 	files, _ := filepath.Glob(filepath.Join("testdata", "edit", "*", "*.txtar"))
 	for _, file := range files {
 		a, err := txtar.ParseFile(file)

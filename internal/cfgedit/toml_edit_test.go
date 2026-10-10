@@ -1,5 +1,3 @@
-//go:build cfgedittoml
-
 package cfgedit
 
 import "testing"

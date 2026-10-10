@@ -9,19 +9,19 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/go-rotini/jsonschema"
+	"github.com/go-rotini/jsonschema/gogen"
 )
 
 // This file converts spec schemas to Go type declarations and to self-contained JSON
 // Schemas for runtime validation.
 
-// outputRootSentinel is the placeholder root type GenerateGo requires; it is stripped from
+// outputRootSentinel is the placeholder root type gogen.Generate requires; it is stripped from
 // the output.
 const outputRootSentinel = "rotiniGeneratedOutputsRoot"
 
 // buildOutputTypes generates Go type declarations for the program's named schemas and its
 // own commands' "<Prefix>Output" and "<Prefix>Stdin" types (see collectOutputDefs), or ""
-// when there are none. It uses jsonschema.GenerateGo, the engine behind the spec and conf
+// when there are none. It uses gogen.Generate, the engine behind the spec and conf
 // types.
 func buildOutputTypes(gp *program, pkg string) (string, error) {
 	defs := collectOutputDefs(gp)
@@ -36,9 +36,9 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshal output schema document: %w", err)
 	}
-	src, err := jsonschema.GenerateGo(doc,
-		jsonschema.WithGoPackage(pkg),
-		jsonschema.WithGoRootType(outputRootSentinel))
+	src, err := gogen.Generate(doc,
+		gogen.WithPackage(pkg),
+		gogen.WithRootType(outputRootSentinel))
 	if err != nil {
 		return "", fmt.Errorf("generate output types: %w", err)
 	}

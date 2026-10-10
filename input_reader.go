@@ -155,7 +155,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	//    is built only when out describes inputs of that channel.
 	var envReg *recon.Registry
 	if hasEnvChannel(v) {
-		if envReg, err = recon.New(recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
+		if envReg, err = recon.New(recon.WithoutWatch(), recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
 			return internalBind(channelEnv, "", "could not build the environment registry", err)
 		}
 		defer envReg.Close()
@@ -304,7 +304,7 @@ func (b *InputReader) bindStdinDocument(sf reflect.Value, format, text string) e
 		}
 	}
 
-	reg, err := recon.New(recon.WithSource(recon.NewMapSource("stdin", m)))
+	reg, err := recon.New(recon.WithoutWatch(), recon.WithSource(recon.NewMapSource("stdin", m)))
 	if err != nil {
 		return internalBind(channelStdin, "", "could not build the stdin registry", err)
 	}
@@ -369,7 +369,7 @@ func bindStdinValue(sf reflect.Value, format string, data []byte, schema string)
 	}
 	ptr := reflect.New(sf.Type().Elem())
 	if err := json.Unmarshal(raw, ptr.Interface()); err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("could not bind stdin: %s", describeDecodeError(err, raw).msg), err)
+		return usageBind(channelStdin, "", fmt.Sprintf("could not bind stdin: %s", decodeMessage(err)), err)
 	}
 	sf.Set(ptr)
 	return nil
@@ -378,12 +378,11 @@ func bindStdinValue(sf reflect.Value, format string, data []byte, schema string)
 // stdinDecodeError reports a stdin document that did not decode, with the decoder's position
 // and reason.
 func stdinDecodeError(format string, data []byte, err error) error {
-	f := describeDecodeError(err, data)
 	msg := "could not parse stdin as " + format
-	if f.line > 0 {
-		msg += fmt.Sprintf(" at line %d, column %d", f.line, f.col)
+	if line, col, ok := recon.ParsePosition(err, data); ok {
+		msg += fmt.Sprintf(" at line %d, column %d", line, col)
 	}
-	return usageBind(channelStdin, "", msg+": "+f.msg, err)
+	return usageBind(channelStdin, "", msg+": "+decodeMessage(err), err)
 }
 
 // isRawStdinFormat reports whether format binds stdin directly instead of decoding it.
@@ -474,7 +473,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 	srcs := make([]recon.Source, 0, 2+len(files))
 	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, b.envPrefix, view))
 	srcs = append(srcs, files...)
-	reg, err := recon.New(recon.WithSources(srcs...))
+	reg, err := recon.New(recon.WithoutWatch(), recon.WithSources(srcs...))
 	if err != nil {
 		return internalBind(channelFlag, "", "could not build the flag-fallback registry", err)
 	}
@@ -938,7 +937,7 @@ func (b *InputReader) configRegistry(files []ConfigFile, boot fileBootstrap, key
 	for i, src := range srcs {
 		srcs[i] = spellings{Source: src, keys: keys, clock: view.clockRef()}
 	}
-	reg, err := recon.New(recon.WithSources(srcs...))
+	reg, err := recon.New(recon.WithoutWatch(), recon.WithSources(srcs...))
 	if err != nil {
 		return nil, nil, internalBind(channelConfig, "", "could not build the configuration registry", err)
 	}
@@ -1022,7 +1021,7 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		for i, src := range srcs {
 			srcs[i] = spellings{Source: src, keys: c.keys, clock: c.view.clockRef()}
 		}
-		reg, err := recon.New(recon.WithSources(srcs...))
+		reg, err := recon.New(recon.WithoutWatch(), recon.WithSources(srcs...))
 		if err != nil {
 			return nil, internalBind(channelConfig, name, fmt.Sprintf("could not build the registry for configuration file %q", name), err)
 		}
@@ -1284,12 +1283,12 @@ func searchFile(dirs []string, name string) string {
 // configFileProblem says why a configuration file could not be used: where a syntax error is
 // and what it is, or why the file could not be read.
 func configFileProblem(path string, err error) string {
-	if de, ok := errors.AsType[*docError](err); ok {
+	if pe, ok := errors.AsType[*recon.ParseError](err); ok {
 		loc := path
-		if at := de.failure.at(); at != "" {
+		if at := pe.Position.String(); at != "" {
 			loc += ":" + at
 		}
-		return fmt.Sprintf("could not parse configuration file %s: %s", loc, de.failure.msg)
+		return fmt.Sprintf("could not parse configuration file %s: %s", loc, decodeMessage(pe))
 	}
 	reason := "cannot be read"
 	switch {
@@ -1348,9 +1347,10 @@ func validateConfigFileAs(f ConfigFile, src recon.Source, profile string) error 
 	if !ok {
 		return internalBind(channelConfig, f.Name, fmt.Sprintf("unsupported format %q for configuration file %s", fsrc.Format(), path), nil)
 	}
-	m, err := codec.Decode(data)
+	m, err := codec.Decode(stripBOM(data))
 	if err != nil {
-		return usageBind(channelConfig, f.Name, configFileProblem(path, err), err)
+		pe := fileParseError(path, data, err)
+		return usageBind(channelConfig, f.Name, configFileProblem(path, pe), pe)
 	}
 	if f.Profiles != nil {
 		m = effectiveDocument(m, f.Profiles.Under, profile)

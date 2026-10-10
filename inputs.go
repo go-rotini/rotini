@@ -607,7 +607,7 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 	}
 	var envReg, flagReg *recon.Registry
 	if hasEnvChannel(v) {
-		if envReg, err = recon.New(recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
+		if envReg, err = recon.New(recon.WithoutWatch(), recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
 			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
 		}
 		defer envReg.Close()
@@ -615,7 +615,7 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 
 	// Flag env fallbacks read the env projection of the recon key, as in reconcileFlags.
 	if v.Kind() == reflect.Struct && hasReconFlags(v) {
-		if flagReg, err = recon.New(recon.WithSource(flagEnvSource(v, b.envPrefix, view))); err != nil {
+		if flagReg, err = recon.New(recon.WithoutWatch(), recon.WithSource(flagEnvSource(v, b.envPrefix, view))); err != nil {
 			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
 		}
 		defer flagReg.Close()

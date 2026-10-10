@@ -83,10 +83,10 @@ require (
 	github.com/go-critic/go-critic v0.15.0 // indirect
 	github.com/go-gremlins/gremlins v0.6.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
-	github.com/go-rotini/jsonc v1.1.0 // indirect
-	github.com/go-rotini/jsonschema v1.1.2 // indirect
-	github.com/go-rotini/toml v1.1.1 // indirect
-	github.com/go-rotini/yaml v1.2.1 // indirect
+	github.com/go-rotini/jsonc v1.1.1 // indirect
+	github.com/go-rotini/jsonschema v1.2.0 // indirect
+	github.com/go-rotini/toml v1.2.0 // indirect
+	github.com/go-rotini/yaml v1.2.2 // indirect
 	github.com/go-toolsmith/astcast v1.1.0 // indirect
 	github.com/go-toolsmith/astcopy v1.1.0 // indirect
 	github.com/go-toolsmith/astequal v1.2.0 // indirect

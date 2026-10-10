@@ -34,10 +34,8 @@ func importers(t *testing.T, pkg string) map[string][]string {
 	return by
 }
 
-// TestCoreLinksNoTemplates checks that the rotini package links no template code of its own and
-// does not import this package, so only programs that import shape link text/template. The
-// go-rotini/fs module is the one importer allowed, until the root package's
-// TestRuntimeDependencies forbids it too.
+// TestCoreLinksNoTemplates checks that the rotini package links no template code and does not
+// import this package, so only programs that import shape link text/template.
 func TestCoreLinksNoTemplates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go list; skipped under -short")
@@ -46,10 +44,8 @@ func TestCoreLinksNoTemplates(t *testing.T) {
 	if _, ok := deps["github.com/go-rotini/rotini/shape"]; ok {
 		t.Error("the rotini package depends on rotini/shape")
 	}
-	for _, imp := range deps["text/template"] {
-		if !strings.HasPrefix(imp, "text/template") && !strings.HasPrefix(imp, "github.com/go-rotini/fs") {
-			t.Errorf("%s imports text/template into the rotini package", imp)
-		}
+	if imps, ok := deps["text/template"]; ok {
+		t.Errorf("the rotini package links text/template, imported by %s", strings.Join(imps, ", "))
 	}
 }
 
