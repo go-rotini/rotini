@@ -96,6 +96,7 @@ type contractArgument struct {
 	Env             []string                     `json:"env,omitempty"`         // fallback variables, in lookup order
 	ConfigKey       string                       `json:"config_key,omitempty"`  // fallback config key, only when the command reads config files
 	Separator       string                       `json:"separator,omitempty"`
+	From            []string                     `json:"from,omitempty"` // where its value may come from besides the word itself: file (@path), stdin (-)
 	Glob            bool                         `json:"glob,omitempty"` // patterns in its words are expanded into paths on Windows
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
@@ -669,7 +670,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		f := contractFactsOf(a.Schema, schemas)
 		arg := contractArgument{
 			Name: a.Name, Summary: a.Summary, Type: f.typ, Kind: f.kind, Required: req, Variadic: isVariadicSchema(a.Schema),
-			Passthrough: a.Passthrough, Separator: f.separator, Glob: a.Schema != nil && a.Schema.Glob,
+			Passthrough: a.Passthrough, Separator: f.separator, From: f.from, Glob: a.Schema != nil && a.Schema.Glob,
 			IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative,
 			VariableFile: f.variableFile, Expand: f.expand, RelativeTo: f.relativeTo,
 			Secret: f.secret, Hidden: a.Hidden, EnumValues: contractEnumValues(a.Schema),
@@ -680,7 +681,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		arg.Env, arg.ConfigKey = argumentFallback(a, p.envPrefix, readsConfig)
 		arg.ValuesFrom = valuesFrom(a.Schema)
 		c.Arguments = append(c.Arguments, arg)
-		param(a.Name, cmp.Or(a.Description, a.Summary), arg.Schema, req, a.Hidden)
+		param(a.Name, cmp.Or(a.Description, a.Summary), withoutDeprecatedEnum(arg.Schema, arg.EnumValues), req, a.Hidden)
 	}
 	declared := map[string]bool{}
 	for _, f := range slices.Concat(in.Flags, n.inherited) {
@@ -710,9 +711,11 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		}
 		// The same names help shows, from the same functions as the generated env tags.
 		row := withConfigKeys([]templateDocFlagRow{flagRow(f, p.envPrefix)}, readsConfig)[0]
-		cf.Env, cf.ConfigKey = row.Env, row.ConfigKey
+		// Only the variable names: help's file-variable row carries a note.
+		cf.Env = slices.DeleteFunc(slices.Clone(row.Env), func(v string) bool { return strings.HasSuffix(v, fileVariableNote) })
+		cf.ConfigKey = row.ConfigKey
 		c.Flags = append(c.Flags, cf)
-		param(f.Name, cmp.Or(f.Description, f.Summary), cf.Schema, req, f.Hidden)
+		param(f.Name, cmp.Or(f.Description, f.Summary), withoutDeprecatedEnum(cf.Schema, cf.EnumValues), req, f.Hidden)
 	}
 	for _, f := range in.Flags {
 		flag(f, false)

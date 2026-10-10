@@ -13,7 +13,8 @@ import (
 // lintPassthroughArgument checks a passthrough argument, where raw words start: it is the
 // command's last argument and a variadic []string, the command has nothing else that reads
 // the words after it (sub-commands, plugins, command-level passthrough), and it declares no
-// rule that would judge or split the raw words (separator, enum, pattern, lengths).
+// rule that would judge, count or split the raw words (separator, enum, pattern, lengths, item
+// counts).
 func lintPassthroughArgument(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -52,6 +53,8 @@ func lintPassthroughArgument(spec *Spec) []error {
 				{"pattern", s.Pattern != ""},
 				{"minLength", s.MinLength != 0},
 				{"maxLength", s.MaxLength != nil},
+				{"minItems", s.MinItems != 0},
+				{"maxItems", s.MaxItems != nil},
 			} {
 				if k.set {
 					add("/schema/"+k.key, fmt.Sprintf("is a passthrough argument, whose words are passed on as typed, so it can't set %#q", k.key))
@@ -222,8 +225,8 @@ func completeKind(schema *InputSchema) string {
 }
 
 // lintResponseFiles checks response files against the inputs they could take words from: the
-// prefix `@` beside a `from: [file]` flag is an error, since `--token @x` would expand instead
-// of reading the file; raw words (a passthrough command or argument) and plugin arguments that
+// prefix `@` beside a `from: [file]` flag or argument is an error, since `--token @x` would
+// expand instead of reading the file; raw words (a passthrough command or argument) and plugin arguments that
 // start with the prefix are expanded too unless written after `--`, a warning.
 func lintResponseFiles(spec *Spec) []error {
 	rf := spec.Command.ResponseFiles
@@ -237,6 +240,12 @@ func lintResponseFiles(spec *Spec) []error {
 			if rf.Prefix == "@" && f.Schema != nil && slices.Contains(f.Schema.From, "file") {
 				problems = append(problems, &problem{kind: "spec", ptr: rootPointer + "/response_files/prefix", loc: rootLabel(spec),
 					msg: fmt.Sprintf("uses the response-file prefix \"@\", which flag %q of command %s also reads with `from: [file]`; `%s @x` would expand a response file instead of reading x. Choose another prefix, such as \"+\"", f.Name, path, flagIdentifiers(c.Flags[i])[0])})
+			}
+		}
+		for _, a := range c.Arguments {
+			if rf.Prefix == "@" && a.Schema != nil && slices.Contains(a.Schema.From, "file") {
+				problems = append(problems, &problem{kind: "spec", ptr: rootPointer + "/response_files/prefix", loc: rootLabel(spec),
+					msg: fmt.Sprintf("uses the response-file prefix \"@\", which argument %q of command %s also reads with `from: [file]`; `@x` there would expand a response file instead of reading x. Choose another prefix, such as \"+\"", a.Name, path)})
 			}
 		}
 		if c.Passthrough || len(c.Plugins) > 0 || c.PluginDiscovery != nil || hasPassthroughArgument(c) {

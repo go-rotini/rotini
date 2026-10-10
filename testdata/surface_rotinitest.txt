@@ -5,6 +5,8 @@ field Result.Env
 field Result.Err
 field Result.Stderr
 field Result.Stdout
+func Argv0(name string) Option
+func Clock(now time.Time) Option
 func Context(ctx context.Context) Option
 func Dir(dir string) Option
 func Env(kv ...string) Option

@@ -76,8 +76,8 @@ groups, config keys read with two types, an identifier that hides every identifi
 cascading or short-circuit flag, and `-ab` beside `-a` and `-b`. It warns, without failing,
 about an identifier that hides only some of them, one-dash multi-letter identifiers, flags with
 no long form, and a literal default on a secret input. Two opt-in conf keys add warnings:
-`validate.flags_first` for env and config inputs no flag can set, and `validate.posix_names` for
-a program name that isn't a POSIX utility name.
+`validate.flags_first` for env and config inputs no flag or argument can set, and
+`validate.posix_names` for a program name that isn't a POSIX utility name.
 
 `generate` runs the same checks first, so `validate` is mostly for CI. To also check in CI that
 the committed code matches the spec, run `go tool rotini generate --dry-run`: it writes nothing,
@@ -129,8 +129,9 @@ Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst 
 
 ### Importing a Cobra CLI
 
-An existing Cobra program can start its spec for you. Point `rotini import cobra` at the package
-that builds the command tree, usually the one declaring `rootCmd`:
+An existing Cobra program can start its spec for you; Cobra is the one framework `rotini import`
+reads today. Point `rotini import cobra` at the package that builds the command tree, usually the
+one declaring `rootCmd`:
 
 {{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
 go tool rotini import cobra ./cmd
@@ -157,6 +158,7 @@ expression that yields a command.
 | `Args` validators and the `Use` line's placeholders | `arguments` with their counts |
 | `ValidArgs` | an `enum` on the first argument, with descriptions |
 | `DisableFlagParsing` | `passthrough: true` |
+| `Flags().SetInterspersed(false)` | `options_first: true` |
 | `help` and `completion` commands, `--help` and `--version` | the seeded help command and flags; one `completion` command taking the shell, with the completion feature on |
 
 A command with no `Args` rule accepts any positionals in Cobra, so it imports with a trailing
@@ -178,7 +180,7 @@ Move each hook's code into the matching method of the command's handler: `Persis
 `CascadingPreRun`, `PreRun` to `PreRun`, `Run` to `Run`, and so on. A few behaviors differ, and
 the import notes each one that applies:
 
-- rotini prints no deprecation warnings itself; a hook reads `rotini.Deprecations` and prints
+- Rotini prints no deprecation warnings itself; a hook reads `rotini.Deprecations` and prints
   them.
 - A command with sub-commands runs its own handler when invoked bare; the generated handler
   prints help.
@@ -621,7 +623,7 @@ commands:
       - name: pattern
         schema: { type: string, required: true }
       - name: files
-        schema: { type: '[]existingfile' }
+        schema: { type: '[]inputfile' }
     stdin:
       format: lines
       stream: true
@@ -890,10 +892,12 @@ if err := os.MkdirAll(dirs.State, 0o700); err != nil {
 }
 {{< /code >}}
 
-### A directory flag (-C)
+### A directory flag
 
-`role: chdir` on a root flag gives a git-style `-C dir`: the program runs as if it had been
-started in that directory.
+`role: chdir` on a root flag makes it a directory flag, like git's `-C dir`: the program runs as
+if it had been started in that directory. Rotini acts on whichever flag carries the role, under
+the identifiers you declare; `-C, --dir` below is one spelling, and `-w, --workdir` works the
+same.
 
 {{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
@@ -910,7 +914,7 @@ command:
 Rotini reads the flag before anything else, wherever it is typed on the command line. Walk-up
 config discovery starts from the directory, and relative config paths, `@file` values,
 `existingfile` and `existingdir` checks, and `rotini.OpenInput` and `rotini.CreateOutput` resolve
-against it. A plugin typed after it runs in it. A relative `-C` is resolved against the run's
+against it. A plugin typed after it runs in it. A relative directory is resolved against the run's
 directory (`WithDir`, else the process's), and the flag binds as the absolute path. Given more
 than once, the last wins; one that isn't a directory is a usage error, even beside `--help`.
 
@@ -925,8 +929,8 @@ handler that opens a relative path joins it first:
 f, err := os.Open(filepath.Join(rtx.Dir(), name))
 {{< /code >}}
 
-A shell completes the words after `-C x` against its own directory; rotini's completers see
-`rtx.Dir()`.
+A shell completes the words after the directory flag against its own directory; Rotini's
+completers see `rtx.Dir()`.
 
 ### Explaining where values came from
 
@@ -1292,8 +1296,8 @@ func exitCode(out rotini.Outcome) int {
   found next to the binary or in `plugin_path` that can't be run is `PluginStartFailed`; one on
   `PATH` without the execute bit isn't found at all, so it exits 127. A plugin that runs past its
   `timeout:` falls through to 1 here.
-- **List the codes** under `exit_status:`, so help, man and markdown pages and the contract say
-  what they mean.
+- **List the codes** under `exit_status:`, so man and markdown pages and the contract say what
+  they mean. `--help` leaves them out.
 
 Install it in `main.go` with `cmd.NewProgram(cmd.Handlers()).WithReporter(cmd.Report)`. Keeping it in the command
 package, rather than in `main.go`, lets tests install the same reporter (see [Testing](#testing)).
@@ -1467,7 +1471,7 @@ The kinds are `ParseKindUnknownFlag`, `ParseKindUnknownCommand`, `ParseKindNeeds
 `ParseKindMisplacedFlag` and `ParseKindInternal`. `ParseKindMisplacedFlag` is a flag typed
 where it can't apply: before a plugin's name, where the plugin would never see it
 (`todo --verbose sync` is refused; `todo sync --verbose` passes `--verbose` to the plugin). A
-short-circuit flag such as `--help` and a [`-C`](#a-directory-flag--c) flag are the exceptions:
+short-circuit flag such as `--help` and a [directory flag](#a-directory-flag) are the exceptions:
 the program answers or applies them itself. This error reaches the reporter, not a handler.
 
 Each response is one call:
@@ -1863,9 +1867,9 @@ declares `output_stream: true`, and its `output:` is then the shape of one item.
 `rtx.WriteOutputItem` writes each item as it is ready: one compact JSON value per line, or one
 YAML document per item, each starting `---`. A stream can't be written as toml. The pages'
 OUTPUT section says the command writes a stream, and the contract marks it `stream: true`.
-`WriteOutput` on such a command, or `WriteOutputItem` on one that writes a single value, is an
-internal error, and `rotini generate` warns when a handler calls `WriteOutputItem` on a command
-that doesn't declare `output_stream: true`.
+`WriteOutput` on such a command is an internal error. `rotini generate` warns when a handler
+calls `WriteOutputItem` on a command that doesn't declare `output_stream: true`; the items are
+still written.
 
 Both return an internal error, and write nothing, when the value is not the command's
 `<Prefix>Output` type or when a format they don't write has no renderer. Both are bugs in the
@@ -2127,8 +2131,8 @@ generate:
 
 ## Files and streams
 
-File arguments, `-` for stdin and stdout, files written safely, buffered stdout, and file
-patterns on Windows.
+File arguments, `-` for stdin and stdout, files written safely, buffered stdout, file
+patterns on Windows, and filters.
 
 ### Files and the standard streams
 
@@ -2209,6 +2213,164 @@ on a variadic argument (`string`, `existingfile`, `existingdir` or `inputfile` e
 such words on Windows only, relative to the run's directory. A word naming an existing path is
 kept, and a pattern matching nothing is passed through, so the path check reports it as a POSIX
 shell would. Matching is case-sensitive and `**` is not supported.
+
+### Filters
+
+A filter reads input, writes a result and sits anywhere in a pipeline. `logs grep PATTERN
+[FILE...]` reads the files it is given in order, or stdin when there are none, with `-`
+standing for stdin among them. Three declarations give that shape:
+
+- an optional `[]inputfile` argument, so each file is checked before the run and `-` passes
+  (see [files and the standard streams](#files-and-the-standard-streams));
+- `stdin:` with `unless_argument:` naming that argument, so stdin is read only when no file is
+  given, or one is `-` (see [reading stdin](#reading-stdin));
+- `stream: true`, so stdin is read a line at a time and memory stays flat at any input size.
+
+{{< code title="cmd/logs/.rotini.spec.yaml (filter)" language="yaml" open="true" collapsible="false" copy="true" >}}
+version: 0.0.0
+command:
+  name: logs
+  summary: read logs
+  commands:
+    - name: grep
+      summary: print the lines that contain a pattern
+      arguments:
+        - name: pattern
+          schema: { type: string, required: true }
+        - name: files
+          summary: files to read; stdin when none, or -
+          schema: { type: '[]inputfile' }
+      flags:
+        - name: "null"
+          identifiers: [-z, --null]
+          summary: end each line with NUL instead of a newline, for xargs -0
+          schema: { type: bool }
+      stdin:
+        format: lines
+        stream: true
+        unless_argument: files
+{{< /code >}}
+
+The handler reads each file through an iterator of the same type as the streamed stdin, so one
+loop serves both. `bufio.Scanner` drops each line's `\n` or `\r\n`, as the stream does; its
+buffer is raised here because by default a line over 64 KiB is an error. With `-z`, each match
+ends with NUL instead of a newline, so lines holding spaces or quotes reach `xargs -0` intact:
+
+{{< code title="internal/cmd/logs/logs_grep.go (filter)" language="go" open="true" collapsible="false" copy="true" >}}
+package logs
+
+import (
+	"bufio"
+	"context"
+	"io"
+	"iter"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*logsGrepHandler)(nil)
+
+type logsGrepHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*logsGrepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[LogsGrepInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	g := in.LogsGrep
+	end := "\n"
+	if g.Flags.Null {
+		end = "\x00"
+	}
+	files := g.Arguments.Files
+	if len(files) == 0 {
+		files = []string{"-"}
+	}
+	for _, name := range files {
+		lines := g.Stdin // stdin, streamed; nil when it wasn't read
+		if name != "-" || lines == nil {
+			lines = readLines(rtx, name)
+		}
+		for line, err := range lines {
+			if err == nil && strings.Contains(line, g.Arguments.Pattern) {
+				_, err = io.WriteString(rtx.Stdout, line+end)
+			}
+			if err != nil {
+				rtx.HaltWith(err)
+				return
+			}
+		}
+	}
+}
+
+// readLines reads a file, or stdin for "-", a line at a time, without line ends.
+func readLines(rtx *rotini.Context, name string) iter.Seq2[string, error] {
+	return func(yield func(string, error) bool) {
+		f, err := rotini.OpenInput(rtx, name)
+		if err != nil {
+			yield("", err)
+			return
+		}
+		defer f.Close()
+		sc := bufio.NewScanner(f)
+		sc.Buffer(nil, 16<<20) // lines up to 16 MiB; the default stops at 64 KiB
+		for sc.Scan() {
+			if !yield(sc.Text(), nil) {
+				return
+			}
+		}
+		if err := sc.Err(); err != nil {
+			yield("", err)
+		}
+	}
+}
+{{< /code >}}
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ logs grep -z draft notes.txt | xargs -0 rm --
+{{< /code >}}
+
+When stdin is a terminal and no file is given, the stream is nil and `OpenInput(rtx, "-")`
+returns a usage error rather than waiting for typing. For NUL-separated input, as
+`find -print0` writes it, set `separator: nul` on `stdin:`. A filter that writes many small
+pieces is much faster with [buffered output](#buffered-output).
+
+A binary filter, such as a hash or a decompressor, wants stdin byte for byte at any size.
+`format: bytes` holds the whole payload in memory, so leave `stdin:` out and open `-` yourself;
+`OpenInput` makes no line-ending or byte-order-mark changes, and closing it leaves stdin open:
+
+{{< code title="hashing stdin" language="go" open="true" collapsible="false" copy="true" >}}
+f, err := rotini.OpenInput(rtx, "-")
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+defer f.Close()
+h := sha256.New()
+if _, err := io.Copy(h, f); err != nil {
+	rtx.HaltWith(err)
+	return
+}
+if _, err := fmt.Fprintf(rtx.Stdout, "%x\n", h.Sum(nil)); err != nil {
+	rtx.HaltWith(err)
+}
+{{< /code >}}
+
+On Windows, text files often end lines with `\r\n` and may start with a UTF-8 byte-order mark.
+Stdin's `lines` format drops each line's `\r` (`separator: nul` keeps bytes exact), and every
+stdin format but `bytes` removes one leading mark; a file opened with `OpenInput` keeps its
+mark, so trim `"﻿"` from its first line when that matters. UTF-16, which Windows
+PowerShell 5.1 writes with `>` and `Out-File`, isn't decoded: a stdin read whole stops with a
+usage error saying so, while streamed stdin and opened files arrive as raw bytes. Have users
+write UTF-8 (`Out-File -Encoding utf8`, or PowerShell 7, where it is the default), or decode it
+with `golang.org/x/text/encoding/unicode`.
 
 ## Agent-ready CLIs
 
@@ -2291,10 +2453,13 @@ validate` warns about a destructive command with neither a `dry-run` nor a `conf
 Some commands and inputs are left out of everything below by default: hidden and deprecated
 ones; a command with sub-commands (it prints help) or a passthrough command (it would run
 whatever it is given); and inputs that are secret (a value an agent types lands in the model's
-context), read `from:` a file or stdin (an agent could read the host's files), or short-circuit
-(`--help`). `agent: true` brings one back; `agent: false` keeps a command, with its
-sub-commands, or an input out while it stays in help. On env and config inputs, which are never
-tool parameters, `agent` only decides whether the skill page lists them.
+context), read `from:` a file or stdin (an agent could read the host's files), short-circuit
+(`--help`), or the [directory flag](#a-directory-flag). `agent: true` brings one back;
+`agent: false` keeps a command, with its sub-commands, or an input out while it stays in help.
+On env and config inputs, which are never tool parameters, `agent` only decides whether the
+skill page lists them. `rotini validate` warns about `agent: true` on a secret flag or argument:
+tool servers never pass a secret on the command line, where other local users can see it, so
+supply it through its environment variable.
 
 ### Tool definitions
 
@@ -2722,9 +2887,10 @@ offered and the completion feature's `messages` are on. A passthrough command st
 and so does a passthrough argument when it is the first. Hidden and deprecated flag spellings
 are listed as hidden, so carapace doesn't offer them; hidden and deprecated command aliases are
 left out. Values a Go completer supplies at run time have no carapace form, so they get
-no candidates; a program that needs them can serve carapace's Cobra bridge, `$carapace.bridge.Cobra([<name>])`,
-with `Program.WithCompletion(rotini.PluginCompletion)`, which hands the whole command line to the
-binary.
+no candidates. A program that needs them can answer completion in `rotini.PluginCompletion`'s
+format (`Program.WithCompletion(rotini.PluginCompletion)`), the one kubectl, Docker and Flux
+plugins use, and have users point carapace's bridge for that format at the binary, which then
+gets the whole command line.
 
 ## Conventions
 
@@ -2922,7 +3088,7 @@ The names users try first. Each is an ordinary spec entry:
 | `--no-input` | never prompt | `type: bool` |
 | `--color[=when]` | `auto`, `always` or `never` | an `enum` with `implicit_value: always` |
 | `--config <file>` | read this config file | `config_source: <entry>` on a string flag, naming a `config_files` entry |
-| `-C <dir>` | run as if started in this directory | `role: chdir` (see [a directory flag](#a-directory-flag--c)) |
+| `-C <dir>` | run as if started in this directory | `role: chdir` on any flag you name (see [a directory flag](#a-directory-flag)) |
 
 ## Plugins
 
@@ -3267,6 +3433,10 @@ func TestAddHigh(t *testing.T) {
   on for the run, so a handler that writes a value off its schema fails it.
 - **`ExitDocumented`** fails the test when the exit code isn't one the command lists in its
   `exit_status`. 0 always passes; a command that lists none passes only 0.
+- **`Clock(t)`** fixes the run's clock, so relative times such as `2h` and `today` read the same
+  instant on every run.
+- **`Argv0(name)`** runs a `multicall` program as if invoked as `name`; pass the inputs of the
+  command that name runs.
 
 Pass a fresh `NewProgram(Handlers())` to every `Run`, with the dependencies `main.go` adds:
 `Run` sets the program's streams and environment. A command line that typed inputs can't express,

@@ -1,9 +1,10 @@
-spec: .rotini.spec.yaml:48:9: command demo/run: sets `topics`, which only the root command declares; move the topics to the root
-spec: .rotini.spec.yaml:18:13: command demo: topic "filters": is declared twice; give each topic its own name
-spec: .rotini.spec.yaml:22:13: command demo: topic "run": has the name of the command "run", so `help run` would be ambiguous; rename the topic
-spec: .rotini.spec.yaml:25:13: command demo: topic "r": has the name of an alias of the command "run", so `help r` would be ambiguous; rename the topic
-spec: .rotini.spec.yaml:28:13: command demo: topic "go": has the name of an alias of the command "run", so `help go` would be ambiguous; rename the topic
-spec: .rotini.spec.yaml:31:13: command demo: topic "audit": has the name of the plugin "audit", so `help audit` would be ambiguous; rename the topic
-spec: .rotini.spec.yaml:35:7: command demo: topic "empty": has neither `body` nor `generate`; write its text in `body`, or set `generate`
-spec: .rotini.spec.yaml:39:13: command demo: topic "both": sets both `body` and `generate`; keep one
-spec: .rotini.spec.yaml:40:17: command demo: topic "both": generates the environment page a second time; keep one
+spec: .rotini.spec.yaml:49:9: command demo/run: sets `topics`, which only the root command declares; move the topics to the root
+spec: .rotini.spec.yaml:19:13: command demo: topic "filters": is declared twice; give each topic its own name
+spec: .rotini.spec.yaml:23:13: command demo: topic "run": has the name of the command "run", so `help run` would be ambiguous; rename the topic
+spec: .rotini.spec.yaml:26:13: command demo: topic "r": has the name of an alias of the command "run", so `help r` would be ambiguous; rename the topic
+spec: .rotini.spec.yaml:29:13: command demo: topic "go": has the name of an alias of the command "run", so `help go` would be ambiguous; rename the topic
+spec: .rotini.spec.yaml:32:13: command demo: topic "audit": has the name of the plugin "audit", so `help audit` would be ambiguous; rename the topic
+spec: .rotini.spec.yaml:36:7: command demo: topic "empty": has neither `body` nor `generate`; write its text in `body`, or set `generate`
+spec: .rotini.spec.yaml:40:13: command demo: topic "both": sets both `body` and `generate`; keep one
+spec: .rotini.spec.yaml:41:17: command demo: topic "both": generates the environment page a second time; keep one
+warning: spec: child.spec.yaml:6:5: command db: declares `topics`, which `help <topic>` can't reach: this spec is mounted with `$ref` from .rotini.spec.yaml, and only the root spec's topics are part of the program; declare them there

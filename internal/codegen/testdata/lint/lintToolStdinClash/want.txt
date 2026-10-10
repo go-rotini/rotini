@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:29:11: command demo/argument: reads stdin and also has an input named "stdin", the tool parameter that holds what it reads; rename the input
+spec: .rotini.spec.yaml:6:7: command demo/inherited: reads stdin and also has an input named "stdin", the tool parameter that holds what it reads; rename the input

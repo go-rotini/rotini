@@ -65,6 +65,8 @@ stderr '--label needs a key before "=" \(got "=v"\)'
 
 wantexit 1 bin/demo$exe run --url localhost:8080 s
 stderr 'a host and port need a scheme, as in http://localhost:8080'
+wantexit 1 bin/demo$exe run --url localhost:8080/api s
+stderr 'a host and port need a scheme, as in http://localhost:8080/api'
 exec bin/demo$exe run --url http://localhost:8080 s
 stdout 'url=http://localhost:8080 '
 
@@ -125,6 +127,14 @@ stdout 'port=-4 ipv4=false'
 # Without a declared digit option, -4 is a number.
 exec bin/demo$exe calc -4 -.5
 stdout 'nums=\[-4 -0.5\]'
+# Digits right after a count or bool flag are a value it doesn't take, unless a digit option
+# is declared: then -v4 is -v and -4.
+wantexit 1 bin/demo$exe opt -v3 s
+stderr '^Error: -v counts occurrences and takes no value; repeat it instead \(-vvv\), not "-v3"$'
+wantexit 1 bin/demo$exe opt -a3 s
+stderr '^Error: -a takes no value \(got "-a3"\)$'
+exec bin/demo$exe ssh -v4 h
+stdout 'ipv4=true ipv6=false host=h'
 
 # ── a passthrough argument ───────────────────────────────────────────────────
 exec bin/demo$exe exec --region eu ls -la --help -- --region x

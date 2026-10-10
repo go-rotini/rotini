@@ -26,6 +26,8 @@ var guardAllocBudgets = []struct {
 	{"help, large environment", []string{"--help"}, 200, 100},
 	{"dispatch", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 0, 250},
 	{"dispatch, large environment", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 200, 250},
+	{"complete a sub-command", []string{"__complete", "bu"}, 0, 20},
+	{"complete a flag value", []string{"__complete", "build", "--mode", ""}, 0, 35},
 }
 
 type guardRootFlags struct {
@@ -52,6 +54,7 @@ type guardBuildInputs struct {
 			Force   bool          `rotini:"force"`
 			Timeout time.Duration `rotini:"timeout"`
 			Tag     []string      `rotini:"tag"`
+			Mode    string        `rotini:"mode"`
 		}
 		Arguments struct {
 			Target string `rotini:"target"`
@@ -101,6 +104,7 @@ func guardProgram() *Program {
 		{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
 		{Name: "timeout", Identifiers: []string{"--timeout"}, Type: "time.Duration"},
 		{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string"},
+		{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Enum: []string{"fast", "safe"}},
 	}
 	def := Definition{
 		Name:    "app",

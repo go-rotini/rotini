@@ -4,4 +4,6 @@ spec: .rotini.spec.yaml:29:24: command demo/wrongtype: argument "command": is a 
 spec: .rotini.spec.yaml:38:24: command demo/rules: argument "command": is a passthrough argument, whose words are passed on as typed, so it can't set `separator`
 spec: .rotini.spec.yaml:39:19: command demo/rules: argument "command": is a passthrough argument, whose words are passed on as typed, so it can't set `enum`
 spec: .rotini.spec.yaml:40:22: command demo/rules: argument "command": is a passthrough argument, whose words are passed on as typed, so it can't set `pattern`
-spec: .rotini.spec.yaml:46:24: command demo/group: argument "command": is a passthrough argument on a command with `commands`; a word naming a sub-command would be ambiguous, so declare one or the other
+spec: .rotini.spec.yaml:41:23: command demo/rules: argument "command": is a passthrough argument, whose words are passed on as typed, so it can't set `minItems`
+spec: .rotini.spec.yaml:42:23: command demo/rules: argument "command": is a passthrough argument, whose words are passed on as typed, so it can't set `maxItems`
+spec: .rotini.spec.yaml:48:24: command demo/group: argument "command": is a passthrough argument on a command with `commands`; a word naming a sub-command would be ambiguous, so declare one or the other

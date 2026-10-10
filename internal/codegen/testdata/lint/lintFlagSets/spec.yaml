@@ -18,6 +18,9 @@ command:
       flag_groups:
         - kind: mutually_exclusive
           flags: [format, verbose]
+      flag_dependencies:
+        - when: dry_run
+          requires: [quiet]
     Unused:
       flags:
         - name: x

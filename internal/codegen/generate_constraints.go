@@ -48,6 +48,8 @@ func constraintText(s *InputSchema, channel string) (compact string, rules []str
 	switch {
 	case repeated && s.Separator == "nul":
 		add("", "NUL-separated in files")
+	case repeated && s.Separator != "" && channel == "env":
+		add("", fmt.Sprintf("several values in the variable, separated by %q", s.Separator))
 	case repeated && s.Separator != "":
 		add("", fmt.Sprintf("several values per occurrence, separated by %q", s.Separator))
 	}

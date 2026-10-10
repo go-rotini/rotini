@@ -47,13 +47,15 @@ func lintFlagDependencies(spec *Spec) []error {
 			return
 		}
 		known, ordered := flagNames(c)
+		// A flag set's rule naming a flag outside the set is lintFlagSets's to report, once.
+		own := ownDependencyCount(c, spec.Command.FlagSets)
 		for i, dep := range c.FlagDependencies {
 			at := fmt.Sprintf("%s/flag_dependencies/%d", ptr, i)
 			add := func(msg string) {
 				problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path, msg: msg})
 			}
 			for _, kn := range dependencyNames(dep) {
-				if !known[kn[1]] {
+				if !known[kn[1]] && i < own {
 					add(didYouMean(fmt.Sprintf("`flag_dependencies` entry references unknown flag %q; it has no matching entry in this command's `flags`", kn[1]), kn[1], ordered))
 				}
 			}

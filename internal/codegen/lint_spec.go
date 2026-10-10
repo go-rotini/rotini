@@ -779,7 +779,7 @@ func inertKeyProblems(ptr, path, channel, name string, schema *InputSchema) []er
 	if schema.Key != "" && channel != "flag" && channel != "argument" && channel != "config" {
 		inert("key", "config inputs and the configuration fallback of flags and arguments")
 	}
-	if len(schema.Properties) > 0 && channel != "flag" {
+	if len(schema.Properties) > 0 && channel != "flag" && channel != "stdin" {
 		inert("properties", "a map flag, whose property names feed shell completion (an object's shape belongs in a named schema)")
 	}
 	return problems
@@ -787,16 +787,20 @@ func inertKeyProblems(ptr, path, channel, name string, schema *InputSchema) []er
 
 // lintConstraintApplicability rejects a constraint on a type it can never check: numeric
 // bounds on non-numerics, length or pattern on non-strings, item counts on non-collections.
-// Per-value constraints on an array apply to its element type. Stdin is exempt because its
-// schema validates the piped document with full JSON Schema semantics.
+// Per-value constraints on an array apply to its element type. Stdin is exempt, apart from
+// the channel keys, because its schema validates the piped document with full JSON Schema
+// semantics.
 func lintConstraintApplicability(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
-			if channel == "stdin" || schema == nil {
+			if schema == nil {
 				return
 			}
 			problems = append(problems, inertKeyProblems(ptr, path, channel, name, schema)...)
+			if channel == "stdin" {
+				return
+			}
 			typ := getSchemaType(schema)
 			if t := namedScalarType(typ, spec.Command.Schemas); t != "" {
 				typ = t // checked as the type the named schema declares, as the runtime does
@@ -1356,11 +1360,13 @@ func lintFlagGroups(spec *Spec) []error {
 			return
 		}
 		known, ordered := flagNames(c)
+		// A flag set's rule naming a flag outside the set is lintFlagSets's to report, once.
+		own := ownGroupCount(c, spec.Command.FlagSets)
 		for i, g := range c.FlagGroups {
 			at := fmt.Sprintf("%s/flag_groups/%d", ptr, i)
 			listed := map[string]bool{}
 			for _, name := range g.Flags {
-				if !known[name] {
+				if !known[name] && i < own {
 					msg := fmt.Sprintf("`flag_groups` entry (%s) references unknown flag %q; it has no matching entry in this command's `flags`", g.Kind, name)
 					problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 				}

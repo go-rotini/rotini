@@ -88,8 +88,6 @@ func TestWriteOutput_programBugs(t *testing.T) {
 			"taskr free: write output as toml: toml cannot be written as a stream"},
 		{"one value on a stream", "watch", func(rtx *Context) error { return rtx.WriteOutput(outTask{}, "json", nil) },
 			"taskr watch: declares a stream (output_stream); write each item with WriteOutputItem"},
-		{"items without a stream", "list", func(rtx *Context) error { return rtx.WriteOutputItem(sampleList, "json", nil) },
-			"taskr list: writes items, but its spec doesn't declare output_stream: true"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -167,6 +165,17 @@ func TestWriteOutputItem(t *testing.T) {
 	}
 	if want := "---\nid: 1\nstatus: done\n---\nid: 2\nstatus: open\n"; out.String() != want {
 		t.Errorf("yaml stream = %q, want %q", out, want)
+	}
+	// A command without output_stream: true still writes items, checked against its declared type.
+	rtx, out = outContext("list")
+	if err := rtx.WriteOutputItem(sampleList, "json", nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := "{\"tasks\":[{\"id\":1,\"status\":\"done\"},{\"id\":2,\"status\":\"open\"}]}\n"; out.String() != want {
+		t.Errorf("items without a stream = %q, want %q", out, want)
+	}
+	if err := rtx.WriteOutputItem(outTask{}, "json", nil); err == nil || CategoryOf(err) != CategoryInternal {
+		t.Errorf("the wrong type without a stream: %v", err)
 	}
 }
 

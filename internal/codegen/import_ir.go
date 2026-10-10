@@ -31,20 +31,21 @@ type importSource struct {
 }
 
 type importCommand struct {
-	Name        string             `json:"name"`
-	DisplayName string             `json:"display_name"`
-	Aliases     []string           `json:"aliases"`
-	Summary     string             `json:"summary"`
-	Description string             `json:"description"`
-	Examples    []string           `json:"examples"`
-	Group       string             `json:"group"`
-	Hidden      bool               `json:"hidden"`
-	Deprecated  string             `json:"deprecated"`
-	Passthrough bool               `json:"passthrough"`
-	Arguments   []*importArgument  `json:"arguments"`
-	Flags       []*importFlag      `json:"flags"`
-	FlagGroups  []*importFlagGroup `json:"flag_groups"`
-	Commands    []*importCommand   `json:"commands"`
+	Name         string             `json:"name"`
+	DisplayName  string             `json:"display_name"`
+	Aliases      []string           `json:"aliases"`
+	Summary      string             `json:"summary"`
+	Description  string             `json:"description"`
+	Examples     []string           `json:"examples"`
+	Group        string             `json:"group"`
+	Hidden       bool               `json:"hidden"`
+	Deprecated   string             `json:"deprecated"`
+	Passthrough  bool               `json:"passthrough"`
+	OptionsFirst bool               `json:"options_first"`
+	Arguments    []*importArgument  `json:"arguments"`
+	Flags        []*importFlag      `json:"flags"`
+	FlagGroups   []*importFlagGroup `json:"flag_groups"`
+	Commands     []*importCommand   `json:"commands"`
 	// Builtin marks a command the framework adds itself: "help" or "completion".
 	Builtin string `json:"builtin"`
 }

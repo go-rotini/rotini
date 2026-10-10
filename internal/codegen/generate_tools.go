@@ -3,6 +3,7 @@ package codegen
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -15,9 +16,9 @@ import (
 // The tools feature: tool definitions for AI agents, one file per target, built from the
 // contract. A command becomes a tool when it is offered to agents (see agentProgram), and its
 // tool parameters are the inputs a caller may type, leaving out what an agent shouldn't
-// supply: short-circuit, hidden, deprecated, secret and `from:` inputs (unless `agent: true`),
-// the directory flag, and the machine-output flag, which the caller adds itself. Env and config
-// inputs are the server's configuration, never parameters.
+// supply: short-circuit, hidden, deprecated, secret and `from:` inputs and the directory flag
+// (unless `agent: true`), and the machine-output flag, which the caller adds itself. Env and
+// config inputs are the server's configuration, never parameters.
 
 // toolsMetaKey is the MCP `_meta` key a tool's invocation facts live under.
 const toolsMetaKey = "dev.rotini/invoke"
@@ -140,7 +141,10 @@ func buildTools(a *agentProgram, wrapOutput bool) ([]tool, []error, error) {
 	var notices []error
 	names := map[string]string{}
 	for _, c := range a.offered() {
-		t, skip := buildTool(a, c, wrapOutput)
+		t, skip, err := buildTool(a, c, wrapOutput)
+		if err != nil {
+			return nil, nil, err
+		}
 		if skip != "" {
 			notices = append(notices, fmt.Errorf("tools: %q is left out of the tool definitions: %s", c.invocation, skip))
 			continue
@@ -155,7 +159,7 @@ func buildTools(a *agentProgram, wrapOutput bool) ([]tool, []error, error) {
 }
 
 // buildTool builds one command's tool. skip says why the command can't be a tool, or "".
-func buildTool(a *agentProgram, c agentCommand, wrapOutput bool) (tool, string) {
+func buildTool(a *agentProgram, c agentCommand, wrapOutput bool) (tool, string, error) {
 	cmd := c.c
 	t := tool{
 		cmd:        c,
@@ -169,10 +173,10 @@ func buildTool(a *agentProgram, c agentCommand, wrapOutput bool) (tool, string) 
 	}
 	serverEnv, skip := t.addInputs(cmd)
 	if skip != "" {
-		return t, skip
+		return t, skip, nil
 	}
-	if skip := t.addStdin(cmd.Stdin); skip != "" {
-		return t, skip
+	if err := t.addStdin(cmd.Stdin); err != nil {
+		return t, "", fmt.Errorf("tools: %q %w", c.invocation, err)
 	}
 	for _, e := range cmd.Env {
 		if e.Required && !e.Hidden {
@@ -182,13 +186,14 @@ func buildTool(a *agentProgram, c agentCommand, wrapOutput bool) (tool, string) 
 	t.defs = reachableContractDefs(t.properties, a.doc.Definitions)
 	t.setOutput(cmd, wrapOutput)
 	t.description = toolDescription(c, serverEnv)
-	return t, ""
+	return t, "", nil
 }
 
 // addParam adds one input as a parameter: its schema, with its description (else summary) and
 // its stability.
 func (t *tool) addParam(in agentInput) {
-	s := maps.Clone(in.Schema)
+	s, _ := withoutDeprecatedEnum(in.Schema, in.EnumValues).(map[string]any)
+	s = maps.Clone(s)
 	if s == nil {
 		s = map[string]any{}
 	}
@@ -238,7 +243,7 @@ func (t *tool) addInputs(cmd agentContractCmd) (serverEnv []string, skip string)
 		}
 		seen[in.Name] = true
 		switch {
-		case in.Role == "machine-output" || in.Role == "chdir":
+		case in.Role == "machine-output":
 			continue
 		case !toolFlagOffered(in):
 			if why := excluded(in); why != "" {
@@ -263,13 +268,13 @@ func (t *tool) addInputs(cmd agentContractCmd) (serverEnv []string, skip string)
 }
 
 // addStdin adds the `stdin` parameter for a command that reads stdin: the stdin schema for a
-// JSON or YAML document, else a string. skip is set when an input already has the name.
-func (t *tool) addStdin(st *contractStdin) string {
+// JSON or YAML document, else a string. It fails when an input already has the name.
+func (t *tool) addStdin(st *contractStdin) error {
 	if st == nil {
-		return ""
+		return nil
 	}
 	if _, clash := t.properties["stdin"]; clash {
-		return `it reads stdin and also has an input named "stdin", which is the tool parameter stdin's content goes in; rename the input`
+		return errors.New(stdinClashMessage)
 	}
 	schema := map[string]any{"type": "string"}
 	if s, ok := st.Schema.(map[string]any); ok && (st.Format == "json" || st.Format == "yaml") {
@@ -292,7 +297,7 @@ func (t *tool) addStdin(st *contractStdin) string {
 		t.required = append(t.required, "stdin")
 	}
 	t.invoke.Stdin = &toolInvokeStdin{Param: "stdin", Format: cmp.Or(st.Format, "text")}
-	return ""
+	return nil
 }
 
 // setOutput sets the tool's output schema from the command's: an array of items for a stream,
@@ -367,8 +372,8 @@ func toolDescription(c agentCommand, serverEnv []string) string {
 	case "beta":
 		parts = append(parts, "Beta: it may change in a minor release.")
 	}
-	if c.effects != nil {
-		parts = append(parts, "Effects: "+effectsText(c.effects)+".")
+	if c.toolEffects != nil {
+		parts = append(parts, "Effects: "+effectsText(c.toolEffects)+".")
 	}
 	if len(serverEnv) > 0 {
 		parts = append(parts, "Requires "+strings.Join(slices.Compact(slices.Sorted(slices.Values(serverEnv))), ", ")+" in the server's environment.")
@@ -520,7 +525,7 @@ func mcpTools(tools []tool) map[string]any {
 			}
 			m["outputSchema"] = toDefs(o)
 		}
-		if ann := mcpAnnotations(t.cmd.effects); ann != nil {
+		if ann := mcpAnnotations(t.cmd.toolEffects); ann != nil {
 			m["annotations"] = ann
 		}
 		list = append(list, m)

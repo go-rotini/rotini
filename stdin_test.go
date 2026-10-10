@@ -530,7 +530,7 @@ func TestInputErrorTexts_env(t *testing.T) {
 		{"required names every spelling", nil, "environment variable APP_REGION (or REGION) is required"},
 		{"coercion names the variable set", []string{"REGION=us", "APP_PORT=abc"}, "environment variable APP_PORT: expected int"},
 		{"a map entry needs key=value", []string{"APP_REGION=us", "APP_LABELS=a=1,bad"}, `environment variable APP_LABELS expects key=value pairs (got "bad")`},
-		{"a map entry needs a key", []string{"APP_REGION=us", "APP_LABELS==v"}, `environment variable APP_LABELS expects key=value pairs (got "=v")`},
+		{"a map entry needs a key", []string{"APP_REGION=us", "APP_LABELS==v"}, `environment variable APP_LABELS needs a key before "=" (got "=v")`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

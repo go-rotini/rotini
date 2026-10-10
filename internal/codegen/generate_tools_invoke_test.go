@@ -24,7 +24,7 @@ func TestToolInvoke_facts(t *testing.T) {
 		},
 	}
 	a := &agentProgram{doc: agentDoc{Name: "app"}}
-	tl, skip := buildTool(a, agentCommand{c: cmd, leaf: true, offered: true, invocation: "app run"}, false)
+	tl, skip, _ := buildTool(a, agentCommand{c: cmd, leaf: true, offered: true, invocation: "app run"}, false)
 	if skip != "" {
 		t.Fatal(skip)
 	}
@@ -45,7 +45,7 @@ func TestToolInvoke_facts(t *testing.T) {
 	}
 
 	cmd.Passthrough = true
-	tl, _ = buildTool(a, agentCommand{c: cmd, leaf: true, offered: true, invocation: "app run"}, false)
+	tl, _, _ = buildTool(a, agentCommand{c: cmd, leaf: true, offered: true, invocation: "app run"}, false)
 	if !tl.invoke.Passthrough {
 		t.Error("a passthrough command's invoke facts lack passthrough")
 	}

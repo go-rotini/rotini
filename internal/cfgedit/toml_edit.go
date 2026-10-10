@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-rotini/toml"
 )
@@ -281,10 +282,10 @@ func (ed *tomlEdit) removeLine(src []byte, span toml.Span) ([]byte, error) {
 	return splice(src, ls, nextLine(src, end), ""), nil
 }
 
-var bareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var bareKey = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9_-]+$`) })
 
 func tomlKey(k string) string {
-	if bareKey.MatchString(k) {
+	if bareKey().MatchString(k) {
 		return k
 	}
 	return tomlString(k)

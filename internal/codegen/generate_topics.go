@@ -100,16 +100,22 @@ func environmentTopicRows(gp *program) []templateDocEnvRow {
 	for _, r := range completionEnvRows(gp.conf) {
 		t.add(r.Var, r, "")
 	}
+	strategies := map[string]bool{}
 	for _, cf := range gp.configFiles {
-		if cf.Discover == nil {
-			continue
+		if cf.Discover != nil {
+			strategies[cf.Discover.Strategy] = true
 		}
-		switch cf.Discover.Strategy {
-		case "xdg", "native":
-			t.add("XDG_CONFIG_HOME", templateDocEnvRow{Summary: "the directory configuration files are found in (default ~/.config)"}, "")
-		case "xdg-system":
-			t.add("XDG_CONFIG_DIRS", templateDocEnvRow{Summary: "the system directories configuration files are found in (default /etc/xdg)"}, "")
-		}
+	}
+	// native follows XDG only on Linux; xdg follows it everywhere.
+	const configHome = "the directory configuration files are found in (default ~/.config)"
+	switch {
+	case strategies["xdg"]:
+		t.add("XDG_CONFIG_HOME", templateDocEnvRow{Summary: configHome}, "")
+	case strategies["native"]:
+		t.add("XDG_CONFIG_HOME", templateDocEnvRow{Summary: "on Linux, " + configHome}, "")
+	}
+	if strategies["xdg-system"] {
+		t.add("XDG_CONFIG_DIRS", templateDocEnvRow{Summary: "the system directories configuration files are found in (default /etc/xdg)"}, "")
 	}
 	out := make([]templateDocEnvRow, 0, len(t.rows))
 	for _, r := range t.rows {

@@ -157,48 +157,50 @@ type agentContractCmd struct {
 
 // agentInput is an argument, flag, env or config input of the contract.
 type agentInput struct {
-	Name                  string         `json:"name"`
-	Summary               string         `json:"summary"`
-	Description           string         `json:"description"`
-	Type                  string         `json:"type"`
-	Kind                  string         `json:"kind"`
-	Required              bool           `json:"required"`
-	Variadic              bool           `json:"variadic"`
-	Passthrough           bool           `json:"passthrough"`
-	Identifiers           []string       `json:"identifiers"`
-	DeprecatedIdentifiers []string       `json:"deprecated_identifiers"`
-	Negated               []string       `json:"negated"`
-	ShortCircuit          bool           `json:"short_circuit"`
-	Role                  string         `json:"role"`
-	RoleValue             string         `json:"role_value"`
-	Inherited             bool           `json:"inherited"`
-	Env                   []string       `json:"env"`
-	ConfigKey             string         `json:"config_key"`
-	Variables             []string       `json:"variables"`
-	Key                   string         `json:"key"`
-	From                  []string       `json:"from"`
-	Separator             string         `json:"separator"`
-	Secret                bool           `json:"secret"`
-	Hidden                bool           `json:"hidden"`
-	Deprecated            string         `json:"deprecated"`
-	Stability             string         `json:"stability"`
-	Effects               *Effects       `json:"effects"`
-	Agent                 *bool          `json:"agent"`
-	Schema                map[string]any `json:"schema"`
+	Name                  string                       `json:"name"`
+	Summary               string                       `json:"summary"`
+	Description           string                       `json:"description"`
+	Type                  string                       `json:"type"`
+	Kind                  string                       `json:"kind"`
+	Required              bool                         `json:"required"`
+	Variadic              bool                         `json:"variadic"`
+	Passthrough           bool                         `json:"passthrough"`
+	Identifiers           []string                     `json:"identifiers"`
+	DeprecatedIdentifiers []string                     `json:"deprecated_identifiers"`
+	Negated               []string                     `json:"negated"`
+	ShortCircuit          bool                         `json:"short_circuit"`
+	Role                  string                       `json:"role"`
+	RoleValue             string                       `json:"role_value"`
+	Inherited             bool                         `json:"inherited"`
+	Env                   []string                     `json:"env"`
+	ConfigKey             string                       `json:"config_key"`
+	Variables             []string                     `json:"variables"`
+	Key                   string                       `json:"key"`
+	From                  []string                     `json:"from"`
+	Separator             string                       `json:"separator"`
+	Secret                bool                         `json:"secret"`
+	Hidden                bool                         `json:"hidden"`
+	Deprecated            string                       `json:"deprecated"`
+	Stability             string                       `json:"stability"`
+	Effects               *Effects                     `json:"effects"`
+	Agent                 *bool                        `json:"agent"`
+	Schema                map[string]any               `json:"schema"`
+	EnumValues            map[string]contractEnumValue `json:"enum_values"`
 }
 
 // agentCommand is one command of the program, with its agent-facing facts resolved.
 type agentCommand struct {
-	c          agentContractCmd
-	invocation string   // "taskr remote add", with the root's display name
-	words      []string // the words that run it: the display name's words, then the path
-	leaf       bool     // it has no sub-commands
-	offered    bool     // in tool exports, the skill page, llms.txt and permission rules
-	effects    *Effects // the worst case over the command and every flag it accepts
-	machine    []string // what to add to the command line for JSON output; nil for none
-	dryRun     string   // the identifier of its dry-run flag; "" for none
-	confirm    string   // the identifier of its confirm flag; "" for none
-	stability  string   // the least stable of it and its ancestors: experimental, beta or ""
+	c           agentContractCmd
+	invocation  string   // "taskr remote add", with the root's display name
+	words       []string // the words that run it: the display name's words, then the path
+	leaf        bool     // it has no sub-commands
+	offered     bool     // in tool exports, the skill page, llms.txt and permission rules
+	effects     *Effects // the worst case over the command and every flag it accepts
+	toolEffects *Effects // the worst case over the command and the flags a tool can pass
+	machine     []string // what to add to the command line for JSON output; nil for none
+	dryRun      string   // the identifier of its dry-run flag; "" for none
+	confirm     string   // the identifier of its confirm flag; "" for none
+	stability   string   // the least stable of it and its ancestors: experimental, beta or ""
 }
 
 // agentProgram reads the program's contract document back and resolves the agent facts.
@@ -244,10 +246,13 @@ func (p *program) agentProgram() (*agentProgram, error) {
 		passthrough := c.Passthrough || slices.ContainsFunc(c.Arguments, func(in agentInput) bool { return in.Passthrough })
 		optIn := c.Agent != nil && *c.Agent
 		ac.offered = !underOff && (optIn || (!c.Hidden && c.Deprecated == "" && ac.leaf && !passthrough))
-		var flagEffects []*Effects
+		var flagEffects, toolFlagEffects []*Effects
 		for _, f := range c.Flags {
-			if f.Effects != nil && toolFlagOffered(f) {
+			if f.Effects != nil {
 				flagEffects = append(flagEffects, f.Effects)
+				if toolFlagOffered(f) {
+					toolFlagEffects = append(toolFlagEffects, f.Effects)
+				}
 			}
 			switch f.Role {
 			case "machine-output":
@@ -261,6 +266,7 @@ func (p *program) agentProgram() (*agentProgram, error) {
 			}
 		}
 		ac.effects = worstEffects(c.Effects, flagEffects)
+		ac.toolEffects = worstEffects(c.Effects, toolFlagEffects)
 		a.commands = append(a.commands, ac)
 	}
 	return a, nil
@@ -294,13 +300,13 @@ func (p *program) commandHelps() map[string]cmdHelp {
 }
 
 // toolFlagOffered reports whether a flag is a tool parameter: not hidden, deprecated, secret,
-// short-circuit or read `from:` a file or stdin unless it opts in with `agent: true`, never
-// with `agent: false`, and never the directory flag or the machine-output flag.
+// short-circuit, the directory flag or read `from:` a file or stdin unless it opts in with
+// `agent: true`, never with `agent: false`, and never the machine-output flag.
 func toolFlagOffered(f agentInput) bool {
-	if f.Role == "chdir" || f.Role == "machine-output" {
+	if f.Role == "machine-output" {
 		return false
 	}
-	return inputOffered(f, f.ShortCircuit)
+	return inputOffered(f, f.ShortCircuit || f.Role == "chdir")
 }
 
 // inputOffered applies the `agent` default and opt-in to one input.

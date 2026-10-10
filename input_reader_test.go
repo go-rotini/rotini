@@ -1568,7 +1568,7 @@ func TestInputReader_channelEnumEnforced(t *testing.T) {
 	t.Run("config rejects a non-member", func(t *testing.T) {
 		cfg := writeConfig(t, "tier: bronze\n")
 		_, err := bind(t, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
-		if err == nil || !strings.Contains(err.Error(), `invalid value "bronze" for tier`) {
+		if err == nil || !strings.HasPrefix(err.Error(), `invalid value "bronze" for config key tier (one of: gold, silver) (from configuration file `+cfg+")") {
 			t.Fatalf("err = %v, want an enum violation for tier", err)
 		}
 	})

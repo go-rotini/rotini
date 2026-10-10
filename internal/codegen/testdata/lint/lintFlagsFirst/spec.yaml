@@ -32,3 +32,14 @@ command:
         # Correct: the root's --profile flag reaches it. No problem.
         - name: profile_again
           schema: { type: string, variable: DEMO_PROFILE }
+    - name: deploy
+      arguments:
+        # Correct: the argument falls back to DEMO_TARGET and the config key "target". No problem.
+        - name: target
+          schema: { type: string, variable: DEMO_TARGET, key: target }
+      env:
+        - name: target
+          schema: { type: string, variable: DEMO_TARGET }
+      config:
+        - name: target
+          schema: { type: string }

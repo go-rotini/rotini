@@ -11,8 +11,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // importShim returns the local checkout of github.com/go-rotini/import that `rotini import`
@@ -43,26 +45,18 @@ func TestImportCobra(t *testing.T) {
 	cases := []struct {
 		fixture, pkg, cli string
 		args              []string
+		// runs is a command line the built CLI must accept: ssh stops parsing flags at its
+		// first argument, so a word after it that looks like a flag is an argument.
+		runs []string
 	}{
-		{fixture: "demo", pkg: ".", cli: "acme"},
+		{fixture: "demo", pkg: ".", cli: "acme", runs: []string{"ssh", "node1", "--not-a-flag", "-t"}},
 		{fixture: "cobracli", pkg: "./cmd", cli: "acmecli", args: []string{"--strict"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.fixture, func(t *testing.T) {
 			dir := copyFixture(t, filepath.Join(shim, "cobra", "testdata", "corpus", tc.fixture))
 			before := treeHash(t, dir)
-			run := func(name string, args ...string) string {
-				t.Helper()
-				cmd := exec.Command(name, args...)
-				cmd.Dir = dir
-				cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOTOOLCHAIN=local")
-				var out, errb bytes.Buffer
-				cmd.Stdout, cmd.Stderr = &out, &errb
-				if err := cmd.Run(); err != nil {
-					t.Fatalf("%s %s: %v\n%s%s", name, strings.Join(args, " "), err, out.String(), errb.String())
-				}
-				return out.String() + errb.String()
-			}
+			run := runIn(t, dir)
 
 			// A dry run writes nothing.
 			cmd := exec.Command(bin, append([]string{"import", "cobra", "--importer-version", shim, "--dry-run", tc.pkg}, tc.args...)...)
@@ -104,6 +98,9 @@ func TestImportCobra(t *testing.T) {
 			if script := run(filepath.Join(dir, exe), "completion", "bash"); !strings.Contains(script, "bash completion for "+tc.cli) {
 				t.Errorf("%s completion bash printed no script:\n%.200s", tc.cli, script)
 			}
+			if tc.runs != nil {
+				run(filepath.Join(dir, exe), tc.runs...)
+			}
 		})
 	}
 }
@@ -129,6 +126,89 @@ func TestImportCobraFailures(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "cmd", "acmecli")); !os.IsNotExist(err) {
 		t.Error("a failed import wrote files")
+	}
+}
+
+// TestImportCobraNetwork imports the importer's pinned large real programs, Delve and kubectl,
+// then validates, regenerates and builds the imported CLI and prints its help. Their modules
+// are downloaded, so it also needs ROTINI_IMPORT_NETWORK=1. Each step's time is logged.
+func TestImportCobraNetwork(t *testing.T) {
+	shim := importShim(t)
+	if os.Getenv("ROTINI_IMPORT_NETWORK") != "1" {
+		t.Skip("set ROTINI_IMPORT_NETWORK=1 to import the importer's pinned real programs")
+	}
+	bin := rotiniBin(t)
+	root := repoRoot(t)
+	cases := []struct {
+		fixture, cli string
+		sub          []string // a sub-command whose help must print
+	}{
+		{fixture: "delve", cli: "dlv", sub: []string{"exec", "--help"}},
+		{fixture: "kubectl", cli: "kubectl", sub: []string{"get", "--help"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fixture, func(t *testing.T) {
+			dir := copyFixture(t, filepath.Join(shim, "cobra", "testdata", "network", tc.fixture))
+			before := treeHash(t, dir)
+			run := runIn(t, dir)
+			step := func(what string, f func()) {
+				t.Helper()
+				start := time.Now()
+				f()
+				t.Logf("%s: %s", what, time.Since(start).Round(time.Millisecond))
+			}
+
+			spec := filepath.Join("cmd", tc.cli, ".rotini.spec.yaml")
+			conf := filepath.Join("cmd", tc.cli, ".rotini.conf.yaml")
+			step("import", func() {
+				out := run(bin, "import", "cobra", "--importer-version", shim, ".")
+				if !strings.Contains(out, "spec: cmd/"+tc.cli+"/.rotini.spec.yaml") {
+					t.Fatalf("import output:\n%s", out)
+				}
+			})
+			if treeHash(t, dir) != before {
+				t.Fatal("the import changed the program's files, go.mod or go.sum")
+			}
+			step("validate", func() { run(bin, "validate", spec, "--config", conf) })
+			step("generate", func() {
+				if got := run(bin, "generate", spec, "--config", conf); strings.Contains(got, "created:") {
+					t.Errorf("a generate right after the import created files:\n%s", got)
+				}
+			})
+			exe := tc.cli
+			if runtime.GOOS == "windows" {
+				exe += ".exe"
+			}
+			step("build", func() {
+				run("go", "mod", "edit", "-require=github.com/go-rotini/rotini@v0.0.0",
+					"-replace=github.com/go-rotini/rotini="+strings.ReplaceAll(root, `\`, `/`))
+				run("go", "mod", "tidy")
+				run("go", "build", "-o", exe, "./cmd/"+tc.cli)
+			})
+			if help := run(filepath.Join(dir, exe), "--help"); !strings.Contains(help, "Usage:") || !strings.Contains(help, "completion") {
+				t.Errorf("%s --help:\n%s", tc.cli, help)
+			}
+			if help := run(filepath.Join(dir, exe), tc.sub...); !strings.Contains(help, "Usage:\n  "+tc.cli+" "+tc.sub[0]) {
+				t.Errorf("%s %s:\n%s", tc.cli, strings.Join(tc.sub, " "), help)
+			}
+		})
+	}
+}
+
+// runIn returns a function that runs a command in dir and returns its combined output, failing
+// the test when it fails.
+func runIn(t *testing.T, dir string) func(name string, args ...string) string {
+	return func(name string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOTOOLCHAIN=local")
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%s %s: %v\n%s%s", name, strings.Join(args, " "), err, out.String(), errb.String())
+		}
+		return out.String() + errb.String()
 	}
 }
 
@@ -159,8 +239,11 @@ func copyFixture(t *testing.T, from string) string {
 	return to
 }
 
-// treeHash hashes every file of the module that isn't under cmd/<cli>, internal/cmd/<cli> or a
-// built binary: the program's own files, go.mod and go.sum.
+// importedCLIs are the CLI names the import tests write under cmd/.
+var importedCLIs = []string{"acme", "acmecli", "dlv", "kubectl"}
+
+// treeHash hashes every file of the module that isn't under cmd/<cli> (one of importedCLIs) or
+// internal: the program's own files, go.mod and go.sum.
 func treeHash(t *testing.T, dir string) string {
 	t.Helper()
 	h := sha256.New()
@@ -170,7 +253,7 @@ func treeHash(t *testing.T, dir string) string {
 		}
 		rel, _ := filepath.Rel(dir, path)
 		if d.IsDir() {
-			if rel == filepath.Join("cmd", "acme") || rel == filepath.Join("cmd", "acmecli") || rel == "internal" {
+			if rel == "internal" || filepath.Dir(rel) == "cmd" && slices.Contains(importedCLIs, filepath.Base(rel)) {
 				return filepath.SkipDir
 			}
 			return nil

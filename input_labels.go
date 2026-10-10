@@ -157,14 +157,14 @@ func checkEnvMaps(s reflect.Value, reg *recon.Registry, l channelLabels) error {
 			continue
 		}
 		secret := reconHasSecret(f.Tag.Get("recon"))
+		label := l.name(channelEnv, key)
 		for entry := range strings.SplitSeq(val.String(), ",") {
 			entry = strings.TrimSpace(entry)
 			if entry == "" {
 				continue
 			}
-			if k, _, ok := strings.Cut(entry, "="); !ok || strings.TrimSpace(k) == "" {
-				return usageBind(channelEnv, key, fmt.Sprintf("%s expects key=value pairs (got %q)",
-					l.name(channelEnv, key), redactValue(entry, secret)), nil)
+			if msg := mapPairProblem(label, entry, secret); msg != "" {
+				return usageBind(channelEnv, key, msg, nil)
 			}
 		}
 	}

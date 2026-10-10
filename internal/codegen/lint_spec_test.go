@@ -22,8 +22,8 @@ func TestLintRegistryCompleteness(t *testing.T) {
 	if got := len(confLints); got != 14 {
 		t.Errorf("len(confLints) = %d, want 14", got)
 	}
-	if got := len(crossLints); got != 4 {
-		t.Errorf("len(crossLints) = %d, want 4", got)
+	if got := len(crossLints); got != 5 {
+		t.Errorf("len(crossLints) = %d, want 5", got)
 	}
 }
 

@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -219,6 +220,32 @@ command:
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestEnvironmentTopic_nativeDiscovery checks that native discovery's XDG_CONFIG_HOME row says
+// it applies on Linux only, and that an xdg entry beside it drops the qualifier.
+func TestEnvironmentTopic_nativeDiscovery(t *testing.T) {
+	for _, tt := range []struct{ strategies, want string }{
+		{"[native]", "on Linux, the directory configuration files are found in (default ~/.config)"},
+		{"[native, xdg]", "the directory configuration files are found in (default ~/.config)"},
+	} {
+		var entries strings.Builder
+		for i, s := range strings.Split(strings.Trim(tt.strategies, "[]"), ", ") {
+			fmt.Fprintf(&entries, "    - { name: c%d, discover: { strategy: %s, app: app, file: config.yaml } }\n", i, s)
+		}
+		spec := "version: 0.0.0\ncommand:\n  name: app\n  config_files:\n" + entries.String()
+		gp, err := resolveTree(decodeSpecYAML(t, spec), filepath.Join(t.TempDir(), ".rotini.spec.yaml"), "example.com/app")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, r := range environmentTopicRows(gp) {
+			got = append(got, r.Var+": "+r.Summary)
+		}
+		if want := []string{"XDG_CONFIG_HOME: " + tt.want}; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: rows %q, want %q", tt.strategies, got, want)
+		}
 	}
 }
 

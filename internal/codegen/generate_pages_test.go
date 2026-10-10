@@ -94,6 +94,7 @@ func TestConstraintText(t *testing.T) {
 		{"map flag", "flag", &InputSchema{Type: "map[string]string"}, "repeatable", []string{"repeatable"}},
 		{"count flag", "flag", &InputSchema{Type: "count"}, "repeatable", []string{"repeat to count"}},
 		{"separator", "flag", &InputSchema{Type: "[]string", Separator: ","}, "repeatable", []string{`several values per occurrence, separated by ","`, "repeatable"}},
+		{"env separator", "env", &InputSchema{Type: "[]string", Separator: ":"}, "", []string{`several values in the variable, separated by ":"`}},
 		{"per-value bounds on a list", "flag", &InputSchema{Type: "[]int", Minimum: 1.0, Maximum: 9.0, MaxItems: n(4)}, "<= 4 values, 1..9, repeatable", []string{"at most 4 values", "each value between 1 and 9", "repeatable"}},
 		{"text bound as written", "flag", &InputSchema{Type: "string", Minimum: "1s"}, ">= 1s", []string{"at least 1s"}},
 		{"duration bound", "flag", &InputSchema{Type: "duration", Maximum: 3.6e12}, "<= 1h", []string{"at most 1h"}},

@@ -67,7 +67,7 @@ func permissionRules(a *agentProgram) []permissionRule {
 		case c.effects.Kind == "destructive":
 			// Only some flags make it destructive: ask when one is given.
 			for _, fl := range c.c.Flags {
-				if fl.Effects != nil && fl.Effects.Kind == "destructive" && toolFlagOffered(fl) {
+				if fl.Effects != nil && fl.Effects.Kind == "destructive" {
 					r.raising = append(r.raising, fl.Identifiers...)
 				}
 			}

@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// keySite is one place a configuration-file key is read: a config input, or a flag's
-// configuration fallback.
+// keySite is one place a configuration-file key is read: a config input, or a flag's or
+// argument's configuration fallback.
 type keySite struct {
 	seq     int // pre-order position, so "later" is stable
 	key     string
@@ -80,7 +80,7 @@ func keyNodes(spec *Spec) []keyNode {
 		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
 			key, pin := "", ""
 			switch channel {
-			case "flag":
+			case "flag", "argument":
 				key = flagReconKey(name, schema)
 			case "config":
 				key = configKey(ConfigInput{Name: name, Schema: schema})

@@ -204,6 +204,8 @@ func FuzzParse(f *testing.F) {
 		"run --count --count 2 -",
 		"--b=yep --ai 1 --ai x --mi k=v --t bad -- -0.5",
 		"--label a.b=c --label = --label =x",
+		"cp a b c dst",
+		"cp -v -- -a dst",
 	} {
 		f.Add(seed)
 	}
@@ -222,6 +224,9 @@ func FuzzParse(f *testing.F) {
 
 		var set cpListInputs // a flag set embedded in the flags struct
 		_ = NewParser().Parse(NewContextFor(cpListDef(), argv), &set)
+
+		var cp bdCpInputs // a variadic argument before a fixed one: SRC... DST
+		_ = NewParser().Parse(NewContextFor(boundaryDef(), argv), &cp)
 	})
 }
 

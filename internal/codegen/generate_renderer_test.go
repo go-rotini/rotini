@@ -70,9 +70,9 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 				if err != nil {
 					t.Fatalf("handler stub: %v", err)
 				}
-				// The new shape checks every write to stdout (a bare-help body writes only to
-				// stderr); the old shape keeps its stubs.
-				want := newShape && (d.RootHook || !d.PrintHelpWhenBare)
+				// Both shapes check every write to stdout; the new shape's bare-help body
+				// writes only to stderr.
+				want := !newShape || d.RootHook || !d.PrintHelpWhenBare
 				if got := strings.Contains(string(out), "if _, err := fmt.Fprint"); got != want {
 					t.Errorf("checked writes = %t, want %t:\n%s", got, want, out)
 				}

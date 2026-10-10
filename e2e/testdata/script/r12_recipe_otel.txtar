@@ -2,6 +2,7 @@
 # on with SetContext, so a command's own spans are its children, and the root's teardown ends
 # it, marked failed when the command failed. The handler files are the ones the recipes page
 # shows; printer.go stands in for an exporter and is not on the page.
+# It needs the network on a cold module cache: `go get` fetches third-party modules.
 
 gomodinit example.com/tracedemo
 

@@ -277,7 +277,7 @@ func (w *dashWord) problem() *problem {
 	p := inputProblem(w.ptr, w.path, "flag", w.flag, "")
 	switch r := w.reading; {
 	case r == nil:
-		p.msg += fmt.Sprintf("identifier %q has one dash and several letters, which POSIX tools read as a bundle of short flags; prefer %s, with at most a one-letter short form", w.id, long)
+		p.msg += fmt.Sprintf("identifier %q has one dash and several letters; POSIX tools would read it as a bundle of short flags", w.id)
 		p.sev = severityWarning
 	case r.valued && r.value != "":
 		p.msg += fmt.Sprintf("identifier %q also reads as %s with the value %q; the exact identifier always wins, so %s can't be given a value starting %q attached. Use %s",
@@ -315,9 +315,8 @@ func chainPointers(chain []*Command, leafPtr string) []string {
 	return out
 }
 
-// lintShortOnlyFlags warns about a flag with only short identifiers: a long form is what
-// scripts and readers of help understand. Negatable flags (lintNegatable requires a long form)
-// and hidden flags (not part of the documented surface) are skipped.
+// lintShortOnlyFlags notes a flag with only short identifiers. Negatable flags (lintNegatable
+// requires a long form) and hidden flags (not part of the documented surface) are skipped.
 func lintShortOnlyFlags(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -334,8 +333,7 @@ func lintShortOnlyFlags(spec *Spec) []error {
 				what = "short identifiers"
 			}
 			p := inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name,
-				fmt.Sprintf("has only %s (%s); add a long form such as --%s, which scripts and readers of help can understand",
-					what, strings.Join(ids, ", "), strings.ReplaceAll(f.Name, "_", "-")))
+				fmt.Sprintf("has only %s (%s) and no long form", what, strings.Join(ids, ", ")))
 			p.sev = severityWarning
 			problems = append(problems, p)
 		}

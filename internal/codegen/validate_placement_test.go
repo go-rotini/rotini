@@ -29,36 +29,95 @@ func TestPlacementHint_schemaKeys(t *testing.T) {
 				Keyword: "false", InstanceLocation: "/command/x/" + key,
 				KeywordLocation: "#/definitions/" + def + "/additionalProperties",
 			}
-			want := fmt.Sprintf("unknown key %q on %s", key, definitionNoun(ve.KeywordLocation))
+			want := fmt.Sprintf("unknown key %q on %s; ", key, definitionNoun(ve.KeywordLocation))
 			if chans, limited := schemaKeyChannels[key]; !limited || slices.Contains(chans, channel) {
-				want += fmt.Sprintf("; %q belongs under schema: (schema: {%s: …})", key, key)
+				want += fmt.Sprintf("%q belongs under schema: (schema: {%s: …})", key, key)
+			} else {
+				want += fmt.Sprintf("%q is a schema key of ", key)
 			}
-			if got := humanizeSchemaError(&ve); got != want {
-				t.Errorf("%s %s:\n got %q\nwant %q", channel, key, got, want)
+			if got := humanizeSchemaError(&ve); !strings.HasPrefix(got, want) {
+				t.Errorf("%s %s:\n got %q\nwant %q…", channel, key, got, want)
 			}
 		}
 	}
 }
 
-// TestPlacementHint_channelKeys pins the keys that work on some channels only, matching the
-// lint rules that reject them elsewhere.
+// TestPlacementHint_channelKeys derives where each channel-specific schema key works from the
+// lint rules themselves: the key is written under schema: on every channel, and it fits where
+// validation reports no problem naming it. A hint must never send an author somewhere a later
+// rule rejects, nor withhold one where the key would work.
 func TestPlacementHint_channelKeys(t *testing.T) {
+	// Each key with a type and sibling keys it needs to be valid where it works.
+	samples := map[string]string{
+		"negatable":      "type: bool\nnegatable: true",
+		"implicit_value": "type: string\nimplicit_value: x",
+		"dotted_keys":    "type: map[string]any\ndotted_keys: true",
+		"from":           "type: string\nfrom: [file]",
+		"properties":     "type: map[string]string\nproperties: {host: {type: string}}",
+		"separator":      "type: '[]string'\nseparator: ';'",
+		"complete":       "type: string\ncomplete: {kind: file}",
+		"variable":       "type: string\nvariable: DEMO_X",
+		"variable_file":  "type: string\nvariable: DEMO_X\nvariable_file: DEMO_X_FILE",
+		"config_source":  "type: string\nconfig_source: app",
+		"key":            "type: string\nkey: x.y",
+		"nesting":        "type: map[string]any\nnesting: '__'",
+		"file":           "type: string\nfile: app",
+		"repeatable":     "type: '[]string'\nrepeatable: false",
+		"glob":           "type: '[]string'\nglob: true",
+		"expand":         "type: string\nexpand: [home]",
+		"relative":       "type: time.Time\nrelative: past",
+	}
+	entries := map[string]string{
+		"flag":     "  flags:\n    - name: x\n      schema:\n",
+		"argument": "  arguments:\n    - name: x\n      schema:\n",
+		"env":      "  env:\n    - name: x\n      schema:\n",
+		"config":   "  config:\n    - name: x\n      schema:\n",
+		"stdin":    "  stdin:\n    format: json\n    schema:\n",
+	}
+	for _, key := range slices.Sorted(maps.Keys(samples)) {
+		for _, channel := range slices.Sorted(maps.Keys(entries)) {
+			indent := "        "
+			if channel == "stdin" {
+				indent = "      "
+			}
+			spec := "version: 0.0.0\ncommand:\n  name: demo\n  config_files:\n    - name: app\n      path: ./app.yaml\n" +
+				entries[channel] + indent + strings.ReplaceAll(samples[key], "\n", "\n"+indent) + "\n"
+			var named []string
+			for _, m := range validateSpecText(t, spec) {
+				if strings.Contains(m, "`"+key+"`") || strings.Contains(m, `"`+key+`"`) {
+					named = append(named, m)
+				}
+			}
+			works := len(named) == 0
+			if fits := schemaKeyFits(channel, key); fits != works {
+				t.Errorf("%s on %s: hint says fits=%v, but validation reports %q", key, channel, fits, named)
+			}
+		}
+	}
 	for _, tt := range []struct {
 		channel, key string
 		fits         bool
 	}{
-		{"flag", "key", true}, {"config", "key", true}, {"env", "key", false}, {"argument", "key", false},
-		{"flag", "variable", true}, {"env", "variable", true}, {"argument", "variable", false}, {"config", "variable", false},
-		{"config", "file", true}, {"flag", "file", false},
-		{"flag", "from", true}, {"env", "from", false},
-		{"argument", "separator", true}, {"env", "separator", false},
-		{"env", "nesting", true}, {"flag", "nesting", false},
-		{"stdin", "required", true}, {"stdin", "properties", true}, {"stdin", "negatable", false},
-		{"flag", "default", true}, {"argument", "minimum", true},
+		{"stdin", "required", true}, {"flag", "default", true}, {"argument", "minimum", true},
 		{"flag", "summary", false}, {"flag", "nonsense", false},
 	} {
 		if got := schemaKeyFits(tt.channel, tt.key); got != tt.fits {
 			t.Errorf("%s %s: fits %v, want %v", tt.channel, tt.key, got, tt.fits)
+		}
+	}
+}
+
+// TestPlacementHint_otherChannels pins the hint for a schema key written on the entry of a
+// channel that doesn't take it.
+func TestPlacementHint_otherChannels(t *testing.T) {
+	for _, tt := range []struct{ definition, key, want string }{
+		{"ConfigInput", "variable_file", `"variable_file" is a schema key of flags, arguments and env inputs only`},
+		{"EnvInput", "glob", `"glob" is a schema key of arguments only`},
+		{"ArgumentInput", "nesting", `"nesting" is a schema key of env inputs only`},
+		{"ArgumentInput", "summary", ""},
+	} {
+		if got := schemaPlacementHint(tt.definition, tt.key); got != tt.want {
+			t.Errorf("%s %s:\n got %q\nwant %q", tt.definition, tt.key, got, tt.want)
 		}
 	}
 }

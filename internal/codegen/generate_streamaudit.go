@@ -66,7 +66,7 @@ func (p *program) unmarkedStreams(fset *token.FileSet, files map[string]*ast.Fil
 					return true
 				}
 				at := findingAt(fset, call.Pos(), p.module.root)
-				at.msg = fmt.Sprintf("%s:%d: %q writes items with WriteOutputItem; declare output_stream: true on it, or it fails at run time", at.file, at.line, invocation)
+				at.msg = fmt.Sprintf("%s:%d: %q writes items with WriteOutputItem; declare output_stream: true on it", at.file, at.line, invocation)
 				found = append(found, at)
 				return true
 			})

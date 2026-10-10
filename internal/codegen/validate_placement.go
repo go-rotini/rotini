@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -22,16 +23,25 @@ var schemaKeyChannels = map[string][]string{
 	"negatable":      {"flag"},
 	"implicit_value": {"flag"},
 	"dotted_keys":    {"flag"},
-	"from":           {"flag"},
+	"from":           {"flag", "argument"},
 	"properties":     {"flag", "stdin"},
-	"separator":      {"flag", "argument"},
+	"separator":      {"flag", "argument", "env"},
 	"complete":       {"flag", "argument"},
-	"variable":       {"flag", "env"},
+	"variable":       {"flag", "argument", "env"},
+	"variable_file":  {"flag", "argument", "env"},
 	"config_source":  {"flag", "env"},
-	"key":            {"flag", "config"},
+	"key":            {"flag", "argument", "config"},
 	"nesting":        {"env"},
 	"file":           {"config"},
 	"repeatable":     {"flag"},
+	"glob":           {"argument"},
+	"expand":         {"flag", "argument", "env", "config"},
+	"relative":       {"flag", "argument", "env", "config"},
+}
+
+// channelPlurals names each channel's entries in a hint.
+var channelPlurals = map[string]string{
+	"flag": "flags", "argument": "arguments", "env": "env inputs", "config": "config inputs", "stdin": "stdin",
 }
 
 // schemaKeyFits reports whether key is a schema key that takes effect on channel.
@@ -45,13 +55,26 @@ func schemaKeyFits(channel, key string) bool {
 }
 
 // schemaPlacementHint returns the hint for an unknown key on the input entry named by
-// definition when the key belongs under its schema, or "".
+// definition: where the key belongs when it is a schema key that works on this channel, which
+// channels take it when it works on others only, or "".
 func schemaPlacementHint(definition, key string) string {
 	channel, ok := inputDefinitionChannels[definition]
-	if !ok || !schemaKeyFits(channel, key) {
+	if !ok {
 		return ""
 	}
-	return fmt.Sprintf("%q belongs under schema: (schema: {%s: …})", key, key)
+	if schemaKeyFits(channel, key) {
+		return fmt.Sprintf("%q belongs under schema: (schema: {%s: …})", key, key)
+	}
+	sets, err := loadSchemaBlockKeys()
+	chans, limited := schemaKeyChannels[key]
+	if err != nil || !sets.input[key] || !limited {
+		return ""
+	}
+	names := make([]string, len(chans))
+	for i, c := range chans {
+		names[i] = channelPlurals[c]
+	}
+	return fmt.Sprintf("%q is a schema key of %s only", key, joinAnd(names))
 }
 
 // entryPlacementHint returns the hint for an unknown key inside channel's schema block when
@@ -94,3 +117,11 @@ var loadEntryKeys = sync.OnceValue(func() map[string]map[string]bool {
 	}
 	return out
 })
+
+// joinAnd joins words as a prose list: "a", "a and b", "a, b and c".
+func joinAnd(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}

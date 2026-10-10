@@ -319,9 +319,9 @@ type templateHandlerData struct {
 	PrintHelpWhenBare bool   // a dispatcher root or group: sub-commands, no own arguments, help feature on
 	NeedsInputs       bool   // the body calls Inputs (for its result or its validation)
 	Redact            bool   // the inputs chain holds a secret, so the default body prints only the command path
-	// NewShape: the root's --help is short_circuit and cascading. Only then do new stubs check
-	// their writes, print "<program> <version>" and send bare help to stderr, so a project on
-	// an older shape keeps the stubs it always got.
+	// NewShape: the root's --help is short_circuit and cascading. Only then do new stubs print
+	// "<program> <version>" and send bare help to stderr, so a project on an older shape keeps
+	// the output its stubs always had.
 	NewShape bool
 
 	// The root's CascadingPreRun, which answers the root's short-circuit --help and --version

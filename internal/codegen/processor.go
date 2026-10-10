@@ -252,6 +252,7 @@ func (p *Processor) validateComposedSpecs(rs *reconciledSpec, seen map[string]bo
 			continue
 		}
 		problems = append(problems, p.validateAndLintOne(child)...)
+		problems = append(problems, composedTopicsProblem(rs, child)...)
 		problems = append(problems, p.validateComposedSpecs(child, seen)...)
 	}
 	return problems

@@ -18,7 +18,11 @@ type demoVersionHandler struct {
 
 func (*demoVersionHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if argv, err := rtx.ArgvInputs[DemoVersionInputs](); err == nil && argv.Values.Demo.Flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
 		rtx.HaltWithCode(0)
 		return
 	}
@@ -33,5 +37,7 @@ func (*demoVersionHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		version = "unknown"
 	}
 
-	fmt.Fprintln(rtx.Stdout, version)
+	if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
+		rtx.HaltWith(err)
+	}
 }

@@ -42,7 +42,8 @@ type rnode struct {
 	aliases               []string
 	inputs                *Inputs
 	help                  cmdHelp          // flattened help fields; for a composed root, from the child spec
-	output                *Schema          // command's output type (own commands only; nil for composed)
+	output                *Schema          // command's declared output
+	outputType            string           // Go type of a composed command's output, qualified; "" when none can be named
 	discovery             *PluginDiscovery // command's plugin discovery (nil = off)
 	hidden                bool             // omit from the parent's generated Commands list
 	group                 string           // group label that buckets this command in the parent's Commands list
@@ -93,9 +94,14 @@ type composeCtx struct {
 	// scope is the composed spec's named schemas, which its commands' $refs name. nil outside
 	// a composed subtree.
 	scope *schemaScope
-	// nested marks a subtree grafted from a `$ref` inside a composed child; its types live in
-	// a package the parent doesn't import.
-	nested bool
+	// typeAlias, typeRoot and typePascal locate the generated types of the subtree's commands:
+	// the import alias of the package of the spec declaring them, the underscore path of that
+	// spec's root in the parent, and the root's Go name. For a `$ref` inside a composed child
+	// that is the grandchild's package, while delegation still goes through the child.
+	// typeAlias is "" when no imported package declares them.
+	typeAlias  string
+	typeRoot   string
+	typePascal string
 	// specRoot is the underscore path of the root command of the spec declaring the subtree, which
 	// a `replaced_by` path is relative to; "" for the program's own spec.
 	specRoot string
@@ -236,11 +242,12 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			path = parentPath + "_" + c.Name
 		}
 		prefix := gp.rootPascal + toPascalCase(path)
-		inputsType := prefix + "Inputs"
+		inputsType, outputType := prefix+"Inputs", ""
 
 		if ctx.composed {
 			rel := strings.TrimPrefix(strings.TrimPrefix(path, ctx.rootPath), "_")
-			inputsType = composedInputsType(ctx, ctx.childPascal+toPascalCase(rel))
+			inputsType = composedTypeName(ctx, path, "Inputs")
+			outputType = composedTypeName(ctx, path, "Output")
 			gp.composed = append(gp.composed, composedCmd{
 				prefix:         prefix,
 				delegateAlias:  ctx.alias,
@@ -291,6 +298,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			inputs:                c.inputs(),
 			help:                  commandHelp(c),
 			output:                c.Output,
+			outputType:            outputType,
 			discovery:             c.PluginDiscovery,
 			hidden:                c.Hidden,
 			group:                 c.Group,
@@ -476,6 +484,9 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 
 	scope := &schemaScope{name: childRoot.Name, schemas: childRoot.Schemas}
 	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, pluginHost: childRoot.Name, scope: scope, specRoot: composeRootPath, flagSets: childRoot.FlagSets}
+	if !passthrough {
+		ctx.typeAlias, ctx.typeRoot, ctx.typePascal = alias, composeRootPath, delegateRoot
+	}
 	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
@@ -503,7 +514,9 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		discovery: childRoot.PluginDiscovery, pluginPath: merged.PluginPath,
 		pluginHost: childRoot.Name, composed: true, ref: c.Ref, children: children,
 		scope: scope, lifecycle: lifecycleOf(&merged),
-		inputsType:    composedInputsType(ctx, delegateRoot),
+		output: childRoot.Output, stream: childRoot.OutputStream,
+		inputsType:    composedTypeName(ctx, composeRootPath, "Inputs"),
+		outputType:    composedTypeName(ctx, composeRootPath, "Output"),
 		hiddenAliases: merged.HiddenAliases,
 		replacedBy:    gp.overlayReplacement(c.ReplacedBy, childRoot.ReplacedBy, "", composeRootPath),
 	}, nil
@@ -570,12 +583,13 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	gcCtx := ctx
 	gcCtx.pluginHost = gc.Name
 	gcCtx.scope = &schemaScope{name: gc.Name, schemas: gc.Schemas}
-	gcCtx.nested = true
 	gcCtx.flagSets = gc.FlagSets
 	gcCtx.specRoot = synth.Name
 	if parentPath != "" {
 		gcCtx.specRoot = parentPath + "_" + synth.Name
 	}
+	gcCtx.typeAlias = gp.nestedTypeAlias(rr, c, ctx, moduleName)
+	gcCtx.typeRoot, gcCtx.typePascal = gcCtx.specRoot, toPascalCase(gc.Name)
 	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleName, seen, gcCtx)
 	if err != nil {
 		return nil, err

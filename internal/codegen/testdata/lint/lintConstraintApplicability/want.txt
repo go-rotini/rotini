@@ -6,3 +6,5 @@ spec: .rotini.spec.yaml:26:7: command demo: flag "workers": `maximum` "1s" is te
 spec: .rotini.spec.yaml:43:7: command demo: argument "labels": sets `properties`, which applies only to a map flag, whose property names feed shell completion (an object's shape belongs in a named schema); here it would do nothing
 spec: .rotini.spec.yaml:38:7: command demo: env "loud": sets `negatable`, which applies only to bool flags (it derives a --no-<name> form); here it would do nothing
 spec: .rotini.spec.yaml:40:7: command demo: env "region": sets `key`, which applies only to config inputs and the configuration fallback of flags and arguments; here it would do nothing
+spec: .rotini.spec.yaml:47:5: command demo: stdin: sets `negatable`, which applies only to bool flags (it derives a --no-<name> form); here it would do nothing
+spec: .rotini.spec.yaml:47:5: command demo: stdin: sets `key`, which applies only to config inputs and the configuration fallback of flags and arguments; here it would do nothing

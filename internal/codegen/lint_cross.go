@@ -27,6 +27,7 @@ var crossLints = []func(*Spec, *Conf) []error{
 	lintUnshownMessages,
 	lintFlagsFirst,
 	lintPosixNames,
+	lintToolStdinClash,
 }
 
 // lintManPageNames rejects two commands whose man pages would share a name when the man
@@ -88,10 +89,10 @@ func lintUnshownMessages(spec *Spec, conf *Conf) []error {
 }
 
 // lintFlagsFirst, turned on by the conf's `validate.flags_first`, warns about each env or
-// config input that no flag in its command chain can also set, through the flag's `variable:`
-// or `key:`, so `--help` doesn't show it. Secret inputs are exempt (a secret doesn't belong on
-// the command line), as are nested env inputs, which read a family of variables no single flag
-// can mirror.
+// config input that no flag in its command chain, and no argument of its command, can also
+// set through its `variable:` or `key:`, so `--help` doesn't show it. Secret inputs are exempt
+// (a secret doesn't belong on the command line), as are nested env inputs, which read a family
+// of variables no single flag can mirror.
 func lintFlagsFirst(spec *Spec, conf *Conf) []error {
 	if spec == nil || conf == nil || conf.Validate == nil || !conf.Validate.FlagsFirst {
 		return nil
@@ -100,17 +101,23 @@ func lintFlagsFirst(spec *Spec, conf *Conf) []error {
 	var problems []error
 	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
 		vars, keys := map[string]bool{}, map[string]bool{}
+		mirror := func(name string, schema *InputSchema) {
+			key := flagReconKey(name, schema)
+			if key == "" {
+				return
+			}
+			keys[key] = true
+			for v := range strings.SplitSeq(flagEnvVar(schema, key, prefix), ",") {
+				vars[v] = true
+			}
+		}
 		for _, c := range chain {
 			for _, f := range c.Flags {
-				key := flagReconKey(f.Name, f.Schema)
-				if key == "" {
-					continue
-				}
-				keys[key] = true
-				for v := range strings.SplitSeq(flagEnvVar(f.Schema, key, prefix), ",") {
-					vars[v] = true
-				}
+				mirror(f.Name, f.Schema)
 			}
+		}
+		for _, a := range chain[len(chain)-1].Arguments {
+			mirror(a.Name, a.Schema)
 		}
 		warn := func(at, channel, name, msg string) {
 			p := inputProblem(at, path, channel, name, msg+" (validate.flags_first)")
@@ -129,7 +136,7 @@ func lintFlagsFirst(spec *Spec, conf *Conf) []error {
 			}
 			if !read {
 				warn(fmt.Sprintf("%s/env/%d", ptr, i), "env", e.Name,
-					fmt.Sprintf("no flag reads %s, so --help doesn't show it; add a flag with `variable: %s`", names[0], names[0]))
+					fmt.Sprintf("no flag or argument reads %s, so --help doesn't show it; add a flag with `variable: %s`", names[0], names[0]))
 			}
 		}
 		for i, c := range leaf.Config {
@@ -138,7 +145,7 @@ func lintFlagsFirst(spec *Spec, conf *Conf) []error {
 			}
 			if key := configKey(c); !keys[key] {
 				warn(fmt.Sprintf("%s/config/%d", ptr, i), "config", c.Name,
-					fmt.Sprintf("no flag reads config key %q, so --help doesn't show it; add a flag with `key: %s`", key, key))
+					fmt.Sprintf("no flag or argument reads config key %q, so --help doesn't show it; add a flag with `key: %s`", key, key))
 			}
 		}
 	})

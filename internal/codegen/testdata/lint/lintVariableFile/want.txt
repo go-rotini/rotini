@@ -3,3 +3,4 @@ spec: .rotini.spec.yaml:10:7: command demo: flag "plain": sets `variable_file` o
 spec: .rotini.spec.yaml:13:7: command demo: flag "same": sets `variable_file: SAME`, which is also one of its own `variable` names; the file form needs its own name (by convention SAME_FILE)
 spec: .rotini.spec.yaml:19:7: command demo: env "labels": sets both `variable_file` and `nesting`; a nested input reads a family of variables, not one value a file could hold
 spec: .rotini.spec.yaml:22:7: command demo: argument "who": sets `variable_file` on an argument with no environment fallback; set `variable:` (or `key:`) so the argument reads an environment variable, then `variable_file` names its file form
+spec: .rotini.spec.yaml:28:5: command demo: stdin: sets `variable_file`, which names an environment variable; only env inputs, and flags and arguments with an environment fallback, read one, so here it would be silently ignored

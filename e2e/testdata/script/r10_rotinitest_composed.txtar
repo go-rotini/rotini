@@ -1,0 +1,226 @@
+# R10 — rotinitest on a suite-style CLI: a root composing a child that composes a grandchild.
+#
+# The root's Definition records each composed command's inputs and output types through the
+# package that declares them, so a test runs a composed command from its typed inputs and
+# decodes its output without naming the command's path.
+
+gomodinit example.com/suite
+
+exec rotini generate cmd/probe/.rotini.spec.yaml --config cmd/probe/.rotini.conf.yaml
+exec rotini generate cmd/status/.rotini.spec.yaml --config cmd/status/.rotini.conf.yaml
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+grep 'Output: &rotini.OutputDef\{Type: reflect.TypeFor\[statuscli.StatusOutput\]\(\)' internal/cmd/demo/zz_demo.go
+grep 'Inputs: +reflect.TypeFor\[probecli.ProbeInputs\]\(\)' internal/cmd/demo/zz_demo.go
+
+exec go mod tidy
+exec go vet ./...
+exec go test -count=1 ./internal/cmd/demo
+! stderr .
+
+-- cmd/probe/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: probe
+  summary: probe a target
+  flags:
+    - name: target
+      identifiers: [--target]
+      schema: {type: string}
+  output:
+    type: object
+    required: [target]
+    properties:
+      target: {type: string}
+-- cmd/probe/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/probe/zz_probe.go
+      package: probe
+-- cmd/status/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: status
+  summary: show the status
+  flags:
+    - name: name
+      identifiers: [--name]
+      schema: {type: string}
+  schemas:
+    Check:
+      type: object
+      required: [healthy]
+      properties:
+        healthy: {type: boolean}
+  output:
+    type: object
+    required: [name]
+    properties:
+      name: {type: string}
+  commands:
+    - name: check
+      summary: check the health
+      flags:
+        - name: fail
+          identifiers: [--fail]
+          schema: {type: bool}
+      output: {$ref: "#/schemas/Check"}
+    - $ref: ../probe/.rotini.spec.yaml
+-- cmd/status/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/status/zz_status.go
+      package: status
+-- cmd/demo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a suite
+  commands:
+    - $ref: ../status/.rotini.spec.yaml
+-- cmd/demo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/demo/main.go
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+-- cmd/demo/main.go --
+package main
+
+import demo "example.com/suite/internal/cmd/demo"
+
+func main() {
+	demo.NewProgram(demo.Handlers()).Execute()
+}
+-- internal/cmd/demo/demo.go --
+package demo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type demoHandler struct{ rotini.NoHooks }
+
+func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/probe/probe.go --
+package probe
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type probeHandler struct{ rotini.NoHooks }
+
+func (*probeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ProbeInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if err := rtx.WriteOutput(ProbeOutput{Target: in.Probe.Flags.Target}, "json", nil); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- internal/cmd/status/status.go --
+package status
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type statusHandler struct{ rotini.NoHooks }
+
+func (*statusHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[StatusInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if err := rtx.WriteOutput(StatusOutput{Name: in.Status.Flags.Name}, "json", nil); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- internal/cmd/status/status_check.go --
+package status
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type statusCheckHandler struct{ rotini.NoHooks }
+
+func (*statusCheckHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[StatusCheckInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if err := rtx.WriteOutput(StatusCheckOutput{Healthy: !in.StatusCheck.Flags.Fail}, "json", nil); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- internal/cmd/demo/demo_test.go --
+package demo_test
+
+import (
+	"slices"
+	"testing"
+
+	"github.com/go-rotini/rotini/rotinitest"
+
+	"example.com/suite/internal/cmd/demo"
+	"example.com/suite/internal/cmd/probe"
+	"example.com/suite/internal/cmd/status"
+)
+
+func TestStatus(t *testing.T) {
+	t.Parallel()
+	var in status.StatusInputs
+	in.Status.Flags.Name = "web"
+	res := rotinitest.Run(t, demo.NewProgram(demo.Handlers()), in)
+	if out := rotinitest.Output[status.StatusOutput](t, res); out.Name != "web" {
+		t.Errorf("output %+v (argv %q)", out, res.Argv)
+	}
+}
+
+func TestStatusCheck(t *testing.T) {
+	t.Parallel()
+	var in status.StatusCheckInputs
+	in.Status.Flags.Name = "web"
+	in.StatusCheck.Flags.Fail = true
+	res := rotinitest.Run(t, demo.NewProgram(demo.Handlers()), in)
+	if want := []string{"status", "--name=web", "check", "--fail"}; !slices.Equal(res.Argv, want) {
+		t.Errorf("argv %q, want %q", res.Argv, want)
+	}
+	if out := rotinitest.Output[status.StatusCheckOutput](t, res); out.Healthy {
+		t.Errorf("output %+v", out)
+	}
+}
+
+// The grandchild's inputs type is recorded too, so no rotinitest.Path is needed.
+func TestProbe(t *testing.T) {
+	t.Parallel()
+	var in probe.ProbeInputs
+	in.Probe.Flags.Target = "db"
+	res := rotinitest.Run(t, demo.NewProgram(demo.Handlers()), in)
+	if want := []string{"status", "probe", "--target=db"}; !slices.Equal(res.Argv, want) {
+		t.Errorf("argv %q, want %q", res.Argv, want)
+	}
+	if out := rotinitest.Output[probe.ProbeOutput](t, res); out.Target != "db" {
+		t.Errorf("output %+v", out)
+	}
+}

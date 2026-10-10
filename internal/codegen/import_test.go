@@ -41,6 +41,7 @@ const testDescription = `{
        "flag_groups": [{"kind": "mutually_exclusive", "flags": ["json", "yaml"]}]},
       {"name": "exec", "summary": "Run a command", "passthrough": true, "arguments": [{"name": "args", "schema": {"type": "[]string"}}]},
       {"name": "help", "summary": "Help about any command", "builtin": "help", "arguments": [{"name": "command", "schema": {"type": "[]string"}}]},
+      {"name": "ssh", "summary": "Open a shell", "options_first": true, "arguments": [{"name": "host", "schema": {"type": "string", "required": true}}, {"name": "command", "schema": {"type": "[]string"}}]},
       {"name": "old", "summary": "Old", "deprecated": "use deploy", "hidden": true}
     ]
   },
@@ -83,7 +84,7 @@ func TestImport(t *testing.T) {
 	if got.Spec != filepath.Join("cmd", "acme", ".rotini.spec.yaml") || got.Conf != filepath.Join("cmd", "acme", ".rotini.conf.yaml") || got.Result == "" {
 		t.Errorf("report = %+v", got)
 	}
-	if want := "imported 6 commands, 8 flags: 4 lossy, 1 unsupported, 2 info"; got.Summary != want {
+	if want := "imported 7 commands, 8 flags: 4 lossy, 1 unsupported, 2 info"; got.Summary != want {
 		t.Errorf("summary = %q, want %q", got.Summary, want)
 	}
 	notes := strings.Join(got.Notes, "\n")
@@ -119,6 +120,12 @@ func TestImport(t *testing.T) {
 	}
 	if strings.Contains(spec, "Args unset") {
 		t.Error("an info note was written into the spec")
+	}
+	if strings.Count(spec, "options_first: true") != 1 {
+		t.Errorf("spec =\n%s\nwant options_first on one command", spec)
+	}
+	if _, ssh, _ := strings.Cut(spec, "    - name: ssh\n"); !strings.Contains(strings.SplitN(ssh, "\n    - name:", 2)[0], "      options_first: true") {
+		t.Errorf("spec =\n%s\nwant options_first on ssh", spec)
 	}
 	var doc map[string]any
 	if err := yaml.Unmarshal([]byte(spec), &doc); err != nil {

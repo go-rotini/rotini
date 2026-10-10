@@ -58,6 +58,7 @@ func (sb *importSpecBuilder) command(c *importCommand, path string, isRoot bool)
 	}
 	m.set("hidden", c.Hidden)
 	m.set("deprecated", c.Deprecated)
+	m.set("options_first", c.OptionsFirst)
 	m.set("passthrough", c.Passthrough)
 
 	flags := make([]any, 0, len(c.Flags))

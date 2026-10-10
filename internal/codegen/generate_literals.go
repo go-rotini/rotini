@@ -535,8 +535,14 @@ func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Sc
 			fmt.Fprintf(b, "ReplacedBy: %q,\n", n.replacedBy.text)
 		}
 		writeInputDefsLiteral(b, n.inputs, schemas)
-		if !n.composed { // a composed command's output type lives in its own cli's package
+		if !n.composed {
 			b.WriteString(outputDefLiteral(n.prefix+"Output", n.output, schemas, n.stream))
+		} else if n.outputType != "" { // declared in the composed cli's package
+			scoped := schemas
+			if n.scope != nil {
+				scoped = n.scope.schemas
+			}
+			b.WriteString(outputDefLiteral(n.outputType, n.output, scoped, n.stream))
 		}
 		b.WriteString(inputsTypeLiteral(n.inputsType))
 		b.WriteString(exitStatusLiteral(n.help.ExitStatus))

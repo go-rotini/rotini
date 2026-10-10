@@ -38,6 +38,8 @@ command:
             separator: ','
             enum: [ls, cat]
             pattern: '^[a-z]+$'
+            minItems: 1
+            maxItems: 9
     - name: group
       commands:
         - name: child

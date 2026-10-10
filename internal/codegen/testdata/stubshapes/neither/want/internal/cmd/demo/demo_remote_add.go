@@ -23,5 +23,7 @@ func (*demoRemoteAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "demo remote add", inputs)
+	if _, err := fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "demo remote add", inputs); err != nil {
+		rtx.HaltWith(err)
+	}
 }

@@ -39,10 +39,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-rotini/recon"
 	"github.com/go-rotini/rotini"
@@ -74,6 +76,8 @@ type config struct {
 	dir     string
 	path    []string
 	hasPath bool
+	clock   func() time.Time
+	argv0   string
 }
 
 // Presence names the inputs [Run] writes, in place of [rotini.PresenceOf] of the inputs value,
@@ -107,6 +111,20 @@ func Env(kv ...string) Option {
 // configuration file there first passes it.
 func Dir(dir string) Option {
 	return func(c *config) { c.dir = dir }
+}
+
+// Clock fixes the run's clock at now, so relative time values (`2h` ago, `today`) and
+// [rotini.Context.Now] read the same instant on every run; see [rotini.Program.WithClock].
+func Clock(now time.Time) Option {
+	return func(c *config) { c.clock = func() time.Time { return now } }
+}
+
+// Argv0 is the name the program is invoked as, for a spec that declares multicall; see
+// [rotini.Program.WithArgv0]. in is still the inputs value of the command to run: when name
+// dispatches to that command, Run leaves the command's name out of the command line, since
+// the invoked name supplies it.
+func Argv0(name string) Option {
+	return func(c *config) { c.argv0 = name }
 }
 
 // Path names the command the inputs value belongs to; see [rotini.ArgvPath]. A generated
@@ -150,6 +168,14 @@ func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result {
 	if err != nil {
 		tb.Fatalf("rotinitest: %v", err)
 	}
+	if cfg.argv0 != "" {
+		// Root flags come before the command's name, and are never a bare word like it.
+		if name, ok := dispatchesTo(def, cfg.argv0, path); ok {
+			if i := slices.Index(argv, name); i >= 0 {
+				argv = slices.Delete(argv, i, i+1)
+			}
+		}
+	}
 
 	base := tb.TempDir()
 	home := filepath.Join(base, "home")
@@ -183,6 +209,12 @@ func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result {
 	var stdout, stderr bytes.Buffer
 	p.WithStdin(stdin).WithStdout(&stdout).WithStderr(&stderr).
 		WithEnviron(env).WithDir(dir).WithOutputChecks(true)
+	if cfg.clock != nil {
+		p.WithClock(cfg.clock)
+	}
+	if cfg.argv0 != "" {
+		p.WithArgv0(cfg.argv0)
+	}
 	code, runErr := p.RunContext(ctx, argv)
 	return Result{
 		Code: code, Err: runErr,
@@ -274,6 +306,42 @@ func exitStatus(def rotini.Definition, path []string) []rotini.ExitStatusDef {
 	return exits
 }
 
+// dispatchesTo reports whether a multicall program invoked as argv0 runs the top-level command
+// that path starts with, by the rule [rotini.MulticallDef] describes, and returns that
+// command's name.
+func dispatchesTo(def rotini.Definition, argv0 string, path []string) (string, bool) {
+	mc := def.Multicall
+	if mc == nil || len(path) == 0 {
+		return "", false
+	}
+	windows := runtime.GOOS == "windows"
+	same, hasPrefix := func(a, b string) bool { return a == b }, strings.HasPrefix
+	if windows {
+		same = strings.EqualFold
+		hasPrefix = func(s, p string) bool { return len(s) >= len(p) && strings.EqualFold(s[:len(p)], p) }
+	}
+	name := filepath.Base(argv0)
+	if ext := filepath.Ext(name); windows && strings.EqualFold(ext, ".exe") {
+		name = strings.TrimSuffix(name, ext)
+	}
+	if (mc.Complete != "" && hasPrefix(name, mc.Complete)) || same(name, def.Name) {
+		return "", false
+	}
+	if mc.Prefix != "" {
+		if !hasPrefix(name, mc.Prefix) {
+			return "", false
+		}
+		name = name[len(mc.Prefix):]
+	}
+	for _, c := range def.Commands {
+		spellings := slices.Concat([]string{c.Name}, c.Aliases, c.HiddenAliases)
+		if slices.Contains(spellings, path[0]) {
+			return c.Name, slices.ContainsFunc(spellings, func(s string) bool { return same(name, s) })
+		}
+	}
+	return "", false
+}
+
 // stdinPayload encodes the inputs value's stdin payload, the invoked command's Stdin field, in
 // the format its tag names; none is empty input.
 func stdinPayload(in any) ([]byte, error) {
@@ -296,13 +364,36 @@ func stdinPayload(in any) ([]byte, error) {
 		}
 		f = f.Elem()
 	}
-	format, _, _ := strings.Cut(sf.Tag.Get("stdin"), ",")
+	opts := strings.Split(sf.Tag.Get("stdin"), ",")
+	format := opts[0]
+	sep := "\n"
+	if slices.Contains(opts[1:], "nul") {
+		sep = "\x00"
+	}
+	if f.Kind() == reflect.Func { // a streamed payload: its items, read from the iterator
+		if f.IsNil() {
+			return nil, nil
+		}
+		var items []reflect.Value
+		for item, err := range f.Seq2() {
+			if e, _ := reflect.TypeAssert[error](err); e != nil {
+				return nil, fmt.Errorf("the stdin payload's iterator failed: %w", e)
+			}
+			items = append(items, item)
+		}
+		return joinItems(format, sep, items)
+	}
 	switch format {
 	case "text":
 		return []byte(f.String()), nil
-	case "lines":
-		lines, _ := reflect.TypeAssert[[]string](f)
-		return []byte(strings.Join(lines, "\n")), nil
+	case "bytes":
+		return f.Bytes(), nil
+	case "lines", "jsonl":
+		items := make([]reflect.Value, f.Len())
+		for i := range items {
+			items[i] = f.Index(i)
+		}
+		return joinItems(format, sep, items)
 	}
 	data, err := json.Marshal(f.Interface())
 	if err != nil {
@@ -324,4 +415,29 @@ func stdinPayload(in any) ([]byte, error) {
 		return nil, fmt.Errorf("encode the stdin payload as %s: %w", format, err)
 	}
 	return b, nil
+}
+
+// joinItems writes a lines or jsonl payload's items, one per line (lines with the nul option
+// end each with a NUL instead). A line holding its separator, or ending in a carriage return
+// that reading drops, can't be written.
+func joinItems(format, sep string, items []reflect.Value) ([]byte, error) {
+	var b bytes.Buffer
+	for _, item := range items {
+		if format == "jsonl" {
+			data, err := json.Marshal(item.Interface())
+			if err != nil {
+				return nil, fmt.Errorf("encode a stdin record: %w", err)
+			}
+			b.Write(data)
+			b.WriteByte('\n')
+			continue
+		}
+		line := item.String()
+		if strings.Contains(line, sep) || (sep == "\n" && strings.HasSuffix(line, "\r")) {
+			return nil, fmt.Errorf("the stdin line %q holds its separator or ends in a carriage return, so it can't be written", line)
+		}
+		b.WriteString(line)
+		b.WriteString(sep)
+	}
+	return b.Bytes(), nil
 }

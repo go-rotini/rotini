@@ -265,7 +265,7 @@ func TestOptionsFirst(t *testing.T) {
 		t.Errorf("got %+v", in.Ssh)
 	}
 
-	if _, err := bdParse[bdSSHInputs](t, "ssh", "-p"); err == nil || !strings.Contains(err.Error(), `flag "-p" needs a value`) {
+	if _, err := bdParse[bdSSHInputs](t, "ssh", "-p"); err == nil || err.Error() != "-p needs a value" {
 		t.Errorf("-p without a value: err = %v", err)
 	}
 
@@ -283,7 +283,7 @@ func TestOptionsFirst(t *testing.T) {
 		}
 	}
 	err = NewParser().Parse(bdContext(t, "run", "s", "d", "-a"), &run)
-	want := `"run" accepts at most 2 arguments (got 3); flags go before the first argument of "run" (it takes options first): -a`
+	want := `app run accepts at most 2 arguments (got 3); flags go before its first argument (it takes options first): -a`
 	if err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %s", err, want)
 	}

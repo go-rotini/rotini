@@ -158,7 +158,8 @@ func machineOutputProblems(c *Command, f FlagInput, t, cmdPath, fptr string) []e
 
 // lintAgent warns about an `agent` key that changes nothing: `agent: true` on an item already
 // offered to agents, on an item under a command with `agent: false`, or on a flag that is never
-// a tool parameter; and `agent: true` on an env or config input that isn't hidden.
+// a tool parameter; and `agent: true` on an env or config input that isn't hidden. It also warns
+// about `agent: true` on a secret flag or argument, which a tool can't pass on the command line.
 func lintAgent(spec *Spec) []error {
 	var problems []error
 	walkChainsAt(spec, func(chain []*Command, cmdPath, ptr string) {
@@ -203,22 +204,32 @@ func agentInputWarnings(c *Command, cmdPath, ptr string) []error {
 		p.sev = severityWarning
 		problems = append(problems, p)
 	}
+	secret := func(at, channel, name string, s *InputSchema) {
+		p := inputProblem(at+"/agent", cmdPath, channel, name, secretAgentMessage(s))
+		p.sev = severityWarning
+		problems = append(problems, p)
+	}
 	on := func(b *bool) bool { return b != nil && *b }
 	for i, f := range c.Flags {
 		at := fmt.Sprintf("%s/flags/%d", ptr, i)
 		switch {
 		case !on(f.Agent):
-		case f.Role == "chdir":
-			warn(at, "flag", f.Name, "a directory flag (role chdir) is never a tool parameter, since a tool runs in the server's directory")
 		case f.Role == "machine-output":
 			warn(at, "flag", f.Name, "tool exports select JSON with the machine-output flag themselves, so it is never a tool parameter")
+		case f.Schema != nil && f.Schema.Secret:
+			secret(at, "flag", f.Name, f.Schema)
 		case !flagOutByDefault(f):
-			warn(at, "flag", f.Name, "the flag is a tool parameter already; `agent: true` brings back a hidden, deprecated, secret, short-circuit or `from:` flag")
+			warn(at, "flag", f.Name, "the flag is a tool parameter already; `agent: true` brings back a hidden, deprecated, secret, short-circuit, directory (role chdir) or `from:` flag")
 		}
 	}
 	for i, a := range c.Arguments {
-		if on(a.Agent) && !inputOutByDefault(a.Hidden, a.Deprecated, a.Schema) {
-			warn(fmt.Sprintf("%s/arguments/%d", ptr, i), "argument", a.Name,
+		at := fmt.Sprintf("%s/arguments/%d", ptr, i)
+		switch {
+		case !on(a.Agent):
+		case a.Schema != nil && a.Schema.Secret:
+			secret(at, "argument", a.Name, a.Schema)
+		case !inputOutByDefault(a.Hidden, a.Deprecated, a.Schema):
+			warn(at, "argument", a.Name,
 				"the argument is a tool parameter already; `agent: true` brings back a hidden, deprecated, secret or `from:` argument")
 		}
 	}
@@ -249,7 +260,7 @@ func commandOutByDefault(c *Command, hiddenAbove bool) bool {
 // flagOutByDefault reports whether a flag is left out of tool parameters unless it says
 // `agent: true`.
 func flagOutByDefault(f FlagInput) bool {
-	return f.ShortCircuit || inputOutByDefault(f.Hidden, f.Deprecated, f.Schema)
+	return f.ShortCircuit || f.Role == "chdir" || inputOutByDefault(f.Hidden, f.Deprecated, f.Schema)
 }
 
 // inputOutByDefault reports whether an input is left out of tool parameters unless it says
@@ -342,4 +353,14 @@ func embedKnobProblems(i int, f Feature, pf programFeature) []error {
 		return []error{at("embed", severityError, f.Type+" writes files for agents into the repository, not into the binary; `embed` and `embed_dir` don't apply, so remove them (use `file` to choose where they go)")}
 	}
 	return nil
+}
+
+// secretAgentMessage is the warning for `agent: true` on a secret flag or argument: tool servers
+// never put a secret on the command line, where other local users can read it.
+func secretAgentMessage(s *InputSchema) string {
+	const msg = "has `agent: true` on a secret, which a tool can't use: tool servers never pass a secret on the command line, where other local users can see it; "
+	if s.Variable != nil {
+		return msg + "supply it through its environment variable instead"
+	}
+	return msg + "declare an environment variable with `variable:` and supply it through that instead"
 }

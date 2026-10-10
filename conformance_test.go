@@ -1130,6 +1130,7 @@ func conformanceCases() []inputCase {
 		{id: "DEP-04", args: []string{"deploy"}, check: confDependencyUnless},
 		{id: "DEP-05", args: []string{"deploy"}, check: confDependencyTyped},
 		{id: "SEC-04", args: []string{"deploy"}, check: confSecretLiteralFree},
+		{id: "FLAG-27", args: []string{"deploy"}, check: confDigitsAfterSwitch},
 	}
 }
 
@@ -1200,6 +1201,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"OUT-01", "OUT-02", "OUT-03", "OUT-04",
 		"PROF-01", "PROF-02", "PROF-03", "PROF-04", "PROF-05", "PROF-06", "PROF-07", "PROF-08", "PROF-09",
 		"WRITE-01", "WRITE-02", "WRITE-03", "WRITE-04", "WRITE-05", "WRITE-06", "WRITE-07", "WRITE-08",
+		"FLAG-27",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {

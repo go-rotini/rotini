@@ -1,0 +1,32 @@
+# A command offered to agents that reads stdin can't have a tool parameter named "stdin".
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: stdin
+      identifiers: [--stdin]
+      cascading: true
+      schema: { type: bool }
+  commands:
+    # Correct: the input named stdin isn't a tool parameter, or the command isn't a tool. No
+    # problem.
+    - name: hidden-input
+      stdin: { format: text }
+      arguments:
+        - name: stdin
+          hidden: true
+          schema: { type: string }
+    - name: kept
+      agent: false
+      stdin: { format: text }
+      arguments:
+        - name: stdin
+          schema: { type: string }
+    # An argument, and a cascading flag from the root.
+    - name: argument
+      stdin: { format: text }
+      arguments:
+        - name: stdin
+          schema: { type: string }
+    - name: inherited
+      stdin: { format: json, schema: { type: object } }

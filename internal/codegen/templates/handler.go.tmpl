@@ -41,7 +41,7 @@ func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Contex
 			rtx.HaltWith(err)
 			return
 		}
-{{if .NewShape}}
+
 		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
 			rtx.HaltWith(err)
 			return
@@ -49,11 +49,6 @@ func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Contex
 
 		rtx.HaltWithCode(0)
 		return
-{{- else}}
-		fmt.Fprintln(rtx.Stdout, page)
-		rtx.HaltWithCode(0)
-		return
-{{- end}}
 	}
 {{- end}}
 {{- if .RootVersionFlag}}
@@ -65,24 +60,22 @@ func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Contex
 		}
 {{if .NewShape}}
 		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+{{- else}}
+		if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
+{{- end}}
 			rtx.HaltWith(err)
 			return
 		}
 
 		rtx.HaltWithCode(0)
 		return
-{{- else}}
-		fmt.Fprintln(rtx.Stdout, version)
-		rtx.HaltWithCode(0)
-		return
-{{- end}}
 	}
 {{- end}}
 }
 {{- end}}
 
 func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
-{{- if and .HelpFlag .VersionFlag .NewShape}}
+{{- if and .HelpFlag .VersionFlag}}
 	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil {
 		if argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
 			if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
@@ -99,8 +92,11 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 			if version == "" {
 				version = "unknown"
 			}
-
+{{if .NewShape}}
 			if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+{{- else}}
+			if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
+{{- end}}
 				rtx.HaltWith(err)
 				return
 			}
@@ -109,49 +105,9 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 			return
 		}
 	}
-{{else if and .HelpFlag .VersionFlag}}
-	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil {
-		if argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
-			fmt.Fprintln(rtx.Stdout, rtx.Help())
-			rtx.HaltWithCode(0)
-			return
-		}
-
-		if argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
-			version := rtx.Version()
-			if version == "" {
-				version = "unknown"
-			}
-
-			fmt.Fprintln(rtx.Stdout, version)
-			rtx.HaltWithCode(0)
-			return
-		}
-	}
-{{else if and .HelpFlag .NewShape}}
-	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil && argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
-		if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
-			rtx.HaltWith(err)
-			return
-		}
-
-		rtx.HaltWithCode(0)
-		return
-	}
 {{else if .HelpFlag}}
 	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil && argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
-{{else if and .VersionFlag .NewShape}}
-	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil && argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
-		version := rtx.Version()
-		if version == "" {
-			version = "unknown"
-		}
-
-		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
 			rtx.HaltWith(err)
 			return
 		}
@@ -165,8 +121,15 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		if version == "" {
 			version = "unknown"
 		}
+{{if .NewShape}}
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+{{- else}}
+		if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
+{{- end}}
+			rtx.HaltWith(err)
+			return
+		}
 
-		fmt.Fprintln(rtx.Stdout, version)
 		rtx.HaltWithCode(0)
 		return
 	}
@@ -191,26 +154,20 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.HaltWith(err)
 		return
 	}
-{{if .NewShape}}
+
 	if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
 		rtx.HaltWith(err)
 	}
-{{- else}}
-	fmt.Fprintln(rtx.Stdout, page)
-{{- end}}
 {{- else if .CompletionArg}}
 	script, err := {{.CompletionFunc}}(inputs.{{.Prefix}}.Arguments.{{.CompletionArg}})
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
-{{if .NewShape}}
+
 	if _, err := fmt.Fprint(rtx.Stdout, script); err != nil {
 		rtx.HaltWith(err)
 	}
-{{- else}}
-	fmt.Fprint(rtx.Stdout, script)
-{{- end}}
 {{- else if .VersionOnly}}
 	version := rtx.Version()
 	if version == "" {
@@ -218,28 +175,28 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 {{if .NewShape}}
 	if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+{{- else}}
+	if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
+{{- end}}
 		rtx.HaltWith(err)
 	}
-{{- else}}
-	fmt.Fprintln(rtx.Stdout, version)
-{{- end}}
 {{- else if and .PrintHelpWhenBare .NewShape}}
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
 {{- else if .PrintHelpWhenBare}}
-	fmt.Fprintln(rtx.Stdout, rtx.Help())
+	if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
 	rtx.HaltWithCode(1)
-{{- else if and .Redact .NewShape}}
+{{- else if .Redact}}
 	if _, err := fmt.Fprintln(rtx.Stdout, "{{.Invocation}}"); err != nil {
 		rtx.HaltWith(err)
 	}
-{{- else if .Redact}}
-	fmt.Fprintln(rtx.Stdout, "{{.Invocation}}")
-{{- else if .NewShape}}
+{{- else}}
 	if _, err := fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "{{.Invocation}}", inputs); err != nil {
 		rtx.HaltWith(err)
 	}
-{{- else}}
-	fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "{{.Invocation}}", inputs)
 {{- end}}
 }

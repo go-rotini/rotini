@@ -199,7 +199,7 @@ func (p *program) emitModelsFile() error {
 	if err != nil {
 		return err
 	}
-	if err := duplicateDecls(p.layout.modelsFile, generatedNames(p.exitConstants(), false), content); err != nil {
+	if err := duplicateDecls(p.layout.modelsFile, generatedNames(p.exitConstants(), false, false), content); err != nil {
 		return err
 	}
 	return p.plan.write(filepath.Join(p.layout.modelsDir, p.layout.modelsFile), content)
@@ -211,7 +211,7 @@ func (p *program) emitCmdFile() error {
 	if err != nil {
 		return err
 	}
-	if err := duplicateDecls(p.layout.cmdFile, generatedNames(p.exitConstants(), p.contractGo != nil), content); err != nil {
+	if err := duplicateDecls(p.layout.cmdFile, generatedNames(p.exitConstants(), p.contractGo != nil, p.toolsGo != nil), content); err != nil {
 		return err
 	}
 	return p.plan.write(filepath.Join(p.layout.cmdDir, p.layout.cmdFile), content)

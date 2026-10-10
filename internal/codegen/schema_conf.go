@@ -155,10 +155,10 @@ type SchemasConfig struct {
 type ValidateConfig struct {
 	// fast = stop at and report the first problem; collect = run to completion and report every problem at once (default).
 	Fail string `json:"fail,omitempty"`
-	// Opt-in: warn about each env or config input that no flag can also set (through the flag's `variable:` or `key:`), so `--help` shows the whole configuration surface. Secret inputs are exempt, since a secret belongs in a file or the environment, not on the command line, and so are nested env inputs (`nesting:`), since no single flag can mirror a family of variables. Warnings never fail validation.
+	// Opt-in: warn about each env or config input that no flag, or argument of its command, can also set (through its `variable:` or `key:`), so `--help` shows the whole configuration surface. Secret inputs are exempt, since a secret belongs in a file or the environment, not on the command line, and so are nested env inputs (`nesting:`), since no single flag can mirror a family of variables. Warnings never fail validation.
 	FlagsFirst bool `json:"flags_first,omitempty"`
 	// Opt-in: warn when the root command's name, the program's name, isn't a POSIX utility name: 2 to 9 lowercase letters and digits. Sub-command names aren't checked. Warnings never fail validation.
 	PosixNames bool `json:"posix_names,omitempty"`
-	// The name of an environment variable holding the release being prepared (X.Y.Z). When it is set, `rotini validate` fails for each command or input whose `removed_in` (or a `deprecated_identifiers_removed_in` entry) is at or below that release, so a planned removal is not forgotten. `rotini validate --release` takes precedence. Unset or empty, nothing is checked. Only `rotini validate` reads it: `rotini generate` never runs this check.
+	// The name of an environment variable holding the release being prepared (X.Y.Z). When it is set, `rotini validate` fails for each command or input whose `removed_in` (or a `deprecated_identifiers_removed_in` entry) is at or below that release, so a planned removal is not forgotten, and `rotini diff` reports a removal planned for that release as expected rather than breaking. The `--release` flag of either command takes precedence. Unset or empty, nothing is checked. `rotini generate` never runs this check.
 	ReleaseEnv string `json:"release_env,omitempty"`
 }

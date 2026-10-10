@@ -67,8 +67,8 @@ func (rtx *Context) WriteOutput[T any](v T, format string, render func(io.Writer
 // WriteOutputItem writes one item of a stream to rtx.Stdout, for a command that writes its output
 // item by item as each is ready: compact json, one value per line; a yaml document starting
 // "---"; any other format by render. toml cannot be streamed. Its checks are WriteOutput's, with
-// the item checked against the declared shape, which for such a command is one item. A command
-// that declares an output must declare it a stream (output_stream) to write items.
+// the item checked against the declared shape, which for a command that declares output_stream
+// is one item. On a command that doesn't, the item is checked as WriteOutput checks a value.
 func (rtx *Context) WriteOutputItem[T any](item T, format string, render func(io.Writer, string, T) error) error {
 	return writeOutput(rtx, rtx.Stdout, item, format, render, true)
 }
@@ -130,11 +130,8 @@ func writeOutput[T any](rtx *Context, w io.Writer, v T, format string, render fu
 	cmd := rtx.invokedCommand()
 	name := rtx.commandName()
 	out := cmd.Output
-	switch {
-	case out != nil && out.Stream && !item:
+	if out != nil && out.Stream && !item {
 		return InternalError(fmt.Errorf("%s: declares a stream (output_stream); write each item with WriteOutputItem", name))
-	case out != nil && !out.Stream && item:
-		return InternalError(fmt.Errorf("%s: writes items, but its spec doesn't declare output_stream: true", name))
 	}
 	sel, selected := any(v).(Selection)
 	if selected && sel.from == nil {

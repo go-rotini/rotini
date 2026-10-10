@@ -137,7 +137,8 @@
         "values_from": { "type": "string", "pattern": "^output(\\.[A-Za-z_][A-Za-z0-9_-]*)*$", "description": "The place in the command's output whose field names are this input's allowed values (`output`, `output.tasks`): the enum in its `schema` (on `items` for a list) lists them, sorted, and changes when the output's fields do." },
         "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
         "stability": { "$ref": "#/definitions/Stability" },
-        "agent": { "$ref": "#/definitions/Agent" }
+        "agent": { "$ref": "#/definitions/Agent" },
+        "from": { "type": "array", "items": { "enum": ["file", "stdin", "value"] }, "description": "Where a value typed on the command line may come from besides the text itself: `file`, a value starting with @ is replaced by that file's contents (@@ is a literal @); `stdin`, a value of exactly - is replaced by what is piped on stdin. A secret argument whose list leaves out `value` refuses any other value typed on the command line: pass the secret through a file or stdin." }
       }
     },
     "Flag": {

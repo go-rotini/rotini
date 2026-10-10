@@ -23,3 +23,7 @@ command:
       schema: {type: string, variable_file: WHO_FILE}
     - name: target
       schema: {type: string, variable: APP_TARGET, variable_file: APP_TARGET_FILE}
+  # Stdin is a document, not a variable.
+  stdin:
+    format: text
+    schema: {variable_file: INPUT_FILE}

@@ -1,0 +1,8 @@
+version: 0.0.0
+command:
+  name: db
+  summary: database commands
+  topics:
+    - name: schemas
+      summary: how schemas work
+      body: A schema is a shape.

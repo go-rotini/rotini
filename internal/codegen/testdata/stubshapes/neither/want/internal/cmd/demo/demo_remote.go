@@ -17,6 +17,10 @@ type demoRemoteHandler struct {
 }
 
 func (*demoRemoteHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, rtx.Help())
+	if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
 	rtx.HaltWithCode(1)
 }

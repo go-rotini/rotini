@@ -220,8 +220,8 @@ func validateStore(chain []Command, store *parsedInputs) error {
 //
 // Stdin is read once per run (see stdinState), so a later call binds the same payload. A
 // streamed field is an iterator over the run's one shared stream, read as the handler ranges
-// over it. A read of piped stdin ends when the run is canceled, with an [*InputError] whose
-// cause is the cancellation's.
+// over it. A read of piped stdin ends when the run is canceled, or when the context the hook
+// holds ([Context.Context]) ends, with an [*InputError] whose cause is the cancellation's.
 func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argValues func(name string) ([]string, error)) error {
 	if v.Kind() != reflect.Struct || v.NumField() == 0 {
 		return nil
@@ -1218,7 +1218,7 @@ func (b *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot file
 }
 
 // openFileSource locates and parses one config_files entry, returning the source and the file
-// it resolved to. rotini expands the path and runs the discover search itself, from the run's
+// it resolved to. Rotini expands the path and runs the discover search itself, from the run's
 // view, so recon reads exactly the absolute path it is given.
 func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]string, view *osView) (recon.Source, string, error) {
 	opts := []recon.FileOption{recon.WithPathExpansion(false)}
@@ -1735,9 +1735,14 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		if label == "" {
 			label = key
 		}
-		// The user set a variable, not an input: name what they typed, and where it came from
-		// when that was not the environment itself.
-		if v := f.Tag.Get("env"); v != "" && cfg == nil {
+		// The user set a variable or a key, not an input: name what they set, and where it came
+		// from when that was not the environment itself.
+		origin := ""
+		switch v := f.Tag.Get("env"); {
+		case cfg != nil:
+			label = "config key " + key
+			origin = cfg.labels().origin(val.Source())
+		case v != "":
 			label = chosenEnv(view, v)
 			label += view.inputOrigin(label)
 		}
@@ -1750,7 +1755,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 			typ = channelGoType(s.Field(j).Type()) // an empty path is no path: nothing to check
 		}
 		if err := checkChannelEnum(channelOf(cfg), label, enum, boundStrings(s.Field(j), vals), secret); err != nil {
-			return err
+			return withOrigin(err, origin)
 		}
 		if enum.rewrites() {
 			canonicalizeField(s.Field(j), enum)
@@ -1759,15 +1764,33 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		// arrives as one string.
 		if elems, count, ok := typedElems(s.Field(j)); ok && isArrayType(typ) {
 			if err := checkTypedConstraints(label, typ, c, count, elems, secret, view.base()); err != nil {
-				return err
+				return withOrigin(err, origin)
 			}
 			continue
 		}
 		if err := checkConstraints(label, typ, c, vals, secret, view.base()); err != nil {
-			return err
+			return withOrigin(err, origin)
 		}
 	}
 	return nil
+}
+
+// withOrigin appends origin, a " (from configuration file …)" suffix, to a value error's message.
+func withOrigin(err error, origin string) error {
+	if origin == "" {
+		return err
+	}
+	switch e := err.(type) { //nolint:errorlint // the value checks return a bare error
+	case *ParseError:
+		cp := *e
+		cp.Msg += origin
+		return &cp
+	case *InputError:
+		cp := *e
+		cp.Msg += origin
+		return &cp
+	}
+	return err
 }
 
 // channelOf names the channel an Env/Config pass is working on: config when it was handed the

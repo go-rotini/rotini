@@ -1,6 +1,7 @@
 # R12 — the testscript recipe: a test in the main package runs the program's own main as a
 # command in script files, with the user's config directory kept out. The test file and the
 # script are the ones the recipes page shows.
+# It needs the network on a cold module cache: `go get` fetches a third-party module.
 
 gomodinit example.com/tsdemo
 

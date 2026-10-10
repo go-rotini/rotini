@@ -10,11 +10,14 @@ import (
 	"net/mail"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/go-rotini/recon"
 )
 
 // ArgvError is a value [ArgvOf] can't write as a command line: a secret, a config or stdin
@@ -73,9 +76,10 @@ func ArgvPath(names ...string) ArgvOption {
 // flag, and a separator-split one quotes items that hold the separator. An object is JSON, a
 // count repeats the flag, and false on a negatable flag is its negated form (--no-name, or the
 // declared one). A "--" always comes before the invoked command's positionals, so a positional
-// that looks like a flag or a command stays a positional; it shows in [Context.DashIndex]. A passthrough command's words follow its name
-// as they are. On a flag or argument reading `@file` values, a value starting with @ is written
-// with the @ doubled.
+// that looks like a flag or a command stays a positional; it shows in [Context.DashIndex]. A
+// passthrough command's words follow its name as they are, except that with response files on,
+// a word before any "--" that starts with the prefix has it doubled. On a flag or argument
+// reading `@file` values, a value starting with @ is written with the @ doubled.
 //
 // A value no command line can supply is an [*ArgvError], never silently dropped:
 //   - a secret flag or argument, unless [ArgvSecrets] is passed;
@@ -123,6 +127,9 @@ func ArgvOf[T any](def Definition, v T, set Presence, opts ...ArgvOption) (argv,
 		return nil, nil, err
 	}
 	w := argvWriter{cfg: cfg, set: set, used: map[FieldPath]bool{}}
+	if def.ResponseFiles != nil {
+		w.responsePrefix = def.ResponseFiles.Prefix
+	}
 	for i, frame := range chain {
 		if i > 0 {
 			w.argv = append(w.argv, frame.Name)
@@ -195,6 +202,8 @@ type argvWriter struct {
 	used      map[FieldPath]bool
 	reached   []Command // the commands named so far, the one being written last
 	argv, env []string
+
+	responsePrefix string // the response-file prefix; "" when response files are off
 }
 
 // given reports whether set names p, and marks p as consumed.
@@ -473,9 +482,29 @@ func (w *argvWriter) arguments(top string, ci reflect.Value, frame Command, leaf
 	}
 	if !frame.Passthrough {
 		w.argv = append(w.argv, "--")
+	} else {
+		words = escapeResponseWords(words, w.responsePrefix)
 	}
 	w.argv = append(w.argv, words...)
 	return nil
+}
+
+// escapeResponseWords doubles the response-file prefix on the raw words before the first "--",
+// which a run would otherwise expand as response files.
+func escapeResponseWords(words []string, prefix string) []string {
+	if prefix == "" {
+		return words
+	}
+	out := slices.Clone(words)
+	for i, w := range out {
+		if w == "--" {
+			break
+		}
+		if len(w) > len(prefix) && strings.HasPrefix(w, prefix) {
+			out[i] = prefix + w
+		}
+	}
+	return out
 }
 
 // argWords spells one argument's value as words. A variadic with a separator quotes each item
@@ -537,6 +566,10 @@ func (w *argvWriter) envInput(p FieldPath, tag reflect.StructTag, f reflect.Valu
 		f = f.Elem()
 	}
 	layout := tag.Get("layout")
+	sep := recon.ParseTag(tag.Get("recon")).Separator
+	if sep == "" {
+		sep = ","
+	}
 	var text string
 	switch {
 	case f.Kind() == reflect.Map:
@@ -544,7 +577,7 @@ func (w *argvWriter) envInput(p FieldPath, tag reflect.StructTag, f reflect.Valu
 		if err != nil {
 			return &ArgvError{Field: p, Reason: err.Error()}
 		}
-		if text, err = envList(pairs); err != nil {
+		if text, err = envList(pairs, sep); err != nil {
 			return &ArgvError{Field: p, Reason: err.Error()}
 		}
 	case f.Kind() == reflect.Slice && !isScalarSlice(f.Type()):
@@ -557,7 +590,7 @@ func (w *argvWriter) envInput(p FieldPath, tag reflect.StructTag, f reflect.Valu
 			items[i] = s
 		}
 		var err error
-		if text, err = envList(items); err != nil {
+		if text, err = envList(items, sep); err != nil {
 			return &ArgvError{Field: p, Reason: err.Error()}
 		}
 	default:
@@ -570,17 +603,17 @@ func (w *argvWriter) envInput(p FieldPath, tag reflect.StructTag, f reflect.Valu
 	return nil
 }
 
-// envList joins list items with commas, as an env input's list is read.
-func envList(items []string) (string, error) {
+// envList joins list items with the env input's separator, as its list is read.
+func envList(items []string, sep string) (string, error) {
 	for _, it := range items {
-		if strings.Contains(it, ",") {
-			return "", fmt.Errorf("the item %q holds a comma, which an environment variable's list can't", it)
+		if strings.Contains(it, sep) {
+			return "", fmt.Errorf("the item %q holds the separator %q, which an environment variable's list can't", it, sep)
 		}
 		if strings.TrimSpace(it) != it {
 			return "", fmt.Errorf("the item %q has surrounding space, which an environment variable's list drops", it)
 		}
 	}
-	return strings.Join(items, ","), nil
+	return strings.Join(items, sep), nil
 }
 
 // envNested writes a nested env input (envnest:"BASE,SEP") as one variable per string leaf.
@@ -641,20 +674,15 @@ func argvText(f reflect.Value, layout string) (string, error) {
 		f = f.Elem()
 	}
 	switch v := f.Interface().(type) {
-	case *url.URL:
-		if v == nil {
-			return "", errors.New("a nil URL can't be written")
+	case *url.URL, *time.Location, *regexp.Regexp:
+		if f.IsNil() {
+			return "", fmt.Errorf("a nil %s can't be written", valueTypeLabels[f.Type()])
 		}
-		return v.String(), nil
+		return parsedText(f, fmt.Sprint(v))
 	case mail.Address:
-		return v.String(), nil
-	case *time.Location:
-		if v == nil {
-			return "", errors.New("a nil time zone can't be written")
-		}
-		return v.String(), nil
+		return parsedText(f, v.String())
 	case net.HardwareAddr:
-		return v.String(), nil
+		return parsedText(f, v.String())
 	case time.Time:
 		return timeText(v, layout)
 	case time.Duration:
@@ -681,6 +709,16 @@ func argvText(f reflect.Value, layout string) (string, error) {
 		return "", fmt.Errorf("a %T in an untyped input can't be written; it reads text only", f.Interface())
 	}
 	return "", fmt.Errorf("a %s can't be written as text", f.Type())
+}
+
+// parsedText checks that s, the spelling of a value type rotini parses itself, reads back to
+// the value f holds.
+func parsedText(f reflect.Value, s string) (string, error) {
+	back, err := valueParsers[f.Type()](s)
+	if err != nil || fmt.Sprint(back.Interface()) != fmt.Sprint(f.Interface()) {
+		return "", fmt.Errorf("the %s %q doesn't read back as it is", valueTypeLabels[f.Type()], s)
+	}
+	return s, nil
 }
 
 // marshaledText spells a value whose type parses itself with UnmarshalText: by its MarshalText,

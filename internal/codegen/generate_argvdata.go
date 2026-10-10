@@ -41,12 +41,36 @@ func exitStatusLiteral(entries []ExitStatusEntry) string {
 	return "ExitStatus: " + l + ",\n"
 }
 
-// composedInputsType names the inputs type of a command in a composed child's package, or ""
-// when the subtree delegates to a hand-written package, or comes from a further `$ref`, whose
-// types the parent doesn't import.
-func composedInputsType(ctx composeCtx, method string) string {
-	if ctx.passthrough || ctx.nested {
+// composedTypeName names a generated type (suffix "Inputs" or "Output") of the command at path
+// in a composed subtree, qualified by the package of the spec that declares the command, or ""
+// when the subtree's types live in no package the parent imports (a hand-written handler
+// package).
+func composedTypeName(ctx composeCtx, path, suffix string) string {
+	if ctx.typeAlias == "" {
 		return ""
 	}
-	return ctx.alias + "." + method + "Inputs"
+	rel := strings.TrimPrefix(strings.TrimPrefix(path, ctx.typeRoot), "_")
+	return ctx.typeAlias + "." + ctx.typePascal + toPascalCase(rel) + suffix
+}
+
+// nestedTypeAlias imports the generated package of a spec `$ref`'d inside a composed child, for
+// its commands' types, and returns its alias; "" when the parent can't name them: the `$ref`
+// (or the composed child above it) delegates to a hand-written package, Go forbids the import,
+// or the alias is taken by another package.
+func (gp *program) nestedTypeAlias(rr resolvedRef, c Command, ctx composeCtx, moduleName string) string {
+	if ctx.typeAlias == "" || c.Handler != nil {
+		return ""
+	}
+	imp := childCmdImport(rr.dir, rr.module)
+	if checkImportableAcrossModules(imp, rr.module, moduleName, c.Ref) != nil {
+		return ""
+	}
+	alias := identAlias(rr.spec.Command.Name)
+	for _, ci := range gp.childImports {
+		if ci.Alias == alias && ci.Path != imp {
+			return ""
+		}
+	}
+	gp.addImport(alias, imp)
+	return alias
 }

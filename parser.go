@@ -45,9 +45,9 @@ type parsedInputs struct {
 	dashAt   int
 
 	// lateFlag records the first word after an options_first command's first argument that
-	// would have been a flag of the chain: [0] is the word, [1] the command's name. A resulting
-	// too-many-arguments error says flags go first. nil when none.
-	lateFlag *[2]string
+	// would have been a flag of the chain. A resulting too-many-arguments error says flags go
+	// first. nil when none.
+	lateFlag *string
 
 	// dir is the run's injected working directory, which relative existingfile and existingdir
 	// values are checked against; "" is the process's.
@@ -80,10 +80,10 @@ func (p *parsedInputs) detachedHint(extra []string) string {
 // lateFlagHint is the hint a too-many-arguments error carries when one of the extra words is
 // a flag typed after an options_first command's first argument, else "".
 func (p *parsedInputs) lateFlagHint(extra []string) string {
-	if p == nil || p.lateFlag == nil || !slices.Contains(extra, p.lateFlag[0]) {
+	if p == nil || p.lateFlag == nil || !slices.Contains(extra, *p.lateFlag) {
 		return ""
 	}
-	return fmt.Sprintf("; flags go before the first argument of %q (it takes options first): %s", p.lateFlag[1], p.lateFlag[0])
+	return "; flags go before its first argument (it takes options first): " + *p.lateFlag
 }
 
 // covers reports whether chain frame i is one this validation pass judges.
@@ -345,7 +345,7 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 	switch {
 	case fdef.Type == "count":
 		if hasInline {
-			return "", i, &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("flag %q counts occurrences and takes no value", name), Flag: name}
+			return "", i, &ParseError{Kind: ParseKindInvalidValue, Msg: name + " counts occurrences and takes no value", Flag: name}
 		}
 		return "1", i, nil // each occurrence appends one marker; the input reader tallies them
 	case fdef.Type == "bool":
@@ -360,7 +360,7 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 	default:
 		i++
 		if i >= len(argv) {
-			return "", i, &ParseError{Kind: ParseKindNeedsValue, Msg: fmt.Sprintf("flag %q needs a value", name), Flag: name}
+			return "", i, &ParseError{Kind: ParseKindNeedsValue, Msg: name + " needs a value", Flag: name}
 		}
 		return argv[i], i, nil
 	}
@@ -415,7 +415,7 @@ func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag
 		if hasInline {
 			return 0, &ParseError{
 				Kind: ParseKindInvalidValue,
-				Msg:  fmt.Sprintf("flag %q is the negated form and takes no value; use %q to set one", name, "--"+fdef.Name),
+				Msg:  fmt.Sprintf("%s is the negated form and takes no value; use --%s to set one", name, fdef.Name),
 				Flag: name,
 			}
 		}
@@ -592,7 +592,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 		}
 		if optionsDone && store.lateFlag == nil && isFlag(chain[:depth], tok) {
 			if name, _, _ := splitFlag(tok); flagNamed(chain[:depth], name) {
-				store.lateFlag = &[2]string{tok, chain[leaf].Name}
+				store.lateFlag = &tok
 			}
 		}
 		if err := addArg(tok); err != nil {
@@ -698,14 +698,23 @@ func checkFlagShape(fd FlagDef, label string, vals []string) error {
 // checkMapPair reports a map input's value that is not a key=value pair with a non-empty key.
 // label names the input as the user supplied it.
 func checkMapPair(label, v string, secret bool) error {
+	if msg := mapPairProblem(label, v, secret); msg != "" {
+		return &ParseError{Kind: ParseKindInvalidValue, Msg: msg, Flag: label}
+	}
+	return nil
+}
+
+// mapPairProblem is the message for a map entry that is not key=value or whose key is empty or
+// only whitespace, else "". Flags and environment variables share it.
+func mapPairProblem(label, v string, secret bool) string {
 	key, _, ok := strings.Cut(v, "=")
 	switch {
 	case !ok:
-		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, secret)), Flag: label}
-	case key == "":
-		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s needs a key before \"=\" (got %q)", label, redactValue(v, secret)), Flag: label}
+		return fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, secret))
+	case strings.TrimSpace(key) == "":
+		return fmt.Sprintf("%s needs a key before \"=\" (got %q)", label, redactValue(v, secret))
 	}
-	return nil
+	return ""
 }
 
 // shapeTypes are the declared types whose values a short-circuited run still converts. Such a
@@ -787,16 +796,17 @@ func strayCommand(leaf Command, si scopeInputs, store *parsedInputs) error {
 
 // extraPositionals reports positionals the leaf has no argument for, unless a variadic argument
 // absorbs them.
-func extraPositionals(leaf Command, si scopeInputs, store *parsedInputs) error {
+func extraPositionals(chain []Command, si scopeInputs, store *parsedInputs) error {
+	leaf := chain[len(chain)-1]
 	n := len(leaf.Arguments)
 	if hasVariadicArg(leaf.Arguments) || len(si.args) <= n {
 		return nil
 	}
 	hint := store.detachedHint(si.args[n:]) + store.lateFlagHint(si.args[n:]) // only a word that is one too many
 	if n == 0 {
-		return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args)) + hint, Command: leaf.Name}
+		return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%s takes no arguments (got %d)", pathOf(chain), len(si.args)) + hint, Command: leaf.Name}
 	}
-	return &ParseError{Kind: ParseKindTooManyArguments, Msg: fmt.Sprintf("%q accepts at most %d %s (got %d)", leaf.Name, n, plural("argument", n), len(si.args)) + hint, Command: leaf.Name}
+	return &ParseError{Kind: ParseKindTooManyArguments, Msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", pathOf(chain), n, plural("argument", n), len(si.args)) + hint, Command: leaf.Name}
 }
 
 // validate enforces the chain's declarations against a parsed store, limited to the frames the
@@ -851,7 +861,7 @@ func validate(chain []Command, store *parsedInputs) error {
 	if !leafCovered {
 		return nil
 	}
-	if err := extraPositionals(leaf, si, store); err != nil {
+	if err := extraPositionals(chain, si, store); err != nil {
 		return err
 	}
 	return validateArgs(leaf, si, waived, store.dir, store.clock)
@@ -1407,12 +1417,17 @@ func isShortCluster(name string) bool {
 // the cluster is rejoined with it: -lapp=web is -l "app=web". An "=value" directly after the
 // last flag belongs to that flag, a bool included (-Aw=false sets -w false).
 func parseCluster(chain []Command, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value, typed string) error) (int, error) {
+	var prev FlagDef
 	for k := range len(body) {
 		short := "-" + body[k:k+1]
 		fdef, idx, ok := findFlagIndex(chain, short)
 		if !ok {
+			if err := digitsAfterSwitch(prev, body, k, hasInline); err != nil {
+				return 0, err
+			}
 			return 0, &ParseError{Kind: ParseKindUnknownFlag, Msg: fmt.Sprintf("unknown flag %q", short), Flag: short, Token: short, Candidates: chainFlagIdentifiers(chain)}
 		}
+		prev = fdef
 		if fdef.Type == "bool" && hasInline && k == len(body)-1 {
 			return 0, addFlag(idx, fdef, inline, short)
 		}
@@ -1438,7 +1453,7 @@ func parseCluster(chain []Command, body, inline string, hasInline bool, argv []s
 			return 0, addFlag(idx, fdef, fdef.ImplicitValue, short)
 		default:
 			if i+1 >= len(argv) {
-				return 0, &ParseError{Kind: ParseKindNeedsValue, Msg: fmt.Sprintf("flag %q needs a value", short), Flag: short}
+				return 0, &ParseError{Kind: ParseKindNeedsValue, Msg: short + " needs a value", Flag: short}
 			}
 			return 1, addFlag(idx, fdef, argv[i+1], short)
 		}
@@ -1448,6 +1463,35 @@ func parseCluster(chain []Command, body, inline string, hasInline bool, argv []s
 		return 0, &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("flag %q does not take a value", "-"+body), Flag: "-" + body}
 	}
 	return 0, nil
+}
+
+// digitsAfterSwitch reports a cluster whose undeclared rest, from position k, is all digits
+// right after a count or bool flag, as in -v3: a number given to a flag that takes none. It
+// carries no candidates, since the digits name no flag.
+func digitsAfterSwitch(prev FlagDef, body string, k int, hasInline bool) error {
+	if k == 0 || hasInline || (prev.Type != "count" && prev.Type != "bool") {
+		return nil
+	}
+	digits := body[k:]
+	if strings.TrimLeft(digits, "0123456789") != "" {
+		return nil
+	}
+	flag := "-" + body[k-1:k]
+	typed := flag + digits
+	if prev.Type == "bool" {
+		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s takes no value (got %q)", flag, typed), Flag: flag, Token: typed}
+	}
+	n, err := strconv.Atoi(digits)
+	if err != nil || n > 3 {
+		n = 3
+	}
+	example := flag + strings.Repeat(body[k-1:k], max(n, 1)-1)
+	return &ParseError{
+		Kind:  ParseKindInvalidValue,
+		Msg:   fmt.Sprintf("%s counts occurrences and takes no value; repeat it instead (%s), not %q", flag, example, typed),
+		Flag:  flag,
+		Token: typed,
+	}
 }
 
 // findFlagIndex searches the chain leaf→root for a flag whose identifiers include name,

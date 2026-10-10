@@ -1,5 +1,6 @@
 # Help topics are root-only pages shown by `help <name>`, so a name is used once and never by a
-# root command, alias or plugin, and each topic has exactly one of body and generate.
+# root command, alias or plugin, and each topic has exactly one of body and generate. A spec
+# mounted with $ref contributes no topics.
 version: 0.0.0
 command:
   name: demo
@@ -48,3 +49,6 @@ command:
         - name: inner
           summary: inner topic
           body: Inner.
+    # A mounted spec's own topics are not part of this program.
+    - name: db
+      $ref: ./child.spec.yaml

@@ -43,3 +43,8 @@ command:
       config:
         - name: region
           schema: { type: '[]string' }
+    # An argument's config fallback reads the key too.
+    - name: get
+      arguments:
+        - name: port
+          schema: { type: string, key: server.port }

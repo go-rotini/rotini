@@ -96,7 +96,8 @@ type layerCore struct {
 // a later call binds the same payload; a streamed stdin is an iterator over the run's one
 // stream instead. It is not read at all, and the field stays nil, under a short-circuit flag or
 // when the command's `unless_argument` file was given. A read of piped stdin ends when the run
-// is canceled (by a trapped signal, for one), with an [*InputError] whose cause is the
+// is canceled (by a trapped signal, for one) or when the hook's [Context.Context] ends (a
+// deadline set with [Context.SetContext], for one), with an [*InputError] whose cause is the
 // cancellation's.
 //
 // T must be the inputs type generated for the command whose hook is running ([Context.Command]),

@@ -23,6 +23,23 @@ cmp out.txt want.txt
 [linux] ! execout /dev/full rotini completion bash
 [linux] stderr 'no space left on device'
 
+# Stubs seeded for an older project shape (--help not short_circuit) check their writes too.
+exec rotini generate cmd/old/.rotini.spec.yaml --config cmd/old/.rotini.conf.yaml
+exec go build -o old$exe ./cmd/old
+grep 'if _, err := fmt.Fprintln\(rtx.Stdout, version\); err != nil' internal/cmd/old/old_version.go
+exec ./old$exe version
+stdout '^0\.0\.0$'
+[linux] ! execout /dev/full ./old$exe --help
+[linux] stderr 'no space left on device'
+[linux] ! execout /dev/full ./old$exe --version
+[linux] stderr 'no space left on device'
+[linux] ! execout /dev/full ./old$exe build x
+[linux] stderr 'no space left on device'
+[linux] ! execout /dev/full ./old$exe help
+[linux] stderr 'no space left on device'
+[linux] ! execout /dev/full ./old$exe version
+[linux] stderr 'no space left on device'
+
 -- want.txt --
 line 1
 line 2
@@ -93,3 +110,42 @@ func (*reportHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.HaltWith(err)
 	}
 }
+-- cmd/old/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: old
+  summary: an older project shape
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [-v, --version]
+      schema: { type: bool }
+  commands:
+    - name: build
+      summary: build it
+      arguments:
+        - name: target
+          schema: { type: string, required: true }
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+-- cmd/old/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/old/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/old/zz_old.go
+      package: old
+  features:
+    - type: help
+      enabled: true

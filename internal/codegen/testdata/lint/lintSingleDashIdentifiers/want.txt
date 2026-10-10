@@ -1,4 +1,4 @@
 spec: .rotini.spec.yaml:7:7: command demo: flag "xy": identifier "-xy" is also the bundle -x -y of declared short flags; the exact identifier always wins, so they can never be bundled as -xy. Use --xy
 spec: .rotini.spec.yaml:19:11: command demo/run: flag "ab": identifier "-ab" is also the bundle -a -b of declared short flags; the exact identifier always wins, so they can never be bundled as -ab. Use --ab
 spec: .rotini.spec.yaml:25:11: command demo/run: flag "name": identifier "-name" also reads as -n with the value "ame"; the exact identifier always wins, so -n can't be given a value starting "ame" attached. Use --name
-warning: spec: .rotini.spec.yaml:29:11: command demo/run: flag "rx": identifier "-rx" has one dash and several letters, which POSIX tools read as a bundle of short flags; prefer --rx, with at most a one-letter short form
+warning: spec: .rotini.spec.yaml:29:11: command demo/run: flag "rx": identifier "-rx" has one dash and several letters; POSIX tools would read it as a bundle of short flags

@@ -11,7 +11,7 @@ exec go mod tidy
 exec go build -o app$exe ./cmd/app
 
 ! exec ./app$exe
-stderr 'invalid value "gld" for tier \(one of: gold, silver\)'
+stderr 'invalid value "gld" for config key tier \(one of: gold, silver\) \(from configuration file .*app.yaml\)'
 stderr '^did you mean "gold"\?$'
 
 -- app.yaml --

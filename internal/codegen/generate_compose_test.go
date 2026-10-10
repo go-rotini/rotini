@@ -85,13 +85,13 @@ func TestCompose_transitiveRef(t *testing.T) {
 		t.Error("the parent's overlay summary did not win over the child's own")
 	}
 
-	// 3. The grandchild delegates through the direct child's package; the root does not
-	//    import the grandchild.
+	// 3. The grandchild delegates through the direct child's package; the root imports the
+	//    grandchild's package only for its types.
 	if !strings.Contains(root, "internal/cmd/child") {
 		t.Error("root does not import the direct child's package")
 	}
-	if strings.Contains(root, "internal/cmd/grand") {
-		t.Error("root imports the grandchild directly — a transitive ref should delegate through the child")
+	if !strings.Contains(root, "childcli.Handlers().ChildGrand()") || strings.Contains(root, "grandcli.Handlers()") {
+		t.Error("the grandchild does not delegate through the child — a transitive ref should")
 	}
 
 	// 4. No stub or input types are emitted at the root for a composed node.

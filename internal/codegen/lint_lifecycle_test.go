@@ -153,6 +153,43 @@ command:
 	}
 }
 
+// TestReleaseCheck_skipsModChildren pins that a mod:// child, part of another module's
+// release, is not checked or fetched, while a local child beside it is.
+func TestReleaseCheck_skipsModChildren(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, ".rotini.spec.yaml", `version: 0.0.0
+command:
+  name: acme
+  commands:
+    - $ref: mod://example.com/other@v1.0.0/.rotini.spec.yaml
+    - $ref: ./kid/.rotini.spec.yaml
+`)
+	writeTestFile(t, dir, "kid/.rotini.spec.yaml", `version: 0.0.0
+command:
+  name: kid
+  flags:
+    - {name: x, identifiers: [--x], deprecated: gone, removed_in: 2.0.0, schema: {type: bool}}
+`)
+	t.Chdir(dir)
+	rs, err := reconcileSpec(".rotini.spec.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	var got []string
+	for _, p := range releaseCheck(rs, "2.0.0", seen) {
+		got = append(got, p.Error())
+	}
+	if len(got) != 1 || !strings.Contains(got[0], `flag "--x": is planned for removal in 2.0.0`) {
+		t.Errorf("problems = %q, want only the local child's removal", got)
+	}
+	for path := range seen {
+		if strings.Contains(path, "example.com/other") {
+			t.Errorf("the mod:// child was visited: %s", path)
+		}
+	}
+}
+
 // TestReleaseEnv pins that the conf names the variable, and that a missing conf names none.
 func TestReleaseEnv(t *testing.T) {
 	dir := t.TempDir()
@@ -204,7 +241,7 @@ func (*demoWatchHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
 	_ = rtx.WriteOutputItem(DemoWatchOutput{})
 }
 `)
-	want := `internal/cmd/demo/demo_watch.go:31: "demo watch" writes items with WriteOutputItem; declare output_stream: true on it, or it fails at run time`
+	want := `internal/cmd/demo/demo_watch.go:33: "demo watch" writes items with WriteOutputItem; declare output_stream: true on it`
 	if got := gen(); len(got) != 1 || got[0] != want {
 		t.Errorf("warnings = %q, want [%q]", got, want)
 	}

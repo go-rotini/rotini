@@ -82,14 +82,17 @@ func contractDecl(doc []byte) string {
 }
 
 // generatedNames says what spec entry a generated top-level name comes from, for a collision
-// message: each exit constant, the Usage function, and Contract.
-func generatedNames(consts []exitConst, contract bool) map[string]string {
+// message: each exit constant, the Usage function, Contract and ToolsMCP.
+func generatedNames(consts []exitConst, contract, tools bool) map[string]string {
 	out := map[string]string{"Usage": "the generated Usage function"}
 	for _, c := range consts {
 		out[c.name] = fmt.Sprintf("the exit_status name %q of %q", c.entry, c.owner)
 	}
 	if contract {
 		out["Contract"] = "generate.contract.go's Contract variable"
+	}
+	if tools {
+		out["ToolsMCP"] = "the tools feature's ToolsMCP variable (go: true)"
 	}
 	return out
 }

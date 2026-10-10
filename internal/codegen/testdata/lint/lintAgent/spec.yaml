@@ -1,7 +1,15 @@
-# `agent` keys that change nothing.
+# `agent` keys that change nothing, and `agent: true` on a secret.
 version: 0.0.0
 command:
   name: demo
+  flags:
+    # Correct: the directory flag is a tool parameter only with `agent: true`. No problem.
+    - name: dir
+      identifiers: [-C, --dir]
+      cascading: true
+      role: chdir
+      agent: true
+      schema: { type: existingdir }
   commands:
     # Correct: each brings back something left out by default. No problem.
     - name: exec
@@ -15,8 +23,9 @@ command:
       agent: true
       flags:
         - name: token
+          hidden: true
           agent: true
-          schema: { type: string, secret: true, from: [stdin] }
+          schema: { type: string, from: [stdin] }
         - name: spec
           agent: true
           schema: { type: string, from: [file] }
@@ -50,7 +59,7 @@ command:
       commands:
         - name: reset
           agent: true
-    # The directory flag and the JSON switch are never tool parameters.
+    # The JSON switch is never a tool parameter.
     - name: build
       output: { type: object, properties: { id: { type: integer } } }
       flags:
@@ -58,3 +67,13 @@ command:
           role: machine-output
           agent: true
           schema: { type: bool }
+    # A tool never passes a secret on the command line.
+    - name: login
+      flags:
+        - name: token
+          agent: true
+          schema: { type: string, secret: true, from: [stdin], variable: DEMO_TOKEN }
+      arguments:
+        - name: password
+          agent: true
+          schema: { type: string, secret: true, from: [file] }

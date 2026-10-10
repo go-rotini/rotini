@@ -66,17 +66,17 @@ func TestParse_nonFiniteAgainstBounds(t *testing.T) {
 	}
 }
 
-// TestURLValue_hostPortWithoutScheme pins that "localhost:8080" is not taken as a URL with the
-// scheme "localhost", while real opaque URLs still parse.
+// TestURLValue_hostPortWithoutScheme pins that "localhost:8080", with or without a path, is not
+// taken as a URL with the scheme "localhost", while real opaque URLs still parse.
 func TestURLValue_hostPortWithoutScheme(t *testing.T) {
 	parse := valueParsers[reflect.TypeFor[*url.URL]()]
-	for _, s := range []string{"localhost:8080", "example.com:443"} {
+	for _, s := range []string{"localhost:8080", "example.com:443", "localhost:8080/api", "db:5432/", "localhost:8080?x=1"} {
 		_, err := parse(s)
 		if err == nil || !strings.Contains(err.Error(), "as in http://"+s) {
 			t.Errorf("%q: err = %v, want the scheme hint", s, err)
 		}
 	}
-	for _, s := range []string{"mailto:ada@example.com", "urn:isbn:0451450523", "http://localhost:8080"} {
+	for _, s := range []string{"mailto:ada@example.com", "urn:isbn:0451450523", "tel:+1-201-555-0123", "tel:5551234", "http://localhost:8080"} {
 		if _, err := parse(s); err != nil {
 			t.Errorf("%q: err = %v, want accepted", s, err)
 		}

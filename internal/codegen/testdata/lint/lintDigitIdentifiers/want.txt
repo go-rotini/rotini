@@ -1,4 +1,4 @@
 spec: .rotini.spec.yaml:19:24: command demo/ssh: flag "lines": declares the digit option -5, which only a bool or count flag can have; a value after it would read like a number
 spec: .rotini.spec.yaml:32:11: command demo/calc: argument "delta": takes negative numbers, but -9 is declared on "demo", so -9 would be read as the flag; declare minimum: 0, or drop the digit identifier
-warning: spec: .rotini.spec.yaml:7:7: command demo: flag "level": has only a short identifier (-9); add a long form such as --level, which scripts and readers of help can understand
-warning: spec: .rotini.spec.yaml:18:11: command demo/ssh: flag "lines": has only a short identifier (-5); add a long form such as --lines, which scripts and readers of help can understand
+warning: spec: .rotini.spec.yaml:7:7: command demo: flag "level": has only a short identifier (-9) and no long form
+warning: spec: .rotini.spec.yaml:18:11: command demo/ssh: flag "lines": has only a short identifier (-5) and no long form

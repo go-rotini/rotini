@@ -29,6 +29,7 @@ type stdinState struct {
 	stream     *cancelReader // the one reader every stream consumer shares
 	lineReader *stdinLines   // the one line reader every streamed field shares
 	run        func() *stdinRun
+	ctx        func() context.Context // the context the reading hook holds, read at read time
 }
 
 const (
@@ -132,7 +133,7 @@ func (rtx *Context) stdinState() *stdinState {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
 	if rtx.stdinRead == nil || rtx.stdinRead.src != rtx.Stdin {
-		rtx.stdinRead = &stdinState{src: rtx.Stdin, run: rtx.currentRun}
+		rtx.stdinRead = &stdinState{src: rtx.Stdin, run: rtx.currentRun, ctx: rtx.Context}
 	}
 	return rtx.stdinRead
 }
@@ -248,15 +249,16 @@ func (s *stdinState) reader() io.Reader {
 
 func (s *stdinState) streamLocked() *cancelReader {
 	if s.stream == nil {
-		s.stream = &cancelReader{src: s.src, direct: s.direct, run: s.run}
+		s.stream = &cancelReader{src: s.src, direct: s.direct, run: s.run, ctx: s.ctx}
 	}
 	return s.stream
 }
 
 // stdinReadError turns a failed stdin read into an [*InputError]: an interruption by the run's
-// cancellation keeps the cancellation cause, anything else is an internal read failure.
+// cancellation, or by the reading hook's context ending, keeps the cause; anything else is an
+// internal read failure.
 func stdinReadError(run *stdinRun, err error) error {
-	if run.interrupted(err) {
+	if _, ended := errors.AsType[readEndedError](err); ended || run.interrupted(err) {
 		return usageBind(channelStdin, "", "reading stdin was interrupted", err)
 	}
 	return internalBind(channelStdin, "", "could not read stdin", err)
@@ -272,8 +274,9 @@ type stdinChunk struct {
 }
 
 // cancelReader reads a source that may block forever (a pipe its writer holds open) so that a
-// Read waiting for data returns as soon as the run is canceled, with the cancellation cause as
-// its error. A source that never blocks, or a run that can't be canceled, is read directly.
+// Read waiting for data returns as soon as the run is canceled, or the context the reading hook
+// holds ([Context.Context]) ends, with the cancellation cause as its error. A source that never
+// blocks, or a read nothing can cancel, is read directly.
 // Otherwise a pump goroutine reads chunks into two recycled buffers; it exits when the source
 // ends or the run settles, unless it is blocked inside the source's Read, where it stays until
 // the source yields.
@@ -283,6 +286,7 @@ type cancelReader struct {
 	src     io.Reader
 	direct  bool
 	run     func() *stdinRun
+	ctx     func() context.Context
 	started atomic.Bool // a consumer has read from it
 
 	once   sync.Once
@@ -303,7 +307,13 @@ func (r *cancelReader) Read(p []byte) (int, error) {
 	}
 	run := r.run()
 	canceled := run.canceled()
-	if r.chunks == nil && (r.direct || canceled == nil) {
+	var ctx context.Context
+	var ended <-chan struct{}
+	if r.ctx != nil {
+		ctx = r.ctx()
+		ended = ctx.Done()
+	}
+	if r.chunks == nil && (r.direct || (canceled == nil && ended == nil)) {
 		return r.src.Read(p)
 	}
 	r.once.Do(func() { r.start(canceled, run.settled()) })
@@ -327,9 +337,22 @@ func (r *cancelReader) Read(p []byte) (int, error) {
 			return r.drain(p), nil
 		case <-canceled:
 			return 0, run.cause()
+		case <-ended:
+			if cause := run.cause(); cause != nil {
+				return 0, cause
+			}
+			// A deadline or cancel the handler set: the pump keeps running for a later read.
+			return 0, readEndedError{context.Cause(ctx)}
 		}
 	}
 }
+
+// readEndedError is a stdin read ended by a context a hook passed to [Context.SetContext], rather
+// than by the run's own cancellation. It unwraps to that context's cause.
+type readEndedError struct{ cause error }
+
+func (e readEndedError) Error() string { return e.cause.Error() }
+func (e readEndedError) Unwrap() error { return e.cause }
 
 // drain copies from the current chunk, recycling its buffer once it is empty.
 func (r *cancelReader) drain(p []byte) int {

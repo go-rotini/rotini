@@ -1,5 +1,5 @@
-# The response-file prefix @ would take a from: [file] flag's @path, and raw words starting
-# with the prefix are expanded unless written after --.
+# The response-file prefix @ would take a from: [file] flag's or argument's @path, and raw
+# words starting with the prefix are expanded unless written after --.
 version: 0.0.0
 command:
   name: demo
@@ -9,6 +9,12 @@ command:
     - name: login
       flags:
         - name: token
+          schema:
+            type: string
+            from: [file]
+    - name: read
+      arguments:
+        - name: path
           schema:
             type: string
             from: [file]

@@ -169,6 +169,9 @@ func lintVariableFile(spec *Spec) []error {
 		for i, cf := range c.Config {
 			check("config", cf.Name, fmt.Sprintf("%s/config/%d", ptr, i), cf.Schema, false)
 		}
+		if c.Stdin != nil {
+			check("stdin", "", ptr+"/stdin", c.Stdin.Schema, false)
+		}
 	})
 	return problems
 }

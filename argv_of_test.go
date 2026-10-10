@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"math"
@@ -8,7 +9,11 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -38,49 +43,58 @@ type argvAppCI struct {
 type argvAppInputs struct{ App argvAppCI }
 
 type argvRunFlags struct {
-	Help      bool              `rotini:"help"`
-	Color     bool              `rotini:"color"`
-	Plain     bool              `rotini:"plain"`
-	Count     int               `rotini:"count"`
-	Verbosity int               `rotini:"verbosity"`
-	Quiet     int               `rotini:"quiet"`
-	Mode      string            `rotini:"mode"`
-	Tags      []string          `rotini:"tag"`
-	Labels    []string          `rotini:"labels"`
-	Ports     []int             `rotini:"port"`
-	Env       map[string]string `rotini:"env"`
-	Envs      map[string]string `rotini:"envs"`
-	Set       map[string]any    `rotini:"set"`
-	Values    map[string]any    `rotini:"values"`
-	DB        argvDB            `rotini:"db"`
-	DBs       []argvDB          `rotini:"dbs"`
-	Limit     *int              `rotini:"limit"`
-	When      time.Time         `rotini:"when"`
-	Date      time.Time         `rotini:"date"`
-	Unix      time.Time         `rotini:"unix"`
-	Milli     time.Time         `rotini:"milli"`
-	Custom    time.Time         `rotini:"custom"`
-	Wait      time.Duration     `rotini:"wait"`
-	URL       *url.URL          `rotini:"url"`
-	Mail      mail.Address      `rotini:"mail"`
-	Loc       *time.Location    `rotini:"loc"`
-	MAC       net.HardwareAddr  `rotini:"mac"`
-	IP        netip.Addr        `rotini:"ip"`
-	Size      ByteSize          `rotini:"size"`
-	Hex       HexBytes          `rotini:"hex"`
-	B64       Base64Bytes       `rotini:"b64"`
-	Body      string            `rotini:"body"`
-	Token     string            `rotini:"token"`
-	New       string            `rotini:"new"`
-	Ratio     float64           `rotini:"ratio"`
-	Short     string            `rotini:"short"`
-	Upper     upperString       `rotini:"upper"`
-	Shout     argvShout         `rotini:"shout"`
-	Opaque    argvOpaque        `rotini:"opaque"`
+	Help      bool                 `rotini:"help"`
+	Color     bool                 `rotini:"color"`
+	Plain     bool                 `rotini:"plain"`
+	Count     int                  `rotini:"count"`
+	Verbosity int                  `rotini:"verbosity"`
+	Quiet     int                  `rotini:"quiet"`
+	Mode      string               `rotini:"mode"`
+	Tags      []string             `rotini:"tag"`
+	Labels    []string             `rotini:"labels"`
+	Ports     []int                `rotini:"port"`
+	Env       map[string]string    `rotini:"env"`
+	Envs      map[string]string    `rotini:"envs"`
+	Set       map[string]any       `rotini:"set"`
+	Values    map[string]any       `rotini:"values"`
+	DB        argvDB               `rotini:"db"`
+	DBs       []argvDB             `rotini:"dbs"`
+	Limit     *int                 `rotini:"limit"`
+	When      time.Time            `rotini:"when"`
+	Date      time.Time            `rotini:"date"`
+	Unix      time.Time            `rotini:"unix"`
+	Milli     time.Time            `rotini:"milli"`
+	Custom    time.Time            `rotini:"custom"`
+	Wait      time.Duration        `rotini:"wait"`
+	URL       *url.URL             `rotini:"url"`
+	Mail      mail.Address         `rotini:"mail"`
+	Loc       *time.Location       `rotini:"loc"`
+	MAC       net.HardwareAddr     `rotini:"mac"`
+	IP        netip.Addr           `rotini:"ip"`
+	Size      ByteSize             `rotini:"size"`
+	Hex       HexBytes             `rotini:"hex"`
+	B64       Base64Bytes          `rotini:"b64"`
+	Body      string               `rotini:"body"`
+	Token     string               `rotini:"token"`
+	New       string               `rotini:"new"`
+	Ratio     float64              `rotini:"ratio"`
+	Short     string               `rotini:"short"`
+	Upper     upperString          `rotini:"upper"`
+	Shout     argvShout            `rotini:"shout"`
+	Opaque    argvOpaque           `rotini:"opaque"`
+	Tint      bool                 `rotini:"tint"`
+	Day       time.Time            `rotini:"day"`
+	Ago       time.Time            `rotini:"ago"`
+	Match     *regexp.Regexp       `rotini:"match"`
+	Glob      Glob                 `rotini:"glob"`
+	Level     string               `rotini:"level"`
+	In        string               `rotini:"in"`
+	OutF      string               `rotini:"outf"`
+	Dates     map[string]time.Time `rotini:"dates"`
 }
 
 type argvRunArgs struct {
-	Target string   `rotini:"target"`
+	Target string   `rotini:"target" recon:"target" env:"APP_TARGET"`
 	Files  []string `rotini:"files"`
 }
 
@@ -89,6 +103,7 @@ type argvRunEnv struct {
 	Names []string       `rotini:"names" recon:"names" env:"APP_NAMES"`
 	Since time.Time      `rotini:"since" recon:"since" env:"APP_SINCE" layout:"2006-01-02"`
 	HTTP  map[string]any `rotini:"http" recon:"http" envnest:"APP_HTTP,__"`
+	Paths []string       `rotini:"paths" recon:"paths,separator=:" env:"APP_PATHS"`
 }
 
 type argvRunConfig struct {
@@ -205,6 +220,16 @@ func argvDef() Definition {
 					{Name: "upper", Identifiers: []string{"--upper"}, Type: "upperString"},
 					{Name: "shout", Identifiers: []string{"--shout"}, Type: "argvShout"},
 					{Name: "opaque", Identifiers: []string{"--opaque"}, Type: "argvOpaque"},
+					{Name: "tint", Identifiers: []string{"--tint"}, Type: "bool", Negatable: true, Negation: "--mono", Default: "true"},
+					{Name: "day", Identifiers: []string{"--day"}, Type: "time.Time", Layout: "02/01/2006", Layouts: []string{"02/01/2006", layoutDate}},
+					{Name: "ago", Identifiers: []string{"--ago"}, Type: "time.Time", Relative: "past"},
+					{Name: "match", Identifiers: []string{"--match"}, Type: "*regexp.Regexp"},
+					{Name: "glob", Identifiers: []string{"--glob"}, Type: "Glob"},
+					{Name: "level", Identifiers: []string{"--level"}, Type: "string", Enum: []string{"low", "high"}, IgnoreCase: true,
+						EnumValues: []EnumValue{{Value: "low", Aliases: []string{"lo"}}, {Value: "high", Aliases: []string{"hi"}}}},
+					{Name: "in", Identifiers: []string{"--in"}, Type: "inputfile"},
+					{Name: "outf", Identifiers: []string{"--outf"}, Type: "outputfile"},
+					{Name: "dates", Identifiers: []string{"--dates"}, Type: "map[string]time.Time", Layout: layoutDate},
 				},
 				Arguments: []ArgDef{
 					{Name: "target", Type: "string", From: []string{"file", "stdin"}},
@@ -382,6 +407,30 @@ func TestArgvOfRules(t *testing.T) {
 			env:  []string{"APP_TOKEN=t", "APP_NAMES=a,b", "APP_SINCE=2026-10-08", "APP_HTTP__RETRY__MAX=9", "APP_HTTP__TIMEOUT=5s"}},
 		{name: "env list item with a comma", fill: func(c *argvRunCI) { c.Env.Names = []string{"a,b"} },
 			paths: []string{"Run.Env.Names"}, err: "Run.Env.Names"},
+		{name: "env list with its own separator", fill: func(c *argvRunCI) { c.Env.Paths = []string{"/a,b", "c"} },
+			paths: []string{"Run.Env.Paths"}, argv: []string{"run"}, env: []string{"APP_PATHS=/a,b:c"}},
+		{name: "env list item with its own separator", fill: func(c *argvRunCI) { c.Env.Paths = []string{"a:b"} },
+			paths: []string{"Run.Env.Paths"}, err: "Run.Env.Paths"},
+		{name: "custom negation", fill: func(*argvRunCI) {},
+			paths: []string{"Run.Flags.Tint"}, argv: []string{"run", "--mono"}},
+		{name: "the first of several layouts", fill: func(c *argvRunCI) { c.Flags.Day = day },
+			paths: []string{"Run.Flags.Day"}, argv: []string{"run", "--day=08/10/2026"}},
+		{name: "a relative time is written absolute", fill: func(c *argvRunCI) { c.Flags.Ago = ts },
+			paths: []string{"Run.Flags.Ago"}, argv: []string{"run", "--ago=2026-10-08T14:30:00.0000005Z"}},
+		{name: "regexp and glob", fill: func(c *argvRunCI) { c.Flags.Match = regexp.MustCompile(`^a+\d$`); c.Flags.Glob = "*.go" },
+			paths: []string{"Run.Flags.Match", "Run.Flags.Glob"}, argv: []string{"run", `--match=^a+\d$`, "--glob=*.go"}},
+		{name: "a nil regexp", fill: func(*argvRunCI) {},
+			paths: []string{"Run.Flags.Match"}, err: "Run.Flags.Match"},
+		{name: "an enum value with aliases", fill: func(c *argvRunCI) { c.Flags.Level = "high" },
+			paths: []string{"Run.Flags.Level"}, argv: []string{"run", "--level=high"}},
+		{name: "stdin and stdout as file kinds", fill: func(c *argvRunCI) { c.Flags.In = "-"; c.Flags.OutF = "-" },
+			paths: []string{"Run.Flags.In", "Run.Flags.OutF"}, argv: []string{"run", "--in=-", "--outf=-"}},
+		{name: "a map of dates", fill: func(c *argvRunCI) { c.Flags.Dates = map[string]time.Time{"start": day} },
+			paths: []string{"Run.Flags.Dates"}, argv: []string{"run", "--dates=start=2026-10-08"}},
+		{name: "a URL that doesn't read back", fill: func(c *argvRunCI) { c.Flags.URL = &url.URL{Path: "x"} },
+			paths: []string{"Run.Flags.URL"}, err: "Run.Flags.URL"},
+		{name: "a MAC address of no standard length", fill: func(c *argvRunCI) { c.Flags.MAC = net.HardwareAddr{1, 2} },
+			paths: []string{"Run.Flags.MAC"}, err: "Run.Flags.MAC"},
 		{name: "nested env key with the separator", fill: func(c *argvRunCI) { c.Env.HTTP = map[string]any{"a__b": "c"} },
 			paths: []string{"Run.Env.HTTP"}, err: "Run.Env.HTTP"},
 		{name: "config", fill: func(c *argvRunCI) { c.Config.Region = "eu" },
@@ -482,7 +531,7 @@ func argvEquivalent(a, b reflect.Value) bool {
 	switch v := a.Interface().(type) {
 	case time.Time:
 		return v.Equal(b.Interface().(time.Time))
-	case *url.URL, *time.Location:
+	case *url.URL, *time.Location, *regexp.Regexp:
 		return a.IsNil() == b.IsNil() && (a.IsNil() || a.Interface().(interface{ String() string }).String() == b.Interface().(interface{ String() string }).String())
 	case map[string]any:
 		ja, _ := json.Marshal(v)
@@ -672,7 +721,14 @@ var argvFuzzPaths = []string{
 	"Run.Flags.Body", "Run.Flags.Token", "Run.Flags.New", "Run.Flags.Ratio", "Run.Flags.Short",
 	"Run.Flags.Shout", "Run.Arguments.Target", "Run.Arguments.Files", "Run.Env.Token",
 	"Run.Env.Names", "Run.Env.Since", "Run.Env.HTTP", "App.Flags.Verbose", "App.Flags.Out",
+	"Run.Flags.URL", "Run.Flags.Mail", "Run.Flags.Loc", "Run.Flags.MAC", "Run.Flags.IP",
+	"Run.Flags.Quiet", "Run.Flags.Tint", "Run.Flags.Day", "Run.Flags.Ago",
+	"Run.Flags.Match", "Run.Flags.Glob", "Run.Flags.Level", "Run.Flags.In", "Run.Flags.OutF",
+	"Run.Flags.Dates", "Run.Env.Paths",
 }
+
+// argvFuzzZones are the time zones FuzzArgvOf picks from.
+var argvFuzzZones = []string{"UTC", "Europe/Berlin", "America/New_York", "Asia/Kolkata"}
 
 // FuzzArgvOf checks that ArgvOf's output parses back to the value it was given: either ArgvOf
 // reports an *ArgvError, or argv and env read back every field in set, and only those.
@@ -686,6 +742,13 @@ func FuzzArgvOf(f *testing.F) {
 	f.Add("\f", "0", int64(9), uint64(3), 0.1, false, int64(1), uint64(1<<31|1<<32))
 	f.Add(" ", "0", int64(-55), uint64(0), 1.5, true, int64(1759104077), uint64(1<<34))
 	f.Add("\xeb", "0", int64(30), uint64(0), 1.5, true, int64(1759104095), uint64(1<<13))
+	f.Add("^a+$", "dir/*.go", int64(7), uint64(0x0102030405060708), 2.5, false, int64(1759104000), uint64(0x01ff)<<39)
+	f.Add("@@x", "a:b", int64(-7), uint64(1), 0.5, true, int64(-1), uint64(0xffff)<<39|1<<36)
+	inPath := filepath.Join(f.TempDir(), "in.txt")
+	if err := os.WriteFile(inPath, []byte("x"), 0o600); err != nil {
+		f.Fatal(err)
+	}
+	outPath := filepath.Join(filepath.Dir(inPath), "out.txt")
 	f.Fuzz(func(t *testing.T, s, k string, n int64, u uint64, x float64, b bool, ts int64, mask uint64) {
 		var in argvRunInputs
 		r := &in.Run
@@ -702,10 +765,26 @@ func FuzzArgvOf(f *testing.F) {
 			Custom: time.Unix(ts-ts%60, 0).UTC(), Wait: time.Duration(n),
 			Size: ByteSize(u >> 1), Hex: HexBytes(s), B64: Base64Bytes(k),
 			Body: s, Token: k, New: s, Ratio: x, Short: k, Shout: argvShout(strings.ToUpper(s)),
+			URL:  &url.URL{Scheme: "https", Host: "example.com", Path: "/" + s, RawQuery: url.QueryEscape(k)},
+			Mail: mail.Address{Name: s, Address: "ada@example.com"},
+			MAC:  binary.BigEndian.AppendUint64(nil, u)[:6], IP: netip.AddrFrom4([4]byte(binary.BigEndian.AppendUint32(nil, uint32(u)))),
+			Quiet: int(u % 3), Tint: b, Day: time.Unix(ts-ts%86400, 0).UTC(), Ago: time.Unix(ts, n%1e9).UTC(),
+			Glob: "*.go", Level: []string{"low", "high"}[u%2], In: inPath, OutF: outPath,
+			Dates: map[string]time.Time{k: time.Unix(ts-ts%86400, 0).UTC()},
+		}
+		r.Flags.Loc, _ = time.LoadLocation(argvFuzzZones[u%uint64(len(argvFuzzZones))])
+		if re, err := regexp.Compile(s); err == nil {
+			r.Flags.Match = re
+		}
+		if _, err := path.Match(k, ""); err == nil {
+			r.Flags.Glob = Glob(k)
+		}
+		if b {
+			r.Flags.In, r.Flags.OutF = "-", "-"
 		}
 		r.Arguments = argvRunArgs{Target: s, Files: []string{k, s}}
 		r.Env = argvRunEnv{Token: s, Names: []string{s, k}, Since: time.Unix(ts-ts%86400, 0).UTC(),
-			HTTP: map[string]any{k: s}}
+			HTTP: map[string]any{k: s}, Paths: []string{s, k}}
 		in.App.Flags = argvAppFlags{Verbose: b, Out: s}
 		set := Presence{}
 		for i, p := range argvFuzzPaths {
@@ -713,6 +792,7 @@ func FuzzArgvOf(f *testing.F) {
 				set[FieldPath(p)] = InputSource{Layer: "custom"}
 			}
 		}
+		argvFuzzPassthrough(t, filepath.Dir(inPath), s, k)
 		argv, env, err := ArgvOf(argvDef(), in, set, ArgvSecrets())
 		if err != nil {
 			if _, ok := errors.AsType[*ArgvError](err); !ok {
@@ -722,4 +802,39 @@ func FuzzArgvOf(f *testing.F) {
 		}
 		argvRoundTrip(t, argvDef(), in, set, argv, env)
 	})
+}
+
+// argvFuzzPassthrough round-trips raw words, on a passthrough command and a passthrough
+// argument, with response files on: what a run in dir would expand must read back as written.
+func argvFuzzPassthrough(t *testing.T, dir, s, k string) {
+	t.Helper()
+	def := argvDef()
+	def.ResponseFiles = &ResponseFilesDef{Prefix: "@"}
+	view := NewContextFor(def, nil).WithDir(dir).view
+	check := func(in any, argv []string, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("ArgvOf: %v", err)
+		}
+		expanded, err := expandResponseFiles(argv, "@", view, false)
+		if err != nil {
+			t.Fatalf("%q expands: %v", argv, err)
+		}
+		switch in := in.(type) {
+		case argvShInputs:
+			argvRoundTrip(t, def, in, PresenceOf(in), expanded, nil)
+		case argvExecInputs:
+			argvRoundTrip(t, def, in, PresenceOf(in), expanded, nil)
+		}
+	}
+	var sh argvShInputs
+	sh.Sh.Arguments.Words = []string{s, "@" + k, k, "--", "@" + s}
+	argv, _, err := ArgvOf(def, sh, PresenceOf(sh))
+	check(sh, argv, err)
+
+	var ex argvExecInputs
+	ex.Exec.Arguments.Name = "@" + s
+	ex.Exec.Arguments.Rest = []string{"@" + k, s}
+	argv, _, err = ArgvOf(def, ex, PresenceOf(ex))
+	check(ex, argv, err)
 }
