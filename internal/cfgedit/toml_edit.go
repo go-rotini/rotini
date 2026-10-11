@@ -245,39 +245,69 @@ func (tomlEditor) unset(src []byte, path []string, keep int) ([]byte, error) {
 	for k > 0 && k > keep && len(chain[k].Children) == 1 {
 		k--
 	}
-	if k > 0 && len(chain[k].Children) == 1 && !explicit(chain[k]) {
-		return nil, refused(path, "removing it would also remove %s, which is kept", strings.Join(path[:k], "."))
-	}
 	return ed.removeEntry(chain, k, kv)
 }
 
 // removeEntry removes the pair kv, or, when the removal empties the tables below level k of
-// chain, the outermost of them: its header line and the pair's line.
+// chain, the outermost of them: its header line and the pair's line. A kept table at level k
+// that the removal would empty and that has no header of its own gets one: in place of the
+// outermost header removed, or at the end of the file.
 func (ed *tomlEdit) removeEntry(chain []*toml.Node, k int, kv *toml.Node) ([]byte, error) {
-	out, err := ed.removeLine(ed.src, kv.Span)
+	type edit struct {
+		start, end int
+		text       string
+	}
+	ls, le, err := ed.lineOf(kv.Span)
 	if err != nil {
 		return nil, err
 	}
+	edits := []edit{{ls, le, ""}}
+	outer := -1
 	for i := len(chain) - 1; i > k; i-- {
 		if explicit(chain[i]) {
-			if out, err = ed.removeLine(out, chain[i].Span); err != nil {
+			ls, le, err := ed.lineOf(chain[i].Span)
+			if err != nil {
 				return nil, err
 			}
+			edits = append(edits, edit{ls, le, ""})
+			outer = i
 		}
+	}
+	if k > 0 && len(chain[k].Children) == 1 && !explicit(chain[k]) {
+		header := "[" + tomlKeyPath(ed.path[:k]) + "]"
+		if outer >= 0 {
+			// Replace the outermost header itself, keeping its line's comment.
+			edits[len(edits)-1].end = chain[outer].Span.End.Offset
+			edits[len(edits)-1].text = header
+		} else {
+			header += ed.nl
+			if strings.TrimSpace(string(ed.src[:ls])) != "" || le < len(ed.src) {
+				header = ed.nl + header // a blank line before it
+			}
+			if !endsWithNewline(ed.src) && le < len(ed.src) {
+				header = ed.nl + header
+			}
+			edits = append(edits, edit{len(ed.src), len(ed.src), header})
+		}
+	}
+	slices.SortFunc(edits, func(a, b edit) int { return b.start - a.start })
+	out := ed.src
+	for _, e := range edits {
+		out = splice(out, e.start, e.end, e.text)
 	}
 	return out, nil
 }
 
-// removeLine removes the line holding span, which must be the line's only content apart from
-// blanks and a trailing comment.
-func (ed *tomlEdit) removeLine(src []byte, span toml.Span) ([]byte, error) {
-	start, end := span.Start.Offset, span.End.Offset
-	ls := lineStart(src, start)
-	rest := strings.TrimLeft(string(src[end:lineEnd(src, end)]), " \t")
-	if strings.TrimSpace(string(src[ls:start])) != "" || (rest != "" && !strings.HasPrefix(rest, "#")) {
-		return nil, refused(ed.path, "the key shares its line with other content")
+// lineOf returns the bounds of the line holding span, line ending included. The span must be
+// the line's only content apart from blanks and a trailing comment.
+func (ed *tomlEdit) lineOf(span toml.Span) (start, end int, err error) {
+	s, e := span.Start.Offset, span.End.Offset
+	ls := lineStart(ed.src, s)
+	rest := strings.TrimLeft(string(ed.src[e:lineEnd(ed.src, e)]), " \t")
+	if strings.TrimSpace(string(ed.src[ls:s])) != "" || (rest != "" && !strings.HasPrefix(rest, "#")) {
+		return 0, 0, refused(ed.path, "the key shares its line with other content")
 	}
-	return splice(src, ls, nextLine(src, end), ""), nil
+	return ls, nextLine(ed.src, e), nil
 }
 
 // isBareKey reports whether k is a TOML bare key: one or more ASCII letters, digits, "_" and "-".

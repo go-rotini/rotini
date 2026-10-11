@@ -18,5 +18,22 @@ email = "ops@example.com"
 name = "one"
 -- op --
 unset db.host keep 1
--- err --
-which is kept
+-- out --
+# app config
+title = "app" # the title
+
+# deploy settings
+[deploy]
+timeout = "5m" # how long
+retries = 3
+tags = ["a", "b"]
+limits = { cpu = 2 }
+
+# nested
+[deploy.notify]
+email = "ops@example.com"
+
+[[hooks]]
+name = "one"
+
+[db]
