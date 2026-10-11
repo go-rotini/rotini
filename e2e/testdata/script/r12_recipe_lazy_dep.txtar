@@ -1,6 +1,6 @@
 # R12 — the lazy dependency recipe: a store registered in the root's CascadingPreRun is opened
 # only by a command that asks for it, once, and a test's own registration wins. The handler
-# files are the ones the recipes page shows.
+# files are the ones the guide shows.
 
 gomodinit example.com/lazydemo
 

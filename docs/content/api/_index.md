@@ -77,7 +77,7 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.Inputs[T]()` | the command's inputs from the command line, environment, config files, stdin and defaults, typed and validated |
 | `rtx.Stdout` / `rtx.Stderr` / `rtx.Stdin` | the program's streams; write to these, not `os.Stdout`, so tests can capture output |
 | `rtx.Argv` | the raw arguments, for a handler that parses its own |
-| `rtx.LookupEnv(name)` / `rtx.Dir()` | the run's environment and working directory; open a relative path with `filepath.Join(rtx.Dir(), path)` |
+| `rtx.LookupEnv(name)` / `rtx.Environ()` / `rtx.Dir()` | the run's environment and working directory; pass `rtx.Environ()` to a child process's `Env`, and open a relative path with `filepath.Join(rtx.Dir(), path)` |
 | `rtx.MustGetDependency(dep)` | a dependency registered in `main.go` |
 | `rtx.RecordSuccess` / `rtx.RecordWarning` / `rtx.RecordInfo` | record an outcome; the reporter prints it once, after the teardown hooks |
 | `rtx.HaltWith(err)` | fail: record the error and stop |

@@ -38,7 +38,7 @@
 //	r9   plugins
 //	r10  structured output
 //	r11  a lean runtime: linked packages, binary size
-//	r12  the recipes page: each recipe's code, built and run
+//	r12  the guide's recipes: each recipe's code, built and run
 package e2e
 
 import (

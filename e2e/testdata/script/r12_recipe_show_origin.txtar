@@ -1,6 +1,6 @@
 # R12 — the show-origin recipe: a config list command reads InputsWithReport and lists each
 # setting with the layer that won, as text or as its declared json output. The handler file is
-# the one the recipes page shows.
+# the one the guide shows.
 
 gomodinit example.com/origindemo
 

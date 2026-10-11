@@ -1,6 +1,6 @@
 # R12 — the coverage recipe: a binary built with -cover writes its counters to GOCOVERDIR on
 # every run, a recovered panic included, and covdata reports them. cover.sh is the shell block
-# the recipes page shows.
+# the guide shows.
 
 [!exec:sh] skip 'runs the page''s shell block'
 

@@ -99,8 +99,7 @@ func (fakeSync) TodoSync() rotini.Handler { return &stubSync{} }
 todo.NewProgramWith(fakeSync{todo.Handlers()}).Run(args)
 {{< /code >}}
 
- A hand-written handler set can do the same with
-`rotini.NewProgramFunc`; `rotini.NewProgram(def, handlers)` finds the methods by reflection.
+A hand-written handler set can do the same with `rotini.NewProgramFunc`; `rotini.NewProgram(def, handlers)` finds the methods by reflection.
 
 The list after the switch is the runtime features the spec uses, such as environment inputs,
 a YAML configuration file or a `url` flag. The program links only those, so a small CLI's

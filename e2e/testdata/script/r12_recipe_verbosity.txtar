@@ -1,6 +1,6 @@
 # R12 — the verbosity recipe: a counted -v flag sets the level of a slog logger the root's
 # CascadingPreRun builds, and commands log through it, to stderr. The root handler file is the
-# one the recipes page shows.
+# one the guide shows.
 
 gomodinit example.com/logdemo
 

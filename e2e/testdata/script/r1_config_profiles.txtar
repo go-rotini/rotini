@@ -3,7 +3,7 @@
 # --profile, then ACME_PROFILE, then the default chooses the profile; its keys win over the
 # file's shared keys. An unknown profile chosen explicitly is a usage error whose facts name the
 # defined profiles; --help still runs. A completer offers the names with ConfigProfiles: the
-# recipes page shows complete.go.txt.
+# guide shows complete.go.txt.
 
 gomodinit example.com/prof
 

@@ -1,6 +1,6 @@
 # R12 — the debugging-completion recipe: the hidden __complete command prints what the shell
 # script reads, one candidate per line, and :rotini: lines for messages and file completion.
-# The outputs are the ones the recipes page shows.
+# The outputs are the ones the guide shows.
 
 gomodinit example.com/taskr
 

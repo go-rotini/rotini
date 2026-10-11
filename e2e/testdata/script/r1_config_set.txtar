@@ -3,7 +3,7 @@
 #
 # The first write creates the file under $XDG_CONFIG_HOME. A write into an existing file keeps
 # its comments and layout. A bad value is a usage error that leaves the file as it was. With a
-# profile selected, the value goes into that profile. The recipes page shows set.go.txt.
+# profile selected, the value goes into that profile. The guide shows set.go.txt.
 
 gomodinit example.com/cfgctl
 

@@ -1,6 +1,6 @@
 # R12 — the update-notice recipe: the root's CascadingPostRun says on stderr, at most once a day
 # and only at a terminal, that a newer release exists, and the declared opt-out and CI turn it
-# off. notify.go is the file the recipes page shows; selftest.go is test scaffolding, not on the
+# off. notify.go is the file the guide shows; selftest.go is test scaffolding, not on the
 # page: it stands in for a terminal and the release server.
 
 gomodinit example.com/updemo

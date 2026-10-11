@@ -1,5 +1,5 @@
 # R12 — the single-page man recipe: a declared man command writes every page from ManPages as
-# one roff stream, which man reads as one document. The handler is the one the recipes page
+# one roff stream, which man reads as one document. The handler is the one the guide
 # shows.
 
 gomodinit example.com/mandemo

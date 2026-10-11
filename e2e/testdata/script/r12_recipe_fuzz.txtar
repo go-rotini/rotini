@@ -1,6 +1,6 @@
 # R12 — the fuzzing recipe: a fuzz test runs the program in-process on generated command lines
 # and fails only on a panic. Here it runs its seed corpus, as `go test` does without -fuzz. The
-# test file is the one the recipes page shows.
+# test file is the one the guide shows.
 
 gomodinit example.com/fuzzdemo
 

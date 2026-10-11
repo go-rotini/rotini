@@ -1,6 +1,6 @@
 # R12 — the tee recipe: one WriteOutputTo call writes the output to stdout and to a file
 # CreateOutput opened, and the file is kept only when everything succeeded. The handler is the
-# one the recipes page shows.
+# one the guide shows.
 
 gomodinit example.com/teedemo
 

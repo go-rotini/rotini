@@ -10,17 +10,10 @@
 </p>
 
 Rotini lets you describe a command-line program in a spec file (YAML, JSON, JSONC or TOML) and
-generates the Go program around it. You write what each command does; rotini handles the
-plumbing. You can adopt as much or as little of it as you want: bring your own command routing,
+generates the Go program around it. You write what each command does and rotini handles the
+plumbing. You can adopt as much or as little as you want; bring your own command routing,
 parsing, input handling, help or error reporting, and rotini still generates the command tree,
 typed inputs, documentation and shell completion from your spec.
-
-## Rotini in a GIF
-
-Create a Go module, add rotini and run `rotini init`. The program it sets up builds and runs before
-you change anything. Then work in the loop. Add a command to the spec and save it, and
-`rotini generate --watch` regenerates the code, including the new command's handler stub. Implement
-the handler, build and run.
 
 <p align="center">
   <img alt="A split terminal. On the left, a Go module is created, rotini is added and rotini init sets up a program that builds and runs. Then rotini generate --watch starts on the right while a command is added to the spec on the left, its handler is implemented and the program is built and run" src="docs/static/rotini-loop.gif" width="800">

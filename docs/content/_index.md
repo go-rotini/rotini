@@ -126,7 +126,7 @@ any new handler, and build.
 
 ## Next
 
-- [README.md](/docs): the guide to using rotini, from install to testing
+- [README.md](/docs): the guide to using rotini, from install to testing, with recipes for common tasks
 - [.rotini.spec.yaml](/specification): every spec key
 - [.rotini.conf.yaml](/configuration): every conf key
 - [zz_rotini.go](/generated): what `rotini generate` writes, and which files are yours

@@ -1,6 +1,6 @@
 # R12 — the crash report recipe: a reporter that, only when the user sets CRASHDEMO_CRASH_DIR,
 # writes a panic's value, stack, version and platform to a file there and says where. The
-# reporter and main.go are the ones the recipes page shows.
+# reporter and main.go are the ones the guide shows.
 
 gomodinit example.com/crashdemo
 

@@ -1,6 +1,6 @@
 # R12 — the profiling recipe: hidden --cpuprofile and --trace flags start the profiler and the
 # tracer in the root's CascadingPreRun and stop them in its CascadingPostRun, which runs after
-# a failed command too. The root handler file is the one the recipes page shows.
+# a failed command too. The root handler file is the one the guide shows.
 
 gomodinit example.com/profdemo
 

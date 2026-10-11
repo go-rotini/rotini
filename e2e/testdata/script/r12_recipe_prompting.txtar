@@ -1,6 +1,6 @@
 # R12 — the prompting recipe: a missing --name is asked for only when stdin is a terminal and
 # --no-input is unset, and the answer is checked with CheckInputs like a typed value. The
-# handler file is the one the recipes page shows.
+# handler file is the one the guide shows.
 
 gomodinit example.com/promptdemo
 

@@ -1,5 +1,5 @@
 # R12 — the jq recipe: a command's -o json output, filtered by jq with the expression the
-# recipes page shows.
+# guide shows.
 
 [!exec:jq] skip 'needs jq'
 

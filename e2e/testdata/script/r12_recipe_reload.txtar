@@ -1,6 +1,6 @@
 # R12 — the SIGHUP recipe: a long-running serve command rereads its configuration on SIGHUP
 # and stops on SIGTERM through rotini's trap, exiting 143. The handler file is the one the
-# recipes page shows; selftest.go is test scaffolding, not on the page: it edits the config
+# guide shows; selftest.go is test scaffolding, not on the page: it edits the config
 # file and signals its own process, as r5_signal_shutdown does.
 
 [!unix] skip 'sends real signals to its own process'

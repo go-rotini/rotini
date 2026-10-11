@@ -15,9 +15,9 @@ import (
 // compares.
 type pinnedBlock struct{ title, script, file string }
 
-// recipeBlocks pins each code block on the recipes page to the file an r12 script builds or
-// compares, so the page shows code and output that are known to work.
-var recipeBlocks = []pinnedBlock{
+// guideBlocks pins each code block in the guide to the file an e2e script builds or compares, so
+// the guide shows code and output that are known to work.
+var guideBlocks = []pinnedBlock{
 	{"internal/cmd/lazydemo/store.go", "r12_recipe_lazy_dep.txtar", "store.go.txt"},
 	{"internal/cmd/lazydemo/lazydemo_get.go", "r12_recipe_lazy_dep.txtar", "get.go.txt"},
 	{"internal/cmd/mandemo/mandemo_man.go", "r12_recipe_man_all.txtar", "man.go.txt"},
@@ -44,10 +44,6 @@ var recipeBlocks = []pinnedBlock{
 	{"internal/cmd/promptdemo/promptdemo_greet.go", "r12_recipe_prompting.txtar", "greet.go.txt"},
 	{"internal/cmd/updemo/notify.go", "r12_recipe_update_notice.txtar", "notify.go.txt"},
 	{"internal/cmd/cfgctl/cfgctl_config_set.go", "r1_config_set.txtar", "set.go.txt"},
-}
-
-// guideBlocks pins code blocks in the guide the same way.
-var guideBlocks = []pinnedBlock{
 	{"internal/cmd/todo/report.go", "r12_recipe_exit_codes.txtar", "report.go.txt"},
 	{"cmd/todo/main.go (time limit)", "r12_runtime_control.txtar", "main.go.txt"},
 	{"internal/cmd/todo/client.go", "r12_runtime_control.txtar", "client.go.txt"},
@@ -57,10 +53,6 @@ var guideBlocks = []pinnedBlock{
 	{"cmd/logs/.rotini.spec.yaml (filter)", "r12_recipe_filter.txtar", "spec.yaml.txt"},
 	{"internal/cmd/logs/logs_grep.go (filter)", "r12_recipe_filter.txtar", "grep.go.txt"},
 	{"internal/cmd/todo/todo_deploy.go", "r12_explain_inputs.txtar", "deploy.go.txt"},
-}
-
-func TestRecipeBlocksMatchScripts(t *testing.T) {
-	checkPinnedBlocks(t, filepath.Join("recipes", "_index.md"), recipeBlocks)
 }
 
 func TestGuideBlocksMatchScripts(t *testing.T) {

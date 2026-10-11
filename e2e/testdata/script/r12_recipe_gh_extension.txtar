@@ -1,5 +1,5 @@
 # R12 — the gh extension recipe: a binary named gh-hello whose pages read as the command the user
-# types, `gh hello`, through display_name. The spec is the one the recipes page shows.
+# types, `gh hello`, through display_name. The spec is the one the guide shows.
 
 gomodinit example.com/gh-hello
 
