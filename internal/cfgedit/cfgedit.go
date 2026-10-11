@@ -107,7 +107,7 @@ func Set(src []byte, format Format, path []string, value any) ([]byte, error) {
 		return nil, err
 	}
 	setPath(before, path, v)
-	return verify(format, src, out, before)
+	return verify(format, out, before)
 }
 
 // Unset removes the key at path from src and returns the edited bytes. Comment lines above
@@ -138,7 +138,7 @@ func Unset(src []byte, format Format, path []string, opts ...Option) ([]byte, er
 		return nil, err
 	}
 	unsetPath(before, path, o.keep)
-	return verify(format, src, out, before)
+	return verify(format, out, before)
 }
 
 // validPath reports whether path has at least one segment and every segment is non-empty,

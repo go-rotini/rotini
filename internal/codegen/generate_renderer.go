@@ -576,7 +576,8 @@ type templateDocFlagRow struct {
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 
-	key string // the config fallback key whether or not the page reads config files
+	key  string // the config fallback key whether or not the page reads config files
+	name string // the flag's name
 }
 
 // templateDocFlagGroup is one bucket of flags in the Flags section. Title is the `group` value;
@@ -681,6 +682,9 @@ type templateHelpData struct {
 	Topic bool
 	// Topics lists the help topics on the root's page; nil on every other page.
 	Topics []templateDocTopicRow
+	// ResponseFiles is the response-file prefix on the root's page when response files are
+	// on; "" otherwise.
+	ResponseFiles string
 	// Effects describes what running the command does, stating only what the spec states
 	// ("destructive, not idempotent"); "" when it declares no effects.
 	Effects string

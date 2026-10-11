@@ -31,8 +31,9 @@ type InputSource struct {
 	Layer string // the supplying layer's name: "defaults", "files", "env", "argv", "stdin", or custom
 	Raw   string // the supplied text, a list's values joined with ", " whichever layer supplied it ("" when non-textual, e.g. a decoded stdin document); "[redacted]" for secrets
 	// Origin names where in the layer the value came from: "argv:--port" (the identifier as
-	// typed), "argv:<target>" (an argument), "env:TASKR_PORT", "env:TASKR_HTTP__*" (a nested
-	// env family), "config:user#deploy.port" (a configuration file's name and key), "default"
+	// typed), "argv:<target>" (an argument), "env:TASKR_PORT", "env:TASKR_TOKEN_FILE" (read
+	// from the file a variable_file variable names), "env:TASKR_HTTP__*" (a nested env family),
+	// "config:user#deploy.port" (a configuration file's name and key), "default"
 	// or "stdin". It is "" for a hand-built layer, which names itself by Layer.
 	Origin string
 }

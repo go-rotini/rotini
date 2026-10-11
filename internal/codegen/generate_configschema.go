@@ -89,6 +89,7 @@ func (p *program) configFileKeys(cf scopedConfigFile) []configKeyEntry {
 		if !readsFile(cf, c.path) {
 			continue
 		}
+		selectors := p.selectorsFor(c.path)
 		for i, in := range c.chain {
 			if in == nil {
 				continue
@@ -105,7 +106,7 @@ func (p *program) configFileKeys(cf scopedConfigFile) []configKeyEntry {
 			}
 			for _, f := range in.Flags {
 				key := flagReconKey(f.Name, f.Schema)
-				if f.Hidden || key == "" || f.Schema.ConfigSource != "" {
+				if f.Hidden || key == "" || f.Schema.ConfigSource != "" || slices.Contains(selectors, f.Name) {
 					continue
 				}
 				add(key, configKeyEntry{

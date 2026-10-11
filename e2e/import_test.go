@@ -36,13 +36,6 @@ func importCmd(t *testing.T, args ...string) []string {
 	return append(cmd, args...)
 }
 
-// importFixture copies the corpus program name ("corpus/demo", "network/delve") to a
-// temporary directory and returns it.
-func importFixture(t *testing.T, name string) string {
-	t.Helper()
-	return copyFixture(t, filepath.Join("testdata", "import", filepath.FromSlash(name)))
-}
-
 // TestImportCobra imports each of the importer's own corpus programs, then validates,
 // regenerates, builds and runs the imported CLI. The program's own files, go.mod and go.sum
 // must be byte-identical after the import.
@@ -202,6 +195,34 @@ func TestImportCobraNetwork(t *testing.T) {
 	}
 }
 
+// TestTreeHash pins what the import must leave alone: code under internal/ counts, the
+// imported CLI's own directories don't.
+func TestTreeHash(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module x\n")
+	write("internal/cmd/tool/tool.go", "package tool\n")
+	before := treeHash(t, dir)
+	write("cmd/acme/.rotini.spec.yaml", "name: acme\n")
+	write("internal/cmd/acme/acme.go", "package acme\n")
+	if treeHash(t, dir) != before {
+		t.Error("the imported CLI's directories changed the hash")
+	}
+	write("internal/cmd/tool/tool.go", "package tool // edited\n")
+	if treeHash(t, dir) == before {
+		t.Error("an edit under internal/cmd/tool left the hash unchanged")
+	}
+}
+
 // runIn returns a function that runs a command in dir and returns its combined output, failing
 // the test when it fails.
 func runIn(t *testing.T, dir string) func(name string, args ...string) string {
@@ -249,8 +270,23 @@ func copyFixture(t *testing.T, from string) string {
 // importedCLIs are the CLI names the import tests write under cmd/.
 var importedCLIs = []string{"acme", "acmecli", "dlv", "kubectl"}
 
-// treeHash hashes every file of the module that isn't under cmd/<cli> (one of importedCLIs) or
-// internal: the program's own files, go.mod and go.sum.
+// importFixture copies the corpus program name ("corpus/demo", "network/delve") to a
+// temporary directory, adds a package of its own under internal/cmd, and returns it.
+func importFixture(t *testing.T, name string) string {
+	t.Helper()
+	dir := copyFixture(t, filepath.Join("testdata", "import", filepath.FromSlash(name)))
+	own := filepath.Join(dir, "internal", "cmd", "tool")
+	if err := os.MkdirAll(own, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(own, "tool.go"), []byte("package tool\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// treeHash hashes every file of the module that isn't under cmd/<cli> or internal/cmd/<cli>
+// (one of importedCLIs): the program's own files, go.mod and go.sum.
 func treeHash(t *testing.T, dir string) string {
 	t.Helper()
 	h := sha256.New()
@@ -260,7 +296,8 @@ func treeHash(t *testing.T, dir string) string {
 		}
 		rel, _ := filepath.Rel(dir, path)
 		if d.IsDir() {
-			if rel == "internal" || filepath.Dir(rel) == "cmd" && slices.Contains(importedCLIs, filepath.Base(rel)) {
+			parent := filepath.ToSlash(filepath.Dir(rel))
+			if (parent == "cmd" || parent == "internal/cmd") && slices.Contains(importedCLIs, filepath.Base(rel)) {
 				return filepath.SkipDir
 			}
 			return nil

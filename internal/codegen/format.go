@@ -369,8 +369,10 @@ func (p *yamlPrinter) continuation(v *cfgedit.YAMLNode, firstLine, from, to int)
 	out := make([]outLine, 0, len(lines))
 	if v.Style != yaml.LiteralStyle && v.Style != yaml.FoldedStyle {
 		// A value that starts on a line of its own goes two columns in, and the lines after
-		// that line two further.
+		// that line move with it, at least two further, so they keep their places relative to
+		// the value's first line.
 		hdr := p.doc.LineStart(v.Body)
+		shift := to - from
 		for _, l := range lines {
 			floor := to + fmtIndent
 			if hdr != firstLine && l.start > hdr {
@@ -380,7 +382,11 @@ func (p *yamlPrinter) continuation(v *cfgedit.YAMLNode, firstLine, from, to int)
 				out = append(out, outLine{verbatim: true})
 				continue
 			}
-			out = append(out, outLine{text: spaces(max(l.indent+to-from, floor)) + p.rawText(l), verbatim: true})
+			indent := max(l.indent+shift, floor)
+			if l.start == hdr {
+				shift = indent - l.indent
+			}
+			out = append(out, outLine{text: spaces(indent) + p.rawText(l), verbatim: true})
 		}
 		return out
 	}
@@ -511,8 +517,8 @@ func (p *yamlPrinter) item(it *cfgedit.YAMLItem, col int, sch *fmtSchema, trail 
 
 // order returns the indices of m's entries in canonical order: the known keys as fmtRanks
 // orders them, then any others in their original order. A mapping keeps its order when it has
-// no schema, holds a merge key, or when moving an entry would put an alias before the anchor
-// it names.
+// no schema, holds a merge key or a block scalar that keeps its trailing blank lines, or when
+// moving an entry would put an alias before the anchor it names.
 func (p *yamlPrinter) order(m *cfgedit.YAMLNode, sch *fmtSchema) []int {
 	idx := make([]int, len(m.Pairs))
 	for i := range idx {
@@ -522,7 +528,7 @@ func (p *yamlPrinter) order(m *cfgedit.YAMLNode, sch *fmtSchema) []int {
 		return idx
 	}
 	for _, pr := range m.Pairs {
-		if pr.Merge {
+		if pr.Merge || p.keepsTrailingLines(pr.Value) {
 			return idx
 		}
 	}
@@ -544,6 +550,30 @@ func (p *yamlPrinter) order(m *cfgedit.YAMLNode, sch *fmtSchema) []int {
 		return idx
 	}
 	return sorted
+}
+
+// keepsTrailingLines reports whether n holds a block scalar with the keep indicator ("|+",
+// ">+") that ends the document: its value takes in the line endings up to the end of the
+// file, so moving it away from the end would change the value.
+func (p *yamlPrinter) keepsTrailingLines(n *cfgedit.YAMLNode) bool {
+	if n == nil {
+		return false
+	}
+	if n.Kind == cfgedit.YAMLScalar && (n.Style == yaml.LiteralStyle || n.Style == yaml.FoldedStyle) {
+		header, _, _ := strings.Cut(string(p.src[n.Body:p.doc.LineEnd(n.Body)]), "#")
+		return strings.Contains(header, "+") && strings.TrimSpace(string(p.src[n.End:])) == ""
+	}
+	for _, pr := range n.Pairs {
+		if p.keepsTrailingLines(pr.Value) {
+			return true
+		}
+	}
+	for _, it := range n.Items {
+		if p.keepsTrailingLines(it.Value) {
+			return true
+		}
+	}
+	return false
 }
 
 // anchorsBeforeAliases reports whether, in the given entry order, every alias in m's entries

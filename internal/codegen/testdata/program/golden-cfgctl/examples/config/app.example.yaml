@@ -12,6 +12,3 @@
 #   retries: 0
 ##   how long a deploy may take (duration; default 5m)
 #   timeout: 5m
-
-## the configuration profile to use (string)
-# profile: ""

@@ -16,11 +16,9 @@ import (
 
 // verify decodes after and checks that it equals want, the original document's values with
 // the intended change applied. A failure means the splice changed something it shouldn't
-// have; nothing is returned then.
-func verify(format Format, before, after []byte, want map[string]any) ([]byte, error) {
-	if bytes.Equal(before, after) {
-		return after, nil
-	}
+// have, or missed what it should have changed; nothing is returned then. An unchanged file is
+// checked too: it's right only when it already held the wanted values.
+func verify(format Format, after []byte, want map[string]any) ([]byte, error) {
 	got, err := decode(format, after)
 	if err != nil {
 		return nil, fmt.Errorf("%w: the edited file doesn't decode: %w", ErrVerify, err)

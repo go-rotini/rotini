@@ -482,3 +482,26 @@ func TestRules_everyRuleTested(t *testing.T) {
 		t.Error("the catalog lists a rule twice")
 	}
 }
+
+func TestDiff_argumentFrom(t *testing.T) {
+	arg := func(from string) string {
+		if from != "" {
+			from = `, "from": [` + from + `]`
+		}
+		return root(`"arguments": [{"name": "token", "kind": "scalar", "type": "string", "required": true` + from + `, "schema": {"type": "string"}}]`)
+	}
+	runRaw(t, []rawCase{
+		{
+			name: "removed", old: contract(arg(`"file", "stdin"`)), new: contract(arg("")),
+			want: []string{"breaking INPUT_FROM_NO_DELETE app <token>", "breaking INPUT_FROM_NO_DELETE app <token>"},
+		},
+		{
+			name: "narrowed", old: contract(arg(`"file", "stdin"`)), new: contract(arg(`"file"`)),
+			want: []string{"breaking INPUT_FROM_NO_DELETE app <token>"},
+		},
+		{
+			name: "added", old: contract(arg("")), new: contract(arg(`"file"`)),
+			want: []string{"possibly_breaking INPUT_FROM_ADDED app <token>"},
+		},
+	})
+}

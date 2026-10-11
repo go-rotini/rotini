@@ -560,7 +560,7 @@ func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
 		{name: "old", aliases: []string{"o"}, deprecated: "use new"},
 		{name: "only", aliases: []string{"legacy"}, deprecatedIdentifiers: []string{"legacy"}, deprecated: "use only"},
 	}
-	rows := buildHelpData("app", cmdHelp{}, nil, children, nil, nil, "", false).CommandGroups[0].Commands
+	rows := buildHelpData("app", cmdHelp{}, nil, children, nil, nil, "", configReads{}).CommandGroups[0].Commands
 	want := []templateDocCommandRow{
 		{Name: "api-resources", Aliases: []string{"ar"}},
 		{Name: "old", Aliases: []string{"o"}, Deprecated: "use new"},

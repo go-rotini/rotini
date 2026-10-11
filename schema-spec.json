@@ -597,7 +597,7 @@
           "pattern": "^([0-9]*\\.?[0-9]+ ?[a-zA-Z\u00b5]+)+$",
           "examples": ["30s", "1h30m", "512Mi"],
           "x-hint": "a string bound is a duration (30s, 1h30m) or a size (512Mi, 10MB), for a duration or bytesize input; any other type takes a number",
-          "description": "Minimum allowed value (inclusive). Number types (the int, uint and float types and the integer and number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes), read by the same parser as the value and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would have no effect. For a repeatable input the bound applies to each element. minimum: 0 is a real, enforced bound."
+          "description": "Minimum allowed value (inclusive). Number types (the int, uint and float types and the integer and number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes), read by the same parser as the value and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would have no effect. For a repeatable input the bound applies to each element. minimum: 0 is a real, enforced bound. A number input with any bound (this, `maximum`, the exclusive bounds or `multipleOf`) rejects NaN and infinite values."
         },
         "maximum": {
           "type": [
@@ -608,7 +608,7 @@
           "pattern": "^([0-9]*\\.?[0-9]+ ?[a-zA-Z\u00b5]+)+$",
           "examples": ["30s", "1h30m", "512Mi"],
           "x-hint": "a string bound is a duration (30s, 1h30m) or a size (512Mi, 10MB), for a duration or bytesize input; any other type takes a number",
-          "description": "Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numbers, durations and sizes, each in its own spelling; per-element for arrays; rejected elsewhere); maximum: 0 is a real, enforced bound."
+          "description": "Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numbers, durations and sizes, each in its own spelling; per-element for arrays; rejected elsewhere); maximum: 0 is a real, enforced bound. As with 'minimum', a bounded number rejects NaN and infinite values."
         },
         "exclusiveMinimum": {
           "type": [
@@ -757,7 +757,7 @@
             "secret": {
               "type": "boolean",
               "default": false,
-              "description": "When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input. A secret flag or argument whose from: list leaves out value refuses a value typed on the command line, which would show in the process list and shell history; `rotini validate` warns about a secret flag that accepts one."
+              "description": "When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input. A secret flag or argument whose from: list leaves out value refuses a value typed on the command line, which would show in the process list and shell history; `rotini validate` warns about a secret flag that accepts one. Help, man and markdown pages leave out a secret input's default unless `default_text` sets what to show."
             },
             "ignore_case": {
               "type": "boolean",
@@ -840,43 +840,8 @@
               "description": "Env inputs only, map-typed ('map'/'object' \u2192 map[string]any): the separator that collects a family of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the UPPER_SNAKE form of the input's name. With name: http, variable: ACME_HTTP, nesting: \"__\", ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: \"30\", retry: {max: \"9\"}} (segments lowercased; values are strings). 'required: true' is an error when no matching variables exist. 'default:' is rejected: set defaults in code or in a config file instead."
             },
             "complete": {
-              "type": "object",
-              "additionalProperties": false,
-              "anyOf": [
-                { "required": ["kind"] },
-                { "required": ["message"] }
-              ],
-              "description": "Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.\n\nFlags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "file",
-                    "directory",
-                    "none",
-                    "command",
-                    "executable",
-                    "user",
-                    "host",
-                    "group"
-                  ],
-                  "description": "'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete nothing, which is not the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that is file completion; 'none' turns it off, so for an opaque value (a container id, an API resource name) the shell does not offer the files in the current directory. 'command': complete command paths below the root, for a help command's argument: the words already given to this argument are the path, and the candidates are its visible sub-commands (`help remote <TAB>` offers remote's sub-commands). Arguments of type string or a list of strings only. 'executable': program names (bash offers every command name it knows; zsh, fish and PowerShell offer programs). 'user', 'group': local account and group names. 'host': host names the shell knows (/etc/hosts, ssh known hosts). Each shell's own completer supplies these four; PowerShell has no host completer, and offers users and groups on Windows only. Values of type string or a list of strings only."
-                },
-                "extensions": {
-                  "type": "array",
-                  "minItems": 1,
-                  "description": "Narrows kind 'file' to these suffixes, written without a leading dot ('yaml', 'json'). Omitted, every file is offered. Rejected on the other kinds, which have no extensions to filter.",
-                  "items": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9.+-]*$", "examples": ["yaml", "tar.gz"]
-                  }
-                },
-                "message": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "A line the shell shows while this input's value is being completed and there is nothing to offer, such as `a service name from deploy.yaml`. One line. It shows only when the conf's completion feature sets `messages`, and in zsh and bash 4.4 or later; other shells skip it. A message a completer adds with rtx.AddCompletionMessage takes its place."
-                }
-              }
+              "$ref": "#/definitions/CompletionHint",
+              "description": "Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.\n\nFlags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback."
             },
             "placeholder": {
               "type": "string",
@@ -974,7 +939,7 @@
         },
         "identifiers": {
           "type": "array",
-          "description": "CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' \u2192 --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle, and an identifier that hides one of a cascading or short-circuit ancestor flag's.\n\nA single dash and one digit (`-4`) declares a digit option, on a bool or count flag (`identifiers: ['-4', --ipv4]`; quoted, since a bare -4 is a number in YAML). A word starting with that dash and digit is then the flag, on this command and every command below it, while other negative numbers still parse as numbers. `rotini validate` rejects it when an argument of this command or one below it takes negative numbers.",
+          "description": "CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' \u2192 --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle. Reusing an identifier of a cascading or short-circuit ancestor flag is a warning, since after this command's name it means this flag; it is an error when this command's flags take every identifier of that flag, which then can't be given after this command's name at all. A flag of the same name that redeclares the switch is not reported.\n\nA single dash and one digit (`-4`) declares a digit option, on a bool or count flag (`identifiers: ['-4', --ipv4]`; quoted, since a bare -4 is a number in YAML). A word starting with that dash and digit is then the flag, on this command and every command below it, while other negative numbers still parse as numbers. `rotini validate` rejects it when an argument of this command or one below it takes negative numbers.",
           "minItems": 1,
           "items": {
             "type": "string",
@@ -1105,7 +1070,7 @@
         "passthrough": {
           "type": "boolean",
           "default": false,
-          "description": "When true, raw words start at this argument: flags before it parse as usual, and it and every word after it are taken as typed, flag-shaped words and `--` included (`app exec --region eu ls -la --help` gives the command's `--region` and passes `ls -la --help` on). A word starting with `-` that should be the first raw word goes after `--` (`app exec -- -x`). It must be the command's last argument, a variadic `[]string` without a separator, enum, pattern or bounds, on a command with no sub-commands, plugins or command-level `passthrough`. A handler reads where a `--` was typed with rtx.DashIndex(). Shell completion offers no flags or sub-commands past the boundary; the argument's own completer, enum or hint still applies."
+          "description": "When true, raw words start at this argument: flags before it parse as usual, and it and every word after it are taken as typed, flag-shaped words and `--` included (`app exec --region eu ls -la --help` gives the command's `--region` and passes `ls -la --help` on). A word starting with `-` that should be the first raw word goes after `--` (`app exec -- -x`). It must be the command's last argument, a variadic `[]string` without a separator, enum, pattern, bounds or `uniqueItems`, on a command with no sub-commands, plugins or command-level `passthrough`. A handler reads where a `--` was typed with rtx.DashIndex(). Shell completion offers no flags or sub-commands past the boundary; the argument's own completer, enum or hint still applies."
         },
         "description": {
           "type": "string",
@@ -1646,6 +1611,45 @@
         "open_world": {
           "type": ["boolean", "null"],
           "description": "It reaches the network or other systems outside the machine. Unset says nothing, and a program reading the contract then assumes it does."
+        }
+      }
+    },
+    "CompletionHint": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["kind"] },
+        { "required": ["message"] }
+      ],
+      "description": "A shell-completion hint for a flag's or argument's value: a `kind` of value to complete, a `message` to show when there is nothing to offer, or both.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "file",
+            "directory",
+            "none",
+            "command",
+            "executable",
+            "user",
+            "host",
+            "group"
+          ],
+          "description": "'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete nothing, which is not the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that is file completion; 'none' turns it off, so for an opaque value (a container id, an API resource name) the shell does not offer the files in the current directory. 'command': complete command paths below the root, for a help command's argument: the words already given to this argument are the path, and the candidates are its visible sub-commands (`help remote <TAB>` offers remote's sub-commands). Arguments of type string or a list of strings only. 'executable': program names (bash offers every command name it knows; zsh, fish and PowerShell offer programs). 'user', 'group': local account and group names. 'host': host names the shell knows (/etc/hosts, ssh known hosts). Each shell's own completer supplies these four; PowerShell has no host completer, and offers users and groups on Windows only. Values of type string or a list of strings only."
+        },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Narrows kind 'file' to these suffixes, written without a leading dot ('yaml', 'json'). Omitted, every file is offered. Rejected on the other kinds, which have no extensions to filter.",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9.+-]*$", "examples": ["yaml", "tar.gz"]
+          }
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A line the shell shows while this input's value is being completed and there is nothing to offer, such as `a service name from deploy.yaml`. One line. It shows only when the conf's completion feature sets `messages`, and in zsh and bash 4.4 or later; other shells skip it. A message a completer adds with rtx.AddCompletionMessage takes its place."
         }
       }
     }

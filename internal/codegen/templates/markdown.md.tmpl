@@ -37,7 +37,8 @@
          The page's .Effects says what running the command does, as declared ("destructive,
          not idempotent, open world"), "" when it declares none; a flag row's .Effects says what
          giving the flag adds ("destructive").
-         The root's page carries .Topics[] {.Name .Summary}, its help topics. On a topic's page
+         The root's page carries .Topics[] {.Name .Summary}, its help topics, and .ResponseFiles,
+         the response-file prefix ("" when response files are off). On a topic's page
          .Topic is true: .Summary and .Description are the topic's, .Environment holds a
          generated environment topic's rows, each with .Commands (the commands that read it),
          and the rest is empty.
@@ -67,6 +68,9 @@
 
 {{end -}}
 {{- with .Passthrough}}Every word after `{{.}}` is passed through as written, so flags go before `{{.}}`.
+
+{{end -}}
+{{- with .ResponseFiles}}A word starting with `{{.}}` names a response file (`{{.}}args`), whose lines are read as arguments, one per line, until `--`; to pass a word starting with `{{.}}`, double it (`{{.}}{{.}}x`).
 
 {{end -}}
 {{- range .CommandGroups}}## {{if .Title}}{{title .Title}} Commands{{else}}Commands{{end}}

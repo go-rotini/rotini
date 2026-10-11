@@ -1,0 +1,34 @@
+# Imports the importer's pinned large real programs, Delve and kubectl, every night, then
+# validates, regenerates and builds each imported CLI. Their modules are downloaded, so this
+# runs nightly rather than on every push.
+name: Nightly import
+
+on:
+  schedule:
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  import-network:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # The imported modules build with GOTOOLCHAIN=local, so install the go.mod toolchain.
+      - name: Read the go.mod toolchain
+        id: toolchain
+        shell: bash
+        run: echo "version=$(awk '/^toolchain /{sub(/^go/, "", $2); print $2}' go.mod)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ steps.toolchain.outputs.version }}
+
+      - name: Import Delve and kubectl
+        env:
+          ROTINI_IMPORT_NETWORK: '1'
+        run: go test -count=1 -timeout=50m -run TestImportCobraNetwork -v ./e2e

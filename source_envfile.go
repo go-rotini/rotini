@@ -24,8 +24,9 @@ type inputEnv struct {
 
 // envValue is a variable's value and where it came from, for messages.
 type envValue struct {
-	val  string
-	from string // "the file named by APP_TOKEN_FILE"
+	val      string
+	from     string // "the file named by APP_TOKEN_FILE"
+	variable string // APP_TOKEN_FILE
 }
 
 // dotenvLayer is one .env file's variables.
@@ -91,6 +92,14 @@ func (v *osView) inputOrigin(name string) string {
 		}
 	}
 	return ""
+}
+
+// fileVariable is the variable_file variable whose file supplied name's value, or "".
+func (v *osView) fileVariable(name string) string {
+	if v == nil || v.input == nil {
+		return ""
+	}
+	return v.input.files[v.key(name)].variable
 }
 
 // inputEnviron is the whole environment as an input sees it, KEY=value: the run's environment,
@@ -237,7 +246,7 @@ func resolveFileVars(v reflect.Value, view *osView, waived bool) (map[string]env
 				}
 				return
 			}
-			out[view.key(names[0])] = envValue{val: val, from: "the file named by " + file}
+			out[view.key(names[0])] = envValue{val: val, from: "the file named by " + file, variable: file}
 		}
 	}
 	for _, ci := range v.Fields() {

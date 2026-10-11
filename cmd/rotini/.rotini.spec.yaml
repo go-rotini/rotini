@@ -15,6 +15,7 @@ command:
         - -v
         - --version
       summary: print version
+      cascading: true
       short_circuit: true
       schema:
         type: bool

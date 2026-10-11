@@ -175,7 +175,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		paths:    []string{""},
 		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix, gp.readsConfig(nil)), nil, gp.tree, gp.rootOutput, gp.rootInputs),
+		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix, gp.configReadsOf(nil)), nil, gp.tree, gp.rootOutput, gp.rootInputs),
 		listed:   true,
 	}}
 	// The variables that switch completion messages and descriptions are inputs the end user
@@ -186,6 +186,9 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 	}
 	out[0].data.Stability = gp.rootHelp.Stability
 	out[0].data.Topics = topicRows(gp.rootHelp.Topics)
+	if rf := gp.responseFiles(); rf != nil {
+		out[0].data.ResponseFiles = rf.Prefix
+	}
 	out[0].data.RelatedPages = append(out[0].data.RelatedPages, topicPageNames(gp)...)
 
 	// cascading accumulates the cascading flags of a node's ancestors; stability is the least
@@ -197,7 +200,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			childChain := append(append([][]string{}, identChain...), seg)
 			childNames := append(append([]string{}, names...), n.name)
 			invocation := gp.rootDisplay + " " + strings.Join(childNames, " ")
-			data := withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix, gp.readsConfig(childNames)), childNames, n.children, n.output, n.inputs)
+			data := withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix, gp.configReadsOf(childNames)), childNames, n.children, n.output, n.inputs)
 			if n.passthrough {
 				data.Passthrough = n.name
 			}
@@ -322,9 +325,8 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 
 // buildHelpData assembles the template data for one command from its doc fields, inputs,
 // direct children and plugins. Hidden children and inputs are excluded; plugins are listed
-// with the commands. readsConfig says whether the command reads any config file, which decides
-// whether its flags show their config keys.
-func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, plugins []PluginSpec, ancestorCascading []templateDocFlagRow, envPrefix string, readsConfig bool) templateHelpData {
+// with the commands. reads decides which of its inputs show config keys.
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, plugins []PluginSpec, ancestorCascading []templateDocFlagRow, envPrefix string, reads configReads) templateHelpData {
 	d := templateHelpData{
 		Invocation:  invocation,
 		Headings:    resolveHeadings(h),
@@ -333,7 +335,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Description: h.Description,
 		Usage:       h.Usage,
 		Footer:      h.Footer,
-		Cascading:   withConfigKeys(ancestorCascading, readsConfig),
+		Cascading:   withConfigKeys(ancestorCascading, reads),
 		Examples:    h.Examples,
 		SeeAlso:     h.SeeAlso,
 		Effects:     effectsText(h.Effects),
@@ -374,7 +376,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if a.Hidden {
 				continue
 			}
-			d.Arguments = append(d.Arguments, argumentRow(a, envPrefix, readsConfig))
+			d.Arguments = append(d.Arguments, argumentRow(a, envPrefix, reads.any))
 		}
 		for _, f := range inputs.Flags {
 			if f.Hidden {
@@ -430,7 +432,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			})
 		}
 	}
-	d.Flags = withConfigKeys(d.Flags, readsConfig)
+	d.Flags = withConfigKeys(d.Flags, reads)
 	labelFlags(d.Flags, d.Cascading)
 	d.FlagGroups = groupFlags(d.Flags, h.Groups)
 	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(plugins) > 0)
@@ -637,6 +639,7 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		Constraints: constraints,
 		Accepts:     acceptsNote(f.Schema),
 		Rules:       rules,
+		name:        f.Name,
 		key:         flagReconKey(f.Name, f.Schema),
 		Effects:     effectsText(f.Effects),
 
@@ -739,18 +742,34 @@ func cascadingFlagsOf(inputs *Inputs, envPrefix string) []templateDocFlagRow {
 	return rows
 }
 
+// configReads is what a command's page and contract entry need to show config keys: whether
+// the command reads any config file, and the flags that select a profile of one, which no file
+// sets.
+type configReads struct {
+	any       bool
+	selectors []string
+}
+
+// configReadsOf is configReads for the command at path (below the root).
+func (gp *program) configReadsOf(path []string) configReads {
+	return configReads{
+		any:       gp.readsConfig(path),
+		selectors: gp.selectorsFor(strings.Join(append([]string{gp.rootName}, path...), "/")),
+	}
+}
+
 // withConfigKeys returns rows with ConfigKey set from each flag's key when the page's command
-// reads config files, and cleared when it reads none: a key no file is read for points nowhere.
-// A cascading flag is judged by the page it appears on, since the runtime reads the invoked
-// command's files.
-func withConfigKeys(rows []templateDocFlagRow, readsConfig bool) []templateDocFlagRow {
+// reads config files, and cleared when it reads none or the flag selects a profile: a key no
+// file is read for points nowhere. A cascading flag is judged by the page it appears on, since
+// the runtime reads the invoked command's files.
+func withConfigKeys(rows []templateDocFlagRow, reads configReads) []templateDocFlagRow {
 	if rows == nil {
 		return nil
 	}
 	out := slices.Clone(rows)
 	for i := range out {
 		out[i].ConfigKey = ""
-		if readsConfig {
+		if reads.any && !slices.Contains(reads.selectors, out[i].name) {
 			out[i].ConfigKey = out[i].key
 		}
 	}

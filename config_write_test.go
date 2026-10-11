@@ -298,6 +298,30 @@ func TestSetConfigValue_createsByStrategy(t *testing.T) {
 			t.Errorf("the file wasn't created at %s", path)
 		}
 	})
+	t.Run("native", func(t *testing.T) {
+		dir := t.TempDir()
+		want := filepath.Join(dir, "xdg", "app", "config.yaml")
+		switch runtime.GOOS {
+		case "darwin", "ios":
+			want = filepath.Join(dir, "Library", "Application Support", "app", "config.yaml")
+		case "windows":
+			want = filepath.Join(dir, "roaming", "app", "config.yaml")
+		case "plan9":
+			want = filepath.Join(dir, "lib", "app", "config.yaml")
+		}
+		env := []string{"HOME=" + dir, "home=" + dir, "XDG_CONFIG_HOME=" + filepath.Join(dir, "xdg"), "AppData=" + filepath.Join(dir, "roaming")}
+		rtx := cwContext(dir, env, ConfigFile{Name: "app", Discover: &DiscoverDef{Strategy: "native", File: "config.yaml", App: "app"}, Keys: keys})
+		path, exists, err := ConfigFilePath(rtx, "app")
+		if err != nil || exists || path != want {
+			t.Fatalf("ConfigFilePath = %q, %v, %v; want %q", path, exists, err, want)
+		}
+		if err := SetConfigValue(rtx, "app", "region", "us"); err != nil {
+			t.Fatal(err)
+		}
+		if got := cwRead(t, want); got != "region: us\n" {
+			t.Errorf("created:\n%s", got)
+		}
+	})
 	t.Run("walk-up", func(t *testing.T) {
 		dir := t.TempDir()
 		run := filepath.Join(dir, "a", "b")

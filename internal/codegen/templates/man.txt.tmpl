@@ -47,7 +47,8 @@
          The page's .Effects says what running the command does, as declared ("destructive,
          not idempotent, open world"), "" when it declares none; a flag row's .Effects says what
          giving the flag adds ("destructive").
-         The root's page carries .Topics[] {.Name .Summary}, its help topics. On a topic's page
+         The root's page carries .Topics[] {.Name .Summary}, its help topics, and
+         .ResponseFiles, the response-file prefix ("" when response files are off). On a topic's page
          .Topic is true: .Summary and .Description are the topic's, .Environment holds a
          generated environment topic's rows, each with .Commands (the commands that read it),
          and the rest is empty.
@@ -85,6 +86,8 @@
 {{else}}\fB{{roff .Invocation}}\fR {{roff (trimPrefix .Invocation .UsageDerived)}}
 {{end}}{{end}}{{with .Passthrough}}.PP
 Every word after \fB{{roff .}}\fR is passed through as written, so options go before \fB{{roff .}}\fR.
+{{end}}{{with .ResponseFiles}}.PP
+A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\fR), whose lines are read as arguments, one per line, until \fB\-\-\fR; to pass a word starting with \fB{{roff .}}\fR, double it (\fB{{roff .}}{{roff .}}x\fR).
 {{end}}
 {{if or .Description .Stability .Effects}}.SH DESCRIPTION
 {{with .Description}}{{roffBlock .}}

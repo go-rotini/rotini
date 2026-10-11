@@ -18,10 +18,12 @@ func TestPages_golden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gp, err := resolveTree(decodeSpecYAML(t, string(body)), filepath.Join(t.TempDir(), ".rotini.spec.yaml"), "example.com/ops")
+	spec := decodeSpecYAML(t, string(body))
+	gp, err := resolveTree(spec, filepath.Join(t.TempDir(), ".rotini.spec.yaml"), "example.com/ops")
 	if err != nil {
 		t.Fatal(err)
 	}
+	gp.spec = spec // root-only settings, as resolveProgram keeps them
 	for _, feat := range []struct {
 		desc docFeature
 		ext  string

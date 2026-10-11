@@ -112,7 +112,7 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 		"Command", "FlagInput", "ArgumentInput", "EnvInput", "ConfigInput", "InputSchema",
 		"BaseSchema", "Schema", "StdinSpec", "FlagGroup", "FlagDependency",
 		"PluginSpec", "PluginDiscovery", "HandlerSource", "HelpHeadings",
-		"ExitStatusEntry", "ConfigurationFile", "ConfigurationFileDiscover",
+		"ExitStatusEntry", "ConfigurationFile", "ConfigurationFileDiscover", "CompletionHint",
 	} {
 		if !strings.Contains(page, "## "+def+"\n") {
 			t.Errorf("no section for definition %s", def)
@@ -123,7 +123,7 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 		"name", "$ref", "flags", "arguments", "env", "config", "config_files", "stdin",
 		"flag_groups", "flag_dependencies", "passthrough", "handler", "plugins",
 		"variable", "negatable", "complete", "group", "dotted_keys", "from", "config_source",
-		"nesting", "placeholder", "secret", "required", "default", "enum", "pattern",
+		"nesting", "placeholder", "secret", "required", "default", "enum", "pattern", "extensions",
 	} {
 		if !strings.Contains(page, "### `"+key+"`") {
 			t.Errorf("no entry for key %q", key)
@@ -135,9 +135,31 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 		"env_prefix",
 		"TextUnmarshaler",
 		"every sub-command below it has the same shape",
+		"rejects NaN and infinite values",
+		"leave out a secret input's default",
+		"take every identifier of that flag",
 	} {
 		if !strings.Contains(page, phrase) {
 			t.Errorf("the rendered page does not carry %q — descriptions are missing", phrase)
+		}
+	}
+}
+
+// TestTypeLabel_alternatives pins that a value of several shapes lists each one, rather than
+// reading as an object.
+func TestTypeLabel_alternatives(t *testing.T) {
+	var doc schemaDoc
+	if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		def, key, want string
+	}{
+		{"BaseSchema", "enum", "array of `string` or `object`"},
+		{"Command", "multicall", "`boolean` or [`Multicall`](#multicall)"},
+	} {
+		if got := typeLabel(flattenAllOf(doc.Definitions[c.def]).Properties[c.key]); got != c.want {
+			t.Errorf("%s.%s: typeLabel = %q, want %q", c.def, c.key, got, c.want)
 		}
 	}
 }
@@ -160,6 +182,7 @@ type schemaDoc struct {
 	Pattern     string               `json:"pattern"`
 	AllOf       []schemaDoc          `json:"allOf"`
 	AnyOf       []schemaDoc          `json:"anyOf"`
+	OneOf       []schemaDoc          `json:"oneOf"`
 }
 
 // renderSchemaMarkdown renders one schema as a Hugo content page: the document's own keys
@@ -385,6 +408,16 @@ func typeLabel(p schemaDoc) string {
 		for _, v := range t {
 			parts = append(parts, fmt.Sprintf("`%v`", v))
 		}
+		return strings.Join(parts, " or ")
+	}
+	// Alternatives list each shape once; ones that only add requirements name no type.
+	var parts []string
+	for _, alt := range slices.Concat(p.AnyOf, p.OneOf) {
+		if l := typeLabel(alt); l != "" && !slices.Contains(parts, l) {
+			parts = append(parts, l)
+		}
+	}
+	if len(parts) > 0 {
 		return strings.Join(parts, " or ")
 	}
 	if len(p.AllOf) > 0 || len(p.AnyOf) > 0 {

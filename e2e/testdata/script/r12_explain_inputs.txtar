@@ -1,0 +1,101 @@
+# R12 — the guide's parse explanation: a hidden short-circuit flag prints where each input's
+# value came from, even on a command line still missing a required argument. deploy.go.txt is
+# the handler block the guide shows.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+concat internal/cmd/todo/todo_deploy.go deploy_head.go.txt deploy.go.txt
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+env TODO_PORT=9000
+env TODO_TOKEN_FILE=token.txt
+exec ./todo$exe deploy prod --explain-inputs
+stdout '^TodoDeploy\.Arguments\.Target = "prod" from argv:<target>$'
+stdout '^TodoDeploy\.Flags\.Port = "9000" from env:TODO_PORT; overrides config:user#deploy\.port "8000", default "8080"$'
+stdout '^TodoDeploy\.Flags\.Token = \[redacted\] from env:TODO_TOKEN_FILE$'
+! stdout s3cret
+
+# The required argument is waived for the explanation, and the token typed on the command line
+# wins over the file.
+exec ./todo$exe deploy --explain-inputs --token typed
+stdout '^TodoDeploy\.Flags\.Token = \[redacted\] from argv:--token; overrides env:TODO_TOKEN_FILE \[redacted\]$'
+! stdout 'Arguments\.Target'
+
+# Without the flag the run is checked as usual.
+! exec ./todo$exe deploy
+stderr 'target'
+
+-- token.txt --
+s3cret
+-- todo.yaml --
+deploy:
+  port: 8000
+-- deploy_head.go.txt --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type todoDeployHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+-- deploy.go.txt --
+func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, report, err := rtx.InputsWithReport[TodoDeployInputs]()
+	if in.TodoDeploy.Flags.ExplainInputs {
+		_ = report.Format(rtx.Stdout)
+		return
+	}
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	// …
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a todo client
+  config_files:
+    - name: user
+      path: todo.yaml
+  commands:
+    - name: deploy
+      summary: deploy the service
+      flags:
+        - name: port
+          summary: the port to serve on
+          identifiers: [--port]
+          schema: {type: int, key: deploy.port, variable: TODO_PORT, default: 8080}
+        - name: token
+          summary: the API token
+          identifiers: [--token]
+          schema: {type: string, secret: true, variable: TODO_TOKEN, variable_file: TODO_TOKEN_FILE}
+        - name: explain-inputs
+          summary: print where each input's value came from
+          identifiers: [--explain-inputs]
+          short_circuit: true
+          hidden: true
+          schema: {type: bool}
+      arguments:
+        - name: target
+          schema: {type: string, required: true}
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo

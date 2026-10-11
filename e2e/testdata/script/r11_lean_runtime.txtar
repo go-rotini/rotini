@@ -29,7 +29,7 @@ stdout 'Usage:'
 # The stripped linux/amd64 binary stays under its budget, which belongs to the go.mod toolchain.
 [linux] [pinnedgo] env GOOS=linux GOARCH=amd64
 [linux] [pinnedgo] exec go build -ldflags '-s -w' -o app-stripped ./cmd/app
-[linux] [pinnedgo] sizebelow app-stripped 7000000
+[linux] [pinnedgo] sizebelow app-stripped 6800000
 
 -- cmd/app/.rotini.conf.yaml --
 version: 0.0.0

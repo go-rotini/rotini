@@ -27,7 +27,7 @@ func TestNamedSchemaRotiniTypes(t *testing.T) {
 			Properties map[string]map[string]any `json:"properties"`
 		} `json:"definitions"`
 	}
-	if err := json.Unmarshal([]byte(validationSchema(Schema{BaseSchema: BaseSchema{Ref: "#/schemas/DB"}}, schemas)), &doc); err != nil {
+	if err := json.Unmarshal([]byte(validationSchema(Schema{Ref: "#/schemas/DB"}, schemas)), &doc); err != nil {
 		t.Fatal(err)
 	}
 	props := doc.Definitions["DB"].Properties

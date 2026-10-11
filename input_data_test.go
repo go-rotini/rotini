@@ -212,6 +212,32 @@ func TestVariableFile_secretRedacted(t *testing.T) {
 	}
 }
 
+// A value read through a file names the file variable as its origin.
+func TestVariableFile_origin(t *testing.T) {
+	dir := t.TempDir()
+	idWrite(t, dir, "token", "s3cret\n")
+	idWrite(t, dir, "pw", "hunter2\n")
+	rtx := NewContextFor(idSecretDef, nil).WithDir(dir).
+		WithEnviron([]string{"APP_TOKEN_FILE=token", "APP_PASSWORD_FILE=pw"})
+	layer, err := rtx.EnvInputs[idSecretInputs]()
+	must(t, err)
+	for path, want := range map[FieldPath]string{
+		"App.Flags.Token":  "env:APP_TOKEN_FILE",
+		"App.Env.Password": "env:APP_PASSWORD_FILE",
+	} {
+		if got := layer.Set[path].Origin; got != want {
+			t.Errorf("origin of %s = %q, want %q", path, got, want)
+		}
+	}
+
+	rtx = NewContextFor(idSecretDef, nil).WithDir(dir).WithEnviron([]string{"DB_PASSWORD=x"})
+	layer, err = rtx.EnvInputs[idSecretInputs]()
+	must(t, err)
+	if got := layer.Set["App.Env.Password"].Origin; got != "env:DB_PASSWORD" {
+		t.Errorf("origin of a plain variable = %q, want env:DB_PASSWORD", got)
+	}
+}
+
 // ── a .env file as an environment layer ─────────────────────────────────────
 
 type idEnvCmd struct {

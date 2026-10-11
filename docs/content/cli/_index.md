@@ -114,7 +114,8 @@ Flags:
   -n, --[no-]dry-run       show what init would write, and change nothing
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini initialize mycli
@@ -174,7 +175,8 @@ Commands:
   cobra    import a Cobra program
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini import cobra ./cmd
@@ -214,7 +216,8 @@ Flags:
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini import cobra ./cmd
@@ -290,7 +293,8 @@ Flags:
   -n, --[no-]dry-run     show what would be written, created or removed, and change nothing; exits 2 when something would change
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini generate
@@ -338,7 +342,8 @@ Flags:
       --format string    how to report problems — text, or json (one object listing every problem, on stdout) (default text) [text|json]
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Output:
   Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.
@@ -395,7 +400,8 @@ Arguments:
   [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini tree
@@ -462,7 +468,8 @@ Flags:
       --format string     how to write the findings (default text) [text|json]
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Output:
   Every change between the contracts, the acknowledgements that matched none, and the counts.
@@ -499,7 +506,8 @@ Arguments:
   <key>    the key path, such as command.flags.schema.from
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini explain command.flags.role
@@ -550,7 +558,8 @@ Flags:
       --kind string    what the files are, when their keys and names don't tell [spec|conf|command]
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini fmt
@@ -574,7 +583,8 @@ Arguments:
   [command...]    name of the command to print help for
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini help
@@ -610,7 +620,8 @@ Arguments:
   <shell>    the shell to print the script for [bash|zsh|fish|powershell|nushell]
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini completion bash
@@ -643,7 +654,8 @@ Flags:
       --dir string    write every page into this directory instead of printing one
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Examples:
   rotini man generate > rotini-generate.1
@@ -656,19 +668,6 @@ Use "rotini help <command>" for more information about a command.
 
 Prints the tool's version. `generate` and `validate` compare it with the `version:` key in your
 spec and conf.
-
-`--format json` prints the version with the Go version that built the binary and the module path
-and version from its build info, as one JSON object. The text output and the root's `--version`
-stay `v1.x.y`.
-
-{{< code title="rotini version --format json — output" language="json" open="true" collapsible="false" copy="false" >}}
-{
-  "go_version": "go1.27.1",
-  "module_path": "github.com/go-rotini/rotini",
-  "module_version": "v1.4.0",
-  "version": "v1.4.0"
-}
-{{< /code >}}
 
 That key is a minimum, not an exact match: it names the rotini your files were written for, and
 any rotini of the same major version at or beyond it accepts them, so a patch or minor upgrade
@@ -687,6 +686,19 @@ not know keys they use, and a different major version:
 When rotini is installed through the module graph — `go get -tool`, then `go tool rotini` — the version is the one your `go.mod` requires, read from the binary's build info. A build from source can stamp one with `-ldflags "-X main.version=…"`, which applies only when build info carries no release version (a development build or a pseudo-version); a real module version always wins.
 {{< /alert >}}
 
+`--format json` prints the version with the Go version that built the binary and the module path
+and version from its build info, as one JSON object. The text output and `--version` stay
+`v1.x.y`.
+
+{{< code title="rotini version --format json — output" language="json" open="true" collapsible="false" copy="false" >}}
+{
+  "go_version": "go1.27.1",
+  "module_path": "github.com/go-rotini/rotini",
+  "module_version": "v1.4.0",
+  "version": "v1.4.0"
+}
+{{< /code >}}
+
 {{< code title="$ rotini help version" language="text" open="true" collapsible="false" copy="false" >}}
 Print the rotini cli version. With --format json, print the version, the Go version that built
 the binary, and the module path and version from its build info, as one JSON object.
@@ -698,7 +710,8 @@ Flags:
       --format string    output format (default text) [text|json]
 
 Global Flags:
-  -h, --help    print help
+  -v, --version    print version
+  -h, --help       print help
 
 Output:
   The version and build of the rotini binary.

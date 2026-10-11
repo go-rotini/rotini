@@ -133,13 +133,11 @@ func TestDiff_profileRules(t *testing.T) {
 		},
 		{
 			name: "selector variable added", old: spec("{under: profiles, select: profile}", plain), new: spec("{under: profiles, select: profile}", withVar),
-			want: []string{"safe PROFILES_ENV_ADDED app config_files app $APP_PROFILE", "safe INPUT_ENV_ADDED app --profile $APP_PROFILE",
-				"safe INPUT_CONFIG_KEY_ADDED app --profile"},
+			want: []string{"safe PROFILES_ENV_ADDED app config_files app $APP_PROFILE", "safe INPUT_ENV_ADDED app --profile $APP_PROFILE"},
 		},
 		{
 			name: "selector variable removed", old: spec("{under: profiles, select: profile}", withVar), new: spec("{under: profiles, select: profile}", plain),
-			want: []string{"breaking PROFILES_ENV_NO_DELETE app config_files app $APP_PROFILE", "breaking INPUT_ENV_NO_DELETE app --profile $APP_PROFILE",
-				"breaking INPUT_CONFIG_KEY_CHANGED app --profile"},
+			want: []string{"breaking PROFILES_ENV_NO_DELETE app config_files app $APP_PROFILE", "breaking INPUT_ENV_NO_DELETE app --profile $APP_PROFILE"},
 		},
 		{
 			name: "default changed", old: spec("{under: profiles, select: profile, default: dev}", plain), new: spec("{under: profiles, select: profile, default: prod}", plain),

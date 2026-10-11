@@ -122,3 +122,36 @@ func TestProfiles_validates(t *testing.T) {
 		t.Error("an unknown key under profiles passed")
 	}
 }
+
+// A profile selector is never read from a config file, so neither the contract, help nor a
+// config file's schema gives it a key.
+func TestProfiles_selectorHasNoConfigKey(t *testing.T) {
+	_, commands := contractJSON(t, profilesSpec)
+	for _, name := range []string{"acme", "acme deploy"} {
+		for _, f := range commands[name]["flags"].([]any) {
+			if f := f.(map[string]any); f["name"] == "profile" && f["config_key"] != nil {
+				t.Errorf("%s: --profile has config_key %v", name, f["config_key"])
+			}
+		}
+	}
+	gp := profilesProgram(t)
+	for _, row := range buildHelpData("acme", gp.rootHelp, gp.rootInputs, gp.tree, nil, nil, gp.envPrefix, gp.configReadsOf(nil)).Flags {
+		if row.ConfigKey != "" {
+			t.Errorf("help shows config key %q for %v", row.ConfigKey, row.Identifiers)
+		}
+	}
+	for _, cf := range gp.configFiles {
+		doc := gp.configSchemaDoc(cf)
+		props := doc["properties"].(map[string]any)
+		if _, ok := props["profile"]; ok {
+			t.Errorf("%s: the schema has a top-level profile key", cf.Name)
+		}
+		if cf.Profiles == nil {
+			continue
+		}
+		section := props[cf.Profiles.Under].(map[string]any)["additionalProperties"].(map[string]any)
+		if _, ok := section["properties"].(map[string]any)["profile"]; ok {
+			t.Errorf("%s: a profile section has a profile key", cf.Name)
+		}
+	}
+}

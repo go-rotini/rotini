@@ -264,6 +264,8 @@ Not supported on a local command and rejected by rotini validation: a timeout is
 
 #### `multicall`
 
+`boolean` or [`Multicall`](#multicall)
+
 Root only: dispatch on the name the binary was invoked as, so one binary serves several names through links or copies. `true` is busybox style: a binary named after a top-level command (a symlink `ls` to the binary) runs it, as if the user had typed `<root> ls`. The object form sets a prefix to strip first, a prefix that answers shell completion, or both. The name is the base name the binary was run as, never a resolved symlink; on Windows a trailing .exe is dropped and names match without regard to case. A name that matches no command, the root's own included, runs the root as usual. Help pages still show the root's invocation (`busybox ls`).
 
 ### Documentation
@@ -487,7 +489,7 @@ Identifiers the command line accepts for this flag but that are never listed: he
 
 array of `string`
 
-CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle, and an identifier that hides one of a cascading or short-circuit ancestor flag's.
+CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle. Reusing an identifier of a cascading or short-circuit ancestor flag is a warning, since after this command's name it means this flag; it is an error when this command's flags take every identifier of that flag, which then can't be given after this command's name at all. A flag of the same name that redeclares the switch is not reported.
 
 A single dash and one digit (`-4`) declares a digit option, on a bool or count flag (`identifiers: ['-4', --ipv4]`; quoted, since a bare -4 is a number in YAML). A word starting with that dash and digit is then the flag, on this command and every command below it, while other negative numbers still parse as numbers. `rotini validate` rejects it when an argument of this command or one below it takes negative numbers.
 
@@ -586,7 +588,7 @@ When true, the argument is omitted from generated help (it still parses on the c
 
 `boolean` · default `false`
 
-When true, raw words start at this argument: flags before it parse as usual, and it and every word after it are taken as typed, flag-shaped words and `--` included (`app exec --region eu ls -la --help` gives the command's `--region` and passes `ls -la --help` on). A word starting with `-` that should be the first raw word goes after `--` (`app exec -- -x`). It must be the command's last argument, a variadic `[]string` without a separator, enum, pattern or bounds, on a command with no sub-commands, plugins or command-level `passthrough`. A handler reads where a `--` was typed with rtx.DashIndex(). Shell completion offers no flags or sub-commands past the boundary; the argument's own completer, enum or hint still applies.
+When true, raw words start at this argument: flags before it parse as usual, and it and every word after it are taken as typed, flag-shaped words and `--` included (`app exec --region eu ls -la --help` gives the command's `--region` and passes `ls -la --help` on). A word starting with `-` that should be the first raw word goes after `--` (`app exec -- -x`). It must be the command's last argument, a variadic `[]string` without a separator, enum, pattern, bounds or `uniqueItems`, on a command with no sub-commands, plugins or command-level `passthrough`. A handler reads where a `--` was typed with rtx.DashIndex(). Shell completion offers no flags or sub-commands past the boundary; the argument's own completer, enum or hint still applies.
 
 ### `removed_in`
 
@@ -1206,7 +1208,7 @@ document instead; see [StdinSpec](#stdinspec).
 
 ### `complete`
 
-`object`
+[`CompletionHint`](#completionhint)
 
 Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 
@@ -1353,7 +1355,7 @@ When true, the input must be provided (or stdin must not be empty for stdin inpu
 
 `boolean` · default `false`
 
-When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input. A secret flag or argument whose from: list leaves out value refuses a value typed on the command line, which would show in the process list and shell history; `rotini validate` warns about a secret flag that accepts one.
+When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input. A secret flag or argument whose from: list leaves out value refuses a value typed on the command line, which would show in the process list and shell history; `rotini validate` warns about a secret flag that accepts one. Help, man and markdown pages leave out a secret input's default unless `default_text` sets what to show.
 
 ### `separator`
 
@@ -1463,7 +1465,7 @@ Every spelling is validated against the named schema, with the same validator a 
 
 ### `enum`
 
-array of `object`
+array of `string` or `object`
 
 Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.
 
@@ -1511,7 +1513,7 @@ Maximum string length in runes (string types only; for []string, each element) �
 
 `number` or `string` or `null`
 
-Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numbers, durations and sizes, each in its own spelling; per-element for arrays; rejected elsewhere); maximum: 0 is a real, enforced bound.
+Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numbers, durations and sizes, each in its own spelling; per-element for arrays; rejected elsewhere); maximum: 0 is a real, enforced bound. As with 'minimum', a bounded number rejects NaN and infinite values.
 
 ### `minItems`
 
@@ -1529,7 +1531,7 @@ Minimum string length in runes (string types only; for []string, each element) �
 
 `number` or `string` or `null`
 
-Minimum allowed value (inclusive). Number types (the int, uint and float types and the integer and number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes), read by the same parser as the value and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would have no effect. For a repeatable input the bound applies to each element. minimum: 0 is a real, enforced bound.
+Minimum allowed value (inclusive). Number types (the int, uint and float types and the integer and number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes), read by the same parser as the value and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would have no effect. For a repeatable input the bound applies to each element. minimum: 0 is a real, enforced bound. A number input with any bound (this, `maximum`, the exclusive bounds or `multipleOf`) rejects NaN and infinite values.
 
 ### `multipleOf`
 
@@ -1602,6 +1604,29 @@ A NAMED OBJECT schema is different: a flag whose schema is `$ref: '#/schemas/DB'
 `boolean`
 
 On a list input (a list flag, a variadic argument, or a list env or config input): reject a list that holds the same value twice. Values compare as their type reads them, so `01` and `1` are the same int, `1h` and `60m` the same duration, `1Ki` and `1024` the same bytesize, and `::1` and `0:0:0:0:0:0:0:1` the same ip; a time compares as the instant it names, read with its layout; a list of objects compares whole objects; a case-insensitive enum compares its declared spellings. Checked on every channel and by CheckInputs, and a list default may not repeat a value. Rejected on scalar, map and count inputs, and inside items. On output, stdin and named schemas it is the JSON Schema keyword.
+
+
+## CompletionHint
+
+A shell-completion hint for a flag's or argument's value: a `kind` of value to complete, a `message` to show when there is nothing to offer, or both.
+
+### `extensions`
+
+array of `string`
+
+Narrows kind 'file' to these suffixes, written without a leading dot ('yaml', 'json'). Omitted, every file is offered. Rejected on the other kinds, which have no extensions to filter.
+
+### `kind`
+
+`string` · one of `file`, `directory`, `none`, `command`, `executable`, `user`, `host`, `group`
+
+'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete nothing, which is not the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that is file completion; 'none' turns it off, so for an opaque value (a container id, an API resource name) the shell does not offer the files in the current directory. 'command': complete command paths below the root, for a help command's argument: the words already given to this argument are the path, and the candidates are its visible sub-commands (`help remote <TAB>` offers remote's sub-commands). Arguments of type string or a list of strings only. 'executable': program names (bash offers every command name it knows; zsh, fish and PowerShell offer programs). 'user', 'group': local account and group names. 'host': host names the shell knows (/etc/hosts, ssh known hosts). Each shell's own completer supplies these four; PowerShell has no host completer, and offers users and groups on Windows only. Values of type string or a list of strings only.
+
+### `message`
+
+`string`
+
+A line the shell shows while this input's value is being completed and there is nothing to offer, such as `a service name from deploy.yaml`. One line. It shows only when the conf's completion feature sets `messages`, and in zsh and bash 4.4 or later; other shells skip it. A message a completer adds with rtx.AddCompletionMessage takes its place.
 
 
 ## FlagSet

@@ -101,7 +101,7 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rotini.AppDirs(rtx, app, strategy)` | the config, data, cache and state directories; see [files your program keeps](/docs#files-your-program-keeps) |
 | `rotini.ConfigProfiles(rtx, file)` | the profiles a config file defines, for a completer; see [profiles](/docs#profiles) |
 | `rotini.SortBy(items, field, desc)` / `rotini.SelectFields(v, at, fields)` | sort a command's output by a field and keep the fields the user chose; see [choosing fields and order](/docs#choosing-fields-and-order) |
-| `rtx.WriteOutputTo(w, …)` / `rtx.WriteOutputItem(item, …)` | write structured output to another writer, or one item of a stream |
+| `rtx.WriteOutputTo(w, v, …)` / `rtx.WriteOutputItemTo(w, item, …)` | write structured output, or one item of a stream, to another writer |
 
 {{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
@@ -200,7 +200,7 @@ checking it against the declared shape.
 | Package | What it is |
 |---|---|
 | `github.com/go-rotini/rotini/shape` | `shape.Template`, a flag type for a `--format '{{…}}'` Go template, and `shape.Render`, the renderer that runs it; see [templates](/docs#templates) |
-| `github.com/go-rotini/rotini/rotinitest` | `Run`, `Output`, `OutputAs` and `ExitDocumented` for tests with typed inputs, with the options `Env`, `Dir`, `Stdin`, `Context`, `Presence`, `Secrets` and `Path`; see [testing with typed inputs](/docs#testing-with-typed-inputs) |
+| `github.com/go-rotini/rotini/rotinitest` | `Run`, `Output`, `OutputAs` and `ExitDocumented` for tests with typed inputs, with the options `Env`, `Dir`, `Stdin`, `Context`, `Presence`, `Secrets`, `Clock`, `Argv0` and `Path`; see [testing with typed inputs](/docs#testing-with-typed-inputs) |
 
 Both are opt-in: a program that doesn't import them links none of their code.
 

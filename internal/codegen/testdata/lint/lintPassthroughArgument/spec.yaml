@@ -40,6 +40,7 @@ command:
             pattern: '^[a-z]+$'
             minItems: 1
             maxItems: 9
+            uniqueItems: true
     - name: group
       commands:
         - name: child

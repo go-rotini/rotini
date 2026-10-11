@@ -283,7 +283,8 @@ Other argument shapes:
 comment lines skipped. Words read from a file aren't expanded again, and `@@x` is the literal
 argument `@x`. Expansion happens before anything else reads the command line, so a file can hold
 the command's name, and `rtx.Argv` holds the expanded words. Choose a prefix other than `@` when a
-flag reads `from: [file]`.
+flag or argument reads `from: [file]`. The root man and markdown pages tell users about the
+prefix and the doubled form.
 
 ### Repeated values
 
@@ -339,7 +340,8 @@ flags:
 `rotini validate --release 2.0.0` then fails for each item still declared whose removal is due
 at or before that release, so a planned removal can't ship by accident. Set the conf's
 `validate.release_env` to the name of a variable your release job sets, and `rotini validate`
-reads the release from it; `--release` wins. `rotini generate` never runs this check.
+and `rotini diff` read the release from it; `--release` wins. `rotini generate` never runs this
+check.
 
 ### Pointing at a replacement
 
@@ -939,15 +941,17 @@ line per field a layer set: the value, where it came from, and what it overrode,
 A secret prints `[redacted]`, whatever layer supplied it:
 
 ```console
-$ todo deploy --explain-inputs
+$ todo deploy prod --token s3cr3t --explain-inputs
+TodoDeploy.Arguments.Target = "prod" from argv:<target>
+TodoDeploy.Flags.ExplainInputs = "true" from argv:--explain-inputs
 TodoDeploy.Flags.Port = "9000" from env:TODO_PORT; overrides config:user#deploy.port "8000", default "8080"
 TodoDeploy.Flags.Token = [redacted] from argv:--token
-TodoDeploy.Arguments.Target = "prod" from argv:<target>
 ```
 
 Each `InputSource` names its origin: `argv:<identifier as typed>`, `argv:<argument>`,
-`env:<VARIABLE>` (`env:TODO_HTTP__*` for a nested family), `config:<file name>#<key>`, `default`
-or `stdin`. A hand-built layer's origin is empty, and the line names its layer. A streamed stdin
+`env:<VARIABLE>` (`env:TODO_HTTP__*` for a nested family; the `variable_file` variable, such as
+`env:TODO_TOKEN_FILE`, for a value read from its file), `config:<file name>#<key>`, `default` or
+`stdin`. A hand-built layer's origin is empty, and the line names its layer. A streamed stdin
 prints `(stream)` and is never read.
 
 To offer this to users, declare a hidden short-circuit flag on the command and print the report
@@ -1313,11 +1317,11 @@ the handler passes to `rtx.HaltWithCode` or `rtx.Exit` as a number or a constant
 list leaves out, is reported as a warning with its file and line. Code 0 needs no entry. A
 command that prints its help when called without a sub-command exits 1, so list 1 for it. (The
 stub `rotini generate` writes for a root or a group command does this, printing the help on
-stderr.) The
-check reads only the methods of the command's handler type, so it can't see a code computed at
-run time, set in another function or package, or set by a reporter, and it skips a command whose
-handler lives in another package (`handler:`). `rotini validate` also reports a code listed
-twice, and warns about a code above 128, which a process stopped by a signal also exits with.
+stderr.) The check reads only the methods of the command's handler type, so it can't see a code
+computed at run time, set in another function or package, or set by a reporter, and it skips a
+command whose handler lives in another package (`handler:`). `rotini validate` also reports a
+code listed twice, and warns about a code above 128, which a process stopped by a signal also
+exits with.
 
 Give a code a `name` and `rotini generate` writes a constant for it, named after the command,
 so a handler doesn't repeat the number:
@@ -1673,7 +1677,8 @@ func (h *todoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context)
 - **Keep the cancel function in a handler field** and call it in the matching teardown. Handlers
   are created once per run, so the field belongs to this run.
 - **A derived context ending doesn't stop the run.** Check `ctx.Err()` in the hook and stop with
-  `rtx.HaltWith(err)`; canceling the run's own context still stops it between hooks. An
+  `rtx.HaltWith(err)`. A stdin read still waiting for data does end with it, returning an error
+  the hook can halt with. Canceling the run's own context still stops it between hooks. An
   `ExitCause` on a derived context sets no exit code: use `rtx.HaltWithCode`.
 - **Calls from a teardown change nothing**, and the reporter always gets the run's context.
   `rtx.Context()` returns the running hook's context; read it in the hook.
@@ -2366,7 +2371,7 @@ if _, err := fmt.Fprintf(rtx.Stdout, "%x\n", h.Sum(nil)); err != nil {
 On Windows, text files often end lines with `\r\n` and may start with a UTF-8 byte-order mark.
 Stdin's `lines` format drops each line's `\r` (`separator: nul` keeps bytes exact), and every
 stdin format but `bytes` removes one leading mark; a file opened with `OpenInput` keeps its
-mark, so trim `"﻿"` from its first line when that matters. UTF-16, which Windows
+mark, so trim `"\ufeff"` (U+FEFF) from its first line when that matters. UTF-16, which Windows
 PowerShell 5.1 writes with `>` and `Out-File`, isn't decoded: a stdin read whole stops with a
 usage error saying so, while streamed stdin and opened files arrive as raw bytes. Have users
 write UTF-8 (`Out-File -Encoding utf8`, or PowerShell 7, where it is the default), or decode it
@@ -2487,7 +2492,8 @@ generate:
   as list items, and `dotted_keys` on a map flag written as `a.b=value` pairs. It is
   written for MCP 2026-07-28; `mcp_revision: 2025-11-25` wraps an output that isn't an object,
   as that revision requires. With `go: true` the generated package also holds it as
-  `var ToolsMCP string`, so the binary can serve itself; the go-rotini/mcp module serves it.
+  `var ToolsMCP string`, so the binary can serve itself; see
+  [serving tools over MCP](#serving-tools-over-mcp).
 - **`openai.json`** holds OpenAI Responses API function tools in strict mode: every property
   required, optional ones nullable, and constraints strict mode doesn't take (lengths, defaults)
   written into the description. A command with a map flag can't be expressed and is left out,
@@ -2498,6 +2504,22 @@ generate:
 Env and config inputs are never parameters; on a server they come from its environment. A
 command whose required input can't be a parameter is left out with a warning, unless it is a
 secret the server's environment can supply. Env inputs are listed for the server.
+
+### Serving tools over MCP
+
+The [go-rotini/mcp](https://github.com/go-rotini/mcp) module serves `mcp.json` as an MCP server on
+stdio, running the program for each call and returning what it prints:
+
+```console
+$ go install github.com/go-rotini/mcp/cmd/rotini-mcp@latest
+$ rotini-mcp serve --tools tools/mcp.json --bin ./todo
+```
+
+`rotini-mcp config enable` adds the server to an MCP client's configuration. A program can serve
+itself instead: with the feature's `go: true`, declare an `mcp` command with `agent: false` and
+pass `ToolsMCP` to `mcp.Serve` in its handler, as the module's README shows. A call that is
+canceled or runs past `--timeout` gets SIGTERM, so the program's signal handling runs, and is
+killed after `--grace` (5s by default). Windows has no SIGTERM, so there it is killed at once.
 
 ### Agent pages
 
@@ -2666,6 +2688,9 @@ A topic name can't also be a root command's name or alias, or a declared plugin'
 discovery on, don't install an executable named after a topic (`todo-filters`): it would run as
 `todo filters` while `todo help filters` shows the topic.
 
+Only the root spec's topics are part of the program, so declare them there: `rotini validate`
+warns about topics in a spec mounted with `$ref`, which `help <topic>` can't reach.
+
 ### Files ready to package
 
 Set `install_dir` on the completion or man feature, and `rotini generate` also writes the scripts
@@ -2783,8 +2808,8 @@ still take:
 - **Flags already set** are left out, read the way the parser reads them (`-vx` sets both, and
   `--no-color` sets `--color`). List, map, count and object flags stay, since they repeat.
 - **Flag groups**: once one flag of a `mutually_exclusive` or `one_of` group is set, the others
-  are left out. Required flags not yet set come first, including those a group or a
-  `flag_dependencies` entry requires.
+  are left out, and so are the flags a set flag forbids in `flag_dependencies`. Required flags not
+  yet set come first, including those a group or a `flag_dependencies` entry requires.
 - **Deprecated** flags, identifiers, commands and aliases are left out. They still work when typed.
 - **Negatable flags** offer their `--no-` form.
 - **Enum values** come in the order the spec declares them, each with its summary.
@@ -2836,7 +2861,8 @@ the command that declares the flag, and `rtx` gives it:
   calls the network sets its own.
 - `rtx.SetCompletionOptions(rotini.CompletionOptions{NoSpace: true})`: no space after the
   inserted candidate, for a value the user goes on typing. fish adds none only after a value
-  ending in one of `@=/:.,`.
+  ending in one of `@=/:.,`. `KeepOrder: true` keeps the whole answer in the order given,
+  sub-command names included.
 
 {{< code title="internal/cmd/todo/todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
@@ -3228,23 +3254,18 @@ the kind line stays last, so a script and a binary from different rotini release
 Another program reads a rotini CLI's completion through `Program.Complete` or
 `Program.WithCompletion`, with a `rotini.CompletionFormat` that writes its own protocol.
 
-**kubectl** runs a separate executable, `kubectl_complete-<name>`, found on `PATH`. Install the
-plugin's binary a second time under that name (a copy or a symlink), and have `main.go` answer
-when it is run that way:
+**kubectl** runs a separate executable, `kubectl_complete-<name>`, found on `PATH`. Declare
+`multicall` on the root and install the plugin's binary a second time under that name (a copy or
+a symlink); run that way, it answers in `rotini.PluginCompletion`'s format:
 
-{{< code title="cmd/kubectl-ctx/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
-func main() {
-	p := cmd.NewProgram(cmd.Handlers())
-	if strings.Contains(filepath.Base(os.Args[0]), "_complete-") {
-		code, _ := p.Complete(os.Args[1:], rotini.PluginCompletion)
-		os.Exit(code)
-	}
-	p.WithVersion(version).Execute()
-}
+{{< code title="cmd/kubectl-ctx/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: kubectl-ctx
+  multicall: {complete: kubectl_complete-}
 {{< /code >}}
 
-Or declare `multicall: {complete: kubectl_complete-}` on the root and drop the check (see
-[one binary, several names](#one-binary-several-names)).
+See [one binary, several names](#one-binary-several-names). A program that decides in its own
+`main.go` calls `p.Complete(os.Args[1:], rotini.PluginCompletion)` instead.
 
 **Docker and Flux** run the plugin's own hidden `__complete` command:
 `docker-where __complete where <words…>`, `flux-suspended __complete <words…>`. Every rotini CLI

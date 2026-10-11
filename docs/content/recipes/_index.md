@@ -289,7 +289,7 @@ jobs:
         with:
           go-version-file: go.mod
           go-package: ./...
-      - run: go tool rotini diff "git:$(git describe --tags --abbrev=0)"
+      - run: go tool rotini diff "git:$(git describe --tags --abbrev=0)" --spec ./cmd/todo/.rotini.spec.yaml
 {{< /code >}}
 
 - `generate --dry-run` exits 2 when the committed code, pages or contract are stale; see
@@ -1506,11 +1506,19 @@ func fetchLatestVersion(ctx context.Context) (string, error) {
 `golang.org/x/mod/semver` (which wants a leading `v`) to skip a server that is behind.
 
 Replacing the binary is a command you declare, such as `self-update`, never something a run
-does on its own. `github.com/creativeprojects/go-selfupdate` finds the newest GitHub release,
-checks it against the release's checksums file, and swaps the running executable:
+does on its own. `github.com/creativeprojects/go-selfupdate` finds the newest GitHub release
+and swaps the running executable. It checks the download against the release's checksums file
+only when given a validator:
 
 {{< code title="self-update (sketch)" language="golang" open="true" collapsible="false" copy="true" >}}
-rel, err := selfupdate.UpdateSelf(ctx, rtx.Version(), selfupdate.ParseSlug("me/updemo"))
+up, err := selfupdate.NewUpdater(selfupdate.Config{
+	Validator: &selfupdate.ChecksumValidator{UniqueFilename: "checksums.txt"},
+})
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+rel, err := up.UpdateSelf(ctx, rtx.Version(), selfupdate.ParseSlug("me/updemo"))
 if err != nil {
 	rtx.HaltWith(err)
 	return

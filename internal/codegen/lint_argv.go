@@ -14,7 +14,7 @@ import (
 // command's last argument and a variadic []string, the command has nothing else that reads
 // the words after it (sub-commands, plugins, command-level passthrough), and it declares no
 // rule that would judge, count or split the raw words (separator, enum, pattern, lengths, item
-// counts).
+// counts, uniqueness).
 func lintPassthroughArgument(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -55,6 +55,7 @@ func lintPassthroughArgument(spec *Spec) []error {
 				{"maxLength", s.MaxLength != nil},
 				{"minItems", s.MinItems != 0},
 				{"maxItems", s.MaxItems != nil},
+				{"uniqueItems", s.UniqueItems},
 			} {
 				if k.set {
 					add("/schema/"+k.key, fmt.Sprintf("is a passthrough argument, whose words are passed on as typed, so it can't set %#q", k.key))

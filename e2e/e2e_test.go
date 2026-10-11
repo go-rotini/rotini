@@ -155,6 +155,18 @@ func TestScripts(t *testing.T) {
 					ts.Fatalf("the program links %s", strings.Join(linked, ", "))
 				}
 			},
+			// concat writes the files after the first, joined, to the first: a page's code block
+			// that shows only part of a file, completed by a head the script carries.
+			"concat": func(ts *testscript.TestScript, neg bool, args []string) {
+				if neg || len(args) < 2 {
+					ts.Fatalf("usage: concat <out> <file>...")
+				}
+				var b strings.Builder
+				for _, f := range args[1:] {
+					b.WriteString(ts.ReadFile(f))
+				}
+				ts.Check(os.WriteFile(ts.MkAbs(args[0]), []byte(b.String()), 0o644))
+			},
 			// sizebelow fails when a file is not smaller than a number of bytes.
 			"sizebelow": func(ts *testscript.TestScript, neg bool, args []string) {
 				if neg || len(args) != 2 {

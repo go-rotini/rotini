@@ -664,7 +664,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 			required = append(required, name)
 		}
 	}
-	readsConfig := p.readsConfig(n.path)
+	reads := p.configReadsOf(n.path)
 	for _, a := range in.Arguments {
 		req := a.Schema != nil && a.Schema.Required
 		f := contractFactsOf(a.Schema, schemas)
@@ -678,7 +678,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 			Schema: schemaOf(a.Schema), Description: a.Description, Stability: a.Stability,
 			Agent: a.Agent,
 		}
-		arg.Env, arg.ConfigKey = argumentFallback(a, p.envPrefix, readsConfig)
+		arg.Env, arg.ConfigKey = argumentFallback(a, p.envPrefix, reads.any)
 		arg.ValuesFrom = valuesFrom(a.Schema)
 		c.Arguments = append(c.Arguments, arg)
 		param(a.Name, cmp.Or(a.Description, a.Summary), withoutDeprecatedEnum(arg.Schema, arg.EnumValues), req, a.Hidden)
@@ -710,7 +710,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 			cf.Repeatable = f.Schema.Repeatable
 		}
 		// The same names help shows, from the same functions as the generated env tags.
-		row := withConfigKeys([]templateDocFlagRow{flagRow(f, p.envPrefix)}, readsConfig)[0]
+		row := withConfigKeys([]templateDocFlagRow{flagRow(f, p.envPrefix)}, reads)[0]
 		// Only the variable names: help's file-variable row carries a note.
 		cf.Env = slices.DeleteFunc(slices.Clone(row.Env), func(v string) bool { return strings.HasSuffix(v, fileVariableNote) })
 		cf.ConfigKey = row.ConfigKey

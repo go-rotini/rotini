@@ -1,0 +1,84 @@
+# R1 — an argument that declares from: reads - from stdin and @path from a file; a word is
+# taken as typed, and - on an argument without stdin in its from: is a plain word.
+
+gomodinit example.com/cat
+
+exec rotini generate cmd/cat/.rotini.spec.yaml --config cmd/cat/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o cat$exe ./cmd/cat
+
+stdin piped.txt
+exec ./cat$exe -
+stdout '^input=piped name=$'
+
+exec ./cat$exe @filed.txt
+stdout '^input=filed name=$'
+
+exec ./cat$exe typed
+stdout '^input=typed name=$'
+
+exec ./cat$exe typed -
+stdout '^input=typed name=-$'
+
+exec ./cat$exe typed @filed.txt
+stdout '^input=typed name=filed$'
+
+-- piped.txt --
+piped
+-- filed.txt --
+filed
+-- cmd/cat/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: cat
+  summary: read an argument from stdin or a file
+  arguments:
+    - name: input
+      schema: {type: string, from: [file, stdin]}
+    - name: name
+      schema: {type: string, from: [file]}
+-- cmd/cat/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/cat/main.go
+    - type: cmd
+      file: internal/cmd/cat/zz_cat.go
+      package: cat
+-- internal/cmd/cat/cat.go --
+package cat
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type catHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*catHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[CatInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "input=%s name=%s\n", in.Cat.Arguments.Input, in.Cat.Arguments.Name)
+}
+-- cmd/cat/main.go --
+package main
+
+import (
+	cat "example.com/cat/internal/cmd/cat"
+)
+
+func main() {
+	cat.NewProgram(cat.Handlers()).
+		Execute()
+}

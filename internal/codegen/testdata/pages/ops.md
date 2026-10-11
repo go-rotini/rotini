@@ -8,6 +8,8 @@ run the fleet
 ops [flags] <command>
 ```
 
+A word starting with `@` names a response file (`@args`), whose lines are read as arguments, one per line, until `--`; to pass a word starting with `@`, double it (`@@x`).
+
 ## Commands
 
 - `note` — add a note

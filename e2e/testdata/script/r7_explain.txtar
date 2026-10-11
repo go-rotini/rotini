@@ -1,0 +1,35 @@
+# R7 — rotini explain prints what the keys a spec uses mean, from the same schemas validate
+# reads, and completes key paths a level at a time.
+
+exec rotini validate .rotini.spec.yaml
+
+exec rotini explain command.flags.schema.from
+stdout '^spec: command\.flags\.schema\.from$'
+stdout '^  type: +array of string$'
+stdout '^  values: +"value", "file", "stdin"$'
+! stdout '^conf:'
+
+# A key both documents have is shown for each.
+exec rotini explain version
+stdout '^spec: version$'
+stdout '^conf: version$'
+
+wantexit 1 rotini explain command.flags.schema.nope
+stderr 'no key "nope" under command\.flags\.schema'
+! stdout .
+
+exec rotini __complete explain command.fla
+stdout '^command\.flags\.$'
+stdout '^command\.flag_groups\.$'
+! stdout '^command\.name'
+
+-- .rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: cat
+  summary: print a file
+  flags:
+    - name: token
+      summary: the API token
+      identifiers: [--token]
+      schema: {type: string, secret: true, from: [file, stdin]}

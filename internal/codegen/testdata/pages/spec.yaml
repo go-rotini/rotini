@@ -1,12 +1,14 @@
 # Every page section that comes from declared data: group descriptions in the declared order,
 # long-only flags aligned with the long column, constraints on each input kind, a stdin
 # section for each format, and a passthrough command, described enum values, a passthrough
-# argument, long input descriptions, stability markers, exit-code links and help topics.
+# argument, long input descriptions, stability markers, exit-code links, help topics and
+# response files.
 version: 0.0.0
 command:
   name: ops
   summary: run the fleet
   env_prefix: OPS
+  response_files: { prefix: "@" }
   config_files:
     - name: user
       path: ~/.ops.yaml

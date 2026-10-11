@@ -358,3 +358,17 @@ func TestCreatedLines(t *testing.T) {
 		t.Errorf("second generate = %q, want no created: lines", results[1])
 	}
 }
+
+// TestExplainBuild pins the note a failed package listing gets when the environment names a
+// go.work, which the run turns off: a package that builds only through the workspace fails.
+func TestExplainBuild(t *testing.T) {
+	fail := errors.New("go list: exit status 1\nno required module provides package example.com/lib")
+	if err := (&importRun{}).explainBuild(fail); err == nil || err.Error() != fail.Error() {
+		t.Errorf("outside a workspace: %v, want the error unchanged", err)
+	}
+	err := (&importRun{workspace: true}).explainBuild(fail)
+	if !errors.Is(err, fail) || !strings.Contains(err.Error(), "rotini import runs with GOWORK=off") ||
+		!strings.Contains(err.Error(), "import from a package that builds from its own module") {
+		t.Errorf("in a workspace: %v", err)
+	}
+}

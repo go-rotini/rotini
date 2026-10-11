@@ -17,7 +17,7 @@ func TestStreamNotesAndGlobRule(t *testing.T) {
 			{Name: "files", Summary: "files to read", Schema: &InputSchema{Type: "[]inputfile", Glob: true}},
 		},
 	}
-	d := buildHelpData("demo", cmdHelp{}, inputs, nil, nil, nil, "", false)
+	d := buildHelpData("demo", cmdHelp{}, inputs, nil, nil, nil, "", configReads{})
 	var flags []string
 	for _, f := range d.Flags {
 		flags = append(flags, f.Summary)

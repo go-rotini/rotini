@@ -109,10 +109,10 @@ func setCompletionMessage(schema **InputSchema, msg string) {
 	switch {
 	case *schema == nil && msg == "":
 	case *schema == nil:
-		*schema = &InputSchema{Complete: &InputSchemaComplete{Message: msg}}
+		*schema = &InputSchema{Complete: &CompletionHint{Message: msg}}
 	case (*schema).Complete == nil && msg == "":
 	case (*schema).Complete == nil:
-		(*schema).Complete = &InputSchemaComplete{Message: msg}
+		(*schema).Complete = &CompletionHint{Message: msg}
 	default:
 		(*schema).Complete.Message = msg
 	}

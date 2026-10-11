@@ -3,6 +3,10 @@
 ops \- run the fleet
 .SH SYNOPSIS
 \fBops\fR [flags] <command>
+.PP
+A word starting with \fB@\fR names a response file (\fB@args\fR), whose lines
+are read as arguments, one per line, until \fB\-\-\fR; to pass a word starting
+with \fB@\fR, double it (\fB@@x\fR).
 .SH "COMMANDS"
 .TP
 \fBnote\fR
