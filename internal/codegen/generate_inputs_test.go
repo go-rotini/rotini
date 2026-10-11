@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -169,9 +168,8 @@ func TestConstraintTags_readBackThroughReflect(t *testing.T) {
 	if got := st.Get("min"); got != "1" {
 		t.Errorf("min read back as %q", got)
 	}
-	var enum []string
-	if err := json.Unmarshal([]byte(st.Get("enum")), &enum); err != nil || !slices.Equal(enum, enumStrings(schema.Enum)) {
-		t.Errorf("enum read back as %v (%v), want %v", enum, err, schema.Enum)
+	if enum, ok := readTagList(st.Get("enumlist")); !ok || !slices.Equal(enum, enumStrings(schema.Enum)) {
+		t.Errorf("enum read back as %v (ok %v), want %v", enum, ok, schema.Enum)
 	}
 	if st.Get("ignorecase") != "true" {
 		t.Error("ignorecase tag missing")

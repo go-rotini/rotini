@@ -8,17 +8,34 @@ import "reflect"
 // new handler per call: a handler's fields are per-run state.
 type HandlerLookup func(name string) (Handler, bool)
 
-// NewProgramFunc wires a command tree to the runtime through lookup, with no reflection. It is
-// what generated code calls: the generated NewProgram passes a switch over the ProgramHandlers
-// methods. Hand-written handler sets can use it the same way for a smaller binary than
-// [NewProgram] gives.
+// NewProgramFunc wires a command tree to the runtime through lookup, with no reflection, and
+// gives the program every [Feature]. Hand-written handler sets can use it for a smaller binary
+// than [NewProgram] gives; generated code calls [NewWiredProgram], which links only the
+// features its spec uses.
 //
 // A nil lookup is accepted here; a run that reaches dispatch then fails with a [*WiringError],
 // and completion offers no dynamic candidates.
 func NewProgramFunc(def Definition, lookup HandlerLookup) *Program {
 	p := newProgram(def, lookup)
+	p.feats = legacyFeatures(def)
 	if lookup == nil {
 		p.noHandlers = "no handlers: NewProgramFunc was given a nil lookup"
+	}
+	return p
+}
+
+// NewWiredProgram is [NewProgramFunc] with exactly the listed features: the program links
+// and runs only those, so a small CLI's binary is smaller and starts faster. It is what the
+// generated NewProgram calls, passing the features its spec uses; [Program.WithFeatures] adds
+// more for code the spec does not describe. A run that needs a feature the program does not
+// have fails with a [*WiringError] naming it.
+//
+// A nil lookup behaves as it does for NewProgramFunc.
+func NewWiredProgram(def Definition, lookup HandlerLookup, features ...Feature) *Program {
+	p := newProgram(def, lookup)
+	p.feats = newFeatureSet(features)
+	if lookup == nil {
+		p.noHandlers = "no handlers: NewWiredProgram was given a nil lookup"
 	}
 	return p
 }

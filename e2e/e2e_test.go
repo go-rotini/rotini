@@ -18,8 +18,8 @@
 //	exists cmd/demo/main.go    a path must exist
 //	wantexit 2 ./app --bad     run a command and assert its exact exit status
 //
-// wantexit, execout, gomodinit, nodeps, sizebelow, writebytes, genlines, heldstdin and rssbelow
-// are rotini's own commands, and pinnedgo its own condition; `! exec` only proves
+// wantexit, execout, gomodinit, nodeps, sizebelow, nosym, writebytes, genlines, heldstdin and
+// rssbelow are rotini's own commands, and pinnedgo its own condition; `! exec` only proves
 // a non-zero exit.
 //
 // # Script names
@@ -137,11 +137,16 @@ func TestScripts(t *testing.T) {
 		Cmds: mergeCmds(dataCmds(), map[string]func(ts *testscript.TestScript, neg bool, args []string){
 			// nodeps fails when the last command's stdout, a `go list -deps` listing, names a
 			// package in testdata/forbidden_deps.txt.
+			// With an argument, the list is that file of testdata instead.
 			"nodeps": func(ts *testscript.TestScript, neg bool, args []string) {
-				if neg || len(args) != 0 {
-					ts.Fatalf("usage: nodeps")
+				if neg || len(args) > 1 {
+					ts.Fatalf("usage: nodeps [list]")
 				}
-				list, err := os.ReadFile(filepath.Join(ts.Getenv("ROTINI_ROOT"), "testdata", "forbidden_deps.txt"))
+				name := "forbidden_deps.txt"
+				if len(args) == 1 {
+					name = args[0]
+				}
+				list, err := os.ReadFile(filepath.Join(ts.Getenv("ROTINI_ROOT"), "testdata", name))
 				ts.Check(err)
 				deps := strings.Fields(ts.ReadFile("stdout"))
 				var linked []string
@@ -181,6 +186,36 @@ func TestScripts(t *testing.T) {
 				ts.Logf("%s: %d bytes (budget %d)", args[0], info.Size(), limit)
 				if info.Size() >= limit {
 					ts.Fatalf("%s is %d bytes, over the budget of %d", args[0], info.Size(), limit)
+				}
+			},
+			// nosym fails when an unstripped binary links a function whose symbol name starts
+			// with one of the prefixes; `! nosym` fails unless each prefix matches one.
+			"nosym": func(ts *testscript.TestScript, neg bool, args []string) {
+				if len(args) < 2 {
+					ts.Fatalf("usage: nosym <binary> <prefix>...")
+				}
+				out, err := exec.Command("go", "tool", "nm", ts.MkAbs(args[0])).Output()
+				ts.Check(err)
+				linked := map[string]string{}
+				for line := range strings.Lines(string(out)) {
+					f := strings.Fields(line)
+					if len(f) < 3 || (f[len(f)-2] != "T" && f[len(f)-2] != "t") {
+						continue
+					}
+					for _, prefix := range args[1:] {
+						if _, ok := linked[prefix]; !ok && strings.HasPrefix(f[len(f)-1], prefix) {
+							linked[prefix] = f[len(f)-1]
+						}
+					}
+				}
+				for _, prefix := range args[1:] {
+					sym, ok := linked[prefix]
+					switch {
+					case ok && !neg:
+						ts.Fatalf("%s links %s", args[0], sym)
+					case !ok && neg:
+						ts.Fatalf("%s links nothing named %s*", args[0], prefix)
+					}
 				}
 			},
 			// wantexit runs a command and asserts its exact exit status.

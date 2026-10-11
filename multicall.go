@@ -99,10 +99,16 @@ func equalFold(a, b string, fold bool) bool {
 	return a == b
 }
 
-// multicall applies the program's multicall rule to argv; see [MulticallDef].
-func (p *Program) multicall(argv []string) (routed []string, complete bool) {
+// multicall applies the program's multicall rule to argv through the wired hook; see
+// [MulticallDef]. A multicall program that does not wire [Multicall] runs argv unrouted and
+// gets a [*WiringError] for the run to report.
+func (p *Program) multicall(fs *featureSet, argv []string) (routed []string, complete bool, unwired *WiringError) {
 	if p.def.Multicall == nil {
-		return argv, false
+		return argv, false, nil
 	}
-	return multicallArgv(p.def, p.argv0, argv, runtime.GOOS)
+	if fs.multicall == nil {
+		return argv, false, missingFeatureIn(p.def.Name, "multicall", "Multicall()", "the program is multicall")
+	}
+	routed, complete = fs.multicall.route(p.def, p.argv0, argv, runtime.GOOS)
+	return routed, complete, nil
 }

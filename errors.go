@@ -210,7 +210,8 @@ func (e *PanicError) Unwrap() []error {
 // WiringError reports that the generated [Definition] and the handler set are out of sync — a
 // resolved command names a handler method that does not exist, or whose return value does not
 // implement [Handler] — or that a command declares config inputs but the program has no
-// [InputSettings]. It is always [CategoryInternal].
+// [InputSettings], or that a program built with [NewWiredProgram] needs a [Feature] it was not
+// given. It is always [CategoryInternal].
 //
 // Command and Handler are empty for a missing InputSettings, a nil handlers value passed to
 // [NewProgram] and a nil lookup passed to [NewProgramFunc].
@@ -218,6 +219,9 @@ type WiringError struct {
 	Command string // the command whose handler wiring is broken
 	Handler string // the handler method name the Definition referenced
 	Msg     string // the human-readable failure
+	// Feature names the missing feature, as its [Feature.String] spells it ("env",
+	// "codec:yaml", "values:url"); "" for the other wiring errors.
+	Feature string
 }
 
 // Error renders the mismatch as a single line.
@@ -225,3 +229,9 @@ func (e *WiringError) Error() string { return e.Msg }
 
 // Unwrap reports [ErrInternal]: a wiring mismatch is the author's bug, never the user's.
 func (e *WiringError) Unwrap() error { return ErrInternal }
+
+// constError is an error that is a constant: a package-level error of this type is static data,
+// built without code at start-up.
+type constError string
+
+func (e constError) Error() string { return string(e) }

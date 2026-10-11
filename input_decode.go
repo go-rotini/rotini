@@ -5,14 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/go-rotini/jsonc"
 	"github.com/go-rotini/jsonschema"
 	"github.com/go-rotini/recon"
-	"github.com/go-rotini/yaml"
 )
 
 // utf8BOM is the UTF-8 byte-order mark some editors write at the start of a file.
@@ -22,13 +19,19 @@ const utf8BOM = "\xef\xbb\xbf"
 func stripBOM(b []byte) []byte { return bytes.TrimPrefix(b, []byte(utf8BOM)) }
 
 // decodeMessage says why a document did not decode, in the decoder's words without its
-// "<format>: line N, column M:" prefix: recon's message for the bundled formats, the mapping
-// rule for a top level that isn't one, else the innermost error's text.
-func decodeMessage(err error) string {
+// "<format>: line N, column M:" prefix: the decoder's message for the bundled formats, the
+// mapping rule for a top level that isn't one, else the innermost error's text.
+func decodeMessage(err error) string { return decodeMessageWith(err, nil) }
+
+// jsonDecodeMessage is [decodeMessage] for an error from encoding/json.
+func jsonDecodeMessage(err error) string { return decodeMessageWith(err, jsonMessage) }
+
+// decodeMessageWith is [decodeMessage], reading a decoder's own error types through more.
+func decodeMessageWith(err error, more func(error) (string, bool)) string {
 	if errors.Is(err, recon.ErrUnsupportedFormat) {
 		return "the top level must be a mapping"
 	}
-	if msg := recon.ParseMessage(err); msg != err.Error() {
+	if msg := parseMessage(err, more); msg != err.Error() {
 		return msg
 	}
 	for next := errors.Unwrap(err); next != nil; next = errors.Unwrap(err) {
@@ -38,49 +41,30 @@ func decodeMessage(err error) string {
 }
 
 // fileParseError reports a configuration file rotini decoded itself the way recon reports one
-// it read: data is the file's content, for decoders that give a byte offset instead of a line.
-func fileParseError(path string, data []byte, err error) *recon.ParseError {
-	pe := &recon.ParseError{Source: path, Path: path, Msg: recon.ParseMessage(err), Cause: err}
-	if line, col, ok := recon.ParsePosition(err, data); ok {
+// it read.
+func fileParseError(path string, err error) *recon.ParseError {
+	pe := &recon.ParseError{Source: path, Path: path, Msg: parseMessage(err, nil), Cause: err}
+	if line, col, ok := parsePosition(err); ok {
 		pe.Position = recon.Position{Line: line, Column: col}
 	}
 	return pe
 }
 
-// fileCodec is the codec a configuration file decodes with: the declared format, else the one
-// its extension names. ok is false when neither names a codec.
-func fileCodec(format, path string) (recon.Codec, bool) {
-	codecs := recon.DefaultCodecs()
-	if format != "" {
-		return codecs.ByName(format)
-	}
-	return codecs.ByExtension(strings.ToLower(filepath.Ext(path)))
-}
-
-// decodeDocumentJSON decodes a stdin document of any shape — a top-level list included — and
-// returns it as JSON, for a payload whose type is not an object. toml and dotenv documents
-// are always tables, so they cannot hold one.
-func decodeDocumentJSON(format string, data []byte) ([]byte, error) {
-	var v any
-	switch format {
-	case "json":
-		if !json.Valid(data) {
-			var probe any
-			return nil, fmt.Errorf("decode json: %w", json.Unmarshal(data, &probe))
-		}
-		return bytes.TrimSpace(data), nil
-	case "yaml":
-		if err := yaml.Unmarshal(data, &v); err != nil {
-			return nil, fmt.Errorf("decode yaml: %w", err)
-		}
-	case "jsonc":
-		if err := jsonc.Unmarshal(data, &v); err != nil {
-			return nil, fmt.Errorf("decode jsonc: %w", err)
-		}
-	default:
+// decodeDocumentJSON decodes a stdin document of any shape — a top-level list included — with
+// format's codec c and returns it as JSON, for a payload whose type is not an object. toml and
+// dotenv documents are always tables, so they cannot hold one; nor can a format with no codec.
+func decodeDocumentJSON(format string, c *codecEntry, data []byte) ([]byte, error) {
+	if c == nil || c.decodeAny == nil {
 		return nil, fmt.Errorf("%w: a %s document is a table at the top level, not a list", recon.ErrUnsupportedFormat, format)
 	}
-	raw, err := json.Marshal(jsonCompatible(v))
+	v, err := c.decodeAny(data)
+	if err != nil {
+		return nil, err
+	}
+	if raw, ok := v.(json.RawMessage); ok {
+		return raw, nil
+	}
+	raw, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("encode the document as JSON: %w", err)
 	}

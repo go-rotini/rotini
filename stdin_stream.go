@@ -215,7 +215,7 @@ func (rtx *Context) streamJSONL(fieldType reflect.Type, tag stdinTag, schema str
 				continue
 			}
 			rec := reflect.New(recType)
-			if err := decodeJSONLRecord(raw, l.line, schema, rec.Interface()); err != nil {
+			if err := decodeJSONLRecord(rtx.features(), raw, l.line, schema, rec.Interface()); err != nil {
 				fail(err)
 				return nil
 			}
@@ -230,36 +230,53 @@ func (rtx *Context) streamJSONL(fieldType reflect.Type, tag stdinTag, schema str
 
 // decodeJSONLRecord checks one JSON Lines record against schema (when given) and decodes it
 // into out. Errors name the line.
-func decodeJSONLRecord(raw []byte, line int, schema string, out any) error {
-	lineErr := func(ie *InputError) error {
-		return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin line %d: %s", line, ie.Msg), Cause: ie.Cause, usage: ie.usage}
-	}
+func decodeJSONLRecord(fs *featureSet, raw []byte, line int, schema string, out any) error {
 	if schema != "" {
-		compiled, err := documentSchema(schema)
-		if err != nil {
-			return err
+		if fs.schemas == nil {
+			return missingFeature("schemas", "Schemas()", "a stdin record schema is declared")
 		}
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.UseNumber()
-		var v any
-		if err := dec.Decode(&v); err != nil || dec.InputOffset() != int64(len(raw)) {
-			return notJSONRecord(raw, line)
-		}
-		result, err := compiled.ValidateValue(v)
-		if err != nil {
-			return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: could not check the record against its schema", line), err)
-		}
-		if err := documentResult(schema, result); err != nil {
-			if ie, ok := errors.AsType[*InputError](err); ok {
-				return lineErr(ie)
-			}
+		if err := fs.schemas.record(schema, jsonlLine{raw: raw, n: line}); err != nil {
 			return err
 		}
 	} else if !json.Valid(raw) {
 		return notJSONRecord(raw, line)
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: could not bind the record: %s", line, decodeMessage(err)), err)
+		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: could not bind the record: %s", line, jsonDecodeMessage(err)), err)
+	}
+	return nil
+}
+
+// jsonlLine is one JSON Lines record as read, and its line number.
+type jsonlLine struct {
+	raw []byte
+	n   int
+}
+
+// checkJSONLRecord checks one JSON Lines record, a [jsonlLine], against schema: it must be one
+// JSON value, and the value must match. Errors name the line.
+func checkJSONLRecord(schema string, v any) error {
+	rec, _ := v.(jsonlLine)
+	raw, line := rec.raw, rec.n
+	compiled, err := documentSchema(schema)
+	if err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil || dec.InputOffset() != int64(len(raw)) {
+		return notJSONRecord(raw, line)
+	}
+	result, err := compiled.ValidateValue(doc)
+	if err != nil {
+		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: could not check the record against its schema", line), err)
+	}
+	if err := documentResult(schema, result); err != nil {
+		if ie, ok := errors.AsType[*InputError](err); ok {
+			return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin line %d: %s", line, ie.Msg), Cause: ie.Cause, usage: ie.usage}
+		}
+		return err
 	}
 	return nil
 }
@@ -271,7 +288,7 @@ func notJSONRecord(raw []byte, line int) error {
 	if err == nil {
 		err = errors.New("more than one JSON value on the line")
 	}
-	return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: not a JSON record: %s", line, decodeMessage(err)), err)
+	return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: not a JSON record: %s", line, jsonDecodeMessage(err)), err)
 }
 
 // splitStdinLines splits a slurped lines payload: on NUL bytes with every byte kept, or on
@@ -295,7 +312,7 @@ func splitStdinLines(text string, nul bool) []string {
 
 // bindJSONL decodes every record of a slurped JSON Lines payload into the field, a
 // *[]<Prefix>Stdin, checking each against its record schema in schemas (when given) first.
-func bindJSONL(sf reflect.Value, text string, schemas map[string]string, tag stdinTag) error {
+func bindJSONL(fs *featureSet, sf reflect.Value, text string, schemas map[string]string, tag stdinTag) error {
 	elem := sf.Type().Elem()
 	if elem.Kind() != reflect.Slice {
 		return internalBind(channelStdin, "", "stdin format jsonl needs a []<record> payload type", nil)
@@ -312,7 +329,7 @@ func bindJSONL(sf reflect.Value, text string, schemas map[string]string, tag std
 			continue
 		}
 		rec := reflect.New(recType)
-		if err := decodeJSONLRecord(raw, n, schema, rec.Interface()); err != nil {
+		if err := decodeJSONLRecord(fs, raw, n, schema, rec.Interface()); err != nil {
 			return err
 		}
 		out = reflect.Append(out, rec.Elem())

@@ -81,7 +81,9 @@ func profileConformanceCases() []dataCase {
 }
 
 func TestConformance_ProfileMatrix(t *testing.T) {
-	for _, c := range profileConformanceCases() {
-		t.Run(c.id, c.check)
-	}
+	wiringModes(t, func(t *testing.T) {
+		for _, c := range profileConformanceCases() {
+			t.Run(c.id, c.check)
+		}
+	})
 }

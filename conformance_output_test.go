@@ -74,7 +74,9 @@ func outputConformanceCases() []dataCase {
 // TestConformance_OutputMatrix runs the field selection rows of the conformance matrix. Their
 // IDs are in the canonical list TestConformance_matrixComplete checks.
 func TestConformance_OutputMatrix(t *testing.T) {
-	for _, c := range outputConformanceCases() {
-		t.Run(c.id, c.check)
-	}
+	wiringModes(t, func(t *testing.T) {
+		for _, c := range outputConformanceCases() {
+			t.Run(c.id, c.check)
+		}
+	})
 }

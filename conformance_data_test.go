@@ -160,7 +160,9 @@ func dataConformanceCases() []dataCase {
 // TestConformance_DataMatrix runs the data rows of the input conformance matrix. Their IDs are
 // in the canonical list TestConformance_matrixComplete checks.
 func TestConformance_DataMatrix(t *testing.T) {
-	for _, c := range dataConformanceCases() {
-		t.Run(c.id, c.check)
-	}
+	wiringModes(t, func(t *testing.T) {
+		for _, c := range dataConformanceCases() {
+			t.Run(c.id, c.check)
+		}
+	})
 }

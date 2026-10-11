@@ -135,7 +135,9 @@ func writeConformanceCases() []dataCase {
 }
 
 func TestConformance_WriteMatrix(t *testing.T) {
-	for _, c := range writeConformanceCases() {
-		t.Run(c.id, c.check)
-	}
+	wiringModes(t, func(t *testing.T) {
+		for _, c := range writeConformanceCases() {
+			t.Run(c.id, c.check)
+		}
+	})
 }

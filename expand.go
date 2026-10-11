@@ -3,7 +3,6 @@ package rotini
 import (
 	"errors"
 	"fmt"
-	"os/user"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -46,14 +45,24 @@ func (e *expandError) Error() string { return e.msg }
 
 // expandValue expands one input value by rule over the run's view: ~ first, then variables,
 // in one pass, so text a variable supplies is never expanded again. Variables are read the way
-// env inputs read them, .env files and variable_file values included.
+// env inputs read them, .env files and variable_file values included. Another user's home
+// (~name) is looked up through the run's path-expansion feature.
 func expandValue(v string, r expandRule, view *osView) (string, error) {
-	return expandValueFor(runtime.GOOS, v, r, view, user.Lookup)
+	lookupUser := noUserLookup
+	if x := view.clockRef().features().expand; x != nil {
+		lookupUser = x.lookupUser
+	}
+	return expandValueFor(runtime.GOOS, v, r, view, lookupUser)
 }
 
-// expandValueFor is expandValue with the operating system and the user lookup given, for
-// tests.
-func expandValueFor(goos, v string, r expandRule, view *osView, lookupUser func(string) (*user.User, error)) (string, error) {
+// noUserLookup is the user lookup of a run without path expansion, which finds no user.
+func noUserLookup(name string) (string, error) {
+	return "", missingFeature("path-expansion", "PathExpansion()", fmt.Sprintf("path %q names another user's home", "~"+name))
+}
+
+// expandValueFor is expandValue with the operating system and the user lookup (a user's home
+// directory by name) given, for tests.
+func expandValueFor(goos, v string, r expandRule, view *osView, lookupUser func(string) (string, error)) (string, error) {
 	home, rest := "", v
 	if r.home {
 		var err error
@@ -73,7 +82,7 @@ func expandValueFor(goos, v string, r expandRule, view *osView, lookupUser func(
 // expandHome splits a value that is exactly ~, or starts with ~/ (or ~\ on Windows), into the
 // home directory and the rest, and ~name/… into that user's home directory and the rest. A
 // value with no leading ~ is all rest.
-func expandHome(goos, v string, view *osView, lookupUser func(string) (*user.User, error)) (home, rest string, err error) {
+func expandHome(goos, v string, view *osView, lookupUser func(string) (string, error)) (home, rest string, err error) {
 	if !strings.HasPrefix(v, "~") {
 		return "", v, nil
 	}
@@ -93,11 +102,14 @@ func expandHome(goos, v string, view *osView, lookupUser func(string) (*user.Use
 		return h, v[1:], nil
 	}
 	name := v[1:end]
-	u, uerr := lookupUser(name)
-	if uerr != nil || u.HomeDir == "" {
+	dir, uerr := lookupUser(name)
+	if we, ok := errors.AsType[*WiringError](uerr); ok {
+		return "", "", we
+	}
+	if uerr != nil || dir == "" {
 		return "", "", &expandError{fmt.Sprintf("cannot expand %q: no such user", "~"+name)}
 	}
-	return u.HomeDir, v[end:], nil
+	return dir, v[end:], nil
 }
 
 // homeReason is why the home directory is unknown, without the wrapping view.home adds.

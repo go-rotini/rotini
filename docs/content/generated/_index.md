@@ -56,7 +56,7 @@ type TodoAddInputs struct {
 }
 
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	return rotini.NewProgramFunc(definition, func(name string) (rotini.Handler, bool) {
+	return rotini.NewWiredProgram(definition, func(name string) (rotini.Handler, bool) {
 		switch name {
 		case "Todo":
 			return handlers.Todo(), true
@@ -64,7 +64,11 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 			return handlers.TodoAdd(), true
 		}
 		return nil, false
-	}).
+	},
+		rotini.Env(),
+		rotini.ConfigFiles(),
+		rotini.YAML(),
+	).
 		WithInputSettings(InputSettings).
 		WithHelp(Help)
 }
@@ -80,6 +84,13 @@ tasks, can use them too. Because `NewProgram` takes a `ProgramHandlers`, the com
 command that has no handler. Its switch finds each command's handler by name without
 reflection, which keeps the binary smaller. A hand-written handler set can do the same with
 `rotini.NewProgramFunc`; `rotini.NewProgram(def, handlers)` finds the methods by reflection.
+
+The list after the switch is the runtime features the spec uses, such as environment inputs,
+a YAML configuration file or a `url` flag. The program links only those, so a small CLI's
+binary is smaller and starts faster. `go generate` keeps the list in step with the spec; see
+[what a program links](/docs#what-a-program-links). Env and config fields write their enum
+values, aliases and time layouts in their struct tags as comma-separated lists, with `\`
+escaping a `,`, `=` or `\` inside a value.
 
 To put the input and output types in a package of their own, for example so a handler in
 another package can import them, declare a `models` target under the conf's

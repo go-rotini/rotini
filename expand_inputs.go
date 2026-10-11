@@ -39,6 +39,31 @@ func parseArgvStore(p *Parser, rtx *Context, out any) (*parsedInputs, []Command,
 	return store, chain, nil
 }
 
+// expandInputs is [expandStore] through the path-expansion hook, given the run's features: the
+// one entry point every reader of argv values and defaults goes through. Nothing is expanded
+// when no flag or argument v describes declares `expand`.
+func expandInputs(fs *featureSet, v reflect.Value, chain []Command, store *parsedInputs, anchor int, view *osView) error {
+	if !hasExpansionIn(v, "Flags", "Arguments") {
+		return nil
+	}
+	if fs.expand == nil {
+		return missingIn(chain, "path-expansion", "PathExpansion()", expandSubject(v))
+	}
+	return fs.expand.store(v, chain, store, anchor, view)
+}
+
+// expandFallbackWired is [expandFallback] through the path-expansion hook.
+func expandFallbackWired(vals []string, tag reflect.StructTag, source, label string, rd fallbackRead) ([]string, error) {
+	if !tagExpandRule(tag).declared() {
+		return vals, nil
+	}
+	fs := rd.view.clockRef().features()
+	if fs.expand == nil {
+		return nil, missingFeature("path-expansion", "PathExpansion()", fmt.Sprintf("input %s declares expand or relative_to", label))
+	}
+	return fs.expand.fallback(vals, tag, source, label, rd)
+}
+
 // expandStore expands the argv store's values (defaults included) for the flags and leaf
 // arguments v declares with `expand`. An expansion failure is a usage error naming the input
 // as typed.
@@ -131,6 +156,9 @@ func withWritten(err error, vals []string, written map[string]string) error {
 // argvExpandError is an expansion failure on the command line, as the [*ParseError] any other
 // bad argv value is.
 func argvExpandError(err error, flag string) error {
+	if isWiringError(err) {
+		return err
+	}
 	return &ParseError{Kind: ParseKindInvalidValue, Msg: err.Error(), Flag: flag}
 }
 
@@ -219,6 +247,9 @@ func expandChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, wai
 		}
 		out, xerr := expandValues(vals, r, labels.view, label)
 		if xerr != nil {
+			if isWiringError(xerr) {
+				return nil, xerr
+			}
 			if waived && cfg != nil {
 				continue
 			}
@@ -279,7 +310,7 @@ func fieldStrings(f reflect.Value) ([]string, func([]string)) {
 // cannot be expanded; the run that reads it reports the failure.
 func expandDefault(d string, tag reflect.StructTag, view *osView) string {
 	r := tagExpandRule(tag)
-	if !r.expands() || d == "" {
+	if !r.expands() || d == "" || view.clockRef().features().expand == nil {
 		return d
 	}
 	if out, err := expandValue(d, r, view); err == nil {
@@ -301,7 +332,7 @@ func layerView(rtx *Context, chain []Command, v reflect.Value, store *parsedInpu
 	if store != nil {
 		overrides = b.pathOverrides(chain, store, view)
 	}
-	if layered, err := b.inputView(chain, v, overrides, true, view); err == nil {
+	if layered, err := b.envFileView(rtx.features(), chain, v, overrides, true, view); err == nil {
 		return layered
 	}
 	return view
@@ -329,6 +360,19 @@ func hasExpansion(v reflect.Value) bool {
 		}
 	}
 	return false
+}
+
+// hasExpansionIn reports whether an input in the named sub-structs of v's command frames (a
+// flag set's flags included) declares `expand`.
+func hasExpansionIn(v reflect.Value, structs ...string) bool {
+	_, ok := firstTagged(v, structs, func(t reflect.StructTag) bool { return tagExpandRule(t).expands() })
+	return ok
+}
+
+// hasPathRules reports whether any input v describes declares `expand` or `relative_to`.
+func hasPathRules(v reflect.Value) bool {
+	_, ok := firstTagged(v, []string{"Flags", "Arguments", "Env", "Config"}, func(t reflect.StructTag) bool { return tagExpandRule(t).declared() })
+	return ok
 }
 
 // fallbackLabel is a flag's label in an error about its fallback value: its identifiers, as

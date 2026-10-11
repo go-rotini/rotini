@@ -2,11 +2,9 @@ package cfgedit
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/go-rotini/toml"
 )
@@ -282,10 +280,23 @@ func (ed *tomlEdit) removeLine(src []byte, span toml.Span) ([]byte, error) {
 	return splice(src, ls, nextLine(src, end), ""), nil
 }
 
-var bareKey = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9_-]+$`) })
+// isBareKey reports whether k is a TOML bare key: one or more ASCII letters, digits, "_" and "-".
+func isBareKey(k string) bool {
+	if k == "" {
+		return false
+	}
+	for i := range len(k) {
+		switch c := k[i]; {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 func tomlKey(k string) string {
-	if bareKey().MatchString(k) {
+	if isBareKey(k) {
 		return k
 	}
 	return tomlString(k)

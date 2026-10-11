@@ -58,4 +58,4 @@ func OpenInput(rtx *Context, path string) (io.ReadCloser, error) {
 
 // errIsDir is any error that is not a missing file or a permission problem, so
 // unreadableFile names the directory.
-var errIsDir = errors.New("is a directory")
+var errIsDir error = constError("is a directory")

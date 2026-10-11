@@ -61,7 +61,9 @@ func pathConformanceCases() []dataCase {
 }
 
 func TestConformance_PathMatrix(t *testing.T) {
-	for _, c := range pathConformanceCases() {
-		t.Run(c.id, c.check)
-	}
+	wiringModes(t, func(t *testing.T) {
+		for _, c := range pathConformanceCases() {
+			t.Run(c.id, c.check)
+		}
+	})
 }

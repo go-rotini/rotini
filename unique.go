@@ -4,8 +4,6 @@ import (
 	"encoding"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/netip"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -43,20 +41,28 @@ func uniqueKeyFor(typ string, ts timeSpec, enum enumSet) func(string) string {
 	if enum.declared() && enum.rewrites() {
 		return func(v string) string { return enum.canonical([]string{v})[0] }
 	}
-	if t, ok := shapeTypes[elem]; ok {
+	if t, ok := shapeType(elem); ok {
 		return func(v string) string {
 			f := reflect.New(t).Elem()
-			if coerce(f, []string{v}) != nil {
+			if coerce(f, []string{v}, noFeatures) != nil {
 				return v
 			}
 			return fmt.Sprint(f.Interface())
 		}
 	}
-	parse := uniqueParsers[elem]
-	if elem == "time.Time" {
+	var parse func(string) (string, error)
+	switch elem {
+	case "time.Time":
 		parse = func(v string) (string, error) {
 			t, err := parseTimeValue(v, ts)
 			return t.UTC().Format(time.RFC3339Nano), err
+		}
+	case "rotini.ByteSize":
+		parse = byteSizeKey
+	default:
+		// The netip and MAC kinds canonicalize their own spellings.
+		if k := ts.clock.features().kindNamed(elem); k != nil {
+			parse = k.unique
 		}
 	}
 	if parse == nil {
@@ -70,29 +76,10 @@ func uniqueKeyFor(typ string, ts timeSpec, enum enumSet) func(string) string {
 	}
 }
 
-// uniqueParsers canonicalize the values of the types whose spellings vary beyond what
-// shapeTypes covers, by definition type name.
-var uniqueParsers = map[string]func(string) (string, error){
-	"rotini.ByteSize": func(v string) (string, error) {
-		n, err := parseByteSize(v)
-		return strconv.FormatInt(n, 10), err
-	},
-	"netip.Addr": func(v string) (string, error) {
-		a, err := netip.ParseAddr(v)
-		return a.String(), err
-	},
-	"netip.Prefix": func(v string) (string, error) {
-		p, err := netip.ParsePrefix(v)
-		return p.String(), err
-	},
-	"netip.AddrPort": func(v string) (string, error) {
-		p, err := netip.ParseAddrPort(v)
-		return p.String(), err
-	},
-	"net.HardwareAddr": func(v string) (string, error) {
-		m, err := net.ParseMAC(v)
-		return m.String(), err
-	},
+// byteSizeKey canonicalizes a size as its count of bytes.
+func byteSizeKey(v string) (string, error) {
+	n, err := parseByteSize(v)
+	return strconv.FormatInt(n, 10), err
 }
 
 // duplicateDocument enforces UniqueItems on a list of objects: two elements are the same when

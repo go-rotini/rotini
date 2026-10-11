@@ -170,6 +170,8 @@ func TestFormatYAMLErrors(t *testing.T) {
 		"unknown kind":   {"name: x\n", "bogus", "unknown document kind"},
 		"ambiguous":      {"version: 1.0.0\n", "", "pass --kind"},
 		"broken":         {"command: [\n", "", "parse yaml"},
+		"not utf-8":      {" \xfe\xff:", "", "isn't valid UTF-8"},
+		"inner bom":      {" \uFEFF: x\n", "", "byte-order mark"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := FormatYAML([]byte(tc.src), tc.kind, "file.yaml")

@@ -65,6 +65,38 @@ func (d *dashOnce) seen(label, flag string, vals []string) error {
 	return nil
 }
 
+// checkDashOnce is [stdinDashOnce] through the run's features, for a chain that declares an
+// inputfile.
+func checkDashOnce(chain []Command, store *parsedInputs) error {
+	label, ok := firstInputFile(chain)
+	if !ok {
+		return nil
+	}
+	sp := store.clock.features().streamPaths
+	if sp == nil {
+		return missingFeature("stream-paths", "StreamPaths()", "input "+label+" is an inputfile")
+	}
+	return sp.dashOnce(chain, store)
+}
+
+// firstInputFile labels the first input of the chain that [stdinDashOnce] reads: a flag of any
+// frame, or an argument of the leaf, of type inputfile or []inputfile.
+func firstInputFile(chain []Command) (string, bool) {
+	for _, c := range chain {
+		for _, fd := range c.Flags {
+			if constraintElemType(fd.Type) == typeInputFile {
+				return flagLabel(fd), true
+			}
+		}
+	}
+	for _, ad := range chain[len(chain)-1].Arguments {
+		if constraintElemType(ad.Type) == typeInputFile {
+			return "<" + ad.Name + ">", true
+		}
+	}
+	return "", false
+}
+
 // stdinDashOnce rejects a second "-" among the command line's inputfile values.
 func stdinDashOnce(chain []Command, store *parsedInputs) error {
 	var dash dashOnce

@@ -3,6 +3,7 @@ package rotini
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -79,7 +80,7 @@ func confArgumentFrom(t *testing.T, _ *Context, _ InputSettings) {
 			}
 		}
 	}
-	def := Definition{Name: "cat", Handler: "Cat", Arguments: []ArgDef{{Name: "input", Type: "string", From: []string{"file", "stdin"}}}}
+	def := Definition{Name: "cat", Handler: "Cat", Inputs: reflect.TypeFor[inputs](), Arguments: []ArgDef{{Name: "input", Type: "string", From: []string{"file", "stdin"}}}}
 	var in inputs
 	rtx := NewContextFor(def, []string{"-"}).WithStdin(strings.NewReader("piped\n"))
 	if err := NewParser().Parse(rtx, &in); err != nil || in.Cat.Arguments.Input != "piped" {
@@ -104,7 +105,7 @@ func confCustomNegation(t *testing.T, _ *Context, _ InputSettings) {
 			Arguments struct{}
 		}
 	}
-	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+	def := Definition{Name: "app", Handler: "App", Inputs: reflect.TypeFor[inputs](), Flags: []FlagDef{
 		{Name: "color", Identifiers: []string{"--color"}, Type: "bool", Default: "true", Negatable: true, Negation: "--plain"},
 	}}
 	var in inputs
@@ -127,7 +128,7 @@ func confEnumValueForms(t *testing.T, _ *Context, _ InputSettings) {
 			Arguments struct{}
 		}
 	}
-	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{
+	def := Definition{Name: "app", Handler: "App", Inputs: reflect.TypeFor[inputs](), Flags: []FlagDef{{
 		Name: "format", Identifiers: []string{"--format"}, Type: "string", Enum: []string{"json", "yaml", "xml", "ini"},
 		EnumValues: []EnumValue{{Value: "json"}, {Value: "yaml", Aliases: []string{"yml"}}, {Value: "xml", Hidden: true}, {Value: "ini", Deprecated: "use json"}},
 	}}}
@@ -164,7 +165,7 @@ func confTimeLayouts(t *testing.T, _ *Context, _ InputSettings) {
 			}
 		}
 	}
-	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+	def := Definition{Name: "app", Handler: "App", Inputs: reflect.TypeFor[inputs](), Flags: []FlagDef{
 		{Name: "at", Identifiers: []string{"--at"}, Type: "time.Time", Layout: "2006-01-02", Layouts: []string{"2006-01-02", "unix"}},
 	}}
 	var in inputs
@@ -192,7 +193,7 @@ func confRelativeTime(t *testing.T, _ *Context, _ InputSettings) {
 			}
 		}
 	}
-	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+	def := Definition{Name: "app", Handler: "App", Inputs: reflect.TypeFor[inputs](), Flags: []FlagDef{
 		{Name: "since", Identifiers: []string{"--since"}, Type: "time.Time", Relative: "past"},
 		{Name: "until", Identifiers: []string{"--until"}, Type: "time.Time", Relative: "both", Default: "+1d"},
 	}}
@@ -219,7 +220,7 @@ func confPatternKinds(t *testing.T, _ *Context, _ InputSettings) {
 			Arguments struct{}
 		}
 	}
-	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+	def := Definition{Name: "app", Handler: "App", Inputs: reflect.TypeFor[inputs](), Flags: []FlagDef{
 		{Name: "re", Identifiers: []string{"--re"}, Type: "*regexp.Regexp"},
 		{Name: "glob", Identifiers: []string{"--glob"}, Type: "rotini.Glob"},
 	}}
@@ -248,7 +249,7 @@ func confEnvListSeparator(t *testing.T, _ *Context, _ InputSettings) {
 	}
 	read := func(v string) (inputs, error) {
 		var in inputs
-		rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithEnviron([]string{"APP_PATH=" + v})
+		rtx := NewContextFor(Definition{Name: "app", Handler: "App", Inputs: reflect.TypeFor[inputs]()}, nil).WithEnviron([]string{"APP_PATH=" + v})
 		return in, NewInputReader(InputSettings{}).Read(rtx, &in)
 	}
 	if in, err := read("/a:/b"); err != nil || !slices.Equal(in.App.Env.Path, []string{"/a", "/b"}) {

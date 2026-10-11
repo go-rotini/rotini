@@ -36,7 +36,9 @@ func runtimeConformanceCases() []dataCase {
 // TestConformance_RuntimeMatrix runs the directory-flag and origin rows of the input
 // conformance matrix.
 func TestConformance_RuntimeMatrix(t *testing.T) {
-	for _, c := range runtimeConformanceCases() {
-		t.Run(c.id, c.check)
-	}
+	wiringModes(t, func(t *testing.T) {
+		for _, c := range runtimeConformanceCases() {
+			t.Run(c.id, c.check)
+		}
+	})
 }

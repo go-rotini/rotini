@@ -464,10 +464,13 @@ type templateRotiniData struct {
 	// HelpResolver is "Help" when the help feature is on, else "". NewProgram passes it to
 	// WithHelp so [rotini.Context.Help] can find the running command's page.
 	HelpResolver string
-	Header       string // the target's conf `header:`; "" for none
-	ExitCodes    string // pre-rendered named exit-code constants (or their re-exports); "" when none
-	Contract     string // pre-rendered Contract variable (generate.contract.go); "" when off
-	UsageFunc    string // pre-rendered Usage function, always emitted; it imports "fmt" and "strings"
+	// WiredFeatures are the feature constructors NewProgram passes to rotini.NewWiredProgram,
+	// e.g. "rotini.YAML()"; see [wiredFeatures].
+	WiredFeatures []string
+	Header        string // the target's conf `header:`; "" for none
+	ExitCodes     string // pre-rendered named exit-code constants (or their re-exports); "" when none
+	Contract      string // pre-rendered Contract variable (generate.contract.go); "" when off
+	UsageFunc     string // pre-rendered Usage function, always emitted; it imports "fmt" and "strings"
 
 	// FlagSets are the flag set structs; empty when the types are split into the models file.
 	FlagSets []templateFlagSet

@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
@@ -108,7 +109,7 @@ type layerCore struct {
 //
 // Inputs delegates to [InputReader.Read]; errors are [*ParseError] and [*InputError] values, or
 // a [*WiringError] when a command declares config inputs and the program has no
-// [InputSettings]. On error the returned T is partially filled and must not be used. A command
+// [InputSettings], or when an input needs a [Feature] the program does not wire. On error the returned T is partially filled and must not be used. A command
 // line that doesn't parse is reported before any other channel is read. Use
 // [Context.InputsWithReport] for a merged value and per-field provenance alongside the error.
 func (rtx *Context) Inputs[T any]() (T, error) {
@@ -346,7 +347,7 @@ func (r InputReport) Validate() error {
 		return nil
 	}
 	if len(r.handBuilt) == 0 {
-		return validateStore(r.chain, r.store)
+		return validateStore(r.view.clockRef().features(), r.chain, r.store)
 	}
 	anchor := r.anchor
 	if !r.anchored {
@@ -361,7 +362,7 @@ func (r InputReport) Validate() error {
 		return nil
 	}
 	store := r.store.withHandBuilt(r.merged, r.chain, anchor, r.handBuilt)
-	if err := validateStore(r.chain, store); err != nil {
+	if err := validateStore(r.view.clockRef().features(), r.chain, store); err != nil {
 		return err
 	}
 	if shortCircuited(r.chain, store) {
@@ -402,6 +403,7 @@ func (r *InputReport) absorb(core *layerCore) {
 	if core.view != nil {
 		r.view = core.view
 		r.store.dir = core.view.base()
+		r.store.clock = featureClock(core.view.clockRef().features())
 	}
 	if core.store == nil || len(core.store.scopes) != len(r.store.scopes) {
 		return
@@ -484,7 +486,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := expandStore(v, chain, store, anchor, layerView(rtx, chain, v, store)); err != nil {
+	if err := expandInputs(rtx.features(), v, chain, store, anchor, layerView(rtx, chain, v, store)); err != nil {
 		return nil, nil, err
 	}
 	if err := bindInputs(v, store, chain, anchor); err != nil {
@@ -519,14 +521,14 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 		return nil, nil, err
 	}
 
-	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
+	store := &parsedInputs{scopes: make([]scopeInputs, len(chain)), clock: featureClock(rtx.features())}
 	applyDefaults(chain, store)
 	anchor, err := layerAnchor(rtx, v, chain)
 	if err != nil {
 		return nil, nil, err
 	}
 	view := layerView(rtx, chain, v, nil)
-	if err := expandStore(v, chain, store, anchor, view); err != nil {
+	if err := expandInputs(rtx.features(), v, chain, store, anchor, view); err != nil {
 		return nil, nil, err
 	}
 	if err := bindInputs(v, store, chain, anchor); err != nil {
@@ -614,24 +616,14 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 	if store, err := parseInto(chain, rtx.Argv, rtx.argvAcq()); err == nil {
 		overrides = b.pathOverrides(chain, store, view)
 	}
-	if view, err = b.inputView(chain, v, overrides, argvWaived(rtx, chain), view); err != nil {
+	if view, err = b.envFileView(rtx.features(), chain, v, overrides, argvWaived(rtx, chain), view); err != nil {
 		return nil, nil, err
 	}
-	var envReg, flagReg *recon.Registry
-	if hasEnvChannel(v) {
-		if envReg, err = recon.New(recon.WithoutWatch(), recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
-			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
-		}
-		defer envReg.Close()
+	envReg, flagReg, closeRegs, err := envRegistries(b, chain, v, view)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	// Flag env fallbacks read the env projection of the recon key, as in reconcileFlags.
-	if v.Kind() == reflect.Struct && hasReconFlags(v) {
-		if flagReg, err = recon.New(recon.WithoutWatch(), recon.WithSource(flagEnvSource(v, b.envPrefix, view))); err != nil {
-			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
-		}
-		defer flagReg.Close()
-	}
+	defer closeRegs()
 
 	anchor, err := layerAnchor(rtx, v, chain)
 	if err != nil {
@@ -639,6 +631,41 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 	}
 	labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
 	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), labels)
+}
+
+// envRegistries builds the environment channel's registries for the inputs v describes: the
+// Env inputs', through the env feature, and the flag and argument fallbacks', which read the
+// env projection of each recon key as reconcileFlags does, through the fallbacks feature.
+// Either is nil when v describes no such input; closeRegs closes what was built.
+func envRegistries(b *InputReader, chain []Command, v reflect.Value, view *osView) (envReg, flagReg *recon.Registry, closeRegs func(), err error) {
+	closeRegs = func() {
+		if envReg != nil {
+			_ = envReg.Close()
+		}
+		if flagReg != nil {
+			_ = flagReg.Close()
+		}
+	}
+	fs := view.clockRef().features()
+	if hasEnvChannel(v) {
+		if fs.env == nil {
+			return nil, nil, nil, missingIn(chain, "env", "Env()", fmt.Sprintf("command %q declares env inputs", pathOf(chain)))
+		}
+		if envReg, err = fs.env.registry(v, b.envPrefix, view); err != nil {
+			return nil, nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
+		}
+	}
+	if v.Kind() == reflect.Struct && hasReconFlags(v) {
+		if fs.fallbacks == nil {
+			closeRegs()
+			return nil, nil, nil, missingIn(chain, "fallbacks", "Fallbacks()", fallbackSubject(v))
+		}
+		if flagReg, err = newRegistry(fs, recon.WithoutWatch(), recon.WithSource(fs.fallbacks.flagEnv(v, b.envPrefix, view))); err != nil {
+			closeRegs()
+			return nil, nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
+		}
+	}
+	return envReg, flagReg, closeRegs, nil
 }
 
 // argvWaived reports whether the command line short-circuits the run ([shortCircuited]), for a
@@ -666,25 +693,35 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 		boot.paths = b.pathOverrides(chain, store, view)
 		waived = shortCircuited(chain, store)
 	}
-	if view, err = b.inputView(chain, v, boot.paths, waived, view); err != nil {
+	fs := rtx.features()
+	if view, err = b.envFileView(fs, chain, v, boot.paths, waived, view); err != nil {
 		return nil, nil, err
 	}
 	if perr == nil {
 		if view.hasInputEnv() {
 			boot.paths = b.pathOverrides(chain, store, view)
 		}
-		boot.profiles = b.profileChoices(chain, store, view)
+		if boot.profiles, err = b.selectProfiles(fs, chain, store, view); err != nil {
+			return nil, nil, err
+		}
 	}
 	var reg *recon.Registry
 	var cfg *cfgRegs
-	if hasConfigChannel(v) || (v.Kind() == reflect.Struct && hasReconFlags(v)) {
-		if cfg, err = b.configRegs(chain, boot, v, waived, view); err != nil {
+	// Without configuration files wired, flag fallbacks with no file to read find nothing here.
+	readsFiles := hasConfigChannel(v) || len(b.chainFiles(chain, false)) > 0 || len(b.sources) > 0
+	if (hasConfigChannel(v) || (v.Kind() == reflect.Struct && hasReconFlags(v))) && (fs.config != nil || readsFiles) {
+		if fs.config == nil {
+			return nil, nil, missingIn(chain, "config-files", "ConfigFiles()", fmt.Sprintf("command %q reads configuration files", pathOf(chain)))
+		}
+		if cfg, err = fs.config.regs(b, chain, boot, v, waived, view); err != nil {
 			return nil, nil, err
 		}
 		defer cfg.Close()
 		reg = cfg.merged
-		if err := b.checkProfiles(v, chain, boot, waived, view); err != nil {
-			return nil, nil, err
+		if fs.profiles != nil {
+			if err := fs.profiles.check(b, v, chain, boot, waived, view); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	anchor, err := layerAnchor(rtx, v, chain)

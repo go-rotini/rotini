@@ -173,7 +173,7 @@ func writeOutput[T any](rtx *Context, w io.Writer, v T, format string, render fu
 	return nil
 }
 
-var errNoRenderer = errors.New("no renderer")
+var errNoRenderer error = constError("no renderer")
 
 // rendererError carries a renderer's error out of encodeOutput untouched.
 type rendererError struct{ err error }

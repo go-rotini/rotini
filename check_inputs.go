@@ -77,10 +77,10 @@ func (rtx *Context) CheckInputs[T any](v T, set Presence) error {
 	if err := checkTypedChannelPresence(rv, chain, anchor, set); err != nil {
 		return err
 	}
-	if err := validateFlagGroups(chain, store); err != nil {
+	if err := checkGroups(rtx.features(), chain, store); err != nil {
 		return err
 	}
-	return validateFlagDependencies(chain, store)
+	return checkDependencies(rtx.features(), chain, store)
 }
 
 // PresenceOf returns a [Presence] marking every non-zero input field of v as supplied, in the
@@ -203,7 +203,7 @@ func suppliedArgs(args []ArgDef, present func(ArgDef) bool) int {
 // is present for the presence rules (and set, for flag groups and dependencies) without
 // adding a value the value rules would read.
 func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anchor int, handBuilt map[FieldPath]bool) *parsedInputs {
-	out := &parsedInputs{scopes: make([]scopeInputs, len(p.scopes)), argvSet: make([]map[string]bool, len(p.argvSet)), span: p.span, detached: p.detached, dashedFirst: p.dashedFirst, lateFlag: p.lateFlag}
+	out := &parsedInputs{scopes: make([]scopeInputs, len(p.scopes)), argvSet: make([]map[string]bool, len(p.argvSet)), span: p.span, detached: p.detached, dashedFirst: p.dashedFirst, lateFlag: p.lateFlag, clock: p.clock}
 	for i, si := range p.scopes {
 		cp := si
 		cp.flags = maps.Clone(si.flags)
@@ -288,6 +288,7 @@ func findArgDef(defs []ArgDef, name string) (ArgDef, bool) {
 func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func(FieldPath) bool, stdinSchemas map[string]string, view *osView) error {
 	var err error
 	var dash dashOnce // "-" may name stdin once across the inputfile fields
+	fs := view.clockRef().features()
 	walkCommandStructs(v, chain, anchor, func(top string, scope int, ci reflect.Value) {
 		if err != nil {
 			return
@@ -298,7 +299,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 				return
 			}
 			if fd, ok := findFlagDef(frame.Flags, logical); ok {
-				err = dash.typed(checkTypedFlag(fd, f, view.base()), fd.Type, flagLabel(fd), flagLabel(fd), f)
+				err = dash.typed(checkTypedFlag(fs, fd, f, view.base()), fd.Type, flagLabel(fd), flagLabel(fd), f)
 			}
 		})
 		if err == nil && scope == len(chain)-1 {
@@ -320,7 +321,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 			})
 		}
 		if err == nil && stdinSchemas != nil && scope == len(chain)-1 && include(fieldPath(top, "Stdin")) {
-			err = checkTypedStdin(ci, stdinSchemas)
+			err = checkTypedStdin(fs, ci, stdinSchemas)
 		}
 	})
 	return err
@@ -355,7 +356,7 @@ func checkAbsentItemCounts(v reflect.Value, chain []Command, anchor int, set Pre
 }
 
 // checkTypedFlag applies a flag's value rules to its typed field, naming the flag canonically.
-func checkTypedFlag(fd FlagDef, f reflect.Value, dir string) error {
+func checkTypedFlag(fs *featureSet, fd FlagDef, f reflect.Value, dir string) error {
 	label := flagLabel(fd)
 	elems, count, ok := typedElems(f)
 	if !ok {
@@ -367,7 +368,7 @@ func checkTypedFlag(fd FlagDef, f reflect.Value, dir string) error {
 				return err
 			}
 		}
-		return checkTypedObject(label, fd.ObjectSchema, elems)
+		return checkTypedObject(fs, label, fd.ObjectSchema, elems)
 	}
 	enum := flagEnum(fd)
 	for _, s := range typedTexts(elems) {
@@ -490,42 +491,48 @@ func reconHasOption(body, opt string) bool {
 // checkTypedStdin validates a supplied stdin document against the command's stdin schema, or
 // each record of a JSON Lines payload against its record schema. A streamed stdin is not
 // checked here: its items are checked as they are read.
-func checkTypedStdin(ci reflect.Value, schemas map[string]string) error {
+func checkTypedStdin(fs *featureSet, ci reflect.Value, schemas map[string]string) error {
 	sf := ci.FieldByName("Stdin")
 	if !sf.IsValid() || sf.Kind() != reflect.Pointer || sf.IsNil() {
 		return nil
 	}
 	if field, ok := ci.Type().FieldByName("Stdin"); ok && parseStdinTag(field.Tag.Get("stdin")).format == "jsonl" {
-		return checkTypedRecords(sf.Elem(), schemas)
+		return checkTypedRecords(fs, sf.Elem(), schemas)
 	}
 	js := schemas[sf.Type().Elem().Name()]
 	if js == "" {
 		return nil
+	}
+	if fs.schemas == nil {
+		return missingFeature("schemas", "Schemas()", "the stdin payload has a schema")
 	}
 	if sf.Type().Elem().Kind() != reflect.Struct {
 		raw, err := json.Marshal(sf.Interface())
 		if err != nil {
 			return internalBind(channelStdin, "", "could not encode the stdin payload", err)
 		}
-		return validateDocumentJSON(js, raw)
+		return fs.schemas.document(js, raw)
 	}
 	doc, err := toDocument(sf.Interface())
 	if err != nil {
 		return internalBind(channelStdin, "", "could not encode the stdin payload", err)
 	}
-	validator, err := schemaValidator(js)
+	validator, err := fs.schemas.validator(js)
 	if err != nil {
 		return internalBind(channelStdin, "", "invalid stdin schema", err)
 	}
 	if err := validator.Validate(doc); err != nil {
-		applyPatternMessages(js, err)
+		fs.schemas.patternMessages(js, err)
 		return reconBind(channelStdin, err)
 	}
 	return nil
 }
 
 // checkTypedObject validates each object value against the flag's JSON Schema.
-func checkTypedObject(label, schema string, elems []reflect.Value) error {
+func checkTypedObject(fs *featureSet, label, schema string, elems []reflect.Value) error {
+	if fs.schemas == nil && len(elems) > 0 {
+		return missingFeature("schemas", "Schemas()", fmt.Sprintf("flag %s takes an object, which has a schema", label))
+	}
 	for _, e := range elems {
 		doc, err := toDocument(e.Interface())
 		if err == nil {
@@ -572,9 +579,9 @@ func checkTypedConstraints(label, typ string, c Constraints, count int, elems []
 			if n, ok := typedNumber(e); ok {
 				err = checkNumberBounds(label, c, n, redactValue(typedText(e), secret), formatNum)
 			}
-		case measuredTypes[elem] != nil:
+		case measuredFor(elem) != nil:
 			if n, ok := typedNumber(e); ok {
-				m := measuredTypes[elem]
+				m := measuredFor(elem)
 				err = checkNumberBounds(label, c, n, redactValue(m.format(n), secret), m.format)
 			}
 		case isPathType(elem):
@@ -719,7 +726,7 @@ func typedArgGiven(ci reflect.Value, name string) bool {
 }
 
 // checkTypedRecords validates each record of a JSON Lines payload against its record schema.
-func checkTypedRecords(records reflect.Value, schemas map[string]string) error {
+func checkTypedRecords(fs *featureSet, records reflect.Value, schemas map[string]string) error {
 	if records.Kind() != reflect.Slice {
 		return nil
 	}
@@ -727,12 +734,15 @@ func checkTypedRecords(records reflect.Value, schemas map[string]string) error {
 	if js == "" {
 		return nil
 	}
+	if fs.schemas == nil {
+		return missingFeature("schemas", "Schemas()", "a stdin record schema is declared")
+	}
 	for i := range records.Len() {
 		raw, err := json.Marshal(records.Index(i).Interface())
 		if err != nil {
 			return internalBind(channelStdin, "", "could not encode the stdin payload", err)
 		}
-		if err := validateDocumentJSON(js, raw); err != nil {
+		if err := fs.schemas.document(js, raw); err != nil {
 			if ie, ok := errors.AsType[*InputError](err); ok {
 				return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin record %d: %s", i+1, ie.Msg), Cause: ie.Cause, usage: ie.usage}
 			}

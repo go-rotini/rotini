@@ -79,8 +79,12 @@ func checkConfigKey(k ConfigKey, raw string, view *osView, parse func(string) er
 }
 
 // configValueError turns a value check's error into the usage (or, for the author's mistake,
-// internal) [*InputError] a config write reports, keeping its message and suggestion facts.
+// internal) [*InputError] a config write reports, keeping its message and suggestion facts. A
+// [*WiringError] is returned as it is.
 func configValueError(key string, err error) error {
+	if we, ok := errors.AsType[*WiringError](err); ok {
+		return we
+	}
 	pe, ok := errors.AsType[*ParseError](err)
 	if !ok {
 		return usageBind(channelConfig, key, err.Error(), err)

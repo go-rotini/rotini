@@ -261,11 +261,11 @@ func TestObjectFlag_freeFormValuesTypeLikeJSON(t *testing.T) {
 	type patch struct {
 		Spec map[string]any `json:"spec"`
 	}
-	fromPairs, err := decodeObject("spec.replicas=5,spec.paused=true,spec.image=v2", reflect.TypeFor[patch]())
+	fromPairs, err := decodeObject(allFeatures(), "spec.replicas=5,spec.paused=true,spec.image=v2", reflect.TypeFor[patch]())
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromJSON, err := decodeObject(`{"spec":{"replicas":5,"paused":true,"image":"v2"}}`, reflect.TypeFor[patch]())
+	fromJSON, err := decodeObject(allFeatures(), `{"spec":{"replicas":5,"paused":true,"image":"v2"}}`, reflect.TypeFor[patch]())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestObjectFlag_uint8FieldFromPairs(t *testing.T) {
 		Level uint8 `json:"level"`
 		Small int8  `json:"small"`
 	}
-	doc, err := decodeObject("level=7,small=-3", reflect.TypeFor[pool]())
+	doc, err := decodeObject(allFeatures(), "level=7,small=-3", reflect.TypeFor[pool]())
 	if err != nil {
 		t.Fatal(err)
 	}

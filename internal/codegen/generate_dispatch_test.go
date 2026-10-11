@@ -10,12 +10,12 @@ import (
 var programHandlersMethod = regexp.MustCompile(`(?m)^\t(\w+)\(\) rotini\.Handler$`)
 
 // assertSwitchDispatch checks that the generated NewProgram builds its program through
-// rotini.NewProgramFunc, with one switch case per ProgramHandlers method calling through the
+// rotini.NewWiredProgram, with one switch case per ProgramHandlers method calling through the
 // interface, and never through the reflective rotini.NewProgram.
 func assertSwitchDispatch(t *testing.T, src string, want ...string) {
 	t.Helper()
-	if !strings.Contains(src, "rotini.NewProgramFunc(definition, func(name string) (rotini.Handler, bool) {") {
-		t.Errorf("generated NewProgram does not use rotini.NewProgramFunc:\n%s", src)
+	if !strings.Contains(src, "rotini.NewWiredProgram(definition, func(name string) (rotini.Handler, bool) {") {
+		t.Errorf("generated NewProgram does not use rotini.NewWiredProgram:\n%s", src)
 	}
 	if strings.Contains(src, "rotini.NewProgram(") {
 		t.Error("generated code still calls the reflective rotini.NewProgram")

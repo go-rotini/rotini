@@ -992,10 +992,10 @@ func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
 		Commands: []CommandDef{{Name: "show", Handler: "AppShow", Arguments: []ArgDef{{Name: "name", Type: "string"}}}},
 	}
 	t.Setenv("LENIENT_STORE", "env")
-	if got := complete(def, []string{"show", ""}, reflectLookup(lenientHandlers{}), newContext()); !reflect.DeepEqual(got, []string{"from-env"}) {
+	if got := complete(def, []string{"show", ""}, reflectLookup(lenientHandlers{}), everyFeatureContext()); !reflect.DeepEqual(got, []string{"from-env"}) {
 		t.Errorf("env fallback: candidates = %v, want [from-env]", got)
 	}
-	if got := complete(def, []string{"--store", "line", "show", ""}, reflectLookup(lenientHandlers{}), newContext()); !reflect.DeepEqual(got, []string{"from-line"}) {
+	if got := complete(def, []string{"--store", "line", "show", ""}, reflectLookup(lenientHandlers{}), everyFeatureContext()); !reflect.DeepEqual(got, []string{"from-line"}) {
 		t.Errorf("flag on the line: candidates = %v, want [from-line] — argv outranks env", got)
 	}
 }

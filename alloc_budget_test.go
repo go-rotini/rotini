@@ -12,7 +12,9 @@ import (
 
 // guardAllocBudgets caps the allocations of one in-process run of a generated-shaped program (see
 // guardProgram), measured with testing.AllocsPerRun. Every invocation of a CLI pays these, so a
-// change that raises one should be a deliberate edit to this table.
+// change that raises one should be a deliberate edit to this table. budget is for the program
+// generated code builds (NewWiredProgram with the features its spec uses: none here); legacy is
+// for the same program built with NewProgramFunc, which has every feature.
 //
 // Each row runs with an empty environment plus extraEnv unrelated variables, so the counts do
 // not depend on the shell the tests run in.
@@ -21,13 +23,14 @@ var guardAllocBudgets = []struct {
 	argv     []string
 	extraEnv int
 	budget   float64
+	legacy   float64
 }{
-	{"help", []string{"--help"}, 0, 100},
-	{"help, large environment", []string{"--help"}, 200, 100},
-	{"dispatch", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 0, 250},
-	{"dispatch, large environment", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 200, 250},
-	{"complete a sub-command", []string{"__complete", "bu"}, 0, 20},
-	{"complete a flag value", []string{"__complete", "build", "--mode", ""}, 0, 35},
+	{"help", []string{"--help"}, 0, 88, 88},
+	{"help, large environment", []string{"--help"}, 200, 88, 88},
+	{"dispatch", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 0, 208, 208},
+	{"dispatch, large environment", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 200, 208, 208},
+	{"complete a sub-command", []string{"__complete", "bu"}, 0, 18, 18},
+	{"complete a flag value", []string{"__complete", "build", "--mode", ""}, 0, 31, 31},
 }
 
 type guardRootFlags struct {
@@ -95,9 +98,8 @@ func (*guardBuild) Run(_ context.Context, rtx *Context) {
 	fmt.Fprintln(rtx.Stdout, in.AppBuild.Arguments.Target)
 }
 
-// guardProgram builds the program the way generated code does: NewProgramFunc with a switch,
-// the generated InputSettings, and no signal trap, so the counts measure rotini's own work.
-func guardProgram() *Program {
+// guardDefinition is the guarded program's command tree.
+func guardDefinition() Definition {
 	leafFlags := []FlagDef{
 		{Name: "name", Identifiers: []string{"--name"}, Type: "string"},
 		{Name: "count", Identifiers: []string{"--count"}, Type: "int"},
@@ -106,7 +108,7 @@ func guardProgram() *Program {
 		{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string"},
 		{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Enum: []string{"fast", "safe"}},
 	}
-	def := Definition{
+	return Definition{
 		Name:    "app",
 		Handler: "App",
 		Flags: []FlagDef{
@@ -124,6 +126,13 @@ func guardProgram() *Program {
 			},
 		},
 	}
+}
+
+// guardProgram builds the program the way generated code does: NewWiredProgram with a switch
+// and no features, the generated InputSettings, and no signal trap, so the counts measure
+// rotini's own work. legacy builds it with NewProgramFunc instead.
+func guardProgram(legacy bool) *Program {
+	def := guardDefinition()
 	lookup := func(name string) (Handler, bool) {
 		switch name {
 		case "App":
@@ -133,7 +142,11 @@ func guardProgram() *Program {
 		}
 		return nil, false
 	}
-	return NewProgramFunc(def, lookup).
+	p := NewWiredProgram(def, lookup)
+	if legacy {
+		p = NewProgramFunc(def, lookup)
+	}
+	return p.
 		WithInputSettings(InputSettings{}).
 		WithoutSignalHandling().
 		WithStdout(io.Discard).
@@ -159,20 +172,26 @@ func TestGuard_allocBudgets(t *testing.T) {
 		t.Skip("allocation budgets are measured in full runs only")
 	}
 	for _, row := range guardAllocBudgets {
-		t.Run(row.name, func(t *testing.T) {
-			guardClearEnv(t)
-			for i := range row.extraEnv {
-				t.Setenv(fmt.Sprintf("ROTINI_ALLOC_UNRELATED_%03d", i), "value")
+		for _, legacy := range []bool{false, true} {
+			name, budget := row.name, row.budget
+			if legacy {
+				name, budget = row.name+", legacy", row.legacy
 			}
-			p := guardProgram()
-			if code, err := p.Run(row.argv); code != 0 || err != nil {
-				t.Fatalf("Run(%q) = %d, %v; want 0, nil", row.argv, code, err)
-			}
-			got := testing.AllocsPerRun(20, func() { _, _ = p.Run(row.argv) })
-			t.Logf("%s: %.0f allocations (budget %.0f)", row.name, got, row.budget)
-			if got > row.budget {
-				t.Errorf("%s: %.0f allocations per run, over the budget of %.0f", row.name, got, row.budget)
-			}
-		})
+			t.Run(name, func(t *testing.T) {
+				guardClearEnv(t)
+				for i := range row.extraEnv {
+					t.Setenv(fmt.Sprintf("ROTINI_ALLOC_UNRELATED_%03d", i), "value")
+				}
+				p := guardProgram(legacy)
+				if code, err := p.Run(row.argv); code != 0 || err != nil {
+					t.Fatalf("Run(%q) = %d, %v; want 0, nil", row.argv, code, err)
+				}
+				got := testing.AllocsPerRun(20, func() { _, _ = p.Run(row.argv) })
+				t.Logf("%s: %.0f allocations (budget %.0f)", name, got, budget)
+				if got > budget {
+					t.Errorf("%s: %.0f allocations per run, over the budget of %.0f", name, got, budget)
+				}
+			})
+		}
 	}
 }

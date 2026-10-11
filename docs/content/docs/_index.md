@@ -1607,6 +1607,9 @@ waits on something passes `ctx` to it or checks `ctx.Err()`.
 | `WithContext(ctx)`, or `RunContext(ctx, argv)` | none, unless `WithSignals` is set: canceling `ctx` is yours |
 | `WithoutSignalHandling()` | none |
 
+`Execute` leaves Rotini's handler registered until the process exits, so a signal that arrives
+after the run has finished is ignored and the process exits with the run's code.
+
 `WithSignals()` with no signals restores the default. Signals Rotini doesn't trap keep Go's
 behaviour: SIGHUP ends the process at once with no teardown (129), unless you add it to
 `WithSignals` or [handle it yourself](/recipes#reloading-config-on-sighup), and a write to a
@@ -1755,6 +1758,29 @@ dependencies, so `rtx.SetDependency` and `rtx.SetDependencyIfAbsent` never reach
 `NewProgram(Handlers()).WithDependency(clientDep, fake)` gets it. `rtx.GetDependency` returns
 the value and whether it is set; `rtx.MustGetDependency` treats a missing one as a fault, which
 reaches the reporter as a panic.
+
+### What a program links
+
+The generated `NewProgram` passes `rotini.NewWiredProgram` the runtime features its spec uses:
+`rotini.Env()` for env inputs, `rotini.ConfigFiles()` and `rotini.YAML()` for a YAML
+configuration file, `rotini.URLValues()` for a `url` flag, and so on. The program links only
+those, so a CLI that uses few of them builds a smaller binary that starts faster. `go generate`
+keeps the list in step with the spec.
+
+Code the spec does not describe can need a feature the list leaves out, for example a custom
+`InputSettings.Sources` entry, which needs `rotini.ConfigFiles()`. Add it in `main.go`:
+
+{{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
+cmd.NewProgram(cmd.Handlers()).
+	WithFeatures(rotini.ConfigFiles(), rotini.TOML()).
+	Execute()
+{{< /code >}}
+
+A run that needs a feature its program does not wire fails with a `*rotini.WiringError` whose
+`Feature` names it, and the message says which constructor to add. Completion never reports
+it; it leaves out the candidates the missing feature would have offered.
+`rotini.NewProgram` and `rotini.NewProgramFunc` give a program every feature, so hand-built
+programs need no list.
 
 ## Structured output
 

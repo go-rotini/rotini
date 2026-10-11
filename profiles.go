@@ -32,6 +32,21 @@ type fileBootstrap struct {
 	profiles map[string]profileChoice
 }
 
+// selectProfiles is [InputReader.profileChoices] through the profiles hook: none when no
+// configuration file has profiles.
+func (b *InputReader) selectProfiles(fs *featureSet, chain []Command, store *parsedInputs, view *osView) (map[string]profileChoice, error) {
+	i := slices.IndexFunc(b.configFiles, func(f ConfigFile) bool { return f.Profiles != nil })
+	if i < 0 {
+		return nil, nil //nolint:nilnil // no file has profiles: nothing to select
+	}
+	if fs.profiles == nil {
+		we := profilesMissing(b.configFiles[i])
+		we.Command = pathOf(chain)
+		return nil, we
+	}
+	return fs.profiles.choices(b, chain, store, view), nil
+}
+
 // profileChoices selects a profile for each profiled configuration file in scope for chain.
 func (b *InputReader) profileChoices(chain []Command, store *parsedInputs, view *osView) map[string]profileChoice {
 	if !slices.ContainsFunc(b.configFiles, func(f ConfigFile) bool { return f.Profiles != nil }) {
@@ -397,7 +412,7 @@ type resolvedConfigFile struct {
 // files and directory) and selects its profile from the command line and the environment. The
 // caller closes src.
 func resolveConfigFile(rtx *Context, name string) (resolvedConfigFile, error) {
-	lf, err := locateConfigFile(rtx, name)
+	lf, err := locateFor(rtx, name)
 	if err != nil {
 		return resolvedConfigFile{}, err
 	}
@@ -416,6 +431,23 @@ type locatedConfigFile struct {
 	reader  *InputReader
 	paths   map[string]string // the config_source paths, by logical name
 	view    *osView
+}
+
+// locateFor is [locateConfigFile] through the run's features: a configuration file needs
+// configuration files wired, a .env file .env files.
+func locateFor(rtx *Context, name string) (locatedConfigFile, error) {
+	fs := rtx.features()
+	if fs.config != nil {
+		return fs.config.locate(rtx, name)
+	}
+	lf, err := locateConfigFile(rtx, name)
+	if err != nil {
+		return locatedConfigFile{}, err
+	}
+	if lf.file.As == "env" && fs.envFiles != nil {
+		return lf, nil
+	}
+	return locatedConfigFile{}, missingFeature("config-files", "ConfigFiles()", fmt.Sprintf("configuration file %q is read", name))
 }
 
 // locateConfigFile finds the named config_files entry for the running command and selects its
@@ -438,7 +470,7 @@ func locateConfigFile(rtx *Context, name string) (locatedConfigFile, error) {
 	}
 	view := rtx.osView()
 	paths := b.pathOverrides(chain, store, view)
-	if layered, err := b.inputView(chain, reflect.Value{}, paths, true, view); err == nil && layered.hasInputEnv() {
+	if layered, err := b.envFileView(rtx.features(), chain, reflect.Value{}, paths, true, view); err == nil && layered.hasInputEnv() {
 		view = layered
 		paths = b.pathOverrides(chain, store, view)
 	}

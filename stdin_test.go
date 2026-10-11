@@ -473,7 +473,7 @@ func TestInputErrorTexts_configParse(t *testing.T) {
 
 func TestInputErrorTexts_configMissingOverride(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "none.yaml")
-	src, _, err := (&InputReader{}).openFileSource(ConfigFile{Name: "app"}, map[string]string{"app": missing}, nil)
+	src, _, err := (&InputReader{}).openFileSource(ConfigFile{Name: "app"}, map[string]string{"app": missing}, everyFeatureView())
 	if err == nil || src != nil || err.Error() != "could not open configuration file "+missing+": no such file" {
 		t.Errorf("err = %v, want the path and the reason", err)
 	}

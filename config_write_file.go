@@ -23,11 +23,12 @@ type configFileTarget struct {
 	exists  bool        // the file exists
 	mode    fs.FileMode // an existing file's permissions
 	src     []byte      // its content; nil when it doesn't exist
+	feats   *featureSet // the run's features, whose codecs read and check the file
 }
 
 // configTarget resolves the named configuration file for writing and reads it.
 func configTarget(rtx *Context, name string) (configFileTarget, error) {
-	lf, err := locateConfigFile(rtx, name)
+	lf, err := locateFor(rtx, name)
 	if err != nil {
 		return configFileTarget{}, err
 	}
@@ -43,7 +44,7 @@ func configTarget(rtx *Context, name string) (configFileTarget, error) {
 	if path == "" {
 		return configFileTarget{}, usageBind(channelConfig, f.Name, fmt.Sprintf("configuration file %q has no location to write to", f.Name), nil)
 	}
-	t := configFileTarget{file: f, profile: lf.profile, path: path, target: path}
+	t := configFileTarget{file: f, profile: lf.profile, path: path, target: path, feats: lf.view.clockRef().features()}
 	if err := t.read(); err != nil {
 		return configFileTarget{}, err
 	}
@@ -60,6 +61,9 @@ func (lf locatedConfigFile) writePath() (string, error) {
 			resolved, err = absPath(lf.view, resolved)
 		}
 		if err != nil {
+			if isWiringError(err) {
+				return "", err
+			}
 			return "", usageBind(channelConfig, f.Name, fmt.Sprintf("could not resolve configuration file path %s: %v", p, err), err)
 		}
 		return resolved, nil
@@ -104,23 +108,33 @@ func (t configFileTarget) format() (cfgedit.Format, error) {
 	if t.file.As == "env" {
 		return cfgedit.Dotenv, nil
 	}
-	codec, ok := fileCodec(t.file.Format, t.path)
-	if !ok {
+	c, err := t.feats.codecFor(t.file.Format, t.path)
+	if err != nil {
+		return "", err
+	}
+	if c == nil {
 		return "", internalBind(channelConfig, t.file.Name, fmt.Sprintf("configuration file %s has no format rotini can write; declare its format", t.path), nil)
 	}
-	return cfgedit.Format(codec.Name()), nil
+	return cfgedit.Format(c.name), nil
 }
 
 // decode reads data in the file's format.
 func (t configFileTarget) decode(data []byte) (map[string]any, error) {
+	var c *codecEntry
 	if t.file.As == "env" {
-		return recon.Dotenv.Decode(stripBOM(data)) //nolint:wrapcheck // reported by the caller
+		if c = t.feats.codec("dotenv"); c == nil {
+			return nil, missingCodec("dotenv", fmt.Sprintf(".env file %q is written", t.file.Name))
+		}
+	} else {
+		var err error
+		if c, err = t.feats.codecFor(t.file.Format, t.path); err != nil {
+			return nil, err
+		}
+		if c == nil {
+			return nil, recon.ErrUnsupportedFormat
+		}
 	}
-	codec, ok := fileCodec(t.file.Format, t.path)
-	if !ok {
-		return nil, recon.ErrUnsupportedFormat
-	}
-	return codec.Decode(stripBOM(data)) //nolint:wrapcheck // reported by the caller
+	return c.codec().Decode(stripBOM(data)) //nolint:wrapcheck // reported by the caller
 }
 
 // holdsSecrets reports whether any key the file may hold is secret.
@@ -158,12 +172,15 @@ func (t configFileTarget) checkSchema(key string, edited []byte, profile string)
 			where += " (profile " + profile + ")"
 		}
 	}
-	validator, err := schemaValidator(f.Schema)
+	if t.feats.schemas == nil {
+		return missingFeature("schemas", "Schemas()", fmt.Sprintf("configuration file %q has a schema", f.Name))
+	}
+	validator, err := t.feats.schemas.validator(f.Schema)
 	if err != nil {
 		return internalBind(channelConfig, f.Name, fmt.Sprintf("invalid schema for configuration file %q", f.Name), err)
 	}
 	if err := validator.Validate(m); err != nil {
-		applyPatternMessages(f.Schema, err)
+		t.feats.schemas.patternMessages(f.Schema, err)
 		return usageBind(channelConfig, key, fmt.Sprintf("config key %s: configuration file %s would be invalid: %s", key, where, schemaDetail(err)), err)
 	}
 	return nil

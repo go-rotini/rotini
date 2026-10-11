@@ -298,7 +298,7 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 	if err != nil {
 		return err
 	}
-	return validateStore(chain, store)
+	return validateStore(rtx.features(), chain, store)
 }
 
 // parseBind parses argv into a store, expands the values of inputs that declare `expand`, and
@@ -312,7 +312,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []Command, err
 	}
 	v := reflect.ValueOf(out).Elem()
 	anchor := frameAnchor(v, chain, rtx.frameIndex())
-	if err := expandStore(v, chain, store, anchor, layerView(rtx, chain, v, store)); err != nil {
+	if err := expandInputs(rtx.features(), v, chain, store, anchor, layerView(rtx, chain, v, store)); err != nil {
 		return nil, nil, err
 	}
 	if err := bindInputs(v, store, chain, anchor); err != nil {
@@ -717,27 +717,53 @@ func mapPairProblem(label, v string, secret bool) string {
 	return ""
 }
 
-// shapeTypes are the declared types whose values a short-circuited run still converts. Such a
-// run may never bind the command that declares an input, so this is where a value that is not
-// a number, a duration or a bool is still reported, as the command line always reports one.
-var shapeTypes = map[string]reflect.Type{
-	"int": reflect.TypeFor[int](), "int8": reflect.TypeFor[int8](), "int16": reflect.TypeFor[int16](),
-	"int32": reflect.TypeFor[int32](), "int64": reflect.TypeFor[int64](),
-	"uint": reflect.TypeFor[uint](), "uint8": reflect.TypeFor[uint8](), "uint16": reflect.TypeFor[uint16](),
-	"uint32": reflect.TypeFor[uint32](), "uint64": reflect.TypeFor[uint64](),
-	"float32": reflect.TypeFor[float32](), "float64": reflect.TypeFor[float64](),
-	"bool": reflect.TypeFor[bool](), "time.Duration": durationType,
+// shapeType is the Go type of a declared type whose values a short-circuited run still
+// converts. Such a run may never bind the command that declares an input, so this is where a
+// value that is not a number, a duration or a bool is still reported, as the command line
+// always reports one.
+func shapeType(name string) (reflect.Type, bool) {
+	switch name {
+	case "int":
+		return reflect.TypeFor[int](), true
+	case "int8":
+		return reflect.TypeFor[int8](), true
+	case "int16":
+		return reflect.TypeFor[int16](), true
+	case "int32":
+		return reflect.TypeFor[int32](), true
+	case "int64":
+		return reflect.TypeFor[int64](), true
+	case "uint":
+		return reflect.TypeFor[uint](), true
+	case "uint8":
+		return reflect.TypeFor[uint8](), true
+	case "uint16":
+		return reflect.TypeFor[uint16](), true
+	case "uint32":
+		return reflect.TypeFor[uint32](), true
+	case "uint64":
+		return reflect.TypeFor[uint64](), true
+	case "float32":
+		return reflect.TypeFor[float32](), true
+	case "float64":
+		return reflect.TypeFor[float64](), true
+	case "bool":
+		return reflect.TypeFor[bool](), true
+	case "time.Duration":
+		return durationType, true
+	}
+	return nil, false
 }
 
 // checkValueShape reports the first of vals that does not convert to typ (or, for a list, its
-// element type), as binding would. Types outside shapeTypes are left to binding.
+// element type), as binding would. Types [shapeType] does not know are left to binding.
 func checkValueShape(typ, label, flag string, vals []string, secret bool) error {
-	t, ok := shapeTypes[strings.TrimPrefix(typ, "[]")]
+	t, ok := shapeType(strings.TrimPrefix(typ, "[]"))
 	if !ok {
 		return nil
 	}
 	for _, v := range vals {
-		if err := coerce(reflect.New(t).Elem(), []string{v}); err != nil {
+		if err := coerce(reflect.New(t).Elem(), []string{v}, noFeatures); err != nil {
 			return coerceFailure(label, flag, err, secret)
 		}
 	}
@@ -758,13 +784,32 @@ func checkFlagValues(fd FlagDef, label string, vals []string, dir string, clock 
 			}
 		}
 	}
-	if err := checkConstraints(label, fd.Type, fd.Constraints, vals, fd.Secret, dir); err != nil {
+	fs := clock.features()
+	if err := checkConstraints(fs, label, fd.Type, fd.Constraints, vals, fd.Secret, dir); err != nil {
 		return err
 	}
 	if fd.UniqueItems && !isObjectFlag(fd) {
-		return checkUniqueItems(label, vals, uniqueKeyFor(fd.Type, flagTimeSpec(fd, clock), flagEnum(fd)), fd.Secret)
+		return checkUnique(fs, label, vals, fd.Type, flagTimeSpec(fd, clock), flagEnum(fd), fd.Secret)
 	}
 	return nil
+}
+
+// checkUnique enforces [Constraints.UniqueItems] on an input's command-line values through the
+// run's bounds.
+func checkUnique(fs *featureSet, label string, vals []string, typ string, ts timeSpec, enum enumSet, secret bool) error {
+	if len(vals) < 2 {
+		return nil
+	}
+	b := fs.bounds
+	if b == nil {
+		return missingBounds(label)
+	}
+	return b.unique(label, vals, b.uniqueKey(typ, ts, enum), secret)
+}
+
+// missingBounds is the error for input label's bounds, which the program does not wire.
+func missingBounds(label string) *WiringError {
+	return missingFeature("bounds", "Bounds()", "input "+label+" declares bounds")
 }
 
 // strayCommand reports a positional on a command that branches but takes no arguments: a
@@ -832,7 +877,7 @@ func validate(chain []Command, store *parsedInputs) error {
 		if err := requiredErrors(chain, store); err != nil {
 			return err
 		}
-		if err := stdinDashOnce(chain, store); err != nil {
+		if err := checkDashOnce(chain, store); err != nil {
 			return err
 		}
 	}
@@ -910,11 +955,12 @@ func checkArgValues(ad ArgDef, vals []string, dir string, clock *runClock) error
 		}
 	}
 	label := "<" + ad.Name + ">"
-	if err := checkConstraints(label, ad.Type, ad.Constraints, vals, ad.Secret, dir); err != nil {
+	fs := clock.features()
+	if err := checkConstraints(fs, label, ad.Type, ad.Constraints, vals, ad.Secret, dir); err != nil {
 		return err
 	}
 	if ad.UniqueItems {
-		return checkUniqueItems(label, vals, uniqueKeyFor(ad.Type, argTimeSpec(ad, clock), argEnum(ad)), ad.Secret)
+		return checkUnique(fs, label, vals, ad.Type, argTimeSpec(ad, clock), argEnum(ad), ad.Secret)
 	}
 	return nil
 }
@@ -932,37 +978,71 @@ func hasVariadicArg(args []ArgDef) bool {
 // checkConstraints enforces an input's declared bounds against its supplied values (one for a
 // scalar, possibly many for a repeatable flag or variadic argument). Numeric bounds apply to
 // numeric and measured types, length and pattern to strings and paths, item counts to arrays
-// and maps; per-value checks apply to each element. A constraint on any other type, which a
-// valid spec cannot produce, is skipped. A secret input's value and length are redacted.
-func checkConstraints(label, typ string, c Constraints, values []string, secret bool, dir string) error {
-	if isArrayType(typ) || isMapType(typ) {
-		if err := checkItemCount(label, c, len(values)); err != nil {
+// and maps; per-value checks apply to each element, in that order. A constraint on any other
+// type, which a valid spec cannot produce, is skipped. A secret input's value and length are
+// redacted. A check the run's features do not wire is a [*WiringError].
+func checkConstraints(fs *featureSet, label, typ string, c Constraints, values []string, secret bool, dir string) error {
+	if (isArrayType(typ) || isMapType(typ)) && (c.MinItems > 0 || c.MaxItems != nil) {
+		if fs.bounds == nil {
+			return missingBounds(label)
+		}
+		if err := fs.bounds.items(label, c, len(values)); err != nil {
 			return err
 		}
 	}
 	elem := constraintElemType(typ)
+	text := isPathType(elem) || elem == "string" // a path is a string, so its length and pattern bounds apply too
+	bounded := (text && hasLengthBounds(c)) || ((isNumericType(elem) || measuredFor(elem) != nil) && hasNumericBounds(c))
+	pattern := text && c.Pattern != ""
 	for _, v := range values {
-		var err error
-		switch {
-		case isNumericType(elem):
-			err = checkNumericBounds(label, c, v, secret, parseNumber, formatNum)
-		case measuredTypes[elem] != nil:
-			m := measuredTypes[elem]
-			err = checkNumericBounds(label, c, v, secret, m.parse, m.format)
-		case isPathType(elem):
-			// A path is a string, so its length and pattern bounds apply too.
-			if err = checkStringBounds(label, c, v, secret); err == nil {
-				err = checkPathExists(label, elem, v, dir)
+		if bounded {
+			if fs.bounds == nil {
+				return missingBounds(label)
 			}
-		case elem == "string":
-			err = checkStringBounds(label, c, v, secret)
+			if err := fs.bounds.value(label, elem, c, v, secret); err != nil {
+				return err
+			}
 		}
-		if err != nil {
-			return err
+		if pattern {
+			if err := checkPattern(fs, label, c, v, secret); err != nil {
+				return err
+			}
+		}
+		if isPathType(elem) {
+			if err := checkPathKind(fs, label, elem, v, dir); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
+
+// checkPattern enforces c.Pattern on one value through the run's patterns. A pattern that does
+// not compile, which spec validation rejects, matches every value.
+func checkPattern(fs *featureSet, label string, c Constraints, v string, secret bool) error {
+	if fs.patterns == nil {
+		return missingFeature("patterns", "Patterns()", "input "+label+" declares a pattern")
+	}
+	if ok, err := fs.patterns.match(c.Pattern, v); err == nil && !ok {
+		return patternViolation(label, c, v, secret)
+	}
+	return nil
+}
+
+// checkPathKind enforces a path type on one value: existence for existingfile and existingdir,
+// the run's stream-path check for inputfile and outputfile.
+func checkPathKind(fs *featureSet, label, typ, value, dir string) error {
+	if !isStreamPathType(typ) {
+		return checkExistingPath(label, typ, value, dir)
+	}
+	if fs.streamPaths == nil {
+		return missingFeature("stream-paths", "StreamPaths()", "input "+label+" is an "+typ)
+	}
+	return fs.streamPaths.check(label, typ, value, dir)
+}
+
+// hasLengthBounds reports whether c declares a length bound.
+func hasLengthBounds(c Constraints) bool { return c.MinLength > 0 || c.MaxLength != nil }
 
 // isPathType reports whether typ is a path kind: existingfile, existingdir, inputfile or
 // outputfile. The generated field is a plain string; only the type name tells the parser to
@@ -980,6 +1060,11 @@ func checkPathExists(label, typ, value, dir string) error {
 	if isStreamPathType(typ) {
 		return checkStreamPath(label, typ, value, dir)
 	}
+	return checkExistingPath(label, typ, value, dir)
+}
+
+// checkExistingPath is [checkPathExists] for existingfile and existingdir.
+func checkExistingPath(label, typ, value, dir string) error {
 	info, err := os.Stat(joinDir(dir, value))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -1077,6 +1162,27 @@ func parseNumber(v string) (float64, bool) {
 // checkStringBounds enforces the length and pattern bounds on one value. A secret's length is
 // redacted, since the length alone leaks information about a credential.
 func checkStringBounds(label string, c Constraints, v string, secret bool) error {
+	if err := checkLengthBounds(label, c, v, secret); err != nil {
+		return err
+	}
+	if c.Pattern != "" {
+		if re, err := compiledPattern(c.Pattern); err == nil && !re.MatchString(v) {
+			return patternViolation(label, c, v, secret)
+		}
+	}
+	return nil
+}
+
+// patternViolation is the error for a value that does not match c.Pattern.
+func patternViolation(label string, c Constraints, v string, secret bool) error {
+	if c.PatternMessage != "" {
+		return constraintViolation("%s %s (got %q)", label, c.PatternMessage, redactValue(v, secret))
+	}
+	return constraintViolation("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))
+}
+
+// checkLengthBounds enforces the length bounds on one value; a secret's length is redacted.
+func checkLengthBounds(label string, c Constraints, v string, secret bool) error {
 	ln := utf8.RuneCountInString(v)
 	gotLen := strconv.Itoa(ln)
 	if secret {
@@ -1087,14 +1193,6 @@ func checkStringBounds(label string, c Constraints, v string, secret bool) error
 		return constraintViolation("%s must be at least %d %s long (got %s)", label, c.MinLength, plural("character", c.MinLength), gotLen)
 	case c.MaxLength != nil && ln > *c.MaxLength:
 		return constraintViolation("%s must be at most %d %s long (got %s)", label, *c.MaxLength, plural("character", *c.MaxLength), gotLen)
-	}
-	if c.Pattern != "" {
-		if re, err := compiledPattern(c.Pattern); err == nil && !re.MatchString(v) {
-			if c.PatternMessage != "" {
-				return constraintViolation("%s %s (got %q)", label, c.PatternMessage, redactValue(v, secret))
-			}
-			return constraintViolation("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))
-		}
 	}
 	return nil
 }
@@ -1116,6 +1214,47 @@ func redactValue(v string, secret bool) string {
 		return "[redacted]"
 	}
 	return v
+}
+
+// checkGroups enforces the flag groups of the frames the store covers through the run's
+// features.
+func checkGroups(fs *featureSet, chain []Command, store *parsedInputs) error {
+	i := coveredFrame(chain, store, func(c Command) bool { return len(c.FlagGroups) > 0 })
+	if i < 0 {
+		return nil
+	}
+	if fs.groups == nil {
+		e := missingFeature("flag-groups", "FlagGroups()", fmt.Sprintf("command %q declares flag groups", pathOf(chain[:i+1])))
+		e.Command = pathOf(chain)
+		return e
+	}
+	return fs.groups.validate(chain, store)
+}
+
+// checkDependencies enforces the flag dependencies of the frames the store covers through the
+// run's features.
+func checkDependencies(fs *featureSet, chain []Command, store *parsedInputs) error {
+	i := coveredFrame(chain, store, func(c Command) bool { return len(c.FlagDependencies) > 0 })
+	if i < 0 {
+		return nil
+	}
+	if fs.deps == nil {
+		e := missingFeature("flag-dependencies", "FlagDependencies()", fmt.Sprintf("command %q declares flag dependencies", pathOf(chain[:i+1])))
+		e.Command = pathOf(chain)
+		return e
+	}
+	return fs.deps.validate(chain, store)
+}
+
+// coveredFrame is the index of the first frame of chain the store covers for which has is
+// true, -1 when there is none.
+func coveredFrame(chain []Command, store *parsedInputs, has func(Command) bool) int {
+	for i, c := range chain {
+		if store.covers(i) && has(c) {
+			return i
+		}
+	}
+	return -1
 }
 
 // validateFlagGroups enforces each command's cross-flag presence rules. Set means explicitly
@@ -1187,16 +1326,18 @@ func joinAnd(items []string) string {
 	}
 }
 
-// numericFamily is every type string whose values are range-checkable numbers: the Go numeric
+// isNumericType reports whether values of type typ are range-checkable numbers: the Go numeric
 // types plus the JSON Schema aliases, which a hand-built Definition may use.
-var numericFamily = map[string]bool{
-	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
-	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
-	"float32": true, "float64": true,
-	"integer": true, "number": true,
+func isNumericType(typ string) bool {
+	switch typ {
+	case "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64",
+		"float32", "float64",
+		"integer", "number":
+		return true
+	}
+	return false
 }
-
-func isNumericType(typ string) bool { return numericFamily[typ] }
 
 // measured is a type whose values are quantities in their own unit (a duration in
 // nanoseconds, a size in bytes): numeric bounds apply once a value is read in that unit, and
@@ -1206,23 +1347,37 @@ type measured struct {
 	format func(float64) string
 }
 
-// measuredTypes are the non-numeric types numeric bounds apply to, by definition type name.
-var measuredTypes = map[string]*measured{
-	"time.Duration": {
-		parse: func(s string) (float64, bool) {
-			d, err := parseDuration(strings.TrimSpace(s))
-			return float64(d), err == nil
-		},
-		format: func(f float64) string { return formatDuration(time.Duration(f)) },
-	},
-	"rotini.ByteSize": {
-		parse: func(s string) (float64, bool) {
-			n, err := parseByteSize(s)
-			return float64(n), err == nil
-		},
-		format: func(f float64) string { return ByteSize(int64(f)).String() },
-	},
+// The measured types: static data, so nothing runs at start-up.
+var (
+	measuredDuration = measured{parse: parseMeasuredDuration, format: formatMeasuredDuration}
+	measuredByteSize = measured{parse: parseMeasuredByteSize, format: formatMeasuredByteSize}
+)
+
+// measuredFor is the measured type numeric bounds apply to for a definition type name, nil for
+// any other type.
+func measuredFor(typ string) *measured {
+	switch typ {
+	case "time.Duration":
+		return &measuredDuration
+	case "rotini.ByteSize":
+		return &measuredByteSize
+	}
+	return nil
 }
+
+func parseMeasuredDuration(s string) (float64, bool) {
+	d, err := parseDuration(strings.TrimSpace(s))
+	return float64(d), err == nil
+}
+
+func formatMeasuredDuration(f float64) string { return formatDuration(time.Duration(f)) }
+
+func parseMeasuredByteSize(s string) (float64, bool) {
+	n, err := parseByteSize(s)
+	return float64(n), err == nil
+}
+
+func formatMeasuredByteSize(f float64) string { return ByteSize(int64(f)).String() }
 
 // constraintElemType is the type a constraint's per-value checks apply to: the element type
 // for a repeatable input, the type itself otherwise. Item-count bounds stay on the collection.
@@ -1760,7 +1915,14 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef, clock *runClock)
 				}
 				continue
 			case isObjectFlag(def):
-				if err := bindObjectFlag(field, raw, def); err != nil {
+				objects := clock.features().objects
+				if objects == nil {
+					return missingFeature("object-flags", "ObjectFlags()", "flag "+label+" takes an object")
+				}
+				if err := objects.bind(field, raw, def, clock.features()); err != nil {
+					if we, ok := errors.AsType[*WiringError](err); ok {
+						return we
+					}
 					if _, dup := errors.AsType[duplicateObjectError](err); dup {
 						return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s %v", label, err), Flag: label}
 					}
@@ -1893,26 +2055,31 @@ var (
 // coerce sets f from the raw string values (the last one, for a scalar), returning an error
 // when a value cannot be parsed into f's type, including a custom type's own
 // [encoding.TextUnmarshaler] error. An unparseable value is reported, never silently zeroed.
-func coerce(f reflect.Value, raw []string) error {
+func coerce(f reflect.Value, raw []string, fs *featureSet) error {
 	if len(raw) == 0 {
 		return nil
 	}
 	// Checked before pointer dereferencing: *url.URL and *time.Location are built by their
 	// parsers, not filled in place.
-	if parse, ok := valueParsers[f.Type()]; ok {
+	if parse := valueParser(f.Type(), fs); parse != nil {
 		last := raw[len(raw)-1]
 		v, err := parse(last)
 		if err != nil {
-			return &coerceError{Value: last, TypeName: typeLabel(f.Type()), Cause: err}
+			return &coerceError{Value: last, TypeName: typeLabel(f.Type(), fs), Cause: err}
 		}
 		f.Set(v)
 		return nil
+	}
+	if fs.valueKindOf(f.Type()) == nil {
+		if id, label, ok := extraKindOf(f.Type()); ok && (f.Kind() != reflect.Pointer || f.Type().Name() == "") {
+			return missingKind(id, label)
+		}
 	}
 	if f.Kind() == reflect.Pointer {
 		if f.IsNil() {
 			f.Set(reflect.New(f.Type().Elem()))
 		}
-		return coerce(f.Elem(), raw)
+		return coerce(f.Elem(), raw, fs)
 	}
 	last := raw[len(raw)-1]
 
@@ -1926,7 +2093,7 @@ func coerce(f reflect.Value, raw []string) error {
 	}
 	if f.CanAddr() && f.Addr().Type().Implements(textUnmarshalerType) {
 		if err := f.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(last)); err != nil {
-			return &coerceError{Value: last, TypeName: typeLabel(f.Type()), Cause: err}
+			return &coerceError{Value: last, TypeName: typeLabel(f.Type(), fs), Cause: err}
 		}
 		return nil
 	}
@@ -1945,9 +2112,9 @@ func coerce(f reflect.Value, raw []string) error {
 		reflect.Float32, reflect.Float64:
 		return coerceNumber(f, last)
 	case reflect.Slice:
-		return coerceSlice(f, raw)
+		return coerceSlice(f, raw, fs)
 	case reflect.Map:
-		return coerceMap(f, raw)
+		return coerceMap(f, raw, fs)
 	case reflect.Interface:
 		if f.Type().NumMethod() != 0 {
 			return unsupportedType(f.Type())
@@ -1972,10 +2139,31 @@ type authorMistake string
 
 func (e authorMistake) Error() string { return string(e) }
 
+// valueParser is how coerce builds a value of field type t that a parser reads rather than the
+// type itself: a time.Time, or a wired value kind with a parser. nil for any other type.
+func valueParser(t reflect.Type, fs *featureSet) func(string) (reflect.Value, error) {
+	if t == timeType {
+		return parseRFC3339Value
+	}
+	if k := fs.valueKindOf(t); k != nil {
+		return k.parse
+	}
+	return nil
+}
+
 // coerceFailure is the error for a value that could not be coerced into its field: the user's
 // invalid value, or for an [authorMistake] the program's bug. label names the input as the
-// user wrote it; flag is the flag label, "" for an argument.
-func coerceFailure(label, flag string, err error, secret bool) *ParseError {
+// user wrote it; flag is the flag label, "" for an argument. A [*WiringError] is returned as
+// it is, naming the input when it is a value kind's.
+func coerceFailure(label, flag string, err error, secret bool) error {
+	if we, ok := errors.AsType[*WiringError](err); ok {
+		if rest, ok := strings.CutPrefix(we.Msg, "input is "); ok && strings.HasPrefix(we.Feature, "values:") {
+			cp := *we
+			cp.Msg = "input " + label + " is " + rest
+			return &cp
+		}
+		return we
+	}
 	if mistake, ok := errors.AsType[authorMistake](err); ok {
 		return &ParseError{Kind: ParseKindInternal, Msg: fmt.Sprintf("rotini: %s: %s", label, mistake), Flag: flag}
 	}
@@ -1984,10 +2172,10 @@ func coerceFailure(label, flag string, err error, secret bool) *ParseError {
 
 // coerceSlice fills a slice field from the raw values (one per repeated flag occurrence, or the
 // trailing positionals of a variadic argument), coercing each into the element type.
-func coerceSlice(f reflect.Value, raw []string) error {
+func coerceSlice(f reflect.Value, raw []string, fs *featureSet) error {
 	out := reflect.MakeSlice(f.Type(), len(raw), len(raw))
 	for i, r := range raw {
-		if err := coerce(out.Index(i), []string{r}); err != nil {
+		if err := coerce(out.Index(i), []string{r}, fs); err != nil {
 			return err
 		}
 	}
@@ -2083,7 +2271,7 @@ func outOfRange(value string, t reflect.Type) error {
 	default: // float32: a float64 field cannot overflow a value ParseFloat(…, 64) accepted
 		bounds = fmt.Sprintf("±%g", math.MaxFloat32)
 	}
-	return &coerceError{Value: value, TypeName: typeLabel(t), Cause: fmt.Errorf("out of range: %s", bounds)}
+	return &coerceError{Value: value, TypeName: typeLabel(t, noFeatures), Cause: fmt.Errorf("out of range: %s", bounds)}
 }
 
 // coerceMapDotted fills a map[string]any flag from "key=value" pairs whose keys are dotted
@@ -2123,7 +2311,7 @@ func coerceMapDotted(f reflect.Value, raw []string) error {
 // '='. The value is coerced into the map's element type; an `any` element gets [inferScalar]'s
 // reading of it (a bool, number, nil or the string). Later pairs win on a duplicate key, and
 // malformed pairs are skipped — validation rejects them.
-func coerceMap(f reflect.Value, raw []string) error {
+func coerceMap(f reflect.Value, raw []string, fs *featureSet) error {
 	kt := f.Type().Key()
 	if kt.Kind() != reflect.String {
 		return authorMistake(fmt.Sprintf("cannot parse into %s; a map flag's keys must be strings", f.Type()))
@@ -2140,7 +2328,7 @@ func coerceMap(f reflect.Value, raw []string) error {
 			if inferred := inferScalar(v); inferred != nil {
 				ev.Set(reflect.ValueOf(inferred))
 			}
-		} else if err := coerce(ev, []string{v}); err != nil {
+		} else if err := coerce(ev, []string{v}, fs); err != nil {
 			return fmt.Errorf("value for key %q: %w", k, err)
 		}
 		m.SetMapIndex(reflect.ValueOf(k).Convert(kt), ev)

@@ -3,8 +3,6 @@ package rotini
 import (
 	"errors"
 	"math"
-	"net/url"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -21,12 +19,12 @@ func TestCheckNumberBounds_nonFinite(t *testing.T) {
 	}
 	for _, v := range []string{"nan", "NaN", "inf", "+Inf", "-inf", "infinity"} {
 		for kind, c := range bounds {
-			err := checkConstraints("--ratio", "float64", c, []string{v}, false, "")
+			err := checkConstraints(allFeatures(), "--ratio", "float64", c, []string{v}, false, "")
 			if err == nil || !strings.Contains(err.Error(), "--ratio must be a finite number (got "+v+")") {
 				t.Errorf("%s with %s: err = %v, want a finite-number error", v, kind, err)
 			}
 		}
-		if err := checkConstraints("--ratio", "float64", Constraints{}, []string{v}, false, ""); err != nil {
+		if err := checkConstraints(allFeatures(), "--ratio", "float64", Constraints{}, []string{v}, false, ""); err != nil {
 			t.Errorf("%s unbounded: err = %v, want accepted", v, err)
 		}
 	}
@@ -69,7 +67,7 @@ func TestParse_nonFiniteAgainstBounds(t *testing.T) {
 // TestURLValue_hostPortWithoutScheme pins that "localhost:8080", with or without a path, is not
 // taken as a URL with the scheme "localhost", while real opaque URLs still parse.
 func TestURLValue_hostPortWithoutScheme(t *testing.T) {
-	parse := valueParsers[reflect.TypeFor[*url.URL]()]
+	parse := parseURLValue
 	for _, s := range []string{"localhost:8080", "example.com:443", "localhost:8080/api", "db:5432/", "localhost:8080?x=1"} {
 		_, err := parse(s)
 		if err == nil || !strings.Contains(err.Error(), "as in http://"+s) {

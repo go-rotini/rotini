@@ -1,7 +1,8 @@
 package codegen
 
 import (
-	"encoding/json"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -111,7 +112,8 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 //
 // Values are written with strconv.Quote because reflect reads tag values back through
 // strconv.Unquote; a raw `^\d+$` would be an invalid escape and the tag would read as absent.
-// An enum is encoded as a JSON array so members may contain any character.
+// Enum values, aliases and layouts are written as escaped lists (see tagList), so members may
+// contain any character.
 func constraintTags(schema *InputSchema) string {
 	var parts []string
 	eachConstraint(schema, func(tag, _, tagVal, _ string) {
@@ -120,33 +122,48 @@ func constraintTags(schema *InputSchema) string {
 	if l := layoutsFor(schema); len(l) > 0 {
 		parts = append(parts, "layout:"+strconv.Quote(l[0]))
 		if len(l) > 1 {
-			if list, err := json.Marshal(l); err == nil { // a []string always marshals
-				parts = append(parts, "layouts:"+strconv.Quote(string(list)))
-			}
+			parts = append(parts, "layoutlist:"+strconv.Quote(tagList(l)))
 		}
 	}
 	if r := relative(schema); r != "" {
 		parts = append(parts, "relative:"+strconv.Quote(r))
 	}
 	if schema != nil && len(schema.Enum) > 0 {
-		if members, err := json.Marshal(enumStrings(schema.Enum)); err == nil { // a []string always marshals
-			parts = append(parts, "enum:"+strconv.Quote(string(members)))
-		}
+		parts = append(parts, "enumlist:"+strconv.Quote(tagList(enumStrings(schema.Enum))))
 		if schema.IgnoreCase {
 			parts = append(parts, `ignorecase:"true"`)
 		}
 		if aliases := enumAliases(schema.Enum); aliases != nil {
-			if m, err := json.Marshal(aliases); err == nil { // a map[string]string always marshals
-				parts = append(parts, "enumalias:"+strconv.Quote(string(m)))
-			}
+			parts = append(parts, "enumaliases:"+strconv.Quote(tagPairs(aliases)))
 		}
 		if unlisted := enumUnlisted(schema.Enum); unlisted != nil {
-			if m, err := json.Marshal(unlisted); err == nil {
-				parts = append(parts, "enumunlisted:"+strconv.Quote(string(m)))
-			}
+			parts = append(parts, "enumhide:"+strconv.Quote(tagList(unlisted)))
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// tagEscaper escapes the list syntax's special bytes in an item, key or value.
+var tagEscaper = strings.NewReplacer(`\`, `\\`, ",", `\,`, "=", `\=`)
+
+// tagList writes items as a list tag value: each item escaped, joined with ",". The input
+// reader splits it back on the unescaped commas.
+func tagList(items []string) string {
+	escaped := make([]string, len(items))
+	for i, it := range items {
+		escaped[i] = tagEscaper.Replace(it)
+	}
+	return strings.Join(escaped, ",")
+}
+
+// tagPairs writes m as a map tag value: key=value pairs in sorted key order, each key and value
+// escaped, joined with ",".
+func tagPairs(m map[string]string) string {
+	pairs := make([]string, 0, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		pairs = append(pairs, tagEscaper.Replace(k)+"="+tagEscaper.Replace(m[k]))
+	}
+	return strings.Join(pairs, ",")
 }
 
 // eachConstraint visits every present validation constraint on schema in a stable order,

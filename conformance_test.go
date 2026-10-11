@@ -1169,9 +1169,11 @@ func mustGetwd(t *testing.T) string {
 
 // TestConformance_InputMatrix runs the in-process tier of the matrix.
 func TestConformance_InputMatrix(t *testing.T) {
-	for _, c := range conformanceCases() {
-		t.Run(c.id, func(t *testing.T) { runInputCase(t, c) })
-	}
+	wiringModes(t, func(t *testing.T) {
+		for _, c := range conformanceCases() {
+			t.Run(c.id, func(t *testing.T) { runInputCase(t, c) })
+		}
+	})
 }
 
 // TestConformance_matrixComplete enforces the suite's shape: every matrix ID
@@ -1202,6 +1204,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"PROF-01", "PROF-02", "PROF-03", "PROF-04", "PROF-05", "PROF-06", "PROF-07", "PROF-08", "PROF-09",
 		"WRITE-01", "WRITE-02", "WRITE-03", "WRITE-04", "WRITE-05", "WRITE-06", "WRITE-07", "WRITE-08",
 		"FLAG-27",
+		"WIRE-01", "WIRE-02", "WIRE-03", "WIRE-04", "WIRE-05",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {
@@ -1220,6 +1223,9 @@ func TestConformance_matrixComplete(t *testing.T) {
 		seen[c.id]++
 	}
 	for _, c := range writeConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range wiringConformanceCases() {
 		seen[c.id]++
 	}
 	for _, id := range acceptanceMatrixIDs {

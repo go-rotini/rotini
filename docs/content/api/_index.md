@@ -11,7 +11,8 @@ type and method is documented in full on
 ## In main.go
 
 `main.go` builds the program with the generated `NewProgram(Handlers())`, configures it and calls
-`Execute`:
+`Execute`. The generated `NewProgram` calls `rotini.NewWiredProgram` with the runtime features
+its spec uses:
 
 {{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func main() {
@@ -210,7 +211,15 @@ Generated code and most programs never need these, but they are supported:
 
 | Symbol | Use it to |
 |---|---|
-| `rotini.NewProgramFunc(def, lookup)` | wire a command tree to handlers through a lookup function, without reflection; the generated `NewProgram` uses it, and `rotini.NewProgram(def, handlers)` is the reflection-based form |
+| `rotini.NewProgramFunc(def, lookup)` | wire a command tree to handlers through a lookup function, without reflection, with every feature; for hand-built programs. `rotini.NewProgram(def, handlers)` is the reflection-based form |
+| `rotini.NewWiredProgram(def, lookup, features...)` | the same with only the listed features linked; the generated `NewProgram` uses it. See [what a program links](/docs#what-a-program-links) |
+| `Program.WithFeatures(features...)` | add features to a wired program, for code its spec does not describe |
+| `rotini.Plugins`, `rotini.ResponseFiles`, `rotini.Chdir`, `rotini.Multicall` | program features: plugins, response files, `role: chdir`, `multicall` |
+| `rotini.Stdin(formats...)`, `rotini.Env`, `rotini.ConfigFiles`, `rotini.Profiles`, `rotini.EnvFiles`, `rotini.Fallbacks`, `rotini.PathExpansion`, `rotini.ObjectFlags`, `rotini.Schemas` | input features: stdin formats, env inputs, configuration files and their profiles, `.env` files and `variable_file`, flag fallbacks, `expand` and `~user` paths, object flags, schema checks |
+| `rotini.JSON`, `rotini.YAML`, `rotini.TOML`, `rotini.JSONC`, `rotini.Dotenv` | document formats, each linking only its own decoder |
+| `rotini.Bounds`, `rotini.Patterns`, `rotini.FlagGroups`, `rotini.FlagDependencies`, `rotini.StreamPaths` | validation: bounds and `uniqueItems`, `pattern`, flag groups, flag dependencies, `inputfile`/`outputfile` |
+| `rotini.URLValues`, `rotini.EmailValues`, `rotini.TimeZoneValues`, `rotini.MACValues`, `rotini.IPValues`, `rotini.RegexpValues` | the value types `url`, `email`, `timezone`, `mac`, `ip`/`cidr`/`hostport`, `regexp` |
+| `WiringError.Feature` | the feature a run needed but its program does not wire |
 | `Program.WithResolver` / `rotini.DefaultResolver` | replace how the command line is resolved to a command or a plugin |
 | `Program.WithLifecycle` / `rotini.DefaultLifecycle` / `rotini.AsCommand` | replace which hooks run and in what order |
 | `Program.WithParser` / `rotini.NewParser`, `rtx.Parser()` | parse the command line into a struct yourself |

@@ -1,0 +1,3 @@
+# Packages a generated program that uses no optional runtime feature must not link, beyond
+# testdata/forbidden_deps.txt. Checked against the e2e r11_lean_runtime fixture.
+crypto/sha256

@@ -9,11 +9,11 @@ import (
 
 func TestExpandValue(t *testing.T) {
 	view := newOSView([]string{"HOME=/home/ada", "USERPROFILE=C:\\Users\\ada", "A=/a", "B=$C", "T=~/x", "EMPTY="}, "", "linux")
-	lookup := func(name string) (*user.User, error) {
+	lookup := func(name string) (string, error) {
 		if name == "bob" {
-			return &user.User{HomeDir: "/home/bob"}, nil
+			return "/home/bob", nil
 		}
-		return nil, user.UnknownUserError(name)
+		return "", user.UnknownUserError(name)
 	}
 	both := expandRule{home: true, env: true}
 	for name, tc := range map[string]struct {
@@ -69,7 +69,7 @@ func TestExpandValue(t *testing.T) {
 }
 
 func TestExpandValue_homeMissing(t *testing.T) {
-	_, err := expandValueFor("linux", "~/x", expandRule{home: true}, newOSView([]string{}, "", "linux"), user.Lookup)
+	_, err := expandValueFor("linux", "~/x", expandRule{home: true}, newOSView([]string{}, "", "linux"), allFeatures().expand.lookupUser)
 	if err == nil || err.Error() != `cannot expand "~/x": $HOME is not defined` {
 		t.Errorf("err = %v", err)
 	}
@@ -80,7 +80,7 @@ func TestExpandValue_currentUser(t *testing.T) {
 	if err != nil || u.Username == "" || u.HomeDir == "" {
 		t.Skip("no current user")
 	}
-	got, err := expandValueFor("linux", "~"+u.Username+"/x", expandRule{home: true}, newOSView(nil, "", "linux"), user.Lookup)
+	got, err := expandValueFor("linux", "~"+u.Username+"/x", expandRule{home: true}, newOSView(nil, "", "linux"), allFeatures().expand.lookupUser)
 	if err != nil || got != u.HomeDir+"/x" {
 		t.Errorf("~%s/x = %q, %v", u.Username, got, err)
 	}

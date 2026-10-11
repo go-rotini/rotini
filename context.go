@@ -190,8 +190,8 @@ func newContext() *Context {
 
 // NewContextFor builds a [Context] with argv resolved against def, as the runtime does before
 // dispatch, using the os streams until [Context.WithStdout] and its siblings replace them, and no
-// program settings. It serves tests of the [Parser], the [Context.Inputs] family, or a single
-// hook:
+// program settings. It has every [Feature]. It serves tests of the [Parser], the [Context.Inputs]
+// family, or a single hook:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
 //	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"})
@@ -216,6 +216,7 @@ func NewContextFor(def Definition, argv []string) *Context {
 	markInvoked(chain)
 	rtx.Argv = argv
 	rtx.chain = chain
+	rtx.clock.feats = legacyFeatures(def)
 	rtx.view = rtx.view.withClock(&rtx.clock)
 	return rtx
 }

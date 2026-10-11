@@ -116,7 +116,10 @@ func argFallback(reg *recon.Registry, field reflect.Value, sf reflect.StructFiel
 		vals = vals[len(vals)-1:] // one value, the last, as a scalar flag's fallback reads
 	}
 	vals = argEnum(ad).canonical(vals)
-	if vals, err = expandFallback(vals, sf.Tag, source, label, rd); err != nil {
+	if vals, err = expandFallbackWired(vals, sf.Tag, source, label, rd); err != nil {
+		if isWiringError(err) {
+			return nil, "", err
+		}
 		if waivable {
 			return nil, "", nil
 		}
@@ -124,6 +127,9 @@ func argFallback(reg *recon.Registry, field reflect.Value, sf reflect.StructFiel
 	}
 	probe := reflect.New(field.Type()).Elem()
 	if err := coerceTime(probe, vals, argTimeSpec(ad, rd.view.clockRef())); err != nil {
+		if isWiringError(err) {
+			return nil, "", err
+		}
 		if waivable {
 			return nil, "", nil
 		}

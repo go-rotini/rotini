@@ -109,12 +109,12 @@ func TestFields_valueTags(t *testing.T) {
 		t.Errorf("env list recon tag %q", p.Recon)
 	}
 	m := f.env[1].Constraint
-	for _, want := range []string{`enumalias:"{\"s\":\"slow\"}"`, `enumunlisted:"[\"old\"]"`} {
+	for _, want := range []string{`enumlist:"fast,slow,old"`, `enumaliases:"s=slow"`, `enumhide:"old"`} {
 		if !strings.Contains(m, want) {
 			t.Errorf("env enum tags %s are missing %s", m, want)
 		}
 	}
-	if got := constraintTags(gp.rootInputs.Flags[3].Schema); !strings.Contains(got, `layouts:"[\"2006-01-02 15:04\",\"2006-01-02\"]" relative:"past"`) {
+	if got := constraintTags(gp.rootInputs.Flags[3].Schema); !strings.Contains(got, `layoutlist:"2006-01-02 15:04,2006-01-02" relative:"past"`) {
 		t.Errorf("time tags %s", got)
 	}
 }

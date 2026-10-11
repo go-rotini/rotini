@@ -40,7 +40,7 @@ const (
 
 // errStdinStreaming reports a whole-payload read of stdin after a stream consumer has started
 // reading it.
-var errStdinStreaming = errors.New("stdin is already being read as a stream")
+var errStdinStreaming error = constError("stdin is already being read as a stream")
 
 // stdinRun is the run a Context belongs to, as far as a blocking stdin read is concerned: the
 // run context, which a trapped signal cancels with the signal's exit code as the cause, and a

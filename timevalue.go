@@ -1,7 +1,6 @@
 package rotini
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -49,12 +48,27 @@ func (rtx *Context) Now() time.Time {
 	return rtx.clock.now()
 }
 
-// runClock is one run's clock and its single reading.
+// runClock is one run's clock and its single reading. The run's wired features travel with its
+// clock, which every value-reading path carries.
 type runClock struct {
-	mu   sync.Mutex
-	fn   func() time.Time // nil reads time.Now
-	at   time.Time
-	read bool
+	mu    sync.Mutex
+	fn    func() time.Time // nil reads time.Now
+	at    time.Time
+	read  bool
+	feats *featureSet // the run's features; nil has none
+	live  bool        // reads time.Now every time, as a nil clock does
+}
+
+// featureClock is a clock that carries fs and otherwise behaves as no clock: it reads time.Now
+// on every use. It is for inputs read outside the run's clock that still need its features.
+func featureClock(fs *featureSet) *runClock { return &runClock{feats: fs, live: true} }
+
+// features is the run's feature set; none for a nil clock or one with no program.
+func (c *runClock) features() *featureSet {
+	if c == nil || c.feats == nil {
+		return noFeatures
+	}
+	return c.feats
 }
 
 // set replaces the clock and forgets any reading.
@@ -67,7 +81,7 @@ func (c *runClock) set(fn func() time.Time) {
 // now reads the clock on first use and returns that reading from then on. A nil clock reads
 // time.Now every time.
 func (c *runClock) now() time.Time {
-	if c == nil {
+	if c == nil || c.live {
 		return time.Now()
 	}
 	c.mu.Lock()
@@ -337,7 +351,7 @@ func orList(items []string) string {
 // other field, or a plain spec, is plain coerce.
 func coerceTime(f reflect.Value, raw []string, ts timeSpec) error {
 	if ts.plain() || len(raw) == 0 {
-		return coerce(f, raw)
+		return coerce(f, raw, ts.clock.features())
 	}
 	switch {
 	case f.Type() == timeType:
@@ -380,18 +394,5 @@ func coerceTime(f reflect.Value, raw []string, ts timeSpec) error {
 		f.Set(out)
 		return nil
 	}
-	return coerce(f, raw)
-}
-
-// tagTimeSpec reads an env or config field's time tags: layout:"<first>", layouts:"<json
-// array>" when there are several, and relative:"past". Codegen writes the list as JSON so a
-// layout may contain any character; a malformed list reads as the first layout alone.
-func tagTimeSpec(tag reflect.StructTag) timeSpec {
-	ts := timeSpec{layout: tag.Get("layout"), relative: tag.Get("relative")}
-	if v := tag.Get("layouts"); v != "" {
-		if err := json.Unmarshal([]byte(v), &ts.layouts); err != nil {
-			ts.layouts = nil
-		}
-	}
-	return ts
+	return coerce(f, raw, ts.clock.features())
 }

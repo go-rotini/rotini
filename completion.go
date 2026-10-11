@@ -975,10 +975,15 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 	}
 	rtx := p.newRunContext()
 	rtx.ctx = ctx
-	p.completionChdir(rtx, words[:len(words)-1])
-	if rf := p.def.ResponseFiles; rf != nil {
+	// Completion never reports a feature the program does not wire, which would corrupt the
+	// shell's output; the run it completes reports it.
+	fs := p.features()
+	if fs.chdir != nil {
+		fs.chdir.complete(p, rtx, words[:len(words)-1])
+	}
+	if rf := p.def.ResponseFiles; rf != nil && fs.respFiles != nil {
 		var fileWord bool
-		if words, fileWord = completionWords(words, rf.Prefix, rtx.view); fileWord {
+		if words, fileWord = fs.respFiles.completionWords(words, rf.Prefix, rtx.view); fileWord {
 			// A response file's name is being typed: nothing to offer but the shell's files.
 			if err := format(p.stdout, CompletionResult{}); err != nil {
 				return 1, err

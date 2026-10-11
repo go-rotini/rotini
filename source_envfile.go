@@ -166,6 +166,23 @@ func (b *InputReader) inputView(chain []Command, v reflect.Value, overrides map[
 	return layered, nil
 }
 
+// envFileView is [InputReader.inputView] through the env-files hook. With no .env file in scope
+// and no input reading a variable_file, the view is the run's own.
+func (b *InputReader) envFileView(fs *featureSet, chain []Command, v reflect.Value, overrides map[string]string, waived bool, view *osView) (*osView, error) {
+	files := b.chainFiles(chain, true)
+	if len(files) == 0 && !hasFileVars(v) {
+		return view, nil
+	}
+	if fs.envFiles == nil {
+		subject := "an input reads a variable_file"
+		if len(files) > 0 {
+			subject = fmt.Sprintf(".env file %q is in scope", files[0].Name)
+		}
+		return nil, missingIn(chain, "env-files", "EnvFiles()", subject)
+	}
+	return fs.envFiles.view(b, chain, v, overrides, waived, view)
+}
+
 // readsEnv reports whether the inputs struct v reads an environment variable: an env input, or
 // a flag with an environment fallback.
 func readsEnv(v reflect.Value) bool {
@@ -185,14 +202,14 @@ func (b *InputReader) envPathSource(chain []Command) bool {
 func (b *InputReader) readDotenv(f ConfigFile, overrides map[string]string, waived bool, view *osView) (*dotenvLayer, error) {
 	src, path, err := b.openFileSource(f, overrides, view)
 	if err != nil {
-		if waived {
+		if waived && !isWiringError(err) {
 			return nil, nil //nolint:nilnil // a short-circuited run skips a file it can't read
 		}
 		return nil, err
 	}
 	defer src.Close()
 	if !waived {
-		if err := validateConfigFile(f, src); err != nil {
+		if err := validateConfigFile(view.clockRef().features(), f, src); err != nil {
 			return nil, err
 		}
 	}
@@ -270,6 +287,30 @@ func resolveFileVars(v reflect.Value, view *osView, waived bool) (map[string]env
 		}
 	}
 	return out, firstErr
+}
+
+// hasFileVars reports whether an input of v reads a variable_file: an env input, or a flag or
+// argument fallback, with an envfile tag.
+func hasFileVars(v reflect.Value) bool {
+	if v.Kind() != reflect.Struct {
+		return false
+	}
+	has := func(f reflect.StructField) bool { return f.Tag.Get("envfile") != "" }
+	for _, ci := range v.Fields() {
+		if ci.Kind() != reflect.Struct {
+			continue
+		}
+		if s := ci.FieldByName("Env"); s.IsValid() && s.Kind() == reflect.Struct && slices.ContainsFunc(slices.Collect(s.Type().Fields()), has) {
+			return true
+		}
+		if s := commandFlags(ci); s.IsValid() && slices.ContainsFunc(slices.Collect(typeLeaves(s.Type())), has) {
+			return true
+		}
+		if s := commandArgs(ci); s.IsValid() && slices.ContainsFunc(slices.Collect(s.Type().Fields()), has) {
+			return true
+		}
+	}
+	return false
 }
 
 // pairLayer returns the lookup of the first layer that sets any of names or file: the run's

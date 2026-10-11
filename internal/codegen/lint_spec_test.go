@@ -27,28 +27,28 @@ func TestLintRegistryCompleteness(t *testing.T) {
 	}
 }
 
-// TestConstraintNumericFamilyMatchesRuntime pins constraintNumericFamily to the runtime's
-// unexported numericFamily, read from the root package's parser.go source.
+// TestConstraintNumericFamilyMatchesRuntime pins constraintNumericFamily to the types the
+// runtime's unexported isNumericType accepts, read from the root package's parser.go source.
 func TestConstraintNumericFamilyMatchesRuntime(t *testing.T) {
 	parser, err := os.ReadFile(filepath.Join("..", "..", "parser.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := string(parser)
-	start := strings.Index(body, "var numericFamily = map[string]bool{")
+	start := strings.Index(body, "func isNumericType(typ string) bool {")
 	if start < 0 {
-		t.Fatal("numericFamily literal not found in runtime parser.go")
+		t.Fatal("isNumericType not found in runtime parser.go")
 	}
-	block := body[start : start+strings.Index(body[start:], "}")]
+	block := body[start : start+strings.Index(body[start:], "return true")]
 	runtimeSet := map[string]bool{}
-	for _, m := range regexp.MustCompile(`"(\w+)":\s*true`).FindAllStringSubmatch(block, -1) {
+	for _, m := range regexp.MustCompile(`"(\w+)"`).FindAllStringSubmatch(block, -1) {
 		runtimeSet[m[1]] = true
 	}
 	if len(runtimeSet) == 0 {
-		t.Fatal("extracted no keys from runtime numericFamily")
+		t.Fatal("extracted no types from runtime isNumericType")
 	}
 	if !maps.Equal(runtimeSet, constraintNumericFamily) {
-		t.Errorf("constraintNumericFamily drifted from runtime numericFamily:\n runtime=%v\n codegen=%v", runtimeSet, constraintNumericFamily)
+		t.Errorf("constraintNumericFamily drifted from runtime isNumericType:\n runtime=%v\n codegen=%v", runtimeSet, constraintNumericFamily)
 	}
 }
 

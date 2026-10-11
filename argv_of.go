@@ -284,7 +284,7 @@ func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
 		return &ArgvError{Field: p, Reason: "a secret is visible in the process list as argv; pass rotini.ArgvSecrets() to write it anyway"}
 	}
 	id := argvIdentifier(fd)
-	if f.Kind() == reflect.Pointer && valueParsers[f.Type()] == nil {
+	if f.Kind() == reflect.Pointer && argvParser(f.Type()) == nil {
 		if f.IsNil() {
 			return &ArgvError{Field: p, Reason: "a nil value can't be written; leave the field out of set"}
 		}
@@ -511,7 +511,7 @@ func escapeResponseWords(words []string, prefix string) []string {
 // on its own; a passthrough argument's words are written as they are.
 func argWords(f reflect.Value, defs []ArgDef, j int, frame Command) ([]string, error) {
 	def := defs[j]
-	if f.Kind() == reflect.Pointer && valueParsers[f.Type()] == nil {
+	if f.Kind() == reflect.Pointer && argvParser(f.Type()) == nil {
 		if f.IsNil() {
 			return nil, errors.New("a nil value can't be written; leave the field out of set")
 		}
@@ -559,7 +559,7 @@ func (w *argvWriter) envInput(p FieldPath, tag reflect.StructTag, f reflect.Valu
 		return &ArgvError{Field: p, Reason: "the input's struct tag names no environment variable"}
 	}
 	name, _, _ := strings.Cut(names, ",")
-	if f.Kind() == reflect.Pointer && valueParsers[f.Type()] == nil {
+	if f.Kind() == reflect.Pointer && argvParser(f.Type()) == nil {
 		if f.IsNil() {
 			return &ArgvError{Field: p, Reason: "a nil value can't be written; leave the field out of set"}
 		}
@@ -653,10 +653,16 @@ func (w *argvWriter) envNested(p FieldPath, nest string, f reflect.Value) error 
 	return nil
 }
 
+// argvParser is the parser rotini reads a value of type t with when t does not parse itself,
+// nil for any other type. [ArgvOf] runs without a program, so every value kind counts.
+func argvParser(t reflect.Type) func(string) (reflect.Value, error) {
+	return valueParser(t, allFeatures())
+}
+
 // isScalarSlice reports whether a slice type is one value, not a list: bytes and the
 // byte-slice value types.
 func isScalarSlice(t reflect.Type) bool {
-	if valueParsers[t] != nil {
+	if argvParser(t) != nil {
 		return true
 	}
 	if t.Elem().Kind() == reflect.Uint8 {
@@ -667,7 +673,7 @@ func isScalarSlice(t reflect.Type) bool {
 
 // argvText spells one scalar value as the parser reads it back.
 func argvText(f reflect.Value, layout string) (string, error) {
-	if f.Kind() == reflect.Pointer && valueParsers[f.Type()] == nil {
+	if f.Kind() == reflect.Pointer && argvParser(f.Type()) == nil {
 		if f.IsNil() {
 			return "", errors.New("a nil value can't be written")
 		}
@@ -676,7 +682,7 @@ func argvText(f reflect.Value, layout string) (string, error) {
 	switch v := f.Interface().(type) {
 	case *url.URL, *time.Location, *regexp.Regexp:
 		if f.IsNil() {
-			return "", fmt.Errorf("a nil %s can't be written", valueTypeLabels[f.Type()])
+			return "", fmt.Errorf("a nil %s can't be written", typeLabel(f.Type(), allFeatures()))
 		}
 		return parsedText(f, fmt.Sprint(v))
 	case mail.Address:
@@ -714,9 +720,9 @@ func argvText(f reflect.Value, layout string) (string, error) {
 // parsedText checks that s, the spelling of a value type rotini parses itself, reads back to
 // the value f holds.
 func parsedText(f reflect.Value, s string) (string, error) {
-	back, err := valueParsers[f.Type()](s)
+	back, err := argvParser(f.Type())(s)
 	if err != nil || fmt.Sprint(back.Interface()) != fmt.Sprint(f.Interface()) {
-		return "", fmt.Errorf("the %s %q doesn't read back as it is", valueTypeLabels[f.Type()], s)
+		return "", fmt.Errorf("the %s %q doesn't read back as it is", typeLabel(f.Type(), allFeatures()), s)
 	}
 	return s, nil
 }

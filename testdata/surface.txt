@@ -320,6 +320,7 @@ field ResponseFilesDef.Prefix
 field TopicDef.Name
 field TopicDef.Summary
 field WiringError.Command
+field WiringError.Feature
 field WiringError.Handler
 field WiringError.Msg
 func AllowSecretWrite() ConfigWriteOption
@@ -328,20 +329,35 @@ func ArgvOf[T any](def Definition, v T, set Presence, opts ...ArgvOption) (argv,
 func ArgvPath(names ...string) ArgvOption
 func ArgvSecrets() ArgvOption
 func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
+func Bounds() Feature
 func CategoryOf(err error) Category
+func Chdir() Feature
 func ConfigFilePath(rtx *Context, file string) (path string, exists bool, err error)
+func ConfigFiles() Feature
 func ConfigProfiles(rtx *Context, file string) ([]string, error)
 func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile, error)
 func DecodeOutput[T any](p *Program, data []byte, format string) (T, error)
 func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep
 func DefaultResolver(def Definition, argv []string) (Resolution, error)
 func Deprecations(rtx *Context) []Deprecation
+func Dotenv() Feature
+func EmailValues() Feature
+func Env() Feature
+func EnvFiles() Feature
 func ExitCause(code int) error
+func Fallbacks() Feature
 func FileMode(perm fs.FileMode) OutputOption
+func FlagDependencies() Feature
+func FlagGroups() Feature
+func IPValues() Feature
 func InternalError(err error) error
 func IsTerminal(stream any) bool
+func JSON() Feature
+func JSONC() Feature
+func MACValues() Feature
 func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport)
 func MergeInputs[T any](layers ...InputLayer[T]) T
+func Multicall() Feature
 func NewContextFor(def Definition, argv []string) *Context
 func NewDependency[T any](name string) Dependency[T]
 func NewInputReader(meta InputSettings) *InputReader
@@ -349,23 +365,38 @@ func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
 func NewProgramFunc(def Definition, lookup HandlerLookup) *Program
 func NewSuggestor() *Suggestor
+func NewWiredProgram(def Definition, lookup HandlerLookup, features ...Feature) *Program
+func ObjectFlags() Feature
 func OpenInput(rtx *Context, path string) (io.ReadCloser, error)
 func Overwrite(enabled bool) OutputOption
 func ParseConfigValue(fn func(raw string) error) ConfigWriteOption
+func PathExpansion() Feature
+func Patterns() Feature
 func PluginCompletion(w io.Writer, result CompletionResult) error
+func Plugins() Feature
 func PresenceOf[T any](v T) Presence
+func Profiles() Feature
 func Ptr[T any](v T) *T
+func RegexpValues() Feature
+func ResponseFiles() Feature
+func Schemas() Feature
 func SelectFields(v any, at string, fields []string) (Selection, error)
 func SetConfigValue(rtx *Context, file, key, raw string, opts ...ConfigWriteOption) error
 func SortBy[E any](items []E, field string, desc bool) error
+func Stdin(formats ...string) Feature
+func StreamPaths() Feature
 func StripANSI(text string) string
 func StructuredReporter(structured func(rtx *Context) bool) Reporter
 func SuggestionFacts(err error) (token string, candidates []string, ok bool)
+func TOML() Feature
+func TimeZoneValues() Feature
 func ToProfile(name string) ConfigWriteOption
 func ToSharedKeys() ConfigWriteOption
+func URLValues() Feature
 func UnsetConfigValue(rtx *Context, file, key string, opts ...ConfigWriteOption) error
 func UsageError(err error) error
 func WithDependency[T any](dep Dependency[T], value T) Option
+func YAML() Feature
 method ArgValueCompleter.CompleteArgValue
 method ArgvError.Error() string
 method Base64Bytes.MarshalText() ([]byte, error)
@@ -438,6 +469,7 @@ method Dependency.String() string
 method DependencyError.Error() string
 method DependencyError.Unwrap() []error
 method Deprecation.Error() string
+method Feature.String() string
 method FlagValueCompleter.CompleteFlagValue
 method Glob.MarshalText() ([]byte, error)
 method Glob.Match(name string) bool
@@ -495,6 +527,7 @@ method Program.WithDependency[T any](dep Dependency[T], value T) *Program
 method Program.WithDir(dir string) *Program
 method Program.WithEnviron(env []string) *Program
 method Program.WithExit(fn func(int)) *Program
+method Program.WithFeatures(features ...Feature) *Program
 method Program.WithHelp(help HelpFunc) *Program
 method Program.WithInputReader(fn func(InputSettings) *InputReader) *Program
 method Program.WithInputSettings(meta InputSettings) *Program
@@ -553,6 +586,7 @@ type DiscoveredPlugin
 type Effects
 type EnumValue
 type ExitStatusDef
+type Feature
 type FieldPath
 type FlagDef
 type FlagDependency

@@ -41,7 +41,7 @@ const (
 
 // Program is a rotini CLI ready to run: the compiled command tree ([Definition]), the
 // handlers that implement it, and the settings around them. The generated entrypoint builds one
-// with [NewProgramFunc] and calls [Program.Execute]. Every With method returns the receiver, so
+// with [NewWiredProgram] and calls [Program.Execute]. Every With method returns the receiver, so
 // calls chain.
 //
 // The surface groups into eight jobs:
@@ -63,7 +63,8 @@ const (
 //   - the program's dependencies — [Program.WithDependency], or [Program.With] with the
 //     [WithDependency] option to register several at once
 //   - rotini's own settings — [Program.WithVersion], [Program.WithParser], [Program.WithInputReader],
-//     and the two the generated code sets, [Program.WithInputSettings] and [Program.WithHelp]
+//     and the two the generated code sets, [Program.WithInputSettings] and [Program.WithHelp];
+//     [Program.WithFeatures] adds runtime features to a program built with [NewWiredProgram]
 //   - phase replacement — [Program.WithResolver], [Program.WithLifecycle]
 //
 // A setting that rotini reads (the runtime or generated code) is a typed option on the
@@ -94,6 +95,8 @@ type Program struct {
 	stdout     io.Writer
 	stderr     io.Writer
 	exit       func(int) // terminal action for Execute; defaults to os.Exit
+	// exitDefault reports that exit is os.Exit: true unless WithExit set another function.
+	exitDefault bool
 
 	lookup     HandlerLookup // finds each command's handler; nil → dispatch fails with noHandlers
 	noHandlers string        // the wiring message for a nil lookup, naming the constructor
@@ -127,6 +130,8 @@ type Program struct {
 
 	outputChecks   bool // WithOutputChecks: check every written output against its schema
 	bufferedOutput bool // WithBufferedOutput: buffer stdout and flush it when the run settles
+
+	feats *featureSet // the features each run has: every one, or NewWiredProgram's and WithFeatures'
 }
 
 // NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
@@ -135,13 +140,27 @@ type Program struct {
 // fails with a [*WiringError].
 //
 // NewProgram finds the methods by reflection, which keeps every exported method of the
-// program's types in the binary. Generated code uses [NewProgramFunc] instead, and so can a
-// hand-written handler set, for a smaller binary.
+// program's types in the binary. Generated code uses [NewWiredProgram], and a hand-written handler
+// set can use [NewProgramFunc], for a smaller binary.
 func NewProgram(def Definition, handlers any) *Program {
 	p := newProgram(def, reflectLookup(handlers))
+	p.feats = legacyFeatures(def)
 	if p.lookup == nil {
 		p.noHandlers = "no handlers: NewProgram was given a nil handlers value"
 	}
+	return p
+}
+
+// WithFeatures adds features to a program built with [NewWiredProgram], for code its spec does
+// not describe: a custom [InputSettings.Sources] entry needs [ConfigFiles], and an inputs
+// struct written by hand needs the features its fields use. It is a no-op on a program built
+// with [NewProgram] or [NewProgramFunc], which has every feature. Configure before the first
+// run.
+func (p *Program) WithFeatures(features ...Feature) *Program {
+	if p.feats == nil {
+		p.feats = newFeatureSet(nil)
+	}
+	p.feats.add(features)
 	return p
 }
 
@@ -157,6 +176,7 @@ func newProgram(def Definition, lookup HandlerLookup) *Program {
 		stdout:          os.Stdout,
 		stderr:          os.Stderr,
 		exit:            os.Exit,
+		exitDefault:     true,
 		teardownOnPanic: true,
 		panicRecover:    true,
 	}
@@ -207,6 +227,7 @@ func (p *Program) WithStderr(w io.Writer) *Program {
 //		WithExit(func(c int) { code = c }).
 //		Execute()
 func (p *Program) WithExit(fn func(int)) *Program {
+	p.exitDefault = fn == nil
 	if fn == nil {
 		fn = os.Exit
 	}
@@ -406,6 +427,7 @@ func (p *Program) newRunContext() *Context {
 	rtx.version, rtx.parser, rtx.help = p.version, p.parser, p.help
 	rtx.outputChecks = p.outputChecks
 	rtx.clock.fn = p.clock
+	rtx.clock.feats = p.feats
 	rtx.view = p.view.resolved().withClock(&rtx.clock)
 	if p.bufferedOutput && !IsTerminal(p.stdout) {
 		rtx.bufOut = newBufferedStdout(p.stdout)
@@ -450,8 +472,18 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 // signal halts the lifecycle as [Context.HaltWithCode] does (forward progress stops, every
 // begun teardown hook runs) with exit code 128+signum. A second signal calls the exit action
 // with 130 immediately. See [Program.WithoutSignalHandling] and [Program.WithSignals].
+//
+// Under the default exit action, Execute leaves rotini's handler registered until the process
+// exits: a signal arriving after the run settles is ignored, and the process exits with the
+// run's code.
 func (p *Program) Execute() error {
-	code, err := p.Run(p.args)
+	var code int
+	var err error
+	if p.ctx != nil {
+		code, err = p.runWith(p.ctx, true, p.args, p.exitDefault)
+	} else {
+		code, err = p.runWith(context.Background(), false, p.args, p.exitDefault)
+	}
 	p.exit(code)
 	return err
 }
@@ -482,9 +514,9 @@ func (p *Program) Execute() error {
 // trap with [Program.WithoutSignalHandling].
 func (p *Program) Run(argv []string) (int, error) {
 	if p.ctx != nil {
-		return p.runWith(p.ctx, true, argv)
+		return p.runWith(p.ctx, true, argv, false)
 	}
-	return p.runWith(context.Background(), false, argv)
+	return p.runWith(context.Background(), false, argv, false)
 }
 
 // RunContext is [Program.Run] under ctx, for this invocation only; the program is not
@@ -495,13 +527,15 @@ func (p *Program) RunContext(ctx context.Context, argv []string) (int, error) {
 	if ctx == nil {
 		return 1, InternalError(errors.New("rotini: RunContext called with a nil context"))
 	}
-	return p.runWith(ctx, true, argv)
+	return p.runWith(ctx, true, argv, false)
 }
 
-// runWith is the shared core of Run and RunContext. hasCtx reports whether the caller
-// supplied the context, which decides the default signal trap.
-func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (int, error) {
-	argv, complete := p.multicall(argv)
+// runWith is the shared core of Execute, Run and RunContext. hasCtx reports whether the caller
+// supplied the context, which decides the default signal trap. oneShot reports that the process
+// exits when the run returns, so the trap is left registered rather than removed.
+func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, oneShot bool) (int, error) {
+	fs := p.features()
+	argv, complete, unwired := p.multicall(fs, argv)
 	if complete {
 		format := p.completion
 		if format == nil {
@@ -537,7 +571,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	// where it writes out what the handlers wrote.
 	defer rtx.flushOutput()
 	if trap {
-		defer p.installTrap(cancel, rtx.flushOutput)()
+		defer p.installTrap(cancel, rtx.flushOutput, oneShot)()
 	}
 
 	resolve := p.resolver
@@ -546,9 +580,20 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	}
 	rtx.bindRun(ctx)
 	rtx.enterHook(ctx, true)
+	if unwired != nil {
+		rtx.recordFault(asFault(unwired))
+		rtx.bindChain([]Command{rootFrame(p.def)})
+		return p.settle(ctx, rtx)
+	}
 
 	if rf := p.def.ResponseFiles; rf != nil {
-		expanded, err := expandResponseFiles(argv, rf.Prefix, rtx.view, false)
+		if fs.respFiles == nil {
+			rtx.recordFault(asFault(missingFeatureIn(p.def.Name, "response-files", "ResponseFiles()",
+				fmt.Sprintf("the program reads response files (prefix %q)", rf.Prefix))))
+			rtx.bindChain([]Command{rootFrame(p.def)})
+			return p.settle(ctx, rtx)
+		}
+		expanded, err := fs.respFiles.expand(argv, rf.Prefix, rtx.view, false)
 		if err != nil {
 			rtx.RecordError(err)
 			rtx.bindChain([]Command{rootFrame(p.def)})
@@ -578,17 +623,23 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		// The reporter sees the commands before the plugin's name, for a "--help" hint.
 		rtx.bindChain(res.Chain)
 		before := argv[:max(len(argv)-len(res.Plugin.Args)-1, 0)]
-		if _, err := p.applyChdir(rtx, res.Chain, before); err != nil {
-			rtx.RecordError(err)
+		if _, err := p.chdir(fs, rtx, res.Chain, before); err != nil {
+			recordChdirError(rtx, err)
 			return p.settle(ctx, rtx)
 		}
-		return p.execPlugin(ctx, rtx, res.Chain, pluginDispatchFor(res.Chain, res.Plugin, rtx.view))
+		if fs.plugins == nil {
+			path := pathOf(res.Chain)
+			rtx.recordFault(asFault(missingFeatureIn(path, "plugins", "Plugins()",
+				fmt.Sprintf("command %q dispatches plugin %q", path, res.Plugin.Def.Name))))
+			return p.settle(ctx, rtx)
+		}
+		return fs.plugins.exec(p, ctx, rtx, res.Chain, pluginDispatchFor(res.Chain, res.Plugin, rtx.view))
 	}
 	if res.Argv != nil {
 		argv = res.Argv
 	}
-	if argv, err = p.applyChdir(rtx, res.Chain, argv); err != nil {
-		rtx.RecordError(err)
+	if argv, err = p.chdir(fs, rtx, res.Chain, argv); err != nil {
+		recordChdirError(rtx, err)
 		return p.settle(ctx, rtx)
 	}
 	if len(res.Chain) == 0 {
@@ -619,7 +670,10 @@ func (rtx *Context) bindChain(chain []Command) []Command {
 // remaining teardown after beforeExit, a best-effort flush of buffered stdout. With
 // WithTerminationTimeout, a run still going that long after the first signal exits the same
 // way, with the first signal's code.
-func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func()) (stop func()) {
+//
+// With oneShot the process exits when the run returns, so stop ends the trap's goroutine but
+// leaves the handler registered: unregistering costs more than the rest of the trap.
+func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func(), oneShot bool) (stop func()) {
 	sigs := p.signalSet
 	if len(sigs) == 0 {
 		sigs = trapSignals
@@ -656,9 +710,14 @@ func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func())
 	}()
 	return func() {
 		close(done)
-		signal.Stop(sigCh)
+		if !oneShot {
+			stopSignals(sigCh)
+		}
 	}
 }
+
+// stopSignals is signal.Stop, a variable so tests can count its calls.
+var stopSignals = signal.Stop
 
 // internalUnlessTagged tags err [CategoryInternal] unless its producer already categorized it:
 // a custom resolver may legitimately raise a usage error, and that must survive.

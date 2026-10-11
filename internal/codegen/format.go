@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-rotini/rotini/internal/cfgedit"
 	"github.com/go-rotini/yaml"
@@ -34,6 +35,14 @@ var noReorder = map[string]bool{"headings": true, "default": true}
 // are copied byte for byte. kind is FormatKindSpec, FormatKindConf, FormatKindCommand, or ""
 // to tell from the document's keys, then from name (the file's name).
 func FormatYAML(src []byte, kind, name string) ([]byte, error) {
+	// YAML is UTF-8. Bytes that aren't, or a byte-order mark past the start, could become a
+	// byte-order mark at the start once formatting moves text, and change how the file reads.
+	if !utf8.Valid(src) {
+		return nil, errors.New("the file isn't valid UTF-8")
+	}
+	if bytes.Contains(bytes.TrimPrefix(src, []byte("\uFEFF")), []byte("\uFEFF")) {
+		return nil, errors.New("the file has a byte-order mark (U+FEFF) after its start")
+	}
 	doc, err := cfgedit.IndexYAML(src)
 	if err != nil {
 		if errors.Is(err, cfgedit.ErrMultipleDocuments) {

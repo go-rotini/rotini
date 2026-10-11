@@ -5,8 +5,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-
-	"github.com/go-rotini/recon"
 )
 
 // CompletionOptions are what a completer can ask of the shell for its answer, with
@@ -113,6 +111,7 @@ func partialArgvLayer(rtx *Context, v reflect.Value, chain []Command) (Presence,
 	if err != nil {
 		return nil, nil, err
 	}
+	store.clock = featureClock(rtx.features())
 	anchor, err := layerAnchor(rtx, v, chain)
 	if err != nil {
 		return nil, nil, err
@@ -181,7 +180,7 @@ func namesFrame(cur Command, tok, name string) bool {
 // fail to convert into an inputs value of type t, so the rest still binds.
 func dropUnbindable(t reflect.Type, store *parsedInputs, chain []Command, anchor int) {
 	try := func(scope int, si scopeInputs) bool {
-		probe := &parsedInputs{scopes: make([]scopeInputs, len(store.scopes))}
+		probe := &parsedInputs{scopes: make([]scopeInputs, len(store.scopes)), clock: store.clock}
 		probe.scopes[scope] = si
 		return bindInputs(reflect.New(t).Elem(), probe, chain, anchor) == nil
 	}
@@ -208,20 +207,11 @@ func dropUnbindable(t reflect.Type, store *parsedInputs, chain []Command, anchor
 // a short-circuited run reads it.
 func partialEnvLayer(b *InputReader, rtx *Context, v reflect.Value, chain []Command) (Presence, *layerCore, error) {
 	view := rtx.osView()
-	var envReg, flagReg *recon.Registry
-	var err error
-	if hasEnvChannel(v) {
-		if envReg, err = recon.New(recon.WithoutWatch(), recon.WithSources(envSources(v, b.envPrefix, view)...)); err != nil {
-			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
-		}
-		defer envReg.Close()
+	envReg, flagReg, closeRegs, err := envRegistries(b, chain, v, view)
+	if err != nil {
+		return nil, nil, err
 	}
-	if v.Kind() == reflect.Struct && hasReconFlags(v) {
-		if flagReg, err = recon.New(recon.WithoutWatch(), recon.WithSource(flagEnvSource(v, b.envPrefix, view))); err != nil {
-			return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
-		}
-		defer flagReg.Close()
-	}
+	defer closeRegs()
 	anchor, err := layerAnchor(rtx, v, chain)
 	if err != nil {
 		return nil, nil, err

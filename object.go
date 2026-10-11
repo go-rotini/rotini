@@ -31,17 +31,20 @@ import (
 func isObjectFlag(fd FlagDef) bool { return fd.ObjectSchema != "" }
 
 // bindObjectFlag decodes, validates and binds an object flag's raw occurrences into f, which is
-// a struct, a pointer to one, or a slice of either.
-func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef) error {
+// a struct, a pointer to one, or a slice of either, with the program's features fs.
+func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef, fs *featureSet) error {
 	if len(raw) == 0 {
 		return nil
+	}
+	if fs.schemas == nil {
+		return missingFeature("schemas", "Schemas()", fmt.Sprintf("flag --%s takes an object, which has a schema", fd.Name))
 	}
 	if f.Kind() == reflect.Slice {
 		elem := f.Type().Elem()
 		out := reflect.MakeSlice(f.Type(), 0, len(raw))
 		docs := make([]map[string]any, 0, len(raw))
 		for _, r := range raw {
-			doc, err := decodeObject(r, elem)
+			doc, err := decodeObject(fs, r, elem)
 			if err != nil {
 				return err
 			}
@@ -53,7 +56,10 @@ func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef) error {
 			docs = append(docs, doc)
 		}
 		if fd.UniqueItems {
-			if dup := duplicateDocument(docs); dup != "" {
+			if fs.bounds == nil {
+				return missingFeature("bounds", "Bounds()", fmt.Sprintf("flag --%s declares unique items", fd.Name))
+			}
+			if dup := fs.bounds.documents(docs); dup != "" {
 				return duplicateObjectError(redactValue(dup, fd.Secret))
 			}
 		}
@@ -62,7 +68,7 @@ func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef) error {
 	}
 	doc := map[string]any{}
 	for _, r := range raw {
-		m, err := decodeObject(r, f.Type())
+		m, err := decodeObject(fs, r, f.Type())
 		if err != nil {
 			return err
 		}
@@ -74,13 +80,13 @@ func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef) error {
 // decodeObject turns one occurrence into a JSON-shaped document: JSON when it starts with "{",
 // YAML when it spans lines (the usual shape of an @file), key=value pairs otherwise. Pairs are
 // typed from the target struct's fields, since argv text carries no type.
-func decodeObject(s string, t reflect.Type) (map[string]any, error) {
+func decodeObject(fs *featureSet, s string, t reflect.Type) (map[string]any, error) {
 	trimmed := strings.TrimSpace(s)
 	switch {
 	case strings.HasPrefix(trimmed, "{"):
-		return decodeDocument("json", trimmed)
+		return decodeDocument(fs, "json", trimmed)
 	case strings.Contains(trimmed, "\n"):
-		return decodeDocument("yaml", trimmed)
+		return decodeDocument(fs, "yaml", trimmed)
 	case trimmed == "":
 		return map[string]any{}, nil
 	}
@@ -106,12 +112,12 @@ func decodeObject(s string, t reflect.Type) (map[string]any, error) {
 
 // decodeDocument decodes JSON or YAML text with recon's codecs, the same ones stdin uses, so a
 // value is typed identically on either channel.
-func decodeDocument(format, text string) (map[string]any, error) {
-	codec, ok := recon.DefaultCodecs().ByName(format)
-	if !ok {
-		return nil, fmt.Errorf("no %s decoder", format)
+func decodeDocument(fs *featureSet, format, text string) (map[string]any, error) {
+	c := fs.codec(format)
+	if c == nil {
+		return nil, missingCodec(format, "an object flag's value is "+format)
 	}
-	m, err := codec.Decode([]byte(text))
+	m, err := c.codec().Decode([]byte(text))
 	if err != nil {
 		return nil, fmt.Errorf("could not read the value as %s: %w", strings.ToUpper(format), err)
 	}
@@ -170,30 +176,6 @@ func typedField(t reflect.Type, path []string, text string) (value any, list boo
 		return inferScalar(text), false, nil
 	}
 	return text, false, nil
-}
-
-// inferScalar types key=value text the schema says nothing about (inside a free-form object or
-// a dotted_keys map) as its JSON spelling would decode: true and false are booleans, null is
-// nil, a JSON number is a float64, and anything else is the text itself. This keeps
-// `replicas=5` and `{"replicas":5}` equivalent. Only JSON scalar forms are inferred; "007",
-// "1_000", "yes" and "0x10" stay text.
-func inferScalar(text string) any {
-	switch text {
-	case "true":
-		return true
-	case "false":
-		return false
-	case "null":
-		return nil
-	}
-	if text == "" || !strings.ContainsAny(text[:1], "-0123456789") || strings.TrimSpace(text) != text {
-		return text
-	}
-	var n float64
-	if err := json.Unmarshal([]byte(text), &n); err == nil {
-		return n
-	}
-	return text
 }
 
 func derefType(t reflect.Type) reflect.Type {

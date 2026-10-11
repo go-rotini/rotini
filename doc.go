@@ -74,12 +74,13 @@
 //
 // # The runtime
 //
-// The generated entrypoint builds a [Program] with [NewProgramFunc] and calls [Program.Execute],
-// which resolves the invoked command from argv, runs its [Handler] hooks, and exits. Each
-// invocation carries a [Context]: the argv, the resolved chain, the program's streams and its
-// dependencies. A handler stops with [Context.HaltWith], [Context.Halt],
-// [Context.HaltWithCode] or [Context.Exit]; recorded errors, recovered panics and detected
-// faults are reported once, after teardown, by the outcome reporter.
+// The generated entrypoint builds a [Program] with [NewWiredProgram], passing the runtime
+// features its spec uses, and calls [Program.Execute], which resolves the invoked command from
+// argv, runs its [Handler] hooks, and exits. Each invocation carries a [Context]: the argv, the
+// resolved chain, the program's streams and its dependencies. A handler stops with
+// [Context.HaltWith], [Context.Halt], [Context.HaltWithCode] or [Context.Exit]; recorded
+// errors, recovered panics and detected faults are reported once, after teardown, by the
+// outcome reporter.
 //
 // The runtime resolves only which command was invoked. Flags and arguments are parsed and
 // validated when a handler calls [Context.Inputs] (or the per-channel [Context.ArgvInputs],

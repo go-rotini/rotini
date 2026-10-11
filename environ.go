@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -248,7 +247,7 @@ func (v *osView) expandPluginPath(dir string) string {
 }
 
 // errUnsetPathVariable reports a ${VAR:?message} reference whose variable is unset or empty.
-var errUnsetPathVariable = errors.New("required variable is not set")
+var errUnsetPathVariable error = constError("required variable is not set")
 
 // expandPath runs a configuration path through shell-style expansion over the run's
 // environment: a leading ~ or ~user, then $VAR and ${VAR}, with the ${VAR-x}, ${VAR:-x},
@@ -281,11 +280,16 @@ func (v *osView) expandTilde(p string) (string, error) {
 		return home + p[1:], nil
 	}
 	name := p[1:end]
-	u, err := user.Lookup(name)
+	expand := v.clockRef().features().expand
+	if expand == nil || expand.lookupUser == nil {
+		return "", missingFeature("path-expansion", "PathExpansion()",
+			fmt.Sprintf("path %q names another user's home", p))
+	}
+	home, err := expand.lookupUser(name)
 	if err != nil {
 		return "", fmt.Errorf("expand ~%s: %w", name, err)
 	}
-	return u.HomeDir + p[end:], nil
+	return home + p[end:], nil
 }
 
 func (v *osView) expandVars(s string) (string, error) {

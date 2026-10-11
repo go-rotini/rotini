@@ -34,12 +34,13 @@ func TestConfigPath_tildeExpansion(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			b := NewInputReader(InputSettings{})
-			src, err := b.fileSource(ConfigFile{Name: "cfg", Path: tc.in}, nil)
+			srcs, err := b.readFileSource(nil, ConfigFile{Name: "cfg", Path: tc.in}, fileBootstrap{}, false, everyFeatureView())
 			if err != nil {
-				t.Fatalf("fileSource(%q): %v", tc.in, err)
+				t.Fatalf("readFileSource(%q): %v", tc.in, err)
 			}
-			// fileSource wraps the recon source to carry the entry's logical name;
+			// readFileSource wraps the recon source to carry the entry's logical name;
 			// the path lives on the file source underneath.
+			src := srcs[0]
 			if named, wrapped := src.(namedSource); wrapped {
 				src = named.Source
 			}

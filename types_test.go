@@ -130,7 +130,7 @@ func TestCoerce_valueTypes(t *testing.T) {
 	v := reflect.ValueOf(&fields).Elem()
 	set := func(name string, raw ...string) {
 		t.Helper()
-		if err := coerce(v.FieldByName(name), raw); err != nil {
+		if err := coerce(v.FieldByName(name), raw, allFeatures()); err != nil {
 			t.Fatalf("%s %v: %v", name, raw, err)
 		}
 	}
@@ -187,9 +187,9 @@ func TestCoerce_valueTypesRejectBadInput(t *testing.T) {
 		"Size": "12XB",
 	} {
 		field := v.FieldByName(name)
-		err := coerce(field, []string{bad})
+		err := coerce(field, []string{bad}, allFeatures())
 		// The message names the kind of value the user got wrong, never the Go type behind it.
-		if want := "is not a valid " + valueTypeLabels[field.Type()]; err == nil || !strings.Contains(err.Error(), want) {
+		if want := "is not a valid " + typeLabel(field.Type(), allFeatures()); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: message %v, want it to say %q", name, err, want)
 		}
 		var ce *coerceError

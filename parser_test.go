@@ -211,23 +211,27 @@ func FuzzParse(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, argline string) {
 		argv := strings.Fields(argline)
-
-		var chained runInputs
-		rtx := NewContextFor(parserTestDef(), argv)
-		rtx.Stdin = strings.NewReader("payload")
-		_ = NewParser().Parse(rtx, &chained)
-
-		var typed matrixInputs
-		rtx2 := NewContextFor(matrixDef(), argv)
-		rtx2.Stdin = strings.NewReader("payload")
-		_ = NewParser().Parse(rtx2, &typed)
-
-		var set cpListInputs // a flag set embedded in the flags struct
-		_ = NewParser().Parse(NewContextFor(cpListDef(), argv), &set)
-
-		var cp bdCpInputs // a variadic argument before a fixed one: SRC... DST
-		_ = NewParser().Parse(NewContextFor(boundaryDef(), argv), &cp)
+		parseBoth[runInputs](t, parserTestDef(), argv)
+		parseBoth[matrixInputs](t, matrixDef(), argv)
+		parseBoth[cpListInputs](t, cpListDef(), argv) // a flag set embedded in the flags struct
+		parseBoth[bdCpInputs](t, boundaryDef(), argv) // a variadic argument before a fixed one: SRC... DST
 	})
+}
+
+// parseBoth parses argv into a T twice, with every feature and with only the features def and
+// T need, and fails unless both runs agree.
+func parseBoth[T any](t *testing.T, def Definition, argv []string) {
+	t.Helper()
+	var legacy, wiredIn T
+	rtx := NewContextFor(def, argv)
+	rtx.Stdin = strings.NewReader("payload")
+	legacyErr := NewParser().Parse(rtx, &legacy)
+	rtx = wiredFor(NewContextFor(def, argv), def, InputSettings{}, reflect.TypeFor[T]())
+	rtx.Stdin = strings.NewReader("payload")
+	wiredErr := NewParser().Parse(rtx, &wiredIn)
+	if errText(legacyErr) != errText(wiredErr) || !reflect.DeepEqual(legacy, wiredIn) {
+		t.Fatalf("%s %q: every feature: %+v, %v; wired: %+v, %v", def.Name, argv, legacy, legacyErr, wiredIn, wiredErr)
+	}
 }
 
 // assertConstraint checks that err satisfies wantErr: when wantErr is "" the value
@@ -1713,14 +1717,14 @@ func TestParse_dottedKeys(t *testing.T) {
 func TestCoerce_unsupportedTypeIsLoud(t *testing.T) {
 	// A type coerce has no rule for errors rather than zeroing the field.
 	var s struct{ X struct{ A int } }
-	err := coerce(reflect.ValueOf(&s.X).Elem(), []string{"v"})
+	err := coerce(reflect.ValueOf(&s.X).Elem(), []string{"v"}, allFeatures())
 	if err == nil || !strings.Contains(err.Error(), "encoding.TextUnmarshaler") {
 		t.Errorf("coerce(plain struct) = %v, want the TextUnmarshaler contract error", err)
 	}
 
 	// An `any` field stores the raw string.
 	var a any
-	if err := coerce(reflect.ValueOf(&a).Elem(), []string{"raw"}); err != nil || a != "raw" {
+	if err := coerce(reflect.ValueOf(&a).Elem(), []string{"raw"}, allFeatures()); err != nil || a != "raw" {
 		t.Errorf("coerce(any) = %v / %v, want raw stored", a, err)
 	}
 }
