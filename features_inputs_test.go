@@ -111,6 +111,7 @@ func wrFile(t *testing.T, name, body string) string {
 func TestWiring_inputs(t *testing.T) {
 	yamlFile := wrFile(t, "app.yaml", "api:\n  endpoint: e\ndir: sub\nprofiles:\n  dev:\n    api:\n      endpoint: d\n")
 	envFile := wrFile(t, "local.env", "REGION=west\n")
+	t.Setenv("WR_ROOT", "/r")
 	for _, tc := range []struct {
 		name     string
 		out      func() any
@@ -136,7 +137,7 @@ func TestWiring_inputs(t *testing.T) {
 		{"dotenv codec", func() any { return &wrEnvOnly{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "local", Path: envFile, As: "env"}}}, nil, "",
 			[]Feature{Env(), EnvFiles(), Dotenv()}, "codec:dotenv"},
 		{"fallbacks", func() any { return &wrFallback{} }, InputSettings{}, nil, "", []Feature{Fallbacks()}, "fallbacks"},
-		{"argv expansion", func() any { return &wrExpand{} }, InputSettings{}, []string{"--root", "$HOME/x"}, "", []Feature{PathExpansion()}, "path-expansion"},
+		{"argv expansion", func() any { return &wrExpand{} }, InputSettings{}, []string{"--root", "$WR_ROOT/x"}, "", []Feature{PathExpansion()}, "path-expansion"},
 		{"relative to config", func() any { return &wrRelative{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: yamlFile}}}, nil, "",
 			[]Feature{ConfigFiles(), YAML(), PathExpansion()}, "path-expansion"},
 		{"stdin", func() any { return &wrStdinYAML{} }, InputSettings{}, nil, "name: x\n", []Feature{Stdin("yaml"), YAML()}, "stdin:yaml"},

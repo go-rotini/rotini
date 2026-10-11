@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -63,7 +64,8 @@ func fakeImporter(t *testing.T) {
 	restore := importRunner
 	t.Cleanup(func() { importRunner = restore })
 	importRunner = func(_ context.Context, moduleRoot string, _ ImportOptions) (*importResult, []importNote, error) {
-		res, err := readImportResult(strings.NewReader(strings.ReplaceAll(testDescription, "$ROOT", moduleRoot)))
+		quoted, _ := json.Marshal(moduleRoot) // a Windows root's backslashes need escaping
+		res, err := readImportResult(strings.NewReader(strings.ReplaceAll(testDescription, "$ROOT", string(quoted[1:len(quoted)-1]))))
 		return res, []importNote{{Path: "acme", Level: "info", Msg: "the root is rootCmd"}}, err
 	}
 }

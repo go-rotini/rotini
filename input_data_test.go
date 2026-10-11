@@ -350,7 +350,11 @@ func TestDotenvLayer_origin(t *testing.T) {
 // ── native and xdg-system discovery ──────────────────────────────────────────
 
 func TestUserConfigDirFor(t *testing.T) {
-	env := map[string]string{"AppData": `C:\Users\me\AppData\Roaming`, "XDG_CONFIG_HOME": "/xdg", "home": "/usr/me"}
+	xdg := "/xdg"
+	if runtime.GOOS == "windows" {
+		xdg = `C:\xdg`
+	}
+	env := map[string]string{"AppData": `C:\Users\me\AppData\Roaming`, "XDG_CONFIG_HOME": xdg, "home": "/usr/me"}
 	getenv := func(k string) string { return env[k] }
 	home := func() (string, error) { return "/home/me", nil }
 	for goos, want := range map[string]string{
@@ -358,7 +362,7 @@ func TestUserConfigDirFor(t *testing.T) {
 		"darwin":  filepath.Join("/home/me", "Library", "Application Support"),
 		"ios":     filepath.Join("/home/me", "Library", "Application Support"),
 		"plan9":   filepath.Join("/usr/me", "lib"),
-		"linux":   "/xdg",
+		"linux":   xdg,
 	} {
 		if got, err := userConfigDirFor(goos, getenv, home); err != nil || got != want {
 			t.Errorf("%s: %q, %v; want %q", goos, got, err, want)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -41,7 +42,7 @@ func TestFlagSet_pathsAndOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := in.App.Flags
-	if f.File != filepath.Join(home, "f.txt") || f.Cache != home+"/c" || f.Raw != "~/r" {
+	if f.File != home+"/f.txt" || f.Cache != home+"/c" || f.Raw != "~/r" {
 		t.Errorf("flags = %+v", f)
 	}
 	for path, want := range map[FieldPath]string{"App.Flags.File": "argv:--file", "App.Flags.Cache": "env:APP_CACHE"} {
@@ -51,7 +52,7 @@ func TestFlagSet_pathsAndOrigins(t *testing.T) {
 	}
 
 	_, err = NewContextFor(fsPathDef, []string{"--file", "~/missing"}).WithDir(work).WithEnviron(env).Inputs[fsPathInputs]()
-	if want := `--file: no such file: "` + filepath.Join(home, "missing") + `" (written as "~/missing")`; err == nil || err.Error() != want {
+	if want := `--file: no such file: ` + strconv.Quote(home+"/missing") + ` (written as "~/missing")`; err == nil || err.Error() != want {
 		t.Errorf("missing set file = %v, want %q", err, want)
 	}
 }
@@ -134,7 +135,7 @@ func TestParser_expands(t *testing.T) {
 	if err := rtx.Parser().Parse(rtx, &in); err != nil {
 		t.Fatal(err)
 	}
-	if f := in.App.Flags; f.File != filepath.Join(home, "f.txt") || len(f.Paths) != 1 || f.Paths[0] != "a1" || f.Raw != "~/r" || f.Out != work+"/out.txt" {
+	if f := in.App.Flags; f.File != home+"/f.txt" || len(f.Paths) != 1 || f.Paths[0] != "a1" || f.Raw != "~/r" || f.Out != work+"/out.txt" {
 		t.Errorf("flags = %+v", f)
 	}
 	if in.App.Arguments.Src != home+"/src" {
@@ -142,7 +143,7 @@ func TestParser_expands(t *testing.T) {
 	}
 	rtx = NewContextFor(exDef, []string{"-f", "~/nope"}).WithDir(work).WithEnviron(env)
 	err := rtx.Parser().Parse(rtx, &in)
-	if want := `-f: no such file: "` + filepath.Join(home, "nope") + `" (written as "~/nope")`; err == nil || err.Error() != want {
+	if want := `-f: no such file: ` + strconv.Quote(home+"/nope") + ` (written as "~/nope")`; err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %q", err, want)
 	}
 }
