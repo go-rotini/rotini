@@ -2,6 +2,7 @@ package cfgedit
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 )
 
@@ -84,10 +85,7 @@ func commentLine(src []byte, start int, marker string) bool {
 
 // splice returns src with [start, end) replaced by text.
 func splice(src []byte, start, end int, text string) []byte {
-	out := make([]byte, 0, len(src)-(end-start)+len(text))
-	out = append(out, src[:start]...)
-	out = append(out, text...)
-	return append(out, src[end:]...)
+	return slices.Concat(src[:start], []byte(text), src[end:])
 }
 
 // spaces returns n spaces.
