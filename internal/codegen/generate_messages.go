@@ -109,10 +109,10 @@ func setCompletionMessage(schema **InputSchema, msg string) {
 	switch {
 	case *schema == nil && msg == "":
 	case *schema == nil:
-		*schema = &InputSchema{Complete: &InputSchemaComplete{Message: msg}}
+		*schema = &InputSchema{Complete: &CompletionHint{Message: msg}}
 	case (*schema).Complete == nil && msg == "":
 	case (*schema).Complete == nil:
-		(*schema).Complete = &InputSchemaComplete{Message: msg}
+		(*schema).Complete = &CompletionHint{Message: msg}
 	default:
 		(*schema).Complete.Message = msg
 	}
@@ -130,4 +130,14 @@ func completionMessagesLiteral(conf *Conf) string {
 		out += "Env: " + strconv.Quote(env)
 	}
 	return out + "},\n"
+}
+
+// completionDescriptionsLiteral renders the Definition's CompletionDescriptions field, or ""
+// when the conf declares no `descriptions_env`, so a CLI without one omits the field.
+func completionDescriptionsLiteral(conf *Conf) string {
+	env := completionScriptEnvs(conf).descriptions
+	if env == "" {
+		return ""
+	}
+	return "CompletionDescriptions: &" + rotiniPkgName + ".CompletionDescriptionsDef{Env: " + strconv.Quote(env) + "},\n"
 }

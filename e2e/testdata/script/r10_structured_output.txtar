@@ -5,6 +5,7 @@
 gomodinit example.com/taskr
 
 exec rotini generate cmd/taskr/.rotini.spec.yaml --config cmd/taskr/.rotini.conf.yaml
+! stderr WriteOutputItem
 exec go mod tidy
 exec go build -o taskr$exe ./cmd/taskr
 
@@ -46,7 +47,7 @@ env TASKR_CHECKS=
 env TASKR_STRUCTURED=1
 ! exec ./taskr$exe list -o json --bogus
 ! stdout .
-stderr '^\{"error":\{"category":"usage","command":"taskr list","exit_code":2,"flag":"--bogus","kind":"unknown-flag","message":".*","token":"--bogus"\}\}$'
+stderr '^\{"schema_version":1,"error":\{"candidates":\[[^]]*"--output"[^]]*\],"category":"usage","command":"taskr list","exit_code":2,"flag":"--bogus","kind":"unknown-flag","message":".*","token":"--bogus"\}\}$'
 ! exec ./taskr$exe list -o table --bogus
 stderr '^Error: '
 env TASKR_STRUCTURED=
@@ -57,6 +58,7 @@ exists schemas/output/taskr-watch.output.json
 exists schemas/output/taskr-bad.output.json
 grep '"format": "rotini-contract/1"' cli-contract.json
 grep '"\$ref": "#/definitions/TaskList"' cli-contract.json
+grep '"stream": true' cli-contract.json
 ! grep 'format_flag' cli-contract.json
 
 # The pages say what each command writes.
@@ -65,6 +67,7 @@ stdout 'Output:'
 stdout 'Every task, oldest first\.'
 stdout '^  TaskList$'
 ! stdout 'chosen with'
+grep 'a stream of Task, one item at a time' internal/cmd/taskr/zz_taskr.go
 
 # DecodeOutput reads captured stdout back, checked against the contract.
 exec go test ./internal/cmd/taskr
@@ -127,6 +130,7 @@ command:
     - name: watch
       summary: write each task as it is read
       output: {$ref: "#/schemas/Task"}
+      output_stream: true
     - name: wrong
       summary: write the wrong type
       output: {$ref: "#/schemas/TaskList"}
@@ -290,7 +294,7 @@ import (
 
 func TestListOutput(t *testing.T) {
 	var stdout bytes.Buffer
-	p := NewProgram(Handlers()).WithStdout(&stdout)
+	p := NewProgram().WithStdout(&stdout)
 	if code, err := p.Run([]string{"list", "-o", "yaml"}); code != 0 {
 		t.Fatalf("exit %d: %v", code, err)
 	}
@@ -308,7 +312,7 @@ func TestListOutput(t *testing.T) {
 
 func TestWatchOutput(t *testing.T) {
 	var stdout bytes.Buffer
-	p := NewProgram(Handlers()).WithStdout(&stdout)
+	p := NewProgram().WithStdout(&stdout)
 	if code, err := p.Run([]string{"watch"}); code != 0 {
 		t.Fatalf("exit %d: %v", code, err)
 	}
@@ -332,10 +336,7 @@ import (
 )
 
 func main() {
-	p := taskr.Program
-	if os.Getenv("TASKR_CHECKS") == "1" {
-		p = p.WithOutputChecks()
-	}
+	p := taskr.NewProgram().WithOutputChecks(os.Getenv("TASKR_CHECKS") == "1")
 	if os.Getenv("TASKR_STRUCTURED") == "1" {
 		p = p.WithReporter(rotini.StructuredReporter(wantsJSON))
 	}

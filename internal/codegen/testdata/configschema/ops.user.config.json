@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Region": {
+      "enum": [
+        "eu",
+        "us"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "$XDG_CONFIG_HOME/ops/config.yaml (default ~/.config/ops/config.yaml), read by ops and its sub-commands.",
+  "properties": {
+    "defaults": {
+      "properties": {
+        "region": {
+          "$ref": "#/definitions/Region",
+          "default": "eu",
+          "description": "The region commands use when none is given.",
+          "enum": [
+            "eu",
+            "us"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "deploy": {
+      "properties": {
+        "replicas": {
+          "description": "how many copies",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "net": {
+      "properties": {
+        "retries": {
+          "description": "how often to retry",
+          "maximum": 9,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "token": {
+      "deprecated": true,
+      "deprecationMessage": "deprecated since 1.2.0: use auth.token",
+      "description": "the API token",
+      "type": "string"
+    },
+    "ui": {
+      "properties": {
+        "color": {
+          "default": "auto",
+          "description": "when to color",
+          "enum": [
+            "auto",
+            "always",
+            "never",
+            "tty"
+          ],
+          "enumDescriptions": [
+            "color on a terminal",
+            "",
+            "",
+            "same as auto"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": "ops configuration file \"user\"",
+  "type": "object"
+}

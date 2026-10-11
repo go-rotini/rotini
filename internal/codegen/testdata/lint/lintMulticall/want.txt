@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:6:5: command demo: routes by the invoked name, but the root has no sub-commands or plugins to route to; add them, or keep only `complete`

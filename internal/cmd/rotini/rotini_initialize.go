@@ -30,14 +30,18 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	flags := inputs.RotiniInitialize.Flags
 
 	version := rtx.Version()
+	opt := codegen.InitOptions{Format: flags.Format, Template: flags.Template, Force: flags.Force}
 	if flags.DryRun {
 		rtx.SetDependencyIfAbsent(initializeDryRunDep, codegen.NewProcessor(version).InitializeDryRun)
-		planned, err := rtx.MustGetDependency(initializeDryRunDep)(args.Name, flags.Format, flags.Force)
+		planned, err := rtx.MustGetDependency(initializeDryRunDep)(args.Name, opt)
 		if err != nil {
 			rtx.HaltWith(err)
 			return
 		}
-		fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", planned.Spec, planned.Conf)
+		if _, err := fmt.Fprint(rtx.Stdout, seedLines(planned)); err != nil {
+			haltWithWriteError(rtx, err)
+			return
+		}
 		reportPlanned(rtx, planned.Result, planned.Changes)
 		return
 	}
@@ -45,19 +49,31 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.SetDependencyIfAbsent(initializeDep, codegen.NewProcessor(version).Initialize)
 	initialize := rtx.MustGetDependency(initializeDep)
 
-	written, err := initialize(args.Name, flags.Format, flags.Force)
+	written, err := initialize(args.Name, opt)
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n%s\n", written.Spec, written.Conf, written.Result)
+	if _, err := fmt.Fprintf(rtx.Stdout, "%s%s\n", seedLines(written), written.Result); err != nil {
+		haltWithWriteError(rtx, err)
+		return
+	}
 
 	// init does not edit go.mod, so it warns when the module does not yet require the runtime
 	// the scaffold imports.
 	if !requiresRuntime(".") {
 		rtx.RecordWarning(fmt.Errorf("go.mod does not require %s yet; run `go get %s` before building ./cmd/%s", runtimeModule, runtimeModule, args.Name))
 	}
+}
+
+// seedLines lists the spec and conf of every CLI init wrote, the named one first.
+func seedLines(in codegen.Initialized) string {
+	var out strings.Builder
+	for _, s := range append([]codegen.SeedFiles{{Spec: in.Spec, Conf: in.Conf}}, in.Also...) {
+		fmt.Fprintf(&out, "spec: %s\nconf: %s\n", filepath.ToSlash(s.Spec), filepath.ToSlash(s.Conf))
+	}
+	return out.String()
 }
 
 // runtimeModule is the module the generated code imports.

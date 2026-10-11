@@ -59,7 +59,7 @@ func TestInitializeDryRun(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
 	t.Chdir(dir)
-	out, err := NewProcessor("0.0.0").InitializeDryRun("demo", "", false)
+	out, err := NewProcessor("0.0.0").InitializeDryRun("demo", InitOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,10 +73,10 @@ func TestInitializeDryRun(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Errorf("a dry run wrote files: %v", entries)
 	}
-	if _, err := NewProcessor("0.0.0").Initialize("demo", "", false); err != nil {
+	if _, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewProcessor("0.0.0").InitializeDryRun("demo", "", false); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := NewProcessor("0.0.0").InitializeDryRun("demo", InitOptions{}); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("dry run over an existing seed = %v, want the same refusal init gives", err)
 	}
 }

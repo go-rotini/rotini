@@ -76,19 +76,25 @@ func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) 
 			return
 		}
 
-		fmt.Fprintln(rtx.Stdout, page)
+		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
+			haltWithWriteError(rtx, err)
+			return
+		}
 		rtx.HaltWithCode(0)
 		return
 	}
 
 	if inputs.Rotini.Flags.Version {
-		fmt.Fprintf(rtx.Stdout, "v%s\n", rtx.Version())
+		if _, err := fmt.Fprintf(rtx.Stdout, "v%s\n", rtx.Version()); err != nil {
+			haltWithWriteError(rtx, err)
+			return
+		}
 		rtx.HaltWithCode(0)
 		return
 	}
 }
 
 func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, rtx.Help())
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
 }

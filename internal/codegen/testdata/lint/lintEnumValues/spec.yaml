@@ -1,0 +1,34 @@
+# An enum member that isn't a value of the input's type can never be matched; an enum on a
+# bool restricts nothing. A member listed twice is a typo.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    # Reported once here, not again on the two flags that refer to it.
+    Port:
+      type: int
+      enum: [http]
+  flags:
+    # Correct: each member parses as an int. No problem.
+    - name: levels
+      schema: { type: '[]int', enum: ['1', '2'] }
+    - name: replicas
+      schema: { type: int, enum: [a, b] }
+    - name: json
+      schema: { type: bool, enum: ['yes', 'no'] }
+    - name: sizes
+      schema: { type: '[]int', enum: ['1', x] }
+    - name: wait
+      schema: { type: duration, enum: [fast] }
+    # A map value is a whole key=value pair.
+    - name: labels
+      schema: { type: 'map[string]string', enum: [a] }
+    - name: format
+      schema: { type: string, enum: [json, yaml, json] }
+    - name: listen
+      schema: { $ref: Port }
+    - name: connect
+      schema: { $ref: Port }
+  env:
+    - name: retries
+      schema: { type: int, enum: [x] }

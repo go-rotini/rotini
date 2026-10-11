@@ -1,0 +1,19 @@
+-- in --
+{
+  "deploy": {
+    "timeout": "5m",
+    "retries": 3
+  },
+  "log": "info"
+}
+-- op --
+set color "a\"b"
+-- out --
+{
+  "deploy": {
+    "timeout": "5m",
+    "retries": 3
+  },
+  "log": "info",
+  "color": "a\"b"
+}

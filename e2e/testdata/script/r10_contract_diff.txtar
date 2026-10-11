@@ -1,0 +1,221 @@
+# R10 — rotini diff compares two versions of a contract and fails on breaking changes.
+#
+# The new contract defaults to the one built from the current spec; acknowledgements in the
+# conf and planned removals (--release) keep an intended break from failing, and a contract
+# written by rotini 1.3 is compared only on the facts it records.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+cp cli-contract.json v1.json
+cp cmd/app/.rotini.conf.yaml plain.conf.yaml
+
+# Unchanged: nothing to report.
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout '^no changes$'
+
+# The second version removes two commands, adds a required flag and changes a default.
+cp v2.spec.yaml cmd/app/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout '^Breaking:'
+stdout 'COMMAND_NO_DELETE +app compact +command removed'
+stdout 'COMMAND_NO_DELETE +app old +command removed \(planned for removal in 2.0.0; pass --release\)'
+stdout 'FLAG_REQUIRED_ADDED +app list --project +required flag added'
+stdout '^Possibly breaking:'
+stdout 'INPUT_DEFAULT_CHANGED +app list --limit +default 20 → 50'
+stdout '^3 breaking, 1 possibly breaking, 0 expected, 0 safe, 0 accepted$'
+
+# --fail-on sets the threshold; --format json writes one document.
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml --fail-on never
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml --format json
+stdout '"rule": "FLAG_REQUIRED_ADDED"'
+stdout '"where": "app list --project"'
+stdout '"possibly_breaking": 1'
+
+# The planned removal is expected at its release, and acknowledged breaks don't fail.
+cp ack.conf.yaml cmd/app/.rotini.conf.yaml
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml --release 2.0.0
+stdout '^Expected:'
+stdout 'COMMAND_NO_DELETE +app old'
+stdout '^Accepted:'
+stdout 'COMMAND_NO_DELETE +app compact +command removed \(breaking; merged into list\)'
+stdout '0 breaking, 1 possibly breaking, 1 expected, 0 safe, 2 accepted'
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml --release 2.0.0 --fail-on possibly
+
+# The release can come from the variable validate.release_env names.
+env APP_RELEASE=2.0.0
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+env APP_RELEASE=
+
+# An acknowledgement that matches nothing fails, naming the entry.
+cp stale.conf.yaml cmd/app/.rotini.conf.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml --release 2.0.0
+stderr 'Warning: diff.accept entry FLAG_NO_DELETE at "app --gone" matched no change'
+
+# A contract written by rotini 1.3 for the first version: only facts it records are compared.
+cp plain.conf.yaml cmd/app/.rotini.conf.yaml
+exec rotini diff v13.json v1.json --config cmd/app/.rotini.conf.yaml
+! stdout 'Breaking:'
+stdout 'ERRORS_CHANGED'
+wantexit 2 rotini diff v13.json --spec cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+stdout 'COMMAND_NO_DELETE +app compact'
+
+# Unreadable contracts are errors.
+wantexit 1 rotini diff missing.json --spec cmd/app/.rotini.spec.yaml
+stderr 'contract missing.json: no such file'
+
+# git:<ref> reads the committed contract; it never fetches.
+[!exec:git] stop 'git is not installed'
+cp v1.spec.yaml cmd/app/.rotini.spec.yaml
+exec git init -q
+exec git add cli-contract.json cmd/app
+exec git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m v1
+exec rotini diff git:HEAD --spec cmd/app/.rotini.spec.yaml
+stdout '^no changes$'
+cp ack.conf.yaml cmd/app/.rotini.conf.yaml
+cp v2.spec.yaml cmd/app/.rotini.spec.yaml
+exec rotini diff git:HEAD --spec cmd/app/.rotini.spec.yaml --release 2.0.0
+stdout '2 accepted'
+exec rotini diff git:HEAD:cli-contract.json --spec cmd/app/.rotini.spec.yaml --release 2.0.0
+wantexit 1 rotini diff git:HEAD:nope.json --spec cmd/app/.rotini.spec.yaml
+stderr 'nope.json doesn''t exist at HEAD; commit a contract first'
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a diff demo
+  commands:
+    - name: list
+      summary: list items
+      flags:
+        - name: limit
+          summary: how many
+          identifiers: [--limit]
+          schema: {type: int, default: 20}
+    - name: compact
+      summary: compact the store
+    - name: old
+      summary: the old way
+      deprecated: use list
+      removed_in: 2.0.0
+-- v1.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a diff demo
+  commands:
+    - name: list
+      summary: list items
+      flags:
+        - name: limit
+          summary: how many
+          identifiers: [--limit]
+          schema: {type: int, default: 20}
+    - name: compact
+      summary: compact the store
+    - name: old
+      summary: the old way
+      deprecated: use list
+      removed_in: 2.0.0
+-- v2.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a diff demo
+  commands:
+    - name: list
+      summary: list items
+      flags:
+        - name: limit
+          summary: how many
+          identifiers: [--limit]
+          schema: {type: int, default: 50}
+        - name: project
+          summary: the project to list
+          identifiers: [--project]
+          schema: {type: string, required: true}
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+validate:
+  release_env: APP_RELEASE
+-- ack.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+validate:
+  release_env: APP_RELEASE
+diff:
+  accept:
+    - {rule: COMMAND_NO_DELETE, where: app compact, reason: merged into list}
+    - {rule: FLAG_REQUIRED_ADDED, where: app list --project, reason: lists are per project now}
+-- stale.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+validate:
+  release_env: APP_RELEASE
+diff:
+  accept:
+    - {rule: COMMAND_NO_DELETE, where: app compact, reason: merged into list}
+    - {rule: FLAG_REQUIRED_ADDED, where: app list --project, reason: lists are per project now}
+    - {rule: FLAG_NO_DELETE, where: app --gone, reason: left over}
+-- v13.json --
+{
+  "format": "rotini-contract/1",
+  "name": "app",
+  "commands": [
+    {
+      "name": "app",
+      "path": [],
+      "summary": "a diff demo",
+      "parameters": {"type": "object", "properties": {}, "additionalProperties": false}
+    },
+    {
+      "name": "app list",
+      "path": ["list"],
+      "summary": "list items",
+      "flags": [
+        {"name": "limit", "identifiers": ["--limit"], "summary": "how many", "schema": {"type": "integer", "default": 20}}
+      ],
+      "parameters": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20, "description": "how many"}}, "additionalProperties": false}
+    },
+    {
+      "name": "app compact",
+      "path": ["compact"],
+      "summary": "compact the store",
+      "parameters": {"type": "object", "properties": {}, "additionalProperties": false}
+    },
+    {
+      "name": "app old",
+      "path": ["old"],
+      "summary": "the old way",
+      "deprecated": "use list",
+      "parameters": {"type": "object", "properties": {}, "additionalProperties": false}
+    }
+  ],
+  "errors": {"type": "object", "properties": {"error": {"type": "object", "properties": {"message": {"type": "string"}}}}}
+}

@@ -1,0 +1,4 @@
+spec: .rotini.spec.yaml:7:7: command demo: schema "Mode" gives an `enum` value a summary; summaries belong on an input's own schema, so write plain values here
+spec: .rotini.spec.yaml:17:11: command demo: flag "format": gives `enum` value "text" a summary of more than one line; help and completion show it on one line
+spec: .rotini.spec.yaml:26:5: command demo: stdin: gives an `enum` value a summary; summaries belong on flags, arguments, env and config inputs, so write plain values here
+spec: .rotini.spec.yaml:36:5: command demo: gives an `enum` value in `output` a summary; summaries belong on an input's own schema, so write plain values here

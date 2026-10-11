@@ -1,0 +1,15 @@
+# A file read `as: env` supplies environment variables, so it must be a dotenv file, and a
+# config input can't pin it.
+version: 0.0.0
+command:
+  name: demo
+  config_files:
+    - name: dotenv
+      path: .env
+      as: env
+    - name: local
+      path: ./local.yaml
+      as: env
+  config:
+    - name: endpoint
+      schema: {type: string, key: API_ENDPOINT, file: dotenv}

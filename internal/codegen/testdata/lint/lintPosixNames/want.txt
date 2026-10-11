@@ -1,0 +1,1 @@
+warning: spec: .rotini.spec.yaml:4:9: command MyTool: POSIX utility names are 2 to 9 lowercase letters and digits (utility syntax guidelines 1 and 2); rename the program, or leave validate.posix_names off

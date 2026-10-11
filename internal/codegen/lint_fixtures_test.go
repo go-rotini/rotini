@@ -48,6 +48,9 @@ func ruleNames() []string {
 	for _, fn := range specLints {
 		add(fn)
 	}
+	for _, fn := range crossLints {
+		add(fn)
+	}
 	for _, fn := range confLints {
 		add(fn)
 	}
@@ -145,7 +148,7 @@ func runLintFixture(t *testing.T, rule string) {
 
 	// "collect" records the whole report, so a fixture tripping extra rules shows in the diff.
 	var warnings []error
-	failure := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect",
+	failure := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect", "",
 		func(string, error) {},
 		func(w []error) { warnings = append(warnings, w...) })
 	got := lintReport(failure, warnings)

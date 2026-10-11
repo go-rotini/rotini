@@ -2,4 +2,8 @@ spec: .rotini.spec.yaml:8:7: command demo: flag "force": sets `complete` but its
 spec: .rotini.spec.yaml:16:7: command demo: flag "out": sets `complete.extensions` with kind "directory"; extensions narrow files, so they apply to kind "file" only
 spec: .rotini.spec.yaml:26:7: command demo: flag "service": sets a `complete.message` that isn't one line of text; a shell shows a message as a single line
 spec: .rotini.spec.yaml:42:7: command demo: flag "dry": sets `complete` but its type is bool, which takes no value; there is nothing to complete
+spec: .rotini.spec.yaml:58:7: command demo: argument "depth": sets `complete.kind: command` but its type is int; a command path is words, so the argument is a string or a list of strings
+spec: .rotini.spec.yaml:64:7: command demo: argument "topic": sets `complete.kind: command` and `enum`; the command names are the candidates, so an enum would never be offered
 spec: .rotini.spec.yaml:51:7: command demo: env "region": sets `complete`, which describes a value typed on the command line; only flags and arguments are, so here it would be silently ignored
+spec: .rotini.spec.yaml:88:11: command demo/run: flag "target": sets `complete.kind: command`, which completes the command path an argument names (a help command's); a flag's value isn't a command path
+warning: spec: .rotini.spec.yaml:71:7: command demo: argument "uid": sets `complete.kind: user` but its type is int, which can't hold the user names the shell offers

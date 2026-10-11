@@ -1,0 +1,52 @@
+package {{.Package}}
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*{{.Handler}})(nil)
+
+type {{.Handler}} struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoCascadingPostRun
+}
+
+func (*{{.Handler}}) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[{{.Inputs}}]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	flags := inputs.{{.Frame}}.Flags
+
+	if flags.For > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, flags.For)
+		defer cancel()
+	}
+
+	ticker := time.NewTicker(flags.Interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			if _, err := fmt.Fprintln(rtx.Stdout, "working at", now.Format(time.RFC3339)); err != nil {
+				rtx.HaltWith(err)
+				return
+			}
+		}
+	}
+}
+
+func (*{{.Handler}}) PostRun(ctx context.Context, rtx *rotini.Context) {
+	if _, err := fmt.Fprintln(rtx.Stderr, "{{.Name}} serve: stopped"); err != nil {
+		rtx.HaltWith(err)
+	}
+}

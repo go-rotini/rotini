@@ -1,0 +1,138 @@
+# R12 — files for AI agents: effects in help, tool definitions (with the MCP tools in the
+# binary), an Agent Skills page, llms.txt and permission rules, all written into the repository
+# and none removed when a feature is turned off.
+
+gomodinit example.com/todo
+
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+exists tools/mcp.json
+exists tools/openai.json
+exists tools/gemini.json
+exists skills/todo/SKILL.md
+exists skills/todo/references/todo-purge.md
+exists llms.txt
+exists agents/claude-settings.json
+exists agents/todo.rules
+exists agents/todo-policy.toml
+
+# Tools: the purge tool is destructive and idempotent, list adds its JSON flag itself, and the
+# group and the hidden command are no tools.
+grep '"name": "todo_purge"' tools/mcp.json
+grep '"destructiveHint": true' tools/mcp.json
+grep '"--format=json"' tools/mcp.json
+! grep '"name": "todo_remote"' tools/mcp.json
+! grep '"name": "todo_debug"' tools/mcp.json
+grep '"strict": true' tools/openai.json
+grep '"dry_run"' tools/gemini.json
+
+# The skill and llms.txt.
+grep '^name: todo$' skills/todo/SKILL.md
+grep '^allowed-tools: "Bash\(todo list \*\) Bash\(todo ls \*\)"$' skills/todo/SKILL.md
+grep 'Preview: `--dry-run`' skills/todo/SKILL.md
+grep '^- \[todo purge\]\(https://todo.example.com/cli/todo-purge.md\): delete finished tasks$' llms.txt
+
+# Permission rules: list (and its alias) allowed, purge asks, no rule for the group.
+grep '"Bash\(todo ls \*\)"' agents/claude-settings.json
+grep '"Bash\(todo purge \*\)"' agents/claude-settings.json
+! grep 'Bash\(todo remote \*\)' agents/claude-settings.json
+grep 'decision = "prompt"' agents/todo.rules
+grep 'decision = "ask_user"' agents/todo-policy.toml
+
+# The program builds with the MCP tools in it, and help shows effects.
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+grep '^var ToolsMCP = ' internal/cmd/todo/zz_rotini.go
+grep '^Effects: destructive, idempotent$' internal/cmd/todo/renders/help_todo_purge.txt
+grep '--prune +also delete tasks the server doesn.t have \(destructive\)' internal/cmd/todo/renders/help_todo_remote_sync.txt
+
+# A dry run after a real run plans nothing; turning the features off removes no file.
+exec rotini generate --dry-run .rotini.spec.yaml --config .rotini.conf.yaml
+! stdout 'mcp.json'
+cp off.conf.yaml .rotini.conf.yaml
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+exists tools/mcp.json
+exists skills/todo/SKILL.md
+exists agents/todo.rules
+
+-- .rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: keep a list of tasks
+  output: {type: object, properties: {ok: {type: bool}}}
+  commands:
+    - name: list
+      summary: list tasks
+      aliases: [ls]
+      effects: {kind: read}
+      flags:
+        - name: format
+          summary: the output format
+          role: machine-output
+          role_value: json
+          schema: {type: string, enum: [text, json], default: text}
+      output: {type: object, properties: {tasks: {type: '[]string'}}}
+    - name: purge
+      summary: delete finished tasks
+      effects: {kind: destructive, idempotent: true}
+      flags:
+        - name: dry-run
+          summary: list what would be deleted
+          role: dry-run
+          schema: {type: bool}
+    - name: remote
+      summary: work with the server
+      commands:
+        - name: sync
+          summary: sync with the server
+          effects: {kind: write, open_world: true}
+          flags:
+            - name: prune
+              summary: also delete tasks the server doesn't have
+              effects: {kind: destructive}
+              schema: {type: bool}
+            - name: yes
+              summary: don't ask
+              role: confirm
+              schema: {type: bool}
+    - name: debug
+      summary: dump state
+      hidden: true
+      effects: {kind: read}
+-- .rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+    - type: tools
+      enabled: true
+      targets: [mcp, openai-strict, gemini]
+      go: true
+    - type: skill
+      enabled: true
+      description: Use when the user asks about their tasks.
+    - type: llms
+      enabled: true
+      base_url: https://todo.example.com/cli/
+    - type: permissions
+      enabled: true
+-- off.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_rotini.go
+  features:
+    - type: help
+      enabled: true

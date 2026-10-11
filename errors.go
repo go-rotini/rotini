@@ -58,7 +58,7 @@ var (
 // CategoryOf returns the [Category] an error carries, or [CategoryNone] when it matches neither
 // sentinel:
 //
-//	cmd.Program.WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+//	cmd.NewProgram().WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 //	    worst := rotini.CategoryNone
 //	    for _, err := range out.Errors {
 //	        fmt.Fprintln(rtx.Stderr, err)
@@ -136,11 +136,22 @@ func (c *categorized) Unwrap() []error { return []error{c.err, c.sentinel} }
 // [Program.WithContext].
 func ExitCause(code int) error { return exitCodeError{code: code} }
 
-// exitCodeError carries a process exit code as a context-cancellation cause.
-type exitCodeError struct{ code int }
+// exitCodeError carries a process exit code as a context-cancellation cause. signal marks the
+// cause rotini's own signal trap sets, as opposed to an [ExitCause] from the caller.
+type exitCodeError struct {
+	code   int
+	signal bool
+}
 
 func (e exitCodeError) Error() string {
 	return fmt.Sprintf("run canceled (exit code %d)", e.code)
+}
+
+// Is matches any exit-code cause with the same code, so errors.Is(err, ExitCause(130)) also
+// matches the cause the signal trap sets.
+func (e exitCodeError) Is(target error) bool {
+	t, ok := target.(exitCodeError)
+	return ok && t.code == e.code
 }
 
 // canceledExitCode returns the code carried by a run context's cancellation cause, or 0 when
@@ -150,6 +161,26 @@ func canceledExitCode(ctx context.Context) int {
 		return ec.code
 	}
 	return 0
+}
+
+// signalCanceled reports whether ctx was canceled by the run's own signal trap.
+func signalCanceled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	ec, ok := errors.AsType[exitCodeError](context.Cause(ctx))
+	return ok && ec.signal
+}
+
+// fromRunSignal reports whether err is the run's own signal cancellation surfacing as an error:
+// the trap's cancellation cause, or context.Canceled, after the trap canceled ctx. The default
+// reporter leaves such an error out, since a signal is a graceful stop and the exit code
+// already says why the run ended.
+func fromRunSignal(ctx context.Context, err error) bool {
+	if err == nil || !signalCanceled(ctx) {
+		return false
+	}
+	return errors.Is(err, context.Cause(ctx)) || errors.Is(err, context.Canceled)
 }
 
 // PanicError carries a panic recovered from a lifecycle hook to the reporter: Value is the
@@ -179,14 +210,18 @@ func (e *PanicError) Unwrap() []error {
 // WiringError reports that the generated [Definition] and the handler set are out of sync — a
 // resolved command names a handler method that does not exist, or whose return value does not
 // implement [Handler] — or that a command declares config inputs but the program has no
-// [InputSettings]. It is always [CategoryInternal].
+// [InputSettings], or that a program built with [NewWiredProgram] needs a [Feature] it was not
+// given. It is always [CategoryInternal].
 //
-// Command and Handler are empty for a missing InputSettings and for a nil handlers value
-// passed to [NewProgram].
+// Command and Handler are empty for a missing InputSettings, a nil handlers value passed to
+// [NewProgram] and a nil lookup passed to [NewProgramFunc].
 type WiringError struct {
 	Command string // the command whose handler wiring is broken
 	Handler string // the handler method name the Definition referenced
 	Msg     string // the human-readable failure
+	// Feature names the missing feature, as its [Feature.String] spells it ("env",
+	// "codec:yaml", "values:url"); "" for the other wiring errors.
+	Feature string
 }
 
 // Error renders the mismatch as a single line.
@@ -194,3 +229,9 @@ func (e *WiringError) Error() string { return e.Msg }
 
 // Unwrap reports [ErrInternal]: a wiring mismatch is the author's bug, never the user's.
 func (e *WiringError) Unwrap() error { return ErrInternal }
+
+// constError is an error that is a constant: a package-level error of this type is static data,
+// built without code at start-up.
+type constError string
+
+func (e constError) Error() string { return string(e) }

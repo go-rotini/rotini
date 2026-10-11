@@ -1,0 +1,31 @@
+-- in --
+// app config
+{
+  // where to deploy
+  "deploy": {
+    "timeout": "5m", // line comment
+    "retries": 3,
+    "tags": ["a", "b"]
+  },
+  /* logging */
+  "log": {"level": "info"}
+}
+-- op --
+set cache.redis.host "h"
+-- out --
+// app config
+{
+  // where to deploy
+  "deploy": {
+    "timeout": "5m", // line comment
+    "retries": 3,
+    "tags": ["a", "b"]
+  },
+  /* logging */
+  "log": {"level": "info"},
+  "cache": {
+    "redis": {
+      "host": "h"
+    }
+  }
+}

@@ -44,21 +44,34 @@ func NewProcessor(version string) *Processor {
 
 // Generate reconciles, validates and emits the program, once or, with watch, on every spec
 // or conf change until interrupted. onGenerate (optional) receives a "[HH:MM:SS] <took>"
-// summary and each pass's error; without watch the pass's error is also returned. onNotices
-// (optional) receives each pass's non-fatal findings: validation warnings, pruned files, and
-// hook-audit warnings about handler files.
+// summary, preceded by one "created: <path>" line per file the pass created that the author
+// owns from then on (handler stubs, main.go, editable templates), and each pass's error;
+// without watch the pass's error is also returned. onNotices (optional) receives each pass's
+// non-fatal findings: validation warnings, pruned files, and hook-audit warnings about
+// handler files.
 func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error {
 	if onGenerate == nil {
 		onGenerate = func(string, error) {}
 	}
+	var created string
 	pass := func(specPath, confPath string) (warnings []error, err error) {
+		created = ""
 		rs, rc, err := p.reconcile(specPath, confPath)
 		if err != nil {
 			return nil, err
 		}
-		return p.validateAndEmit(rs, rc, true, newPlanner(false))
+		pl := newPlanner(false)
+		warnings, err = p.validateAndEmit(rs, rc, true, pl)
+		created = pl.createdLines()
+		return warnings, err
 	}
-	return p.run(specPath, confPath, watch, pass, onGenerate, onNotices)
+	report := func(result string, err error) {
+		if err == nil {
+			result = created + result
+		}
+		onGenerate(result, err)
+	}
+	return p.run(specPath, confPath, watch, pass, report, onNotices)
 }
 
 // GenerateDryRunFn is the signature of [Processor.GenerateDryRun].
@@ -92,46 +105,65 @@ func (p *Processor) GenerateDryRun(specPath, confPath string, onNotices func(not
 
 // Validate reconciles, validates and lints both documents, once or, with watch, on every
 // change. failMode overrides the conf's validate.fail ("fast" or "collect"; "" uses the conf).
+// A non-empty release (X.Y.Z) also fails for each command, input or deprecated identifier
+// whose removed_in is at or below it, in the spec and the local specs it composes.
 // onValidate (optional) receives a summary and each pass's error; onWarnings (optional)
 // receives each pass's non-fatal warnings.
-func (p *Processor) Validate(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error), onWarnings func(warnings []error)) error {
+func (p *Processor) Validate(specPath, confPath string, watch bool, failMode, release string, onValidate func(result string, err error), onWarnings func(warnings []error)) error {
 	if onValidate == nil {
 		onValidate = func(string, error) {}
+	}
+	if release != "" {
+		if err := CheckRelease(release, "release"); err != nil {
+			return err
+		}
 	}
 	pass := func(specPath, confPath string) (warnings []error, err error) {
 		rs, rc, err := p.reconcile(specPath, confPath)
 		if err != nil {
 			return nil, err
 		}
-		return p.validateDocuments(rs, rc, failMode)
+		warnings, err = p.validateDocuments(rs, rc, failMode)
+		if release == "" || (err != nil && failFast(failMode, rc)) {
+			return warnings, err
+		}
+		due := releaseCheck(rs, release, map[string]bool{})
+		if len(due) > 0 && failFast(failMode, rc) && err == nil {
+			return warnings, due[0]
+		}
+		return warnings, errors.Join(append([]error{err}, due...)...)
 	}
 	return p.run(specPath, confPath, watch, pass, onValidate, onWarnings)
 }
 
-// Initialize scaffolds a new CLI named name: it writes the seed spec and conf in format,
-// then validates and generates a ready-to-build program. force replaces an existing seed
-// spec and conf. It never deletes files; stale handlers are pruned by the next generate.
-func (p *Processor) Initialize(name, format string, force bool) (Initialized, error) {
-	return p.initializeWith(name, format, force, newPlanner(false))
+// Initialize scaffolds a new CLI named name: it writes the seed spec and conf in opt.Format
+// (or, with opt.Template, every CLI that template declares), then validates and generates a
+// ready-to-build program. opt.Force replaces an existing seed spec and conf. It never deletes
+// files; stale handlers are pruned by the next generate.
+func (p *Processor) Initialize(name string, opt InitOptions) (Initialized, error) {
+	return p.initializeWith(name, opt, newPlanner(false))
 }
 
 // InitializeDryRun plans everything [Processor.Initialize] would write, and writes nothing.
 // The result's Changes lists each file it would create or replace.
-func (p *Processor) InitializeDryRun(name, format string, force bool) (Initialized, error) {
-	return p.initializeWith(name, format, force, newPlanner(true))
+func (p *Processor) InitializeDryRun(name string, opt InitOptions) (Initialized, error) {
+	return p.initializeWith(name, opt, newPlanner(true))
 }
 
 // initializeWith runs init through pl and reports what it wrote, or in a dry run would write.
-func (p *Processor) initializeWith(name, format string, force bool, pl *planner) (Initialized, error) {
+func (p *Processor) initializeWith(name string, opt InitOptions, pl *planner) (Initialized, error) {
 	start := time.Now()
-	specPath, confPath, err := p.initialize(name, format, force, pl)
+	seeds, err := p.initialize(name, opt, pl)
 	if err != nil {
 		return Initialized{}, err
 	}
 	out := Initialized{
-		Spec:   displayPath(specPath),
-		Conf:   displayPath(confPath),
+		Spec:   displayPath(seeds[0].Spec),
+		Conf:   displayPath(seeds[0].Conf),
 		Result: reportTiming(start),
+	}
+	for _, s := range seeds[1:] {
+		out.Also = append(out.Also, SeedFiles{Spec: displayPath(s.Spec), Conf: displayPath(s.Conf)})
 	}
 	if pl.dry {
 		out.Changes = pl.Changes()
@@ -213,9 +245,14 @@ func (p *Processor) validateComposedSpecs(rs *reconciledSpec, seen map[string]bo
 		seen[locator] = true
 		child, err := reconcileSpec(displayPath(locator))
 		if err != nil {
+			// A repeated key is reported in the child's own file, like its other problems.
+			if dup := (*duplicateKeysError)(nil); errors.As(err, &dup) {
+				problems = append(problems, dup.problems...)
+			}
 			continue
 		}
 		problems = append(problems, p.validateAndLintOne(child)...)
+		problems = append(problems, composedTopicsProblem(rs, child)...)
 		problems = append(problems, p.validateComposedSpecs(child, seen)...)
 	}
 	return problems
@@ -298,8 +335,7 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prun
 	}
 	prog.skipPrune = !prune
 	err = prog.generate()
-	notices := make([]error, 0, len(warnings)+len(prog.pruned)+len(prog.auditWarnings))
-	notices = append(notices, warnings...)
+	notices := slices.Clone(warnings)
 	if !pl.dry { // a dry run lists the removal as a change instead
 		for _, name := range prog.pruned {
 			notices = append(notices, fmt.Errorf("pruned %s; its command is no longer in the spec", name))
@@ -309,6 +345,7 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prun
 		notices = append(notices, fmt.Errorf("restored %s; its command is back in the spec", name))
 	}
 	notices = append(notices, prog.auditWarnings...)
+	notices = append(notices, prog.agentNotices...)
 	return notices, err
 }
 

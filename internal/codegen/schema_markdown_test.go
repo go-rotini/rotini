@@ -112,7 +112,7 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 		"Command", "FlagInput", "ArgumentInput", "EnvInput", "ConfigInput", "InputSchema",
 		"BaseSchema", "Schema", "StdinSpec", "FlagGroup", "FlagDependency",
 		"PluginSpec", "PluginDiscovery", "HandlerSource", "HelpHeadings",
-		"ExitStatusEntry", "ConfigurationFile", "ConfigurationFileDiscover",
+		"ExitStatusEntry", "ConfigurationFile", "ConfigurationFileDiscover", "CompletionHint",
 	} {
 		if !strings.Contains(page, "## "+def+"\n") {
 			t.Errorf("no section for definition %s", def)
@@ -123,7 +123,7 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 		"name", "$ref", "flags", "arguments", "env", "config", "config_files", "stdin",
 		"flag_groups", "flag_dependencies", "passthrough", "handler", "plugins",
 		"variable", "negatable", "complete", "group", "dotted_keys", "from", "config_source",
-		"nesting", "placeholder", "secret", "required", "default", "enum", "pattern",
+		"nesting", "placeholder", "secret", "required", "default", "enum", "pattern", "extensions",
 	} {
 		if !strings.Contains(page, "### `"+key+"`") {
 			t.Errorf("no entry for key %q", key)
@@ -135,9 +135,31 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 		"env_prefix",
 		"TextUnmarshaler",
 		"every sub-command below it has the same shape",
+		"rejects NaN and infinite values",
+		"leave out a secret input's default",
+		"take every identifier of that flag",
 	} {
 		if !strings.Contains(page, phrase) {
 			t.Errorf("the rendered page does not carry %q — descriptions are missing", phrase)
+		}
+	}
+}
+
+// TestTypeLabel_alternatives pins that a value of several shapes lists each one, rather than
+// reading as an object.
+func TestTypeLabel_alternatives(t *testing.T) {
+	var doc schemaDoc
+	if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		def, key, want string
+	}{
+		{"BaseSchema", "enum", "array of `string` or `object`"},
+		{"Command", "multicall", "`boolean` or [`Multicall`](#multicall)"},
+	} {
+		if got := typeLabel(flattenAllOf(doc.Definitions[c.def]).Properties[c.key]); got != c.want {
+			t.Errorf("%s.%s: typeLabel = %q, want %q", c.def, c.key, got, c.want)
 		}
 	}
 }
@@ -160,6 +182,7 @@ type schemaDoc struct {
 	Pattern     string               `json:"pattern"`
 	AllOf       []schemaDoc          `json:"allOf"`
 	AnyOf       []schemaDoc          `json:"anyOf"`
+	OneOf       []schemaDoc          `json:"oneOf"`
 }
 
 // renderSchemaMarkdown renders one schema as a Hugo content page: the document's own keys
@@ -213,12 +236,13 @@ var commandKeyGroups = []struct {
 	title string
 	keys  []string
 }{
-	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers"}},
-	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies"}},
-	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "plugins", "plugin_discovery", "plugin_path", "timeout"}},
-	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "header", "footer", "headings", "help", "man", "markdown"}},
-	{"Output and shared types", []string{"output", "schemas"}},
+	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers", "deprecated_since", "removed_in", "deprecated_identifiers_removed_in", "hidden_aliases", "replaced_by", "stability"}},
+	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies", "response_files", "flag_sets", "use"}},
+	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "options_first", "plugins", "plugin_discovery", "plugin_path", "timeout", "multicall"}},
+	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "groups", "header", "footer", "headings", "help", "man", "markdown", "topics"}},
+	{"Output and shared types", []string{"output", "output_stream", "schemas"}},
 	{"Generated code", []string{"filename"}},
+	{"Agents", []string{"effects", "agent"}},
 }
 
 // renderGroupedKeys renders the Command section under commandKeyGroups' headings.
@@ -386,6 +410,16 @@ func typeLabel(p schemaDoc) string {
 		}
 		return strings.Join(parts, " or ")
 	}
+	// Alternatives list each shape once; ones that only add requirements name no type.
+	var parts []string
+	for _, alt := range slices.Concat(p.AnyOf, p.OneOf) {
+		if l := typeLabel(alt); l != "" && !slices.Contains(parts, l) {
+			parts = append(parts, l)
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, " or ")
+	}
 	if len(p.AllOf) > 0 || len(p.AnyOf) > 0 {
 		return "`object`"
 	}
@@ -506,9 +540,17 @@ var inputKeySamples = map[string]string{
 	"properties":       `{"type": "map", "properties": {"k": {"type": "string"}}}`,
 	"required":         `{"type": "string", "required": true}`,
 	"secret":           `{"type": "string", "secret": true}`,
-	"separator":        `{"type": "array", "separator": ","}`,
+	"separator":        `{"type": "array", "separator": ":"}`,
 	"type":             `{"type": "string"}`,
 	"variable":         `{"type": "string", "variable": "X_VAR"}`,
+	"variable_file":    `{"type": "string", "variable": "X_VAR", "variable_file": "X_VAR_FILE"}`,
+	"repeatable":       `{"type": "string", "repeatable": false}`,
+	"relative":         `{"type": "time", "relative": "past"}`,
+	"glob":             `{"type": "[]existingfile", "glob": true}`,
+	"expand":           `{"type": "string", "expand": ["home"]}`,
+	"relative_to":      `{"type": "string", "key": "k", "relative_to": "config"}`,
+	"values_from":      `{"type": "string", "values_from": "output"}`,
+	"uniqueItems":      `{"type": "array", "uniqueItems": true}`,
 }
 
 // inputChannelTable renders which input-schema keys each channel accepts by validating every
@@ -520,13 +562,14 @@ func inputChannelTable(t *testing.T) string {
 		writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
 		spec := "version: 0.0.0\ncommand:\n  name: demo\n  summary: s\n" +
 			"  schemas:\n    Name: {type: string}\n" +
+			"  output: {type: object, properties: {id: {type: string}}}\n" +
 			"  config_files:\n    - name: main\n      path: c.yaml\n" +
 			fmt.Sprintf(decl, schema)
 		writeTestFile(t, dir, ".rotini.spec.yaml", spec)
 		writeTestFile(t, dir, ".rotini.conf.yaml", lintFixtureConf)
 		var warnings []error
 		err := NewProcessor("0.0.0").Validate(filepath.Join(dir, ".rotini.spec.yaml"), filepath.Join(dir, ".rotini.conf.yaml"),
-			false, "collect", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
+			false, "collect", "", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
 		return err == nil && len(warnings) == 0
 	}
 	// A plain input must pass on every channel, or rejections below would be the probe's fault.
@@ -609,7 +652,10 @@ func TestEveryKeyExamplesAreValidAndComplete(t *testing.T) {
 	}
 	var warnings []error
 	err := NewProcessor("0.0.0").Validate(filepath.Join(mod, "cmd/deploy/.rotini.spec.yaml"), filepath.Join(mod, "cmd/deploy/.rotini.conf.yaml"),
-		false, "collect", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
+		false, "collect", "", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
+	// The examples turn on response files beside passthrough and plugins, which is worth a
+	// warning in a real spec.
+	warnings = slices.DeleteFunc(warnings, func(w error) bool { return strings.Contains(w.Error(), "turns on response files") })
 	if err != nil || len(warnings) > 0 {
 		t.Errorf("the every-key examples do not validate cleanly: %v %v", err, warnings)
 	}

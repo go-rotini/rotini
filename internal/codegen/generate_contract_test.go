@@ -77,7 +77,7 @@ command:
 		"app small":   {"type": "integer"},
 		"app size":    {"type": "string"},
 		"app waits":   {"type": "array", "items": map[string]any{"type": "string"}},
-		"app days":    {"type": "object", "additionalProperties": map[string]any{"type": "string", "format": "date"}},
+		"app days":    {"type": "object", "additionalProperties": map[string]any{"type": "string", "format": "date"}}, // map values read under the date layout, as list items do
 		"app timeout": {"type": "string"},
 	} {
 		if got := inputs[name]; !reflect.DeepEqual(got, want) {

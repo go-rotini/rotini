@@ -1,10 +1,8 @@
 package rotini
 
 import (
-	"os"
-	"path/filepath"
+	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 )
 
@@ -24,6 +22,9 @@ type Command struct {
 	Matched               string   // the argv token that resolved this command (name or an alias); "" for the root
 	DeprecatedIdentifiers []string // aliases of this command that are deprecated
 	Deprecated            string   // the command's deprecation message, when it is deprecated as a whole
+	DeprecatedSince       string   // the release that deprecated it; see [CommandDef.DeprecatedSince]
+	RemovedIn             string   // the release that will remove it
+	ReplacedBy            string   // the command to use instead; see [CommandDef.ReplacedBy]
 	Flags                 []FlagDef
 	Arguments             []ArgDef
 	FlagGroups            []FlagGroup
@@ -32,32 +33,42 @@ type Command struct {
 	Plugins               []PluginDef         // co-located plugin binaries dispatched as sub-commands
 	PluginDiscovery       *PluginDiscoveryDef // plugin auto-discovery (nil = off)
 	// PluginPath is an extra directory searched for this command's declared and discovered
-	// plugin binaries, with a leading ~ and $VAR references already expanded. Empty means only
-	// the host binary's directory and PATH are searched.
+	// plugin binaries, with a leading ~ and $VAR references already expanded from the run's
+	// environment ([Program.WithEnviron]). Empty means only the host binary's directory and PATH
+	// are searched.
 	PluginPath  string
 	Passthrough bool       // every token after this command is a raw positional (no flag parsing)
 	Output      *OutputDef // what the command writes to stdout (nil = not declared); see [Context.WriteOutput]
+
+	// OptionsFirst stops flags at this command's first argument when it is the invoked one; see
+	// [CommandDef.OptionsFirst].
+	OptionsFirst bool
+
+	// DeprecatedIdentifiersRemovedIn is the release removing each deprecated alias; see
+	// [CommandDef.DeprecatedIdentifiersRemovedIn].
+	DeprecatedIdentifiersRemovedIn map[string]string
 
 	// Invoked reports whether this is the command the user invoked: the last command in the
 	// chain. Exactly one entry of [Context.CommandChain] has it set; in a cascading hook,
 	// rtx.Command().Invoked distinguishes the invoked command from its ancestors.
 	Invoked bool
+
+	// Usage is the command's usage line; see [CommandDef.Usage] and [Context.Usage].
+	Usage string
+
+	// pluginPathRaw is PluginPath as declared, for re-expanding it against a run's injected
+	// environment; view is that run's environment, used by [Command.PluginBinary] and
+	// [Command.DiscoveredPlugins]. Both are set by the runtime; nil reads the process.
+	pluginPathRaw string
+	view          *osView
 }
 
 // expandPluginPath expands a leading ~ to the user's home directory and $VAR / ${VAR}
 // references from the environment, as a shell would. When the home directory cannot be found
 // the ~ is left in place.
 func expandPluginPath(dir string) string {
-	if dir == "" {
-		return ""
-	}
-	dir = os.ExpandEnv(dir)
-	if dir == "~" || strings.HasPrefix(dir, "~/") || strings.HasPrefix(dir, "~"+string(filepath.Separator)) {
-		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, dir[1:])
-		}
-	}
-	return dir
+	var process *osView
+	return process.expandPluginPath(dir)
 }
 
 // rootFrame is the chain frame for the program's root command.
@@ -67,8 +78,8 @@ func rootFrame(def Definition) Command {
 		Flags: def.Flags, Arguments: def.Arguments,
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Plugins: def.Plugins, PluginDiscovery: def.PluginDiscovery,
-		PluginPath: expandPluginPath(def.PluginPath), Passthrough: def.Passthrough,
-		Output: def.Output,
+		PluginPath: expandPluginPath(def.PluginPath), pluginPathRaw: def.PluginPath, Passthrough: def.Passthrough, OptionsFirst: def.OptionsFirst,
+		Output: def.Output, Usage: def.Usage,
 	}
 }
 
@@ -76,11 +87,12 @@ func rootFrame(def Definition) Command {
 func cmdFrame(c CommandDef) Command {
 	return Command{
 		Name: c.Name, Handler: c.Handler, DeprecatedIdentifiers: c.DeprecatedIdentifiers, Deprecated: c.Deprecated,
+		DeprecatedSince: c.DeprecatedSince, RemovedIn: c.RemovedIn, DeprecatedIdentifiersRemovedIn: c.DeprecatedIdentifiersRemovedIn, ReplacedBy: c.ReplacedBy,
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Plugins: c.Plugins, PluginDiscovery: c.PluginDiscovery,
-		PluginPath: expandPluginPath(c.PluginPath), Passthrough: c.Passthrough,
-		Output: c.Output,
+		PluginPath: expandPluginPath(c.PluginPath), pluginPathRaw: c.PluginPath, Passthrough: c.Passthrough, OptionsFirst: c.OptionsFirst,
+		Output: c.Output, Usage: c.Usage,
 	}
 }
 
@@ -100,7 +112,7 @@ func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
 		if tok == "--" {
 			break // the rest are positional; no further command descent
 		}
-		if isFlag(tok) {
+		if isFlag(chain, tok) {
 			// Skip a separate value word so it is not mistaken for a command.
 			i += flagTokenWidth(chain, argv, i)
 			continue
@@ -147,18 +159,30 @@ func findPlugin(f Command, tok string) (PluginDef, bool) {
 	return PluginDef{}, false
 }
 
-// isFlag reports whether tok is a flag token. Bare "-" and "--" are not, and neither is a
-// token that parses as a number ("-5", "-1e3"): flag identifiers always have a letter after
-// the dashes, so a negative number is handled as a positional.
-func isFlag(tok string) bool {
+// isFlag reports whether tok is a flag token, given chain, the commands reached so far. Every
+// argv walker (the resolver, the parser, completion and the deprecation and plugin-host parses)
+// decides with it, so they agree on where flags are. Bare "-" and "--" are not flags, and
+// neither is a negative number: "-" followed by a digit ("-5", "-1e3", "-5s"), or by "." and a
+// digit ("-.5"). The exception is a declared digit option: "-4…" is a flag when -4 is an
+// identifier on chain. Any other word starting with "-" is a flag, so a declared -I wins over
+// "-Inf".
+func isFlag(chain []Command, tok string) bool {
 	if len(tok) <= 1 || tok[0] != '-' || tok == "--" {
 		return false
 	}
-	if _, err := strconv.ParseFloat(tok, 64); err == nil {
-		return false
+	if isDigit(tok[1]) {
+		_, _, declared := findFlagIndex(chain, tok[:2])
+		return declared
 	}
-	return true
+	return len(tok) < 3 || tok[1] != '.' || !isDigit(tok[2])
 }
+
+// flagIn returns isFlag bound to chain, for a walker that tests words one at a time.
+func flagIn(chain []Command) func(string) bool {
+	return func(tok string) bool { return isFlag(chain, tok) }
+}
+
+func isDigit(b byte) bool { return '0' <= b && b <= '9' }
 
 // splitFlag splits a flag token into its identifier and an inline "=value".
 func splitFlag(tok string) (name, value string, hasValue bool) {
@@ -168,26 +192,10 @@ func splitFlag(tok string) (name, value string, hasValue bool) {
 	return tok, "", false
 }
 
-// findFlag searches the resolved chain leaf→root for a flag whose identifiers
-// include name, returning its definition and the owning command-name scope.
-func findFlag(chain []Command, name string) (FlagDef, string, bool) {
-	for _, v := range slices.Backward(chain) {
-		for _, f := range v.Flags {
-			if slices.Contains(f.Identifiers, name) {
-				return f, v.Name, true
-			}
-		}
-	}
-	return FlagDef{}, "", false
-}
-
-// findChild returns the sub-command of f matching tok by name or alias.
+// findChild returns the sub-command of f matching tok by name, alias or hidden alias.
 func findChild(f Command, tok string) (CommandDef, bool) {
 	for _, c := range f.Commands {
-		if c.Name == tok {
-			return c, true
-		}
-		if slices.Contains(c.Aliases, tok) {
+		if c.matches(tok) {
 			return c, true
 		}
 	}
@@ -210,7 +218,9 @@ type Resolution struct {
 }
 
 // Resolver is the resolve phase: it matches argv against the [Definition] to decide what this
-// invocation targets. An error is reported as a fault and fails the run. See
+// invocation targets. An error fails the run: a usage error is reported as one, anything else
+// as a fault. With an error, [Resolution.Chain] may hold the commands resolved so far, which
+// [Context.CommandPath] then reports to the reporter; without one it reports the root. See
 // [DefaultResolver].
 //
 // The Definition is passed by value, but its slices are the program's own and shared by every
@@ -221,8 +231,52 @@ type Resolver func(def Definition, argv []string) (Resolution, error)
 // DefaultResolver is rotini's resolve phase, exported for a custom [Resolver] to wrap. It
 // descends sub-commands by name or alias, skips flags and their values, stops at the first
 // positional, and diverts to a plugin dispatch for declared and discovered plugins. It does
-// not validate input and never returns an error.
+// not validate the invoked command's input.
+//
+// A plugin receives only the words after its name, so flags typed before the name are checked
+// strictly: a short-circuit flag set there (such as --help) cancels the dispatch, and the run
+// answers it for the command the words before the plugin name resolve to, with [Resolution.Argv]
+// cut to those words. The root's `role: chdir` flag may come there too: the plugin runs in its
+// directory. Any other flag there, or one that does not parse, is returned as a usage
+// [*ParseError], with the commands before the plugin name as the Chain.
 func DefaultResolver(def Definition, argv []string) (Resolution, error) {
 	chain, plugin := resolveChain(def, argv)
+	if plugin != nil {
+		before := argv[:len(argv)-len(plugin.Args)-1]
+		answer, err := pluginHostFlags(chain, before, plugin.Def.Name)
+		if err != nil {
+			return Resolution{Chain: chain}, err
+		}
+		if answer {
+			return Resolution{Chain: chain, Argv: before}, nil
+		}
+	}
 	return Resolution{Chain: chain, Plugin: plugin, Argv: argv}, nil
+}
+
+// pluginHostFlags checks the words before plugin's name (before) against chain, the commands
+// they resolved. It reports whether a short-circuit flag set there replaces the dispatch, and
+// fails on any other flag, which the plugin would never receive. The root's `role: chdir` flag
+// is allowed there: the plugin runs in its directory.
+func pluginHostFlags(chain []Command, before []string, plugin string) (answer bool, err error) {
+	before = withoutChdir(chain, before)
+	first := slices.IndexFunc(before, flagIn(chain))
+	if first < 0 {
+		return false, nil
+	}
+	store, err := quietTokens(chain, before)
+	if err != nil {
+		return false, err
+	}
+	if shortCircuited(chain, store) {
+		return true, nil
+	}
+	name, _, _ := splitFlag(before[first])
+	return false, &ParseError{
+		Kind:    ParseKindMisplacedFlag,
+		Msg:     fmt.Sprintf("%s can't come before plugin %q: a plugin receives only the words after its name", name, plugin),
+		Command: chain[len(chain)-1].Name,
+		Flag:    name,
+		Token:   name,
+	}
 }

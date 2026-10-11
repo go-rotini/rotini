@@ -36,9 +36,17 @@ command:
   commands:
     - name: deploy
       summary: deploy it
+      effects: { kind: write, idempotent: true, open_world: true }
       config_files:
         - name: deploy
           path: ./deploy.yaml
+      arguments:
+        - name: target
+          summary: what to deploy
+          schema: { type: string, required: true, key: deploy.target, variable: DEPLOY_TARGET }
+        - name: stage
+          summary: which stage
+          schema: { type: string, default: prod }
       flags:
         - name: replicas
           summary: how many
@@ -48,6 +56,11 @@ command:
           summary: where
           identifiers: [--region]
           schema: { type: string, key: region, variable: DEPLOY_REGION }
+        - name: prune
+          summary: remove old releases
+          identifiers: [--prune]
+          effects: { kind: destructive, idempotent: false }
+          schema: { type: bool }
       commands:
         - name: canary
           summary: a canary deploy
@@ -165,9 +178,9 @@ func TestFlagSources_render(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"  -r, --replicas int    how many (default 1)\n                        also set by APP_DEPLOY_REPLICAS or config key deploy.replicas\n",
-		"  --region string       where\n                        also set by DEPLOY_REGION or config key region\n",
-		"  --verbose    say more\n               also set by APP_LOG_VERBOSE or config key log.verbose",
+		"  -r, --replicas int     how many (default 1)\n                         also set by APP_DEPLOY_REPLICAS or config key deploy.replicas\n",
+		"      --region string    where\n                         also set by DEPLOY_REGION or config key region\n",
+		"      --verbose    say more\n                   also set by APP_LOG_VERBOSE or config key log.verbose",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("help is missing\n%s\n--- page ---\n%s", want, page)
@@ -194,6 +207,9 @@ func TestFlagSources_render(t *testing.T) {
 	}
 	if want := "- `-r, --replicas` `int` — how many (default `1`); also set by `APP_DEPLOY_REPLICAS` or config key `deploy.replicas`"; !strings.Contains(page, want) {
 		t.Errorf("markdown is missing\n%s\n--- page ---\n%s", want, page)
+	}
+	if want := "- `<target>` — what to deploy; also set by `DEPLOY_TARGET` or config key `deploy.target`"; !strings.Contains(page, want) {
+		t.Errorf("markdown is missing the argument's sources\n%s\n--- page ---\n%s", want, page)
 	}
 
 	root := pages[""]

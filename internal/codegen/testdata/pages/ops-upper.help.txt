@@ -1,0 +1,14 @@
+upper-case lines
+
+This command is experimental: it may change or be removed in any release.
+
+Usage:
+  ops upper
+
+Global Flags:
+  -h, --help            print help
+  -v, --verbose         say more (repeatable)
+      --color string    when to color (default auto) [auto|always|never]
+
+Stdin:
+  lines []string

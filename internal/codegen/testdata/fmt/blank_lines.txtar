@@ -1,0 +1,25 @@
+-- in --
+version: 1.0.0
+
+
+command:
+  name: tool
+
+
+
+  summary: s
+
+
+  commands:
+
+    - name: a
+-- out --
+version: 1.0.0
+
+command:
+  name: tool
+
+  summary: s
+
+  commands:
+    - name: a

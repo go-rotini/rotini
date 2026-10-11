@@ -8,7 +8,7 @@ exec rotini init demo
 cd cmd/demo
 
 exec rotini validate .rotini.spec.yaml --config .rotini.conf.yaml
-! stderr 'warning'
+! stderr .
 ! stderr 'Error'
 
 # Validation is also idempotent and side-effect free: running it twice changes nothing.

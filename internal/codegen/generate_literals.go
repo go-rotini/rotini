@@ -27,6 +27,9 @@ func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Sc
 	if fd := flagDependenciesLiteral(in); fd != "" {
 		fmt.Fprintf(b, "FlagDependencies: %s,\n", fd)
 	}
+	if in != nil && in.OptionsFirst {
+		b.WriteString("OptionsFirst: true,\n")
+	}
 }
 
 // renderDefinition renders the unexported `var definition = rotini.Definition{…}` literal,
@@ -41,8 +44,13 @@ func renderDefinition(gp *program) string {
 		b.WriteString("Passthrough: true,\n")
 	}
 	writeInputDefsLiteral(&b, gp.rootInputs, gp.schemas)
-	b.WriteString(outputDefLiteral(gp.rootPascal+"Output", gp.rootOutput, gp.schemas))
-	if cl := rnodesLiteral(gp.rootName, gp.tree, gp.schemas); cl != "" {
+	b.WriteString(outputDefLiteral(gp.rootPascal+"Output", gp.rootOutput, gp.schemas, gp.rootStream))
+	b.WriteString(inputsTypeLiteral(gp.rootPascal + "Inputs"))
+	b.WriteString(exitStatusLiteral(gp.rootHelp.ExitStatus))
+	fmt.Fprintf(&b, "Usage: %q,\n", rootUsage(gp))
+	b.WriteString(effectsField(gp.rootHelp.Effects))
+	b.WriteString(multicallLiteral(gp))
+	if cl := rnodesLiteral(gp.rootName, gp.rootDisplay, gp.tree, gp.schemas); cl != "" {
 		fmt.Fprintf(&b, "Commands: %s,\n", cl)
 	}
 	if rl := pluginDefsLiteral(gp.rootName, gp.rootPlugins); rl != "" {
@@ -52,6 +60,11 @@ func renderDefinition(gp *program) string {
 		fmt.Fprintf(&b, "PluginDiscovery: %s,\n", dl)
 	}
 	b.WriteString(completionMessagesLiteral(gp.conf))
+	b.WriteString(completionDescriptionsLiteral(gp.conf))
+	b.WriteString(topicsLiteral(gp))
+	if rf := gp.responseFiles(); rf != nil {
+		fmt.Fprintf(&b, "ResponseFiles: &%s.ResponseFilesDef{Prefix: %q},\n", rotiniPkgName, rf.Prefix)
+	}
 	if gp.rootPluginPath != "" {
 		fmt.Fprintf(&b, "PluginPath: %q,\n", gp.rootPluginPath)
 	}
@@ -94,6 +107,9 @@ func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile
 		if f.Format != "" {
 			fmt.Fprintf(b, ", Format: %q", f.Format)
 		}
+		if f.As == "env" {
+			b.WriteString(", As: \"env\"")
+		}
 		renderDiscover(b, f.Discover)
 		if f.Schema != nil {
 			if js := validationSchema(*f.Schema, gp.schemas); js != "" {
@@ -103,6 +119,8 @@ func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile
 		if c, ok := pathFrom[f.Name]; ok {
 			renderPathFrom(b, c)
 		}
+		renderProfiles(b, gp, f)
+		renderConfigKeys(b, gp, f)
 		b.WriteString("},\n")
 	}
 	b.WriteString("},\n")
@@ -247,11 +265,24 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if f.Deprecated != "" {
 			fmt.Fprintf(b, ", Deprecated: %q", f.Deprecated)
 		}
-		if f.Schema != nil && f.Schema.Negatable {
+		writeLifecycleFields(b, ", %s: %s", lifecycle{since: f.DeprecatedSince, removedIn: f.RemovedIn, removedIDs: f.DeprecatedIdentifiersRemovedIn})
+		if f.ReplacedBy != "" {
+			fmt.Fprintf(b, ", ReplacedBy: %q", f.ReplacedBy)
+		}
+		if len(f.HiddenIdentifiers) > 0 {
+			fmt.Fprintf(b, ", HiddenIdentifiers: %s", goStringSlice(f.HiddenIdentifiers))
+		}
+		if on, custom := negation(f.Schema); on {
 			b.WriteString(", Negatable: true")
+			if custom != "" {
+				fmt.Fprintf(b, ", Negation: %q", custom)
+			}
 		}
 		if f.ShortCircuit {
 			b.WriteString(", ShortCircuit: true")
+		}
+		if f.Schema != nil && f.Schema.Repeatable != nil && !*f.Schema.Repeatable {
+			b.WriteString(", NoRepeat: true")
 		}
 		if f.Schema != nil && f.Schema.ImplicitValue != nil {
 			fmt.Fprintf(b, ", ImplicitValue: %q", defaultString(f.Schema.ImplicitValue))
@@ -266,24 +297,40 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 			fmt.Fprintf(b, ", From: %s", goStringSlice(f.Schema.From))
 		}
 		b.WriteString(completionLiteral(f.Schema))
+		if f.Role != "" {
+			fmt.Fprintf(b, ", Role: %q", f.Role)
+		}
+		b.WriteString(flagEffectsField(f.Effects))
 	})
 }
 
-// layoutFor is the layout a time input is parsed under: its declared `layout:`, else
-// "2006-01-02" for `type: date` (or a list of dates), else "" (RFC 3339).
-func layoutFor(schema *InputSchema) string {
+// layoutsFor is the layouts a time input is parsed under, tried in order: its declared `layout:`,
+// else "2006-01-02" for `type: date` (or a list or map of dates), else none (RFC 3339).
+func layoutsFor(schema *InputSchema) []string {
 	if schema == nil {
-		return ""
+		return nil
 	}
-	if schema.Layout != "" {
-		return schema.Layout
+	if l := declaredLayouts(schema); len(l) > 0 {
+		return l
 	}
 	t := schema.Type
 	if schema.Items != nil && schema.Items.Type != "" && jsonSchemaTypeToGo(t) == "[]string" {
 		t = schema.Items.Type
 	}
-	if strings.TrimPrefix(t, "[]") == "date" {
-		return "2006-01-02"
+	t = strings.TrimPrefix(t, "[]")
+	if _, v, ok := splitMapType(t); ok {
+		t = v
+	}
+	if t == "date" {
+		return []string{"2006-01-02"}
+	}
+	return nil
+}
+
+// layoutFor is the first layout a time input is parsed under, "" for RFC 3339; see layoutsFor.
+func layoutFor(schema *InputSchema) string {
+	if l := layoutsFor(schema); len(l) > 0 {
+		return l[0]
 	}
 	return ""
 }
@@ -408,6 +455,16 @@ func argDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if a.Deprecated != "" {
 			fmt.Fprintf(b, ", Deprecated: %q", a.Deprecated)
 		}
+		writeLifecycleFields(b, ", %s: %s", lifecycle{since: a.DeprecatedSince, removedIn: a.RemovedIn})
+		if a.Passthrough {
+			b.WriteString(", Passthrough: true")
+		}
+		if a.Schema != nil && len(a.Schema.From) > 0 {
+			fmt.Fprintf(b, ", From: %s", goStringSlice(a.Schema.From))
+		}
+		if a.Schema != nil && a.Schema.Glob {
+			b.WriteString(", Glob: true")
+		}
 	})
 }
 
@@ -429,14 +486,26 @@ func flagDependenciesLiteral(in *Inputs) string {
 		return ""
 	}
 	return sliceLiteral("FlagDependency", in.FlagDependencies, func(b *strings.Builder, d FlagDependency) {
-		fmt.Fprintf(b, "When: %q, Requires: %s", d.When, goStringSlice(d.Requires))
+		var parts []string
+		if d.When != "" {
+			parts = append(parts, fmt.Sprintf("When: %q", d.When))
+		}
+		for _, f := range []struct {
+			name   string
+			values []string
+		}{{"Requires", d.Requires}, {"Equals", dependencyEquals(d)}, {"Unless", d.Unless}, {"Forbids", d.Forbids}} {
+			if len(f.values) > 0 {
+				parts = append(parts, f.name+": "+goStringSlice(f.values))
+			}
+		}
+		b.WriteString(strings.Join(parts, ", "))
 	})
 }
 
 // rnodesLiteral renders the []rotini.CommandDef literal for a resolved command tree,
 // recursively, or "" when nodes is empty. host prefixes plugin binary names unless a node
-// carries its own pluginHost.
-func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string {
+// carries its own pluginHost; invocation is the parent's, which each usage line starts with.
+func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Schema) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
 		fmt.Fprintf(b, "Name: %q,\n", n.name)
 		fmt.Fprintf(b, "Handler: %q,\n", n.prefix)
@@ -452,17 +521,34 @@ func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string
 		if len(n.aliases) > 0 {
 			fmt.Fprintf(b, "Aliases: %s,\n", goStringSlice(n.aliases))
 		}
+		if len(n.hiddenAliases) > 0 {
+			fmt.Fprintf(b, "HiddenAliases: %s,\n", goStringSlice(n.hiddenAliases))
+		}
 		if len(n.deprecatedIdentifiers) > 0 {
 			fmt.Fprintf(b, "DeprecatedIdentifiers: %s,\n", goStringSlice(n.deprecatedIdentifiers))
 		}
 		if n.deprecated != "" {
 			fmt.Fprintf(b, "Deprecated: %q,\n", n.deprecated)
 		}
-		writeInputDefsLiteral(b, n.inputs, schemas)
-		if !n.composed { // a composed command's output type lives in its own cli's package
-			b.WriteString(outputDefLiteral(n.prefix+"Output", n.output, schemas))
+		writeLifecycleFields(b, "%s: %s,\n", n.lifecycle)
+		if n.replacedBy.text != "" {
+			fmt.Fprintf(b, "ReplacedBy: %q,\n", n.replacedBy.text)
 		}
-		if cl := rnodesLiteral(host, n.children, schemas); cl != "" {
+		writeInputDefsLiteral(b, n.inputs, schemas)
+		if !n.composed {
+			b.WriteString(outputDefLiteral(n.prefix+"Output", n.output, schemas, n.stream))
+		} else if n.outputType != "" { // declared in the composed cli's package
+			scoped := schemas
+			if n.scope != nil {
+				scoped = n.scope.schemas
+			}
+			b.WriteString(outputDefLiteral(n.outputType, n.output, scoped, n.stream))
+		}
+		b.WriteString(inputsTypeLiteral(n.inputsType))
+		b.WriteString(exitStatusLiteral(n.help.ExitStatus))
+		fmt.Fprintf(b, "Usage: %q,\n", nodeUsage(invocation, n))
+		b.WriteString(effectsField(n.help.Effects))
+		if cl := rnodesLiteral(host, usageInvocation(invocation, n), n.children, schemas); cl != "" {
 			fmt.Fprintf(b, "Commands: %s,\n", cl)
 		}
 		pluginHost := host
@@ -498,7 +584,10 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 		fmt.Fprintf(b, ", Default: %q", d)
 	}
 	if len(schema.Enum) > 0 {
-		fmt.Fprintf(b, ", Enum: %s", goStringSlice(schema.Enum))
+		fmt.Fprintf(b, ", Enum: %s", goStringSlice(enumStrings(schema.Enum)))
+		if enumDetailed(schema.Enum) {
+			fmt.Fprintf(b, ", EnumValues: %s", enumValuesLiteral(schema.Enum))
+		}
 		if schema.IgnoreCase {
 			b.WriteString(", IgnoreCase: true")
 		}
@@ -507,20 +596,27 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 		b.WriteString(", Secret: true")
 	}
 	if schema.Separator != "" {
-		fmt.Fprintf(b, ", Separator: %q", schema.Separator)
+		fmt.Fprintf(b, ", Separator: %q", runtimeSeparator(schema.Separator))
 	}
-	if l := layoutFor(schema); l != "" {
-		fmt.Fprintf(b, ", Layout: %q", l)
+	if l := layoutsFor(schema); len(l) > 0 {
+		fmt.Fprintf(b, ", Layout: %q", l[0])
+		if len(l) > 1 {
+			fmt.Fprintf(b, ", Layouts: %s", goStringSlice(l))
+		}
 	}
-	if c := constraintsLiteral(schema); c != "" {
-		fmt.Fprintf(b, ", Constraints: %s", c)
+	if r := relative(schema); r != "" {
+		fmt.Fprintf(b, ", Relative: %q", r)
+	}
+	if c := constraintFields(schema); c != "" {
+		b.WriteString(", ")
+		b.WriteString(c)
 	}
 }
 
-// constraintsLiteral renders a rotini.Constraints{…} literal from a schema's declared bounds,
-// or "" when none are set. Numeric bounds are emitted as rotini.Ptr literals, so a declared 0
-// is kept; length and count bounds treat 0 as unset.
-func constraintsLiteral(schema *InputSchema) string {
+// constraintFields renders a schema's declared bounds as the promoted rotini.Constraints fields of
+// a FlagDef, ArgDef or ConfigKey literal, or "" when none are set. Numeric bounds are emitted as
+// rotini.Ptr literals, so a declared 0 is kept; length and count bounds treat 0 as unset.
+func constraintFields(schema *InputSchema) string {
 	var parts []string
 	eachConstraint(schema, func(_, field, _, litVal string) {
 		parts = append(parts, field+": "+litVal)
@@ -528,7 +624,7 @@ func constraintsLiteral(schema *InputSchema) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return rotiniPkgName + ".Constraints{" + strings.Join(parts, ", ") + "}"
+	return strings.Join(parts, ", ")
 }
 
 // definitionType resolves an input schema to the type string on the emitted FlagDef/ArgDef,
@@ -589,7 +685,8 @@ func namedScalarType(typ string, schemas map[string]Schema) string {
 // would erase. Keep in sync with the parser's isPathType and count handling;
 // TestDefinitionTypePreservesParserSemantics pins this set.
 func parserSignificantType(t string) bool {
-	return t == "count" || t == "existingfile" || t == "existingdir"
+	return t == "count" || t == "existingfile" || t == "existingdir" ||
+		t == "inputfile" || t == "outputfile"
 }
 
 // getSchemaType resolves an input schema to its Go type expression, defaulting to "string".
@@ -677,4 +774,40 @@ func defaultString(v any) string {
 	default:
 		return fmt.Sprintf("%v", x)
 	}
+}
+
+// enumValuesLiteral renders the []rotini.EnumValue literal for enum members, each with what it
+// declares beyond its spelling.
+func enumValuesLiteral(members []any) string {
+	return sliceLiteral("EnumValue", enumValues(members), func(b *strings.Builder, v enumValue) {
+		fmt.Fprintf(b, "Value: %q", v.Value)
+		if v.Summary != "" {
+			fmt.Fprintf(b, ", Summary: %q", v.Summary)
+		}
+		if len(v.Aliases) > 0 {
+			fmt.Fprintf(b, ", Aliases: %s", goStringSlice(v.Aliases))
+		}
+		if v.Hidden {
+			b.WriteString(", Hidden: true")
+		}
+		if v.Deprecated != "" {
+			fmt.Fprintf(b, ", Deprecated: %q", v.Deprecated)
+		}
+		if len(v.DeprecatedAliases) > 0 {
+			fmt.Fprintf(b, ", DeprecatedAliases: %s", goStringSlice(v.DeprecatedAliases))
+		}
+		for _, kv := range [][2]string{{"DeprecatedSince", v.DeprecatedSince}, {"RemovedIn", v.RemovedIn}, {"ReplacedBy", v.ReplacedBy}} {
+			if kv[1] != "" {
+				fmt.Fprintf(b, ", %s: %q", kv[0], kv[1])
+			}
+		}
+	})
+}
+
+// responseFiles is the root's response-file setting, nil when off.
+func (gp *program) responseFiles() *ResponseFiles {
+	if gp.spec == nil {
+		return nil
+	}
+	return gp.spec.Command.ResponseFiles
 }

@@ -92,3 +92,30 @@ func TestDeprecations_attributeTokensToTheBoundFlag(t *testing.T) {
 		t.Errorf("the root's --store: %+v", got)
 	}
 }
+
+// TestDeprecations_lifecycle pins that a Deprecation carries the spec's planned releases: the
+// item's, or a deprecated identifier's own removal where it has one.
+func TestDeprecations_lifecycle(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands: []CommandDef{{
+			Name: "build", Aliases: []string{"mk"}, Handler: "AppBuild",
+			DeprecatedIdentifiers: []string{"mk"}, DeprecatedIdentifiersRemovedIn: map[string]string{"mk": "2.0.0"},
+			Flags: []FlagDef{
+				{Name: "conf", Identifiers: []string{"--conf"}, Type: "string", Deprecated: "use --config", DeprecatedSince: "1.4.0", RemovedIn: "3.0.0"},
+				{Name: "out", Identifiers: []string{"--out", "--output"}, Type: "string", DeprecatedIdentifiers: []string{"--out"}, DeprecatedIdentifiersRemovedIn: map[string]string{"--out": "2.1.0"}},
+			},
+			Arguments: []ArgDef{{Name: "legacy", Type: "string", Deprecated: "unused", DeprecatedSince: "1.1.0", RemovedIn: "1.9.0"}},
+		}},
+	}
+	got := Deprecations(NewContextFor(def, []string{"mk", "--conf", "x", "--out", "y", "z"}))
+	want := []Deprecation{
+		{Kind: "command", Name: "build", Identifier: "mk", RemovedIn: "2.0.0"},
+		{Kind: "flag", Name: "conf", Identifier: "--conf", Message: "use --config", Since: "1.4.0", RemovedIn: "3.0.0"},
+		{Kind: "flag", Name: "out", Identifier: "--out", RemovedIn: "2.1.0"},
+		{Kind: "argument", Name: "legacy", Identifier: "<legacy>", Message: "unused", Since: "1.1.0", RemovedIn: "1.9.0"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("Deprecations =\n%+v\nwant\n%+v", got, want)
+	}
+}

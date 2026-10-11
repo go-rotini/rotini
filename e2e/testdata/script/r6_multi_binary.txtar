@@ -51,7 +51,7 @@ stdout 'alpha did 1 \(prod\)'
 # ── the overlay rename ───────────────────────────────────────────────────────
 # The child names itself after its binary, so its help is truthful...
 exec ./my-alpha$exe --help
-stdout 'my-alpha <command>'
+stdout 'my-alpha \[flags\] <command>'
 # ...and the parent lists it short.
 exec ./parent$exe --help
 stdout '  alpha '
@@ -368,7 +368,7 @@ import (
 )
 
 func main() {
-	parent.Program.Execute()
+	parent.NewProgram().Execute()
 }
 -- cmd/alpha/main.go --
 package main
@@ -378,7 +378,7 @@ import (
 )
 
 func main() {
-	alpha.Program.Execute()
+	alpha.NewProgram().Execute()
 }
 -- cmd/beta/main.go --
 package main
@@ -388,5 +388,5 @@ import (
 )
 
 func main() {
-	beta.Program.Execute()
+	beta.NewProgram().Execute()
 }

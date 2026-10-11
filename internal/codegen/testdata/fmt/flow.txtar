@@ -1,0 +1,14 @@
+-- in --
+version: 1.0.0
+command:
+  name: tool
+  flags: [{name: a, schema: {type: bool}}]
+  aliases: [t,
+    tl]
+-- out --
+version: 1.0.0
+command:
+  name: tool
+  aliases: [t,
+    tl]
+  flags: [{name: a, schema: {type: bool}}]

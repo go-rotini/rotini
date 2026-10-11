@@ -1,6 +1,6 @@
-# variable: names the exact environment variable an input reads. Only the two channels with
-# an environment — env inputs and flags — can act on it; on an argument or a config input it
-# would be silently ignored, which is what validation exists to prevent.
+# variable: names the exact environment variable an input reads. Env inputs, flags and
+# arguments (as their fallback) act on it; on a config input it would be silently ignored, which
+# is what validation exists to prevent.
 #
 # The legal uses are below too, so this fixture also pins that they are NOT rejected.
 version: 0.0.0
@@ -22,7 +22,7 @@ command:
     - name: target
       schema:
         type: string
-        variable: NOPE
+        variable: DEMO_TARGET
   config:
     - name: timeout
       schema:

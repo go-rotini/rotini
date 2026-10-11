@@ -1,7 +1,7 @@
 package rotini
 
 import (
-	"bytes"
+	"context"
 	"io"
 	"maps"
 	"os"
@@ -18,28 +18,37 @@ import (
 // The surface groups into eight jobs:
 //
 //   - invocation — the [Context.Argv], [Context.Stdin], [Context.Stdout] and [Context.Stderr]
-//     fields
+//     fields, and the run's environment and working directory: [Context.LookupEnv],
+//     [Context.Environ] and [Context.Dir], and the run's clock reading, [Context.Now];
+//     [Context.DashIndex] says where a "--" was typed;
+//     [Context.Context] is the running hook's context, and [Context.SetContext] hands a
+//     derived one to the hooks after it
 //   - command — [Context.Command] is the command whose hook is running (its Invoked field
 //     reports whether the user ran it), [Context.CommandPath] names it, and
-//     [Context.CommandChain] lists every command from the root to the invoked one
+//     [Context.CommandChain] lists every command from the root to the invoked one, and
+//     [Context.Usage] is its usage line
 //   - inputs — [Context.Inputs] returns the command's validated inputs,
 //     [Context.InputsWithReport] adds where each value came from, and the per-channel
 //     [Context.ArgvInputs], [Context.EnvInputs], [Context.FileInputs],
 //     [Context.StdinInputs] and [Context.DefaultInputs] read one channel each;
 //     [Context.CheckInputs] checks inputs the program collected itself against the spec
 //   - output — [Context.WriteOutput] writes the command's declared output to stdout,
-//     [Context.WriteOutputItem] one item of a stream, and [Context.CheckOutput] checks a value
-//     against the declared shape without writing it
+//     [Context.WriteOutputItem] one item of a stream, [Context.WriteOutputTo] and
+//     [Context.WriteOutputItemTo] write them to another writer, and [Context.CheckOutput] checks
+//     a value against the declared shape without writing it
 //   - dependencies — [Context.GetDependency] and [Context.MustGetDependency] read one;
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
 //     [Context.RecordError], and [Context.Failed]; during completion,
-//     [Context.AddCompletionMessage]
+//     [Context.AddCompletionMessage] and [Context.SetCompletionOptions], [Context.PartialInputs] reads
+//     what has been typed so far, and [Context.Context] is the program's base context
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
 //   - rotini's own settings — [Context.Version], [Context.Help] and [Context.Parser] read them;
 //     [Context.WithVersion], [Context.WithHelp], [Context.WithParser],
-//     [Context.WithInputSettings] and [Context.WithInputReader] set them on a standalone Context
+//     [Context.WithInputSettings], [Context.WithInputReader], [Context.WithEnviron],
+//     [Context.WithDir], [Context.WithClock], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
+//     [Context.WithOutputChecks] set them on a standalone Context
 //
 // Nothing is parsed or validated until a handler calls an inputs method; a handler with its
 // own parser reads [Context.Argv] instead.
@@ -49,6 +58,8 @@ import (
 //
 // Methods do not check for a nil receiver, with these exceptions: the With setters do nothing
 // and return nil, the inputs methods return an error, and [Deprecations] returns none.
+//
+// A nil argument to a With setter restores that setting's default.
 type Context struct {
 	mu sync.RWMutex
 
@@ -56,9 +67,9 @@ type Context struct {
 	// Handlers use them instead of os.Std* so tests can substitute streams. They are set before
 	// dispatch and never nil.
 	//
-	// Assigning one is not supported: the default reporter writes to the Program's streams, so
-	// reassigning rtx.Stdout redirects only the handler's own writes. Redirect a run with
-	// [Program.WithStdout] and its siblings.
+	// Set them with [Context.WithStdin] and its siblings on a standalone Context, and with
+	// [Program.WithStdin] and its siblings for a run. The default reporter writes to the
+	// Program's streams.
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -86,6 +97,11 @@ type Context struct {
 	// and the inputs methods anchor on it.
 	frame int
 
+	// ctx is the context the running hook received; see [Context.SetContext]. ctxFrozen makes
+	// SetContext a no-op during teardown and the reporter.
+	ctx       context.Context
+	ctxFrozen bool
+
 	// rotini's own settings, seeded from the Program each run and kept out of services so a
 	// dependency can never shadow them.
 	meta     *InputSettings
@@ -94,6 +110,13 @@ type Context struct {
 	help     HelpFunc
 	parser   *Parser
 
+	// view is the environment and directory this run reads; see [Program.WithEnviron] and
+	// [Program.WithDir]. nil reads the process's.
+	view *osView
+
+	// clock is the run's clock and its one reading; see [Program.WithClock]. view points at it.
+	clock runClock
+
 	// outputChecks makes WriteOutput and WriteOutputItem check each value against the declared
 	// output schema before writing it. See [Program.WithOutputChecks].
 	outputChecks bool
@@ -101,11 +124,22 @@ type Context struct {
 	// completionMessages collects what [Context.AddCompletionMessage] adds. It is non-nil only
 	// while a completion request runs with completion messages on.
 	completionMessages *[]string
+	// completionOptions collects what [Context.SetCompletionOptions] asks for. It is non-nil
+	// only while a completion request runs.
+	completionOptions *CompletionOptions
 
-	// flagStdinMemo holds stdin as read for a `from: [stdin]` flag's "-" value. Argv can be
-	// parsed several times in one run (a --help check, a parent's inputs, the leaf's inputs)
-	// but stdin can be read only once, so the first read is replayed to every later parse.
-	flagStdinMemo *stdinMemo
+	// stdinRead is the run's stdin, read at most once and shared by every consumer: argv can
+	// be parsed several times in one run and inputs collected more than once, but stdin can be
+	// read only once. runState is the run a blocking stdin read watches for cancellation.
+	stdinRead *stdinState
+	runState  *stdinRun
+
+	// bufOut is the run's buffered stdout under [Program.WithBufferedOutput], kept apart from
+	// Stdout so a handler that replaces Stdout cannot hide it from the final flush.
+	bufOut *bufferedStdout
+	// outputs are the files [CreateOutput] opened and that are not yet closed or aborted; the
+	// run aborts them when it settles.
+	outputs []*OutputFile
 }
 
 // AddCompletionMessage adds a line for the shell to show while it completes, from a
@@ -129,44 +163,10 @@ func (rtx *Context) AddCompletionMessage(msg string) {
 	}
 }
 
-// stdinMemo reads a stream to EOF once and replays it.
-type stdinMemo struct {
-	once sync.Once
-	src  io.Reader
-	data []byte
-	err  error
-}
-
-// flagStdin returns the reader a parse resolves `from: [stdin]` against: a fresh replay of one
-// shared, lazy read of rtx.Stdin. Nothing is read unless a "-" value asks.
-func (rtx *Context) flagStdin() io.Reader {
-	if rtx.Stdin == nil {
-		return nil
-	}
-	rtx.mu.Lock()
-	defer rtx.mu.Unlock()
-	if rtx.flagStdinMemo == nil || rtx.flagStdinMemo.src != rtx.Stdin {
-		rtx.flagStdinMemo = &stdinMemo{src: rtx.Stdin}
-	}
-	return &memoReader{m: rtx.flagStdinMemo}
-}
-
-type memoReader struct {
-	m *stdinMemo
-	r io.Reader // this replay's position in m.data, once the read has happened
-}
-
-func (r *memoReader) Read(p []byte) (int, error) {
-	if r.r == nil {
-		// readStdin, not io.ReadAll: an interactive terminal reads as empty rather than
-		// blocking on the keyboard.
-		r.m.once.Do(func() { r.m.data, r.m.err = readStdin(r.m.src) })
-		if r.m.err != nil {
-			return 0, r.m.err
-		}
-		r.r = bytes.NewReader(r.m.data)
-	}
-	return r.r.Read(p)
+// argvAcq is what parsing this run's argv reads values from: the replayed stdin and the
+// injected directory.
+func (rtx *Context) argvAcq() argvAcq {
+	return argvAcq{stdin: rtx.flagStdin(), dir: rtx.osView().base(), clock: &rtx.clock}
 }
 
 // cloneServices copies the dependency store. Each run is seeded from the Program's copy, so a
@@ -189,13 +189,22 @@ func newContext() *Context {
 }
 
 // NewContextFor builds a [Context] with argv resolved against def, as the runtime does before
-// dispatch, using the os streams and no program settings. It serves tests of the [Parser], the
-// [Context.Inputs] family, or a single hook:
+// dispatch, using the os streams until [Context.WithStdout] and its siblings replace them, and no
+// program settings. It has every [Feature]. It serves tests of the [Parser], the [Context.Inputs]
+// family, or a single hook:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
 //	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"})
 //	var in appInputs
 //	err := rtx.Parser().Parse(rtx, &in)
+//
+// A single hook runs against captured streams:
+//
+//	var out bytes.Buffer
+//	rtx := rotini.NewContextFor(def, []string{"list", "-o", "json"}).
+//		WithStdin(strings.NewReader("")).
+//		WithStdout(&out)
+//	(&listHandler{}).Run(t.Context(), rtx)
 //
 // To test a generated program end to end, build it with the generated NewProgram and run it
 // with [Program.WithExit] and captured streams.
@@ -207,6 +216,8 @@ func NewContextFor(def Definition, argv []string) *Context {
 	markInvoked(chain)
 	rtx.Argv = argv
 	rtx.chain = chain
+	rtx.clock.feats = legacyFeatures(def)
+	rtx.view = rtx.view.withClock(&rtx.clock)
 	return rtx
 }
 
@@ -609,9 +620,9 @@ func (rtx *Context) WithInputSettings(meta InputSettings) *Context {
 
 // WithInputReader replaces the input reader [Context.Inputs] uses. See
 // [Program.WithInputReader]. It is for a Context built with [NewContextFor]; during a run, the
-// change lasts for the rest of that run. A nil fn is ignored.
+// change lasts for the rest of that run. A nil fn restores the default, [NewInputReader].
 func (rtx *Context) WithInputReader(fn func(InputSettings) *InputReader) *Context {
-	if rtx != nil && fn != nil {
+	if rtx != nil {
 		rtx.mu.Lock()
 		rtx.readerFn = fn
 		rtx.mu.Unlock()
@@ -632,9 +643,9 @@ func (rtx *Context) WithVersion(version string) *Context {
 
 // WithHelp sets where [Context.Help] finds pages. See [Program.WithHelp]. It is for a Context
 // built with [NewContextFor]; during a run, the change lasts for the rest of that run. A nil
-// help is ignored.
+// help restores the default, no pages.
 func (rtx *Context) WithHelp(help HelpFunc) *Context {
-	if rtx != nil && help != nil {
+	if rtx != nil {
 		rtx.mu.Lock()
 		rtx.help = help
 		rtx.mu.Unlock()
@@ -642,13 +653,72 @@ func (rtx *Context) WithHelp(help HelpFunc) *Context {
 	return rtx
 }
 
-// WithParser sets the parser [Context.Parser] returns. See [Program.WithParser]. It is for a
-// Context built with [NewContextFor]; during a run, the change lasts for the rest of that run.
-// A nil parser is ignored.
+// WithParser sets the parser [Context.Parser] returns. [Parser] has no options, so this changes
+// nothing today; see [Program.WithParser]. It is for a Context built with [NewContextFor];
+// during a run, the change lasts for the rest of that run. A nil parser restores the default.
 func (rtx *Context) WithParser(parser *Parser) *Context {
-	if rtx != nil && parser != nil {
+	if rtx != nil {
 		rtx.mu.Lock()
 		rtx.parser = parser
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithStdin sets the stream [Context.Stdin] reads and stdin inputs decode, for a Context built
+// with [NewContextFor]. A nil reader restores os.Stdin. During a run it changes only what this
+// run's hooks and a custom reporter read; redirect a whole run with [Program.WithStdin].
+// Configure it before anything reads stdin.
+func (rtx *Context) WithStdin(r io.Reader) *Context {
+	if rtx != nil {
+		if r == nil {
+			r = os.Stdin
+		}
+		rtx.resetStdin(r)
+	}
+	return rtx
+}
+
+// WithStdout sets [Context.Stdout], where handlers and [Context.WriteOutput] write, for a
+// Context built with [NewContextFor]. A nil writer restores os.Stdout. During a run it changes
+// only this run's later handler writes and what a custom reporter writes to; redirect a whole
+// run with [Program.WithStdout]. Configure it before use.
+func (rtx *Context) WithStdout(w io.Writer) *Context {
+	if rtx != nil {
+		if w == nil {
+			w = os.Stdout
+		}
+		rtx.mu.Lock()
+		rtx.Stdout = w
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithStderr sets [Context.Stderr] for a Context built with [NewContextFor]. A nil writer
+// restores os.Stderr. During a run it changes only this run's later handler writes and what a
+// custom reporter writes to; the default reporter keeps the Program's stream. Redirect a whole
+// run with [Program.WithStderr]. Configure it before use.
+func (rtx *Context) WithStderr(w io.Writer) *Context {
+	if rtx != nil {
+		if w == nil {
+			w = os.Stderr
+		}
+		rtx.mu.Lock()
+		rtx.Stderr = w
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithOutputChecks makes [Context.WriteOutput] and [Context.WriteOutputItem] check each value
+// against the command's declared output schema before writing it, as
+// [Program.WithOutputChecks] does for a run. It is for a Context built with [NewContextFor];
+// during a run, the change lasts for the rest of that run.
+func (rtx *Context) WithOutputChecks(enabled bool) *Context {
+	if rtx != nil {
+		rtx.mu.Lock()
+		rtx.outputChecks = enabled
 		rtx.mu.Unlock()
 	}
 	return rtx

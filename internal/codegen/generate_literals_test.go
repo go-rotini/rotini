@@ -5,28 +5,28 @@ import (
 	"testing"
 )
 
-// TestConstraintRendering pins the exact output of constraintTags and constraintsLiteral.
+// TestConstraintRendering pins the exact output of constraintTags and constraintFields.
 func TestConstraintRendering(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	s := &InputSchema{
 		Minimum: f(1), Maximum: f(10),
 		ExclusiveMinimum: f(0), ExclusiveMaximum: f(100),
 		MultipleOf: f(2),
-		MinLength:  3, MaxLength: 20, MinItems: 1, MaxItems: 5,
+		MinLength:  3, MaxLength: new(20), MinItems: 1, MaxItems: new(5),
 		Pattern: "^x$"}
 	const wantTags = `min:"1" max:"10" xmin:"0" xmax:"100" multipleof:"2" minlen:"3" maxlen:"20" minitems:"1" maxitems:"5" pattern:"^x$"`
-	const wantLit = `rotini.Constraints{Minimum: rotini.Ptr[float64](1), Maximum: rotini.Ptr[float64](10), ExclusiveMinimum: rotini.Ptr[float64](0), ExclusiveMaximum: rotini.Ptr[float64](100), MultipleOf: rotini.Ptr[float64](2), MinLength: 3, MaxLength: 20, MinItems: 1, MaxItems: 5, Pattern: "^x$"}`
+	const wantLit = `Minimum: new(float64(1)), Maximum: new(float64(10)), ExclusiveMinimum: new(float64(0)), ExclusiveMaximum: new(float64(100)), MultipleOf: new(float64(2)), MinLength: 3, MaxLength: new(20), MinItems: 1, MaxItems: new(5), Pattern: "^x$"`
 	if got := constraintTags(s); got != wantTags {
 		t.Errorf("constraintTags:\n got=%s\nwant=%s", got, wantTags)
 	}
-	if got := constraintsLiteral(s); got != wantLit {
-		t.Errorf("constraintsLiteral:\n got=%s\nwant=%s", got, wantLit)
+	if got := constraintFields(s); got != wantLit {
+		t.Errorf("constraintFields:\n got=%s\nwant=%s", got, wantLit)
 	}
 	if got := constraintTags(&InputSchema{}); got != "" {
 		t.Errorf("constraintTags(empty) = %q, want empty", got)
 	}
-	if got := constraintsLiteral(&InputSchema{}); got != "" {
-		t.Errorf("constraintsLiteral(empty) = %q, want empty", got)
+	if got := constraintFields(&InputSchema{}); got != "" {
+		t.Errorf("constraintFields(empty) = %q, want empty", got)
 	}
 }
 
@@ -49,6 +49,9 @@ func TestDefinitionTypePreservesParserSemantics(t *testing.T) {
 		{"array of strings is unaffected", &InputSchema{Type: "array", Items: &Schema{Type: "string"}}, "[]string", "[]string"},
 		{"a $ref wins over the type name", &InputSchema{Ref: "#/schemas/Meta", Type: "count"}, "Meta", "Meta"},
 		{"nil schema defaults to string", nil, "string", "string"},
+		{"input file", &InputSchema{Type: "inputfile"}, "inputfile", "string"},
+		{"output file", &InputSchema{Type: "outputfile"}, "outputfile", "string"},
+		{"list of input files", &InputSchema{Type: "[]inputfile"}, "[]inputfile", "[]string"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -172,7 +175,7 @@ func TestDefsLiteral_deprecatedMessages(t *testing.T) {
 			t.Errorf("literal missing %s:\n%s", want, lit)
 		}
 	}
-	cmds := rnodesLiteral("app", []rnode{{name: "build", prefix: "AppBuild", deprecated: "use app make"}}, nil)
+	cmds := rnodesLiteral("app", "app", []rnode{{name: "build", prefix: "AppBuild", deprecated: "use app make"}}, nil)
 	if !strings.Contains(cmds, `Deprecated: "use app make"`) {
 		t.Errorf("command literal missing its message:\n%s", cmds)
 	}

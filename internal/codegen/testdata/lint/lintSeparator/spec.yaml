@@ -38,7 +38,19 @@ command:
         items: {type: string}
         separator: ','
   env:
+    # Fine: an env list splitting on a colon. A comma is the default, so declaring it is a
+    # warning.
+    - name: paths
+      schema:
+        type: '[]string'
+        separator: ':'
     - name: hosts
+      schema:
+        type: '[]string'
+        separator: ','
+  config:
+    # A configuration file writes a list as a list.
+    - name: mirrors
       schema:
         type: '[]string'
         separator: ','

@@ -1,0 +1,185 @@
+[
+  {
+    "description": "add a task\n\nEffects: write.\n\nExit codes: 3 (duplicate): a task with this title exists.",
+    "name": "taskr_add",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "due": {
+          "description": "when it is due",
+          "format": "date",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priority": {
+          "description": "how urgent it is (experimental). default: \"low\".",
+          "enum": [
+            "low",
+            "high",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tag": {
+          "description": "tags for the task. no repeated items.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "what to do. at least 1 characters.",
+          "type": "string"
+        },
+        "verbose": {
+          "description": "say more",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "due",
+        "priority",
+        "tag",
+        "title",
+        "verbose"
+      ],
+      "type": "object"
+    },
+    "strict": true,
+    "type": "function"
+  },
+  {
+    "description": "delete finished tasks\n\nEffects: destructive, idempotent.\n\nExit codes: 75 (busy, retryable): the list is locked.",
+    "name": "taskr_purge",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "dry-run": {
+          "description": "list what would be deleted",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "verbose": {
+          "description": "say more",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "yes": {
+          "description": "delete without asking",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "dry-run",
+        "verbose",
+        "yes"
+      ],
+      "type": "object"
+    },
+    "strict": true,
+    "type": "function"
+  },
+  {
+    "description": "add tasks read from stdin\n\nEffects: write.",
+    "name": "taskr_import",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "stdin": {
+          "description": "What the command reads on stdin, as a JSON value.",
+          "items": {},
+          "type": "array"
+        },
+        "verbose": {
+          "description": "say more",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "stdin",
+        "verbose"
+      ],
+      "type": "object"
+    },
+    "strict": true,
+    "type": "function"
+  },
+  {
+    "description": "sync with the server\n\nEffects: destructive, open world.\n\nRequires TASKR_KEY in the server's environment.",
+    "name": "taskr_remote_sync",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "prune": {
+          "description": "also delete tasks the server doesn't have",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "verbose": {
+          "description": "say more",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "prune",
+        "verbose"
+      ],
+      "type": "object"
+    },
+    "strict": true,
+    "type": "function"
+  },
+  {
+    "description": "show the server's address\n\nEffects: read.",
+    "name": "taskr_remote_show",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "verbose": {
+          "description": "say more",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "verbose"
+      ],
+      "type": "object"
+    },
+    "strict": true,
+    "type": "function"
+  }
+]

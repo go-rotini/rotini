@@ -1,0 +1,72 @@
+# The roles a program driving the CLI reads: their flag types, role_value, once per command
+# counting inherited cascading flags, and a preview or confirmation for a destructive command.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: remote
+      flags:
+        - name: yes
+          cascading: true
+          role: confirm
+          schema: { type: bool }
+      commands:
+        # Correct: a JSON switch by value, a preview, a page token, and the inherited confirm
+        # flag. No problem.
+        - name: purge
+          effects: { kind: destructive }
+          output: { type: object, properties: { removed: { type: integer } } }
+          flags:
+            - name: format
+              role: machine-output
+              role_value: json
+              schema: { type: string, enum: [text, json] }
+            - name: dry-run
+              role: dry-run
+              schema: { type: bool }
+            - name: page
+              role: page
+              schema: { type: string }
+        # Wrong types, a second confirm flag beside the inherited one, and role_value problems.
+        - name: bad
+          output: { type: object, properties: { id: { type: integer } } }
+          flags:
+            - name: dry-run
+              role: dry-run
+              schema: { type: string }
+            - name: force
+              role: confirm
+              schema: { type: bool }
+            - name: page
+              role: page
+              schema: { type: float64 }
+            - name: format
+              role: machine-output
+              role_value: yaml
+              schema: { type: string, enum: [text, json] }
+            - name: limit
+              role_value: json
+              schema: { type: int }
+    # A bool JSON switch takes no role_value, and there is no output to select.
+    - name: worse
+      flags:
+        - name: json
+          role: machine-output
+          role_value: json
+          schema: { type: bool }
+    # A string JSON switch needs an enum and a role_value.
+    - name: odd
+      output: { type: object, properties: { id: { type: integer } } }
+      flags:
+        - name: format
+          role: machine-output
+          schema: { type: string, enum: [text, json] }
+    - name: odder
+      output: { type: object, properties: { id: { type: integer } } }
+      flags:
+        - name: mode
+          role: machine-output
+          schema: { type: string }
+    # Destructive with neither a preview nor a confirmation.
+    - name: wipe
+      effects: { kind: destructive }

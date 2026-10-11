@@ -42,3 +42,7 @@ command:
   arguments:
     - name: labels
       schema: {type: map, properties: {team: {type: string}}}
+  # Stdin's schema takes JSON Schema keys, but not these.
+  stdin:
+    format: json
+    schema: {type: bool, negatable: true, key: input}

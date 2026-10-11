@@ -3,8 +3,10 @@ package codegen
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,6 +71,7 @@ type program struct {
 	rootPlugins     []PluginSpec       // root-level declared plugins
 	rootHelp        cmdHelp            // root command's flattened help fields
 	rootOutput      *Schema            // root command's output type (nil when unset)
+	rootStream      bool               // root command's output_stream
 	rootDiscovery   *PluginDiscovery   // root command's plugin discovery (nil = off)
 	rootPluginPath  string             // root command's extra plugin directory (both kinds of plugin)
 	rootPassthrough bool               // root command's passthrough (raw positionals)
@@ -87,6 +90,29 @@ type program struct {
 	// per-command pages written to disk (featureOutputs).
 	featureBlocks  []templateFeature
 	featureOutputs []featureOutput
+
+	// contractGo is the contract document for the cmd file's Contract variable
+	// (generate.contract.go), set by emitContract; nil when that is off.
+	contractGo []byte
+
+	// toolsGo is the MCP tools document for the cmd file's ToolsMCP variable (the tools
+	// feature's `go: true`), set by emitProgramFeatures; nil when that is off.
+	toolsGo []byte
+
+	// examples are the config_example and env_example texts behind the cmd file's ConfigExample
+	// and EnvExample, set by emitProgramFeatures.
+	examples exampleAccessors
+
+	// agentNotices are the whole-program features' warnings, such as a command left out of a
+	// tool export. Reported as notices.
+	agentNotices []error
+
+	// flagSets are the spec's flag sets, flagSetBlocks the structs generated for the used ones (in
+	// first-use order), and flagSetEmitted their type names.
+	flagSets       map[string]FlagSet
+	rootFlagSets   []string // the flag set each of the root's flags came from; nil without sets
+	flagSetBlocks  []flagSetBlock
+	flagSetEmitted map[string]bool
 }
 
 // module is the Go module a spec lives in: the filesystem root (the directory holding
@@ -126,12 +152,15 @@ func (p *program) generate() error {
 	}{
 		{"emit schemas", p.emitSchemas},
 		{"emit contract", p.emitContract},
+		{"emit program features", p.emitProgramFeatures},
 		{"emit models file", p.emitModelsFile},
 		{"emit cmd file", p.emitCmdFile},
 		{"emit feature outputs", p.emitFeatures},
+		{"emit install files", p.emitInstallFiles},
 		{"emit handler stubs", p.emitStubs},
 		{"emit entrypoint", p.emitEntrypoint},
 		{"prune orphans", p.prune},
+		{"prune installed man pages", p.pruneInstallFiles},
 		{"audit handler hooks", p.auditHooks},
 	}
 	for _, s := range steps {
@@ -164,10 +193,15 @@ func (p *program) emitModelsFile() error {
 		Package:     p.layout.modelsPkgName,
 		Imports:     renderImports(imports),
 		Blocks:      blocks,
+		FlagSets:    flagSetTemplates(p),
 		OutputTypes: outputTypes,
+		ExitCodes:   exitConstantsDecl(p.exitConstants(), false),
 		Header:      p.layout.modelsHeader,
 	})
 	if err != nil {
+		return err
+	}
+	if err := duplicateDecls(p.layout.modelsFile, generatedNames(p.exitConstants(), false, false), content); err != nil {
 		return err
 	}
 	return p.plan.write(filepath.Join(p.layout.modelsDir, p.layout.modelsFile), content)
@@ -177,6 +211,9 @@ func (p *program) emitModelsFile() error {
 func (p *program) emitCmdFile() error {
 	content, err := renderCmdFile(p, p.layout, p.featureBlocks)
 	if err != nil {
+		return err
+	}
+	if err := duplicateDecls(p.layout.cmdFile, generatedNames(p.exitConstants(), p.contractGo != nil, p.toolsGo != nil), content); err != nil {
 		return err
 	}
 	return p.plan.write(filepath.Join(p.layout.cmdDir, p.layout.cmdFile), content)
@@ -200,9 +237,43 @@ func (p *program) emitFeatures() error {
 func (p *program) emitStubs() error { return writeHandlerStubs(p, p.layout) }
 
 // emitEntrypoint writes the binary's main.go, create-once, when the conf declares an
-// entrypoint.
+// entrypoint, and notes an existing one that still uses the removed Program variable.
 func (p *program) emitEntrypoint() error {
-	return writeEntrypoint(p.plan, p.layout, string(detectFileFormat(p.specPath)))
+	if err := writeEntrypoint(p.plan, p.layout, string(detectFileFormat(p.specPath))); err != nil {
+		return err
+	}
+	if w := p.staleProgramVar(); w != nil {
+		p.auditWarnings = append(p.auditWarnings, w)
+	}
+	return nil
+}
+
+// programVarUse matches a package-qualified Program, as in cmd.Program.Execute().
+var programVarUse = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.Program\b`)
+
+// staleProgramVar reports an existing main.go that uses the generated package's Program
+// variable, which generated code no longer declares, with the line that replaces it.
+// main.go is create-once and belongs to the author, so it's never rewritten.
+func (p *program) staleProgramVar() error {
+	if p.layout.entrypointDir == "" {
+		return nil
+	}
+	path := filepath.Join(p.layout.entrypointDir, p.layout.entrypointFile)
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil //nolint:nilerr // a missing or unreadable main.go has nothing to report
+	}
+	for _, m := range programVarUse.FindAllSubmatch(src, -1) {
+		if pkg := string(m[1]); pkg != rotiniPkgName {
+			name, err := filepath.Rel(p.module.root, path)
+			if err != nil {
+				name = path
+			}
+			return fmt.Errorf("%s uses %s.Program, which generated code no longer declares; build the program with %s.NewProgram()",
+				filepath.ToSlash(name), pkg, pkg)
+		}
+	}
+	return nil
 }
 
 // prune deletes generated stubs and feature pages the spec no longer declares, sparing
@@ -268,8 +339,7 @@ func (p *program) resolveFeatures() error {
 		var contents []string
 		var err error
 		if f.desc.perShell {
-			_, messagesEnv := completionMessages(p.conf)
-			contents, err = completionContents(p.rootName, messagesEnv, nodes)
+			contents, err = completionContents(p.rootName, completionScriptEnvs(p.conf), nodes)
 		} else {
 			contents, err = docFeatureContents(p.plan, absTemplateDir, nodes, f.desc, f.cfg.Template)
 		}
@@ -364,28 +434,29 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 	// only aliases re-exporting them, so handler code reads the same either way.
 	var modelsImport string
 	var aliases []string
+	var flagSets []templateFlagSet
 	outputTypes := ""
 	if lay.splitModels {
 		modelsImport = "models " + strconv.Quote(lay.modelsImport)
 		aliases = modelAliases(gp, blocks)
 		blocks, imports = nil, nil
 	} else {
+		flagSets = flagSetTemplates(gp)
 		var err error
 		if outputTypes, err = buildOutputTypes(gp, lay.cmdPkgName); err != nil {
 			return nil, err
 		}
 	}
-	if declaresOutput(gp) { // the Definition records each output's Go type
-		if imports == nil {
-			imports = map[string]bool{}
-		}
-		imports["reflect"] = true
+	if imports == nil {
+		imports = map[string]bool{}
 	}
+	imports["reflect"] = true // the Definition records each command's inputs type
 
 	return renderRotiniFile(templateRotiniData{
 		Package:       lay.cmdPkgName,
 		PathResolvers: hasPathResolver(features),
 		HelpResolver:  helpResolver(features),
+		WiredFeatures: wiredFeatures(gp),
 		Header:        lay.cmdHeader,
 		RuntimeImport: runtimeImport,
 		Imports:       renderImports(imports),
@@ -396,10 +467,15 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		ModelsImport:  modelsImport,
 		ModelAliases:  aliases,
 		Blocks:        blocks,
+		FlagSets:      flagSets,
 		OutputTypes:   outputTypes,
 		InputSettings: renderInputSettings(gp),
 		Features:      features,
-		EmbedImport:   anyEmbed(features),
+		EmbedImport:   anyEmbed(features) || examplesEmbed(gp.examples),
+		NeedsFmt:      gp.examples.configOn,
+		ExitCodes:     exitConstantsDecl(gp.exitConstants(), lay.splitModels),
+		Contract:      contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo) + examplesDecl(gp.examples),
+		UsageFunc:     usageFuncDecl(gp),
 	})
 }
 
@@ -421,6 +497,7 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 		blocks = append(blocks, templateInputBlock{
 			Prefix:       c.prefix,
 			Flags:        toTemplateFields(c.flags),
+			Embeds:       c.embeds,
 			Arguments:    toTemplateFields(c.args),
 			Env:          toTemplateFields(c.env),
 			Config:       toTemplateFields(c.config),
@@ -429,6 +506,9 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 			InputsFields: toTemplateFields(c.inputs),
 		})
 		c.addImports(imports)
+		if strings.HasPrefix(c.stdinType, "iter.") {
+			imports["iter"] = true // a streamed stdin field
+		}
 	}
 
 	// A composed node's handler uses the child package's types, so it needs no local
@@ -451,6 +531,7 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 		c.addImports(imports)
 	}
 
+	addFlagSetImports(gp, imports)
 	return blocks, imports
 }
 
@@ -472,6 +553,7 @@ func modelAliases(gp *program, blocks []templateInputBlock) []string {
 			out = append(out, b.Prefix+"Inputs")
 		}
 	}
+	out = append(out, flagSetTypeNames(gp)...)
 	out = append(out, outputTypeNames(gp)...)
 	return out
 }
@@ -620,6 +702,7 @@ func seedHelpAndVersion(gp *program, c genCommand, d *templateHandlerData, isRoo
 	}
 	rootVersion := rootShortCircuitFlag(gp, "version", false)
 	newShape := helpOn && rootShortCircuitFlag(gp, "help", true) != ""
+	d.NewShape = newShape
 
 	if helpOn {
 		d.HelpFlag, d.HelpFrame = helpFlagFor(gp, c)
@@ -655,8 +738,9 @@ func rootShortCircuitFlag(gp *program, logical string, requireCascading bool) st
 // stubBody assembles the handler stub's template data, choosing the seeded body from the
 // command's declarations. A --help flag is wired only when the help feature is enabled. A
 // non-root `help` command with help enabled prints the page for its variadic path argument;
-// a non-root `version` command with no arguments prints the version; a dispatch-only root
-// prints its help when invoked bare. Every other command gets the default body.
+// a non-root `version` command with no arguments prints the version; a dispatch-only root or
+// group prints its help when invoked bare. Every other command gets the default body, which
+// prints the command path alone when its inputs hold a secret.
 func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) templateHandlerData {
 	d := templateHandlerData{
 		Package:       pkg,
@@ -675,17 +759,44 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		d.HelpPathArg = variadicStringArgField(c)
 	case name == "version" && !isRoot && len(c.args) == 0:
 		d.VersionOnly = true
-	case isRoot && helpOn && len(c.args) == 0 && len(gp.own)+len(gp.composed) > 0:
-		// A dispatch-only root shows its help when invoked bare.
+	case !isRoot && completionStub(gp, c):
+		d.CompletionArg, d.CompletionFunc = c.args[0].Field, completionFeatureDesc.resolver
+	case helpOn && len(c.args) == 0 && ((isRoot && len(gp.own)+len(gp.composed) > 0) || (!isRoot && c.hasChildren)):
+		// A dispatch-only root or group shows its help when invoked bare.
 		d.PrintHelpWhenBare = true
 	}
+	d.Redact = d.HelpPathArg+d.CompletionArg == "" && !d.VersionOnly && !d.PrintHelpWhenBare && chainHasSecret(gp, c)
 
 	// NeedsInputs: the body calls rtx.Inputs, which also reports unknown flags.
 	// UsesInputs: the body reads the result; otherwise it is discarded to `_`.
 	d.NeedsInputs = d.HelpFlag != "" || d.VersionFlag != "" || d.HelpPathArg != "" ||
 		(!d.VersionOnly && !d.PrintHelpWhenBare)
-	d.UsesInputs = d.HelpPathArg != "" || (!d.VersionOnly && !d.PrintHelpWhenBare)
+	d.UsesInputs = d.HelpPathArg != "" || (!d.VersionOnly && !d.PrintHelpWhenBare && !d.Redact)
 	return d
+}
+
+// chainHasSecret reports whether c or any own ancestor declares a secret input. Its inputs type
+// embeds every frame of the chain, so printing it would print an ancestor's secret too.
+func chainHasSecret(gp *program, c genCommand) bool {
+	byPrefix := map[string]genCommand{}
+	for _, oc := range gp.ownCommands() {
+		byPrefix[oc.prefix] = oc
+	}
+	for _, frame := range c.inputs {
+		if byPrefix[frame.Field].secret {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSecretInput reports whether any of a command's own inputs is declared secret.
+func hasSecretInput(in *Inputs) bool {
+	secret := false
+	eachInputSchema(in, func(_, _ string, schema *InputSchema) {
+		secret = secret || (schema != nil && schema.Secret)
+	})
+	return secret
 }
 
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint package. It

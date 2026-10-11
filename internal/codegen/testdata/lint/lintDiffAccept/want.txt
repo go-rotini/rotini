@@ -1,0 +1,2 @@
+conf: .rotini.conf.yaml:12:7: diff.accept.rule: "COMAND_NO_DELETE" is not a rule `rotini diff` reports; did you mean "COMMAND_NO_DELETE"?
+conf: .rotini.conf.yaml:14:7: diff.accept: acknowledges COMMAND_NO_DELETE at "demo compact" again; each finding takes one entry

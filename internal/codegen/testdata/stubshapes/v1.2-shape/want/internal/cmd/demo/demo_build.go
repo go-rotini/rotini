@@ -18,7 +18,11 @@ type demoBuildHandler struct {
 
 func (*demoBuildHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if argv, err := rtx.ArgvInputs[DemoBuildInputs](); err == nil && argv.Values.Demo.Flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
 		rtx.HaltWithCode(0)
 		return
 	}
@@ -29,5 +33,7 @@ func (*demoBuildHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "demo build", inputs)
+	if _, err := fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "demo build", inputs); err != nil {
+		rtx.HaltWith(err)
+	}
 }

@@ -2,11 +2,15 @@
 # listed as "<package> <FuzzName>". List every FuzzXxx here as it is added.
 #
 #   FuzzParse          the argv grammar
+#   FuzzArgvOf         ArgvOf's command line parses back to the value it was given
 #   FuzzSuggest        the suggestion ranking
 #   FuzzSuggestionFacts reading a token and candidates from any error tree
 #   FuzzValidateSpec   the spec loader: four codecs, schema, lint rules, source locator
 #   FuzzValidateConf   the same for the conf
-FUZZ_TARGETS := .:FuzzParse .:FuzzSuggest .:FuzzSuggestionFacts ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf
+#   FuzzTemplate       shape templates: parsing, round-trips, execution errors
+#   FuzzEdit           config file splices: a successful edit reads back as intended
+#   FuzzFormat         rotini fmt: never changes a value, and formatting twice is a no-op
+FUZZ_TARGETS := .:FuzzParse .:FuzzArgvOf .:FuzzArgvOfGlob .:FuzzSuggest .:FuzzSuggestionFacts ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf ./shape:FuzzTemplate ./internal/cfgedit:FuzzEdit ./internal/codegen:FuzzFormat .:FuzzStripANSI .:FuzzDuration .:FuzzByteSize .:FuzzTagList .:FuzzInferScalar ./internal/cfgedit:FuzzBareKey ./internal/codegen:FuzzTagListWriter
 
 # The version `rotini-build` stamps into the dogfood binary: the checkout's own, from git.
 # v1.2.0 on a tagged commit; v1.2.0-3-gabc1234 between tags, which rotini reads as the last
@@ -34,7 +38,7 @@ TOOL := go tool -modfile=tools.mod
 # which the other tools' shared graph would override. Keep the version in step with editors.
 GOPLS := go run golang.org/x/tools/gopls@v0.23.0
 
-.PHONY: all check-generated clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race tools-upgrade vuln vuln-tools rotini rotini-build rotini-install
+.PHONY: all bench-cli check-generated clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race tools-upgrade vuln vuln-tools rotini rotini-build rotini-install
 
 all: clean lint test test-conformance test-acceptance test-e2e test-bench test-fuzz test-mutation test-race rotini-build rotini-install
 
@@ -132,6 +136,13 @@ test-e2e:
 
 test-bench:
 	@go test -bench=. -benchmem -count=1 ./... | tee test_bench.out
+
+# Builds the lean-runtime fixture CLI (e2e r11_lean_runtime) from this working tree and prints its
+# size, linked packages, and dispatch, --help and completion latency. Wall-clock timing is too
+# noisy to enforce, so this records numbers and is not part of `all`; the size, dependency and
+# allocation budgets are enforced by `test` and `test-e2e`.
+bench-cli:
+	@go run ./internal/benchcli -root .
 
 test-fuzz:
 	@for target in $(FUZZ_TARGETS); do \

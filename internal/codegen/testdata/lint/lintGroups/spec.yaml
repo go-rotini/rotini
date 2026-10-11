@@ -1,0 +1,17 @@
+# `groups` describes the group headings on a command's own pages. A group listed twice is an
+# error; a group no sub-command or flag uses is likely a typo, so it is a warning.
+version: 0.0.0
+command:
+  name: demo
+  groups:
+    - name: Inspect
+      description: Commands that only read.
+    - name: Inspect
+    - name: Inspct
+  commands:
+    - name: status
+      group: Inspect
+  flags:
+    - name: verbose
+      group: Output
+      schema: {type: bool}

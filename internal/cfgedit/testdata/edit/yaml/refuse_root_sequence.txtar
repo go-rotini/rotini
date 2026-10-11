@@ -1,0 +1,7 @@
+-- in --
+- a
+- b
+-- op --
+set a 2
+-- err --
+root must be a mapping

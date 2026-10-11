@@ -72,7 +72,15 @@ func roffLines(s string) string {
 // and a run of blank lines becomes one ".PP", since a blank roff line is stray vertical space,
 // not a paragraph break. Indented lines (a command table, a code sample) go in a .nf no-fill
 // block so roff keeps their columns instead of filling them into the paragraph.
-func roffBlock(s string) string {
+func roffBlock(s string) string { return roffParagraphs(s, ".PP") }
+
+// roffIndented escapes a block that sits inside a tagged paragraph (.TP), such as an option's
+// description: like roffBlock, but paragraphs are separated by ".sp", since ".PP" would end the
+// tagged paragraph and its indent.
+func roffIndented(s string) string { return roffParagraphs(s, ".sp") }
+
+// roffParagraphs is roffBlock with brk as the paragraph break request.
+func roffParagraphs(s, brk string) string {
 	var out []string
 	pending, noFill := false, false
 	for l := range strings.SplitSeq(strings.Trim(s, "\n"), "\n") {
@@ -87,7 +95,7 @@ func roffBlock(s string) string {
 		}
 		indented := l[0] == ' ' || l[0] == '\t'
 		if pending {
-			out = append(out, ".PP")
+			out = append(out, brk)
 			pending = false
 		}
 		switch {

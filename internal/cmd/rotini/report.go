@@ -60,17 +60,29 @@ func resolveInputs(rtx *rotini.Context, specPath, confPath string) (spec, conf s
 		rtx.HaltWith(rotini.UsageError(err))
 		return "", "", false
 	}
-	fmt.Fprintf(rtx.Stdout, "spec: %s\n", spec)
-	if conf == "" {
-		fmt.Fprintln(rtx.Stdout, "conf: none (defaults)")
-	} else {
-		fmt.Fprintf(rtx.Stdout, "conf: %s\n", conf)
+	shown := "none (defaults)"
+	if conf != "" {
+		shown = conf
+	}
+	if _, err := fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", spec, shown); err != nil {
+		haltWithWriteError(rtx, err)
+		return "", "", false
 	}
 	return spec, conf, true
 }
 
+// haltWithWriteError halts on a failed write to stdout, so a full disk or a closed pipe fails
+// the run instead of leaving a short file behind and exiting 0.
+func haltWithWriteError(rtx *rotini.Context, err error) {
+	rtx.HaltWith(writeError(err))
+}
+
+// writeError names a failed write to stdout: `write output: no space left on device`.
+func writeError(err error) error { return fmt.Errorf("write output: %w", err) }
+
 // printResult returns a pass's result callback: it prints the result line to stdout on success
-// and each problem to stderr on failure. In watch mode it is the only report a pass gets.
+// and each problem to stderr on failure. In watch mode it is the only report a pass gets. A
+// failed write to stdout is recorded, so the run exits non-zero.
 func printResult(rtx *rotini.Context) func(string, error) {
 	return func(result string, err error) {
 		if err != nil {
@@ -79,7 +91,9 @@ func printResult(rtx *rotini.Context) func(string, error) {
 			}
 			return
 		}
-		fmt.Fprintln(rtx.Stdout, result)
+		if _, err := fmt.Fprintln(rtx.Stdout, result); err != nil {
+			rtx.RecordError(writeError(err))
+		}
 	}
 }
 

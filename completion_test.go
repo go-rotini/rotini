@@ -431,12 +431,12 @@ func TestComplete_dynamicFlagValue(t *testing.T) {
 	}{
 		{"dynamic overrides enum", []string{"build", "--mode", ""}, agg, []string{"fast", "slow"}},
 		{"dynamic prefix-filtered", []string{"build", "--mode", "f"}, agg, []string{"fast"}},
-		{"nil return falls back to enum", []string{"build", "--level", ""}, agg, []string{"high", "low"}},
+		{"nil return falls back to enum", []string{"build", "--level", ""}, agg, []string{"low", "high"}},
 		{"no handlers → static enum", []string{"build", "--mode", ""}, nil, []string{"debug", "release"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := complete(def, c.words, c.handlers, newContext())
+			got := complete(def, c.words, reflectLookup(c.handlers), newContext())
 			if !reflect.DeepEqual(got, c.want) {
 				t.Errorf("complete(%v) = %v, want %v", c.words, got, c.want)
 			}
@@ -449,7 +449,7 @@ func TestComplete_dynamicFlagValue(t *testing.T) {
 func TestComplete_dynamicReceivesContext(t *testing.T) {
 	def := dynCompletionDef()
 	rtx := newContext()
-	got := complete(def, []string{"build", "--mode", "x"}, dynCtxHandlers{t: t}, rtx)
+	got := complete(def, []string{"build", "--mode", "x"}, reflectLookup(dynCtxHandlers{t: t}), rtx)
 	if !reflect.DeepEqual(got, []string{"x-leaf-build"}) {
 		t.Errorf("completer did not observe rtx chain/args: %v", got)
 	}
@@ -546,21 +546,21 @@ func TestComplete_dispatchFaithful(t *testing.T) {
 	}{
 		{"root commands, hidden excluded", []string{""}, []string{"deploy", "stash"}},
 		{"prefix filter", []string{"dep"}, []string{"deploy"}},
-		{"subcommand plus arg enum", []string{"deploy", ""}, []string{"api", "status", "web", "worker"}},
-		{"flag value: enum", []string{"deploy", "--env", ""}, []string{"dev", "prod", "staging"}},
+		{"subcommand plus arg enum", []string{"deploy", ""}, []string{"status", "api", "web", "worker"}},
+		{"flag value: enum", []string{"deploy", "--env", ""}, []string{"dev", "staging", "prod"}},
 		{"flag value: enum prefix", []string{"deploy", "--env", "d"}, []string{"dev"}},
-		{"flag value: short identifier", []string{"deploy", "-e", ""}, []string{"dev", "prod", "staging"}},
+		{"flag value: short identifier", []string{"deploy", "-e", ""}, []string{"dev", "staging", "prod"}},
 		{"flag value without candidates is empty", []string{"deploy", "--out", ""}, nil},
-		{"flag value consumed, next word completes again", []string{"deploy", "--out", "x.txt", ""}, []string{"api", "status", "web", "worker"}},
+		{"flag value consumed, next word completes again", []string{"deploy", "--out", "x.txt", ""}, []string{"status", "api", "web", "worker"}},
 		{"flag value never resolves as a command", []string{"--config", "deploy", ""}, []string{"deploy", "stash"}},
-		{"bool flag consumes no value", []string{"deploy", "--force", ""}, []string{"api", "status", "web", "worker"}},
+		{"bool flag consumes no value", []string{"deploy", "--force", ""}, []string{"status", "api", "web", "worker"}},
 		{"descent stops at the first positional", []string{"deploy", "api", ""}, []string{"fast", "slow"}},
 		{"variadic arg absorbs the tail", []string{"deploy", "api", "fast", ""}, []string{"fast", "slow"}},
 		{"flag names, hidden excluded, chain-wide", []string{"deploy", "-"}, []string{"--config", "--env", "--force", "--out", "--verbose", "-e", "-v"}},
 		{"inline = completes the value", []string{"deploy", "--env=d"}, []string{"--env=dev"}},
 		{"inline = on a valueless flag is empty", []string{"deploy", "--force=x"}, nil},
-		{"bash = split: empty value", []string{"deploy", "--env", "=", ""}, []string{"dev", "prod", "staging"}},
-		{"bash = split: glued value then next word", []string{"deploy", "--env", "=", "dev", ""}, []string{"api", "status", "web", "worker"}},
+		{"bash = split: empty value", []string{"deploy", "--env", "=", ""}, []string{"dev", "staging", "prod"}},
+		{"bash = split: glued value then next word", []string{"deploy", "--env", "=", "dev", ""}, []string{"status", "api", "web", "worker"}},
 		{"after -- only positionals complete", []string{"deploy", "--", ""}, []string{"api", "web", "worker"}},
 		{"after -- flags never complete", []string{"deploy", "--", "-"}, nil},
 		{"hidden argument offers nothing", []string{"stash", ""}, nil},
@@ -606,12 +606,12 @@ func TestComplete_dynamicArgValue(t *testing.T) {
 	want := []string{"dyn-one", "dyn-two"}
 	// Candidates are prefix-filtered, so query with a prefix the dynamic ones share:
 	// "x" would filter every one of them out and prove nothing.
-	got := complete(def, []string{"deploy", "dyn"}, argCompleterHandlers{}, nil)
+	got := complete(def, []string{"deploy", "dyn"}, reflectLookup(argCompleterHandlers{}), nil)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dynamic arg candidates = %v, want %v", got, want)
 	}
 	// The variadic "extra" argument gets nil from the completer → its enum.
-	got = complete(def, []string{"deploy", "api", "f"}, argCompleterHandlers{}, nil)
+	got = complete(def, []string{"deploy", "api", "f"}, reflectLookup(argCompleterHandlers{}), nil)
 	if !reflect.DeepEqual(got, []string{"fast"}) {
 		t.Errorf("enum fallback after dynamic nil = %v, want [fast]", got)
 	}
@@ -992,10 +992,10 @@ func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
 		Commands: []CommandDef{{Name: "show", Handler: "AppShow", Arguments: []ArgDef{{Name: "name", Type: "string"}}}},
 	}
 	t.Setenv("LENIENT_STORE", "env")
-	if got := complete(def, []string{"show", ""}, lenientHandlers{}, newContext()); !reflect.DeepEqual(got, []string{"from-env"}) {
+	if got := complete(def, []string{"show", ""}, reflectLookup(lenientHandlers{}), everyFeatureContext()); !reflect.DeepEqual(got, []string{"from-env"}) {
 		t.Errorf("env fallback: candidates = %v, want [from-env]", got)
 	}
-	if got := complete(def, []string{"--store", "line", "show", ""}, lenientHandlers{}, newContext()); !reflect.DeepEqual(got, []string{"from-line"}) {
+	if got := complete(def, []string{"--store", "line", "show", ""}, reflectLookup(lenientHandlers{}), everyFeatureContext()); !reflect.DeepEqual(got, []string{"from-line"}) {
 		t.Errorf("flag on the line: candidates = %v, want [from-line] — argv outranks env", got)
 	}
 }

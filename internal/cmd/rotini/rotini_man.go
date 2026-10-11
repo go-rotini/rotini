@@ -44,7 +44,9 @@ func (*rotiniManHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprint(rtx.Stdout, page)
+	if _, err := fmt.Fprint(rtx.Stdout, page); err != nil {
+		haltWithWriteError(rtx, err)
+	}
 }
 
 // writeManPages writes every page ManPages lists into dir as <name>.<section>, creating dir as

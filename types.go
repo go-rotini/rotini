@@ -6,12 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net"
-	"net/mail"
-	"net/netip"
-	"net/url"
+	"path"
+	"path/filepath"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +17,8 @@ import (
 // Value types beyond Go's builtins and encoding.TextUnmarshaler, by two mechanisms:
 //
 //   - A distinct standard-library type (*url.URL, mail.Address, *time.Location,
-//     net.HardwareAddr) is parsed through [valueParsers], keyed on the type itself.
+//     net.HardwareAddr, the netip types, *regexp.Regexp) is a value kind, wired by its feature
+//     ([URLValues] and the rest).
 //   - A value whose Go representation is ambiguous (a byte size is an int64; hex and base64 are
 //     []byte) gets a named type that parses itself: [ByteSize], [HexBytes], [Base64Bytes].
 
@@ -69,27 +67,101 @@ func (b ByteSize) String() string {
 	return strconv.FormatInt(n, 10)
 }
 
-var byteSizeSyntax = regexp.MustCompile(`^\s*(\d*\.?\d+)\s*([a-zA-Z]*)\s*$`)
-
-// byteSizeUnits maps a lowercased suffix to its multiplier. The trailing `b` is optional.
-var byteSizeUnits = map[string]float64{
-	"": 1, "b": 1,
-	"k": 1e3, "kb": 1e3, "m": 1e6, "mb": 1e6, "g": 1e9, "gb": 1e9,
-	"t": 1e12, "tb": 1e12, "p": 1e15, "pb": 1e15, "e": 1e18, "eb": 1e18,
-	"ki": 1 << 10, "kib": 1 << 10, "mi": 1 << 20, "mib": 1 << 20, "gi": 1 << 30, "gib": 1 << 30,
-	"ti": 1 << 40, "tib": 1 << 40, "pi": 1 << 50, "pib": 1 << 50, "ei": 1 << 60, "eib": 1 << 60,
+// byteSizeUnit is the multiplier of a lowercased suffix. The trailing `b` is optional.
+func byteSizeUnit(lower string) (float64, bool) {
+	switch lower {
+	case "", "b":
+		return 1, true
+	case "k", "kb":
+		return 1e3, true
+	case "m", "mb":
+		return 1e6, true
+	case "g", "gb":
+		return 1e9, true
+	case "t", "tb":
+		return 1e12, true
+	case "p", "pb":
+		return 1e15, true
+	case "e", "eb":
+		return 1e18, true
+	case "ki", "kib":
+		return 1 << 10, true
+	case "mi", "mib":
+		return 1 << 20, true
+	case "gi", "gib":
+		return 1 << 30, true
+	case "ti", "tib":
+		return 1 << 40, true
+	case "pi", "pib":
+		return 1 << 50, true
+	case "ei", "eib":
+		return 1 << 60, true
+	}
+	return 0, false
 }
 
+// splitByteSize splits a size into its number and its unit: blanks (space, tab, newline,
+// carriage return, form feed), a decimal number (digits, or digits and a fraction, or a bare
+// fraction such as .5), blanks, ASCII letters, blanks. ok is false for anything else.
+func splitByteSize(s string) (number, unit string, ok bool) {
+	i := skipSizeBlanks(s, 0)
+	end, ok := scanDecimal(s, i)
+	if !ok {
+		return "", "", false
+	}
+	number = s[i:end]
+	i = skipSizeBlanks(s, end)
+	j := i
+	for j < len(s) && isASCIILetter(s[j]) {
+		j++
+	}
+	unit = s[i:j]
+	if skipSizeBlanks(s, j) != len(s) {
+		return "", "", false
+	}
+	return number, unit, true
+}
+
+// scanDecimal reads a decimal number at s[i:]: digits, optionally followed by "." and at least
+// one digit, or "." and at least one digit alone. It returns the index after the number.
+func scanDecimal(s string, i int) (int, bool) {
+	j := skipDigits(s, i)
+	if j < len(s) && s[j] == '.' {
+		if k := skipDigits(s, j+1); k > j+1 {
+			return k, true
+		}
+	}
+	return j, j > i
+}
+
+// skipDigits returns the index of the first byte at or after i that is not an ASCII digit.
+func skipDigits(s string, i int) int {
+	for i < len(s) && isDigit(s[i]) {
+		i++
+	}
+	return i
+}
+
+// skipSizeBlanks returns the index of the first byte at or after i that is not a blank.
+func skipSizeBlanks(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r' || s[i] == '\f') {
+		i++
+	}
+	return i
+}
+
+func isASCIILetter(c byte) bool { return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' }
+
 func parseByteSize(s string) (int64, error) {
-	m := byteSizeSyntax.FindStringSubmatch(s)
-	if m == nil {
+	number, unit, ok := splitByteSize(s)
+	if !ok {
 		return 0, fmt.Errorf("%q is not a size; write a number with an optional unit, e.g. 512Mi, 10MB, 1.5GiB", s)
 	}
-	mult, ok := byteSizeUnits[strings.ToLower(m[2])]
+	mult, ok := byteSizeUnit(strings.ToLower(unit))
 	if !ok {
-		return 0, fmt.Errorf("%q has an unknown unit %q; use B, K/KB, M/MB, G/GB, T/TB, P/PB, E/EB (decimal) or Ki, Mi, Gi, Ti, Pi, Ei (binary)", s, m[2])
+		return 0, fmt.Errorf("%q has an unknown unit %q; use B, K/KB, M/MB, G/GB, T/TB, P/PB, E/EB (decimal) or Ki, Mi, Gi, Ti, Pi, Ei (binary)", s, unit)
 	}
-	n, err := strconv.ParseFloat(m[1], 64)
+	n, err := strconv.ParseFloat(number, 64)
 	if err != nil {
 		return 0, fmt.Errorf("%q is not a size: %w", s, err)
 	}
@@ -146,72 +218,58 @@ func (b Base64Bytes) MarshalText() ([]byte, error) { return []byte(b.String()), 
 // String renders the bytes as standard, padded base64.
 func (b Base64Bytes) String() string { return base64.StdEncoding.EncodeToString(b) }
 
-// valueParsers parse standard-library input types that do not implement
-// encoding.TextUnmarshaler, keyed on the exact field type. [coerce] consults it before anything
-// else, including pointer dereferencing, because *url.URL and *time.Location are built by their
-// parsers rather than filled in place.
-var valueParsers = map[reflect.Type]func(string) (reflect.Value, error){
-	reflect.TypeFor[*url.URL](): func(s string) (reflect.Value, error) {
-		u, err := url.Parse(s)
-		if err != nil {
-			return reflect.Value{}, fmt.Errorf("want a URL such as https://example.com: %w", err)
-		}
-		if u.Scheme == "" || (u.Host == "" && u.Opaque == "") {
-			return reflect.Value{}, errors.New("a URL needs a scheme and a host, e.g. https://example.com")
-		}
-		return reflect.ValueOf(u), nil
-	},
-	reflect.TypeFor[mail.Address](): func(s string) (reflect.Value, error) {
-		a, err := mail.ParseAddress(s)
-		if err != nil {
-			return reflect.Value{}, fmt.Errorf("want ada@example.com or \"Ada <ada@example.com>\": %w", err)
-		}
-		return reflect.ValueOf(*a), nil
-	},
-	reflect.TypeFor[*time.Location](): func(s string) (reflect.Value, error) {
-		loc, err := time.LoadLocation(s)
-		if err != nil {
-			return reflect.Value{}, fmt.Errorf("want an IANA name such as Europe/Berlin: %w", err)
-		}
-		return reflect.ValueOf(loc), nil
-	},
-	// time.Time parses itself, but this entry replaces its unhelpful layout error with one
-	// that names the expected format.
-	reflect.TypeFor[time.Time](): func(s string) (reflect.Value, error) {
-		t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
-		if err != nil {
-			return reflect.Value{}, errors.New("write it as RFC 3339, e.g. 2026-09-29T14:00:00Z; or declare `type: date` or a `layout:`")
-		}
-		return reflect.ValueOf(t), nil
-	},
-	reflect.TypeFor[net.HardwareAddr](): func(s string) (reflect.Value, error) {
-		mac, err := net.ParseMAC(s)
-		if err != nil {
-			return reflect.Value{}, fmt.Errorf("want hex pairs such as 01:23:45:67:89:ab: %w", err)
-		}
-		return reflect.ValueOf(mac), nil
-	},
+// Glob is a validated path.Match pattern: `*` and `?` match within one path segment, `[a-z]` a
+// class, and `\` escapes the next character. It matches slash-separated names, and `**` is not
+// recursive: it means two `*`. A spec declares one with `type: glob`.
+type Glob string
+
+// UnmarshalText implements [encoding.TextUnmarshaler], rejecting a malformed pattern.
+func (g *Glob) UnmarshalText(text []byte) error {
+	if _, err := path.Match(string(text), ""); err != nil {
+		return fmt.Errorf("check its brackets and escapes: %w", err)
+	}
+	*g = Glob(text)
+	return nil
 }
 
-// valueTypeLabels name value types in a parse error in user terms ("URL", not "*url.URL").
-var valueTypeLabels = map[reflect.Type]string{
-	reflect.TypeFor[*url.URL]():         "URL",
-	reflect.TypeFor[mail.Address]():     "email address",
-	reflect.TypeFor[*time.Location]():   "time zone",
-	reflect.TypeFor[net.HardwareAddr](): "MAC address",
-	reflect.TypeFor[netip.Addr]():       "IP address",
-	reflect.TypeFor[netip.Prefix]():     "CIDR prefix",
-	reflect.TypeFor[netip.AddrPort]():   "address and port",
-	reflect.TypeFor[time.Time]():        "time",
-	reflect.TypeFor[ByteSize]():         "size",
-	reflect.TypeFor[HexBytes]():         "hex value",
-	reflect.TypeFor[Base64Bytes]():      "base64 value",
+// MarshalText implements [encoding.TextMarshaler].
+func (g Glob) MarshalText() ([]byte, error) { return []byte(g), nil }
+
+// Match reports whether name matches the pattern. name's separators are read as slashes, so a
+// Windows path matches the same pattern a Unix one does. A malformed pattern, which
+// [Glob.UnmarshalText] rejects, matches nothing.
+func (g Glob) Match(name string) bool {
+	ok, err := path.Match(string(g), filepath.ToSlash(name))
+	return ok && err == nil
 }
 
-// typeLabel names a field type for a parse error: its label when it has one, else its Go name.
-func typeLabel(t reflect.Type) string {
-	if l, ok := valueTypeLabels[t]; ok {
-		return l
+// parseRFC3339Value reads a time.Time as RFC 3339. time.Time parses itself, but this replaces
+// its unhelpful layout error with one that names the expected format.
+func parseRFC3339Value(s string) (reflect.Value, error) {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+	if err != nil {
+		return reflect.Value{}, errors.New("write it as RFC 3339, e.g. 2026-09-29T14:00:00Z; or declare `type: date` or a `layout:`")
+	}
+	return reflect.ValueOf(t), nil
+}
+
+// typeLabel names a field type for a parse error in user terms ("URL", not "*url.URL"): a
+// wired value kind's label, rotini's own types' labels, else its Go name.
+func typeLabel(t reflect.Type, fs *featureSet) string {
+	if k := fs.valueKindOf(t); k != nil {
+		return k.label
+	}
+	switch t {
+	case timeType:
+		return "time"
+	case reflect.TypeFor[ByteSize]():
+		return "size"
+	case reflect.TypeFor[HexBytes]():
+		return "hex value"
+	case reflect.TypeFor[Base64Bytes]():
+		return "base64 value"
+	case reflect.TypeFor[Glob]():
+		return "glob pattern"
 	}
 	return t.String()
 }
@@ -274,45 +332,6 @@ func layoutLabel(layout string) string {
 
 var timeType = reflect.TypeFor[time.Time]()
 
-// coerceWithLayout is [coerce] for an input that declares a time layout: a time.Time field —
-// or a pointer to one, or a list of them — parses each value under the layout instead of as
-// RFC 3339. Any other field, or no layout, is plain coerce.
-func coerceWithLayout(f reflect.Value, raw []string, layout string) error {
-	if layout == "" || len(raw) == 0 {
-		return coerce(f, raw)
-	}
-	switch {
-	case f.Type() == timeType:
-		last := raw[len(raw)-1]
-		t, err := parseTimeLayout(last, layout)
-		if err != nil {
-			return &coerceError{Value: last, TypeName: layoutLabel(layout), Cause: err}
-		}
-		f.Set(reflect.ValueOf(t))
-		return nil
-	case f.Kind() == reflect.Pointer && f.Type().Elem() == timeType:
-		v := reflect.New(timeType)
-		if err := coerceWithLayout(v.Elem(), raw, layout); err != nil {
-			return err
-		}
-		f.Set(v)
-		return nil
-	case f.Kind() == reflect.Slice && derefType(f.Type().Elem()) == timeType:
-		out := reflect.MakeSlice(f.Type(), len(raw), len(raw))
-		for i, r := range raw {
-			if err := coerceWithLayout(out.Index(i), []string{r}, layout); err != nil {
-				return err
-			}
-		}
-		f.Set(out)
-		return nil
-	}
-	return coerce(f, raw)
-}
-
-// durationDays matches a day or week component of a duration: `7d`, `1.5w`.
-var durationDays = regexp.MustCompile(`(\d*\.?\d+)([dw])`)
-
 // parseDuration is [time.ParseDuration] plus days (`d`, 24h) and weeks (`w`, 168h).
 // Components combine as usual: `1d12h`, `2w3d`, `1.5d`.
 func parseDuration(s string) (time.Duration, error) {
@@ -334,18 +353,21 @@ func parseDuration(s string) (time.Duration, error) {
 // zero units ("30d", "1d12h", "1h30m", "90s"), so a bound such as `maximum: 30d` prints in an
 // error as the spec wrote it.
 func formatDuration(d time.Duration) string {
-	if d < 0 {
-		return "-" + formatDuration(-d)
-	}
 	const day = 24 * time.Hour
-	out := ""
-	if d >= day {
-		out = strconv.FormatInt(int64(d/day), 10) + "d"
-		d %= day
-		if d == 0 {
+	// Split before negating: -d overflows for the most negative duration, but its whole days
+	// and the remainder each negate safely.
+	days, rest, sign := d/day, d%day, ""
+	if d < 0 {
+		days, rest, sign = -days, -rest, "-"
+	}
+	out := sign
+	if days > 0 {
+		out += strconv.FormatInt(int64(days), 10) + "d"
+		if rest == 0 {
 			return out
 		}
 	}
+	d = rest
 	s := d.String() // "1h0m0s", "2m0s", "1h30m0s", "90ms"
 	if strings.HasSuffix(s, "m0s") {
 		s = strings.TrimSuffix(s, "0s")
@@ -356,21 +378,75 @@ func formatDuration(d time.Duration) string {
 	return out + s
 }
 
-// expandDays rewrites each day and week component of a duration as hours.
+// expandDays rewrites each day and week component of a duration as hours. A component is a
+// decimal number (see [scanDecimal]) directly followed by "d" or "w"; components are found
+// left to right, each starting at the leftmost place one can. A number too large to read is
+// left as written and its error returned.
 func expandDays(s string) (string, error) {
+	var b strings.Builder
 	var convErr error
-	expanded := durationDays.ReplaceAllStringFunc(s, func(part string) string {
-		m := durationDays.FindStringSubmatch(part)
-		n, err := strconv.ParseFloat(m[1], 64)
+	for i := 0; i < len(s); {
+		end, ok := dayComponent(s, i)
+		if !ok {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		part := s[i : end+1]
+		n, err := strconv.ParseFloat(s[i:end], 64)
 		if err != nil {
 			convErr = err
-			return part
+			b.WriteString(part)
+		} else {
+			hours := n * 24
+			if s[end] == 'w' {
+				hours = n * 24 * 7
+			}
+			b.WriteString(strconv.FormatFloat(hours, 'f', -1, 64))
+			b.WriteByte('h')
 		}
-		hours := n * 24
-		if m[2] == "w" {
-			hours = n * 24 * 7
+		i = end + 1
+	}
+	return b.String(), convErr
+}
+
+// dayComponent reports whether a day or week component starts at s[i], and the index of its
+// unit letter. A fraction that is not followed by a unit leaves the digits before its "." to
+// stand alone, as "2d" in "1.2d" does not: there the fraction belongs to the number.
+func dayComponent(s string, i int) (int, bool) {
+	j := skipDigits(s, i)
+	if j < len(s) && s[j] == '.' {
+		if k := skipDigits(s, j+1); k > j+1 && k < len(s) && (s[k] == 'd' || s[k] == 'w') {
+			return k, true
 		}
-		return strconv.FormatFloat(hours, 'f', -1, 64) + "h"
-	})
-	return expanded, convErr
+	}
+	if j > i && j < len(s) && (s[j] == 'd' || s[j] == 'w') {
+		return j, true
+	}
+	return 0, false
+}
+
+// isPortOpaque reports whether a URL's opaque part reads as a port, optionally followed by a
+// path: one to five digits up to 65535, then nothing or "/…". A longer number, as in
+// tel:5551234, is not a port.
+func isPortOpaque(opaque string) bool {
+	port, _, _ := strings.Cut(opaque, "/")
+	if len(port) > 5 || !isAllDigits(port) {
+		return false
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n <= 65535
+}
+
+// isAllDigits reports whether s is one or more ASCII digits.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if !isDigit(s[i]) {
+			return false
+		}
+	}
+	return true
 }

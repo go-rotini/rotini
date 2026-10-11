@@ -1,0 +1,98 @@
+.TH "OPS" 1 "" "ops" "User Commands"
+.SH NAME
+ops \- run the fleet
+.SH SYNOPSIS
+\fBops\fR [flags] <command>
+.PP
+A word starting with \fB@\fR names a response file (\fB@args\fR), whose lines
+are read as arguments, one per line, until \fB\-\-\fR; to pass a word starting
+with \fB@\fR, double it (\fB@@x\fR).
+.SH "COMMANDS"
+.TP
+\fBnote\fR
+add a note
+.TP
+\fBexec\fR
+run a command
+.TP
+\fBrun\fR
+run a command on a host
+.SH "DATA"
+Commands that read a document from standard input.
+.TP
+\fBimport\fR
+import tasks
+.TP
+\fBupper\fR
+upper\-case lines (experimental)
+.SH "DEPLOYING"
+Commands that change what runs where.
+Each one asks before it acts.
+.TP
+\fBdeploy\fR
+ship a service (beta)
+.SH "HELP TOPICS"
+.TP
+\fBfilters\fR
+how filters work
+.TP
+\fBenvironment\fR
+the environment variables ops reads
+.SH "OPTIONS"
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+print help
+.SH "OUTPUT"
+Flags that shape what ops prints.
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+say more (repeatable)
+.br
+repeat to count: \-vvv
+.TP
+\fB\-\-color\fR \fIstring\fR
+when to color (default auto) [auto|always|never]
+.SH ENVIRONMENT
+.TP
+\fBOPS_TOKEN\fR \fIstring\fR
+the API token (length >= 20)
+.sp
+Get one from the console.
+.sp
+\&.Keep it secret; a path such as C:\eops\etoken works too.
+.br
+at least 20 characters
+.TP
+\fBOPS_LOG\fR \fIstring\fR
+the log level [debug|info|error]
+.RS
+.RS 2
+\fBdebug\fR \- everything
+.br
+\fBinfo\fR
+.br
+\fBerror\fR \- failures only
+.RE
+.RE
+.SH CONFIGURATION
+.TP
+\fBregion\fR (region) \fIstring\fR
+the default region (beta)
+.sp
+The region commands use when none is given.
+.br
+must look like eu\-1
+.TP
+\fBprofile\fR (profile) \fIstring\fR
+the output profile [short|long]
+.RS
+.RS 2
+\fBshort\fR \- one line each
+.br
+\fBlong\fR \- every field
+.RE
+.RE
+.SH "SEE ALSO"
+\fBops\-deploy\fR(1), \fBops\-import\fR(1), \fBops\-upper\fR(1),
+\fBops\-note\fR(1), \fBops\-exec\fR(1), \fBops\-run\fR(1),
+\fBops\-filters\fR(1), \fBops\-environment\fR(1)

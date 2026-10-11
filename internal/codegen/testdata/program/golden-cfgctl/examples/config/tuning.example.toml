@@ -1,0 +1,11 @@
+#:schema ../../schemas/cfgctl.tuning.config.json
+## tuning: ./tuning.toml, read by cfgctl and its sub-commands.
+## Each line starting with "# " is a key: remove the "# " to set it.
+## Keys any configuration file may hold are listed once, in app.example.yaml.
+
+## who owns the service (string)
+# owner = ""
+
+# [pool]
+## worker threads (int; default 4)
+# workers = 4

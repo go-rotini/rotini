@@ -1,0 +1,45 @@
+# Groups and dependencies that contradict each other leave flags that can never be set.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: json
+      schema: { type: bool }
+    - name: yaml
+      schema: { type: bool }
+    - name: wide
+      schema: { type: bool }
+    - name: name
+      schema: { type: bool }
+    - name: tls
+      schema: { type: bool }
+    - name: insecure
+      schema: { type: bool }
+    - name: region
+      schema: { type: string, required: true }
+    - name: zone
+      schema: { type: string }
+    # Correct: required, but env can supply it while --zone2 is given. No problem.
+    - name: zone1
+      schema: { type: string, required: true, variable: DEMO_ZONE1 }
+    - name: zone2
+      schema: { type: string }
+  flag_groups:
+    - kind: mutually_exclusive
+      flags: [json, yaml]
+    - kind: required_together
+      flags: [json, yaml]
+    # Exactly one of wide/name, but both or neither: nothing satisfies the command.
+    - kind: one_of
+      flags: [wide, name]
+    - kind: required_together
+      flags: [wide, name]
+    - kind: mutually_exclusive
+      flags: [tls, insecure]
+    - kind: mutually_exclusive
+      flags: [region, zone]
+    - kind: mutually_exclusive
+      flags: [zone1, zone2]
+  flag_dependencies:
+    - when: insecure
+      requires: [tls]

@@ -1,0 +1,49 @@
+$schema: ./.rotini-schema.spec.json
+version: {{.Version}}
+command:
+{{- if .Admin}}
+  name: {{.Name}}-admin
+  summary: administer {{.Name}} (replace this)
+  description: Describe {{.Name}}-admin here; this paragraph opens {{.Name}}-admin --help.
+  footer: Use "{{.Name}}-admin help <command>" for more information about a command.
+{{- else}}
+  name: {{.Name}}
+  summary: what {{.Name}} does, in one line (replace this)
+  description: Describe {{.Name}} here; this paragraph opens {{.Name}} --help.
+  footer: Use "{{.Name}} help <command>" for more information about a command.
+{{- end}}
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    # {{.Child}} is its own spec, composed into both binaries: change it once there.
+    - $ref: ../{{.Child}}/.rotini.spec.{{.Ext}}
+{{- if .Admin}}
+    - name: reset
+      summary: reset {{.Name}}'s state
+      description: Reset {{.Name}}'s state; only {{.Name}}-admin has this command.
+{{- end}}
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+{{- if .Admin}}
+      description: Print the {{.Name}}-admin version.
+{{- else}}
+      description: Print the {{.Name}} version.
+{{- end}}

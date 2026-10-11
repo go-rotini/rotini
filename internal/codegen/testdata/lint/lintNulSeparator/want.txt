@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:10:7: command demo: flag "tags": sets `separator: nul`, but command-line values can't contain a NUL byte, so there is nothing to split; add `from: [file]` or `from: [stdin]` so the flag's file or piped content is split on NUL
+spec: .rotini.spec.yaml:14:7: command demo: argument "paths": sets `separator: nul`, but command-line and environment values can't contain a NUL byte; it applies only to a list or map flag's file or stdin content (`from: [file]` or `from: [stdin]`)

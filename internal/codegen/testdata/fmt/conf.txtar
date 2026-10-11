@@ -1,0 +1,24 @@
+-- in --
+validate:
+  fail: collect
+generate:
+  features:
+    - enabled: true
+      type: help
+  packages:
+    - file: cmd/app/main.go
+      type: main
+version: 1.0.0
+$schema: ./conf.json
+-- out --
+$schema: ./conf.json
+version: 1.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+  features:
+    - type: help
+      enabled: true
+validate:
+  fail: collect

@@ -55,7 +55,7 @@ func TestSuggestionFacts_inputError(t *testing.T) {
 		}
 	})
 	t.Run("a secret value is redacted and never offered", func(t *testing.T) {
-		err := checkChannelEnum(channelEnv, "MODE", []string{"fast", "slow"}, false, []string{"hunter2"}, true)
+		err := checkChannelEnum(channelEnv, "MODE", enumSet{values: []string{"fast", "slow"}}, []string{"hunter2"}, true)
 		var ie *InputError
 		if !errors.As(err, &ie) || ie.Token != "[redacted]" || strings.Contains(err.Error(), "hunter2") {
 			t.Fatalf("err = %#v, want Token [redacted] and no value in the message", err)

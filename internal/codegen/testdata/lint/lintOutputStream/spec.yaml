@@ -1,0 +1,16 @@
+# output_stream says the command writes a stream of its declared output, one item at a time,
+# so it needs an output to describe the item.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    # Correct: a stream of tasks, declared as one task. No problem.
+    - name: watch
+      output_stream: true
+      output:
+        type: object
+        properties:
+          id: { type: string }
+    # No output for the stream to carry.
+    - name: tail
+      output_stream: true

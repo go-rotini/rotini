@@ -1,0 +1,46 @@
+$schema: ./.rotini-schema.spec.json
+version: {{.Version}}
+command:
+  name: {{.Name}}
+  summary: what {{.Name}} does, in one line (replace this)
+  description: Describe {{.Name}} here; this paragraph opens {{.Name}} --help.
+  footer: Use "{{.Name}} help <command>" for more information about a command.
+  examples:
+    - {{.Name}} serve
+    - {{.Name}} serve --interval 5s --for 1m
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: serve
+      summary: run until stopped
+      description: Do the work every --interval until Ctrl-C, SIGTERM or --for stops it, then shut down cleanly.
+      flags:
+        - name: interval
+          identifiers: [--interval]
+          summary: how often to do the work
+          schema: { type: duration, default: 1s, minimum: 1ms }
+        - name: for
+          identifiers: [--for]
+          summary: stop after this long; 0 runs until stopped
+          schema: { type: duration, default: 0s }
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+      description: Print the {{.Name}} version.

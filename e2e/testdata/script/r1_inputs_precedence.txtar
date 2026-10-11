@@ -138,7 +138,27 @@ stderr 'negated form'
 
 exec ./app$exe --help
 stdout '--\[no-\]color'
+! stdout 'explain-inputs'
 
+# An author-declared short-circuit flag prints where each value came from, the winner first
+# and then what it overrode. A secret prints redacted.
+env APP_SERVER_PORT=7070
+env GITHUB_TOKEN=s3cret
+exec ./app$exe --conf app.yaml --explain-inputs
+cmp stdout explain.txt
+! stdout s3cret
+env APP_SERVER_PORT=
+env GITHUB_TOKEN=
+
+-- explain.txt --
+App.Env.APIKey = "" from env:APP_API_KEY
+App.Env.BaseURL = "" from env:APP_BASE_URL
+App.Env.Region = "" from env:APP_REGION; overrides default "default-region"
+App.Flags.Color = "true" from default
+App.Flags.Conf = "app.yaml" from argv:--conf
+App.Flags.ExplainInputs = "true" from argv:--explain-inputs
+App.Flags.Port = "7070" from env:APP_SERVER_PORT; overrides config:appconf#server.port "9090", default "8080"
+App.Flags.Token = [redacted] from env:GITHUB_TOKEN
 -- app.yaml --
 server:
   port: 9090
@@ -202,6 +222,14 @@ command:
       schema:
         type: string
         key: server.sort_by
+    - name: explain-inputs
+      summary: print where each input's value came from
+      identifiers:
+        - --explain-inputs
+      short_circuit: true
+      hidden: true
+      schema:
+        type: bool
   env:
     - name: region
       summary: the deployment region
@@ -248,7 +276,11 @@ type appHandler struct {
 }
 
 func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rtx.Inputs[AppInputs]()
+	in, rep, err := rtx.InputsWithReport[AppInputs]()
+	if in.App.Flags.ExplainInputs {
+		_ = rep.Format(rtx.Stdout)
+		return
+	}
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)

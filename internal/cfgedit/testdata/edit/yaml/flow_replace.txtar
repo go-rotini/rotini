@@ -1,0 +1,6 @@
+-- in --
+a: {b: 1, c: 2}
+-- op --
+set a.c "x y"
+-- out --
+a: {b: 1, c: x y}

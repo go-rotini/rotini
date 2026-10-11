@@ -1,25 +1,63 @@
 package rotini
 
-import (
-	"regexp"
-	"strings"
-)
+import "strings"
 
-// ansiSequences matches CSI sequences (SGR styling among them) and OSC sequences terminated by
-// BEL or ST.
-var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
-
-// esc begins every ANSI escape sequence; text without one is returned without running the regexp.
+// esc begins every ANSI escape sequence; text without one is returned as it is.
 const esc = '\x1b'
 
 // StripANSI removes every ANSI escape sequence from text, SGR styling and OSC alike, leaving the
 // characters a terminal would display. Rotini applies it to man pages, markdown pages and
 // completion descriptions, whose consumers would print escapes literally.
+//
+// A CSI sequence is ESC "[", parameter bytes (digits, ";", ":", "?"), intermediate bytes
+// (0x20–0x2f) and one final byte (0x40–0x7e); an OSC sequence is ESC "]" and a body ended by BEL
+// or by ESC "\". An ESC that starts neither is kept.
 func StripANSI(text string) string {
 	if !strings.ContainsRune(text, esc) {
 		return text
 	}
-	return ansiSequences.ReplaceAllString(text, "")
+	var b strings.Builder
+	b.Grow(len(text))
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if c == esc && i+1 < len(text) {
+			if end, ok := ansiSequenceEnd(text, i); ok {
+				i = end
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// ansiSequenceEnd reports where the escape sequence starting at text[i] (an ESC) ends: the index
+// of its last byte.
+func ansiSequenceEnd(text string, i int) (int, bool) {
+	j := i + 2
+	switch text[i+1] {
+	case '[':
+		for j < len(text) && (isDigit(text[j]) || text[j] == ';' || text[j] == ':' || text[j] == '?') {
+			j++
+		}
+		for j < len(text) && text[j] >= 0x20 && text[j] <= 0x2f {
+			j++
+		}
+		if j < len(text) && text[j] >= 0x40 && text[j] <= 0x7e {
+			return j, true
+		}
+	case ']':
+		for j < len(text) && text[j] != 0x07 && text[j] != esc {
+			j++
+		}
+		switch {
+		case j < len(text) && text[j] == 0x07:
+			return j, true
+		case j+1 < len(text) && text[j] == esc && text[j+1] == '\\':
+			return j + 1, true
+		}
+	}
+	return 0, false
 }
 
 // Page is one generated documentation page for one command: a man page or a markdown reference
@@ -41,4 +79,7 @@ type Page struct {
 	Path []string
 	// Content is the page itself: roff for a man page, markdown for a markdown page.
 	Content string
+	// Topic is true for a help topic's page (the spec's `topics:`), listed after the commands'
+	// pages; its Path is the topic's name.
+	Topic bool
 }

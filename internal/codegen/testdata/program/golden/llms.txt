@@ -1,0 +1,22 @@
+# taskr
+
+> keep a list of tasks
+
+Taskr keeps a list of tasks in a file and syncs it with a server.
+
+## Commands
+
+- [taskr add](https://taskr.example.com/cli/taskr-add.md): add a task
+- [taskr list](https://taskr.example.com/cli/taskr-list.md): list tasks
+- [taskr purge](https://taskr.example.com/cli/taskr-purge.md): delete finished tasks
+- [taskr import](https://taskr.example.com/cli/taskr-import.md): add tasks read from stdin
+- [taskr remote sync](https://taskr.example.com/cli/taskr-remote-sync.md): sync with the server
+- [taskr remote show](https://taskr.example.com/cli/taskr-remote-show.md): show the server's address
+- [taskr remote login](https://taskr.example.com/cli/taskr-remote-login.md): log in with a key file
+
+## Optional
+
+- [taskr](https://taskr.example.com/cli/taskr.md): keep a list of tasks
+- [taskr remote](https://taskr.example.com/cli/taskr-remote.md): work with the server
+- [taskr exec](https://taskr.example.com/cli/taskr-exec.md): run a command with the list's directory
+- [taskr old](https://taskr.example.com/cli/taskr-old.md): an old way to list (deprecated: use list)

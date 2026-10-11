@@ -1,0 +1,20 @@
+# A flag with no long identifier is hard to read in scripts and help.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Correct: a short form beside a long one. No problem.
+    - name: force
+      identifiers: [-f, --force]
+      schema: { type: bool }
+    - name: verbose
+      identifiers: [-v]
+      schema: { type: count }
+    - name: extract
+      identifiers: [-x, -X]
+      schema: { type: bool }
+    # Correct: hidden flags aren't part of the documented surface. No problem.
+    - name: debug
+      identifiers: [-D]
+      hidden: true
+      schema: { type: bool }

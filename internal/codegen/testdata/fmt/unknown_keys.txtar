@@ -1,0 +1,14 @@
+-- in --
+version: 1.0.0
+command:
+  zzz: 1
+  summary: s
+  aaa: 2
+  name: tool
+-- out --
+version: 1.0.0
+command:
+  name: tool
+  summary: s
+  zzz: 1
+  aaa: 2

@@ -1,7 +1,8 @@
 package codegen
 
 import (
-	"encoding/json"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -17,8 +18,7 @@ import (
 // a composed child whose types were generated under the child's own names.
 func inputsFields(rootPascal, path string) []fieldDef {
 	segments := strings.Split(path, "_")
-	fields := make([]fieldDef, 0, 1+len(segments))
-	fields = append(fields, fieldDef{Field: rootPascal, GoType: rootPascal + "CommandInputs"})
+	fields := []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs"}} //nolint:prealloc // a few fields; CodeQL flags 1+len as an overflow
 	for i := 1; i <= len(segments); i++ {
 		prefix := rootPascal + toPascalCase(strings.Join(segments[:i], "_"))
 		fields = append(fields, fieldDef{Field: prefix, GoType: prefix + "CommandInputs"})
@@ -39,14 +39,18 @@ func flagFields(in *Inputs, envPrefix string) []fieldDef {
 			Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name,
 			Import: fieldImport(f.Schema), Recon: key,
 			// The env fallback is pinned at generate time; see [envVarFor].
-			EnvVar:  flagEnvVar(f.Schema, key, envPrefix),
-			Comment: contractComment(f.Schema),
+			EnvVar:     flagEnvVar(f.Schema, key, envPrefix),
+			Comment:    contractComment(f.Schema),
+			Constraint: expansionTags(f.Schema),
 		})
+		if key != "" && f.Schema.VariableFile != "" {
+			fields[len(fields)-1].EnvFile = f.Schema.VariableFile
+		}
 	}
 	return fields
 }
 
-// flagReconKey is a flag's reconciliation key, which opts it into the fallback chain
+// flagReconKey is a flag's (or an argument's) reconciliation key, which opts it into the fallback chain
 // (argv > env > config > default); "" for an argv-only flag. An explicit `key:` is used
 // as-is. `variable:` alone also opts in, keyed by the flag's name, so --token can read
 // GITHUB_TOKEN without a config key.
@@ -75,7 +79,14 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 			Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name,
 			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema),
 			EnvVar:     envVarName(e, envPrefix),
-			Constraint: constraintTags(e.Schema),
+			Constraint: joinTags(constraintTags(e.Schema), expansionTags(e.Schema), pathTag(e.Schema)),
+		}
+		// recon splits an env list or map on its separator option (default ","), plainly.
+		if e.Schema != nil && e.Schema.Separator != "" && e.Schema.Separator != "," {
+			fd.Recon += ",separator=" + e.Schema.Separator
+		}
+		if e.Schema != nil && e.Schema.Nesting == "" {
+			fd.EnvFile = e.Schema.VariableFile
 		}
 		// A nested input's variable is a family prefix, so it goes in the envnest tag
 		// instead of env:, and rotini (not recon) enforces required, since recon
@@ -100,30 +111,65 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 //
 // Values are written with strconv.Quote because reflect reads tag values back through
 // strconv.Unquote; a raw `^\d+$` would be an invalid escape and the tag would read as absent.
-// An enum is encoded as a JSON array so members may contain any character.
+// Enum values, aliases and layouts are written as escaped lists (see tagList), so members may
+// contain any character.
 func constraintTags(schema *InputSchema) string {
 	var parts []string
 	eachConstraint(schema, func(tag, _, tagVal, _ string) {
 		parts = append(parts, tag+":"+strconv.Quote(tagVal))
 	})
-	if l := layoutFor(schema); l != "" {
-		parts = append(parts, "layout:"+strconv.Quote(l))
+	if l := layoutsFor(schema); len(l) > 0 {
+		parts = append(parts, "layout:"+strconv.Quote(l[0]))
+		if len(l) > 1 {
+			parts = append(parts, "layoutlist:"+strconv.Quote(tagList(l)))
+		}
+	}
+	if r := relative(schema); r != "" {
+		parts = append(parts, "relative:"+strconv.Quote(r))
 	}
 	if schema != nil && len(schema.Enum) > 0 {
-		if members, err := json.Marshal(schema.Enum); err == nil { // a []string always marshals
-			parts = append(parts, "enum:"+strconv.Quote(string(members)))
-		}
+		parts = append(parts, "enumlist:"+strconv.Quote(tagList(enumStrings(schema.Enum))))
 		if schema.IgnoreCase {
 			parts = append(parts, `ignorecase:"true"`)
+		}
+		if aliases := enumAliases(schema.Enum); aliases != nil {
+			parts = append(parts, "enumaliases:"+strconv.Quote(tagPairs(aliases)))
+		}
+		if unlisted := enumUnlisted(schema.Enum); unlisted != nil {
+			parts = append(parts, "enumhide:"+strconv.Quote(tagList(unlisted)))
 		}
 	}
 	return strings.Join(parts, " ")
 }
 
+// tagEscaper escapes the list syntax's special bytes in an item, key or value.
+var tagEscaper = strings.NewReplacer(`\`, `\\`, ",", `\,`, "=", `\=`)
+
+// tagList writes items as a list tag value: each item escaped, joined with ",". The input
+// reader splits it back on the unescaped commas.
+func tagList(items []string) string {
+	escaped := make([]string, len(items))
+	for i, it := range items {
+		escaped[i] = tagEscaper.Replace(it)
+	}
+	return strings.Join(escaped, ",")
+}
+
+// tagPairs writes m as a map tag value: key=value pairs in sorted key order, each key and value
+// escaped, joined with ",".
+func tagPairs(m map[string]string) string {
+	pairs := make([]string, 0, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		pairs = append(pairs, tagEscaper.Replace(k)+"="+tagEscaper.Replace(m[k]))
+	}
+	return strings.Join(pairs, ",")
+}
+
 // eachConstraint visits every present validation constraint on schema in a stable order,
 // passing its tag name, its Constraints field name, and its value rendered for a struct tag
-// and for a Go literal. constraintTags and constraintsLiteral both use it so they cannot drift.
-// Numeric bounds are present when non-nil; length and item counts only when non-zero.
+// and for a Go literal. constraintTags and constraintFields both use it so they cannot drift.
+// Numeric bounds, maxLength and maxItems are present when non-nil, so a 0 is kept; minLength
+// and minItems only when non-zero.
 func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal string)) {
 	if schema == nil {
 		return
@@ -133,7 +179,7 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 			return
 		}
 		s := strconv.FormatFloat(*p, 'g', -1, 64)
-		visit(tag, field, s, rotiniPkgName+".Ptr[float64]("+s+")")
+		visit(tag, field, s, "new(float64("+s+"))")
 	}
 	intC := func(tag, field string, n int) {
 		if n == 0 {
@@ -142,20 +188,30 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 		s := strconv.Itoa(n)
 		visit(tag, field, s, s)
 	}
+	intPtrC := func(tag, field string, p *int) {
+		if p == nil {
+			return
+		}
+		s := strconv.Itoa(*p)
+		visit(tag, field, s, "new("+s+")")
+	}
 	floatC("min", "Minimum", bound(schema.Minimum))
 	floatC("max", "Maximum", bound(schema.Maximum))
 	floatC("xmin", "ExclusiveMinimum", bound(schema.ExclusiveMinimum))
 	floatC("xmax", "ExclusiveMaximum", bound(schema.ExclusiveMaximum))
 	floatC("multipleof", "MultipleOf", bound(schema.MultipleOf))
 	intC("minlen", "MinLength", schema.MinLength)
-	intC("maxlen", "MaxLength", schema.MaxLength)
+	intPtrC("maxlen", "MaxLength", schema.MaxLength)
 	intC("minitems", "MinItems", schema.MinItems)
-	intC("maxitems", "MaxItems", schema.MaxItems)
+	intPtrC("maxitems", "MaxItems", schema.MaxItems)
 	if schema.Pattern != "" {
 		visit("pattern", "Pattern", schema.Pattern, strconv.Quote(schema.Pattern))
 		if schema.PatternMessage != "" {
 			visit("patternmsg", "PatternMessage", schema.PatternMessage, strconv.Quote(schema.PatternMessage))
 		}
+	}
+	if schema.UniqueItems {
+		visit("unique", "UniqueItems", "true", "true")
 	}
 }
 
@@ -165,7 +221,7 @@ func envVarOf(schema *InputSchema) string {
 	return strings.Join(variables(schema), ",")
 }
 
-// flagEnvVar is a flag's pinned env-fallback variable: its explicit `variable:` (exempt from
+// flagEnvVar is a flag's (or an argument's) pinned env-fallback variable: its explicit `variable:` (exempt from
 // env_prefix), else the name derived from its recon key, else "" for an argv-only flag.
 func flagEnvVar(schema *InputSchema, reconKey, envPrefix string) string {
 	if v := envVarOf(schema); v != "" {
@@ -188,7 +244,7 @@ func configFields(in *Inputs) []fieldDef {
 		fd := fieldDef{
 			Field: toPascalCase(c.Name), GoType: goFieldType(c.Schema), Tag: c.Name,
 			Import: fieldImport(c.Schema), Recon: reconTag(configKey(c), c.Schema),
-			Constraint: constraintTags(c.Schema),
+			Constraint: joinTags(constraintTags(c.Schema), expansionTags(c.Schema), pathTag(c.Schema)),
 		}
 		if c.Schema != nil && c.Schema.File != "" {
 			fd.CfgFile = c.Schema.File
@@ -234,51 +290,86 @@ func reconTag(key string, schema *InputSchema) string {
 	return strings.Join(parts, ",")
 }
 
-// stdinTypeExpr returns the Go type for a command's Stdin field: "*<Prefix>Stdin" for a
-// document payload, "*string" for text, "*[]string" for lines, or "" when the command
-// declares no stdin. It is always a pointer so "nothing piped" differs from "empty payload".
+// stdinTypeExpr returns the Go type for a command's Stdin field, or "" when the command
+// declares no stdin: "*<Prefix>Stdin" for a document payload, "*string" for text, "*[]string"
+// for lines, "*[]byte" for bytes and "*[]<Prefix>Stdin" for jsonl, where <Prefix>Stdin is one
+// record. A pointer, so "nothing piped" differs from "empty payload". A streamed lines or jsonl
+// stdin is an iterator instead, nil when stdin isn't read.
 func stdinTypeExpr(prefix string, in *Inputs) string {
 	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
 		return ""
 	}
+	stream := in.Stdin.Stream
 	switch in.Stdin.Format {
 	case "text":
 		return "*string"
+	case "bytes":
+		return "*[]byte"
 	case "lines":
+		if stream {
+			return "iter.Seq2[string, error]"
+		}
 		return "*[]string"
+	case "jsonl":
+		if stream {
+			return "iter.Seq2[" + prefix + "Stdin, error]"
+		}
+		return "*[]" + prefix + "Stdin"
 	}
 	return "*" + prefix + "Stdin"
 }
 
 // rawStdinFormat reports whether a stdin format binds the payload directly rather than
-// decoding it into a generated struct.
-func rawStdinFormat(format string) bool { return format == "text" || format == "lines" }
+// decoding it into a generated type.
+func rawStdinFormat(format string) bool {
+	return format == "text" || format == "lines" || format == "bytes"
+}
 
-// stdinFormatExpr returns the value of a command's `stdin:"<format>[,required]"` struct
-// tag: the decode format (default json), plus ",required" when the payload is required so
-// the input reader rejects an empty stdin. "" when the command declares no stdin.
+// stdinFormatExpr returns the value of a command's
+// `stdin:"<format>[,stream][,nul][,required][,unless=<argument>]"` struct tag: the decode
+// format (default json), then the options the input reader needs: a streamed field, NUL as the
+// line separator, an empty stdin rejected, and the file argument whose value means stdin is
+// not read. "" when the command declares no stdin.
 func stdinFormatExpr(in *Inputs) string {
 	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
 		return ""
 	}
-	format := in.Stdin.Format
-	if format == "" {
-		format = "json"
+	parts := []string{in.Stdin.Format}
+	if parts[0] == "" {
+		parts[0] = "json"
+	}
+	if in.Stdin.Stream {
+		parts = append(parts, "stream")
+	}
+	if in.Stdin.Separator == "nul" {
+		parts = append(parts, "nul")
 	}
 	if in.Stdin.Schema.Required {
-		format += ",required"
+		parts = append(parts, "required")
 	}
-	return format
+	if in.Stdin.UnlessArgument != "" {
+		parts = append(parts, "unless="+in.Stdin.UnlessArgument)
+	}
+	return strings.Join(parts, ",")
 }
 
-// argFields returns the <Prefix>Arguments struct fields for a command's inputs.
-func argFields(in *Inputs) []fieldDef {
+// argFields returns the <Prefix>Arguments struct fields for a command's inputs. An argument
+// with an env or config fallback carries the same recon and env tags a flag does.
+func argFields(in *Inputs, envPrefix string) []fieldDef {
 	if in == nil {
 		return nil
 	}
 	fields := make([]fieldDef, 0, len(in.Arguments))
 	for _, a := range in.Arguments {
-		fields = append(fields, fieldDef{Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema), Comment: contractComment(a.Schema)})
+		key := flagReconKey(a.Name, a.Schema)
+		fields = append(fields, fieldDef{
+			Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema),
+			Recon: key, EnvVar: flagEnvVar(a.Schema, key, envPrefix), Comment: contractComment(a.Schema),
+			Constraint: expansionTags(a.Schema),
+		})
+		if key != "" && a.Schema.VariableFile != "" {
+			fields[len(fields)-1].EnvFile = a.Schema.VariableFile
+		}
 	}
 	return fields
 }
@@ -329,33 +420,33 @@ func jsonSchemaTypeToGo(t string) string {
 		return "int" // presence counter: the field tallies occurrences (-vvv → 3)
 	case "existingfile", "existingdir":
 		return "string" // a path; the declared type name makes the parser check it (see definitionType)
-	case "duration":
-		return "time.Duration"
-	case "time", "datetime", "date":
-		return "time.Time"
-	case "url":
-		return "*url.URL"
-	case "email":
-		return "mail.Address"
-	case "timezone":
-		return "*time.Location"
-	case "mac":
-		return "net.HardwareAddr"
-	case "ip":
-		return "netip.Addr"
-	case "cidr":
-		return "netip.Prefix"
-	case "hostport":
-		return "netip.AddrPort"
-	case "bytesize":
-		return "rotini.ByteSize"
-	case "hexbytes":
-		return "rotini.HexBytes"
-	case "base64bytes":
-		return "rotini.Base64Bytes"
-	default:
-		return t
+	case "inputfile", "outputfile":
+		return "string" // a path, or "-" for stdin or stdout; checked like existingfile
 	}
+	if g, ok := valueTypeGo[t]; ok {
+		return g
+	}
+	return t
+}
+
+// valueTypeGo is the Go type each of rotini's value types reads into.
+var valueTypeGo = map[string]string{
+	"duration":    "time.Duration",
+	"time":        "time.Time",
+	"datetime":    "time.Time",
+	"date":        "time.Time",
+	"url":         "*url.URL",
+	"email":       "mail.Address",
+	"timezone":    "*time.Location",
+	"mac":         "net.HardwareAddr",
+	"ip":          "netip.Addr",
+	"cidr":        "netip.Prefix",
+	"hostport":    "netip.AddrPort",
+	"bytesize":    "rotini.ByteSize",
+	"hexbytes":    "rotini.HexBytes",
+	"base64bytes": "rotini.Base64Bytes",
+	"regexp":      "*regexp.Regexp",
+	"glob":        "rotini.Glob",
 }
 
 // splitMapType splits a `map[K]V` spelling into its key and value, matching brackets so a key or
@@ -388,6 +479,8 @@ var rotiniTypeAliases = []string{
 	"existingfile", "existingdir", "duration", "time", "datetime", "date",
 	"url", "email", "timezone", "mac", "ip", "cidr", "hostport",
 	"bytesize", "hexbytes", "base64bytes",
+	"regexp", "glob",
+	"inputfile", "outputfile",
 }
 
 // toTemplateFields converts fieldDefs to template fields, assembling each struct-tag

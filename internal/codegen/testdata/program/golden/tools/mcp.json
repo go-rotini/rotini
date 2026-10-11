@@ -1,0 +1,355 @@
+{
+  "tools": [
+    {
+      "_meta": {
+        "dev.rotini/invoke": {
+          "path": [
+            "add"
+          ],
+          "arguments": [
+            {
+              "name": "title",
+              "kind": "scalar"
+            }
+          ],
+          "flags": {
+            "due": {
+              "flag": "--due",
+              "kind": "scalar",
+              "type": "date"
+            },
+            "priority": {
+              "flag": "--priority",
+              "kind": "scalar",
+              "type": "string"
+            },
+            "tag": {
+              "flag": "--tag",
+              "kind": "list",
+              "type": "[]string"
+            },
+            "verbose": {
+              "flag": "--verbose",
+              "kind": "count",
+              "type": "count"
+            }
+          }
+        }
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
+      "description": "add a task\n\nEffects: write.\n\nExit codes: 3 (duplicate): a task with this title exists.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "due": {
+            "description": "when it is due",
+            "format": "date",
+            "type": "string"
+          },
+          "priority": {
+            "default": "low",
+            "description": "how urgent it is (experimental)",
+            "enum": [
+              "low",
+              "high"
+            ],
+            "type": "string"
+          },
+          "tag": {
+            "description": "tags for the task",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "title": {
+            "description": "what to do",
+            "minLength": 1,
+            "type": "string"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "taskr_add",
+      "outputSchema": {
+        "$defs": {
+          "Task": {
+            "properties": {
+              "done": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "integer"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ],
+            "type": "object"
+          }
+        },
+        "$ref": "#/$defs/Task"
+      },
+      "title": "taskr add"
+    },
+    {
+      "_meta": {
+        "dev.rotini/invoke": {
+          "path": [
+            "list"
+          ],
+          "flags": {
+            "label": {
+              "flag": "--label",
+              "kind": "map",
+              "type": "map[string]string"
+            },
+            "page": {
+              "flag": "--page",
+              "kind": "scalar",
+              "type": "string",
+              "role": "page"
+            },
+            "verbose": {
+              "flag": "--verbose",
+              "kind": "count",
+              "type": "count"
+            }
+          },
+          "fixed": [
+            "--format=json"
+          ]
+        }
+      },
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "list tasks\n\nEffects: read, idempotent.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "only tasks with these labels",
+            "type": "object"
+          },
+          "page": {
+            "description": "the page token from the last call",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "taskr_list",
+      "outputSchema": {
+        "items": {},
+        "type": "array"
+      },
+      "title": "taskr list"
+    },
+    {
+      "_meta": {
+        "dev.rotini/invoke": {
+          "path": [
+            "purge"
+          ],
+          "flags": {
+            "dry-run": {
+              "flag": "--dry-run",
+              "kind": "scalar",
+              "type": "bool",
+              "role": "dry-run"
+            },
+            "verbose": {
+              "flag": "--verbose",
+              "kind": "count",
+              "type": "count"
+            },
+            "yes": {
+              "flag": "--yes",
+              "kind": "scalar",
+              "type": "bool",
+              "role": "confirm"
+            }
+          }
+        }
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "delete finished tasks\n\nEffects: destructive, idempotent.\n\nExit codes: 75 (busy, retryable): the list is locked.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "dry-run": {
+            "description": "list what would be deleted",
+            "type": "boolean"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "yes": {
+            "description": "delete without asking",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "taskr_purge",
+      "title": "taskr purge"
+    },
+    {
+      "_meta": {
+        "dev.rotini/invoke": {
+          "path": [
+            "import"
+          ],
+          "flags": {
+            "verbose": {
+              "flag": "--verbose",
+              "kind": "count",
+              "type": "count"
+            }
+          },
+          "stdin": {
+            "param": "stdin",
+            "format": "json"
+          }
+        }
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
+      "description": "add tasks read from stdin\n\nEffects: write.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "stdin": {
+            "description": "What the command reads on stdin, as a JSON value.",
+            "items": {},
+            "type": "array"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stdin"
+        ],
+        "type": "object"
+      },
+      "name": "taskr_import",
+      "title": "taskr import"
+    },
+    {
+      "_meta": {
+        "dev.rotini/invoke": {
+          "path": [
+            "remote",
+            "sync"
+          ],
+          "flags": {
+            "prune": {
+              "flag": "--prune",
+              "kind": "scalar",
+              "type": "bool"
+            },
+            "verbose": {
+              "flag": "--verbose",
+              "kind": "count",
+              "type": "count"
+            }
+          }
+        }
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "sync with the server\n\nEffects: destructive, open world.\n\nRequires TASKR_KEY in the server's environment.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "prune": {
+            "description": "also delete tasks the server doesn't have",
+            "type": "boolean"
+          },
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "taskr_remote_sync",
+      "title": "taskr remote sync"
+    },
+    {
+      "_meta": {
+        "dev.rotini/invoke": {
+          "path": [
+            "remote",
+            "show"
+          ],
+          "flags": {
+            "verbose": {
+              "flag": "--verbose",
+              "kind": "count",
+              "type": "count"
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "show the server's address\n\nEffects: read.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "verbose": {
+            "description": "say more",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "taskr_remote_show",
+      "title": "taskr remote show"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+validate:
+  posix_names: true

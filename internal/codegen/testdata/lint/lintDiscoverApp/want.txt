@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:8:7: command demo: config_files "system": `discover` strategy "xdg-system" needs `app` (the directory under the config root)
+spec: .rotini.spec.yaml:10:7: command demo: config_files "native": `discover` strategy "native" needs `app` (the directory under the config root)

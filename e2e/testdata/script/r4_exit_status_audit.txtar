@@ -25,6 +25,15 @@ cp documented.yaml cmd/demo/.rotini.spec.yaml
 exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
 ! stderr 'Warning:'
 
+# ── a named code becomes a constant the audit reads like the number ─────────
+cp named.yaml cmd/demo/.rotini.spec.yaml
+cp named_sync.go.txt internal/cmd/demo/demo_sync.go
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+stderr '^Warning: internal/cmd/demo/demo_sync\.go:\d+: "demo sync" exits with DemoPushExitRejected, which belongs to "demo push"; declare the code on this command and use its own constant$'
+! stderr 'DemoSyncExitConflict'
+exec go build -o demo$exe ./cmd/demo
+wantexit 3 ./demo$exe sync
+
 # ── validate reports a code listed twice ─────────────────────────────────────
 cp twice.yaml cmd/demo/.rotini.spec.yaml
 ! exec rotini validate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
@@ -63,6 +72,46 @@ command:
       exit_status:
         - { code: 3, summary: a conflict }
         - { code: 3, summary: another conflict }
+-- named.yaml --
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: sync
+      summary: sync things
+      exit_status:
+        - { code: 0, summary: synced }
+        - { code: 3, name: conflict, summary: a conflict }
+        - { code: 5, summary: rejected }
+    - name: push
+      summary: push things
+      exit_status:
+        - { code: 5, name: rejected, summary: the remote said no }
+-- named_sync.go.txt --
+package demo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*demoSyncHandler)(nil)
+
+type demoSyncHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*demoSyncHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if false {
+		rtx.HaltWithCode(DemoPushExitRejected)
+		return
+	}
+	rtx.HaltWithCode(DemoSyncExitConflict)
+}
 -- cmd/demo/.rotini.conf.yaml --
 version: 0.0.0
 generate:

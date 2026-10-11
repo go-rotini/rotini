@@ -1,0 +1,180 @@
+# Every page section that comes from declared data: group descriptions in the declared order,
+# long-only flags aligned with the long column, constraints on each input kind, a stdin
+# section for each format, and a passthrough command, described enum values, a passthrough
+# argument, long input descriptions, stability markers, exit-code links, help topics and
+# response files.
+version: 0.0.0
+command:
+  name: ops
+  summary: run the fleet
+  env_prefix: OPS
+  response_files: { prefix: "@" }
+  config_files:
+    - name: user
+      path: ~/.ops.yaml
+  groups:
+    - name: Data
+      description: Commands that read a document from standard input.
+    - name: Deploying
+      description: |-
+        Commands that change what runs where.
+        Each one asks before it acts.
+    - name: Output
+      description: Flags that shape what ops prints.
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help, -h]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+    - name: verbose
+      summary: say more
+      identifiers: [-v, --verbose]
+      cascading: true
+      group: Output
+      schema: {type: count}
+    - name: color
+      summary: when to color
+      identifiers: [--color]
+      cascading: true
+      group: Output
+      schema: {type: string, enum: [auto, always, never], default: auto}
+  env:
+    - name: token
+      summary: the API token
+      description: |-
+        Get one from the console.
+
+        .Keep it secret; a path such as C:\ops\token works too.
+      schema: {type: string, minLength: 20}
+    - name: log
+      summary: the log level
+      schema:
+        type: string
+        enum: [{value: debug, summary: everything}, info, {value: error, summary: failures only}]
+  config:
+    - name: region
+      summary: the default region
+      description: The region commands use when none is given.
+      stability: beta
+      schema: {type: string, key: region, pattern: '^[a-z]+-[0-9]$', pattern_message: 'must look like eu-1'}
+    - name: profile
+      summary: the output profile
+      schema: {type: string, key: profile, enum: [{value: short, summary: one line each}, {value: long, summary: every field}]}
+  topics:
+    - name: filters
+      summary: how filters work
+      body: |-
+        A filter is a word that narrows a list.
+
+        Filters combine with AND.
+    - name: environment
+      summary: the environment variables ops reads
+      generate: environment
+  schemas:
+    Task:
+      type: object
+      description: One task to import.
+      required: [title]
+      properties:
+        title: {type: string, description: what to do}
+        due: {type: string, description: when it is due}
+    TaskList:
+      type: array
+      description: The tasks to import.
+      items: {$ref: Task}
+  commands:
+    - name: deploy
+      summary: ship a service
+      group: Deploying
+      stability: beta
+      exit_status:
+        - { code: 0, summary: shipped }
+        - { code: 4, name: rejected, summary: the cluster refused it, docs_url: "https://example.com/ops/rejected" }
+      arguments:
+        - name: service
+          summary: the service to ship
+          description: |-
+            The service to ship, by its registry name.
+
+            Names are lowercase.
+          schema: {type: string, required: true, minLength: 2, maxLength: 63, pattern: '^[a-z][a-z0-9-]*$'}
+        - name: replicas
+          summary: how many copies
+          schema: {type: int, minimum: 1}
+      flags:
+        - name: port
+          summary: listen port
+          description: The port the service listens on.
+          identifiers: [--port, -p]
+          schema: {type: int, default: 8080, minimum: 1, maximum: 65535}
+        - name: ratio
+          summary: traffic share
+          stability: experimental
+          identifiers: [--ratio]
+          schema: {type: float64, exclusiveMinimum: 0, maximum: 1}
+        - name: step
+          summary: rollout step
+          identifiers: [--step]
+          schema: {type: int, multipleOf: 5}
+        - name: tag
+          summary: a label
+          identifiers: [--tag]
+          schema: {type: '[]string', minItems: 1, maxItems: 5, separator: ",", maxLength: 10}
+        - name: timeout
+          summary: how long to wait
+          identifiers: [--timeout]
+          schema: {type: duration, minimum: 1s, exclusiveMaximum: 1h}
+        - name: env
+          summary: extra environment
+          identifiers: [--env, -e]
+          schema: {type: 'map[string]string', maxItems: 8}
+    - name: import
+      summary: import tasks
+      group: Data
+      stdin:
+        format: yaml
+        schema: {$ref: TaskList, required: true}
+    - name: upper
+      summary: upper-case lines
+      stability: experimental
+      group: Data
+      stdin:
+        format: lines
+    - name: note
+      summary: add a note
+      stdin:
+        schema:
+          type: object
+          properties:
+            text: {type: string, description: the note}
+    - name: exec
+      summary: run a command
+      passthrough: true
+      arguments:
+        - name: argv
+          summary: the command and its arguments
+          schema: {type: '[]string', required: true}
+    - name: run
+      summary: run a command on a host
+      options_first: true
+      arguments:
+        - name: host
+          summary: where to run it
+          schema: {type: string, required: true, enum: [{value: edge, summary: the edge pool}, core]}
+        - name: command
+          summary: the command and its arguments
+          passthrough: true
+          schema: {type: '[]string', required: true}
+      flags:
+        - name: format
+          summary: how to print results
+          identifiers: [--format, -f]
+          schema:
+            type: string
+            default: text
+            enum:
+              - {value: text, summary: aligned columns}
+              - json
+              - {value: yaml, summary: human-friendly}

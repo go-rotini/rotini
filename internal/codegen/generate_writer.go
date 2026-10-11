@@ -25,6 +25,10 @@ type planner struct {
 	// pending and removed are what a dry run would have done, by absolute path.
 	pending map[string][]byte
 	removed map[string]bool
+
+	// created lists, in order, each create-once file the run created: files the author owns
+	// from then on.
+	created []string
 }
 
 // newPlanner returns a planner that applies each operation (dry false) or only records it.
@@ -58,7 +62,23 @@ func (pl *planner) createOnce(path string, content []byte) error {
 	if err != nil || exists {
 		return err
 	}
-	return pl.apply(fs.PlanOp{Action: fs.PlanActionCreate, Path: path, Data: content, Perm: generatedPerm})
+	if err := pl.apply(fs.PlanOp{Action: fs.PlanActionCreate, Path: path, Data: content, Perm: generatedPerm}); err != nil {
+		return err
+	}
+	pl.created = append(pl.created, path)
+	return nil
+}
+
+// createdLines renders each created file as a report line, `created: <path>`, with the path
+// relative to the working directory.
+func (pl *planner) createdLines() string {
+	var b strings.Builder
+	for _, path := range pl.created {
+		b.WriteString("created: ")
+		b.WriteString(relToWorkdir(path))
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // remove plans deleting path when it exists.

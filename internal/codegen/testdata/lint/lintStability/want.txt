@@ -1,0 +1,3 @@
+warning: spec: .rotini.spec.yaml:18:22: command demo/alpha/child: declares stability "beta" but inherits experimental from command demo/alpha; a command is as unstable as its ancestors; remove `stability` or make it "experimental"
+warning: spec: .rotini.spec.yaml:22:26: command demo/alpha/child: flag "--deep": declares stability "beta" but inherits experimental from command demo/alpha; an input is as unstable as its command; remove `stability` or make it "experimental"
+warning: spec: .rotini.spec.yaml:39:22: command demo/stable: flag "--must": is required and experimental on a command that isn't experimental, so the command depends on an input that may change or go away; make it optional, or mark the command experimental too

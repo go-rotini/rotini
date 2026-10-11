@@ -3,14 +3,14 @@ package rotini
 import (
 	"encoding"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-rotini/recon"
 )
 
 // CheckInputs reports whether v satisfies the spec for the running command: required inputs,
@@ -25,6 +25,9 @@ import (
 // [PresenceOf] builds a set from v's non-zero fields; build one by hand when a zero value must
 // count as supplied. A declared default satisfies a required input, as it does for
 // [Context.Inputs].
+//
+// A streamed stdin field (an iterator) counts as supplied when it is non-nil; its items are
+// checked as they are read, not here.
 //
 // It reads no channel, applies no defaults and never changes v. T must describe the running
 // command, as for Context.Inputs. Each input is named by its canonical spelling: a flag's first
@@ -65,7 +68,7 @@ func (rtx *Context) CheckInputs[T any](v T, set Presence) error {
 	if err := requiredErrors(chain, store); err != nil {
 		return err
 	}
-	if err := checkTypedValues(rv, chain, anchor, func(p FieldPath) bool { _, ok := set[p]; return ok }, readerFor(rtx).stdinSchemas); err != nil {
+	if err := checkTypedValues(rv, chain, anchor, func(p FieldPath) bool { _, ok := set[p]; return ok }, readerFor(rtx).stdinSchemas, rtx.osView()); err != nil {
 		return err
 	}
 	if err := checkAbsentItemCounts(rv, chain, anchor, set); err != nil {
@@ -74,16 +77,17 @@ func (rtx *Context) CheckInputs[T any](v T, set Presence) error {
 	if err := checkTypedChannelPresence(rv, chain, anchor, set); err != nil {
 		return err
 	}
-	if err := validateFlagGroups(chain, store); err != nil {
+	if err := checkGroups(rtx.features(), chain, store); err != nil {
 		return err
 	}
-	return validateFlagDependencies(chain, store)
+	return checkDependencies(rtx.features(), chain, store)
 }
 
 // PresenceOf returns a [Presence] marking every non-zero input field of v as supplied, in the
 // shape [Context.CheckInputs] and a hand-built [InputLayer] read. A field holding its zero value
 // (false, 0, "") is not marked, so build the Presence by hand when a zero value must count as
-// supplied. A non-nil pointer to a zero value (a nullable input) is marked.
+// supplied. A non-nil pointer to a zero value (a nullable input) is marked. Each field's source
+// is Layer "custom"; in a merge, the hand-built [InputLayer]'s Name replaces it.
 func PresenceOf[T any](v T) Presence {
 	set := Presence{}
 	rv := reflect.ValueOf(v)
@@ -103,7 +107,7 @@ func PresenceOf[T any](v T) Presence {
 				}
 			})
 		}
-		if sf := ci.FieldByName("Stdin"); sf.IsValid() && sf.Kind() == reflect.Pointer && !sf.IsNil() {
+		if sf := ci.FieldByName("Stdin"); stdinSet(sf) {
 			set[fieldPath(top, "Stdin")] = InputSource{Layer: "custom"}
 		}
 	}
@@ -136,7 +140,7 @@ func presenceStore(v reflect.Value, chain []Command, anchor int, set Presence) *
 	store.span = &[2]int{anchor, anchor + v.NumField()}
 	walkCommandStructs(v, chain, anchor, func(top string, scope int, ci reflect.Value) {
 		frame := chain[scope]
-		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, _ reflect.Value) {
+		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, f reflect.Value) {
 			fd, ok := findFlagDef(frame.Flags, logical)
 			if !ok {
 				return
@@ -153,6 +157,7 @@ func presenceStore(v reflect.Value, chain []Command, anchor int, set Presence) *
 					store.argvSet[scope] = map[string]bool{}
 				}
 				store.argvSet[scope][logical] = true
+				store.scopes[scope].noteDependencyValue(logical, f)
 			}
 		})
 		if scope != len(chain)-1 {
@@ -160,28 +165,49 @@ func presenceStore(v reflect.Value, chain []Command, anchor int, set Presence) *
 		}
 		// Positionals fill in order, so the leading run of supplied (or defaulted) arguments is
 		// what counts toward the required check.
-		n := 0
-		for _, ad := range frame.Arguments {
+		present := func(ad ArgDef) bool {
 			path, ok := argPath(ci, top, ad.Name)
 			_, given := set[path]
-			if (!ok || !given) && ad.Default == "" {
-				break
-			}
-			n++
+			return (ok && given) || ad.Default != ""
 		}
-		store.scopes[scope].args = make([]string, n)
+		store.scopes[scope].args = make([]string, suppliedArgs(frame.Arguments, present))
 	})
 	return store
+}
+
+// suppliedArgs counts the positionals that stand for the present arguments: the leading run
+// of present ones, since positionals fill in order. Fixed arguments after a variadic bind from
+// the end, so they count only when all are present, behind the leading run and the variadic.
+func suppliedArgs(args []ArgDef, present func(ArgDef) bool) int {
+	n := 0
+	v := variadicIndex(args)
+	for i, ad := range args {
+		if !present(ad) || (i == v && hasArgTail(args)) {
+			break
+		}
+		n++
+	}
+	if hasArgTail(args) && n == v {
+		tail := args[v+1:]
+		if !slices.ContainsFunc(tail, func(ad ArgDef) bool { return !present(ad) }) {
+			if present(args[v]) {
+				n++
+			}
+			n += len(tail)
+		}
+	}
+	return n
 }
 
 // withHandBuilt returns a copy of the store in which every input a hand-built layer supplied
 // is present for the presence rules (and set, for flag groups and dependencies) without
 // adding a value the value rules would read.
 func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anchor int, handBuilt map[FieldPath]bool) *parsedInputs {
-	out := &parsedInputs{scopes: make([]scopeInputs, len(p.scopes)), argvSet: make([]map[string]bool, len(p.argvSet)), span: p.span, detached: p.detached}
+	out := &parsedInputs{scopes: make([]scopeInputs, len(p.scopes)), argvSet: make([]map[string]bool, len(p.argvSet)), span: p.span, detached: p.detached, dashedFirst: p.dashedFirst, lateFlag: p.lateFlag, clock: p.clock}
 	for i, si := range p.scopes {
 		cp := si
 		cp.flags = maps.Clone(si.flags)
+		cp.depValues = maps.Clone(si.depValues)
 		cp.args = append([]string(nil), si.args...)
 		out.scopes[i] = cp
 	}
@@ -190,7 +216,7 @@ func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anch
 	}
 	walkCommandStructs(merged, chain, anchor, func(top string, scope int, ci reflect.Value) {
 		si := &out.scopes[scope]
-		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, _ reflect.Value) {
+		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, f reflect.Value) {
 			if !handBuilt[fieldPath(top, "Flags", fieldName)] {
 				return
 			}
@@ -202,6 +228,7 @@ func (p *parsedInputs) withHandBuilt(merged reflect.Value, chain []Command, anch
 			}
 			si.flags[logical] = nil
 			si.presenceOnly[logical] = true
+			si.noteDependencyValue(logical, f)
 			if out.argvSet[scope] == nil {
 				out.argvSet[scope] = map[string]bool{}
 			}
@@ -257,8 +284,11 @@ func findArgDef(defs []ArgDef, name string) (ArgDef, bool) {
 // lengths, patterns, path checks, item counts and object schemas for flags and arguments, the
 // tag-declared enum and constraints for environment and config fields, and the stdin schema
 // (when stdinSchemas is given). It is the typed half of the rule core the command line shares.
-func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func(FieldPath) bool, stdinSchemas map[string]string) error {
+// view names environment variables and resolves relative paths.
+func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func(FieldPath) bool, stdinSchemas map[string]string, view *osView) error {
 	var err error
+	var dash dashOnce // "-" may name stdin once across the inputfile fields
+	fs := view.clockRef().features()
 	walkCommandStructs(v, chain, anchor, func(top string, scope int, ci reflect.Value) {
 		if err != nil {
 			return
@@ -269,7 +299,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 				return
 			}
 			if fd, ok := findFlagDef(frame.Flags, logical); ok {
-				err = checkTypedFlag(fd, f)
+				err = dash.typed(checkTypedFlag(fs, fd, f, view.base()), fd.Type, flagLabel(fd), flagLabel(fd), f)
 			}
 		})
 		if err == nil && scope == len(chain)-1 {
@@ -278,7 +308,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 					return
 				}
 				if ad, ok := findArgDef(frame.Arguments, logical); ok {
-					err = checkTypedArg(ad, f)
+					err = dash.typed(checkTypedArg(ad, f, view.base()), ad.Type, "<"+ad.Name+">", "", f)
 				}
 			})
 		}
@@ -287,11 +317,11 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 				if err != nil || !include(fieldPath(top, channel, fieldName)) {
 					return
 				}
-				err = checkTypedChannelField(channel, tag, f)
+				err = checkTypedChannelField(channel, tag, f, view)
 			})
 		}
 		if err == nil && stdinSchemas != nil && scope == len(chain)-1 && include(fieldPath(top, "Stdin")) {
-			err = checkTypedStdin(ci, stdinSchemas)
+			err = checkTypedStdin(fs, ci, stdinSchemas)
 		}
 	})
 	return err
@@ -326,55 +356,51 @@ func checkAbsentItemCounts(v reflect.Value, chain []Command, anchor int, set Pre
 }
 
 // checkTypedFlag applies a flag's value rules to its typed field, naming the flag canonically.
-func checkTypedFlag(fd FlagDef, f reflect.Value) error {
+func checkTypedFlag(fs *featureSet, fd FlagDef, f reflect.Value, dir string) error {
 	label := flagLabel(fd)
 	elems, count, ok := typedElems(f)
 	if !ok {
 		return nil
 	}
 	if fd.ObjectSchema != "" {
-		return checkTypedObject(label, fd.ObjectSchema, elems)
-	}
-	for _, s := range typedTexts(elems) {
-		if len(fd.Enum) > 0 && !enumHas(fd.Enum, s, fd.IgnoreCase) {
-			return &ParseError{
-				Kind:       ParseKindEnumViolation,
-				Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(s, fd.Secret), label, strings.Join(fd.Enum, ", ")),
-				Flag:       label,
-				Token:      redactValue(s, fd.Secret),
-				Candidates: fd.Enum,
+		if fd.UniqueItems && isArrayType(fd.Type) {
+			if err := checkUniqueTyped(label, elems, fd.Secret); err != nil {
+				return err
 			}
 		}
+		return checkTypedObject(fs, label, fd.ObjectSchema, elems)
 	}
-	return checkTypedConstraints(label, fd.Type, fd.Constraints, count, elems, fd.Secret)
+	enum := flagEnum(fd)
+	for _, s := range typedTexts(elems) {
+		if enum.declared() && !enum.has(s) {
+			return enum.violation(label, label, s, fd.Secret)
+		}
+	}
+	return checkTypedConstraints(label, fd.Type, fd.Constraints, count, elems, fd.Secret, dir)
 }
 
 // checkTypedArg applies an argument's value rules to its typed field.
-func checkTypedArg(ad ArgDef, f reflect.Value) error {
+func checkTypedArg(ad ArgDef, f reflect.Value, dir string) error {
 	label := "<" + ad.Name + ">"
 	elems, count, ok := typedElems(f)
 	if !ok {
 		return nil
 	}
+	enum := argEnum(ad)
 	for _, s := range typedTexts(elems) {
-		if len(ad.Enum) > 0 && !enumHas(ad.Enum, s, ad.IgnoreCase) {
-			return &ParseError{
-				Kind:       ParseKindEnumViolation,
-				Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(s, ad.Secret), label, strings.Join(ad.Enum, ", ")),
-				Token:      redactValue(s, ad.Secret),
-				Candidates: ad.Enum,
-			}
+		if enum.declared() && !enum.has(s) {
+			return enum.violation(label, "", s, ad.Secret)
 		}
 	}
-	return checkTypedConstraints(label, ad.Type, ad.Constraints, count, elems, ad.Secret)
+	return checkTypedConstraints(label, ad.Type, ad.Constraints, count, elems, ad.Secret, dir)
 }
 
 // checkTypedChannelField applies an environment or config field's tag-declared enum and
 // constraints, labeled as the channel validation labels it.
-func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Value) error {
+func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Value, view *osView) error {
 	c, has := channelConstraints(tag)
-	enum, ignoreCase := channelEnum(tag)
-	if !has && len(enum) == 0 {
+	enum := channelEnum(tag)
+	if !has && !enum.declared() && tag.Get("path") == "" {
 		return nil
 	}
 	body := tag.Get("recon")
@@ -387,7 +413,7 @@ func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Val
 	if channel == "Env" {
 		ch = channelEnv
 		if env := tag.Get("env"); env != "" {
-			label = chosenEnv(env)
+			label = chosenEnv(view, env)
 		}
 	}
 	elems, count, ok := typedElems(f)
@@ -395,10 +421,14 @@ func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Val
 		return nil
 	}
 	secret := reconHasSecret(body)
-	if err := checkChannelEnum(ch, label, enum, ignoreCase, typedTexts(elems), secret); err != nil {
+	if err := checkChannelEnum(ch, label, enum, typedTexts(elems), secret); err != nil {
 		return err
 	}
-	return checkTypedConstraints(label, channelGoType(f.Type()), c, count, elems, secret)
+	typ := channelFieldType(tag, f.Type())
+	if isPathType(typ) && len(elems) == 1 && typedText(elems[0]) == "" {
+		typ = channelGoType(f.Type()) // an empty path is no path: nothing to check
+	}
+	return checkTypedConstraints(label, typ, c, count, elems, secret, view.base())
 }
 
 // checkTypedChannelPresence reports a required environment, config or stdin input the
@@ -418,11 +448,16 @@ func checkTypedChannelPresence(v reflect.Value, chain []Command, anchor int, set
 				if _, given := set[fieldPath(top, channel, fieldName)]; given {
 					return
 				}
-				ch, key := channelConfig, reconKey(body)
+				key := reconKey(body)
 				if channel == "Env" {
-					ch = channelEnv
+					var names []string
+					if tag.Get("env") != "" {
+						names = strings.Split(tag.Get("env"), ",")
+					}
+					err = usageBind(channelEnv, key, envUnsetLabel(names, key)+" is required", nil)
+					return
 				}
-				err = usageBind(ch, key, fmt.Sprintf("%s %q is required", channelNoun(ch), key), nil)
+				err = usageBind(channelConfig, key, "config key "+key+" is required", nil)
 			})
 		}
 		if err != nil || scope != len(chain)-1 {
@@ -432,8 +467,9 @@ func checkTypedChannelPresence(v reflect.Value, chain []Command, anchor int, set
 		if !ok {
 			return
 		}
-		if _, required := parseStdinTag(field.Tag.Get("stdin")); !required {
-			return
+		tag := parseStdinTag(field.Tag.Get("stdin"))
+		if !tag.required || (tag.unless != "" && typedArgGiven(ci, tag.unless)) {
+			return // not required, or the file argument is the input
 		}
 		if _, given := set[fieldPath(top, "Stdin")]; !given {
 			err = usageBind(channelStdin, "", "required stdin payload is missing", nil)
@@ -452,33 +488,51 @@ func reconHasOption(body, opt string) bool {
 	return false
 }
 
-// checkTypedStdin validates a supplied stdin document against the command's stdin schema.
-func checkTypedStdin(ci reflect.Value, schemas map[string]string) error {
+// checkTypedStdin validates a supplied stdin document against the command's stdin schema, or
+// each record of a JSON Lines payload against its record schema. A streamed stdin is not
+// checked here: its items are checked as they are read.
+func checkTypedStdin(fs *featureSet, ci reflect.Value, schemas map[string]string) error {
 	sf := ci.FieldByName("Stdin")
 	if !sf.IsValid() || sf.Kind() != reflect.Pointer || sf.IsNil() {
 		return nil
+	}
+	if field, ok := ci.Type().FieldByName("Stdin"); ok && parseStdinTag(field.Tag.Get("stdin")).format == "jsonl" {
+		return checkTypedRecords(fs, sf.Elem(), schemas)
 	}
 	js := schemas[sf.Type().Elem().Name()]
 	if js == "" {
 		return nil
 	}
+	if fs.schemas == nil {
+		return missingFeature("schemas", "Schemas()", "the stdin payload has a schema")
+	}
+	if sf.Type().Elem().Kind() != reflect.Struct {
+		raw, err := json.Marshal(sf.Interface())
+		if err != nil {
+			return internalBind(channelStdin, "", "could not encode the stdin payload", err)
+		}
+		return fs.schemas.document(js, raw)
+	}
 	doc, err := toDocument(sf.Interface())
 	if err != nil {
 		return internalBind(channelStdin, "", "could not encode the stdin payload", err)
 	}
-	validator, err := recon.NewJSONSchemaValidator([]byte(js))
+	validator, err := fs.schemas.validator(js)
 	if err != nil {
 		return internalBind(channelStdin, "", "invalid stdin schema", err)
 	}
 	if err := validator.Validate(doc); err != nil {
-		applyPatternMessages(js, err)
+		fs.schemas.patternMessages(js, err)
 		return reconBind(channelStdin, err)
 	}
 	return nil
 }
 
 // checkTypedObject validates each object value against the flag's JSON Schema.
-func checkTypedObject(label, schema string, elems []reflect.Value) error {
+func checkTypedObject(fs *featureSet, label, schema string, elems []reflect.Value) error {
+	if fs.schemas == nil && len(elems) > 0 {
+		return missingFeature("schemas", "Schemas()", fmt.Sprintf("flag %s takes an object, which has a schema", label))
+	}
 	for _, e := range elems {
 		doc, err := toDocument(e.Interface())
 		if err == nil {
@@ -506,9 +560,14 @@ func toDocument(v any) (map[string]any, error) {
 
 // checkTypedConstraints is [checkConstraints] over typed values: count is the collection's
 // size (for item-count bounds) and elems its values, each checked by the input's element type.
-func checkTypedConstraints(label, typ string, c Constraints, count int, elems []reflect.Value, secret bool) error {
+func checkTypedConstraints(label, typ string, c Constraints, count int, elems []reflect.Value, secret bool, dir string) error {
 	if isArrayType(typ) || isMapType(typ) {
 		if err := checkItemCount(label, c, count); err != nil {
+			return err
+		}
+	}
+	if c.UniqueItems && isArrayType(typ) {
+		if err := checkUniqueTyped(label, elems, secret); err != nil {
 			return err
 		}
 	}
@@ -520,15 +579,15 @@ func checkTypedConstraints(label, typ string, c Constraints, count int, elems []
 			if n, ok := typedNumber(e); ok {
 				err = checkNumberBounds(label, c, n, redactValue(typedText(e), secret), formatNum)
 			}
-		case measuredTypes[elem] != nil:
+		case measuredFor(elem) != nil:
 			if n, ok := typedNumber(e); ok {
-				m := measuredTypes[elem]
+				m := measuredFor(elem)
 				err = checkNumberBounds(label, c, n, redactValue(m.format(n), secret), m.format)
 			}
 		case isPathType(elem):
 			s := typedText(e)
 			if err = checkStringBounds(label, c, s, secret); err == nil {
-				err = checkPathExists(label, elem, s)
+				err = checkPathExists(label, elem, s, dir)
 			}
 		case elem == "string":
 			err = checkStringBounds(label, c, typedText(e), secret)
@@ -581,6 +640,19 @@ func typedTexts(elems []reflect.Value) []string {
 	return out
 }
 
+// typed checks the typed field f of an input of type typ for "-" after its value rules passed
+// (err is their result, returned when set): label is the input, flag its flag label or "".
+func (d *dashOnce) typed(err error, typ, label, flag string, f reflect.Value) error {
+	if err != nil || constraintElemType(typ) != typeInputFile {
+		return err
+	}
+	elems, _, ok := typedElems(f)
+	if !ok {
+		return nil
+	}
+	return d.seen(label, flag, typedTexts(elems))
+}
+
 // typedNumber returns a numeric value's float64, false for a non-number.
 func typedNumber(e reflect.Value) (float64, bool) {
 	switch e.Kind() {
@@ -626,4 +698,56 @@ func typedText(e reflect.Value) string {
 		return fmt.Sprint(e.Interface())
 	}
 	return ""
+}
+
+// typedArgGiven reports whether the command's argument name holds a value other than "-" in
+// the typed value ci, so a stdin that reads only when no file is given is not needed.
+func typedArgGiven(ci reflect.Value, name string) bool {
+	given := false
+	eachTaggedField(ci, "Arguments", func(_, logical string, _ reflect.StructTag, f reflect.Value) {
+		if logical != name {
+			return
+		}
+		switch f.Kind() {
+		case reflect.String:
+			given = f.String() != "" && f.String() != "-"
+		case reflect.Slice:
+			given = f.Len() > 0
+			for i := range f.Len() {
+				if e := f.Index(i); e.Kind() == reflect.String && e.String() == "-" {
+					given = false
+				}
+			}
+		default:
+			given = !f.IsZero()
+		}
+	})
+	return given
+}
+
+// checkTypedRecords validates each record of a JSON Lines payload against its record schema.
+func checkTypedRecords(fs *featureSet, records reflect.Value, schemas map[string]string) error {
+	if records.Kind() != reflect.Slice {
+		return nil
+	}
+	js := schemas[records.Type().Elem().Name()]
+	if js == "" {
+		return nil
+	}
+	if fs.schemas == nil {
+		return missingFeature("schemas", "Schemas()", "a stdin record schema is declared")
+	}
+	for i := range records.Len() {
+		raw, err := json.Marshal(records.Index(i).Interface())
+		if err != nil {
+			return internalBind(channelStdin, "", "could not encode the stdin payload", err)
+		}
+		if err := fs.schemas.document(js, raw); err != nil {
+			if ie, ok := errors.AsType[*InputError](err); ok {
+				return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin record %d: %s", i+1, ie.Msg), Cause: ie.Cause, usage: ie.usage}
+			}
+			return err
+		}
+	}
+	return nil
 }

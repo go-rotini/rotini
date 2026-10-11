@@ -31,7 +31,7 @@ func fieldImport(schema *InputSchema) string {
 }
 
 // builtinImport returns the standard-library import a rotini type alias requires, or "" when
-// none is needed. rotini's own types (bytesize, hexbytes, base64bytes) use the runtime import.
+// none is needed. rotini's own types (bytesize, hexbytes, base64bytes, glob) use the runtime import.
 func builtinImport(rotiniType string) string {
 	if elem, ok := strings.CutPrefix(rotiniType, "[]"); ok {
 		return builtinImport(elem)
@@ -50,6 +50,8 @@ func builtinImport(rotiniType string) string {
 		return "net"
 	case "ip", "cidr", "hostport":
 		return "net/netip"
+	case "regexp":
+		return "regexp"
 	}
 	return ""
 }

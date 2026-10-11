@@ -1,0 +1,38 @@
+# A regexp or glob input's value is itself a pattern, so an enum would check the pattern's text,
+# and a regexp is already a pointer, so nullable adds nothing.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Fine: a regexp with a default, and a list of globs.
+    - name: match
+      identifiers: [--match]
+      schema:
+        type: regexp
+        default: '^v[0-9]+$'
+    - name: include
+      identifiers: [--include]
+      schema:
+        type: '[]glob'
+    - name: exclude
+      identifiers: [--exclude]
+      schema:
+        type: glob
+        enum: ['*.go']
+    - name: grep
+      identifiers: [--grep]
+      schema:
+        type: regexp
+        nullable: true
+    # A default that doesn't compile.
+    - name: bad
+      identifiers: [--bad]
+      schema:
+        type: regexp
+        default: '('
+  arguments:
+    # glob: true expands patterns into file names; a glob value keeps the pattern.
+    - name: patterns
+      schema:
+        type: '[]glob'
+        glob: true

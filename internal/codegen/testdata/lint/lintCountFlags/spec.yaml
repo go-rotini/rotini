@@ -6,6 +6,7 @@ command:
     - name: verbose
       identifiers:
         - -v
+        - --verbose
       schema:
         type: count
         default: 1

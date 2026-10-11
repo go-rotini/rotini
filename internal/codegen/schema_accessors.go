@@ -69,6 +69,9 @@ type Inputs struct {
 	Stdin            *StdinSpec
 	FlagGroups       []FlagGroup
 	FlagDependencies []FlagDependency
+	// OptionsFirst is the command's `options_first`: how its argv is read, which travels with
+	// its inputs. A command that declares no inputs has no arguments for it to act on.
+	OptionsFirst bool
 }
 
 // inputs returns the command's channels as an Inputs view, or nil when it declares none.
@@ -87,6 +90,7 @@ func (c *Command) inputs() *Inputs {
 		Stdin:            c.Stdin,
 		FlagGroups:       c.FlagGroups,
 		FlagDependencies: c.FlagDependencies,
+		OptionsFirst:     c.OptionsFirst,
 	}
 }
 

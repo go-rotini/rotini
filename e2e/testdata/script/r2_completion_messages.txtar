@@ -96,6 +96,7 @@ env APP_COMPLETION_MESSAGES=
 api
 web
 :rotini:message showing 2 services
+:rotini:option keep-order
 :rotini:none
 -- drive-bash.sh --
 set -e

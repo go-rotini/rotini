@@ -18,7 +18,11 @@ type demoHelpHandler struct {
 
 func (*demoHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if argv, err := rtx.ArgvInputs[DemoHelpInputs](); err == nil && argv.Values.Demo.Flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
 		rtx.HaltWithCode(0)
 		return
 	}
@@ -35,5 +39,7 @@ func (*demoHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintln(rtx.Stdout, page)
+	if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
+		rtx.HaltWith(err)
+	}
 }

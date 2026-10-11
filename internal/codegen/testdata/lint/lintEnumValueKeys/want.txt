@@ -1,0 +1,9 @@
+spec: .rotini.spec.yaml:9:7: command demo: schema "Format" gives an `enum` value aliases, `hidden` or `deprecated`; these belong on an input's own schema, so write plain values here
+spec: .rotini.spec.yaml:46:5: command demo: gives an `enum` value in `output` aliases, `hidden` or `deprecated`; these describe what a user types, so write plain values here
+spec: .rotini.spec.yaml:26:7: command demo: flag "mode": gives `enum` value "fast" the alias "Slow", which already means "slow"; each spelling means one value
+spec: .rotini.spec.yaml:26:7: command demo: flag "mode": lists "s" in `deprecated_aliases` of `enum` value "slow", but not in its `aliases`; deprecate an alias it declares
+spec: .rotini.spec.yaml:26:7: command demo: flag "mode": gives `enum` value "safe" `deprecated_since`, `removed_in` or `replaced_by` without `deprecated`; they plan a deprecation, so say why with `deprecated`
+spec: .rotini.spec.yaml:26:7: command demo: flag "mode": gives `enum` value "old" `removed_in: 1.0.0`, not after `deprecated_since: 2.0.0`
+spec: .rotini.spec.yaml:26:7: command demo: flag "mode": gives `enum` value "old" `replaced_by: new`, which is not a value of this enum
+spec: .rotini.spec.yaml:26:7: command demo: flag "mode": has a `default` of "f", an alias; write the value "fast", not its alias
+spec: .rotini.spec.yaml:38:7: command demo: flag "level": marks every `enum` value hidden or deprecated, so help, completion and errors have nothing to offer; leave at least one value in use

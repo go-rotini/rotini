@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=https://carapace.sh/schemas/command.json
+name: kit
+description: a toolkit
+persistentflags:
+  "-h, --help": show help
+  "-v, --verbose*": say more
+commands:
+  - name: build
+    aliases:
+      - b
+    description: build an artifact
+    flags:
+      "-o, --format=": the output format
+      "--output=&": the output format
+      "--fmt=&": the output format
+      "--json": write JSON
+      "--cache": use the build cache
+      "--no-cache&": use the build cache
+      "--color?": when to color
+      "-c, --config=": a config file
+      "--workdir=": the work directory
+      "--wd=&": the work directory
+      "-D, --define=*": build variables
+      "--owner=!": who owns it
+      "--shell=&": the shell to run steps in
+    exclusiveflags:
+      - [json, format]
+    completion:
+      flag:
+        format:
+          - "text\taligned columns"
+          - "yaml\thuman-friendly"
+        color:
+          - always
+          - never
+          - auto
+        config:
+          - "$files([.yaml, .yml])"
+        workdir:
+          - $directories
+        define:
+          - "$message(--define map[string]string: build variables)"
+        owner:
+          - $carapace.os.Users
+        shell:
+          - $executables
+      positional:
+        - [$directories]
+  - name: run
+    description: run a program
+    completion:
+      positional:
+        - [$executables]
+      positionalany:
+        - "$message(<args>: its arguments)"
+  - name: exec
+    description: run anything
+    parsing: disabled
+  - name: legacy
+    description: the old way
+    hidden: true
+  - name: help
+    description: show help for a command
+    completion:
+      positionalany:
+        - build
+        - run
+        - exec
+        - help
+  - name: sync
+    description: sync through a plugin
+    parsing: disabled

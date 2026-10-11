@@ -1,0 +1,4 @@
+spec: .rotini.spec.yaml:9:15: command demo: flag "include": sets `glob`, which applies to variadic arguments only
+spec: .rotini.spec.yaml:14:15: command demo: argument "first": sets `glob` but is not variadic; a pattern expands to many paths, so declare a list
+spec: .rotini.spec.yaml:19:15: command demo: argument "rest": sets `glob` and `separator`; a pattern is one word, so remove `separator`
+spec: .rotini.spec.yaml:26:19: command demo/sum: argument "counts": sets `glob` but its elements are int; glob expands to paths, so use string, existingfile, existingdir or inputfile

@@ -1,0 +1,6 @@
+-- in --
+a: 1
+-- op --
+set a.b 2
+-- err --
+holds a value, not a mapping

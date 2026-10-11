@@ -5,9 +5,10 @@
   "type": "object",
   "oneOf": [
     {
-      "required": ["error"],
+      "required": ["schema_version", "error"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "error": {
           "type": "object",
           "description": "An error. The run exits with exit_code.",
@@ -20,15 +21,17 @@
             "command": { "type": "string", "description": "The command the error happened in, as typed: \"taskr list\"." },
             "flag": { "type": "string", "description": "The flag involved, by the identifier the user typed." },
             "token": { "type": "string", "description": "The token or value at fault: a command-line token, an environment or config value outside its allowed values, or a mistyped plugin command. A secret value is redacted." },
-            "exit_code": { "type": "integer", "description": "The code the run exits with, decided as the default reporter decides it." }
+            "exit_code": { "type": "integer", "description": "The code the run exits with, decided as the default reporter decides it." },
+            "candidates": { "type": "array", "items": { "type": "string" }, "description": "The words token was checked against, as rotini.SuggestionFacts returns them: the command's visible sub-commands, its flag spellings, or an input's allowed values. Present only with token. Rotini doesn't rank them; a tool can offer the nearest. Hidden spellings, hidden values and a secret input's values never appear." }
           }
         }
       }
     },
     {
-      "required": ["warning"],
+      "required": ["schema_version", "warning"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "warning": {
           "type": "object",
           "description": "A warning. It does not change the exit code.",
@@ -42,9 +45,10 @@
       }
     },
     {
-      "required": ["info"],
+      "required": ["schema_version", "info"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "info": {
           "type": "object",
           "description": "A message the default reporter would print to stdout before everything else.",
@@ -58,9 +62,10 @@
       }
     },
     {
-      "required": ["success"],
+      "required": ["schema_version", "success"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "success": {
           "type": "object",
           "description": "A message the default reporter would print to stdout after everything else.",

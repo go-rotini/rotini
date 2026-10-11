@@ -1,0 +1,424 @@
+# R11 — a generated program wires the runtime features its spec uses. This spec declares every
+# one; each command below exercises one, so a feature missing from the generated NewProgram
+# fails the run that needs it. Then a NewProgram with one feature removed by hand reports the
+# missing feature by name instead of running.
+
+gomodinit example.com/ks
+
+exec rotini generate cmd/ks/.rotini.spec.yaml --config cmd/ks/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o ks$exe ./cmd/ks
+exec go build -o ks-ext$exe ./plugins/ext
+
+# Program features: a declared plugin, a response file, -C and a multicall name.
+exec ./ks$exe ext one two
+stdout '^ks-ext got: one two$'
+exec ./ks$exe +args.txt
+stdout 'Port:3'
+exec ./ks$exe -C sub config
+stdout 'Region:eu-west'
+stdout 'Owner:from-sub'
+[unix] symlink bounds -> ks
+[unix] exec ./bounds --port 4
+[unix] stdout 'Port:4'
+
+# Stdin in three formats, each checked against its schema.
+stdin doc.yaml
+exec ./ks$exe doc
+stdout '^doc: \{Name:from-yaml\}$'
+stdin docs.jsonl
+exec ./ks$exe docs
+stdout '^docs: \[\{Name:a\} \{Name:b\}\]$'
+stdin doc.toml
+exec ./ks$exe tdoc
+stdout '^tdoc: \{Name:from-toml\}$'
+stdin empty.yaml
+! exec ./ks$exe doc
+stderr 'name'
+
+# The environment, a variable_file and a .env file.
+env KS_TOKEN_FILE=token.txt
+exec ./ks$exe env
+stdout 'Token:from-file'
+stdout 'Dotenv:from-dotenv'
+env KS_TOKEN_FILE=
+
+# Configuration files: YAML with a profile and an enum alias, a second layout, JSONC.
+exec ./ks$exe config
+stdout 'Region:eu-west'
+stdout 'Since:2026-01-02 00:00:00 \+0000 UTC'
+stdout 'Owner:from-jsonc'
+exec ./ks$exe --profile prod config
+stdout 'Region:us-east'
+! exec ./ks$exe --profile bad config
+stderr 'eu-west'
+! stderr '"old"'
+
+# A fallback, path expansion and an object flag.
+env KS_ZONE=z1
+exec ./ks$exe fallback
+stdout 'Zone:z1'
+env KS_ZONE=
+env PLACE=somewhere
+exec ./ks$exe expand --root '$PLACE/x'
+stdout 'Root:somewhere/x'
+exec ./ks$exe object --db host=h,port=2
+stdout 'Host:h Port:2'
+! exec ./ks$exe object --db port=0
+stderr 'host'
+
+# Validation: bounds, a pattern, a flag group, a dependency and a stream path.
+exec ./ks$exe bounds --port 10
+! exec ./ks$exe bounds --port 11
+stderr '--port'
+exec ./ks$exe pattern --name abc
+! exec ./ks$exe pattern --name ABC
+stderr '--name'
+! exec ./ks$exe groups --a --b
+stderr '--a'
+! exec ./ks$exe deps --a
+stderr '--b'
+exec ./ks$exe deps --a --b
+exec ./ks$exe stream doc.yaml
+stdout 'Src:doc.yaml'
+
+# Every value type.
+exec ./ks$exe values --url https://example.com/x --email 'Ann <ann@example.com>' --tz Europe/Berlin --mac 00:11:22:33:44:55 --ip 10.0.0.1 --cidr 10.0.0.0/8 --hostport 10.0.0.1:80 --re '^a+$'
+stdout '^URL=https://example.com/x$'
+stdout '^Email="Ann" <ann@example.com>$'
+stdout '^Tz=Europe/Berlin$'
+stdout '^Mac=00:11:22:33:44:55$'
+stdout '^IP=10.0.0.1$'
+stdout '^Cidr=10.0.0.0/8$'
+stdout '^Hostport=10.0.0.1:80$'
+stdout '^Re=\^a\+\$$'
+
+# A NewProgram without one of the features its spec needs reports it, naming the feature.
+exec go run ./tools/drop internal/cmd/ks/zz_ks.go 'rotini.Plugins(),'
+exec go build -o ks-unwired$exe ./cmd/ks
+! exec ./ks-unwired$exe ext one
+stderr 'does not wire plugins'
+stderr 'rotini.Plugins\(\)'
+exec ./ks-unwired$exe bounds --port 3
+stdout 'Port:3'
+
+-- cmd/ks/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/ks/main.go
+    - type: cmd
+      file: internal/cmd/ks/zz_ks.go
+      package: ks
+-- args.txt --
+bounds
+--port
+3
+-- ks.yaml --
+region: eu-west
+since: "2026-01-02"
+zone: from-config
+profiles:
+  prod:
+    region: us,east
+  bad:
+    region: nope
+-- extra.jsonc --
+{
+  // a comment JSON would reject
+  "owner": "from-jsonc"
+}
+-- sub/ks.yaml --
+region: eu-west
+-- sub/extra.jsonc --
+{"owner": "from-sub"}
+-- .env --
+KS_DOTENV=from-dotenv
+-- token.txt --
+from-file
+-- doc.yaml --
+name: from-yaml
+-- docs.jsonl --
+{"name": "a"}
+{"name": "b"}
+-- doc.toml --
+name = "from-toml"
+-- empty.yaml --
+other: x
+-- plugins/ext/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() { fmt.Println("ks-ext got: " + strings.Join(os.Args[1:], " ")) }
+-- tools/drop/main.go --
+// drop removes every line of a file that is, once trimmed, exactly the given text.
+package main
+
+import (
+	"os"
+	"strings"
+)
+
+func main() {
+	data, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		panic(err)
+	}
+	var kept []string
+	dropped := false
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == os.Args[2] {
+			dropped = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if !dropped {
+		panic("no line is " + os.Args[2])
+	}
+	if err := os.WriteFile(os.Args[1], []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+		panic(err)
+	}
+}
+-- internal/cmd/ks/ks_doc.go --
+package ks
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ksDocHandler struct{ rotini.NoHooks }
+
+func (*ksDocHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KsDocInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "doc: %+v\n", *in.KsDoc.Stdin)
+}
+-- internal/cmd/ks/ks_docs.go --
+package ks
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ksDocsHandler struct{ rotini.NoHooks }
+
+func (*ksDocsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KsDocsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "docs: %+v\n", *in.KsDocs.Stdin)
+}
+-- internal/cmd/ks/ks_tdoc.go --
+package ks
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ksTdocHandler struct{ rotini.NoHooks }
+
+func (*ksTdocHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KsTdocInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "tdoc: %+v\n", *in.KsTdoc.Stdin)
+}
+-- internal/cmd/ks/ks_values.go --
+package ks
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ksValuesHandler struct{ rotini.NoHooks }
+
+// Run prints each flag as name=value, through its String method where it has one.
+func (*ksValuesHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KsValuesInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	v := reflect.ValueOf(&in.KsValues.Flags).Elem()
+	for i := range v.NumField() {
+		f := v.Field(i)
+		var s any = f.Interface()
+		if st, ok := f.Addr().Interface().(fmt.Stringer); ok && f.Kind() != reflect.Pointer {
+			s = st
+		}
+		fmt.Fprintf(rtx.Stdout, "%s=%v\n", v.Type().Field(i).Name, s)
+	}
+}
+-- cmd/ks/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: ks
+  summary: a kitchen sink that uses every runtime feature
+  env_prefix: KS
+  multicall: true
+  response_files: {prefix: "+"}
+  config_files:
+    - name: app
+      path: ./ks.yaml
+      profiles: {select: profile, under: profiles}
+      schema:
+        type: object
+        properties:
+          region: {type: string}
+    - name: local
+      path: .env
+      as: env
+    - name: extra
+      path: ./extra.jsonc
+  schemas:
+    DB:
+      type: object
+      required: [host]
+      properties:
+        host: {type: string}
+        port: {type: integer, minimum: 1}
+    Doc:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+  flags:
+    - name: dir
+      summary: run in this directory
+      identifiers: [-C, --dir]
+      cascading: true
+      role: chdir
+      schema: {type: string}
+    - name: profile
+      summary: the configuration profile
+      identifiers: [--profile]
+      cascading: true
+      schema: {type: string}
+  plugins:
+    - name: ext
+      summary: a plugin
+  commands:
+    - name: doc
+      summary: read a YAML document from stdin
+      stdin: {format: yaml, schema: {$ref: '#/schemas/Doc'}}
+    - name: docs
+      summary: read JSON Lines from stdin
+      stdin: {format: jsonl, schema: {$ref: '#/schemas/Doc'}}
+    - name: tdoc
+      summary: read a TOML document from stdin
+      stdin: {format: toml, schema: {$ref: '#/schemas/Doc'}}
+    - name: env
+      summary: read the environment
+      env:
+        - name: token
+          schema: {type: string, variable: KS_TOKEN, variable_file: KS_TOKEN_FILE}
+        - name: dotenv
+          schema: {type: string, variable: KS_DOTENV}
+    - name: config
+      summary: read the configuration file
+      config:
+        - name: region
+          schema:
+            type: string
+            pattern: '^[a-z,-]+$'
+            enum:
+              - eu-west
+              - {value: us-east, aliases: ['us,east']}
+              - {value: old, deprecated: gone}
+        - name: since
+          schema: {type: time, layout: ['2006-01-02 15:04', '2006-01-02']}
+        - name: owner
+          schema: {type: string}
+    - name: fallback
+      summary: a flag that falls back to the environment and the configuration file
+      flags:
+        - name: zone
+          summary: the zone
+          identifiers: [--zone]
+          schema: {type: string, key: zone, variable: KS_ZONE}
+    - name: expand
+      summary: expand a path
+      flags:
+        - name: root
+          summary: a root directory
+          identifiers: [--root]
+          schema: {type: string, expand: [home, env]}
+    - name: object
+      summary: an object flag
+      flags:
+        - name: db
+          summary: the database
+          identifiers: [--db]
+          schema: {$ref: '#/schemas/DB'}
+    - name: bounds
+      summary: a bounded flag
+      flags:
+        - name: port
+          summary: the port
+          identifiers: [--port]
+          schema: {type: int, minimum: 1, maximum: 10}
+    - name: pattern
+      summary: a patterned flag
+      flags:
+        - name: name
+          summary: the name
+          identifiers: [--name]
+          schema: {type: string, pattern: '^[a-z]+$'}
+    - name: groups
+      summary: flags in a group
+      flags:
+        - {name: a, summary: a, identifiers: [--a], schema: {type: bool}}
+        - {name: b, summary: b, identifiers: [--b], schema: {type: bool}}
+      flag_groups:
+        - {kind: mutually_exclusive, flags: [a, b]}
+    - name: deps
+      summary: dependent flags
+      flags:
+        - {name: a, summary: a, identifiers: [--a], schema: {type: bool}}
+        - {name: b, summary: b, identifiers: [--b], schema: {type: bool}}
+      flag_dependencies:
+        - {when: a, requires: [b]}
+    - name: stream
+      summary: a stream path
+      arguments:
+        - name: src
+          summary: the input
+          schema: {type: inputfile}
+    - name: values
+      summary: every value type
+      flags:
+        - {name: url, summary: u, identifiers: [--url], schema: {type: url}}
+        - {name: email, summary: e, identifiers: [--email], schema: {type: email}}
+        - {name: tz, summary: z, identifiers: [--tz], schema: {type: timezone}}
+        - {name: mac, summary: m, identifiers: [--mac], schema: {type: mac}}
+        - {name: ip, summary: i, identifiers: [--ip], schema: {type: ip}}
+        - {name: cidr, summary: c, identifiers: [--cidr], schema: {type: cidr}}
+        - {name: hostport, summary: h, identifiers: [--hostport], schema: {type: hostport}}
+        - {name: re, summary: r, identifiers: [--re], schema: {type: regexp}}

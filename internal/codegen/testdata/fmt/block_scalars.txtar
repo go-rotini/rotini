@@ -1,0 +1,34 @@
+-- in --
+version: 1.0.0
+command:
+  description: |
+      four-space body
+
+        nested more
+      last
+  usage: >-
+    folded
+    text
+  footer: |2
+      indicator body
+  header: |+
+    keep
+
+  name: tool
+-- out --
+version: 1.0.0
+command:
+  name: tool
+  description: |
+    four-space body
+
+      nested more
+    last
+  usage: >-
+    folded
+    text
+  header: |+
+    keep
+
+  footer: |2
+      indicator body

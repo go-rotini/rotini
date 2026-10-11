@@ -173,7 +173,7 @@ import (
 // The loop shape: one Program, dispatched once per line. Each RunContext gets a fresh
 // Context, while the counter bound here reaches every line.
 func main() {
-	p := loop.NewProgram(loop.Handlers()).
+	p := loop.NewProgram().
 		With(rotini.WithDependency(loop.CounterDep, &loop.Counter{}))
 
 	// ^C cancels the running line, never the session. rotini installs no trap of its own for

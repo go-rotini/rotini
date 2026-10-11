@@ -1,5 +1,5 @@
-# Acquisition sentinels are argv flag grammar: not on an argument, and never on a
-# bool flag, whose value is inline-only.
+# Acquisition sentinels are argv grammar: on flags, and on arguments before any variadic one,
+# never on a bool flag, whose value is inline-only. Stdin has one consumer on a command path.
 version: 0.0.0
 command:
   name: demo
@@ -11,3 +11,24 @@ command:
         type: bool
         from:
           - file
+  arguments:
+    # Fine: the first argument reads a file or stdin.
+    - name: input
+      schema:
+        type: string
+        from: [file, stdin]
+    # A second stdin consumer on the same command.
+    - name: other
+      schema:
+        type: string
+        from: [stdin]
+    # A variadic argument's position isn't known as the words arrive.
+    - name: rest
+      schema:
+        type: '[]string'
+        from: [file]
+  commands:
+    - name: sub
+      stdin:
+        format: text
+        schema: {type: string}

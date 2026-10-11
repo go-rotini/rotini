@@ -29,5 +29,7 @@ func (*rotiniCompletionHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprint(rtx.Stdout, script)
+	if _, err := fmt.Fprint(rtx.Stdout, script); err != nil {
+		haltWithWriteError(rtx, err)
+	}
 }

@@ -7,10 +7,12 @@ command:
     - name: out
       identifiers:
         - -o
+        - --out
       schema:
         type: string
     - name: owner
       identifiers:
         - -o
+        - --owner
       schema:
         type: string

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -273,8 +274,7 @@ func runInputCase(t *testing.T, c inputCase) {
 		t.Setenv(k, v)
 	}
 
-	rtx := NewContextFor(acmeDef(), c.args)
-	rtx.Stdin = strings.NewReader(c.stdin)
+	rtx := NewContextFor(acmeDef(), c.args).WithStdin(strings.NewReader(c.stdin))
 	c.check(t, rtx, acmeMeta(dir))
 }
 
@@ -479,7 +479,7 @@ func conformanceCases() []inputCase {
 			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				var in acIngestInputs
 				err := NewInputReader(meta).Read(rtx, &in)
-				if err == nil || !strings.Contains(err.Error(), "decode") {
+				if err == nil || !strings.Contains(err.Error(), "could not parse stdin as yaml at line 1") {
 					t.Errorf("err = %v, want a loud decode error for a malformed payload", err)
 				}
 			}},
@@ -847,6 +847,314 @@ func conformanceCases() []inputCase {
 					t.Errorf("history = %v, want %v", layers, want)
 				}
 			}},
+
+		// ── INJ — an injected environment and directory ──
+		{id: "INJ-01", args: []string{"deploy"},
+			env: map[string]string{"ACME_REGION": "from-process", "ACME_ENV": "from-process"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// The run's environment replaces the process's for every env read. It is the whole
+				// environment, so it names the config home too.
+				xdg, _ := os.LookupEnv("XDG_CONFIG_HOME")
+				rtx.WithEnviron([]string{"ACME_REGION=from-run", "ACME_ENV=from-run", "XDG_CONFIG_HOME=" + xdg})
+				in := bindAs[acDeployInputs](t, rtx, meta)
+				if in.Deploy.Env.Region != "from-run" || in.Deploy.Flags.Env != "from-run" {
+					t.Errorf("region=%q env=%q, want both from the injected environment", in.Deploy.Env.Region, in.Deploy.Flags.Env)
+				}
+			}},
+		{id: "INJ-02", args: []string{"deploy"},
+			files: map[string]string{
+				".acme.yaml":           "acme:\n  output: from-process-cwd\n",
+				"other/.acme.yaml":     "acme:\n  output: from-run-dir\n",
+				"other/sub/.gitkeep":   "",
+				"xdg/acme/config.yaml": "acme:\n  env: from-process-xdg\n",
+			},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// Walk-up starts at the run's directory, and xdg follows the run's environment.
+				caseDir := filepath.Dir(mustGetwd(t))
+				rtx.WithDir(filepath.Join(caseDir, "other", "sub")).WithEnviron([]string{"XDG_CONFIG_HOME=" + filepath.Join(caseDir, "nowhere")})
+				in := bindAs[acDeployInputs](t, rtx, meta)
+				if in.Deploy.Flags.Output != "from-run-dir" || in.Deploy.Flags.Env == "from-process-xdg" {
+					t.Errorf("output=%q env=%q, want the run directory's file and no process xdg file", in.Deploy.Flags.Output, in.Deploy.Flags.Env)
+				}
+			}},
+		{id: "INJ-03", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A plugin is found on the run's PATH and runs with the run's environment and
+				// directory.
+				if runtime.GOOS == "windows" {
+					t.Skip("a shell-script stand-in for a plugin cannot run on Windows; see e2e r9_plugins")
+				}
+				bin, work := t.TempDir(), t.TempDir()
+				if err := os.WriteFile(filepath.Join(bin, "acme-ext"), []byte("#!/bin/sh\necho \"$ACME_MARK\"\npwd\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				def := Definition{Name: "acme", Handler: "Acme", Plugins: []PluginDef{{Name: "ext", Binary: "acme-ext"}}}
+				var out strings.Builder
+				p := NewProgram(def, nil).WithEnviron([]string{"PATH=" + bin, "ACME_MARK=from-run"}).WithDir(work).
+					WithStdout(&out).WithStderr(&out).WithoutSignalHandling()
+				if code, err := p.Run([]string{"ext"}); code != 0 {
+					t.Fatalf("Run = %d, %v: %s", code, err, out.String())
+				}
+				lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+				gotDir, _ := filepath.EvalSymlinks(lines[len(lines)-1])
+				wantDir, _ := filepath.EvalSymlinks(work)
+				if lines[0] != "from-run" || gotDir != wantDir {
+					t.Errorf("plugin printed %q, want from-run and %s", lines, wantDir)
+				}
+			}},
+
+		// ── argv words: numbers versus flags, "--", map keys, bounds ──
+		{id: "ARG-13", args: []string{"run", "-.5", "-5s", "-1e3"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// Only "-" then a digit, or "-." then a digit, is a number; every other dash
+				// word is a flag, so a declared -I takes "-Inf" as -I with the value "nf".
+				in := bindAs[acRunInputs](t, rtx, meta)
+				if want := []string{"-.5", "-5s", "-1e3"}; !reflect.DeepEqual(in.Run.Arguments.Script, want) {
+					t.Errorf("script = %v, want number-shaped words as positionals %v", in.Run.Arguments.Script, want)
+				}
+				calc := bindAs[acCalcInputs](t, NewContextFor(acCalcDef(), []string{"-Inf", "-.5"}), meta)
+				if calc.Calc.Flags.Include != "nf" || !reflect.DeepEqual(calc.Calc.Arguments.Nums, []float64{-0.5}) {
+					t.Errorf("-Inf -.5 = include %q, nums %v; want nf, [-0.5]", calc.Calc.Flags.Include, calc.Calc.Arguments.Nums)
+				}
+			}},
+		{id: "ARG-14", args: []string{"--", "deploy"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// "--" ends command lookup: a sub-command's name after it is a positional, and
+				// the error says so instead of calling it unknown.
+				var in acDeployInputs
+				err := NewInputReader(meta).Read(rtx, &in)
+				pe, ok := errors.AsType[*ParseError](err)
+				if !ok || !strings.Contains(pe.Msg, `"deploy" after "--" is not read as a command`) {
+					t.Fatalf("err = %v, want the ended-lookup message", err)
+				}
+				if slices.Contains(pe.Candidates, "deploy") {
+					t.Errorf("candidates = %v, want deploy left out", pe.Candidates)
+				}
+			}},
+		{id: "FLAG-15", args: []string{"deploy", "--label", "=web"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// A map pair needs a key.
+				var in acDeployInputs
+				err := NewInputReader(meta).Read(rtx, &in)
+				if err == nil || !strings.Contains(err.Error(), `--label needs a key before "="`) || CategoryOf(err) != CategoryUsage {
+					t.Errorf("err = %v, want the empty-key usage error", err)
+				}
+			}},
+		{id: "FLAG-16", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, meta InputSettings) {
+				// A declared bound implies a finite number: NaN and ±Inf are rejected.
+				for _, v := range []string{"nan", "inf", "-Inf"} {
+					var in acCalcInputs
+					err := NewInputReader(meta).Read(NewContextFor(acCalcDef(), []string{"--ratio=" + v}), &in)
+					if err == nil || !strings.Contains(err.Error(), "must be a finite number") {
+						t.Errorf("--ratio=%s: err = %v, want a finite-number error", v, err)
+					}
+				}
+			}},
+
+		// ── where flags stop: options_first, a passthrough argument, digit options ──
+		{id: "ARG-10", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// options_first: flags stop at the command's first argument.
+				in, err := bdParse[bdSSHInputs](t, "ssh", "-p", "22", "host", "-v", "-p", "1")
+				if err != nil || in.Ssh.Flags.Port != 22 || in.App.Flags.Verbose || !slices.Equal(in.Ssh.Arguments.Cmd, []string{"-v", "-p", "1"}) {
+					t.Errorf("got %+v (verbose %v), %v; want flags after the host passed on", in.Ssh, in.App.Flags.Verbose, err)
+				}
+			}},
+		{id: "ARG-11", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// After an options_first command's first argument, "--" is an argument; before
+				// it, "--" is consumed.
+				in, err := bdParse[bdSSHInputs](t, "ssh", "host", "--", "x")
+				if err != nil || !slices.Equal(in.Ssh.Arguments.Cmd, []string{"--", "x"}) {
+					t.Errorf("ssh host -- x: cmd %q, %v; want the -- kept", in.Ssh.Arguments.Cmd, err)
+				}
+				in, err = bdParse[bdSSHInputs](t, "ssh", "--", "-host", "x")
+				if err != nil || in.Ssh.Arguments.Host != "-host" || !slices.Equal(in.Ssh.Arguments.Cmd, []string{"x"}) {
+					t.Errorf("ssh -- -host x: %+v, %v", in.Ssh.Arguments, err)
+				}
+			}},
+		{id: "ARG-12", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A cascading short-circuit flag after the boundary is an argument and waives
+				// nothing.
+				for _, argv := range [][]string{{"ssh", "host", "--help"}, {"exec", "ls", "--help"}} {
+					rtx := bdContext(t, argv...)
+					if store := quietParse(rtx.CommandChain(), argv); store == nil || shortCircuited(rtx.CommandChain(), store) {
+						t.Errorf("%q: short-circuited, want --help passed on", argv)
+					}
+				}
+			}},
+		{id: "ARG-15", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A passthrough argument: flags before it parse, every word from it on is raw.
+				in, err := bdParse[bdExecInputs](t, "--verbose", "exec", "--region", "eu", "ls", "-la", "--", "--region", "x")
+				if err != nil || !in.App.Flags.Verbose || in.Exec.Flags.Region != "eu" ||
+					!slices.Equal(in.Exec.Arguments.Command, []string{"ls", "-la", "--", "--region", "x"}) {
+					t.Errorf("got %+v, %v", in.Exec, err)
+				}
+			}},
+		{id: "ARG-16", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A variadic before a fixed argument: the fixed one binds from the end.
+				in, err := bdParse[bdCpInputs](t, "cp", "a", "b", "dst")
+				if err != nil || !slices.Equal(in.Cp.Arguments.Src, []string{"a", "b"}) || in.Cp.Arguments.Dst != "dst" {
+					t.Errorf("cp a b dst: %+v, %v", in.Cp.Arguments, err)
+				}
+			}},
+		{id: "FLAG-13", args: []string{"widget", "create", "--spec", "@@literal"},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
+				// A doubled @ on a from: [file] flag is one literal @, read from no file.
+				if in := bindAs[acCreateInputs](t, rtx, meta); in.Create.Flags.Spec != "@literal" {
+					t.Errorf("spec = %q, want @literal", in.Create.Flags.Spec)
+				}
+			}},
+		{id: "FLAG-14", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A declared digit option is a flag, clustering like a letter; other negative
+				// numbers stay numbers.
+				in, err := bdParse[bdSSHInputs](t, "ssh", "-46", "host", "-5")
+				if err != nil || !in.Ssh.Flags.IPv4 || !in.Ssh.Flags.IPv6 || !slices.Equal(in.Ssh.Arguments.Cmd, []string{"-5"}) {
+					t.Errorf("got %+v, %v", in.Ssh, err)
+				}
+			}},
+
+		// ── response files ──
+		{id: "RSP-01", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A response file's lines are words, and can name the command.
+				got := runResponse(t, map[string]string{"a.rsp": "exec\n--region\neu\n"}, "@a.rsp", "ls")
+				if want := []string{"exec", "--region", "eu", "ls"}; !slices.Equal(got, want) {
+					t.Errorf("argv = %q, want %q", got, want)
+				}
+			}},
+		{id: "RSP-02", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// "--" stops expansion.
+				got := runResponse(t, map[string]string{"a.rsp": "x\n"}, "exec", "--", "@a.rsp")
+				if want := []string{"exec", "--", "@a.rsp"}; !slices.Equal(got, want) {
+					t.Errorf("argv = %q, want %q", got, want)
+				}
+			}},
+		{id: "RSP-03", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// A doubled prefix is the literal word with one prefix.
+				got := runResponse(t, nil, "exec", "@@a.rsp")
+				if want := []string{"exec", "@a.rsp"}; !slices.Equal(got, want) {
+					t.Errorf("argv = %q, want %q", got, want)
+				}
+			}},
+		{id: "RSP-04", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// Words read from a file are not expanded again.
+				got := runResponse(t, map[string]string{"a.rsp": "exec\n@b.rsp\n", "b.rsp": "never\n"}, "@a.rsp")
+				if want := []string{"exec", "@b.rsp"}; !slices.Equal(got, want) {
+					t.Errorf("argv = %q, want %q", got, want)
+				}
+			}},
+
+		// ── repeated values ──
+		{id: "FLAG-17", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, meta InputSettings) {
+				// repeatable: false makes a second occurrence a usage error naming both values;
+				// a flag without it keeps the last value.
+				var in acSetInputs
+				err := NewInputReader(meta).Read(NewContextFor(acSetDef(), []string{"--name", "a", "--name", "b"}), &in)
+				if err == nil || err.Error() != `--name was given more than once ("a", then "b"); it takes one value` || CategoryOf(err) != CategoryUsage {
+					t.Errorf("err = %v, want the repeat usage error", err)
+				}
+				if err := NewInputReader(meta).Read(NewContextFor(acmeDef(), []string{"deploy", "--env", "dev", "--env", "prod"}), &acDeployInputs{}); err != nil {
+					t.Errorf("last-wins by default: %v", err)
+				}
+			}},
+		{id: "FLAG-18", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, meta InputSettings) {
+				// uniqueItems compares values as the type reads them: 01 is 1.
+				var in acSetInputs
+				err := NewInputReader(meta).Read(NewContextFor(acSetDef(), []string{"--port", "1", "--port", "01"}), &in)
+				if err == nil || err.Error() != `--port must not repeat a value (got "01" twice)` || CategoryOf(err) != CategoryUsage {
+					t.Errorf("err = %v, want the duplicate usage error", err)
+				}
+			}},
+		{id: "ENV-07", args: []string{"deploy"}, env: map[string]string{"SET_PORTS": "80,443,80"},
+			check: func(t *testing.T, _ *Context, meta InputSettings) {
+				// An environment list is checked element by element: uniqueItems and bounds.
+				var in acSetInputs
+				err := NewInputReader(meta).Read(NewContextFor(acSetDef(), nil), &in)
+				if err == nil || !strings.Contains(err.Error(), `SET_PORTS must not repeat a value (got "80" twice)`) {
+					t.Errorf("err = %v, want the duplicate error naming the variable", err)
+				}
+				t.Setenv("SET_PORTS", "80,70000")
+				err = NewInputReader(meta).Read(NewContextFor(acSetDef(), nil), &in)
+				if err == nil || !strings.Contains(err.Error(), "must be <= 65535 (got 70000)") {
+					t.Errorf("err = %v, want the element's bound", err)
+				}
+			}},
+		{id: "ARG-17", args: []string{"deploy"}, check: confArgumentEnvFallback},
+		{id: "ARG-18", args: []string{"deploy"}, check: confArgumentConfigFallback},
+		{id: "ARG-19", args: []string{"deploy"}, check: confArgumentFrom},
+		{id: "FLAG-19", args: []string{"deploy"}, check: confCustomNegation},
+		{id: "FLAG-20", args: []string{"deploy"}, check: confEnumValueForms},
+		{id: "FLAG-21", args: []string{"deploy"}, check: confTimeLayouts},
+		{id: "FLAG-22", args: []string{"deploy"}, check: confRelativeTime},
+		{id: "FLAG-23", args: []string{"deploy"}, check: confPatternKinds},
+		{id: "ENV-08", args: []string{"deploy"}, check: confEnvListSeparator},
+
+		// ── FILE — input and output files ──
+		{id: "FILE-01", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// "-" among inputfile values is stdin, read in place.
+				if got := fileCat(t, "piped\n", "a.txt", "-", "b.txt"); got != "a\npiped\nb\n" {
+					t.Errorf("cat a.txt - b.txt = %q", got)
+				}
+			}},
+		{id: "FILE-02", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// stdin can be named only once.
+				if _, err := fileParse(t, "-", "a.txt", "-"); err == nil || CategoryOf(err) != CategoryUsage {
+					t.Errorf("err = %v, want a usage error", err)
+				}
+			}},
+		{id: "FILE-03", args: []string{"deploy"},
+			check: func(t *testing.T, _ *Context, _ InputSettings) {
+				// "-" as an outputfile is stdout; an existing file is kept without Overwrite.
+				fileOutput(t)
+			}},
+
+		// ── flag sets, value rules, literal-free secrets, hidden spellings ──
+		{id: "FLAG-24", args: []string{"deploy"}, check: confFlagSetMember},
+		{id: "FLAG-25", args: []string{"deploy"}, check: confHiddenIdentifier},
+		{id: "DEP-01", args: []string{"deploy"}, check: confDependencyEquals},
+		{id: "DEP-02", args: []string{"deploy"}, check: confDependencyArgvOnly},
+		{id: "DEP-03", args: []string{"deploy"}, check: confDependencyForbids},
+		{id: "DEP-04", args: []string{"deploy"}, check: confDependencyUnless},
+		{id: "DEP-05", args: []string{"deploy"}, check: confDependencyTyped},
+		{id: "SEC-04", args: []string{"deploy"}, check: confSecretLiteralFree},
+		{id: "FLAG-27", args: []string{"deploy"}, check: confDigitsAfterSwitch},
+	}
+}
+
+// acCalcDef is a small CLI beside the acme fixture for the cases about number-shaped words.
+func acCalcDef() Definition {
+	return Definition{
+		Name: "calc", Handler: "Calc",
+		Flags: []FlagDef{
+			{Name: "include", Identifiers: []string{"--include", "-I"}, Type: "string"},
+			{Name: "ratio", Identifiers: []string{"--ratio"}, Type: "float64", ExclusiveMinimum: new(0.0)},
+		},
+		Arguments: []ArgDef{{Name: "nums", Type: "[]float64", Variadic: true}},
+	}
+}
+
+type acCalcInputs struct {
+	Calc struct {
+		Flags struct {
+			Include string  `rotini:"include"`
+			Ratio   float64 `rotini:"ratio"`
+		}
+		Arguments struct {
+			Nums []float64 `rotini:"nums"`
+		}
 	}
 }
 
@@ -861,9 +1169,11 @@ func mustGetwd(t *testing.T) string {
 
 // TestConformance_InputMatrix runs the in-process tier of the matrix.
 func TestConformance_InputMatrix(t *testing.T) {
-	for _, c := range conformanceCases() {
-		t.Run(c.id, func(t *testing.T) { runInputCase(t, c) })
-	}
+	wiringModes(t, func(t *testing.T) {
+		for _, c := range conformanceCases() {
+			t.Run(c.id, func(t *testing.T) { runInputCase(t, c) })
+		}
+	})
 }
 
 // TestConformance_matrixComplete enforces the suite's shape: every matrix ID
@@ -878,9 +1188,44 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"CFG-01", "CFG-02", "CFG-03", "CFG-04", "CFG-05", "CFG-06", "CFG-07", "CFG-08",
 		"SEC-01", "SEC-02", "SEC-03",
 		"PREC-01", "PREC-02", "PREC-03", "PREC-04",
+		"INJ-01", "INJ-02", "INJ-03",
+		"ARG-13", "ARG-14", "FLAG-15", "FLAG-16",
+		"ARG-10", "ARG-11", "ARG-12", "ARG-15", "ARG-16", "FLAG-13", "FLAG-14",
+		"RSP-01", "RSP-02", "RSP-03", "RSP-04",
+		"FLAG-17", "FLAG-18", "ENV-07",
+		"ARG-17", "ARG-18", "ARG-19", "FLAG-19", "FLAG-20", "FLAG-21", "FLAG-22", "FLAG-23", "ENV-08",
+		"FILE-01", "FILE-02", "FILE-03",
+		"STDIN-08", "STDIN-09", "STDIN-10", "STDIN-11", "STDIN-12", "STDIN-13", "STDIN-14",
+		"LIST-01", "LIST-02", "LIST-03", "ENV-09", "ENV-10", "ENV-11", "PREC-05", "CFG-09", "CFG-10",
+		"FLAG-24", "FLAG-25", "DEP-01", "DEP-02", "DEP-03", "DEP-04", "DEP-05", "SEC-04",
+		"INJ-04", "PREC-06",
+		"FLAG-26", "ENV-12", "ENV-13", "CFG-11", "CFG-12", "ARG-20",
+		"OUT-01", "OUT-02", "OUT-03", "OUT-04",
+		"PROF-01", "PROF-02", "PROF-03", "PROF-04", "PROF-05", "PROF-06", "PROF-07", "PROF-08", "PROF-09",
+		"WRITE-01", "WRITE-02", "WRITE-03", "WRITE-04", "WRITE-05", "WRITE-06", "WRITE-07", "WRITE-08",
+		"FLAG-27",
+		"WIRE-01", "WIRE-02", "WIRE-03", "WIRE-04", "WIRE-05",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range append(dataConformanceCases(), runtimeConformanceCases()...) {
+		seen[c.id]++
+	}
+	for _, c := range pathConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range outputConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range profileConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range writeConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range wiringConformanceCases() {
 		seen[c.id]++
 	}
 	for _, id := range acceptanceMatrixIDs {
@@ -895,4 +1240,24 @@ func TestConformance_matrixComplete(t *testing.T) {
 	for id, n := range seen {
 		t.Errorf("unexpected matrix ID %s (×%d) — extend the canonical list", id, n)
 	}
+}
+
+// runResponse runs boundaryDef with response files on, in a directory holding files, and
+// returns the argv its handler saw.
+func runResponse(t *testing.T, files map[string]string, argv ...string) []string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	def := boundaryDef()
+	def.ResponseFiles = &ResponseFilesDef{Prefix: "@"}
+	var out strings.Builder
+	var seen []string
+	if code, err := bdProgram(def, dir, &out, &seen).Run(argv); code != 0 {
+		t.Fatalf("Run(%q) = %d, %v: %s", argv, code, err, out.String())
+	}
+	return seen
 }

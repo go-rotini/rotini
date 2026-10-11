@@ -1,0 +1,79 @@
+# `agent` keys that change nothing, and `agent: true` on a secret.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Correct: the directory flag is a tool parameter only with `agent: true`. No problem.
+    - name: dir
+      identifiers: [-C, --dir]
+      cascading: true
+      role: chdir
+      agent: true
+      schema: { type: existingdir }
+  commands:
+    # Correct: each brings back something left out by default. No problem.
+    - name: exec
+      passthrough: true
+      agent: true
+      arguments:
+        - name: argv
+          schema: { type: '[]string' }
+    - name: old
+      deprecated: use new
+      agent: true
+      flags:
+        - name: token
+          hidden: true
+          agent: true
+          schema: { type: string, from: [stdin] }
+        - name: spec
+          agent: true
+          schema: { type: string, from: [file] }
+      env:
+        - name: debug
+          hidden: true
+          agent: true
+          schema: { type: bool }
+    # Each of these is offered to agents already.
+    - name: list
+      agent: true
+      flags:
+        - name: limit
+          agent: true
+          schema: { type: int }
+      arguments:
+        - name: filter
+          agent: true
+          schema: { type: string }
+      env:
+        - name: home
+          agent: true
+          schema: { type: string }
+      config:
+        - name: color
+          agent: true
+          schema: { type: bool }
+    # A subtree kept from agents can't be opted back into from below.
+    - name: admin
+      agent: false
+      commands:
+        - name: reset
+          agent: true
+    # The JSON switch is never a tool parameter.
+    - name: build
+      output: { type: object, properties: { id: { type: integer } } }
+      flags:
+        - name: json
+          role: machine-output
+          agent: true
+          schema: { type: bool }
+    # A tool never passes a secret on the command line.
+    - name: login
+      flags:
+        - name: token
+          agent: true
+          schema: { type: string, secret: true, from: [stdin], variable: DEMO_TOKEN }
+      arguments:
+        - name: password
+          agent: true
+          schema: { type: string, secret: true, from: [file] }

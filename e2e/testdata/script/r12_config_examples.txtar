@@ -1,0 +1,126 @@
+# R12 — the config_example and env_example features: an example of each configuration file, in
+# its format, and a .env.example, every key and variable commented out. The generated
+# ConfigExample and EnvExample serve the same text from the binary.
+
+gomodinit example.com/ex
+
+exec rotini generate cmd/ex/.rotini.spec.yaml --config cmd/ex/.rotini.conf.yaml
+exists examples/config/app.example.yaml
+exists examples/config/tuning.example.toml
+exists .env.example
+
+# YAML: a header naming the file, notes above each key, nested by dot.
+grep '^## app: ./ex.yaml, read by ex and its sub-commands\.$' examples/config/app.example.yaml
+grep '^# deploy:$' examples/config/app.example.yaml
+grep '^##   how long a deploy may take \(duration; default 5m\)$' examples/config/app.example.yaml
+grep '^#   timeout: 5m$' examples/config/app.example.yaml
+# A key pinned to the TOML file is listed there, under its table.
+grep '^# \[pool\]$' examples/config/tuning.example.toml
+grep '^# workers = 4$' examples/config/tuning.example.toml
+! grep 'timeout' examples/config/tuning.example.toml
+
+# The env example: defaults commented out, a secret left blank.
+grep '^# EX_REGION=us-east-1$' .env.example
+grep '^## the API token \(string; secret\)$' .env.example
+grep '^# EX_TOKEN=$' .env.example
+
+# The binary serves the same text.
+exec go mod tidy
+exec go build -o ex$exe ./cmd/ex
+exec ./ex$exe example app
+cmp stdout examples/config/app.example.yaml
+exec ./ex$exe example env
+cmp stdout .env.example
+! exec ./ex$exe example nope
+stderr 'no config example for "nope"'
+
+# A dry run after a real run plans nothing.
+exec rotini generate --dry-run cmd/ex/.rotini.spec.yaml --config cmd/ex/.rotini.conf.yaml
+! stdout 'example'
+
+-- cmd/ex/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: ex
+  env_prefix: EX
+  config_files:
+    - name: app
+      path: ./ex.yaml
+    - name: tuning
+      path: ./tuning.toml
+  flags:
+    - name: help
+      identifiers: [--help]
+      short_circuit: true
+      schema: { type: bool }
+  env:
+    - name: region
+      summary: deployment region
+      schema: { type: string, default: us-east-1 }
+    - name: token
+      summary: the API token
+      schema: { type: string, secret: true }
+  config:
+    - name: timeout
+      summary: how long a deploy may take
+      schema: { type: duration, key: deploy.timeout, default: 5m }
+    - name: workers
+      summary: worker threads
+      schema: { type: int, key: pool.workers, default: 4, file: tuning }
+  commands:
+    - name: example
+      summary: print an example file
+      arguments:
+        - name: name
+          summary: a config file's name, or env
+          schema: { type: string, required: true }
+-- cmd/ex/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/ex/main.go
+    - type: cmd
+      file: internal/cmd/ex/zz_ex.go
+      package: ex
+  features:
+    - type: config_example
+      enabled: true
+    - type: env_example
+      enabled: true
+-- internal/cmd/ex/ex_example.go --
+package ex
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*exExampleHandler)(nil)
+
+type exExampleHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*exExampleHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ExExampleInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.ExExample.Arguments.Name == "env" {
+		fmt.Fprint(rtx.Stdout, EnvExample())
+		return
+	}
+	text, err := ConfigExample(in.ExExample.Arguments.Name)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprint(rtx.Stdout, text)
+}

@@ -1,0 +1,17 @@
+-- in --
+a:
+  b:
+    c: 1
+    # foot of b
+# head of z
+z: 2
+-- op --
+set a.d 1
+-- out --
+a:
+  b:
+    c: 1
+    # foot of b
+  d: 1
+# head of z
+z: 2

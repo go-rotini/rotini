@@ -40,6 +40,9 @@ type OutputDef struct {
 	// Schema is the shape as a self-contained JSON Schema, which [Program.WithOutputChecks],
 	// [Context.CheckOutput] and [DecodeOutput] check values against. "" when there is none.
 	Schema string
+	// Stream is the spec's `output_stream`: the command writes a stream of Type items with
+	// [Context.WriteOutputItem], rather than one value with [Context.WriteOutput].
+	Stream bool
 }
 
 // machineFormats are the formats rotini serializes itself. Every other format is a human format,
@@ -50,20 +53,48 @@ var machineFormats = []string{"json", "yaml", "toml"}
 // yaml or toml by rotini, any other format by render, which may be nil when the handler only
 // ever passes those three. An empty format means json.
 //
-// It returns an internal error, and writes nothing, when v is not the type the command declares
-// as its output, when no renderer is passed for a format rotini does not write, or, with
+// It returns an internal error, and writes nothing, when the command declares a stream
+// (output_stream), when v is not the type the command declares as its output, when no renderer is passed for a format rotini does not write, or, with
 // [Program.WithOutputChecks], when v does not match the declared shape. A renderer's error is
 // returned unwrapped. A command that declares no output may still use it; nothing is checked.
+//
+// v may be a [Selection] made from a value of the declared type by [SelectFields]: it is checked
+// as that type, and against the declared shape with every `required` removed.
 func (rtx *Context) WriteOutput[T any](v T, format string, render func(io.Writer, string, T) error) error {
-	return writeOutput(rtx, v, format, render, false)
+	return writeOutput(rtx, rtx.Stdout, v, format, render, false)
 }
 
 // WriteOutputItem writes one item of a stream to rtx.Stdout, for a command that writes its output
 // item by item as each is ready: compact json, one value per line; a yaml document starting
 // "---"; any other format by render. toml cannot be streamed. Its checks are WriteOutput's, with
-// the item checked against the declared shape, which for such a command is one item.
+// the item checked against the declared shape, which for a command that declares output_stream
+// is one item. On a command that doesn't, the item is checked as WriteOutput checks a value.
 func (rtx *Context) WriteOutputItem[T any](item T, format string, render func(io.Writer, string, T) error) error {
-	return writeOutput(rtx, item, format, render, true)
+	return writeOutput(rtx, rtx.Stdout, item, format, render, true)
+}
+
+// WriteOutputTo is [Context.WriteOutput] to w instead of rtx.Stdout: an output file from
+// [CreateOutput], a buffer, or several writers at once. Its checks and errors are WriteOutput's.
+// To write the output to a file and to stdout (a tee):
+//
+//	out, err := rotini.CreateOutput(rtx, in.Flags.Output)
+//	if err != nil {
+//		return err
+//	}
+//	defer out.Abort()
+//	if err := rtx.WriteOutputTo(io.MultiWriter(rtx.Stdout, out), report, format, render); err != nil {
+//		return err
+//	}
+//	return out.Close()
+//
+// io.MultiWriter stops at the first writer that fails, so a closed stdout also ends the file.
+func (rtx *Context) WriteOutputTo[T any](w io.Writer, v T, format string, render func(io.Writer, string, T) error) error {
+	return writeOutput(rtx, w, v, format, render, false)
+}
+
+// WriteOutputItemTo is [Context.WriteOutputItem] to w instead of rtx.Stdout.
+func (rtx *Context) WriteOutputItemTo[T any](w io.Writer, item T, format string, render func(io.Writer, string, T) error) error {
+	return writeOutput(rtx, w, item, format, render, true)
 }
 
 // CheckOutput checks v against the invoked command's declared output schema, returning an
@@ -72,27 +103,47 @@ func (rtx *Context) WriteOutputItem[T any](item T, format string, render func(io
 //	taskr list: output does not match its contract: output.tasks[2].status: value is not in enum
 //
 // It writes nothing. [Program.WithOutputChecks] makes every WriteOutput call check.
+// A [Selection] is checked as the type it was selected from, against the schema with every
+// `required` removed.
 func (rtx *Context) CheckOutput(v any) error {
 	cmd := rtx.invokedCommand()
 	name := rtx.commandName()
 	if cmd.Output == nil || cmd.Output.Schema == "" {
 		return InternalError(fmt.Errorf("%s: declares no output to check against", name))
 	}
-	if err := checkOutputType(name, cmd.Output, reflect.TypeOf(v)); err != nil {
+	t := reflect.TypeOf(v)
+	sel, selected := v.(Selection)
+	if selected {
+		if sel.from == nil {
+			return InternalError(fmt.Errorf("%s: the output is a zero Selection; make one with SelectFields", name))
+		}
+		t = sel.from
+	}
+	if err := checkOutputType(name, cmd.Output, t); err != nil {
 		return err
 	}
-	return checkOutputValue(name, cmd.Output.Schema, v)
+	return checkOutputSchema(name, cmd.Output.Schema, v, selected)
 }
 
-// writeOutput is WriteOutput and WriteOutputItem.
-func writeOutput[T any](rtx *Context, v T, format string, render func(io.Writer, string, T) error, item bool) error {
+// writeOutput is WriteOutput and WriteOutputItem, and their To forms, writing to w.
+func writeOutput[T any](rtx *Context, w io.Writer, v T, format string, render func(io.Writer, string, T) error, item bool) error {
 	cmd := rtx.invokedCommand()
 	name := rtx.commandName()
 	out := cmd.Output
+	if out != nil && out.Stream && !item {
+		return InternalError(fmt.Errorf("%s: declares a stream (output_stream); write each item with WriteOutputItem", name))
+	}
+	sel, selected := any(v).(Selection)
+	if selected && sel.from == nil {
+		return InternalError(fmt.Errorf("%s: the output written is a zero Selection; make one with SelectFields", name))
+	}
 	if out != nil {
 		t := reflect.TypeFor[T]()
 		if t.Kind() == reflect.Interface {
 			t = reflect.TypeOf(any(v))
+		}
+		if selected {
+			t = sel.from
 		}
 		if err := checkOutputType(name, out, t); err != nil {
 			return err
@@ -102,7 +153,7 @@ func writeOutput[T any](rtx *Context, v T, format string, render func(io.Writer,
 		format = "json"
 	}
 	if out != nil && out.Schema != "" && rtx.outputChecks {
-		if err := checkOutputValue(name, out.Schema, v); err != nil {
+		if err := checkOutputSchema(name, out.Schema, v, selected); err != nil {
 			return err
 		}
 	}
@@ -116,13 +167,13 @@ func writeOutput[T any](rtx *Context, v T, format string, render func(io.Writer,
 		}
 		return InternalError(fmt.Errorf("%s: write output as %s: %w", name, format, err))
 	}
-	if _, err := rtx.Stdout.Write(buf.Bytes()); err != nil {
+	if _, err := w.Write(buf.Bytes()); err != nil {
 		return fmt.Errorf("%s: write output: %w", name, err)
 	}
 	return nil
 }
 
-var errNoRenderer = errors.New("no renderer")
+var errNoRenderer error = constError("no renderer")
 
 // rendererError carries a renderer's error out of encodeOutput untouched.
 type rendererError struct{ err error }
@@ -158,7 +209,11 @@ func encodeOutput[T any](w *bytes.Buffer, v T, format string, render func(io.Wri
 		if item {
 			return errors.New("toml cannot be written as a stream")
 		}
-		b, err := toml.Marshal(v)
+		var doc any = v
+		if s, ok := doc.(Selection); ok {
+			doc = nativeNumbers(s.data) // the toml encoder doesn't ask the top-level value
+		}
+		b, err := toml.Marshal(doc)
 		if err != nil {
 			return err //nolint:wrapcheck // wrapped by the caller
 		}
@@ -191,13 +246,30 @@ var outputValidators sync.Map // string → *jsonschema.Schema
 
 // checkOutputValue checks v against schema, reporting every field that does not match.
 func checkOutputValue(name, schema string, v any) error {
-	cached, ok := outputValidators.Load(schema)
+	return checkOutputSchema(name, schema, v, false)
+}
+
+// checkOutputSchema is checkOutputValue, against the schema with every `required` removed when
+// partial, as for a [Selection].
+func checkOutputSchema(name, schema string, v any, partial bool) error {
+	key := schema
+	if partial {
+		key = "partial:" + schema
+	}
+	cached, ok := outputValidators.Load(key)
 	if !ok {
-		s, err := jsonschema.Compile([]byte(schema))
+		text := []byte(schema)
+		if partial {
+			var err error
+			if text, err = partialSchema(text); err != nil {
+				return InternalError(fmt.Errorf("%s: the output schema does not compile: %w", name, err))
+			}
+		}
+		s, err := jsonschema.Compile(text)
 		if err != nil {
 			return InternalError(fmt.Errorf("%s: the output schema does not compile: %w", name, err))
 		}
-		cached, _ = outputValidators.LoadOrStore(schema, s)
+		cached, _ = outputValidators.LoadOrStore(key, s)
 	}
 	compiled, ok := cached.(*jsonschema.Schema)
 	if !ok {
@@ -268,9 +340,12 @@ func outputPath(pointer string) string {
 // it and every item is decoded. format is json, yaml or toml. It is for tests:
 //
 //	var stdout bytes.Buffer
-//	p := cmd.NewProgram(cmd.Handlers()).WithStdout(&stdout)
+//	p := cmd.NewProgram().WithStdout(&stdout)
 //	p.Run([]string{"list", "-o", "json"})
 //	list, err := rotini.DecodeOutput[cmd.TaskrListOutput](p, stdout.Bytes(), "json")
+//
+// Output written from a [Selection] leaves fields out, so it fails the schema's `required`
+// here; DecodeOutput is for whole outputs.
 func DecodeOutput[T any](p *Program, data []byte, format string) (T, error) {
 	var zero T
 	if !slices.Contains(machineFormats, format) {
@@ -279,6 +354,11 @@ func DecodeOutput[T any](p *Program, data []byte, format string) (T, error) {
 	t := reflect.TypeFor[T]()
 	out, name, stream := findOutput(p, t)
 	if out == nil {
+		if s, n, _ := findAnyOutput(p, t); s != nil && s.Stream {
+			return zero, fmt.Errorf("%s writes a stream of %s (output_stream); decode it into []%s", n, t, t)
+		} else if s != nil {
+			return zero, fmt.Errorf("%s writes one %s, not a stream; decode it into %s", n, s.Type, s.Type)
+		}
 		return zero, fmt.Errorf("no command declares %s as its output", t)
 	}
 	var docs []any
@@ -319,10 +399,9 @@ func DecodeOutput[T any](p *Program, data []byte, format string) (T, error) {
 	return v, nil
 }
 
-// findOutput finds the command whose declared output T is. T is the declared type for one
-// document, or a slice of it for a stream of items; stream reports which. An exact match is
-// preferred, so a command whose declared type is itself a slice still decodes as one document.
-// It returns the declaration and the command's name as typed.
+// findOutput finds the command whose declared output T is: the declared type for a command
+// that writes one value, or a slice of it for one that declares a stream (output_stream);
+// stream reports which. It returns the declaration and the command's name as typed.
 func findOutput(p *Program, t reflect.Type) (out *OutputDef, name string, stream bool) {
 	find := func(matches func(*OutputDef) bool) (*OutputDef, string) {
 		if matches(p.def.Output) {
@@ -343,15 +422,40 @@ func findOutput(p *Program, t reflect.Type) (out *OutputDef, name string, stream
 		}
 		return walk(p.def.Commands, p.def.Name)
 	}
-	if out, name := find(func(o *OutputDef) bool { return o != nil && o.Type == t }); out != nil {
+	if out, name := find(func(o *OutputDef) bool { return o != nil && !o.Stream && o.Type == t }); out != nil {
 		return out, name, false
 	}
 	if t.Kind() == reflect.Slice {
-		if out, name := find(func(o *OutputDef) bool { return o != nil && o.Type == t.Elem() }); out != nil {
+		if out, name := find(func(o *OutputDef) bool { return o != nil && o.Stream && o.Type == t.Elem() }); out != nil {
 			return out, name, true
 		}
 	}
 	return nil, "", false
+}
+
+// findAnyOutput finds a command whose declared type is T or T's element, whether or not it
+// streams, to say why DecodeOutput can't read T.
+func findAnyOutput(p *Program, t reflect.Type) (*OutputDef, string, bool) {
+	match := func(o *OutputDef) bool {
+		return o != nil && (o.Type == t || (t.Kind() == reflect.Slice && o.Type == t.Elem()))
+	}
+	if match(p.def.Output) {
+		return p.def.Output, p.def.Name, true
+	}
+	var walk func(cmds []CommandDef, path string) (*OutputDef, string, bool)
+	walk = func(cmds []CommandDef, path string) (*OutputDef, string, bool) {
+		for i := range cmds {
+			name := path + " " + cmds[i].Name
+			if match(cmds[i].Output) {
+				return cmds[i].Output, name, true
+			}
+			if o, n, ok := walk(cmds[i].Commands, name); ok {
+				return o, n, true
+			}
+		}
+		return nil, "", false
+	}
+	return walk(p.def.Commands, p.def.Name)
 }
 
 // decodeOutputDocument decodes one json, yaml or toml document into its JSON-shaped value.
@@ -428,13 +532,14 @@ func normalizeJSON(v any) (any, error) {
 // WithOutputChecks makes every [Context.WriteOutput] and [Context.WriteOutputItem] call check
 // its value against the command's declared output schema before writing it. A value that does
 // not match is an internal error naming each field at fault, and nothing is written. It is off
-// by default; enable it in tests or debug builds:
+// by default; enable it in tests or debug builds, and WithOutputChecks(false) turns it off
+// again:
 //
-//	p := cmd.NewProgram(cmd.Handlers()).WithOutputChecks()
+//	p := cmd.NewProgram().WithOutputChecks(true)
 //
 // Only output written through WriteOutput and WriteOutputItem is checked. To check captured
 // stdout, use [DecodeOutput].
-func (p *Program) WithOutputChecks() *Program {
-	p.outputChecks = true
+func (p *Program) WithOutputChecks(enabled bool) *Program {
+	p.outputChecks = enabled
 	return p
 }

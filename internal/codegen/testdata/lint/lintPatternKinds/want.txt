@@ -1,0 +1,5 @@
+spec: .rotini.spec.yaml:28:7: command demo: flag "bad": `default` "(" is not a valid regular expression (missing closing ): `(`); every run that leaves it unset would fail
+spec: .rotini.spec.yaml:17:7: command demo: flag "exclude": sets `enum` on a glob input, which would check the pattern's text, not what it matches; remove it
+spec: .rotini.spec.yaml:22:7: command demo: flag "grep": sets `nullable` on a regexp input, whose field is already a pointer (*regexp.Regexp), nil when unset; remove it
+spec: .rotini.spec.yaml:35:7: command demo: argument "patterns": sets `glob: true` on a glob input: `glob: true` expands a pattern into file names, while `type: glob` keeps the pattern as a value; use one
+spec: .rotini.spec.yaml:38:15: command demo: argument "patterns": sets `glob` but its elements are rotini.Glob; glob expands to paths, so use string, existingfile, existingdir or inputfile

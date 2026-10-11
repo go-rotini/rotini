@@ -1,0 +1,31 @@
+# A completion command taking the shell (as `rotini import` writes one) with the completion
+# feature on: its stub prints that shell's script. One whose argument isn't a shell gets the
+# default body.
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: completion
+      summary: print a completion script
+      arguments:
+        - name: shell
+          schema: { type: string, required: true, enum: [bash, fish, powershell, zsh] }
+      flags:
+        - name: no-descriptions
+          identifiers: [--no-descriptions]
+          schema: { type: bool }
+    - name: other
+      summary: not a completion command
+      commands:
+        - name: completion
+          summary: takes a word
+          arguments:
+            - name: word
+              schema: { type: string, required: true, enum: [bash, tcsh] }

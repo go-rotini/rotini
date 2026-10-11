@@ -28,7 +28,7 @@ stdout '^  umbrella kid work <target>$'
 stdout '--verbose'
 ! stderr .
 exec ./umbrella$exe kid --help
-stdout '^  umbrella kid <command> \[flags\]'
+stdout '^  umbrella kid \[flags\] <command>'
 stdout '--verbose'
 
 # Without --help the required argument is still required: answering help did not loosen it.

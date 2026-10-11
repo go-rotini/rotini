@@ -5,10 +5,10 @@ generate:
   # at raw.githubusercontent.com/.../refs/tags/<tag>/schema-spec.json — the URL a user's
   # `$schema` key points at. TestPublishedSchemasInSync guards the copies.
   schemas:
-    spec:
-      file: schema-spec.json
     conf:
       file: schema-conf.json
+    spec:
+      file: schema-spec.json
   packages:
     - type: main
       file: cmd/rotini/main.go

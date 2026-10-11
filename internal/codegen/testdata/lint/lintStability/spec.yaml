@@ -1,0 +1,40 @@
+# A command or input is as unstable as the command it belongs to, so marking it more stable is
+# a promise rotini can't keep; and a required experimental input makes a stable command depend
+# on something that may go away.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    # Correct: an experimental input on an experimental command. No problem.
+    - name: alpha
+      stability: experimental
+      flags:
+        - name: fast
+          stability: experimental
+          schema: { type: bool }
+      commands:
+        # Marked more stable than its parent.
+        - name: child
+          stability: beta
+          flags:
+            # Marked more stable than the command it inherits from.
+            - name: deep
+              stability: beta
+              schema: { type: bool }
+    # Correct: a beta input on a beta command. No problem.
+    - name: beta
+      stability: beta
+      arguments:
+        - name: target
+          stability: beta
+          schema: { type: string }
+    - name: stable
+      flags:
+        # Correct: an optional experimental flag on a stable command. No problem.
+        - name: maybe
+          stability: experimental
+          schema: { type: bool }
+        # Required and experimental on a stable command.
+        - name: must
+          stability: experimental
+          schema: { type: string, required: true }

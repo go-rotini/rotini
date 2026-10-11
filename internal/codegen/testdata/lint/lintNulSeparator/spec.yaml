@@ -1,0 +1,15 @@
+# Command-line and environment values can't contain a NUL byte, so `separator: nul` applies
+# only to a list or map flag that reads a file or stdin itself.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: files-from
+      identifiers: [--files-from]
+      schema: {type: '[]string', separator: nul, from: [file, stdin]}
+    - name: tags
+      identifiers: [--tags]
+      schema: {type: '[]string', separator: nul}
+  arguments:
+    - name: paths
+      schema: {type: '[]string', separator: nul}

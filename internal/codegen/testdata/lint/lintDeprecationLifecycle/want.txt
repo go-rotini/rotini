@@ -1,0 +1,5 @@
+spec: .rotini.spec.yaml:24:25: command demo/quiet: sets `deprecated_since` without `deprecated`; say why it is deprecated, or drop `deprecated_since`
+spec: .rotini.spec.yaml:27:23: command demo/quiet: argument "target": sets `removed_in` without `deprecated`; say why it is deprecated, or drop `removed_in`
+spec: .rotini.spec.yaml:33:19: command demo/early: removed_in 1.9.0 is not later than deprecated_since 2.0.0
+spec: .rotini.spec.yaml:38:23: command demo/early: env "token": removed_in 1.4.0 is not later than deprecated_since 1.4.0
+spec: .rotini.spec.yaml:42:42: command demo/alias: deprecated_identifiers_removed_in names "al", which deprecated_identifiers does not list; deprecate it first

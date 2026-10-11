@@ -1,11 +1,41 @@
-# A trailing variadic absorbs the rest, so anything after it could never bind.
+# Fixed arguments after a variadic bind from the end, so each must be required, with no
+# default; there is one variadic, and it can't split on a separator.
 version: 0.0.0
 command:
   name: demo
-  arguments:
-    - name: paths
-      schema:
-        type: '[]string'
-    - name: target
-      schema:
-        type: string
+  commands:
+    - name: cp
+      arguments:
+        - name: src
+          schema:
+            type: '[]string'
+            separator: ','
+            complete:
+              kind: file
+        - name: dst
+          schema:
+            type: string
+            required: true
+            complete:
+              kind: directory
+    - name: bad
+      arguments:
+        - name: paths
+          schema:
+            type: '[]string'
+        - name: target
+          schema:
+            type: string
+        - name: more
+          schema:
+            type: '[]string'
+    - name: ok
+      arguments:
+        - name: src
+          schema:
+            type: '[]string'
+            minItems: 1
+        - name: dst
+          schema:
+            type: string
+            required: true

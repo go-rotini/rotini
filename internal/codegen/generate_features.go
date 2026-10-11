@@ -59,7 +59,7 @@ var (
 		// Help is a terminal surface, so spec-authored styling is kept.
 	}
 	manFeatureDesc = docFeature{
-		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
+		name: "man", noun: "man page", varPrefix: "Man", resolver: "Man",
 		tmplFile: manTemplateName, embedded: templateMan,
 		verbatim:  func(h cmdHelp) string { return h.Man },
 		strip:     true, // a roff man page carries no legitimate SGR
@@ -67,7 +67,7 @@ var (
 		pagesFunc: "ManPages",
 	}
 	markdownFeatureDesc = docFeature{
-		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
+		name: "markdown", noun: "markdown page", varPrefix: "Markdown", resolver: "Markdown",
 		ext: ".md", filePrefix: "markdown_", tmplFile: markdownTemplateName, embedded: templateMarkdown,
 		verbatim:  func(h cmdHelp) string { return h.Markdown },
 		strip:     true, // a markdown file carries no legitimate SGR
@@ -82,7 +82,7 @@ var (
 )
 
 // completionShells are the shells completionScript supports, in generation order.
-var completionShells = []string{"bash", "zsh", "fish", "powershell"}
+var completionShells = []string{"bash", "zsh", "fish", "powershell", "nushell"}
 
 // helpNode is one command's page for one feature: its embed var and resolver identity plus the
 // verbatim page or the data to render it from.
@@ -95,6 +95,7 @@ type helpNode struct {
 	data     templateHelpData // rendering inputs (used when verbatim == "")
 	path     []string         // the canonical command path below the root; nil for the root
 	listed   bool             // in ManPages/MarkdownPages: neither it nor an ancestor is hidden
+	topic    bool             // a help topic's page, not a command's; path is [topic name]
 }
 
 // cmdHelp bundles a command's doc fields. A non-empty Help, Man or Markdown is that feature's
@@ -109,9 +110,14 @@ type cmdHelp struct {
 	Examples    []string
 	ExitStatus  []ExitStatusEntry // command.exit_status (man EXIT STATUS section)
 	SeeAlso     []string          // command.see_also (man SEE ALSO section)
+	Groups      []HelpGroup       // command.groups: descriptions and order of its pages' group headings
 	Help        string            // verbatim help page (command.help)
 	Man         string            // verbatim man page (command.man)
 	Markdown    string            // verbatim markdown reference page (command.markdown)
+	Stability   string            // command.stability as declared: "experimental", "beta" or "" (stable)
+	Topics      []Topic           // command.topics: help topics, read from the root only
+	Effects     *Effects          // command.effects: what running it does; nil when undeclared
+	Agent       *bool             // command.agent: offered to AI agents (true), kept from them (false), or unset
 }
 
 // commandHelp gathers the doc fields of a command.
@@ -119,8 +125,10 @@ func commandHelp(c Command) cmdHelp {
 	return cmdHelp{
 		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
 		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
-		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso,
+		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso, Groups: c.Groups,
 		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
+		Stability: c.Stability, Topics: c.Topics,
+		Effects: c.Effects, Agent: c.Agent,
 	}
 }
 
@@ -139,10 +147,13 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		}
 		return feat.filePrefix + gp.rootName + "_" + strings.Join(names, "_") + feat.ext
 	}
-	// withPage fills the output doc and man page fields: the page's name, section, source and
-	// date, and its cross-references (the parent's page, then each visible child's).
-	withPage := func(d templateHelpData, names []string, children []rnode, output *Schema) templateHelpData {
+	// withPage fills the output and stdin docs and man page fields: the page's name, section,
+	// source and date, and its cross-references (the parent's page, then each visible child's).
+	withPage := func(d templateHelpData, names []string, children []rnode, output *Schema, inputs *Inputs) templateHelpData {
 		d.Output = outputDoc(output, gp.schemas)
+		if inputs != nil {
+			d.Stdin = stdinDocFor(inputs, gp.schemas)
+		}
 		d.PageName = manPageName(gp.rootName, names)
 		d.Section = section
 		d.Source = gp.rootDisplay
@@ -164,41 +175,65 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		paths:    []string{""},
 		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix, gp.readsConfig(nil)), nil, gp.tree, gp.rootOutput),
+		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix, gp.configReadsOf(nil)), nil, gp.tree, gp.rootOutput, gp.rootInputs),
 		listed:   true,
 	}}
-	// The variable that hides completion messages is an input the end user sets, so the root's
-	// man page lists it with the program's other environment variables.
-	if mode, env := completionMessages(gp.conf); feat.manPages && mode != "" && env != "" {
-		out[0].data.Environment = append(out[0].data.Environment, templateDocEnvRow{
-			Var: env, Summary: "set to 0, false or off to hide completion messages",
-		})
+	// The variables that switch completion messages and descriptions are inputs the end user
+	// sets, so the root's man page lists them with the program's other environment variables.
+	markStream(out[0].data.Output, gp.rootStream)
+	if feat.manPages {
+		out[0].data.Environment = append(out[0].data.Environment, completionEnvRows(gp.conf)...)
 	}
+	out[0].data.Stability = gp.rootHelp.Stability
+	out[0].data.Topics = topicRows(gp.rootHelp.Topics)
+	if rf := gp.responseFiles(); rf != nil {
+		out[0].data.ResponseFiles = rf.Prefix
+	}
+	out[0].data.RelatedPages = append(out[0].data.RelatedPages, topicPageNames(gp)...)
 
-	// cascading accumulates the cascading flags of a node's ancestors.
-	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool)
-	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool) {
+	// cascading accumulates the cascading flags of a node's ancestors; stability is the least
+	// stable of the ancestors' declared stability.
+	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool, stability string)
+	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool, stability string) {
 		for _, n := range nodes {
-			seg := append([]string{n.name}, n.aliases...)
+			seg := slices.Concat([]string{n.name}, n.aliases, n.hiddenAliases) // help accepts a hidden alias, as the command line does
 			childChain := append(append([][]string{}, identChain...), seg)
 			childNames := append(append([]string{}, names...), n.name)
 			invocation := gp.rootDisplay + " " + strings.Join(childNames, " ")
+			data := withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix, gp.configReadsOf(childNames)), childNames, n.children, n.output, n.inputs)
+			if n.passthrough {
+				data.Passthrough = n.name
+			}
+			data.Stability = leastStable(stability, n.help.Stability)
+			markStream(data.Output, n.stream)
 			out = append(out, helpNode{
 				prefix:   n.prefix,
 				file:     file(childNames),
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix, gp.readsConfig(childNames)), childNames, n.children, n.output),
+				data:     data,
 				path:     childNames,
 				listed:   listed && !n.hidden,
 			})
 			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs, gp.envPrefix)...)
-			walk(n.children, childChain, childNames, childCascading, listed && !n.hidden)
+			walk(n.children, childChain, childNames, childCascading, listed && !n.hidden, data.Stability)
 		}
 	}
-	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs, gp.envPrefix), true)
-	return out
+	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs, gp.envPrefix), true, gp.rootHelp.Stability)
+	return append(out, topicNodes(gp, feat, section, date)...)
+}
+
+// stabilityRank orders stability markers from least to most stable; "" is stable.
+var stabilityRank = map[string]int{"experimental": 0, "beta": 1, "": 2}
+
+// leastStable returns the less stable of two stability markers: an item is never more stable
+// than the command it belongs to.
+func leastStable(a, b string) string {
+	if stabilityRank[b] < stabilityRank[a] {
+		return b
+	}
+	return a
 }
 
 // manPageName returns a command's man page name: the root's name and the command path joined
@@ -264,7 +299,7 @@ func completionNodes() []helpNode {
 // resolveHeadings returns the default section headings, overridden by any set in the spec.
 func resolveHeadings(h cmdHelp) templateDocHeadings {
 	// Defaults carry the trailing ":" so an override renders verbatim, colon or not.
-	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:"}
+	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:", Stdin: "Stdin:", Topics: "Help Topics:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -283,14 +318,15 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 	override(&hd.Cascading, o.Cascading)
 	override(&hd.Examples, o.Examples)
 	override(&hd.Output, o.Output)
+	override(&hd.Stdin, o.Stdin)
+	override(&hd.Topics, o.Topics)
 	return hd
 }
 
 // buildHelpData assembles the template data for one command from its doc fields, inputs,
 // direct children and plugins. Hidden children and inputs are excluded; plugins are listed
-// with the commands. readsConfig says whether the command reads any config file, which decides
-// whether its flags show their config keys.
-func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, plugins []PluginSpec, ancestorCascading []templateDocFlagRow, envPrefix string, readsConfig bool) templateHelpData {
+// with the commands. reads decides which of its inputs show config keys.
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, plugins []PluginSpec, ancestorCascading []templateDocFlagRow, envPrefix string, reads configReads) templateHelpData {
 	d := templateHelpData{
 		Invocation:  invocation,
 		Headings:    resolveHeadings(h),
@@ -299,12 +335,13 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Description: h.Description,
 		Usage:       h.Usage,
 		Footer:      h.Footer,
-		Cascading:   withConfigKeys(ancestorCascading, readsConfig),
+		Cascading:   withConfigKeys(ancestorCascading, reads),
 		Examples:    h.Examples,
 		SeeAlso:     h.SeeAlso,
+		Effects:     effectsText(h.Effects),
 	}
 	for _, e := range h.ExitStatus {
-		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Summary: e.Summary, Output: shapeTypeName(e.Output)})
+		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, Output: shapeTypeName(e.Output), DocsURL: e.DocsUrl})
 	}
 	var cmds []templateDocCommandRow
 	for _, c := range children {
@@ -320,7 +357,10 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			Summary:    c.help.Summary,
 			Aliases:    aliases,
 			Group:      c.group,
-			Deprecated: deprecated,
+			Deprecated: withReplacement(deprecated, c.replacedBy.text),
+			Stability:  c.help.Stability,
+
+			DeprecatedSince: c.lifecycle.since, RemovedIn: c.lifecycle.removedIn,
 		})
 	}
 	for _, r := range plugins {
@@ -330,21 +370,13 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			Aliases: r.Aliases,
 		})
 	}
-	d.CommandGroups = groupCommands(cmds)
+	d.CommandGroups = groupCommands(cmds, h.Groups)
 	if inputs != nil {
 		for _, a := range inputs.Arguments {
 			if a.Hidden {
 				continue
 			}
-			d.Arguments = append(d.Arguments, templateDocArgumentRow{
-				Name:       a.Name,
-				Summary:    a.Summary,
-				Required:   a.Schema != nil && a.Schema.Required,
-				Variadic:   isVariadicSchema(a.Schema),
-				Default:    schemaDefaultString(a.Schema),
-				Enum:       enumOf(a.Schema),
-				Deprecated: a.Deprecated,
-			})
+			d.Arguments = append(d.Arguments, argumentRow(a, envPrefix, reads.any))
 		}
 		for _, f := range inputs.Flags {
 			if f.Hidden {
@@ -356,43 +388,97 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if e.Hidden {
 				continue
 			}
+			constraints, rules := constraintText(e.Schema, "env")
 			d.Environment = append(d.Environment, templateDocEnvRow{
-				Var:        envVarLabel(e, envPrefix),
-				Summary:    e.Summary,
-				Type:       flagDisplayType(e.Schema),
-				Required:   e.Schema != nil && e.Schema.Required,
-				Default:    schemaDefaultString(e.Schema),
-				Enum:       enumOf(e.Schema),
-				Deprecated: e.Deprecated,
+				Var:         envVarLabel(e, envPrefix),
+				Summary:     e.Summary,
+				Description: e.Description,
+				Stability:   e.Stability,
+				Type:        flagDisplayType(e.Schema),
+				Required:    e.Schema != nil && e.Schema.Required,
+				Default:     schemaDefaultString(e.Schema),
+				Enum:        enumOf(e.Schema),
+				EnumValues:  enumValuesOf(e.Schema),
+				Deprecated:  e.Deprecated,
+				Constraints: constraints,
+				Accepts:     acceptsNote(e.Schema),
+				Rules:       rules,
+
+				DeprecatedSince: e.DeprecatedSince, RemovedIn: e.RemovedIn,
 			})
 		}
 		for _, c := range inputs.Config {
 			if c.Hidden {
 				continue
 			}
+			constraints, rules := constraintText(c.Schema, "config")
 			d.Configuration = append(d.Configuration, templateDocConfigRow{
-				Name:       c.Name,
-				Location:   configLocation(c),
-				Summary:    c.Summary,
-				Type:       flagDisplayType(c.Schema),
-				Required:   c.Schema != nil && c.Schema.Required,
-				Default:    schemaDefaultString(c.Schema),
-				Enum:       enumOf(c.Schema),
-				Deprecated: c.Deprecated,
+				Name:        c.Name,
+				Location:    configLocation(c),
+				Summary:     c.Summary,
+				Description: c.Description,
+				Stability:   c.Stability,
+				Type:        flagDisplayType(c.Schema),
+				Required:    c.Schema != nil && c.Schema.Required,
+				Default:     schemaDefaultString(c.Schema),
+				Enum:        enumOf(c.Schema),
+				EnumValues:  enumValuesOf(c.Schema),
+				Deprecated:  c.Deprecated,
+				Constraints: constraints,
+				Accepts:     acceptsNote(c.Schema),
+				Rules:       rules,
+
+				DeprecatedSince: c.DeprecatedSince, RemovedIn: c.RemovedIn,
 			})
 		}
 	}
-	d.Flags = withConfigKeys(d.Flags, readsConfig)
-	d.FlagGroups = groupFlags(d.Flags)
+	d.Flags = withConfigKeys(d.Flags, reads)
+	labelFlags(d.Flags, d.Cascading)
+	d.FlagGroups = groupFlags(d.Flags, h.Groups)
 	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(plugins) > 0)
 	return d
+}
+
+// argumentRow is an argument's row on the help, man and markdown pages.
+func argumentRow(a ArgumentInput, envPrefix string, readsConfig bool) templateDocArgumentRow {
+	constraints, rules := constraintText(a.Schema, "argument")
+	if a.Schema != nil && a.Schema.Glob {
+		rules = append(rules, globRule)
+	}
+	row := templateDocArgumentRow{
+		Name:        a.Name,
+		Summary:     withStreamNote(a.Summary, a.Schema),
+		Description: a.Description,
+		Stability:   a.Stability,
+		Required:    a.Schema != nil && a.Schema.Required,
+		Variadic:    isVariadicSchema(a.Schema),
+		Default:     schemaDefaultString(a.Schema),
+		Enum:        enumOf(a.Schema),
+		EnumValues:  enumValuesOf(a.Schema),
+		Passthrough: a.Passthrough,
+		Deprecated:  a.Deprecated,
+		Constraints: constraints,
+		Accepts:     acceptsNote(a.Schema),
+		Rules:       rules,
+
+		DeprecatedSince: a.DeprecatedSince, RemovedIn: a.RemovedIn,
+	}
+	row.Env, row.ConfigKey = argumentFallback(a, envPrefix, readsConfig)
+	if len(row.Env) > 0 && a.Schema.VariableFile != "" {
+		row.Env = append(row.Env, a.Schema.VariableFile+fileVariableNote)
+	}
+	return row
 }
 
 // envVarLabel returns the environment variable(s) an env input reads, for display: the names
 // envVarName produces (the same ones the generated `env:` tag pins), comma-separated with a
 // space, first preferred.
 func envVarLabel(e EnvInput, envPrefix string) string {
-	return strings.ReplaceAll(envVarName(e, envPrefix), ",", ", ")
+	label := strings.ReplaceAll(envVarName(e, envPrefix), ",", ", ")
+	if e.Schema != nil && e.Schema.VariableFile != "" {
+		label += ", " + e.Schema.VariableFile + fileVariableNote
+	}
+	return label
 }
 
 // configLocation returns where a config input is read from, for display: "<file>.<key>" when a
@@ -415,23 +501,56 @@ func configLocation(c ConfigInput) string {
 	}
 }
 
-// groupCommands buckets command rows by Group in first-appearance order. Ungrouped rows form a
-// bucket with an empty Title, which templates head with their default heading.
-func groupCommands(rows []templateDocCommandRow) []templateDocCommandGroup {
+// groupCommands buckets command rows by Group (see groupOrder for the order). Ungrouped rows
+// form a bucket with an empty Title, which templates head with their default heading. A bucket
+// whose group the command's `groups` describes carries that description.
+func groupCommands(rows []templateDocCommandRow, declared []HelpGroup) []templateDocCommandGroup {
 	var groups []templateDocCommandGroup
 	for title, members := range groupByTitle(rows, func(r templateDocCommandRow) string { return r.Group }) {
-		groups = append(groups, templateDocCommandGroup{Title: title, Commands: members})
+		groups = append(groups, templateDocCommandGroup{Title: title, Description: groupDescription(declared, title), Commands: members})
 	}
+	slices.SortStableFunc(groups, func(a, b templateDocCommandGroup) int {
+		return groupOrder(declared, a.Title) - groupOrder(declared, b.Title)
+	})
 	return groups
 }
 
 // groupFlags buckets flag rows by Group the same way groupCommands buckets commands.
-func groupFlags(rows []templateDocFlagRow) []templateDocFlagGroup {
+func groupFlags(rows []templateDocFlagRow, declared []HelpGroup) []templateDocFlagGroup {
 	var groups []templateDocFlagGroup
 	for title, members := range groupByTitle(rows, func(r templateDocFlagRow) string { return r.Group }) {
-		groups = append(groups, templateDocFlagGroup{Title: title, Flags: members})
+		groups = append(groups, templateDocFlagGroup{Title: title, Description: groupDescription(declared, title), Flags: members})
 	}
+	slices.SortStableFunc(groups, func(a, b templateDocFlagGroup) int {
+		return groupOrder(declared, a.Title) - groupOrder(declared, b.Title)
+	})
 	return groups
+}
+
+// groupOrder ranks a bucket for sorting buckets that are already in first-appearance order.
+// Without declared groups every bucket ranks the same, so that order stands. With them, the
+// ungrouped bucket comes first, then the declared groups in their order, then any others.
+func groupOrder(declared []HelpGroup, title string) int {
+	if len(declared) == 0 {
+		return 0
+	}
+	if title == "" {
+		return -1
+	}
+	if i := slices.IndexFunc(declared, func(g HelpGroup) bool { return g.Name == title }); i >= 0 {
+		return i
+	}
+	return len(declared)
+}
+
+// groupDescription returns the description declared gives the group titled title, or "".
+func groupDescription(declared []HelpGroup, title string) string {
+	for _, g := range declared {
+		if g.Name == title && title != "" {
+			return g.Description
+		}
+	}
+	return ""
 }
 
 // groupByTitle buckets rows by the title group returns, yielding each bucket once in the order
@@ -504,19 +623,43 @@ func undeprecated(names, deprecatedIDs []string, message string) ([]string, stri
 // env names are the ones the generated field's env tag pins, so help and the runtime agree.
 func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 	ids, deprecated := undeprecated(flagIdentifiers(f), f.DeprecatedIdentifiers, f.Deprecated)
+	constraints, rules := constraintText(f.Schema, "flag")
 	row := templateDocFlagRow{
-		Identifiers: negatableIdentifiers(f, ids),
-		Summary:     f.Summary,
+		Identifiers: shortFirst(negatableIdentifiers(f, ids)),
+		Summary:     withStreamNote(f.Summary, f.Schema),
+		Description: f.Description,
+		Stability:   f.Stability,
 		Group:       f.Group,
 		Type:        flagDisplayType(f.Schema),
 		Required:    f.Schema != nil && f.Schema.Required,
 		Default:     schemaDefaultString(f.Schema),
 		Enum:        enumOf(f.Schema),
-		Deprecated:  deprecated,
+		EnumValues:  enumValuesOf(f.Schema),
+		Deprecated:  withReplacement(deprecated, f.ReplacedBy),
+		Constraints: constraints,
+		Accepts:     acceptsNote(f.Schema),
+		Rules:       rules,
+		name:        f.Name,
 		key:         flagReconKey(f.Name, f.Schema),
+		Effects:     effectsText(f.Effects),
+
+		DeprecatedSince: f.DeprecatedSince, RemovedIn: f.RemovedIn,
+	}
+	// A count flag's rule shows the repetition with its short form: repeat to count: -vvv.
+	if f.Schema != nil && f.Schema.Type == "count" {
+		if short := shortIdentifier(row.Identifiers); short != "" {
+			for i, r := range row.Rules {
+				if r == "repeat to count" {
+					row.Rules[i] += ": " + short + strings.Repeat(short[1:], 2)
+				}
+			}
+		}
 	}
 	if env := flagEnvVar(f.Schema, row.key, envPrefix); env != "" {
 		row.Env = strings.Split(env, ",")
+		if f.Schema.VariableFile != "" {
+			row.Env = append(row.Env, f.Schema.VariableFile+fileVariableNote)
+		}
 	}
 	// An implicit value must be attached, so the value token moves into brackets on the last
 	// identifier: `-c, --color[=when]`.
@@ -528,6 +671,59 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		}
 	}
 	return row
+}
+
+// shortFirst returns identifiers with the short ones (-v) before the long ones (--verbose),
+// each kind in declared order, so every page reads the same way whatever order the spec used.
+func shortFirst(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !strings.HasPrefix(id, "--") {
+			out = append(out, id)
+		}
+	}
+	for _, id := range ids {
+		if strings.HasPrefix(id, "--") {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// shortIdentifier returns a flag's first short identifier (-v), or "".
+func shortIdentifier(ids []string) string {
+	for _, id := range ids {
+		if !strings.HasPrefix(id, "--") {
+			return id
+		}
+	}
+	return ""
+}
+
+// longOnlyPad indents a long-only flag's identifiers to the column where long forms start on
+// rows with a short one: the width of "-v, ".
+const longOnlyPad = "    "
+
+// labelFlags sets the Label of every flag row on one page (its own flags and the cascading
+// flags it inherits). When any row has a short identifier, a row without one is indented so
+// long forms line up in one column.
+func labelFlags(pages ...[]templateDocFlagRow) {
+	anyShort := false
+	for _, rows := range pages {
+		for _, r := range rows {
+			if shortIdentifier(r.Identifiers) != "" {
+				anyShort = true
+			}
+		}
+	}
+	for _, rows := range pages {
+		for i := range rows {
+			rows[i].Label = strings.Join(rows[i].Identifiers, ", ")
+			if anyShort && shortIdentifier(rows[i].Identifiers) == "" {
+				rows[i].Label = longOnlyPad + rows[i].Label
+			}
+		}
+	}
 }
 
 // cascadingFlagsOf returns help rows for a command's visible cascading flags, in declaration
@@ -546,18 +742,34 @@ func cascadingFlagsOf(inputs *Inputs, envPrefix string) []templateDocFlagRow {
 	return rows
 }
 
+// configReads is what a command's page and contract entry need to show config keys: whether
+// the command reads any config file, and the flags that select a profile of one, which no file
+// sets.
+type configReads struct {
+	any       bool
+	selectors []string
+}
+
+// configReadsOf is configReads for the command at path (below the root).
+func (gp *program) configReadsOf(path []string) configReads {
+	return configReads{
+		any:       gp.readsConfig(path),
+		selectors: gp.selectorsFor(strings.Join(append([]string{gp.rootName}, path...), "/")),
+	}
+}
+
 // withConfigKeys returns rows with ConfigKey set from each flag's key when the page's command
-// reads config files, and cleared when it reads none: a key no file is read for points nowhere.
-// A cascading flag is judged by the page it appears on, since the runtime reads the invoked
-// command's files.
-func withConfigKeys(rows []templateDocFlagRow, readsConfig bool) []templateDocFlagRow {
+// reads config files, and cleared when it reads none or the flag selects a profile: a key no
+// file is read for points nowhere. A cascading flag is judged by the page it appears on, since
+// the runtime reads the invoked command's files.
+func withConfigKeys(rows []templateDocFlagRow, reads configReads) []templateDocFlagRow {
 	if rows == nil {
 		return nil
 	}
 	out := slices.Clone(rows)
 	for i := range out {
 		out[i].ConfigKey = ""
-		if readsConfig {
+		if reads.any && !slices.Contains(reads.selectors, out[i].name) {
 			out[i].ConfigKey = out[i].key
 		}
 	}
@@ -577,12 +789,16 @@ func (gp *program) readsConfig(path []string) bool {
 	return false
 }
 
-// deriveUsage builds the default usage line: the invocation, a <command> slot when there are
-// visible children, each visible argument (<required> or [optional], "..." when variadic), then
-// [flags] when there are visible flags.
+// deriveUsage builds the default usage line: the invocation, [flags] when there are visible
+// flags, a <command> slot when there are visible children, then each visible argument
+// (<required> or [optional], "..." when variadic), with [--] before a passthrough argument. A
+// command's flags are accepted anywhere after its name, so before its arguments is always right.
 func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 	var b strings.Builder
 	b.WriteString(invocation)
+	if hasVisibleFlags(inputs) {
+		b.WriteString(" [flags]")
+	}
 	if hasChildren {
 		b.WriteString(" <command>")
 	}
@@ -598,6 +814,9 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 			if isVariadicSchema(a.Schema) {
 				name += "..."
 			}
+			if a.Passthrough {
+				b.WriteString(" [--]")
+			}
 			if a.Schema != nil && a.Schema.Required {
 				b.WriteString(" <")
 				b.WriteString(name)
@@ -608,9 +827,6 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 				b.WriteString("]")
 			}
 		}
-	}
-	if hasVisibleFlags(inputs) {
-		b.WriteString(" [flags]")
 	}
 	return b.String()
 }
@@ -649,6 +865,7 @@ var valueTypeAliases = []string{
 	"duration", "time", "datetime", "date",
 	"url", "email", "timezone", "mac", "ip", "cidr", "hostport",
 	"bytesize", "hexbytes", "base64bytes",
+	"regexp", "glob",
 }
 
 // helpTypeName renders a declared type for docs: value aliases as written, everything else
@@ -674,21 +891,48 @@ func schemaDefaultString(schema *InputSchema) string {
 	if schema.DefaultText != "" {
 		return schema.DefaultText
 	}
+	if schema.Secret {
+		// A page is shared and pasted; only an author's explicit default_text shows.
+		return ""
+	}
 	return defaultString(schema.Default)
 }
 
+// enumOf returns an input's enum values for the docs pages: every value that is not hidden,
+// deprecated ones included, since they are still accepted.
 func enumOf(schema *InputSchema) []string {
 	if schema == nil {
 		return nil
 	}
-	return schema.Enum
+	return enumVisible(schema.Enum)
+}
+
+// enumValuesOf returns every enum value that is not hidden, in declared order, with what it
+// declares beyond its spelling, for the docs pages; nil when no value declares more, so the
+// pages keep the compact value list.
+func enumValuesOf(schema *InputSchema) []enumValue {
+	if schema == nil || !enumDetailed(schema.Enum) {
+		return nil
+	}
+	var out []enumValue
+	for _, v := range enumValues(schema.Enum) {
+		if !v.Hidden {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // negatableIdentifiers returns a flag's identifiers as docs show them. A negatable flag's long
-// forms render as "--[no-]color"; short forms have no negated spelling and are unchanged.
+// forms render as "--[no-]color"; short forms have no negated spelling and are unchanged. A
+// custom negated form is listed after the flag's own identifiers: "--color, --plain".
 func negatableIdentifiers(f FlagInput, ids []string) []string {
-	if f.Schema == nil || !f.Schema.Negatable {
+	on, custom := negation(f.Schema)
+	if !on {
 		return ids
+	}
+	if custom != "" {
+		return append(slices.Clone(ids), custom)
 	}
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -769,7 +1013,7 @@ func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool
 			if len(hn.path) > 0 {
 				path = goStringSlice(hn.path)
 			}
-			h.Pages = append(h.Pages, templateFeaturePage{Name: hn.data.PageName, PathLiteral: path, Var: feat.varPrefix + hn.prefix})
+			h.Pages = append(h.Pages, templateFeaturePage{Name: hn.data.PageName, PathLiteral: path, Var: feat.varPrefix + hn.prefix, Topic: hn.topic})
 		}
 	}
 	for i, hn := range nodes {
@@ -843,10 +1087,10 @@ func docFeatureContents(pl *planner, featDir string, nodes []helpNode, feat docF
 }
 
 // completionContents returns each node's shell completion script, parallel to nodes.
-func completionContents(prog, messagesEnv string, nodes []helpNode) ([]string, error) {
+func completionContents(prog string, envs completionEnvs, nodes []helpNode) ([]string, error) {
 	contents := make([]string, len(nodes))
 	for i, n := range nodes {
-		script, err := completionScript(prog, n.name, messagesEnv)
+		script, err := completionScript(prog, n.name, envs)
 		if err != nil {
 			return nil, fmt.Errorf("generate %s completion: %w", n.name, err)
 		}

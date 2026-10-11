@@ -53,3 +53,48 @@ command:
         type: string
         complete:
           kind: file
+  arguments:
+    # A number can't be a command path.
+    - name: depth
+      schema:
+        type: int
+        complete:
+          kind: command
+    # The command names are the candidates, so the enum would never be offered.
+    - name: topic
+      schema:
+        type: string
+        enum: [a, b]
+        complete:
+          kind: command
+    # A number can't be a user name: a warning.
+    - name: uid
+      schema:
+        type: int
+        complete:
+          kind: user
+    # Correct: a help command's argument.
+    - name: command
+      schema:
+        type: array
+        items:
+          type: string
+        complete:
+          kind: command
+  commands:
+    - name: run
+      flags:
+        # A flag's value isn't a command path.
+        - name: target
+          identifiers: [--target]
+          schema:
+            type: string
+            complete:
+              kind: command
+        # Correct: a program name.
+        - name: shell
+          identifiers: [--shell]
+          schema:
+            type: string
+            complete:
+              kind: executable

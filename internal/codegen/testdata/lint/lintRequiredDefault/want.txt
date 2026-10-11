@@ -1,0 +1,5 @@
+spec: .rotini.spec.yaml:11:7: command demo: flag "output": sets `required` and a `default`; the default always supplies a value, so the requirement can never fire. Drop `default` to make it required, or drop `required`
+spec: .rotini.spec.yaml:13:7: command demo: flag "tags": sets `required` and a `default`; the default always supplies a value, so the requirement can never fire. Drop `default` to make it required, or drop `required`
+spec: .rotini.spec.yaml:16:7: command demo: argument "path": sets `required` and a `default`; the default always supplies a value, so the requirement can never fire. Drop `default` to make it required, or drop `required`
+spec: .rotini.spec.yaml:19:7: command demo: env "token": sets `required` and a `default`; the default always supplies a value, so the requirement can never fire. Drop `default` to make it required, or drop `required`
+spec: .rotini.spec.yaml:22:7: command demo: config "endpoint": sets `required` and a `default`; the default always supplies a value, so the requirement can never fire. Drop `default` to make it required, or drop `required`

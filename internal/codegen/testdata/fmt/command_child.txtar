@@ -1,0 +1,12 @@
+-- in --
+summary: a child
+flags:
+  - name: x
+    schema: { type: bool }
+name: child
+-- out --
+name: child
+summary: a child
+flags:
+  - name: x
+    schema: { type: bool }

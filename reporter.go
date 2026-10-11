@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"slices"
 )
 
 // Outcome is everything a run recorded, handed to the [Reporter]. Each slice is in recording
@@ -30,7 +32,7 @@ func (o Outcome) Empty() bool {
 }
 
 // Failed reports whether the run recorded an error or a panic, the condition for the default
-// reporter's exit floor.
+// reporter's exit floor (which leaves out an error the run's own signal caused).
 func (o Outcome) Failed() bool { return len(o.Errors) > 0 || len(o.Panics) > 0 }
 
 // Reporter is the program's outcome reporter. The runtime calls it once per run, after the
@@ -48,9 +50,12 @@ type Reporter func(ctx context.Context, rtx *Context, out Outcome)
 
 // WithReporter sets the program's outcome reporter. See [Reporter].
 //
-// The default prints infos, warnings, errors, panics, then successes (infos and successes to
-// stdout, the rest to stderr), and applies an exit floor: a recorded error or panic exits 1
-// unless a handler already set a non-zero code. A custom reporter owns the exit code entirely.
+// The default prints infos, warnings, errors, panics, then successes, all to stderr, so stdout
+// carries only what handlers write. It applies an exit floor: a recorded error or panic exits 1
+// unless a handler already set a non-zero code. It leaves out an error caused by the run's own
+// signal trap (the trap's cancellation, or context.Canceled after it), since a signal is a
+// graceful stop and the exit code, 128+n, already says why the run ended. A custom reporter
+// receives every recorded error and owns the exit code entirely.
 //
 // A nil fn restores the default reporter.
 func (p *Program) WithReporter(fn Reporter) *Program {
@@ -58,13 +63,17 @@ func (p *Program) WithReporter(fn Reporter) *Program {
 	return p
 }
 
-// settle is the single run tail every run path ends in: it hands the recorded outcome to the
-// reporter and resolves the exit code.
+// settle is the single run tail every run path ends in: it discards output files left open,
+// flushes buffered stdout (recording a failed flush as an error), hands the recorded outcome to
+// the reporter and resolves the exit code.
 //
 // A handler's exit code is already in rtx.exitCode when the reporter runs; the reporter is
 // the final authority, since rtx.Exit overrides it during the reporter stage. The exit floor
 // lives in defaultReporter, so a custom reporter does not inherit it.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
+	rtx.endStdin()
+	rtx.abortOutputs()
+	rtx.settleOutput()
 	out := Outcome{
 		Infos:     rtx.copyInfos(),
 		Successes: rtx.copySuccesses(),
@@ -104,26 +113,48 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 	return errors.Join(all...)
 }
 
-// defaultReporter prints infos, warnings, errors, panics, then successes (infos and successes
-// to stdout, the rest to stderr), then applies the exit floor: an error or fault exits 1
-// unless a handler already set a non-zero code. Panic stacks are not printed.
-func (p *Program) defaultReporter(_ context.Context, rtx *Context, out Outcome) {
+// defaultReporter prints infos, warnings, errors, panics, then successes to the Program's
+// stderr, then applies the exit floor. Panic stacks are not printed.
+func (p *Program) defaultReporter(ctx context.Context, rtx *Context, out Outcome) {
+	writeText(ctx, rtx, p.stderr, out)
+}
+
+// writeText is the default reporter's output, written to w: errors the run's own signal caused
+// are left out, and the exit floor applies to the rest.
+func writeText(ctx context.Context, rtx *Context, w io.Writer, out Outcome) {
+	errs, _ := settleReported(ctx, rtx, out)
 	for _, s := range out.Infos {
-		fmt.Fprintln(p.stdout, s)
+		fmt.Fprintln(w, s)
 	}
-	for _, w := range out.Warnings {
-		fmt.Fprintf(p.stderr, "Warning: %s\n", w.Error())
+	for _, warn := range out.Warnings {
+		fmt.Fprintf(w, "Warning: %s\n", warn.Error())
 	}
-	for _, e := range out.Errors {
-		fmt.Fprintf(p.stderr, "Error: %s\n", e.Error())
+	for _, e := range errs {
+		fmt.Fprintf(w, "Error: %s\n", e.Error())
 	}
 	for _, pe := range out.Panics {
-		fmt.Fprintf(p.stderr, "Fatal Error: %v\n", pe)
+		fmt.Fprintf(w, "Fatal Error: %v\n", pe)
 	}
 	for _, s := range out.Successes {
-		fmt.Fprintln(p.stdout, s)
+		fmt.Fprintln(w, s)
 	}
-	rtx.applyExitFloor(out.Failed())
+}
+
+// settleReported returns the recorded errors rotini's reporters print, leaving out those the
+// run's own signal caused, and applies the exit floor to what is left: a reported error or a
+// panic exits 1 unless a code was already set. A run whose only errors came from its signal
+// keeps the signal's code. It returns the resulting exit code.
+func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, int) {
+	errs := out.Errors
+	if signalCanceled(ctx) {
+		errs = slices.DeleteFunc(slices.Clone(errs), func(err error) bool { return fromRunSignal(ctx, err) })
+	}
+	code := rtx.applyExitFloor(len(errs) > 0 || len(out.Panics) > 0)
+	if code == 0 && len(errs) < len(out.Errors) {
+		code = canceledExitCode(ctx)
+		rtx.Exit(code)
+	}
+	return errs, code
 }
 
 // StructuredReporter returns a [Reporter] for programs whose output scripts read. When
@@ -131,40 +162,48 @@ func (p *Program) defaultReporter(_ context.Context, rtx *Context, out Outcome) 
 // JSON object per line, and leaves stdout alone, so a partial result there is never
 // interleaved with an error:
 //
-//	{"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"missing required input: <title>"}}
-//	{"warning":{"command":"taskr list","message":"the cache is stale"}}
+//	{"schema_version":1,"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"missing required input: <title>"}}
+//	{"schema_version":1,"error":{"candidates":["add","list","done"],"category":"usage","command":"taskr","exit_code":1,"kind":"unknown-command","message":"unknown command \"lst\" for \"taskr\"","token":"lst"}}
+//	{"schema_version":1,"warning":{"command":"taskr list","message":"the cache is stale"}}
 //
-// Infos and successes are written the same way, as {"info":{…}} and {"success":{…}}, rather
-// than to stdout. A field is present only when rotini knows it: kind, flag and token come from
-// a [*ParseError], kind from a [*PluginError] too, and token from any error [SuggestionFacts]
-// reads. Each line's shape is described by schema-error.json in the rotini repository, and
-// the contract document includes it.
+// Infos and successes are written the same way, as {"info":{…}} and {"success":{…}}. A field
+// is present only when rotini knows it: kind, flag and token come from a [*ParseError], kind
+// from a [*PluginError] too, and token from any error [SuggestionFacts] reads. With such a
+// token, candidates lists the words it was checked against, as SuggestionFacts returns them,
+// unranked: a tool can offer the nearest, while rotini itself suggests nothing. Each line's
+// shape is described by schema-error.json in the rotini repository, and the contract document
+// includes it.
 //
 // When structured reports false, or is nil, it reports as the default reporter does. Either way
-// the exit code follows the default reporter's rule.
+// the exit code follows the default reporter's rule, and an error the run's own signal caused
+// is left out, as the default reporter leaves it out.
 //
 // structured is the program's own rule, typically whether its format flag asks for json. The
 // run may have failed in parsing, so the rule should read [Context.Argv], not validated inputs:
 //
-//	cmd.Program.WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
+//	cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 //	    return slices.Contains(rtx.Argv, "--json")
 //	})).Execute()
 func StructuredReporter(structured func(rtx *Context) bool) Reporter {
-	return func(_ context.Context, rtx *Context, out Outcome) {
+	return func(ctx context.Context, rtx *Context, out Outcome) {
 		if structured == nil || !structured(rtx) {
-			reportText(rtx, out)
+			reportText(ctx, rtx, out)
 			return
 		}
-		reportStructured(rtx, out)
+		reportStructured(ctx, rtx, out)
 	}
 }
 
 // reportStructured writes the outcome as JSON lines on stderr.
-func reportStructured(rtx *Context, out Outcome) {
+// structuredSchemaVersion is the version of StructuredReporter's line format, written first on
+// every line. It changes only when a line's shape changes in a way that breaks a reader.
+const structuredSchemaVersion = 1
+
+func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 	// A non-zero code a handler set is kept, as in the default reporter.
-	exitCode := rtx.applyExitFloor(out.Failed())
+	errs, exitCode := settleReported(ctx, rtx, out)
 	command := rtx.commandName()
-	lines := make([]map[string]any, 0, len(out.Infos)+len(out.Warnings)+len(out.Errors)+len(out.Panics)+len(out.Successes))
+	lines := make([]map[string]any, 0, len(out.Infos)+len(out.Warnings)+len(errs)+len(out.Panics)+len(out.Successes))
 	message := func(kind, msg string) map[string]any {
 		body := map[string]any{"message": msg}
 		if command != "" {
@@ -190,9 +229,11 @@ func reportStructured(rtx *Context, out Outcome) {
 		} else if pe, ok := errors.AsType[*PluginError](err); ok {
 			body["kind"] = pe.Kind.String()
 		}
-		if _, has := body["token"]; !has {
-			if token, _, ok := SuggestionFacts(err); ok {
+		// Candidates go with the token they were checked against, so both come from one error.
+		if token, candidates, ok := SuggestionFacts(err); ok {
+			if have, has := body["token"]; !has || have == token {
 				body["token"] = token
+				body["candidates"] = candidates
 			}
 		}
 		return line
@@ -203,7 +244,7 @@ func reportStructured(rtx *Context, out Outcome) {
 	for _, w := range out.Warnings {
 		lines = append(lines, message("warning", w.Error()))
 	}
-	for _, e := range out.Errors {
+	for _, e := range errs {
 		lines = append(lines, failure(e))
 	}
 	for _, pe := range out.Panics {
@@ -213,30 +254,17 @@ func reportStructured(rtx *Context, out Outcome) {
 		lines = append(lines, message("success", s))
 	}
 	for _, line := range lines {
-		b, err := json.Marshal(line)
-		if err != nil {
-			continue // unreachable: every value is a string or an int
+		for kind, body := range line { // one kind per line
+			b, err := json.Marshal(body)
+			if err != nil {
+				continue // unreachable: every value is a string, an int or a []string
+			}
+			fmt.Fprintf(rtx.Stderr, "{\"schema_version\":%d,%q:%s}\n", structuredSchemaVersion, kind, b)
 		}
-		fmt.Fprintf(rtx.Stderr, "%s\n", b)
 	}
 }
 
-// reportText reports as the default reporter does, through the run's streams.
-func reportText(rtx *Context, out Outcome) {
-	for _, s := range out.Infos {
-		fmt.Fprintln(rtx.Stdout, s)
-	}
-	for _, w := range out.Warnings {
-		fmt.Fprintf(rtx.Stderr, "Warning: %s\n", w.Error())
-	}
-	for _, e := range out.Errors {
-		fmt.Fprintf(rtx.Stderr, "Error: %s\n", e.Error())
-	}
-	for _, pe := range out.Panics {
-		fmt.Fprintf(rtx.Stderr, "Fatal Error: %v\n", pe)
-	}
-	for _, s := range out.Successes {
-		fmt.Fprintln(rtx.Stdout, s)
-	}
-	rtx.applyExitFloor(out.Failed())
+// reportText reports as the default reporter does, through the run's stderr.
+func reportText(ctx context.Context, rtx *Context, out Outcome) {
+	writeText(ctx, rtx, rtx.Stderr, out)
 }

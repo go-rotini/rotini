@@ -1,0 +1,18 @@
+-- in --
+# app settings
+export APP_TOKEN=abc # the token
+APP_NAME="my app" # name
+APP_PORT = 8080
+APP_EMPTY=
+APP_DUP=1
+APP_DUP=2
+-- op --
+set APP_TOKEN "a b#c$d"
+-- out --
+# app settings
+export APP_TOKEN="a b#c\$d" # the token
+APP_NAME="my app" # name
+APP_PORT = 8080
+APP_EMPTY=
+APP_DUP=1
+APP_DUP=2

@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-// These tests drive the companion cli through its generated Program, binding doubles for the
+// These tests drive the companion cli through NewProgram(), binding doubles for the
 // codegen entry points (handlers use SetDependencyIfAbsent, so a test's double wins). Run is
 // used instead of Execute so nothing exits, with a fresh Program per test. Run's error is the
 // run's recorded failure, so on a failure path a non-nil error is expected.
@@ -27,7 +28,7 @@ const testVersion = "9.9.9"
 func newTestCLI(t *testing.T) (*rotini.Program, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
-	p := NewProgram(Handlers()).
+	p := NewProgram().
 		WithStdout(out).
 		WithStderr(errb).
 		WithExit(func(int) { t.Error("a handler called the exit action; Run must not exit the process") }).
@@ -66,6 +67,9 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 		{"completion", "tcsh", "--help"},
 		{"man", "--help"},
 		{"man", "--dir", "/nonexistent/must-not-be-created", "--help"},
+		{"tree", "--help"},
+		{"import", "--help"},
+		{"import", "cobra", "--help"},
 	} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			p, out, _ := newTestCLI(t)
@@ -74,13 +78,21 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 				t.Error("--help ran the generate work")
 				return nil
 			}))
-			p.WithDependency(validateDep, codegen.ValidateFn(func(string, string, bool, string, func(string, error), func([]error)) error {
+			p.WithDependency(validateDep, codegen.ValidateFn(func(string, string, bool, string, string, func(string, error), func([]error)) error {
 				t.Error("--help ran the validate work")
 				return nil
 			}))
-			p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+			p.WithDependency(initializeDep, codegen.InitializeFn(func(string, codegen.InitOptions) (codegen.Initialized, error) {
 				t.Error("--help ran the initialize work")
 				return codegen.Initialized{}, nil
+			}))
+			p.WithDependency(importDep, codegen.ImportFn(func(context.Context, codegen.ImportOptions) (codegen.Imported, error) {
+				t.Error("--help ran the import work")
+				return codegen.Imported{}, nil
+			}))
+			p.WithDependency(treeDep, codegen.TreeFn(func(string) (string, error) {
+				t.Error("--help ran the tree work")
+				return "", nil
 			}))
 
 			if _, err := p.Run(argv); err != nil {
@@ -105,9 +117,9 @@ func TestCLI_helpKeepsUnreadableInput(t *testing.T) {
 	}
 }
 
-// A bare root invocation prints help and exits non-zero.
+// A bare root invocation prints help on stderr and exits non-zero.
 func TestCLI_rootWithNoArgs(t *testing.T) {
-	p, out, _ := newTestCLI(t)
+	p, out, errb := newTestCLI(t)
 	code, err := p.Run(nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -115,8 +127,44 @@ func TestCLI_rootWithNoArgs(t *testing.T) {
 	if code == 0 {
 		t.Error("bare invocation exited 0; it printed usage, so it should signal a mistake")
 	}
-	if !strings.Contains(out.String(), "Usage:") {
-		t.Errorf("bare invocation printed no usage:\n%s", out.String())
+	if !strings.Contains(errb.String(), "Usage:") {
+		t.Errorf("bare invocation printed no usage on stderr:\n%s", errb.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("bare invocation wrote to stdout:\n%s", out.String())
+	}
+}
+
+// failingWriter fails every write, as stdout does on a full disk.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+// A failed write to stdout fails the run instead of exiting 0 with nothing written.
+func TestCLI_writeErrorsFailTheRun(t *testing.T) {
+	for _, argv := range [][]string{
+		{"version"},
+		{"--version"},
+		{"--help"},
+		{"help"},
+		{"completion", "bash"},
+		{"man"},
+	} {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			errb := &bytes.Buffer{}
+			p := NewProgram().
+				WithStdout(failingWriter{}).
+				WithStderr(errb).
+				WithExit(func(int) { t.Error("Run must not exit the process") }).
+				WithVersion(testVersion)
+			code, _ := p.Run(argv)
+			if code == 0 {
+				t.Error("exited 0 although stdout could not be written")
+			}
+			if !strings.Contains(errb.String(), "write output: no space left on device") {
+				t.Errorf("stderr = %q, want the write error", errb.String())
+			}
+		})
 	}
 }
 
@@ -172,7 +220,7 @@ func TestCLI_validateDelegatesFailMode(t *testing.T) {
 	var gotSpec, gotConf, gotFail string
 	p, out, _ := newTestCLI(t)
 	p.WithDependency(validateDep, codegen.ValidateFn(
-		func(spec, conf string, _ bool, failMode string, onValidate func(string, error), _ func([]error)) error {
+		func(spec, conf string, _ bool, failMode, _ string, onValidate func(string, error), _ func([]error)) error {
 			gotSpec, gotConf, gotFail = spec, conf, failMode
 			onValidate("valid", nil)
 			return nil
@@ -193,7 +241,7 @@ func TestCLI_validateDelegatesFailMode(t *testing.T) {
 func TestCLI_validateWarningsDoNotFail(t *testing.T) {
 	p, out, errb := newTestCLI(t)
 	p.WithDependency(validateDep, codegen.ValidateFn(
-		func(_, _ string, _ bool, _ string, _ func(string, error), onWarnings func([]error)) error {
+		func(_, _ string, _ bool, _, _ string, _ func(string, error), onWarnings func([]error)) error {
 			onWarnings([]error{errAdvisory})
 			return nil
 		}))
@@ -216,8 +264,8 @@ func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	t.Chdir(t.TempDir()) // no go.mod requiring rotini, so the runtime warning is due
 
 	p, _, errb := newTestCLI(t)
-	p.WithDependency(initializeDep, codegen.InitializeFn(func(name, format string, force bool) (codegen.Initialized, error) {
-		gotName, gotFormat, gotForce = name, format, force
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(name string, opt codegen.InitOptions) (codegen.Initialized, error) {
+		gotName, gotFormat, gotForce = name, opt.Format, opt.Force
 		return codegen.Initialized{}, nil
 	}))
 
@@ -242,7 +290,7 @@ func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 	}
 	t.Chdir(dir)
 	p, out, errb := newTestCLI(t)
-	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, codegen.InitOptions) (codegen.Initialized, error) {
 		return codegen.Initialized{
 			Spec:   "cmd/mycli/.rotini.spec.yaml",
 			Conf:   "cmd/mycli/.rotini.conf.yaml",
@@ -264,7 +312,7 @@ func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 // init requires the name argument.
 func TestCLI_initializeRequiresAName(t *testing.T) {
 	p, _, errb := newTestCLI(t)
-	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, codegen.InitOptions) (codegen.Initialized, error) {
 		t.Error("initialize ran without a name")
 		return codegen.Initialized{}, nil
 	}))
@@ -317,8 +365,14 @@ func TestCLI_aliases(t *testing.T) {
 			var ran bool
 			p, _, _ := newTestCLI(t)
 			p.WithDependency(generateDep, func(string, string, bool, func(string, error), func([]error)) error { ran = true; return nil })
-			p.WithDependency(validateDep, func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil })
-			p.WithDependency(initializeDep, func(string, string, bool) (codegen.Initialized, error) { ran = true; return codegen.Initialized{}, nil })
+			p.WithDependency(validateDep, func(string, string, bool, string, string, func(string, error), func([]error)) error {
+				ran = true
+				return nil
+			})
+			p.WithDependency(initializeDep, func(string, codegen.InitOptions) (codegen.Initialized, error) {
+				ran = true
+				return codegen.Initialized{}, nil
+			})
 
 			argv := []string{tc.alias, "x"}
 			if _, err := p.Run(argv); err != nil {
@@ -521,7 +575,7 @@ func TestCLI_bannerNamesTheFilesRead(t *testing.T) {
 	}
 	p, out, _ := newTestCLI(t)
 	var gotSpec, gotConf string
-	p.WithDependency(validateDep, codegen.ValidateFn(func(spec, conf string, _ bool, _ string, _ func(string, error), _ func([]error)) error {
+	p.WithDependency(validateDep, codegen.ValidateFn(func(spec, conf string, _ bool, _, _ string, _ func(string, error), _ func([]error)) error {
 		gotSpec, gotConf = spec, conf
 		return nil
 	}))
@@ -548,6 +602,7 @@ func TestCLI_suggestsNearestSpelling(t *testing.T) {
 		{argv: []string{"validate", "--fial", "fast"}, want: `unknown flag "--fial"; did you mean "--fail"?`},
 		{argv: []string{"init", "x", "--format", "jsn"}, want: `did you mean "json"?`},
 		{argv: []string{"help", "genrate"}, want: `no help for command "genrate"; did you mean "generate"?`},
+		{argv: []string{"man", "genrate"}, want: `no man page for command "genrate"; did you mean "generate"?`},
 		{argv: []string{"kubernetes"}},
 		{argv: []string{"init", "x", "--bogus"}},
 	}
@@ -624,12 +679,12 @@ func TestCLI_man(t *testing.T) {
 // `rotini man --dir <path>` creates the directory and writes every page as <name>.<section>.
 func TestCLI_manDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "man", "man1")
-	p, out, _ := newTestCLI(t)
+	p, _, errb := newTestCLI(t)
 	if code, err := p.Run([]string{"man", "--dir", dir}); code != 0 || err != nil {
 		t.Fatalf("man --dir = (%d, %v)", code, err)
 	}
-	if !strings.Contains(out.String(), "wrote 8 man pages to "+dir) {
-		t.Errorf("stdout = %q, want it to say what it wrote", out.String())
+	if !strings.Contains(errb.String(), "wrote 16 man pages to "+dir) {
+		t.Errorf("stderr = %q, want it to say what it wrote", errb.String())
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -639,8 +694,9 @@ func TestCLI_manDir(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	want := []string{"rotini-completion.1", "rotini-generate.1", "rotini-help.1", "rotini-initialize.1",
-		"rotini-man.1", "rotini-validate.1", "rotini-version.1", "rotini.1"}
+	want := []string{"rotini-completion.1", "rotini-diff.1", "rotini-explain.1", "rotini-fmt.1", "rotini-generate.1", "rotini-help.1", "rotini-import-cobra.1", "rotini-import-kong.1", "rotini-import-urfave.1", "rotini-import.1",
+		"rotini-initialize.1",
+		"rotini-man.1", "rotini-tree.1", "rotini-validate.1", "rotini-version.1", "rotini.1"}
 	if !slices.Equal(names, want) {
 		t.Errorf("wrote %q, want %q", names, want)
 	}
@@ -649,7 +705,7 @@ func TestCLI_manDir(t *testing.T) {
 		t.Error("the file written for rotini man differs from what `rotini man man` prints")
 	}
 
-	p, _, errb := newTestCLI(t)
+	p, _, errb = newTestCLI(t)
 	if code, _ := p.Run([]string{"man", "generate", "--dir", dir}); code == 0 || !strings.Contains(errb.String(), "--dir writes every page") {
 		t.Errorf("man generate --dir = exit %d, stderr %q; want a usage error", code, errb.String())
 	}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Serves this checkout as github.com/go-rotini/rotini@$ROTINI_DEMO_VERSION (default v1.3.0) from a
+# Serves this checkout as github.com/go-rotini/rotini@$ROTINI_DEMO_VERSION (default v1.4.0) from a
 # throwaway file-based module proxy, so the demo tapes can run the real `go get ...@latest`
 # commands before the version is published, and `rotini init` seeds that version. Prints the
 # environment to export; everything lives in one temp dir.
@@ -10,16 +10,23 @@
 set -euo pipefail
 
 src=$(cd "$(dirname "$0")/../.." && pwd)
-version=${ROTINI_DEMO_VERSION:-v1.3.0}
+version=${ROTINI_DEMO_VERSION:-v1.4.0}
 work=$(mktemp -d)
 proxy="$work/proxy/github.com/go-rotini/rotini/@v"
 stage="$work/stage/github.com/go-rotini/rotini@$version"
 mkdir -p "$proxy" "$stage"
 
-# The module's files: tracked plus untracked-but-not-ignored, minus the docs site (its own module).
+# The module's files: tracked plus untracked-but-not-ignored, minus nested modules (the docs site,
+# test fixtures), which a module zip never contains.
 cd "$src"
-git ls-files -co --exclude-standard | grep -v '^docs/' | while IFS= read -r f; do
+nested=$(git ls-files -co --exclude-standard | grep '/go\.mod$' | sed 's|go\.mod$||')
+git ls-files -co --exclude-standard | while IFS= read -r f; do
   [ -f "$f" ] || continue
+  skip=
+  for d in $nested; do
+    case "$f" in "$d"*) skip=1 && break ;; esac
+  done
+  [ -z "$skip" ] || continue
   mkdir -p "$stage/$(dirname "$f")"
   cp "$f" "$stage/$f"
 done

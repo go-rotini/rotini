@@ -1,0 +1,2 @@
+conf: .rotini.conf.yaml:11:12: generate.schemas.output.dir: "schemas/../../output" must resolve under the module root
+conf: .rotini.conf.yaml:13:12: generate.schemas.config.dir: ".." must resolve under the module root

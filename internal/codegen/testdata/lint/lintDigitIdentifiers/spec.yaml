@@ -1,0 +1,34 @@
+# A digit option is a bool or count flag, and no argument of its command or one below it may
+# take negative numbers, which would read as the flag.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: level
+      identifiers: ['-9']
+      schema:
+        type: count
+  commands:
+    - name: ssh
+      flags:
+        - name: ipv4
+          identifiers: ['-4', --ipv4]
+          schema:
+            type: bool
+        - name: lines
+          identifiers: ['-5']
+          schema:
+            type: int
+      arguments:
+        - name: port
+          schema:
+            type: int
+            minimum: 0
+        - name: name
+          schema:
+            type: string
+    - name: calc
+      arguments:
+        - name: delta
+          schema:
+            type: float64

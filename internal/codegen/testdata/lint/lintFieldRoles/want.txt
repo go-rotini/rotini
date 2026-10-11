@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:26:17: command demo/bad: flag "json": has role fields but is a string; the fields role marks a []string flag
+spec: .rotini.spec.yaml:29:17: command demo/bad: flag "sort-by": has role sort but no field names to choose from; add `values_from: output` (or a path below it) or an `enum`
+spec: .rotini.spec.yaml:34:17: command demo/worse: flag "sort-by": has role sort but is a []string; the sort role marks a string flag

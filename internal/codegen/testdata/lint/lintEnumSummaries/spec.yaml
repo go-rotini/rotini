@@ -1,0 +1,42 @@
+# A summary is one line, and only an input's own schema carries summaries.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    Mode:
+      type: string
+      enum:
+        - fast
+        - value: slow
+          summary: the careful way
+  flags:
+    - name: format
+      schema:
+        type: string
+        enum:
+          - json
+          - value: yaml
+            summary: human-friendly
+          - value: text
+            summary: "plain lines\nfor grep"
+    - name: mode
+      schema:
+        $ref: Mode
+  stdin:
+    format: json
+    schema:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - value: a
+              summary: the a kind
+  output:
+    type: object
+    properties:
+      state:
+        type: string
+        enum:
+          - value: up
+            summary: running

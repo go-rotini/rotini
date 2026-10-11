@@ -31,6 +31,12 @@ The minimum rotini version this conf requires (X.Y.Z): the feature set it was wr
 
 Optional URI identifying the rotini conf schema, for editor tooling only: rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.3.0/schema-conf.json — note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL.
 
+### `diff`
+
+[`DiffConfig`](#diffconfig)
+
+Controls `rotini diff`, which compares two versions of the cli's contract: the changes this release makes on purpose.
+
 ### `generate`
 
 [`GenerateConfig`](#generateconfig)
@@ -41,7 +47,18 @@ Controls `rotini generate`: the generated packages and features. When omitted en
 
 [`ValidateConfig`](#validateconfig)
 
-Controls how `rotini validate` and `rotini generate` report problems (collect everything vs. fail fast).
+Controls how `rotini validate` and `rotini generate` report problems (collect everything vs. fail fast), and which opt-in warnings they add.
+
+
+## DiffConfig
+
+Controls `rotini diff`. An acknowledgement belongs to one release, not to the interface, so it lives here rather than in the spec.
+
+### `accept`
+
+array of [`DiffAccept`](#diffaccept)
+
+The changes this release makes on purpose. Each entry acknowledges one finding, by its exact rule and where: the finding is reported as accepted and doesn't fail the run. An entry that matches no finding fails the run, naming the entry, so the list doesn't outlive its release. There is no blanket ignore by rule.
 
 
 ## GenerateConfig
@@ -81,7 +98,7 @@ Optional: where to write rotini's conf and spec JSON Schemas into this project, 
 
 ## ValidateConfig
 
-Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. Strictness is fixed (validation is always strict); only the failure-reporting mode is configurable. `rotini validate --fail` overrides this.
+Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. The rules are fixed, apart from the opt-in `flags_first` and `posix_names` warnings. `rotini validate --fail` overrides `fail`.
 
 ### `fail`
 
@@ -89,16 +106,63 @@ Controls how `rotini validate`, and the validation `rotini generate` runs first,
 
 fast = stop at and report the first problem; collect = run to completion and report every problem at once (default).
 
+### `flags_first`
 
-## ContractConfig
+`boolean` · default `false`
 
-Optional: write the contract document, one JSON file describing the whole CLI for scripts, tools and AI agents. Every visible command is listed with its arguments, flags (including inherited cascading flags), environment variables, configuration keys and stdin; a `parameters` JSON Schema combining its arguments and flags; its output shape where one is declared; and its exit statuses. The format is rotini's own, described by schema-contract.json in the rotini repository, and the shape of the error line rotini.StructuredReporter writes to stderr is included under `errors`.
+Opt-in: warn about each env or config input that no flag, or argument of its command, can also set (through its `variable:` or `key:`), so `--help` shows the whole configuration surface. Secret inputs are exempt, since a secret belongs in a file or the environment, not on the command line, and so are nested env inputs (`nesting:`), since no single flag can mirror a family of variables. Warnings never fail validation.
 
-### `file`
+### `posix_names`
+
+`boolean` · default `false`
+
+Opt-in: warn when the root command's name, the program's name, isn't a POSIX utility name: 2 to 9 lowercase letters and digits. Sub-command names aren't checked. Warnings never fail validation.
+
+### `release_env`
+
+`string`
+
+The name of an environment variable holding the release being prepared (X.Y.Z). When it is set, `rotini validate` fails for each command or input whose `removed_in` (or a `deprecated_identifiers_removed_in` entry) is at or below that release, so a planned removal is not forgotten, and `rotini diff` reports a removal planned for that release as expected rather than breaking. The `--release` flag of either command takes precedence. Unset or empty, nothing is checked. `rotini generate` never runs this check.
+
+
+## DiffAccept
+
+One acknowledged change: `{rule: COMMAND_NO_DELETE, where: "taskr compact", reason: "replaced by purge"}`.
+
+### `rule`
 
 `string` · **required**
 
+The finding's rule ID, as `rotini diff` prints it.
+
+### `where`
+
+`string` · **required**
+
+The finding's where, exactly as `rotini diff` prints it: the item in the old contract, written as on the command line.
+
+### `reason`
+
+`string` · **required**
+
+Why the change is intended; shown beside the accepted finding.
+
+
+## ContractConfig
+
+Optional: write the contract document, one JSON file describing the whole CLI for scripts, tools and AI agents. Every command is listed, a hidden one marked `hidden: true`, with its arguments, flags (including inherited cascading flags), environment variables, configuration keys and stdin, each marked hidden where it is; a `parameters` JSON Schema combining its visible arguments and flags; its output shape where one is declared; and its exit statuses. The format is rotini's own, described by schema-contract.json in the rotini repository, and the shape of the error line rotini.StructuredReporter writes to stderr is included under `errors`. Validate a contract with the schema-contract.json from the rotini that wrote it: newer releases add fields, which an older copy of the schema rejects.
+
+### `file`
+
+`string`
+
 Module-root-relative path (no leading slash) ending in '.json' the contract document is written to. Rewritten on every `generate`.
+
+### `go`
+
+`boolean` · default `false`
+
+When true, the generated cmd file also holds the contract document as `var Contract string`, byte for byte what `file` holds, so the binary can print its own contract. Declare a command for it and print Contract from its handler (`fmt.Fprint(rtx.Stdout, Contract)`); rotini adds no command of its own. It adds the document's size to the binary. Works without `file`.
 
 
 ## Feature
@@ -107,9 +171,31 @@ One generated feature, chosen by 'type' (help, completion, man, markdown): an on
 
 ### `type`
 
-`string` · **required** · one of `help`, `completion`, `man`, `markdown`
+`string` · **required** · one of `help`, `completion`, `man`, `markdown`, `tools`, `skill`, `llms`, `permissions`, `carapace`, `config_example`, `env_example`
 
-Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion&lt;Shell&gt;' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.
+Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell, nushell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion&lt;Shell&gt;' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.
+
+tools, skill, llms and permissions are files for AI agents and their tools, one set for the whole program, written under 'file' (relative to the module root) and never removed: tools writes tool definitions for each of 'targets' (tools/mcp.json, tools/openai.json, tools/gemini.json), skill an Agent Skills page (skills/&lt;name&gt;/SKILL.md), llms an llms.txt, and permissions permission rules for each of 'harnesses'. They add no Go code, except `go: true` on tools. skill and llms render from an editable template, as help does; tools and permissions are built from the contract and have none. 'embed' and 'embed_dir' don't apply to them.
+
+carapace, config_example and env_example are files for the program's users, also written under 'file' and never removed. carapace writes a carapace-spec completion file (completions/carapace/&lt;name&gt;.yaml) from the spec's static facts: commands, flags, enum values and completion hints. config_example writes an example of each configuration file the spec declares (examples/config/&lt;name&gt;.example.&lt;ext&gt;), in the file's format, with every key commented out above its summary, type and default; env_example writes .env.example, every environment variable the program reads, commented out. config_example and env_example also generate 'ConfigExample(name string) (string, error)' and 'EnvExample() string', so a command can print them; 'embed' and 'embed_dir' choose how that text is stored, as for help. All three are built in Go, with no editable template.
+
+### `base_url`
+
+`string`
+
+llms only: the address the markdown pages are published at. llms.txt links each command to &lt;base_url&gt;&lt;page&gt;.md (taskr-add.md). Without it, the links are relative to llms.txt and point at the markdown feature's files, which needs the markdown feature on with `embed: true`. Setting it on any other feature is an error.
+
+### `description`
+
+`string`
+
+skill only: when an agent should use the skill, added after the root's summary in SKILL.md's `description` (at most 1024 characters together). Setting it on any other feature is an error.
+
+### `descriptions_env`
+
+`string`
+
+completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide the descriptions shown beside completion candidates, in every shell; unset or any other value leaves them on. Descriptions show by default: zsh, fish and PowerShell beside each candidate, and bash on the second TAB. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionDescriptions replaces this check with a rule of your own.
 
 ### `embed`
 
@@ -129,11 +215,41 @@ Directory (relative to the module root) where this feature's rendered files (hel
 
 When true, rotini generates this feature's outputs into the cmd package, with their variables and lookup function. Off by default.
 
+### `file`
+
+`string`
+
+tools, skill, llms, permissions, carapace, config_example and env_example only: where the files are written, relative to the module root. A directory for tools (default 'tools/'), skill (default 'skills/', which gets &lt;name&gt;/SKILL.md), permissions (default 'agents/') and config_example (default 'examples/config/'); a file for llms (default 'llms.txt'), carapace (default 'completions/carapace/&lt;name&gt;.yaml', where &lt;name&gt; is the root command's name, which carapace requires as the file name) and env_example (default '.env.example'). Rewritten on every generate; turning the feature off leaves the files in place. Setting it on any other feature is an error.
+
+### `go`
+
+`boolean`
+
+tools only: also put mcp.json in the generated cmd package as the string variable ToolsMCP, so the binary can serve itself over MCP (with the MCP companion module) without reading a file. Needs 'mcp' in 'targets'. Setting it on any other feature is an error.
+
+### `harnesses`
+
+array of `string`
+
+permissions only: which agent harnesses to write permission rules for, from the commands' `effects`. 'claude' writes claude-settings.json, a fragment to merge into Claude Code's .claude/settings.json. 'codex' writes &lt;name&gt;.rules, Codex prefix rules. 'gemini' writes &lt;name&gt;-policy.toml, a Gemini CLI policy. Read commands are allowed and destructive ones ask first; write commands get no rule, so the harness asks as it does by default. Default: all three. Setting it on any other feature is an error.
+
+### `install_dir`
+
+`string`
+
+completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/&lt;name&gt;.bash, completions/_&lt;name&gt; (zsh), completions/&lt;name&gt;.fish, completions/&lt;name&gt;.ps1 and completions/&lt;name&gt;.nu, and man/man&lt;section&gt;/&lt;page&gt;.&lt;section&gt;, where &lt;name&gt; is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone is removed. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error.
+
+### `mcp_revision`
+
+`string` · one of `2026-07-28`, `2025-11-25`
+
+tools only: the MCP revision mcp.json is written for. 2026-07-28 (the default) allows any JSON value as a tool's output; with 2025-11-25, which requires an object, an output that isn't one is described wrapped as {"result": …}, and the MCP companion wraps it the same way. Setting it on any other feature is an error.
+
 ### `messages`
 
 `string` · one of `declared`, `all`
 
-completion only: turns on completion messages, lines the shell shows while a value is being completed and there is nothing to offer. 'declared' shows the inputs' `complete.message` lines from the spec. 'all' also shows a line derived from the summary of every other flag and argument that has one, such as `--replicas <int>: how many instances`. Either way a completer can add its own with rtx.AddCompletionMessage, which take the place of the static line. Omitted, there are no messages. zsh and bash 4.4 or later show them; fish, PowerShell and older bash skip them, and the plugin hosts kubectl, Docker and Flux show them their own way. Setting it on any other feature is an error.
+completion only: turns on completion messages, lines the shell shows while a value is being completed and there is nothing to offer. 'declared' shows the inputs' `complete.message` lines from the spec. 'all' also shows a line derived from the summary of every other flag and argument that has one, such as `--replicas <int>: how many instances`. Either way a completer can add its own with rtx.AddCompletionMessage, which take the place of the static line. Omitted, there are no messages. zsh and bash 4.4 or later show them; fish, PowerShell, Nushell and older bash skip them, and the plugin hosts kubectl, Docker and Flux show them their own way. Setting it on any other feature is an error.
 
 ### `messages_env`
 
@@ -141,11 +257,23 @@ completion only: turns on completion messages, lines the shell shows while a val
 
 completion only: the name of an environment variable your users can set to 0, false or off (any case) to hide completion messages; unset or any other value leaves them on. It is listed in the root man page's ENVIRONMENT section, the contract document and the completion scripts' header. Program.WithCompletionMessages replaces this check with a rule of your own. Requires `messages`.
 
+### `name`
+
+`string`
+
+skill only: the skill's name, its directory under 'file' and its SKILL.md `name`: lowercase letters, digits and single hyphens, at most 64 characters. Defaults to the root command's name, lowercased, with '_' written '-'. Setting it on any other feature is an error.
+
 ### `section`
 
 `integer` · default `1`
 
 man only: the man page section the pages are generated for, a single digit 1-9 (default 1, user commands; 8 is administration tools and daemons). It is the section in each page's header, the extension of each page file (taskr-add.8), and the section in cross-references between pages, and the generated ManSection constant holds it. One value for the whole program. Setting it on any other feature is an error.
+
+### `targets`
+
+array of `string`
+
+tools only: which tool-definition files to write. 'mcp' writes mcp.json, a Model Context Protocol tools/list result whose tools carry annotations from `effects` and the facts a server needs to run each one (the MCP companion module serves it). 'openai-strict' writes openai.json, OpenAI Responses API function tools in strict mode. 'gemini' writes gemini.json, Gemini function declarations. Default: mcp. Setting it on any other feature is an error.
 
 ### `template`
 
@@ -171,7 +299,7 @@ One generated code target, chosen by 'type'. 'file' is the module-root-relative 
 Which code this target receives.
 
 - main: the program's entrypoint (main.go), created once and never overwritten.
-- cmd: the CLI package. Its directory holds the handler files you edit and the one generated file, which holds the typed input and output structs (what rtx.Inputs[T] and the per-source input methods fill), the command tree with NewProgram, ProgramHandlers and InputSettings, and the handler wiring (Program and Handlers()).
+- cmd: the CLI package. Its directory holds the handler files you edit and the one generated file, which holds the typed input and output structs (what rtx.Inputs[T] and the per-source input methods fill), the command tree with NewProgram, NewProgramWith, ProgramHandlers and InputSettings, and the handler wiring (Handlers()).
 - models: only the typed input and output structs, in their own package. Optional: without it they live in the cmd file. Declare it when a command uses a handler from another package (`handler:`) and that package needs the input types: the cmd package imports the handler package, so the handler package cannot import cmd back, and with models both import it instead. The cmd package re-exports every model as a type alias, so handler code inside cmd is unaffected either way.
 
 There is no 'runtime' target: the rotini runtime is imported from github.com/go-rotini/rotini, not generated.
@@ -213,6 +341,12 @@ Where to write rotini's JSON Schemas into this project. Each entry is optional: 
 
 Where to write rotini's conf-schema (the schema for this .rotini.conf file).
 
+### `config`
+
+[`ConfigSchemasConfig`](#configschemasconfig)
+
+Where to write one JSON Schema per configuration file the spec declares, describing the keys your users may write in it, for completion and checking in their editor (`# yaml-language-server: $schema=…` in YAML, `#:schema …` in TOML, a `$schema` key in JSON).
+
 ### `output`
 
 [`OutputSchemasConfig`](#outputschemasconfig)
@@ -235,6 +369,17 @@ A single schema write target: the project-relative path the embedded JSON Schema
 `string` · **required**
 
 Module-root-relative path (no leading slash) ending in '.json' where the JSON Schema is written. Overwritten on every `generate`, and never removed. Point a document's `$schema:` key at it for completion and validation in your editor.
+
+
+## ConfigSchemasConfig
+
+A directory of JSON Schemas, '&lt;page-name&gt;.&lt;file-name&gt;.config.json' for each config_files entry (taskr.user.config.json for a file 'user' declared on the root, taskr-deploy.user.config.json for one declared on deploy). A schema lists every key a command that reads the file binds: config inputs and flags' config keys, with their types, enums and value summaries, defaults (never a secret's), bounds and deprecations. It doesn't forbid other keys, which rotini ignores. A file's own declared `schema` is included under allOf. dotenv files and files read as environment variables get none. Rewritten on every generate; a '\*.config.json' file in the directory that no entry produces any more is removed.
+
+### `dir`
+
+`string` · **required**
+
+Module-root-relative directory (no leading slash) the config file schemas are written to.
 
 
 ## OutputSchemasConfig

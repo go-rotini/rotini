@@ -28,13 +28,21 @@ func (*demoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 			version = "unknown"
 		}
 
-		fmt.Fprintln(rtx.Stdout, version)
+		if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
 		rtx.HaltWithCode(0)
 		return
 	}
 }
 
 func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, rtx.Help())
+	if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
 	rtx.HaltWithCode(1)
 }

@@ -10,8 +10,9 @@
 # Multi-token completion is asserted by the candidates it returns, not only by the absence of
 # a leaked directive: a script that drops tokens returns nothing, which an absence check passes.
 #
-# Each shell's block runs only if that shell is installed. CI installs all four on ubuntu and
-# macos (see the e2e job in .github/workflows/ci.yml).
+# Each shell's block runs only if that shell is installed. CI installs bash, zsh, fish and
+# PowerShell on ubuntu and macos (see the e2e job in .github/workflows/ci.yml); the Nushell
+# block needs Nushell 0.116 or later.
 
 gomodinit example.com/shells
 
@@ -24,6 +25,7 @@ cp internal/cmd/app/renders/completion_bash.txt completion_bash.sh
 cp internal/cmd/app/renders/completion_zsh.txt completion_zsh.sh
 cp internal/cmd/app/renders/completion_fish.txt completion_fish.fish
 cp internal/cmd/app/renders/completion_powershell.txt completion_powershell.ps1
+cp internal/cmd/app/renders/completion_nushell.txt completion_nushell.nu
 
 # Sanity: the binary answers the protocol the scripts speak.
 exec ./app$exe __complete ''
@@ -39,6 +41,10 @@ stdout '^:rotini:file yaml yml$'
 [exec:bash] stdout 'CONFIG: .*b\.yml'
 [exec:bash] ! stdout 'CONFIG: .*c\.txt'
 [exec:bash] ! stdout ':rotini:'
+[exec:bash] stdout 'LISTED: \|deploy  \(deploy it\)\|status  \(show status\)\|$'
+[exec:bash] stdout 'INSERTED: \|deploy\|status\|$'
+[exec:bash] stdout 'ORDER: low high$'
+[exec:bash] stdout 'OFF: \|deploy\|status\|$'
 
 [exec:zsh] exec zsh drive-zsh.sh
 [exec:zsh] stdout 'OK: zsh script parsed'
@@ -48,10 +54,21 @@ stdout '^:rotini:file yaml yml$'
 [exec:fish] stdout 'CANDIDATES: .*status'
 [exec:fish] stdout 'ENUM: .*json'
 [exec:fish] stdout 'ENUM: .*text'
+[exec:fish] stdout 'ORDER: low high$'
 [exec:fish] ! stdout ':rotini:'
 [exec:fish] stdout 'CONFIG: .*a\.yaml'
 [exec:fish] stdout 'CONFIG: .*b\.yml'
 [exec:fish] ! stdout 'CONFIG: .*c\.txt'
+
+[exec:nu] exec nu --no-config-file drive-nu.nu
+[exec:nu] stdout '^CANDIDATES: deploy status$'
+[exec:nu] stdout '^DESCRIBED: deploy=deploy it status=show status$'
+[exec:nu] stdout '^ENUM: json text yaml$'
+[exec:nu] stdout '^ORDER: low high$'
+[exec:nu] stdout '^DEEP: json text yaml$'
+[exec:nu] stdout '^CONFIG: a.yaml b.yml '
+[exec:nu] ! stdout 'CONFIG: .*c\.txt'
+[exec:nu] ! stdout ':rotini:'
 
 # PowerShell reads a config file under the user's home at startup, and testscript hands every
 # script a home that does not exist: $HOME, and on Windows $USERPROFILE. It also expects the
@@ -107,6 +124,27 @@ COMPREPLY=()
 _app_complete
 echo "ENUM: ${COMPREPLY[@]}"
 
+# The second TAB (COMP_TYPE 63) lists each candidate with its description; the first inserts
+# bare values. APP_DESCRIPTIONS=off turns descriptions off in the binary.
+COMP_WORDS=(app "")
+COMP_CWORD=1
+COMP_TYPE=63 COLUMNS=80
+_app_complete
+printf 'LISTED: '; printf '|%s' "${COMPREPLY[@]}"; echo '|'
+COMP_TYPE=9
+_app_complete
+printf 'INSERTED: '; printf '|%s' "${COMPREPLY[@]}"; echo '|'
+COMP_TYPE=63
+APP_DESCRIPTIONS=off _app_complete
+printf 'OFF: '; printf '|%s' "${COMPREPLY[@]}"; echo '|'
+unset COMP_TYPE
+
+# An enum keeps its declared order.
+COMP_WORDS=(app --level "")
+COMP_CWORD=2
+_app_complete
+echo "ORDER: ${COMPREPLY[*]}"
+
 # And a THIRD word, so a one-off fencepost cannot pass either.
 COMP_WORDS=(app deploy --format "")
 COMP_CWORD=3
@@ -142,12 +180,29 @@ end
 set -l enum (complete -C "app --format ")
 echo "ENUM: "(string join ' ' (for l in $enum; string split -f1 \t -- $l; end))
 
+# An enum keeps its declared order.
+set -l order (complete -C "app --level ")
+echo "ORDER: "(string join ' ' (for l in $order; string split -f1 \t -- $l; end))
+
 # The file hint still offers files, narrowed to its extensions.
 set -l cfg (complete -C "app --config ")
 set -l joined (string join ' ' (for l in $cfg; string split -f1 \t -- $l; end))
 echo "CONFIG: $joined"
 
 echo "OK: fish separated the directive"
+-- drive-nu.nu --
+# Nushell 0.116 or later: `commandline complete` asks for the completions of a line the way TAB
+# does, through the completer the script attaches to the app extern.
+$env.PATH = ($env.PATH | prepend $env.PWD)
+source completion_nushell.nu
+
+def values [line: string] { $line | commandline complete | str join ' ' }
+print $"CANDIDATES: (values 'app ')"
+print $"DESCRIBED: ('app ' | commandline complete --detailed | each {|c| $'($c.value)=($c.description)' } | str join ' ')"
+print $"ENUM: (values 'app --format ')"
+print $"ORDER: (values 'app --level ')"
+print $"DEEP: (values 'app deploy --format ')"
+print $"CONFIG: (values 'app --config ')"
 -- drive-pwsh.ps1 --
 # PowerShell has no way to invoke a registered native completer directly without a live
 # host, so this exercises the same split the script performs: run __complete, separate the
@@ -207,6 +262,15 @@ command:
           - json
           - text
           - yaml
+    - name: level
+      summary: how much to say
+      identifiers:
+        - --level
+      schema:
+        type: string
+        enum:
+          - { value: low, summary: quiet }
+          - { value: high, summary: loud }
   commands:
     - name: deploy
       summary: deploy it
@@ -226,6 +290,7 @@ generate:
       enabled: true
       embed: true
       embed_dir: internal/cmd/app/renders
+      descriptions_env: APP_DESCRIPTIONS
 -- internal/cmd/app/app.go --
 package app
 
@@ -277,6 +342,6 @@ import (
 )
 
 func main() {
-	app.Program.
+	app.NewProgram().
 		Execute()
 }

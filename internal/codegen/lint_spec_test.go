@@ -13,39 +13,42 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-// TestLintRegistryCompleteness pins the number of registered spec and conf rules so a
+// TestLintRegistryCompleteness pins the number of registered spec, conf and cross rules so a
 // dropped rule is noticed.
 func TestLintRegistryCompleteness(t *testing.T) {
-	if got := len(specLints); got != 45 {
-		t.Errorf("len(specLints) = %d, want 45 (a rule was dropped or added — update intentionally)", got)
+	if got := len(specLints); got != 98 {
+		t.Errorf("len(specLints) = %d, want 98 (a rule was dropped or added — update intentionally)", got)
 	}
-	if got := len(confLints); got != 10 {
-		t.Errorf("len(confLints) = %d, want 10", got)
+	if got := len(confLints); got != 14 {
+		t.Errorf("len(confLints) = %d, want 14", got)
+	}
+	if got := len(crossLints); got != 5 {
+		t.Errorf("len(crossLints) = %d, want 5", got)
 	}
 }
 
-// TestConstraintNumericFamilyMatchesRuntime pins constraintNumericFamily to the runtime's
-// unexported numericFamily, read from the root package's parser.go source.
+// TestConstraintNumericFamilyMatchesRuntime pins constraintNumericFamily to the types the
+// runtime's unexported isNumericType accepts, read from the root package's parser.go source.
 func TestConstraintNumericFamilyMatchesRuntime(t *testing.T) {
 	parser, err := os.ReadFile(filepath.Join("..", "..", "parser.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := string(parser)
-	start := strings.Index(body, "var numericFamily = map[string]bool{")
+	start := strings.Index(body, "func isNumericType(typ string) bool {")
 	if start < 0 {
-		t.Fatal("numericFamily literal not found in runtime parser.go")
+		t.Fatal("isNumericType not found in runtime parser.go")
 	}
-	block := body[start : start+strings.Index(body[start:], "}")]
+	block := body[start : start+strings.Index(body[start:], "return true")]
 	runtimeSet := map[string]bool{}
-	for _, m := range regexp.MustCompile(`"(\w+)":\s*true`).FindAllStringSubmatch(block, -1) {
+	for _, m := range regexp.MustCompile(`"(\w+)"`).FindAllStringSubmatch(block, -1) {
 		runtimeSet[m[1]] = true
 	}
 	if len(runtimeSet) == 0 {
-		t.Fatal("extracted no keys from runtime numericFamily")
+		t.Fatal("extracted no types from runtime isNumericType")
 	}
 	if !maps.Equal(runtimeSet, constraintNumericFamily) {
-		t.Errorf("constraintNumericFamily drifted from runtime numericFamily:\n runtime=%v\n codegen=%v", runtimeSet, constraintNumericFamily)
+		t.Errorf("constraintNumericFamily drifted from runtime isNumericType:\n runtime=%v\n codegen=%v", runtimeSet, constraintNumericFamily)
 	}
 }
 
@@ -342,7 +345,7 @@ func TestDefaultConstraintsAgreeWithRuntime(t *testing.T) {
 			func() any { return &stringInputs{} }},
 		{`type: string, maxLength: 2, default: abcdef`,
 			rotini.FlagDef{Type: "string", Default: "abcdef",
-				MaxLength: 2},
+				MaxLength: new(2)},
 			func() any { return &stringInputs{} }},
 		{`type: string, pattern: '^v[0-9]+$', default: nope`,
 			rotini.FlagDef{Type: "string", Default: "nope",

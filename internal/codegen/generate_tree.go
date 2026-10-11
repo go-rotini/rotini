@@ -42,7 +42,8 @@ type rnode struct {
 	aliases               []string
 	inputs                *Inputs
 	help                  cmdHelp          // flattened help fields; for a composed root, from the child spec
-	output                *Schema          // command's output type (own commands only; nil for composed)
+	output                *Schema          // command's declared output
+	outputType            string           // Go type of a composed command's output, qualified; "" when none can be named
 	discovery             *PluginDiscovery // command's plugin discovery (nil = off)
 	hidden                bool             // omit from the parent's generated Commands list
 	group                 string           // group label that buckets this command in the parent's Commands list
@@ -50,9 +51,17 @@ type rnode struct {
 	deprecatedIdentifiers []string         // deprecated aliases of this command (runtime Deprecations)
 	passthrough           bool             // every token after this command is a raw positional
 	composed              bool             // grafted from a $ref'd child (its types live in the child's cmd)
+	ref                   string           // the $ref as written, on a composed root ("" otherwise)
 	plugins               []PluginSpec     // plugins declared on this command
 	pluginHost            string           // program name plugin binaries are named after ("" = this program's)
 	pluginPath            string           // extra directory searched for BOTH this command's kinds of plugin
+	scope                 *schemaScope     // the named schemas its $refs resolve against (nil = the root spec's)
+	stream                bool             // output_stream: the command writes a stream of output items
+	lifecycle             lifecycle        // deprecated_since, removed_in and per-alias removals
+	inputsType            string           // Go type of the command's inputs, qualified when composed; "" when none can be named
+	hiddenAliases         []string         // names that dispatch but are never listed
+	replacedBy            replacement      // the replacement of a deprecated command
+	flagSets              []string         // the flag set each of inputs.Flags came from, "" for its own; nil without sets
 	children              []rnode
 }
 
@@ -82,6 +91,22 @@ type composeCtx struct {
 	// composed spec's root name, so a plugin serves `child cmd` and `parent child cmd`
 	// alike. "" outside a composed subtree.
 	pluginHost string
+	// scope is the composed spec's named schemas, which its commands' $refs name. nil outside
+	// a composed subtree.
+	scope *schemaScope
+	// typeAlias, typeRoot and typePascal locate the generated types of the subtree's commands:
+	// the import alias of the package of the spec declaring them, the underscore path of that
+	// spec's root in the parent, and the root's Go name. For a `$ref` inside a composed child
+	// that is the grandchild's package, while delegation still goes through the child.
+	// typeAlias is "" when no imported package declares them.
+	typeAlias  string
+	typeRoot   string
+	typePascal string
+	// specRoot is the underscore path of the root command of the spec declaring the subtree, which
+	// a `replaced_by` path is relative to; "" for the program's own spec.
+	specRoot string
+	// flagSets are the flag sets of the spec declaring the subtree; nil for the program's own.
+	flagSets map[string]FlagSet
 }
 
 // scopedConfigFile is one config_files entry tagged with the path of the command that
@@ -140,6 +165,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		rootPlugins:     root.Plugins,
 		rootHelp:        commandHelp(root),
 		rootOutput:      root.Output,
+		rootStream:      root.OutputStream,
 		rootDiscovery:   root.PluginDiscovery,
 		rootPluginPath:  root.PluginPath,
 		rootPassthrough: root.Passthrough,
@@ -147,6 +173,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		configFiles:     allScopedConfigFiles(spec),
 		envPrefix:       envPrefix,
 		adoptedPrefixes: map[string]string{},
+		flagSets:        spec.Command.FlagSets,
 	}
 	gp.root = genCommand{
 		prefix:         gp.rootPascal,
@@ -159,7 +186,10 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		stdinFormat:    stdinFormatExpr(root.inputs()),
 		inputs:         []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
 		exitCodes:      exitCodesOf(root.ExitStatus),
+		secret:         hasSecretInput(root.inputs()),
 	}
+	gp.embedFlagSets(&gp.root, &root)
+	gp.rootFlagSets = flagSetNames(&root, gp.flagSets)
 
 	absSpec := specPath
 	if a, err := filepath.Abs(specPath); err == nil {
@@ -212,9 +242,12 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			path = parentPath + "_" + c.Name
 		}
 		prefix := gp.rootPascal + toPascalCase(path)
+		inputsType, outputType := prefix+"Inputs", ""
 
 		if ctx.composed {
 			rel := strings.TrimPrefix(strings.TrimPrefix(path, ctx.rootPath), "_")
+			inputsType = composedTypeName(ctx, path, "Inputs")
+			outputType = composedTypeName(ctx, path, "Output")
 			gp.composed = append(gp.composed, composedCmd{
 				prefix:         prefix,
 				delegateAlias:  ctx.alias,
@@ -224,16 +257,19 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			})
 		} else {
 			gc := genCommand{
-				prefix:         prefix,
-				invocation:     gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
-				handler:        lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handler",
-				filename:       commandStubFilename(gp.rootName, path, c.Filename),
-				dashedFilename: dashedStubFilename(gp.rootName, path, c.Filename),
-				inputFields:    gp.inputFieldsOf(c.inputs()),
-				stdinType:      stdinTypeExpr(prefix, c.inputs()),
-				stdinFormat:    stdinFormatExpr(c.inputs()),
-				inputs:         inputsFields(gp.rootPascal, path),
-				exitCodes:      exitCodesOf(c.ExitStatus),
+				prefix:          prefix,
+				invocation:      gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
+				handler:         lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handler",
+				filename:        commandStubFilename(gp.rootName, path, c.Filename),
+				dashedFilename:  dashedStubFilename(gp.rootName, path, c.Filename),
+				inputFields:     gp.inputFieldsOf(c.inputs()),
+				stdinType:       stdinTypeExpr(prefix, c.inputs()),
+				stdinFormat:     stdinFormatExpr(c.inputs()),
+				inputs:          inputsFields(gp.rootPascal, path),
+				exitCodes:       exitCodesOf(c.ExitStatus),
+				hasChildren:     len(c.Commands) > 0 || len(c.Plugins) > 0 || c.PluginDiscovery != nil,
+				secret:          hasSecretInput(c.inputs()),
+				completionShell: isCompletionCommand(&c),
 			}
 			if c.Handler != nil {
 				// Inline passthrough: an own command whose handler lives in another
@@ -247,6 +283,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				gc.delegateMethod = c.Handler.Convention
 				gc.filename = ""
 			}
+			gp.embedFlagSets(&gc, &c)
 			gp.own = append(gp.own, gc)
 		}
 
@@ -261,6 +298,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			inputs:                c.inputs(),
 			help:                  commandHelp(c),
 			output:                c.Output,
+			outputType:            outputType,
 			discovery:             c.PluginDiscovery,
 			hidden:                c.Hidden,
 			group:                 c.Group,
@@ -271,6 +309,13 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			plugins:               c.Plugins,
 			pluginHost:            ctx.pluginHost,
 			pluginPath:            c.PluginPath,
+			scope:                 ctx.scope,
+			stream:                c.OutputStream,
+			lifecycle:             lifecycleOf(&c),
+			inputsType:            inputsType,
+			hiddenAliases:         c.HiddenAliases,
+			replacedBy:            gp.commandReplacement(c.ReplacedBy, ctx.specRoot),
+			flagSets:              flagSetNames(&c, ctx.setsOr(gp.flagSets)),
 			children:              children,
 		})
 	}
@@ -295,6 +340,9 @@ func overlayCommand(child, parent Command) Command {
 	if len(parent.DeprecatedIdentifiers) > 0 {
 		m.DeprecatedIdentifiers = parent.DeprecatedIdentifiers
 	}
+	if len(parent.DeprecatedIdentifiersRemovedIn) > 0 {
+		m.DeprecatedIdentifiersRemovedIn = parent.DeprecatedIdentifiersRemovedIn
+	}
 	if parent.Hidden {
 		m.Hidden = true
 	}
@@ -304,6 +352,14 @@ func overlayCommand(child, parent Command) Command {
 	if parent.Deprecated != "" {
 		m.Deprecated = parent.Deprecated
 	}
+	if parent.DeprecatedSince != "" {
+		m.DeprecatedSince = parent.DeprecatedSince
+	}
+	if parent.RemovedIn != "" {
+		m.RemovedIn = parent.RemovedIn
+	}
+	m.Stability = cmp.Or(parent.Stability, m.Stability)
+	m.Agent = cmp.Or(parent.Agent, m.Agent)
 	if parent.Summary != "" {
 		m.Summary = parent.Summary
 	}
@@ -321,6 +377,9 @@ func overlayCommand(child, parent Command) Command {
 	}
 	if parent.Headings != nil {
 		m.Headings = parent.Headings
+	}
+	if len(parent.Groups) > 0 {
+		m.Groups = parent.Groups
 	}
 	if len(parent.Examples) > 0 {
 		m.Examples = parent.Examples
@@ -346,6 +405,7 @@ func overlayCommand(child, parent Command) Command {
 	if parent.PluginPath != "" {
 		m.PluginPath = parent.PluginPath
 	}
+	overlaySpellings(&m, parent)
 	return m
 }
 
@@ -422,7 +482,11 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		inputFields: gp.inputFieldsOf(childRoot.inputs()),
 	})
 
-	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, pluginHost: childRoot.Name}
+	scope := &schemaScope{name: childRoot.Name, schemas: childRoot.Schemas}
+	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, pluginHost: childRoot.Name, scope: scope, specRoot: composeRootPath, flagSets: childRoot.FlagSets}
+	if !passthrough {
+		ctx.typeAlias, ctx.typeRoot, ctx.typePascal = alias, composeRootPath, delegateRoot
+	}
 	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
@@ -448,7 +512,13 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		deprecated: merged.Deprecated, deprecatedIdentifiers: merged.DeprecatedIdentifiers,
 		passthrough: childRoot.Passthrough, plugins: childRoot.Plugins,
 		discovery: childRoot.PluginDiscovery, pluginPath: merged.PluginPath,
-		pluginHost: childRoot.Name, composed: true, children: children,
+		pluginHost: childRoot.Name, composed: true, ref: c.Ref, children: children,
+		scope: scope, lifecycle: lifecycleOf(&merged),
+		output: childRoot.Output, stream: childRoot.OutputStream,
+		inputsType:    composedTypeName(ctx, composeRootPath, "Inputs"),
+		outputType:    composedTypeName(ctx, composeRootPath, "Output"),
+		hiddenAliases: merged.HiddenAliases,
+		replacedBy:    gp.overlayReplacement(c.ReplacedBy, childRoot.ReplacedBy, "", composeRootPath),
 	}, nil
 }
 
@@ -512,9 +582,21 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	synth.Commands = gc.Commands // authored siblings merge below
 	gcCtx := ctx
 	gcCtx.pluginHost = gc.Name
+	gcCtx.scope = &schemaScope{name: gc.Name, schemas: gc.Schemas}
+	gcCtx.flagSets = gc.FlagSets
+	gcCtx.specRoot = synth.Name
+	if parentPath != "" {
+		gcCtx.specRoot = parentPath + "_" + synth.Name
+	}
+	gcCtx.typeAlias = gp.nestedTypeAlias(rr, c, ctx, moduleName)
+	gcCtx.typeRoot, gcCtx.typePascal = gcCtx.specRoot, toPascalCase(gc.Name)
 	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleName, seen, gcCtx)
 	if err != nil {
 		return nil, err
+	}
+	if len(nodes) == 1 {
+		nodes[0].replacedBy = gp.overlayReplacement(c.ReplacedBy, gc.ReplacedBy, ctx.specRoot, gcCtx.specRoot)
+		nodes[0].ref = c.Ref
 	}
 	// `commands:` beside the nested `$ref` resolve against this spec's base, delegate to the
 	// direct child, and are grafted as children of the grandchild.
@@ -610,6 +692,7 @@ type fieldDef struct {
 	Recon   string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
 	EnvVar  string // environment variable an env field reads, explicit (schema.variable) or derived (envVarFor); "" otherwise
 	EnvNest string // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
+	EnvFile string // the variable naming a file to read the value from (schema.variable_file); "" otherwise
 	CfgFile string // config input's pinned source file (schema.file); the value is read from that file only
 	Comment string // trailing line comment on the generated field, e.g. the TextUnmarshaler note; "" for none
 	// Constraint is the space-separated validation struct tags for an env/config field
@@ -625,13 +708,14 @@ type inputFields struct {
 	args   []fieldDef
 	env    []fieldDef // <Prefix>Env fields (pure environment inputs)
 	config []fieldDef // <Prefix>Config fields (pure config-file inputs)
+	embeds []string   // the flag set structs embedded in <Prefix>Flags, after flags
 }
 
 // inputFieldsOf derives in's generated struct fields under the program's env prefix.
 func (gp *program) inputFieldsOf(in *Inputs) inputFields {
 	return inputFields{
 		flags:  flagFields(in, gp.envPrefix),
-		args:   argFields(in),
+		args:   argFields(in, gp.envPrefix),
 		env:    envFields(in, gp.envPrefix),
 		config: configFields(in),
 	}
@@ -664,6 +748,11 @@ type genCommand struct {
 	stdinFormat    string     // stdin decode format, e.g. "yaml"; "" when no stdin
 	inputs         []fieldDef // InputsFields for this command's <Prefix>Inputs
 	exitCodes      []int      // the codes its spec's exit_status lists, for the handler audit
+	hasChildren    bool       // it declares sub-commands, plugins or plugin discovery
+	secret         bool       // one of its own inputs is secret, so its stub never prints inputs
+	// completionShell: a command named completion whose one argument is a required shell
+	// name, so a new stub prints that shell's completion script.
+	completionShell bool
 
 	// Inline passthrough: the command's types are generated locally, but the rollup
 	// returns delegateAlias.delegateMethod() instead of a stub, and no stub is seeded.

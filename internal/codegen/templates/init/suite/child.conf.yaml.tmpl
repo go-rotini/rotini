@@ -1,0 +1,17 @@
+$schema: ./.rotini-schema.conf.json
+version: {{.Version}}
+generate:
+  schemas:
+    conf:
+      file: cmd/{{.Child}}/.rotini-schema.conf.json
+    spec:
+      file: cmd/{{.Child}}/.rotini-schema.spec.json
+  # No main package: {{.Child}} is not a binary of its own, only a command the others compose.
+  packages:
+    - type: cmd
+      file: internal/cmd/{{.Child}}/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+validate:
+  fail: collect

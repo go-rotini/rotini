@@ -24,7 +24,11 @@ func dryRunCLI(t *testing.T, changes []string) (*rotini.Program, *string) {
 		which = "dry-run"
 		return codegen.Planned{Result: "[12:00:00] 1ms", Changes: changes}, nil
 	}))
-	prog.WithDependency(initializeDryRunDep, codegen.InitializeDryRunFn(func(name, _ string, _ bool) (codegen.Initialized, error) {
+	prog.WithDependency(initializeDep, codegen.InitializeFn(func(name string, _ codegen.InitOptions) (codegen.Initialized, error) {
+		which = "init"
+		return codegen.Initialized{Spec: "cmd/" + name + "/.rotini.spec.yaml", Conf: "cmd/" + name + "/.rotini.conf.yaml"}, nil
+	}))
+	prog.WithDependency(initializeDryRunDep, codegen.InitializeDryRunFn(func(name string, _ codegen.InitOptions) (codegen.Initialized, error) {
 		which = "init dry-run"
 		return codegen.Initialized{Spec: "cmd/" + name + "/.rotini.spec.yaml", Conf: "cmd/" + name + "/.rotini.conf.yaml", Changes: changes}, nil
 	}))
@@ -54,6 +58,8 @@ func TestCLI_dryRun(t *testing.T) {
 		{"--dry-run with --watch is a conflict", "", []string{"generate", "s.yaml", "--dry-run", "--watch"}, nil, "", 1},
 		{"--no-dry-run lets the env-triggered run watch", "on", []string{"generate", "s.yaml", "--config", conf, "--no-dry-run", "--watch"}, nil, "generate", 0},
 		{"init --dry-run", "", []string{"init", "demo", "--dry-run"}, []string{"1. create cmd/demo/.rotini.spec.yaml"}, "init dry-run", 2},
+		{"init --no-dry-run", "", []string{"init", "demo", "--no-dry-run"}, nil, "init", 0},
+		{"init --dry-run --no-dry-run: the last wins", "", []string{"init", "demo", "--dry-run", "--no-dry-run"}, []string{"1. create a.go"}, "init", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

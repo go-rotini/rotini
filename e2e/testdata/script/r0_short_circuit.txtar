@@ -33,9 +33,9 @@ stdout '-h, --help'
 
 # --version is answered from any command.
 exec ./sc$exe grab --version
-stdout '^0\.0\.0$'
+stdout '^sc 0\.0\.0$'
 exec ./sc$exe --version
-stdout '^0\.0\.0$'
+stdout '^sc 0\.0\.0$'
 
 # Without the flag, every requirement still holds.
 wantexit 1 ./sc$exe grab

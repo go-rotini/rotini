@@ -1,0 +1,31 @@
+$schema: ./.rotini-schema.spec.json
+version: {{.Version}}
+command:
+  name: {{.Name}}
+  display_name: {{.Display}}
+  summary: what {{.Display}} does, in one line (replace this)
+  description: Describe {{.Display}} here; this paragraph opens {{.Display}} --help.
+  # {{.Host}} runs {{.CompleteName}} to complete `{{.Display}} <TAB>`: install a copy
+  # of this binary (or a link to it) under that name, beside {{.Name}} on PATH.
+  multicall:
+    complete: {{.Host}}_complete-
+  examples:
+    - {{.Display}}
+    - {{.Display}} -o json
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: output
+      identifiers: [-o, --output]
+      summary: output format
+      schema: { type: string, default: text, enum: [text, json] }

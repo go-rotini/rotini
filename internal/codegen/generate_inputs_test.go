@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -15,7 +14,8 @@ import (
 )
 
 // TestRotiniTypeAliasesMatchTheResolver pins that rotiniTypeAliases (which lintSchemaTypes uses
-// to tell an alias from a typo) matches the names jsonSchemaTypeToGo's switch resolves.
+// to tell an alias from a typo) matches the names jsonSchemaTypeToGo resolves: its switch, and
+// the value types it reads from valueTypeGo.
 func TestRotiniTypeAliasesMatchTheResolver(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "generate_inputs.go", nil, 0)
@@ -43,6 +43,9 @@ func TestRotiniTypeAliasesMatchTheResolver(t *testing.T) {
 	})
 	if len(cases) == 0 {
 		t.Fatal("found no cases in jsonSchemaTypeToGo — did it move or change shape?")
+	}
+	for name := range valueTypeGo {
+		cases = append(cases, name)
 	}
 	for _, c := range cases {
 		if strings.ContainsAny(c, "[]") {
@@ -149,7 +152,7 @@ func TestValueTypes_generateCompilingCode(t *testing.T) {
 func TestConstraintTags_readBackThroughReflect(t *testing.T) {
 	schema := &InputSchema{
 		Pattern:    `^\d+\.\w+ "quoted" ` + "`tick`$",
-		Enum:       []string{"fast", `a "b"`, `c\d`, "e`f"},
+		Enum:       []any{"fast", `a "b"`, `c\d`, "e`f"},
 		IgnoreCase: true,
 	}
 	schema.Minimum = new(1.0)
@@ -165,9 +168,8 @@ func TestConstraintTags_readBackThroughReflect(t *testing.T) {
 	if got := st.Get("min"); got != "1" {
 		t.Errorf("min read back as %q", got)
 	}
-	var enum []string
-	if err := json.Unmarshal([]byte(st.Get("enum")), &enum); err != nil || !slices.Equal(enum, schema.Enum) {
-		t.Errorf("enum read back as %v (%v), want %v", enum, err, schema.Enum)
+	if enum, ok := readTagList(st.Get("enumlist")); !ok || !slices.Equal(enum, enumStrings(schema.Enum)) {
+		t.Errorf("enum read back as %v (ok %v), want %v", enum, ok, schema.Enum)
 	}
 	if st.Get("ignorecase") != "true" {
 		t.Error("ignorecase tag missing")

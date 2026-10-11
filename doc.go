@@ -74,12 +74,13 @@
 //
 // # The runtime
 //
-// The generated entrypoint builds a [Program] with [NewProgram] and calls [Program.Execute],
-// which resolves the invoked command from argv, runs its [Handler] hooks, and exits. Each
-// invocation carries a [Context]: the argv, the resolved chain, the program's streams and its
-// dependencies. A handler stops with [Context.HaltWith], [Context.Halt],
-// [Context.HaltWithCode] or [Context.Exit]; recorded errors, recovered panics and detected
-// faults are reported once, after teardown, by the outcome reporter.
+// The generated entrypoint builds a [Program] with [NewWiredProgram], passing the runtime
+// features its spec uses, and calls [Program.Execute], which resolves the invoked command from
+// argv, runs its [Handler] hooks, and exits. Each invocation carries a [Context]: the argv, the
+// resolved chain, the program's streams and its dependencies. A handler stops with
+// [Context.HaltWith], [Context.Halt], [Context.HaltWithCode] or [Context.Exit]; recorded
+// errors, recovered panics and detected faults are reported once, after teardown, by the
+// outcome reporter.
 //
 // The runtime resolves only which command was invoked. Flags and arguments are parsed and
 // validated when a handler calls [Context.Inputs] (or the per-channel [Context.ArgvInputs],
@@ -88,6 +89,11 @@
 // validation; [Context.CheckInputs] checks inputs it collects another way. A flag marked
 // short_circuit in the spec ([FlagDef.ShortCircuit]), such as --help, waives every declared
 // requirement when it is set on the command line, so the handler can act on it.
+//
+// A run reads the process environment and working directory unless the program gives it its
+// own with [Program.WithEnviron] and [Program.WithDir]. Env inputs and fallbacks, config file
+// paths and discovery, `@file` and existingfile paths, and plugins all read through them, and a
+// handler reads them with [Context.LookupEnv], [Context.Environ] and [Context.Dir].
 //
 // The runtime's only built-in behaviors are a default SIGINT/SIGTERM trap (see
 // [Program.WithoutSignalHandling] and [Program.WithSignals]), the hidden __complete entry the
@@ -104,11 +110,16 @@
 //     uint64 and byte; the floats float32 and float64 (also number); and any, which holds the
 //     raw text. complex64, complex128 and uintptr have no parser and are refused.
 //   - Value types: duration with Go's units plus d and w (7d, 2w3d); time and datetime
-//     (RFC 3339) and date (2026-09-29), each taking `layout:` for another format; url, email,
-//     timezone, mac, ip, cidr and hostport; bytesize ([ByteSize]: 512Mi, 10MB), hexbytes
-//     ([HexBytes]) and base64bytes ([Base64Bytes]).
+//     (RFC 3339) and date (2026-09-29), each taking `layout:` for another format, or a list of
+//     formats tried in order, and `relative:` for a time measured from the run's clock (2h ago,
+//     today; see [Program.WithClock]); url, email, timezone, mac, ip, cidr and hostport;
+//     bytesize ([ByteSize]: 512Mi, 10MB), hexbytes ([HexBytes]) and base64bytes
+//     ([Base64Bytes]); regexp (a compiled *regexp.Regexp) and glob ([Glob], a checked
+//     path.Match pattern).
 //   - Path checks: existingfile and existingdir are strings checked at parse time to exist and
-//     to be that kind of entry.
+//     to be that kind of entry. inputfile is an existingfile where "-" means stdin, at most
+//     once per run; outputfile is a file to write, where "-" means stdout. [OpenInput] and
+//     [CreateOutput] open them.
 //   - Shapes: count (flags only) counts occurrences (-vvv is 3); a list ([]T, or array with
 //     `items:`) and a map (map[string]T, or map and object) repeat.
 //   - Any other type parses through its own encoding.TextUnmarshaler, with `import:` naming
@@ -118,7 +129,10 @@
 //   - `implicit_value:` makes a flag's value optional: bare --color takes it, --color=never
 //     sets one, and the next word is never consumed.
 //   - An `enum` matches exactly, or regardless of case with `ignore_case:`, binding the
-//     declared spelling.
+//     declared spelling; a value's `aliases` bind as the value itself, and hidden and
+//     deprecated values are accepted but not offered.
+//   - An argument with `variable:` or `key:` falls back to the environment and configuration
+//     files, as a flag does, for a position the command line left out.
 //   - A flag whose schema is a named object ($ref: '#/schemas/DB') takes a structured value:
 //     JSON (--db '{"host":"h","port":5}'), key=value pairs (--db host=h,port=5, dotted keys
 //     nesting, quotes keeping a comma), a JSON or YAML file with `from: [file]` (--db @db.yaml),
@@ -165,10 +179,11 @@
 // A hook that records a failure without stopping lets the next hook run, often repeating the
 // same failure.
 //
-// The default reporter prints infos, warnings, errors, panics, then successes (infos and
-// successes to stdout, the rest to stderr), then applies the exit floor: a recorded error or
-// fault exits 1 unless a handler already set a non-zero code. A custom reporter owns the exit
-// code entirely.
+// The default reporter prints infos, warnings, errors, panics, then successes, all to stderr so
+// stdout carries only what handlers write, then applies the exit floor: a recorded error or
+// fault exits 1 unless a handler already set a non-zero code. It leaves out an error the run's
+// own signal trap caused, since that run exits 128+n anyway. A custom reporter receives every
+// record and owns the exit code entirely.
 //
 // Every failure class is errors.Is-able against the [ErrUsage] or [ErrInternal] sentinel, so
 // [CategoryOf] classifies it (except a plugin timeout, which is [CategoryNone]), and
@@ -202,10 +217,10 @@
 //	var Store = rotini.NewDependency[*store.Store]("tasks.store")
 //
 //	// main.go — the value's type is checked where it is supplied
-//	cmd.Program.WithDependency(tasks.Store, store.New()).Execute()
+//	cmd.NewProgram().WithDependency(tasks.Store, store.New()).Execute()
 //
 //	// or several at once ([WithDependency] and [Program.With])
-//	cmd.Program.
+//	cmd.NewProgram().
 //		With(
 //			rotini.WithDependency(tasks.Store, store.New()),
 //			rotini.WithDependency(tasks.Client, client.New()),
@@ -234,13 +249,15 @@
 //
 //     inputs, err := rtx.Inputs[DeployInputs]()
 //
-//     [Context.InputsWithReport] adds the provenance [InputReport]. Both use the
+//     [Context.InputsWithReport] adds the provenance [InputReport], whose [InputReport.Format]
+//     prints where each value came from ([InputSource.Origin]). Both use the
 //     [InputSettings] the generated NewProgram supplies via [Program.WithInputSettings].
 //
 //   - [Parser] parses and validates the argv channel alone (GNU/POSIX grammar, typed
 //     coercion, enum and constraint checks), failing with a [*ParseError]. [InputReader] is the
 //     engine behind [Context.Inputs], for callers who hold the settings explicitly. Neither needs
-//     to be supplied; [Program.WithParser] replaces only the parser [Context.Parser] returns.
+//     to be supplied; [Program.WithParser] replaces only the parser [Context.Parser] returns,
+//     which has no options.
 //
 //   - [Deprecations] reports the deprecated aliases and identifiers this invocation used.
 //
@@ -249,6 +266,13 @@
 //     writes one item of a stream. [Context.CheckOutput], [Program.WithOutputChecks] and
 //     [DecodeOutput] check values against the declared shape, and [StructuredReporter] reports
 //     a run's outcome as JSON lines on stderr when the program's rule marks the run structured.
+//     [Context.WriteOutputTo] and [Context.WriteOutputItemTo] write to another writer.
+//     [SelectFields] keeps the output fields a `--json id,title` flag names, as a [Selection]
+//     these write in place of the output, and [SortBy] sorts items by one field.
+//
+//   - [OpenInput] and [CreateOutput] open an inputfile or outputfile value, where "-" is stdin
+//     or stdout; CreateOutput writes a file atomically. [Program.WithBufferedOutput] buffers
+//     stdout and checks the final flush.
 //
 //   - The per-channel methods ([Context.ArgvInputs], [Context.EnvInputs],
 //     [Context.FileInputs], [Context.StdinInputs], [Context.DefaultInputs], merged by
@@ -259,6 +283,10 @@
 //     service, a test) against the spec, with [PresenceOf] marking which fields were supplied;
 //     a hand-built [InputLayer] merged with rotini's is checked the same way by
 //     [InputReport.Validate].
+//
+//   - [ArgvOf] turns an inputs value back into the argv and env that supply it, for tests and
+//     tools that drive a CLI. The rotinitest package builds on it to run a command from its
+//     inputs type in a test.
 //
 //   - [SuggestionFacts] reads the rejected token and its candidates from any error that carries
 //     them, and [Suggestor] ranks them into "did you mean" suggestions; [Suggestor.For] does
@@ -271,16 +299,21 @@
 //     __complete answer in that format, for hosts that call it (Docker, Flux). When the conf
 //     turns completion messages on, a completer adds its own with
 //     [Context.AddCompletionMessage], and [Program.WithCompletionMessages] decides when they
-//     show.
+//     show. A completer reads what has been typed so far with [Context.PartialInputs] and the
+//     program's context with [Context.Context], and asks for no trailing space with
+//     [Context.SetCompletionOptions]; [Program.WithCompletionDescriptions] decides whether
+//     candidates carry descriptions.
 //
 // # Batteries
 //
 // Rotini does nothing on import, starts no background goroutine and touches no terminal. It
-// ships no styler, table, spinner, prompt, pager, terminal probe or process runner; use
-// golang.org/x/term, os/exec and similar libraries. Its one text helper:
+// ships no styler, table, spinner, prompt, pager or process runner; use golang.org/x/term,
+// os/exec and similar libraries. Its two small helpers:
 //
 //   - [StripANSI] removes ANSI escape sequences, making a styled string safe for a man page, a
 //     markdown page or a completion description.
+//   - [IsTerminal] reports whether a stream is a terminal, to choose a default output format or
+//     skip a prompt.
 //
 // # Program shapes
 //

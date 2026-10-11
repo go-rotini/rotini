@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:25:17: command demo/upper: stdin: sets `stream`, which applies to lines and jsonl, where stdin is read one line or record at a time; `format` "text" is read whole
+spec: .rotini.spec.yaml:29:17: command demo/apply: stdin: sets `stream`, which applies to lines and jsonl, where stdin is read one line or record at a time; `format` "yaml" is read whole
+spec: .rotini.spec.yaml:34:20: command demo/hash: stdin: sets `separator`, which chooses what separates lines and applies to `format: lines` only; `format` "bytes" has no lines to split

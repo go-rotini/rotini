@@ -22,5 +22,7 @@ func (*demoVersionHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		version = "unknown"
 	}
 
-	fmt.Fprintln(rtx.Stdout, version)
+	if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+		rtx.HaltWith(err)
+	}
 }

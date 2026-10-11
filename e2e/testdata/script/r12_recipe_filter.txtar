@@ -1,0 +1,154 @@
+# R12 — the filter recipe: `logs grep PATTERN [FILE...]` streams the files it is given, or stdin
+# when there are none (or `-`), and -z ends each match with NUL for xargs -0. The spec and the
+# handler are the ones the guide's Filters section shows.
+
+gomodinit example.com/logs
+writebytes crlf.log '"error: from windows\r\nfine\r\n"'
+
+cp spec.yaml.txt cmd/logs/.rotini.spec.yaml
+exec rotini generate cmd/logs/.rotini.spec.yaml --config cmd/logs/.rotini.conf.yaml
+cp grep.go.txt internal/cmd/logs/logs_grep.go
+exec go mod tidy
+exec go build -o logs$exe ./cmd/logs
+
+# Files, one after the other; CRLF line ends are dropped.
+exec ./logs$exe grep error app.log crlf.log
+cmp stdout want.txt
+
+# No file: stdin, streamed.
+stdin app.log
+exec ./logs$exe grep error
+stdout '^error: disk full$'
+stdout '^error: no route$'
+! stdout fine
+
+# "-" among the files reads stdin in its place.
+stdin crlf.log
+exec ./logs$exe grep error app.log -
+cmp stdout want.txt
+
+# -z: each match ends with NUL, spaces kept, as xargs -0 reads it.
+writebytes want.bin '"error: disk full\x00error: no route\x00"'
+exec ./logs$exe grep -z error app.log
+cmp stdout want.bin
+
+# A file that isn't there is an error before anything is read.
+! exec ./logs$exe grep error missing.log
+stderr 'missing\.log'
+
+-- app.log --
+fine
+error: disk full
+fine again
+error: no route
+-- want.txt --
+error: disk full
+error: no route
+error: from windows
+-- spec.yaml.txt --
+version: 0.0.0
+command:
+  name: logs
+  summary: read logs
+  commands:
+    - name: grep
+      summary: print the lines that contain a pattern
+      arguments:
+        - name: pattern
+          schema: { type: string, required: true }
+        - name: files
+          summary: files to read; stdin when none, or -
+          schema: { type: '[]inputfile' }
+      flags:
+        - name: "null"
+          identifiers: [-z, --null]
+          summary: end each line with NUL instead of a newline, for xargs -0
+          schema: { type: bool }
+      stdin:
+        format: lines
+        stream: true
+        unless_argument: files
+-- grep.go.txt --
+package logs
+
+import (
+	"bufio"
+	"context"
+	"io"
+	"iter"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*logsGrepHandler)(nil)
+
+type logsGrepHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*logsGrepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[LogsGrepInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	g := in.LogsGrep
+	end := "\n"
+	if g.Flags.Null {
+		end = "\x00"
+	}
+	files := g.Arguments.Files
+	if len(files) == 0 {
+		files = []string{"-"}
+	}
+	for _, name := range files {
+		lines := g.Stdin // stdin, streamed; nil when it wasn't read
+		if name != "-" || lines == nil {
+			lines = readLines(rtx, name)
+		}
+		for line, err := range lines {
+			if err == nil && strings.Contains(line, g.Arguments.Pattern) {
+				_, err = io.WriteString(rtx.Stdout, line+end)
+			}
+			if err != nil {
+				rtx.HaltWith(err)
+				return
+			}
+		}
+	}
+}
+
+// readLines reads a file, or stdin for "-", a line at a time, without line ends.
+func readLines(rtx *rotini.Context, name string) iter.Seq2[string, error] {
+	return func(yield func(string, error) bool) {
+		f, err := rotini.OpenInput(rtx, name)
+		if err != nil {
+			yield("", err)
+			return
+		}
+		defer f.Close()
+		sc := bufio.NewScanner(f)
+		sc.Buffer(nil, 16<<20) // lines up to 16 MiB; the default stops at 64 KiB
+		for sc.Scan() {
+			if !yield(sc.Text(), nil) {
+				return
+			}
+		}
+		if err := sc.Err(); err != nil {
+			yield("", err)
+		}
+	}
+}
+-- cmd/logs/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/logs/main.go
+    - type: cmd
+      file: internal/cmd/logs/zz_logs.go
+      package: logs

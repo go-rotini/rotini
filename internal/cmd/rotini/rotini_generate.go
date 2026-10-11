@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/go-rotini/rotini"
@@ -85,7 +84,11 @@ func resolveDryRun(rtx *rotini.Context, flag bool, spec, conf string) (dryRun, f
 		return flag, true, nil
 	}
 	name := codegen.DryRunEnv(spec, conf)
-	return name != "" && envTrue(os.Getenv(name)), false, nil
+	if name == "" {
+		return false, false, nil
+	}
+	value, _ := rtx.LookupEnv(name)
+	return envTrue(value), false, nil
 }
 
 // envTrue reports whether an environment variable's value turns a switch on: 1, true, yes or
@@ -103,7 +106,10 @@ func envTrue(value string) bool {
 // with a closing count, and exits 2.
 func reportPlanned(rtx *rotini.Context, result string, changes []string) {
 	if len(changes) == 0 {
-		fmt.Fprintln(rtx.Stdout, result)
+		if _, err := fmt.Fprintln(rtx.Stdout, result); err != nil {
+			haltWithWriteError(rtx, err)
+			return
+		}
 		rtx.HaltWithCode(0)
 		return
 	}

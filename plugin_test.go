@@ -121,20 +121,20 @@ func TestResolvePluginBinary_resolutionOrder(t *testing.T) {
 	t.Setenv("PATH", pathDir)
 
 	// The plugin path wins over a same-named binary on PATH.
-	if got, err := resolvePluginBinary(name, dir); err != nil {
+	if got, err := resolvePluginBinary(name, dir, nil); err != nil {
 		t.Fatalf("resolve via dir: %v", err)
 	} else if got != dirBin {
 		t.Errorf("resolved %q, want the discovery-path copy %q (dir beats PATH)", got, dirBin)
 	}
 
 	// dir misses → fall through to PATH.
-	if got, err := resolvePluginBinary(name, t.TempDir()); err != nil {
+	if got, err := resolvePluginBinary(name, t.TempDir(), nil); err != nil {
 		t.Fatalf("resolve via PATH: %v", err)
 	} else if filepath.Dir(got) != pathDir {
 		t.Errorf("resolved %q, want the PATH copy under %q", got, pathDir)
 	}
 
-	_, err := resolvePluginBinary("rotini-absent-plugin-zzz", "")
+	_, err := resolvePluginBinary("rotini-absent-plugin-zzz", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("absent binary: err = %v, want a 'not found' error", err)
 	}

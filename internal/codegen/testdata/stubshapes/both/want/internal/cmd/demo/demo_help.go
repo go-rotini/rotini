@@ -29,5 +29,7 @@ func (*demoHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintln(rtx.Stdout, page)
+	if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
+		rtx.HaltWith(err)
+	}
 }

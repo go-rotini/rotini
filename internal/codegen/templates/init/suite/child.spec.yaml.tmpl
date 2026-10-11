@@ -1,0 +1,11 @@
+$schema: ./.rotini-schema.spec.json
+version: {{.Version}}
+command:
+  name: {{.Child}}
+  summary: show the current status
+  description: Show the current status. {{.Name}} and {{.Name}}-admin both compose this command from this spec.
+  flags:
+    - name: verbose
+      identifiers: [--verbose]
+      summary: show more detail
+      schema: { type: bool }

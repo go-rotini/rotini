@@ -215,7 +215,7 @@ Sleep 600ms
 Type@70ms "/Fprintf"
 Enter
 Sleep 800ms
-Type "cc"
+Type "3cc"
 Tab
 Type@70ms `greeting := "Hello, " + inputs.HelloworldHello.Arguments.Name + "!"`
 Enter

@@ -1,13 +1,14 @@
 # exit_status documents what each exit code means, so a code is listed once, and a code above
-# 128 is flagged because a process stopped by signal n exits with 128+n.
+# 128 is flagged because a process stopped by signal n exits with 128+n. A code's name becomes
+# a Go constant, so names are unique within a command, also once written as Go names.
 version: 0.0.0
 command:
   name: demo
-  # Correct: distinct codes in the ordinary range. No problem.
+  # Correct: distinct codes in the ordinary range, with distinct names. No problem.
   exit_status:
     - { code: 0, summary: success }
     - { code: 1, summary: an error }
-    - { code: 3, summary: some tasks failed }
+    - { code: 3, name: partial, summary: some tasks failed }
     - { code: 128, summary: the highest code no signal uses }
   commands:
     - name: run
@@ -19,5 +20,13 @@ command:
         - { code: 130, summary: interrupted }
         - { code: 143, summary: terminated }
         - { code: 200, summary: something else }
+        # The same name twice, and two names that become the same Go name.
+        - { code: 4, name: not_found, summary: no such task }
+        - { code: 5, name: not_found, summary: no such list }
+        - { code: 6, name: not__found, summary: no such board }
+    # Correct: another command may reuse a name.
+    - name: get
+      exit_status:
+        - { code: 3, name: partial, summary: some fields were missing }
     # A composed child: its duplicate is reported in its own file.
     - $ref: ./kid.yaml

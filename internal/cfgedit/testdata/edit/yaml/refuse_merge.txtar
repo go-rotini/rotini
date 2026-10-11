@@ -1,0 +1,10 @@
+-- in --
+base: &b
+  x: 1
+d:
+  <<: *b
+  y: 2
+-- op --
+set d.z 3
+-- err --
+merge key

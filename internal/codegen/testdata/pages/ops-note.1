@@ -1,0 +1,24 @@
+.TH "OPS\-NOTE" 1 "" "ops" "User Commands"
+.SH NAME
+ops\-note \- add a note
+.SH SYNOPSIS
+\fBops note\fR
+.SH "GLOBAL OPTIONS"
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+print help
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+say more (repeatable)
+.br
+repeat to count: \-vvv
+.TP
+\fB\-\-color\fR \fIstring\fR
+when to color (default auto) [auto|always|never]
+.SH STDIN
+Reads a \fBjson\fR document (\fBobject\fR) from standard input.
+.TP
+\fBtext\fR \fIstring\fR
+the note
+.SH "SEE ALSO"
+\fBops\fR(1)

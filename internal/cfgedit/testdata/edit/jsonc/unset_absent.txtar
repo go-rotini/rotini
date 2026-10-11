@@ -1,0 +1,26 @@
+-- in --
+// app config
+{
+  // where to deploy
+  "deploy": {
+    "timeout": "5m", // line comment
+    "retries": 3,
+    "tags": ["a", "b"]
+  },
+  /* logging */
+  "log": {"level": "info"}
+}
+-- op --
+unset deploy.nope
+-- out --
+// app config
+{
+  // where to deploy
+  "deploy": {
+    "timeout": "5m", // line comment
+    "retries": 3,
+    "tags": ["a", "b"]
+  },
+  /* logging */
+  "log": {"level": "info"}
+}

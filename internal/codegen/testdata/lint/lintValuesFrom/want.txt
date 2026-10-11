@@ -1,0 +1,8 @@
+spec: .rotini.spec.yaml:28:48: command demo/list: flag "bad-path": output has no property "nope"; it has tasks, total
+spec: .rotini.spec.yaml:30:48: command demo/list: flag "scalar": output.total is not an object with properties, so it has no fields to list
+spec: .rotini.spec.yaml:32:45: command demo/list: flag "number": sets `values_from` but its type is int; field names are strings, so use string or []string
+spec: .rotini.spec.yaml:34:60: command demo/list: flag "own": sets both `values_from` and its own values (`enum` or a named schema); keep one
+spec: .rotini.spec.yaml:37:48: command demo/list: flag "wide": sets `values_from` on a cascading flag; the commands below have outputs of their own, so declare the flag on each
+spec: .rotini.spec.yaml:40:48: command demo/list: env "cols": sets `values_from`, which applies to flags and arguments only
+spec: .rotini.spec.yaml:45:52: command demo/list/one: flag "field": sets `values_from`, but its command declares no `output:` to take field names from
+spec: .rotini.spec.yaml:58:48: command demo/dotted: flag "field": reaches a property named "a.b"; a dot in a field name reads as a nested field, so values_from can't list it

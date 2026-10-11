@@ -1,0 +1,1 @@
+warning: spec: .rotini.spec.yaml:6:7: command demo: flag "region": sets `complete.message`, but the conf's completion feature is off or doesn't set `messages`, so it is never shown; enable completion with `messages: declared`, or remove the message

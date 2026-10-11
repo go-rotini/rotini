@@ -9,19 +9,19 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/go-rotini/jsonschema"
+	"github.com/go-rotini/jsonschema/gogen"
 )
 
 // This file converts spec schemas to Go type declarations and to self-contained JSON
 // Schemas for runtime validation.
 
-// outputRootSentinel is the placeholder root type GenerateGo requires; it is stripped from
+// outputRootSentinel is the placeholder root type gogen.Generate requires; it is stripped from
 // the output.
 const outputRootSentinel = "rotiniGeneratedOutputsRoot"
 
 // buildOutputTypes generates Go type declarations for the program's named schemas and its
 // own commands' "<Prefix>Output" and "<Prefix>Stdin" types (see collectOutputDefs), or ""
-// when there are none. It uses jsonschema.GenerateGo, the engine behind the spec and conf
+// when there are none. It uses gogen.Generate, the engine behind the spec and conf
 // types.
 func buildOutputTypes(gp *program, pkg string) (string, error) {
 	defs := collectOutputDefs(gp)
@@ -36,9 +36,9 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshal output schema document: %w", err)
 	}
-	src, err := jsonschema.GenerateGo(doc,
-		jsonschema.WithGoPackage(pkg),
-		jsonschema.WithGoRootType(outputRootSentinel))
+	src, err := gogen.Generate(doc,
+		gogen.WithPackage(pkg),
+		gogen.WithRootType(outputRootSentinel))
 	if err != nil {
 		return "", fmt.Errorf("generate output types: %w", err)
 	}
@@ -152,18 +152,18 @@ func eachOwnNode(nodes []rnode, visit func(n *rnode)) {
 func collectOutputDefs(gp *program) map[string]any {
 	defs := map[string]any{}
 	for name, sch := range gp.schemas {
-		defs[name] = schemaToDoc(sch)
+		defs[name] = jsonSchemaTypes(schemaToDoc(sch))
 	}
 	add := func(prefix string, out *Schema) {
 		if out != nil {
-			defs[prefix+"Output"] = schemaToDoc(*out)
+			defs[prefix+"Output"] = jsonSchemaTypes(schemaToDoc(*out))
 		}
 	}
 	// Only the stdin schema's BaseSchema is type structure; required, default, etc. are
 	// input metadata.
 	addStdin := func(prefix string, in *Inputs) {
 		if in != nil && in.Stdin != nil && in.Stdin.Schema != nil && !rawStdinFormat(in.Stdin.Format) {
-			defs[prefix+"Stdin"] = schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema})
+			defs[prefix+"Stdin"] = jsonSchemaTypes(schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema}))
 		}
 	}
 	add(gp.rootPascal, gp.rootOutput)
@@ -184,11 +184,12 @@ type pathFromClaim struct {
 
 // collectStdinSchemas maps each own command's "<Prefix>Stdin" name to the self-contained JSON
 // Schema the input reader validates its stdin payload against, or returns nil when none
-// declare stdin.
+// declare a decoded stdin. A raw format (text, lines) binds the payload as is, with no
+// <Prefix>Stdin type and nothing to validate, so it has no entry.
 func collectStdinSchemas(gp *program) map[string]string {
 	out := map[string]string{}
 	add := func(prefix string, in *Inputs) {
-		if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
+		if in == nil || in.Stdin == nil || in.Stdin.Schema == nil || rawStdinFormat(in.Stdin.Format) {
 			return
 		}
 		// Only the schema's shape (its BaseSchema) validates, matching the generated type.
@@ -206,9 +207,10 @@ func collectStdinSchemas(gp *program) map[string]string {
 
 // validationSchema renders a self-contained JSON Schema for runtime validation of stdin
 // payloads, config files, and object flags: the declared shape plus the document's named
-// schemas as definitions, so "#/schemas/X" refs resolve. It returns "" on failure.
+// schemas as definitions, so "#/schemas/X" refs resolve. Rotini type names (int, bool,
+// duration) are written as JSON Schema. It returns "" on failure.
 func validationSchema(schema Schema, docSchemas map[string]Schema) string {
-	body, ok := schemaToDoc(schema).(map[string]any)
+	body, ok := jsonSchemaTypes(schemaToDoc(schema)).(map[string]any)
 	if !ok {
 		return ""
 	}
@@ -216,7 +218,7 @@ func validationSchema(schema Schema, docSchemas map[string]Schema) string {
 	if len(docSchemas) > 0 {
 		defs := map[string]any{}
 		for name, s := range docSchemas {
-			defs[name] = schemaToDoc(s)
+			defs[name] = jsonSchemaTypes(schemaToDoc(s))
 		}
 		body["definitions"] = defs
 	}
@@ -228,7 +230,7 @@ func validationSchema(schema Schema, docSchemas map[string]Schema) string {
 }
 
 // schemaToDoc marshals a spec Schema to a generic JSON-schema value and rewrites
-// its "#/schemas/" refs to "#/definitions/".
+// its "#/schemas/" refs to "#/definitions/", with every enum flattened to plain values.
 func schemaToDoc(s Schema) any {
 	raw, err := json.Marshal(s)
 	if err != nil {
@@ -239,6 +241,7 @@ func schemaToDoc(s Schema) any {
 		return map[string]any{}
 	}
 	rewriteSchemaRefs(v)
+	flattenEnums(v)
 	return v
 }
 

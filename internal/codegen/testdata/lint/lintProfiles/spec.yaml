@@ -1,0 +1,71 @@
+# Each profiled file below breaks one rule: a selector no input declares, a selector that isn't
+# a string, selectors read from a configuration file (config_source, key), a selector that
+# doesn't cascade to sub-commands (a warning), a profiles key a config input reads, a default
+# declared twice, a default outside the selector's values, a dotenv file, and files sharing a
+# selector but not the key holding their profiles (warnings).
+version: 0.0.0
+command:
+  name: demo
+  config_files:
+    - name: nosel
+      path: a.yaml
+      profiles: { under: profiles, select: nosuch }
+    - name: typed
+      path: b.yaml
+      profiles: { under: profiles, select: count }
+    - name: sourced
+      path: c.yaml
+      profiles: { under: profiles, select: conf }
+    - name: keyed
+      path: d.yaml
+      profiles: { under: profiles, select: keyed }
+    - name: local
+      path: e.yaml
+      profiles: { under: profiles, select: local }
+    - name: collide
+      path: f.yaml
+      profiles: { under: db, select: profile }
+    - name: twice
+      path: g.yaml
+      profiles: { under: profiles, select: profile, default: other }
+    - name: outside
+      path: h.yaml
+      profiles: { under: sets, select: env, default: nope }
+    - name: dotenv
+      path: .env
+      format: dotenv
+      as: env
+      profiles: { under: profiles, select: profile }
+  flags:
+    - name: count
+      identifiers: [--count]
+      cascading: true
+      schema: { type: int }
+    - name: conf
+      identifiers: [--conf]
+      cascading: true
+      schema: { type: string, config_source: sourced }
+    - name: keyed
+      identifiers: [--keyed]
+      cascading: true
+      schema: { type: string, key: keyed }
+    - name: local
+      identifiers: [--local]
+      schema: { type: string }
+    - name: profile
+      identifiers: [--profile]
+      cascading: true
+      schema: { type: string, default: base }
+    - name: env
+      identifiers: [--env]
+      cascading: true
+      schema: { type: string, enum: [dev, prod] }
+  config:
+    - name: host
+      schema: { type: string, key: db.host }
+  commands:
+    - name: sub
+      config_files:
+        - name: subfile
+          path: i.yaml
+          profiles: { under: contexts, select: profile }

@@ -1,0 +1,34 @@
+# options_first contradicts a passthrough command, and does nothing without arguments or when
+# the first argument is a passthrough argument.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: ssh
+      options_first: true
+      arguments:
+        - name: host
+          schema:
+            type: string
+            required: true
+        - name: command
+          schema:
+            type: '[]string'
+    - name: wrap
+      options_first: true
+      passthrough: true
+      arguments:
+        - name: argv
+          schema:
+            type: '[]string'
+    - name: group
+      options_first: true
+      commands:
+        - name: child
+    - name: exec
+      options_first: true
+      arguments:
+        - name: command
+          passthrough: true
+          schema:
+            type: '[]string'

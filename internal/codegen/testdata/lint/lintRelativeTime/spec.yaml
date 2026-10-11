@@ -1,0 +1,38 @@
+# relative accepts a time measured from now, so it applies to time inputs, and a relative default
+# must read under the input's direction.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Fine: a time ago, with a relative default.
+    - name: since
+      identifiers: [--since]
+      schema:
+        type: time
+        relative: past
+        default: 24h
+    - name: count
+      identifiers: [--count]
+      schema:
+        type: int
+        relative: past
+    # A default the direction rules out, and a date moved by part of a day.
+    - name: until
+      identifiers: [--until]
+      schema:
+        type: time
+        relative: future
+        default: -1h
+    - name: day
+      identifiers: [--day]
+      schema:
+        type: date
+        relative: both
+        default: +2h
+  env:
+    # An env input's default is read as an absolute time.
+    - name: after
+      schema:
+        type: time
+        relative: past
+        default: 1h

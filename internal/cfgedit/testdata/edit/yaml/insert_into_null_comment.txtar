@@ -1,0 +1,12 @@
+-- in --
+a: 1
+b: # later
+c: 3
+-- op --
+set b.x.y 2
+-- out --
+a: 1
+b: # later
+  x:
+    y: 2
+c: 3

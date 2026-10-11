@@ -1,0 +1,12 @@
+-- in --
+items:
+  - name: a
+    v: 1
+other: 2
+-- op --
+set other 3
+-- out --
+items:
+  - name: a
+    v: 1
+other: 3

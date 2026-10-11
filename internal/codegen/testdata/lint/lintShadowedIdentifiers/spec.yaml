@@ -1,0 +1,61 @@
+# After a sub-command's name, an identifier means the nearest command's flag, so a descendant
+# reusing a cascading or short-circuit ancestor's identifier hides it there.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: output
+      identifiers: [-o, --output]
+      cascading: true
+      schema: { type: string }
+    - name: color
+      cascading: true
+      schema: { type: bool, negatable: true }
+    - name: quiet
+      identifiers: [-q]
+      hidden: true
+      cascading: true
+      schema: { type: bool }
+  commands:
+    - name: deploy
+      flags:
+        # -h still exists as --help: a warning.
+        - name: host
+          identifiers: [-h, --host]
+          schema: { type: string }
+        # Hides the derived --no-color, but --color still reaches it: a warning.
+        - name: nocolor
+          identifiers: [--no-color]
+          schema: { type: bool }
+        # -q was quiet's only identifier: an error.
+        - name: quota
+          identifiers: [-q, --quota]
+          schema: { type: int }
+      commands:
+        - name: app
+          flags:
+            # -o under the cascading --output: a warning.
+            - name: owner
+              identifiers: [-o, --owner]
+              schema: { type: string }
+    - name: status
+      flags:
+        # Correct: the same switch redeclared. No problem.
+        - name: help
+          identifiers: [-h, --help]
+          schema: { type: bool }
+        # Correct: the documented override of a cascading flag. No problem.
+        - name: output
+          identifiers: [-o, --output]
+          schema: { type: int }
+    - name: show
+      flags:
+        # A help that takes a string can't ask for help.
+        - name: help
+          identifiers: [-h, --help]
+          schema: { type: string }

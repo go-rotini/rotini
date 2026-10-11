@@ -18,7 +18,9 @@
 //	exists cmd/demo/main.go    a path must exist
 //	wantexit 2 ./app --bad     run a command and assert its exact exit status
 //
-// wantexit and gomodinit are rotini's own commands; `! exec` only proves a non-zero exit.
+// wantexit, execout, gomodinit, nodeps, sizebelow, nosym, writebytes, genlines, heldstdin and
+// rssbelow are rotini's own commands, and pinnedgo its own condition; `! exec` only proves
+// a non-zero exit.
 //
 // # Script names
 //
@@ -35,6 +37,8 @@
 //	r8   the version guard
 //	r9   plugins
 //	r10  structured output
+//	r11  a lean runtime: linked packages, binary size
+//	r12  the guide's recipes: each recipe's code, built and run
 package e2e
 
 import (
@@ -44,6 +48,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,7 +128,99 @@ func TestScripts(t *testing.T) {
 			}
 			return nil
 		},
-		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
+		Condition: func(cond string) (bool, error) {
+			switch cond {
+			case "pinnedgo":
+				return pinnedToolchain(root)
+			case "race":
+				return raceEnabled, nil
+			}
+			return false, fmt.Errorf("unknown condition %q", cond)
+		},
+		Cmds: mergeCmds(dataCmds(), map[string]func(ts *testscript.TestScript, neg bool, args []string){
+			// nodeps fails when the last command's stdout, a `go list -deps` listing, names a
+			// package in testdata/forbidden_deps.txt.
+			// With an argument, the list is that file of testdata instead.
+			"nodeps": func(ts *testscript.TestScript, neg bool, args []string) {
+				if neg || len(args) > 1 {
+					ts.Fatalf("usage: nodeps [list]")
+				}
+				name := "forbidden_deps.txt"
+				if len(args) == 1 {
+					name = args[0]
+				}
+				list, err := os.ReadFile(filepath.Join(ts.Getenv("ROTINI_ROOT"), "testdata", name))
+				ts.Check(err)
+				deps := strings.Fields(ts.ReadFile("stdout"))
+				var linked []string
+				for line := range strings.Lines(string(list)) {
+					pkg := strings.TrimSpace(line)
+					if pkg != "" && !strings.HasPrefix(pkg, "#") && slices.Contains(deps, pkg) {
+						linked = append(linked, pkg)
+					}
+				}
+				if len(linked) > 0 {
+					ts.Fatalf("the program links %s", strings.Join(linked, ", "))
+				}
+			},
+			// concat writes the files after the first, joined, to the first: a page's code block
+			// that shows only part of a file, completed by a head the script carries.
+			"concat": func(ts *testscript.TestScript, neg bool, args []string) {
+				if neg || len(args) < 2 {
+					ts.Fatalf("usage: concat <out> <file>...")
+				}
+				var b strings.Builder
+				for _, f := range args[1:] {
+					b.WriteString(ts.ReadFile(f))
+				}
+				ts.Check(os.WriteFile(ts.MkAbs(args[0]), []byte(b.String()), 0o644))
+			},
+			// sizebelow fails when a file is not smaller than a number of bytes.
+			"sizebelow": func(ts *testscript.TestScript, neg bool, args []string) {
+				if neg || len(args) != 2 {
+					ts.Fatalf("usage: sizebelow <file> <bytes>")
+				}
+				limit, err := strconv.ParseInt(args[1], 10, 64)
+				if err != nil {
+					ts.Fatalf("sizebelow: %q is not a byte count", args[1])
+				}
+				info, err := os.Stat(ts.MkAbs(args[0]))
+				ts.Check(err)
+				ts.Logf("%s: %d bytes (budget %d)", args[0], info.Size(), limit)
+				if info.Size() >= limit {
+					ts.Fatalf("%s is %d bytes, over the budget of %d", args[0], info.Size(), limit)
+				}
+			},
+			// nosym fails when an unstripped binary links a function whose symbol name starts
+			// with one of the prefixes; `! nosym` fails unless each prefix matches one.
+			"nosym": func(ts *testscript.TestScript, neg bool, args []string) {
+				if len(args) < 2 {
+					ts.Fatalf("usage: nosym <binary> <prefix>...")
+				}
+				out, err := exec.Command("go", "tool", "nm", ts.MkAbs(args[0])).Output()
+				ts.Check(err)
+				linked := map[string]string{}
+				for line := range strings.Lines(string(out)) {
+					f := strings.Fields(line)
+					if len(f) < 3 || (f[len(f)-2] != "T" && f[len(f)-2] != "t") {
+						continue
+					}
+					for _, prefix := range args[1:] {
+						if _, ok := linked[prefix]; !ok && strings.HasPrefix(f[len(f)-1], prefix) {
+							linked[prefix] = f[len(f)-1]
+						}
+					}
+				}
+				for _, prefix := range args[1:] {
+					sym, ok := linked[prefix]
+					switch {
+					case ok && !neg:
+						ts.Fatalf("%s links %s", args[0], sym)
+					case !ok && neg:
+						ts.Fatalf("%s links nothing named %s*", args[0], prefix)
+					}
+				}
+			},
 			// wantexit runs a command and asserts its exact exit status.
 			"wantexit": func(ts *testscript.TestScript, neg bool, args []string) {
 				if neg || len(args) < 2 {
@@ -148,6 +245,25 @@ func TestScripts(t *testing.T) {
 					ts.Fatalf("wantexit: %v exited %d, want %d", args[1:], got, want)
 				}
 			},
+			// execout runs a command with its stdout written to a file, such as /dev/full, which
+			// testscript's captured stdout can't stand in for. Its stderr is the script's stderr.
+			"execout": func(ts *testscript.TestScript, neg bool, args []string) {
+				if len(args) < 2 {
+					ts.Fatalf("usage: execout <stdout-file> <command> [args...]")
+				}
+				out, err := os.OpenFile(ts.MkAbs(args[0]), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+				ts.Check(err)
+				defer out.Close()
+				cmd := exec.Command(lookScriptPath(ts, args[1]), args[2:]...)
+				cmd.Dir = ts.MkAbs(".")
+				cmd.Env = scriptEnv(ts)
+				cmd.Stdout = out
+				cmd.Stderr = ts.Stderr()
+				err = cmd.Run()
+				if neg != (err != nil) {
+					ts.Fatalf("execout %v: unexpected result: %v", args[1:], err)
+				}
+			},
 			// gomodinit writes a go.mod wired to this working tree (see gomod).
 			"gomodinit": func(ts *testscript.TestScript, neg bool, args []string) {
 				if neg || len(args) < 1 || len(args) > 2 {
@@ -163,13 +279,35 @@ func TestScripts(t *testing.T) {
 					0o600,
 				))
 			},
-		},
+		}),
 		RequireExplicitExec: true,
 		RequireUniqueNames:  true,
 	})
 }
 
-// gomod returns a script's go.mod: rotini required at version, declared as a tool (so the
+// pinnedToolchain reports whether the go command scripts run is the toolchain go.mod names,
+// which the linker-output and size checks are calibrated against.
+func pinnedToolchain(root string) (bool, error) {
+	mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return false, err
+	}
+	for line := range strings.Lines(string(mod)) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "toolchain "); ok {
+			// Scripts run with GOTOOLCHAIN=local, so ask the same go command.
+			cmd := exec.Command("go", "env", "GOVERSION")
+			cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
+			out, err := cmd.Output()
+			if err != nil {
+				return false, err
+			}
+			return strings.TrimSpace(string(out)) == v, nil
+		}
+	}
+	return false, nil
+}
+
+// gomod returns a script's go.mod:rotini required at version, declared as a tool (so the
 // seeded //go:generate line's `go tool rotini` resolves), and replaced with the working tree at
 // root. A rotini built through this module reports version, since build info outranks an
 // -ldflags stamp, so a script that needs a particular version passes it here.
@@ -250,4 +388,34 @@ func codeBlock(page, title string) (string, bool) {
 	}
 	body, _, ok = strings.Cut(body, "\n{{< /code >}}")
 	return body, ok
+}
+
+// scriptEnv is the environment a command a custom script command starts runs with: the
+// variables Setup gives every script.
+func scriptEnv(ts *testscript.TestScript) []string {
+	var env []string
+	for _, name := range []string{"PATH", "HOME", "WORK", "TMPDIR", "NO_COLOR", "TERM", "PATHEXT", "SYSTEMROOT", "GOCACHE", "GOMODCACHE", "GOPATH"} {
+		if v := ts.Getenv(name); v != "" {
+			env = append(env, name+"="+v)
+		}
+	}
+	return env
+}
+
+// lookScriptPath resolves a command the way exec does in a script: a path relative to $WORK,
+// or a name searched on the script's PATH.
+func lookScriptPath(ts *testscript.TestScript, name string) string {
+	if strings.ContainsRune(name, '/') || strings.ContainsRune(name, filepath.Separator) {
+		return ts.MkAbs(name)
+	}
+	for _, dir := range filepath.SplitList(ts.Getenv("PATH")) {
+		for _, ext := range []string{"", ".exe"} {
+			p := filepath.Join(dir, name+ext)
+			if info, err := os.Stat(p); err == nil && !info.IsDir() {
+				return p
+			}
+		}
+	}
+	ts.Fatalf("%s: not found on the script's PATH", name)
+	return ""
 }

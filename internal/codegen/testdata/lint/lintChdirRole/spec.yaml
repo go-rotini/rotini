@@ -1,0 +1,25 @@
+# role: chdir is a cascading root flag holding one directory, read from the command line only.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: dir
+      identifiers: [-C, --dir]
+      role: chdir
+      schema:
+        type: int
+        default: 3
+        variable: DEMO_DIR
+    - name: quiet
+      schema:
+        type: bool
+  flag_groups:
+    - kind: mutually_exclusive
+      flags: [dir, quiet]
+  commands:
+    - name: run
+      flags:
+        - name: work
+          role: chdir
+          schema:
+            type: existingdir

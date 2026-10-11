@@ -1,0 +1,243 @@
+# R1 — flag dependencies on values, forbidden and unless flags; a secret flag that refuses a
+# typed value; replacements for deprecated commands and flags; hidden aliases and identifiers.
+
+gomodinit example.com/rules
+
+exec rotini validate cmd/rules/.rotini.spec.yaml --config cmd/rules/.rotini.conf.yaml
+! stderr 'is secret but accepts'
+exec rotini generate cmd/rules/.rotini.spec.yaml --config cmd/rules/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o rules$exe ./cmd/rules
+
+# A value-conditional requirement: csv needs a delimiter, text doesn't.
+! exec ./rules$exe export --format csv
+stderr 'flag --delimiter is required when --format is csv'
+exec ./rules$exe export --format csv --delimiter ';'
+stdout 'export csv'
+exec ./rules$exe export --format text
+
+# The environment never triggers a rule: only what the command line sets counts.
+env RULES_FORMAT=csv
+exec ./rules$exe export
+stdout 'export csv'
+env RULES_FORMAT=
+
+# forbids, and a rule turned off by another flag.
+! exec ./rules$exe export --all --limit 5
+stderr 'flag --limit can''t be used when --all is set'
+! exec ./rules$exe login
+stderr 'flag --token is required unless --anonymous is set'
+exec ./rules$exe login --anonymous
+stdout 'login anonymous'
+
+# A secret that refuses a typed value says how to pass it, and never echoes it.
+! exec ./rules$exe login --token sk_live_123
+stderr '--token takes @file or -, not a value'
+! stderr 'sk_live_123'
+exec ./rules$exe login --token @token.txt
+stdout 'login with a token of 7 bytes'
+stdin token.txt
+exec ./rules$exe login --token -
+stdout 'login with a token of 7 bytes'
+
+# A hidden alias and a hidden identifier work, and are listed nowhere.
+exec ./rules$exe ex --fmt csv --delimiter ,
+stdout 'export csv'
+exec ./rules$exe __complete ''
+! stdout '^ex\s'
+exec ./rules$exe __complete export --f
+! stdout 'fmt'
+exec ./rules$exe export --help
+! stdout 'fmt'
+
+# Help says what replaces a deprecated command or flag, and Deprecations carries it.
+exec ./rules$exe --help
+stdout 'renamed; use rules export instead'
+exec ./rules$exe dump --legacy
+stderr 'use rules export instead'
+stderr 'use --all instead'
+
+-- token.txt --
+sk_file
+-- cmd/rules/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: rules
+  summary: flag rules
+  env_prefix: RULES
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: export
+      summary: export things
+      hidden_aliases: [ex]
+      flags:
+        - name: format
+          summary: how to print
+          hidden_identifiers: [--fmt]
+          schema: { type: string, enum: [text, csv], default: text, key: format }
+        - name: delimiter
+          summary: the csv separator
+          schema: { type: string }
+        - name: all
+          summary: every thing
+          schema: { type: bool }
+        - name: limit
+          summary: at most this many
+          schema: { type: int }
+      flag_dependencies:
+        - when: format
+          equals: [csv]
+          requires: [delimiter]
+        - when: all
+          forbids: [limit]
+    - name: dump
+      summary: export things
+      deprecated: renamed
+      replaced_by: export
+      flags:
+        - name: everything
+          summary: every thing
+          identifiers: [--all]
+          schema: { type: bool }
+        - name: legacy
+          summary: every thing
+          deprecated: renamed
+          replaced_by: --all
+          schema: { type: bool }
+    - name: login
+      summary: log in
+      flags:
+        - name: token
+          summary: the API token
+          schema: { type: string, secret: true, from: [file, stdin] }
+        - name: anonymous
+          summary: log in without a token
+          schema: { type: bool }
+      flag_dependencies:
+        - unless: [anonymous]
+          requires: [token]
+-- cmd/rules/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/rules/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/rules/zz_rules.go
+      package: rules
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+-- internal/cmd/rules/rules.go --
+package rules
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type rulesHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*rulesHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[RulesInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Rules.Flags.Help {
+		fmt.Fprint(rtx.Stdout, rtx.Help())
+		rtx.Halt()
+	}
+}
+
+func (*rulesHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/rules/rules_export.go --
+package rules
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type rulesExportHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*rulesExportHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[RulesExportInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, "export", in.RulesExport.Flags.Format)
+}
+-- internal/cmd/rules/rules_dump.go --
+package rules
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type rulesDumpHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*rulesDumpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	for _, d := range rotini.Deprecations(rtx) {
+		fmt.Fprintf(rtx.Stderr, "%v; use %s instead\n", d, d.ReplacedBy)
+	}
+}
+-- internal/cmd/rules/rules_login.go --
+package rules
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type rulesLoginHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*rulesLoginHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[RulesLoginInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.RulesLogin.Flags.Anonymous {
+		fmt.Fprintln(rtx.Stdout, "login anonymous")
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "login with a token of %d bytes\n", len(in.RulesLogin.Flags.Token))
+}

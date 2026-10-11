@@ -81,7 +81,7 @@ import (
 var version = "9.9.9"
 
 func main() {
-	demo.Program.
+	demo.NewProgram().
 		WithVersion(version).
 		Execute()
 }

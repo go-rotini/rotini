@@ -1,0 +1,16 @@
+-- in --
+version: 1.0.0
+command:
+  summary: "a quoted
+    value over lines"
+  description: plain value
+    over lines
+  name: tool
+-- out --
+version: 1.0.0
+command:
+  name: tool
+  summary: "a quoted
+    value over lines"
+  description: plain value
+    over lines

@@ -2,11 +2,22 @@
 .SH NAME
 app\-deploy \- deploy it
 .SH SYNOPSIS
-\fBapp deploy\fR <command> [flags]
+\fBapp deploy\fR [flags] <command> <target> [stage]
+.SH DESCRIPTION
+Effects: write, idempotent, open world
 .SH "COMMANDS"
 .TP
 \fBcanary\fR
 a canary deploy
+.SH ARGUMENTS
+.TP
+\fI<target>\fR
+what to deploy
+.br
+also set by \fBDEPLOY_TARGET\fR or config key \fBdeploy.target\fR
+.TP
+\fI[stage]\fR
+which stage (default prod)
 .SH "OPTIONS"
 .TP
 \fB\-r\fR, \fB\-\-replicas\fR \fIint\fR
@@ -18,6 +29,9 @@ also set by \fBAPP_DEPLOY_REPLICAS\fR or config key \fBdeploy.replicas\fR
 where
 .br
 also set by \fBDEPLOY_REGION\fR or config key \fBregion\fR
+.TP
+\fB\-\-prune\fR
+remove old releases (destructive, not idempotent)
 .SH "GLOBAL OPTIONS"
 .TP
 \fB\-\-verbose\fR

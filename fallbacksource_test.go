@@ -80,7 +80,7 @@ func TestFallbackSource_argvValueHasNoSuffixEvenWithEnvSet(t *testing.T) {
 func TestFallbackSource_configFile(t *testing.T) {
 	cfg := writeConfig(t, "port: 500\n")
 	err := fsRead(t, fsDef(false), nil, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
-	if err == nil || !strings.HasSuffix(err.Error(), `(from configuration file "app")`) {
+	if err == nil || !strings.HasSuffix(err.Error(), "(from configuration file "+cfg+", key port)") {
 		t.Fatalf("Read = %v, want the config file named", err)
 	}
 }
@@ -133,7 +133,7 @@ func fsRuleDef() Definition {
 			{Name: "name", Identifiers: []string{"--name"}, Type: "string", MinLength: 3},
 			{Name: "code", Identifiers: []string{"--code"}, Type: "string", Pattern: "^[a-z]+$"},
 			{Name: "sku", Identifiers: []string{"--sku"}, Type: "string", Pattern: "^[A-Z]{3}$", PatternMessage: "three capital letters"},
-			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Separator: ",", MaxItems: 1},
+			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Separator: ",", MaxItems: new(1)},
 			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true},
 		},
 	}

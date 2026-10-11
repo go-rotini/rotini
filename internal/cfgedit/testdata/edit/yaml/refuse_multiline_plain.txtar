@@ -1,0 +1,8 @@
+-- in --
+a: one
+  two
+b: 1
+-- op --
+set a 2
+-- err --
+several lines

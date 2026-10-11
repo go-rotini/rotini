@@ -1,0 +1,27 @@
+$schema: ./.rotini-schema.conf.json
+version: {{.Version}}
+generate:
+  schemas:
+    conf:
+      file: cmd/{{.Name}}/.rotini-schema.conf.json
+    spec:
+      file: cmd/{{.Name}}/.rotini-schema.spec.json
+  packages:
+    - type: main
+      file: cmd/{{.Name}}/main.go
+    - type: cmd
+      file: internal/cmd/{{.Name}}/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+    # completion is on for its messages, which {{.Host}} shows at TAB when a value has nothing
+    # to offer.
+    - type: completion
+      enabled: true
+      messages: all
+    - type: man
+      enabled: false
+    - type: markdown
+      enabled: false
+validate:
+  fail: collect

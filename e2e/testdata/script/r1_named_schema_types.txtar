@@ -1,0 +1,73 @@
+# R1 — rotini type names in a named schema: int and bool mean integer and boolean, so an
+# object flag of that schema validates and binds typed fields.
+
+gomodinit example.com/obj
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+exec ./app$exe --db host=a,port=2,tls=true
+stdout 'db=a:2 tls=true'
+exec ./app$exe --db '{"host":"b","port":3}'
+stdout 'db=b:3 tls=false'
+! exec ./app$exe --db host=a,port=0
+stderr '--db: port: value must be >= 1'
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: object flags demo
+  schemas:
+    DB:
+      type: object
+      required: [host]
+      properties:
+        host: {type: string}
+        port: {type: int, minimum: 1}
+        tls: {type: bool}
+  flags:
+    - name: db
+      summary: the database to use
+      identifiers: [--db]
+      schema:
+        $ref: '#/schemas/DB'
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AppInputs]()
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.HaltWithCode(1)
+		return
+	}
+	f := in.App.Flags
+	fmt.Fprintf(rtx.Stdout, "db=%s:%d tls=%v\n", f.Db.Host, f.Db.Port, f.Db.TLS)
+}

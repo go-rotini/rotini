@@ -1,0 +1,15 @@
+-- in --
+# top
+
+# about a
+[a]
+x = 1
+-- op --
+set top 1
+-- out --
+# top
+
+top = 1
+# about a
+[a]
+x = 1

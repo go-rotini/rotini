@@ -1,0 +1,46 @@
+# `unless_argument` names an optional file argument of the same command: stdin is read only
+# when it gets no file, or "-". An existingfile can't be "-", so it only warns.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: cat
+      arguments:
+        - name: files
+          schema: {type: '[]existingfile'}
+      stdin:
+        format: text
+        unless_argument: files
+    - name: missing
+      stdin:
+        format: text
+        unless_argument: files
+    - name: words
+      arguments:
+        - name: files
+          schema: {type: '[]string'}
+      stdin:
+        format: lines
+        unless_argument: files
+    - name: needed
+      arguments:
+        - name: file
+          schema: {type: existingfile, required: true}
+      stdin:
+        format: text
+        unless_argument: file
+    - name: defaulted
+      arguments:
+        - name: file
+          schema: {type: existingfile, default: a.txt}
+      stdin:
+        format: text
+        unless_argument: file
+    - name: exec
+      passthrough: true
+      arguments:
+        - name: files
+          schema: {type: '[]string'}
+      stdin:
+        format: text
+        unless_argument: files

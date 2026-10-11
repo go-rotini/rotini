@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "rotini contract document",
-  "description": "The contract document `rotini generate` writes when the conf sets generate.contract.file: every visible command of a cli with its inputs, output and exit statuses. Each command maps directly onto a tool definition for an AI agent: `name` and `summary` describe it, `parameters` is the JSON Schema of its arguments and flags, and `output` the JSON Schema of its result. Every embedded schema is standard JSON Schema (draft-07), and a `$ref` in one resolves against this document's `definitions`.",
+  "description": "The contract document `rotini generate` writes when the conf sets generate.contract: every command of a cli with its inputs, output and exit statuses. Each command maps directly onto a tool definition for an AI agent: `name` and `summary` describe it, `parameters` is the JSON Schema of its arguments and flags, and `output` the JSON Schema of its result. Hidden commands and inputs are listed with `hidden: true`; a tool that presents the cli's public surface skips them. Every embedded schema is standard JSON Schema (draft-07). `parameters`, `output`, an exit status's `output` and `stdin.schema` are self-contained: each declares `$schema` and carries the definitions it reaches. A per-input `schema` may `$ref` a definition, which resolves against this document's `definitions`. Newer rotini releases add fields to this format, so validate a contract with the schema-contract.json from the rotini that wrote it.",
   "type": "object",
   "required": ["format", "name", "commands", "errors"],
   "additionalProperties": false,
@@ -13,12 +13,12 @@
     "name": { "type": "string", "description": "The cli's root command name." },
     "commands": {
       "type": "array",
-      "description": "Every visible command, the root first and then depth-first in spec order. A hidden command, and everything beneath it, is left out. A plugin a command declares follows it, with `plugin: true`.",
+      "description": "Every command, the root first and then depth-first in spec order. A hidden command, and everything beneath it, is marked `hidden: true`. A plugin a command declares follows it, with `plugin: true`.",
       "items": { "$ref": "#/definitions/Command" }
     },
     "definitions": {
       "type": "object",
-      "description": "The spec's named schemas, as JSON Schema, by name.",
+      "description": "The spec's named schemas, as JSON Schema, by name, and those of the specs it composes. A composed spec's schema whose name is already taken by a different schema is listed as `<spec name>.<schema name>`, and that spec's references name it so.",
       "additionalProperties": { "$ref": "#/definitions/JSONSchema" }
     },
     "errors": {
@@ -30,8 +30,32 @@
       "additionalProperties": false,
       "description": "What the program's shell completion lets its users switch. Present only when the cli declares something here.",
       "properties": {
-        "messages_env": { "type": "string", "description": "The environment variable that hides completion messages when set to 0, false or off." }
+        "messages_env": { "type": "string", "description": "The environment variable that hides completion messages when set to 0, false or off." },
+        "descriptions_env": { "type": "string", "description": "The environment variable that hides the descriptions shown beside completion candidates when set to 0, false or off." }
       }
+    },
+    "response_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prefix"],
+      "description": "How the program reads response files: before the first `--`, a word starting with the prefix is replaced by the named file's lines, one argument per line. A caller passing an argument that starts with the prefix writes it after `--`, or doubles the prefix (`@@x` is the argument `@x`). Present only when the cli reads response files.",
+      "properties": {
+        "prefix": { "type": "string", "description": "The character that starts a response-file word, such as @." }
+      }
+    },
+    "multicall": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the program dispatches on the name its binary was invoked as, through links or copies. With neither field, busybox style: a binary named after a top-level command runs it. Present only when the cli declares multicall; removing or changing it breaks installed links.",
+      "properties": {
+        "prefix": { "type": "string", "description": "Stripped from the invoked name before it is matched against the top-level commands." },
+        "complete": { "type": "string", "description": "An invoked name starting with this answers shell completion for the root, in the plugin hosts' format unless the program sets another." }
+      }
+    },
+    "topics": {
+      "type": "array",
+      "description": "The help topics the root declares: pages that aren't commands, shown by `<name> help <topic>` when the program has a help command that calls the generated Help function. Present only when the cli declares any.",
+      "items": { "$ref": "#/definitions/Topic" }
     }
   },
   "definitions": {
@@ -49,19 +73,36 @@
         "summary": { "type": "string" },
         "description": { "type": "string" },
         "aliases": { "type": "array", "items": { "type": "string" } },
+        "hidden": { "type": "boolean", "description": "true when the command, or one of its ancestors, is hidden: it runs, but help leaves it out." },
         "deprecated": { "type": "string", "description": "Why the command is deprecated, when it is." },
+        "deprecated_since": { "$ref": "#/definitions/Version", "description": "The release that deprecated the command." },
+        "removed_in": { "$ref": "#/definitions/Version", "description": "The release that will remove the command." },
+        "deprecated_identifiers": { "type": "array", "items": { "type": "string" }, "description": "The aliases that are deprecated. Running the command by one of them still works." },
+        "deprecated_identifiers_removed_in": { "$ref": "#/definitions/Removals", "description": "The release that will remove each deprecated alias, by alias." },
         "plugin": { "type": "boolean", "description": "true for a plugin: a separate program the command runs, whose inputs and output this document does not describe." },
+        "options_first": { "type": "boolean", "description": "true when flags must come before the command's first argument: every word after that argument is an argument, flag-shaped words and `--` included." },
+        "passthrough": { "type": "boolean", "description": "true when every word after the command's name is an argument, taken as typed: the command parses no flags of its own." },
         "arguments": { "type": "array", "items": { "$ref": "#/definitions/Argument" } },
         "flags": { "type": "array", "items": { "$ref": "#/definitions/Flag" }, "description": "The command's own flags, then the cascading flags it inherits from its ancestors." },
+        "flag_groups": { "type": "array", "items": { "$ref": "#/definitions/FlagGroup" }, "description": "Rules over sets of the command's flags, by flag name." },
+        "flag_dependencies": { "type": "array", "items": { "$ref": "#/definitions/FlagDependency" }, "description": "Flags that require others, by flag name." },
         "env": { "type": "array", "items": { "$ref": "#/definitions/Env" } },
         "config": { "type": "array", "items": { "$ref": "#/definitions/Config" } },
+        "config_files": { "type": "array", "items": { "$ref": "#/definitions/ConfigFile" }, "description": "The configuration files this command declares. The command and every command beneath it read them; a config entry's `file` names one by `name`." },
         "stdin": { "$ref": "#/definitions/Stdin" },
+        "plugin_discovery": { "$ref": "#/definitions/PluginDiscovery" },
         "parameters": {
           "$ref": "#/definitions/JSONSchema",
-          "description": "An object schema with one property per argument and flag, by name, each carrying its summary as `description`: the input schema of a tool definition."
+          "description": "An object schema with one property per visible argument and flag, by name, each carrying its description (else its summary) as `description`: the input schema of a tool definition. Hidden inputs are left out. Self-contained."
         },
-        "output": { "$ref": "#/definitions/JSONSchema", "description": "The shape of what the command writes to stdout when it succeeds, when it declares one. A command that writes a stream of items declares one item." },
-        "exit_status": { "type": "array", "items": { "$ref": "#/definitions/ExitStatus" } }
+        "output": { "$ref": "#/definitions/JSONSchema", "description": "The shape of what the command writes to stdout when it succeeds, when it declares one. A command that writes a stream of items declares one item. Self-contained." },
+        "stream": { "type": "boolean", "description": "true when the command writes a stream of `output` items rather than one value: in JSON, one compact value per line; in YAML, one document per item, each starting `---`." },
+        "exit_status": { "type": "array", "items": { "$ref": "#/definitions/ExitStatus" } },
+        "hidden_aliases": { "type": "array", "items": { "type": "string" }, "description": "More names that run the command but that help, completion and suggestions never list." },
+        "replaced_by": { "type": "string", "description": "With `deprecated`: the command to use instead, as its command names below the root joined by spaces (\"purge\", \"remote add\")." },
+        "stability": { "$ref": "#/definitions/Stability", "description": "How settled the command is, as declared. Its inputs, sub-commands, output and exit codes are at most as stable as it is." },
+        "effects": { "$ref": "#/definitions/Effects", "description": "What running the command does, as declared. Absent says nothing: assume the worst (destructive, reaching outside the machine). Sub-commands don't inherit it; a flag's `effects` can raise it for a run that gives the flag." },
+        "agent": { "$ref": "#/definitions/Agent" }
       }
     },
     "Argument": {
@@ -71,10 +112,33 @@
       "properties": {
         "name": { "type": "string" },
         "summary": { "type": "string" },
+        "type": { "$ref": "#/definitions/RotiniType" },
+        "kind": { "$ref": "#/definitions/Kind" },
         "required": { "type": "boolean" },
-        "variadic": { "type": "boolean", "description": "true when it takes every remaining positional." },
+        "variadic": { "type": "boolean", "description": "true when it takes every remaining positional. When arguments follow it, they take the last positionals and it takes the ones in between." },
+        "passthrough": { "type": "boolean", "description": "true when raw words start at this argument: it and every word after it are taken as typed, flag-shaped words and `--` included. A word starting with - that should be its first word is written after `--`." },
+        "separator": { "$ref": "#/definitions/Separator" },
+        "ignore_case": { "$ref": "#/definitions/IgnoreCase" },
+        "layouts": { "$ref": "#/definitions/Layouts" },
+        "secret": { "$ref": "#/definitions/Secret" },
+        "hidden": { "$ref": "#/definitions/Hidden" },
+        "env": { "type": "array", "items": { "type": "string" }, "description": "The environment variables the argument falls back to when the command line leaves its position empty, in lookup order: the first one set wins." },
+        "config_key": { "type": "string", "description": "The config file key the argument falls back to after its environment variables. Present only when the command reads config files." },
+        "enum_values": { "$ref": "#/definitions/EnumValues" },
         "deprecated": { "type": "string" },
-        "schema": { "$ref": "#/definitions/JSONSchema" }
+        "deprecated_since": { "$ref": "#/definitions/Version" },
+        "removed_in": { "$ref": "#/definitions/Version" },
+        "schema": { "$ref": "#/definitions/JSONSchema", "description": "The value's JSON Schema. A `$ref` in it resolves against the document's `definitions`." },
+        "relative": { "$ref": "#/definitions/Relative" },
+        "glob": { "type": "boolean", "description": "true when, on Windows, each word containing `*`, `?` or `[` is expanded into the paths it matches (the shell does it elsewhere). A word that names an existing path, or matches nothing, is kept as written." },
+        "variable_file": { "$ref": "#/definitions/VariableFile" },
+        "expand": { "$ref": "#/definitions/Expand" },
+        "relative_to": { "$ref": "#/definitions/RelativeTo" },
+        "values_from": { "type": "string", "pattern": "^output(\\.[A-Za-z_][A-Za-z0-9_-]*)*$", "description": "The place in the command's output whose field names are this input's allowed values (`output`, `output.tasks`): the enum in its `schema` (on `items` for a list) lists them, sorted, and changes when the output's fields do." },
+        "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
+        "stability": { "$ref": "#/definitions/Stability" },
+        "agent": { "$ref": "#/definitions/Agent" },
+        "from": { "type": "array", "items": { "enum": ["file", "stdin", "value"] }, "description": "Where a value typed on the command line may come from besides the text itself: `file`, a value starting with @ is replaced by that file's contents (@@ is a literal @); `stdin`, a value of exactly - is replaced by what is piped on stdin. A secret argument whose list leaves out `value` refuses any other value typed on the command line: pass the secret through a file or stdin." }
       }
     },
     "Flag": {
@@ -84,15 +148,47 @@
       "properties": {
         "name": { "type": "string" },
         "identifiers": { "type": "array", "items": { "type": "string" }, "description": "What the user types: [\"-o\", \"--output\"]." },
+        "negated": { "type": "array", "items": { "type": "string" }, "description": "The forms that set a negatable bool flag false: [\"--no-color\"]. They take no value." },
         "summary": { "type": "string" },
+        "type": { "$ref": "#/definitions/RotiniType" },
+        "kind": { "$ref": "#/definitions/Kind" },
         "required": { "type": "boolean" },
         "cascading": { "type": "boolean", "description": "true when the command declares it and every command beneath it accepts it too." },
         "inherited": { "type": "boolean", "description": "true when an ancestor declares it as cascading." },
         "short_circuit": { "type": "boolean", "description": "true when setting it on the command line waives the command's required inputs and other rules, as --help does: an agent can pass it without supplying anything else." },
         "env": { "type": "array", "items": { "type": "string" }, "description": "The environment variables the flag falls back to when it is not on the command line, in lookup order: the first one set wins." },
         "config_key": { "type": "string", "description": "The config file key the flag falls back to after its environment variables. Present only when the command reads config files." },
+        "config_source": { "$ref": "#/definitions/ConfigSource" },
+        "separator": { "$ref": "#/definitions/Separator" },
+        "from": { "type": "array", "items": { "enum": ["file", "stdin", "value"] }, "description": "Where a value typed on the command line may come from besides the text itself: `file`, a value starting with @ is replaced by that file's contents (@@ is a literal @); `stdin`, a value of exactly - is replaced by what is piped on stdin. A secret flag whose list leaves out `value` refuses any other value typed on the command line: pass the secret through a file or stdin." },
+        "implicit_value": { "description": "The value the flag takes when given without one: its value is optional and, when given, must be attached (`--color=never`, not `--color never`)." },
+        "ignore_case": { "$ref": "#/definitions/IgnoreCase" },
+        "dotted_keys": { "type": "boolean", "description": "true when a map flag's dotted key (`--set a.b=1`) assigns into nested maps." },
+        "layouts": { "$ref": "#/definitions/Layouts" },
+        "secret": { "$ref": "#/definitions/Secret" },
+        "hidden": { "$ref": "#/definitions/Hidden" },
         "deprecated": { "type": "string" },
-        "schema": { "$ref": "#/definitions/JSONSchema" }
+        "deprecated_since": { "$ref": "#/definitions/Version" },
+        "removed_in": { "$ref": "#/definitions/Version" },
+        "deprecated_identifiers": { "type": "array", "items": { "type": "string" }, "description": "The identifiers that are deprecated, when only some are. Without it, a deprecated flag is deprecated under every identifier." },
+        "deprecated_identifiers_removed_in": { "$ref": "#/definitions/Removals", "description": "The release that will remove each deprecated identifier, by identifier." },
+        "enum_values": { "$ref": "#/definitions/EnumValues" },
+        "schema": { "$ref": "#/definitions/JSONSchema", "description": "The value's JSON Schema. A `$ref` in it resolves against the document's `definitions`." },
+        "repeatable": { "type": "boolean", "description": "false when giving the flag more than once on the command line is an error rather than the last value winning. Absent means repeats are accepted." },
+        "relative": { "$ref": "#/definitions/Relative" },
+        "variable_file": { "$ref": "#/definitions/VariableFile" },
+        "role": { "enum": ["force", "chdir", "fields", "sort", "dry-run", "confirm", "machine-output", "page"], "description": "What the flag means to a program driving the CLI. force: the bool flag that lets the command replace existing output files. fields: the list flag that chooses which output fields are written. sort: the flag that names the output field to sort by. These three change nothing at run time. chdir: the root flag naming the directory the run resolves relative paths and config discovery against, read from the command line only; a caller passes an absolute path, or one relative to its own directory. dry-run: the bool flag that previews a run without changing anything. confirm: the bool flag that answers yes for a command that would otherwise refuse or prompt. machine-output: the flag that makes the command write its output as JSON, a bool flag or a string flag whose `role_value` selects JSON. page: the flag that selects a page of results." },
+        "role_value": { "type": "string", "description": "With role machine-output on a string flag: the value that selects JSON (`--format=json`)." },
+        "effects": { "$ref": "#/definitions/Effects", "description": "What giving the flag adds to its command's effects, as declared: a run's kind is the highest of its command's and every given flag's; it is idempotent only when every stated value is, and reaches outside the machine when any does. A cascading flag raises whichever command it is given to." },
+        "agent": { "$ref": "#/definitions/Agent" },
+        "hidden_identifiers": { "type": "array", "items": { "type": "string" }, "description": "More identifiers the command line accepts for the flag, which help, completion and suggestions never list. A negatable flag's hidden long identifiers have unlisted --no- forms too." },
+        "replaced_by": { "type": "string", "description": "With `deprecated`: the identifier of the flag to use instead (\"--output\")." },
+        "flag_set": { "type": "string", "description": "The flag set the flag comes from, when the spec declares it once in a set that several commands use. The flag works like the command's own." },
+        "expand": { "$ref": "#/definitions/Expand" },
+        "relative_to": { "$ref": "#/definitions/RelativeTo" },
+        "values_from": { "type": "string", "pattern": "^output(\\.[A-Za-z_][A-Za-z0-9_-]*)*$", "description": "The place in the command's output whose field names are this flag's allowed values (`output`, `output.tasks`): the enum in its `schema` (on `items` for a list) lists them, sorted, and changes when the output's fields do." },
+        "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
+        "stability": { "$ref": "#/definitions/Stability" }
       }
     },
     "Env": {
@@ -103,10 +199,28 @@
         "name": { "type": "string" },
         "variables": { "type": "array", "items": { "type": "string" }, "description": "The environment variables read, the first preferred." },
         "summary": { "type": "string" },
+        "type": { "$ref": "#/definitions/RotiniType" },
+        "kind": { "$ref": "#/definitions/Kind", "description": "How the value is written: a list is split on its `separator`, else commas (TAGS=a,b); a map is key=value pairs split the same way." },
         "required": { "type": "boolean" },
         "secret": { "type": "boolean", "description": "true when the value is a secret; its default is then left out." },
+        "config_source": { "$ref": "#/definitions/ConfigSource" },
+        "nesting": { "type": "string", "description": "The separator that gathers a family of variables into one nested map: with variable ACME_HTTP and nesting __, ACME_HTTP__RETRY__MAX=9 sets {retry: {max: \"9\"}}." },
+        "ignore_case": { "$ref": "#/definitions/IgnoreCase" },
+        "layouts": { "$ref": "#/definitions/Layouts" },
+        "hidden": { "$ref": "#/definitions/Hidden" },
         "deprecated": { "type": "string" },
-        "schema": { "$ref": "#/definitions/JSONSchema" }
+        "deprecated_since": { "$ref": "#/definitions/Version" },
+        "removed_in": { "$ref": "#/definitions/Version" },
+        "enum_values": { "$ref": "#/definitions/EnumValues" },
+        "schema": { "$ref": "#/definitions/JSONSchema", "description": "The value's JSON Schema. A `$ref` in it resolves against the document's `definitions`." },
+        "separator": { "type": "string", "description": "The character a list or map variable is split on, when not a comma: a plain split with spaces trimmed (`:` reads PATHS=a:b)." },
+        "relative": { "$ref": "#/definitions/Relative" },
+        "variable_file": { "$ref": "#/definitions/VariableFile" },
+        "expand": { "$ref": "#/definitions/Expand" },
+        "relative_to": { "$ref": "#/definitions/RelativeTo" },
+        "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
+        "stability": { "$ref": "#/definitions/Stability" },
+        "agent": { "$ref": "#/definitions/Agent" }
       }
     },
     "Config": {
@@ -118,18 +232,37 @@
         "key": { "type": "string", "description": "The key read from the configuration file." },
         "file": { "type": "string", "description": "The name of the configuration file it is read from, when one is named." },
         "summary": { "type": "string" },
+        "type": { "$ref": "#/definitions/RotiniType" },
+        "kind": { "$ref": "#/definitions/Kind" },
         "required": { "type": "boolean" },
+        "ignore_case": { "$ref": "#/definitions/IgnoreCase" },
+        "layouts": { "$ref": "#/definitions/Layouts" },
+        "secret": { "$ref": "#/definitions/Secret" },
+        "hidden": { "$ref": "#/definitions/Hidden" },
         "deprecated": { "type": "string" },
-        "schema": { "$ref": "#/definitions/JSONSchema" }
+        "deprecated_since": { "$ref": "#/definitions/Version" },
+        "removed_in": { "$ref": "#/definitions/Version" },
+        "enum_values": { "$ref": "#/definitions/EnumValues" },
+        "schema": { "$ref": "#/definitions/JSONSchema", "description": "The value's JSON Schema. A `$ref` in it resolves against the document's `definitions`." },
+        "relative": { "$ref": "#/definitions/Relative" },
+        "expand": { "$ref": "#/definitions/Expand" },
+        "relative_to": { "$ref": "#/definitions/RelativeTo" },
+        "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
+        "stability": { "$ref": "#/definitions/Stability" },
+        "agent": { "$ref": "#/definitions/Agent" }
       }
     },
     "Stdin": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "format": { "type": "string" },
+        "format": { "type": "string", "description": "How stdin is read: json, yaml, toml, text, lines, jsonl (one JSON record per line; `schema` describes one record) or bytes (exactly as piped)." },
+        "type": { "$ref": "#/definitions/RotiniType" },
         "required": { "type": "boolean", "description": "true when an empty stdin is an error." },
-        "schema": { "$ref": "#/definitions/JSONSchema" }
+        "schema": { "$ref": "#/definitions/JSONSchema", "description": "The shape of what is read. Self-contained." },
+        "stream": { "type": "boolean", "description": "true when lines or jsonl records are read one at a time as the command consumes them, so stdin of any size is read in constant memory." },
+        "separator": { "enum": ["nul"], "description": "nul: lines are separated by NUL bytes, as `find -print0` writes them, instead of line endings." },
+        "unless_argument": { "type": "string", "description": "The argument, by name, that stands in for stdin: stdin is read only when it gets no value, or `-`. Absent means stdin is read on every run." }
       }
     },
     "ExitStatus": {
@@ -138,9 +271,172 @@
       "additionalProperties": false,
       "properties": {
         "code": { "type": "integer" },
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "The code's snake_case name, unique within the command." },
         "summary": { "type": "string" },
-        "output": { "$ref": "#/definitions/JSONSchema", "description": "What the command still writes to stdout when it exits with this code." }
+        "retryable": { "type": "boolean", "description": "true when running the same command again may succeed." },
+        "output": { "$ref": "#/definitions/JSONSchema", "description": "What the command still writes to stdout when it exits with this code. Self-contained." },
+        "docs_url": { "type": "string", "description": "A link to more about the code." }
       }
+    },
+    "EnumValues": {
+      "type": "object",
+      "description": "What each of the input's enum values declares beyond its spelling, by value. Present only when some value declares more than its spelling. The schema's own `enum` lists the values only, hidden ones left out.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "summary": { "type": "string", "description": "One line saying what the value means." },
+          "aliases": { "type": "array", "items": { "type": "string" }, "description": "Other spellings accepted for the value, each bound as the value." },
+          "deprecated_aliases": { "type": "array", "items": { "type": "string" }, "description": "The aliases being retired; still accepted." },
+          "hidden": { "type": "boolean", "description": "true when the value is accepted but not offered or listed." },
+          "deprecated": { "type": "string", "description": "The value's deprecation message; the value is still accepted." },
+          "deprecated_since": { "type": "string", "description": "The release that deprecated the value." },
+          "removed_in": { "type": "string", "description": "The release that will remove the value." },
+          "replaced_by": { "type": "string", "description": "The value to use instead." }
+        }
+      }
+    },
+    "RotiniType": {
+      "type": "string",
+      "description": "The input's type as rotini reads it: a Go type (`int8`, `[]string`, `map[string]int`) or a rotini value type (`duration`, `date`, `count`), the JSON Schema names written as Go types (`integer` is `int`). Absent for a named object schema, which `schema` references. JSON Schema's `integer` cannot tell `int8` from `int64`; this can. `inputfile` and `outputfile` are paths where `-` means stdin and stdout."
+    },
+    "Kind": {
+      "enum": ["scalar", "count", "list", "map", "object"],
+      "description": "How a caller supplies the value. scalar: one value. count: repeat the identifier (`-vvv`), never `=N`. list: repeat the input, or split one value on its separator. map: key=value pairs. object: a named object schema, given as JSON or field by field (`--db.host x`)."
+    },
+    "Separator": { "type": "string", "description": "The character each value is split on: `--tags a,b` is two tags. The word nul means NUL bytes, which only a flag's file or stdin content can hold." },
+    "IgnoreCase": { "type": "boolean", "description": "true when an enum value matches whatever its case." },
+    "Layouts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "How a time value is written: Go reference-time layouts (2006-01-02, 2006-01-02T15:04:05Z07:00), or unix (seconds since the epoch) or unixmilli. Present on time inputs only."
+    },
+    "Secret": { "type": "boolean", "description": "true when the value is a secret; its default is then left out." },
+    "Hidden": { "type": "boolean", "description": "true when help leaves the input out. It is still read. Absent from the command's `parameters`." },
+    "ConfigSource": { "type": "string", "description": "The configuration file whose path this input supplies, by its `config_files` name." },
+    "Version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "A release, X.Y.Z." },
+    "Removals": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/Version" }
+    },
+    "FlagGroup": {
+      "type": "object",
+      "required": ["kind", "flags"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "description": "The rule: mutually_exclusive, at most one set; required_together, all or none; one_of, exactly one; at_least_one, one or more." },
+        "flags": { "type": "array", "items": { "type": "string" }, "description": "The flags it covers, by name." }
+      }
+    },
+    "FlagDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A rule that applies when `when` is set on the command line (with one of the `equals` values, when given) and none of `unless` is: then every flag in `requires` must be set and none in `forbids` may be. Only what the command line sets counts; defaults and fallbacks neither trigger a rule nor satisfy it.",
+      "properties": {
+        "when": { "type": "string", "description": "The flag that, when set, triggers the rule, by name. Absent when only `unless` decides." },
+        "requires": { "type": "array", "items": { "type": "string" }, "description": "The flags it requires, by name." },
+        "equals": { "type": "array", "items": { "type": ["string", "number", "boolean"] }, "description": "The values of `when` that trigger the rule; absent means any value." },
+        "unless": { "type": "array", "items": { "type": "string" }, "description": "Flags, by name, any one of which set on the command line turns the rule off." },
+        "forbids": { "type": "array", "items": { "type": "string" }, "description": "The flags that can't be set when the rule applies, by name." }
+      }
+    },
+    "ConfigFile": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "format": { "type": "string", "description": "The file's format, when declared; otherwise its extension says." },
+        "path": { "type": "string", "description": "A fixed path, which may start with ~." },
+        "discover": {
+          "type": "object",
+          "required": ["strategy", "file"],
+          "additionalProperties": false,
+          "description": "How the file is found at run time, instead of a fixed path.",
+          "properties": {
+            "strategy": { "type": "string", "description": "walk-up: from the working directory upward. xdg: $XDG_CONFIG_HOME/<app>, else ~/.config/<app>. native: the platform's config directory (~/Library/Application Support/<app> on macOS, %AppData%\\<app> on Windows, as xdg elsewhere). xdg-system: each directory of $XDG_CONFIG_DIRS (default /etc/xdg) joined with <app>." },
+            "app": { "type": "string" },
+            "file": { "type": "string", "description": "The file name looked for." }
+          }
+        },
+        "as": { "enum": ["env"], "description": "env: a dotenv file whose entries are environment variables, under the real environment (which wins); it supplies no config keys." },
+        "profiles": {
+          "type": "object",
+          "required": ["under", "select"],
+          "additionalProperties": false,
+          "description": "The file holds named profiles, one chosen per run. The chosen profile's keys win over the file's other top-level keys, which every profile shares.",
+          "properties": {
+            "under": { "type": "string", "description": "The top-level key holding the profiles." },
+            "select": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "What chooses the profile: the flag set on the command line, then the first set variable.",
+              "properties": {
+                "flag": { "type": "string", "description": "The selector flag's name." },
+                "env": { "type": "array", "items": { "type": "string" }, "description": "The variables read, first preferred." }
+              }
+            },
+            "default": { "type": "string", "description": "The profile used when nothing chooses one; without it, only the shared keys apply." }
+          }
+        }
+      }
+    },
+    "PluginDiscovery": {
+      "type": "object",
+      "required": ["prefix"],
+      "additionalProperties": false,
+      "description": "The command runs any executable named <prefix><word> as `<command> <word>`.",
+      "properties": {
+        "prefix": { "type": "string" },
+        "hidden": { "type": "boolean", "description": "true when completion leaves discovered plugins out." }
+      }
+    },
+    "Relative": {
+      "enum": ["past", "future", "both"],
+      "description": "The time input also takes a time measured from now. past: `2h` or `3d` ago, `now`, `today`, `yesterday`. future: `2h` or `+2h` from now, `tomorrow`. both: a sign is required (`-2h`, `+3d`). Present on time inputs only."
+    },
+    "VariableFile": {
+      "type": "string",
+      "description": "An environment variable naming a file that holds the value (`APP_TOKEN_FILE=/run/secrets/token`), for when the variable itself isn't set. Setting both is an error."
+    },
+    "Expand": {
+      "type": "array",
+      "items": { "enum": ["home", "env"] },
+      "uniqueItems": true,
+      "description": "What is expanded in the input's values, from every source, before they are checked: home, a leading `~` or `~name`; env, `$NAME` and `${NAME}` (an unset variable is an error). Absent: values are taken as written."
+    },
+    "RelativeTo": {
+      "enum": ["config"],
+      "description": "config: a relative path read from a configuration file is resolved against that file's directory. Values from other sources stay relative to the run's directory."
+    },
+    "Stability": {
+      "enum": ["experimental", "beta"],
+      "description": "How settled the item is, as declared. experimental: it may change or be removed in any release. beta: it may change in a minor release. Absent means stable. An item is at most as stable as its command and that command's ancestors."
+    },
+    "Topic": {
+      "type": "object",
+      "required": ["name", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "The word after `help` that shows the topic." },
+        "summary": { "type": "string" },
+        "body": { "type": "string", "description": "The topic's text, when it is written in the spec." },
+        "generate": { "enum": ["environment"], "description": "What the topic's text is built from, when it is generated. environment: every environment variable the program reads." }
+      }
+    },
+    "Effects": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["read", "write", "destructive"], "description": "read: changes nothing. write: creates or changes things. destructive: deletes or overwrites what can't be got back." },
+        "idempotent": { "type": "boolean", "description": "Whether running it again with the same inputs changes nothing more. Absent says nothing." },
+        "open_world": { "type": "boolean", "description": "Whether it reaches the network or other systems outside the machine. Absent says nothing: assume it does." }
+      }
+    },
+    "Agent": {
+      "type": "boolean",
+      "description": "As declared: true offers the item to AI agents (tool exports, the agent skill page, permission snippets) where it would be left out by default; false keeps it, and a command's sub-commands, from them. Absent follows the defaults."
     }
   }
 }

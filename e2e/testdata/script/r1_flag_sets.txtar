@@ -1,0 +1,148 @@
+# R1 — a flag set is declared once and used by several commands: each gets the flags, the
+# generated code embeds one struct per set, and help lists the members under the set's group.
+
+gomodinit example.com/sets
+
+exec rotini generate cmd/sets/.rotini.spec.yaml --config cmd/sets/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o sets$exe ./cmd/sets
+
+# One struct for the set, embedded in each using command's flags.
+grep 'type SetsOutputFlagSet struct' internal/cmd/sets/zz_sets.go
+grep -count=2 '^	SetsOutputFlagSet$' internal/cmd/sets/zz_sets.go
+
+# Both commands read the set's flag through the same flat path.
+exec ./sets$exe list --format json
+stdout 'list format=json all=false'
+exec ./sets$exe show item --format json
+stdout 'show item format=json'
+
+# The set's flags validate, fall back and default like a command's own.
+! exec ./sets$exe list --format xml
+stderr 'invalid value "xml" for --format'
+env SETS_FORMAT=json
+exec ./sets$exe show item
+stdout 'show item format=json'
+env SETS_FORMAT=
+exec ./sets$exe show item
+stdout 'show item format=text'
+
+# The set's flag group comes with it.
+! exec ./sets$exe list --format json --quiet
+stderr 'flags --format and --quiet are mutually exclusive'
+
+# Help lists the members under the set's group.
+exec ./sets$exe list --help
+stdout 'Output:'
+stdout '--format'
+
+-- cmd/sets/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: sets
+  summary: flag sets
+  env_prefix: SETS
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  flag_sets:
+    Output:
+      group: Output
+      flags:
+        - name: format
+          summary: how to print
+          schema: { type: string, enum: [text, json], default: text, key: format }
+        - name: quiet
+          summary: print nothing
+          schema: { type: bool }
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [format, quiet]
+  commands:
+    - name: list
+      summary: list items
+      use: [Output]
+      flags:
+        - name: all
+          summary: every item
+          schema: { type: bool }
+    - name: show
+      summary: show an item
+      use: [Output]
+      arguments:
+        - name: id
+          summary: the item
+          schema: { type: string, required: true }
+-- cmd/sets/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/sets/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/sets/zz_sets.go
+      package: sets
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/sets/sets_list.go --
+package sets
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type setsListHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*setsListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[SetsListInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Sets.Flags.Help {
+		fmt.Fprint(rtx.Stdout, rtx.Help())
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "list format=%s all=%v\n", in.SetsList.Flags.Format, in.SetsList.Flags.All)
+}
+-- internal/cmd/sets/sets_show.go --
+package sets
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type setsShowHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*setsShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[SetsShowInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "show %s %s\n", in.SetsShow.Arguments.ID, describe(in.SetsShow.Flags.SetsOutputFlagSet))
+}
+
+// describe takes the set's struct, so every command that uses the set can share it.
+func describe(o SetsOutputFlagSet) string { return "format=" + o.Format }

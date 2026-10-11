@@ -138,6 +138,6 @@ import (
 )
 
 func main() {
-	filter.Program.
+	filter.NewProgram().
 		Execute()
 }

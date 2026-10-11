@@ -1,0 +1,3 @@
+A filter is a word that narrows a list.
+
+Filters combine with AND.

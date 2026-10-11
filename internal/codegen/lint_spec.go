@@ -27,6 +27,7 @@ func (p *Processor) lintSpec(rs *reconciledSpec) []error {
 		problems = append(problems, rule(rs.spec)...)
 	}
 	problems = append(problems, lintComposedTree(rs.spec, rs.path)...)
+	problems = remapFlagSetProblems(rs.spec, problems)
 	locateProblems(problems, rs.path, rs.locate)
 	return problems
 }
@@ -43,7 +44,12 @@ var specLints = []func(*Spec) []error{
 	lintLocalTimeout,
 	lintFlagGroups,
 	lintFlagDependencies,
+	lintGroupConflicts,
 	lintDuplicateFlagIdentifiers,
+	lintShadowedIdentifiers,
+	lintSingleDashIdentifiers,
+	lintShortOnlyFlags,
+	lintDigitIdentifiers,
 	lintSchemaRefs,
 	lintHandlerFilenames,
 	lintSiblingCollisions,
@@ -53,14 +59,18 @@ var specLints = []func(*Spec) []error{
 	lintPluginTimeouts,
 	lintDottedKeys,
 	lintFrom,
+	lintResponseFiles,
 	lintConfigurationFiles,
 	lintConfigFilesScope,
 	lintConfigSource,
 	lintEnvNesting,
 	lintConfigInputFiles,
+	lintConfigKeyCollisions,
 	lintConstraintApplicability,
 	lintCountFlags,
 	lintPassthrough,
+	lintPassthroughArgument,
+	lintOptionsFirst,
 	lintPatternCompiles,
 	lintSchemaTypes,
 	lintVariable,
@@ -68,6 +78,10 @@ var specLints = []func(*Spec) []error{
 	lintShortCircuit,
 	lintStdinFormat,
 	lintComplete,
+	lintBoundsSatisfiable,
+	lintEnumValues,
+	lintEnumSummaries,
+	lintRequiredDefault,
 	lintDefaultScalar,
 	lintDefaultConstraints,
 	lintItemConstraints,
@@ -76,9 +90,49 @@ var specLints = []func(*Spec) []error{
 	lintSeparator,
 	lintImplicitValue,
 	lintValuesParse,
+	lintSecretDefault,
 	lintObjectFlags,
 	lintLayout,
 	lintExitStatus,
+	lintStdinSchema,
+	lintGroups,
+	lintRepeatable,
+	lintUniqueItems,
+	lintOutputStream,
+	lintDeprecationLifecycle,
+	lintArgumentFallback,
+	lintRelativeTime,
+	lintPatternKinds,
+	lintEnumValueKeys,
+	lintStdinStream,
+	lintStdinUnlessArgument,
+	lintNulSeparator,
+	lintVariableFile,
+	lintConfigFilesAsEnv,
+	lintDiscoverApp,
+	lintStreamPaths,
+	lintRoles,
+	lintGlob,
+	lintFlagSets,
+	lintSecretLiterals,
+	lintReplacedBy,
+	lintHiddenSpellings,
+	lintExpand,
+	lintUsageSchemaName,
+	lintMulticall,
+	lintChdirRole,
+	lintValuesFrom,
+	lintFieldRoles,
+	lintInputDescription,
+	lintStability,
+	lintTopics,
+	lintDocsURL,
+	lintProfiles,
+	lintEffects,
+	lintFlagRoles,
+	lintAgent,
+	lintExamplesParse,
+	lintConfigFileSchemaRefs,
 }
 
 // lintRootCommand requires the root command, which is the binary itself, to have a
@@ -126,6 +180,9 @@ func lintDocLevelKeys(spec *Spec) []error {
 		}
 		if c.DisplayName != "" {
 			add("display_name")
+		}
+		if c.ResponseFiles != nil {
+			add("response_files")
 		}
 	})
 	return problems
@@ -180,6 +237,9 @@ func lintRefNodeKeys(spec *Spec) []error {
 		if c.Output != nil {
 			reject("output")
 		}
+		if c.OutputStream {
+			reject("output_stream")
+		}
 		if len(c.Plugins) > 0 {
 			reject("plugins")
 		}
@@ -188,6 +248,9 @@ func lintRefNodeKeys(spec *Spec) []error {
 		}
 		if c.Passthrough {
 			reject("passthrough")
+		}
+		if c.OptionsFirst {
+			reject("options_first")
 		}
 	})
 	return problems
@@ -224,6 +287,13 @@ func lintRootAliases(spec *Spec) []error {
 				quotedList(spec.Command.DeprecatedIdentifiers)),
 		})
 	}
+	if len(spec.Command.HiddenAliases) > 0 {
+		problems = append(problems, &problem{
+			kind: "spec", ptr: rootPointer + "/hidden_aliases", loc: rootLabel(spec),
+			msg: fmt.Sprintf("the root command cannot declare `hidden_aliases` (%s); it is reached by invoking the binary, not by a routing token; declare them on sub-commands",
+				quotedList(spec.Command.HiddenAliases)),
+		})
+	}
 	return problems
 }
 
@@ -256,7 +326,7 @@ func lintSiblingCollisions(spec *Spec) []error {
 			if owner == "" {
 				owner = child.Ref
 			}
-			claim(owner, fmt.Sprintf("%s/commands/%d", ptr, i), append([]string{child.Name}, child.Aliases...)...)
+			claim(owner, fmt.Sprintf("%s/commands/%d", ptr, i), dispatchTokens(child)...)
 		}
 		for i, r := range c.Plugins {
 			claim("plugin "+r.Name, fmt.Sprintf("%s/plugins/%d", ptr, i), append([]string{r.Name}, r.Aliases...)...)
@@ -287,27 +357,6 @@ func lintDuplicateInputNames(spec *Spec) []error {
 	return problems
 }
 
-// lintVariadicArguments rejects a variadic (slice-typed) argument anywhere but last: it
-// absorbs the remaining positionals, so later arguments could never bind.
-func lintVariadicArguments(spec *Spec) []error {
-	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		if c.inputs() == nil {
-			return
-		}
-		for i, a := range c.inputs().Arguments {
-			if i == len(c.inputs().Arguments)-1 {
-				break
-			}
-			if strings.HasPrefix(getSchemaType(a.Schema), "[]") {
-				problems = append(problems, inputProblem(fmt.Sprintf("%s/arguments/%d", ptr, i), path, "argument", a.Name,
-					"variadic but not last; it would absorb every remaining positional, so later arguments could never bind"))
-			}
-		}
-	})
-	return problems
-}
-
 // lintRequiredArgumentOrder rejects a required positional argument declared after an
 // optional one. Positionals fill in order, so the first value always lands in the optional
 // argument, which therefore can never be omitted. A variadic with minItems > 0 counts as
@@ -321,6 +370,9 @@ func lintRequiredArgumentOrder(spec *Spec) []error {
 		}
 		firstOptional := ""
 		for i, a := range in.Arguments {
+			if i > 0 && strings.HasPrefix(getSchemaType(in.Arguments[i-1].Schema), "[]") {
+				break // arguments after a variadic bind from the end: lintVariadicArguments
+			}
 			if !argumentRequired(a) {
 				if firstOptional == "" {
 					firstOptional = a.Name
@@ -352,7 +404,7 @@ func lintIgnoreCase(spec *Spec) []error {
 				return
 			}
 			seen := map[string]string{}
-			for _, m := range schema.Enum {
+			for _, m := range enumStrings(schema.Enum) {
 				if prev, ok := seen[strings.ToLower(m)]; ok && prev != m {
 					add(fmt.Sprintf("sets `ignore_case` but enum members %q and %q differ only in case; a value matching both could bind either", prev, m))
 					return
@@ -379,8 +431,8 @@ func lintSeparator(spec *Spec) []error {
 			t := getSchemaType(schema)
 			isList, isMap := strings.HasPrefix(t, "[]"), strings.HasPrefix(t, "map[")
 			switch {
-			case channel != "flag" && channel != "argument":
-				add("sets `separator`, which applies to flags and arguments only; an env input's list splits on commas and a configuration file writes a list as a list, so there is nothing for it to choose")
+			case channel != "flag" && channel != "argument" && channel != "env":
+				add("sets `separator`, which applies to flags, arguments and env inputs only; a configuration file writes a list as a list, so there is nothing for it to choose")
 			case !isList && !isMap:
 				add(fmt.Sprintf("sets `separator` but its type is %s; only a list or map takes several values to split into", displayType(t)))
 			case schema.Separator == `"`:
@@ -389,6 +441,10 @@ func lintSeparator(spec *Spec) []error {
 				add("sets `separator` to a line break, which ends a CSV record rather than separating items in one")
 			case isMap && schema.Separator == "=":
 				add("sets `separator` to \"=\", which already separates each map entry's key from its value")
+			case channel == "env" && schema.Separator == ",":
+				p := inputProblem(ptr, path, channel, name, "sets `separator` to \",\", which an env input already splits on; remove it")
+				p.sev = severityWarning
+				problems = append(problems, p)
 			}
 		})
 	})
@@ -398,10 +454,14 @@ func lintSeparator(spec *Spec) []error {
 // enumMember reports whether v is one of schema's enum members, the way the runtime matches:
 // exactly, or regardless of case under ignore_case.
 func enumMember(schema *InputSchema, v string) bool {
-	if schema.IgnoreCase {
-		return slices.ContainsFunc(schema.Enum, func(m string) bool { return strings.EqualFold(m, v) })
+	spellings := enumStrings(schema.Enum)
+	for a := range enumAliases(schema.Enum) {
+		spellings = append(spellings, a) // an alias is accepted; lintEnumValueKeys asks for the value
 	}
-	return slices.Contains(schema.Enum, v)
+	if schema.IgnoreCase {
+		return slices.ContainsFunc(spellings, func(m string) bool { return strings.EqualFold(m, v) })
+	}
+	return slices.Contains(spellings, v)
 }
 
 // lintImplicitValue restricts implicit_value to single-valued flags (not bool, count, list
@@ -713,13 +773,13 @@ func inertKeyProblems(ptr, path, channel, name string, schema *InputSchema) []er
 		problems = append(problems, inputProblem(ptr, path, channel, name,
 			fmt.Sprintf("sets %#q, which applies only to %s; here it would do nothing", key, where)))
 	}
-	if schema.Negatable && channel != "flag" {
+	if negatable(schema) && channel != "flag" {
 		inert("negatable", "bool flags (it derives a --no-<name> form)")
 	}
-	if schema.Key != "" && channel != "flag" && channel != "config" {
-		inert("key", "config inputs and a flag's configuration fallback")
+	if schema.Key != "" && channel != "flag" && channel != "argument" && channel != "config" {
+		inert("key", "config inputs and the configuration fallback of flags and arguments")
 	}
-	if len(schema.Properties) > 0 && channel != "flag" {
+	if len(schema.Properties) > 0 && channel != "flag" && channel != "stdin" {
 		inert("properties", "a map flag, whose property names feed shell completion (an object's shape belongs in a named schema)")
 	}
 	return problems
@@ -727,16 +787,20 @@ func inertKeyProblems(ptr, path, channel, name string, schema *InputSchema) []er
 
 // lintConstraintApplicability rejects a constraint on a type it can never check: numeric
 // bounds on non-numerics, length or pattern on non-strings, item counts on non-collections.
-// Per-value constraints on an array apply to its element type. Stdin is exempt because its
-// schema validates the piped document with full JSON Schema semantics.
+// Per-value constraints on an array apply to its element type. Stdin is exempt, apart from
+// the channel keys, because its schema validates the piped document with full JSON Schema
+// semantics.
 func lintConstraintApplicability(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
-			if channel == "stdin" || schema == nil {
+			if schema == nil {
 				return
 			}
 			problems = append(problems, inertKeyProblems(ptr, path, channel, name, schema)...)
+			if channel == "stdin" {
+				return
+			}
 			typ := getSchemaType(schema)
 			if t := namedScalarType(typ, spec.Command.Schemas); t != "" {
 				typ = t // checked as the type the named schema declares, as the runtime does
@@ -759,10 +823,10 @@ func lintConstraintApplicability(spec *Spec) []error {
 					}
 				}
 			}
-			if (schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "") && !stringValued(elem) {
+			if (schema.MinLength != 0 || schema.MaxLength != nil || schema.Pattern != "") && !stringValued(elem) {
 				add(fmt.Sprintf("`minLength`/`maxLength`/`pattern` apply to string types only, not %s; the constraint would be silently ignored", typ))
 			}
-			if (schema.MinItems != 0 || schema.MaxItems != 0) &&
+			if (schema.MinItems != 0 || schema.MaxItems != nil) &&
 				!strings.HasPrefix(typ, "[]") && !strings.HasPrefix(typ, "map[") {
 				add(fmt.Sprintf("`minItems`/`maxItems` apply to repeatable (list or map) types only, not %s; the count bound would be silently ignored", typ))
 			}
@@ -801,7 +865,8 @@ func measuredBoundProblems(s *InputSchema, elem string) []string {
 // stringValued reports whether a type's value is a string and so accepts string constraints:
 // "string" and the path types, whose generated field is a plain string.
 func stringValued(elem string) bool {
-	return elem == "string" || elem == "existingfile" || elem == "existingdir"
+	return elem == "string" || elem == "existingfile" || elem == "existingdir" ||
+		elem == "inputfile" || elem == "outputfile"
 }
 
 // lintPassthrough requires a passthrough command, whose every token is a raw positional, to
@@ -868,8 +933,8 @@ func lintCountFlags(spec *Spec) []error {
 				"items":           schema.Items != nil,
 				"minimum/maximum": schema.Minimum != nil || schema.Maximum != nil,
 				"exclusiveMinimum/exclusiveMaximum/multipleOf": schema.ExclusiveMinimum != nil || schema.ExclusiveMaximum != nil || schema.MultipleOf != nil,
-				"minLength/maxLength/pattern":                  schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "",
-				"minItems/maxItems":                            schema.MinItems != 0 || schema.MaxItems != 0,
+				"minLength/maxLength/pattern":                  schema.MinLength != 0 || schema.MaxLength != nil || schema.Pattern != "",
+				"minItems/maxItems":                            schema.MinItems != 0 || schema.MaxItems != nil,
 			} {
 				if set {
 					bad = append(bad, key)
@@ -885,7 +950,7 @@ func lintCountFlags(spec *Spec) []error {
 }
 
 // lintVariable restricts variable, which names the environment variable an input reads, to
-// env inputs and flags (as the flag's env fallback), and requires a nested env input to name
+// env inputs, flags and arguments (as their env fallback), and requires a nested env input to name
 // a single prefix.
 func lintVariable(spec *Spec) []error {
 	var problems []error
@@ -895,7 +960,7 @@ func lintVariable(spec *Spec) []error {
 			if schema == nil || len(vars) == 0 {
 				return
 			}
-			if channel == "env" || channel == "flag" {
+			if channel == "env" || channel == "flag" || channel == "argument" {
 				if len(vars) > 1 && schema.Nesting != "" {
 					problems = append(problems, inputProblem(ptr, path, channel, name,
 						fmt.Sprintf("sets `nesting` with %d variables; a nested input reads the family of variables under ONE prefix, so name one", len(vars))))
@@ -903,52 +968,8 @@ func lintVariable(spec *Spec) []error {
 				return
 			}
 			problems = append(problems, inputProblem(ptr, path, channel, name,
-				"sets `variable`, which names an environment variable; only env inputs and flags (as a flag's env fallback) read one, so here it would be silently ignored"))
+				"sets `variable`, which names an environment variable; only env inputs, flags and arguments (as their env fallback) read one, so here it would be silently ignored"))
 		})
-	})
-	return problems
-}
-
-// lintNegatable restricts negatable to bool flags with a long identifier to derive
-// "--no-<name>" from, and rejects a derived form that collides with a declared identifier.
-func lintNegatable(spec *Spec) []error {
-	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		flagPtr := func(i int) string { return fmt.Sprintf("%s/flags/%d", ptr, i) }
-		for i, f := range c.Flags {
-			if f.Schema == nil || !f.Schema.Negatable {
-				continue
-			}
-			add := func(msg string) { problems = append(problems, inputProblem(flagPtr(i), path, "flag", f.Name, msg)) }
-			if t := f.Schema.Type; t != "bool" && t != "boolean" {
-				add(fmt.Sprintf("sets `negatable` but its type is %s; the negated form sets a bool false, so it applies to bool flags only", displayType(t)))
-				continue
-			}
-			if !slices.ContainsFunc(flagIdentifiers(f), func(id string) bool { return strings.HasPrefix(id, "--") }) {
-				add("sets `negatable` but declares no long identifier; the negated form is derived as \"--no-<name>\", so there is nothing to derive it from")
-			}
-		}
-		declared := map[string]string{}
-		for _, f := range c.Flags {
-			for _, id := range flagIdentifiers(f) {
-				declared[id] = f.Name
-			}
-		}
-		for i, f := range c.Flags {
-			if f.Schema == nil || !f.Schema.Negatable {
-				continue
-			}
-			for _, id := range flagIdentifiers(f) {
-				if !strings.HasPrefix(id, "--") {
-					continue
-				}
-				neg := "--no-" + strings.TrimPrefix(id, "--")
-				if owner, clash := declared[neg]; clash {
-					problems = append(problems, inputProblem(flagPtr(i), path, "flag", f.Name,
-						fmt.Sprintf("sets `negatable`, deriving %q, which flag %q already declares; one of the two would never match", neg, owner)))
-				}
-			}
-		}
 	})
 	return problems
 }
@@ -968,9 +989,8 @@ func lintShortCircuit(spec *Spec) []error {
 		}
 		dependent := map[string]bool{}
 		for _, dep := range c.FlagDependencies {
-			dependent[dep.When] = true
-			for _, name := range dep.Requires {
-				dependent[name] = true
+			for _, kn := range dependencyNames(dep) {
+				dependent[kn[1]] = true
 			}
 		}
 		for i, f := range c.Flags {
@@ -1004,7 +1024,7 @@ func shortCircuitFlagProblems(f FlagInput, grouped, dependent bool) []string {
 	if s.Key != "" || len(variables(s)) > 0 {
 		msgs = append(msgs, "sets `short_circuit` and reads an environment variable or config key (`key` / `variable`); only the command line sets a short-circuit flag, or every run with that value set would be short-circuited")
 	}
-	if s.Negatable {
+	if negatable(s) {
 		msgs = append(msgs, "sets `short_circuit` and `negatable`; a negated short-circuit flag has no meaning")
 	}
 	if grouped {
@@ -1025,9 +1045,9 @@ func displayType(t string) string {
 }
 
 // lintStdinFormat requires the schema type of a raw stdin format to match what the payload
-// becomes: string for 'text', []string for 'lines'. A mismatch would otherwise surface at run
-// time as a wiring error. Document formats decode into the generated struct and are
-// unconstrained.
+// becomes: string for 'text' and 'bytes', []string for 'lines'. A mismatch would otherwise
+// surface at run time as a wiring error. Document formats decode into the generated struct
+// and are unconstrained.
 func lintStdinFormat(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -1041,7 +1061,7 @@ func lintStdinFormat(spec *Spec) []error {
 					c.Stdin.Format, want, displayType(typ), want)))
 		}
 		switch c.Stdin.Format {
-		case "text":
+		case "text", "bytes":
 			if typ != "string" {
 				add("string")
 			}
@@ -1078,10 +1098,31 @@ func lintComplete(spec *Spec) []error {
 			if len(schema.Complete.Extensions) > 0 && schema.Complete.Kind != "file" {
 				add(fmt.Sprintf("sets `complete.extensions` with kind %q; extensions narrow files, so they apply to kind \"file\" only", schema.Complete.Kind))
 			}
+			t := getSchemaType(schema)
+			switch kind := schema.Complete.Kind; kind {
+			case "command":
+				switch {
+				case channel != "argument":
+					add("sets `complete.kind: command`, which completes the command path an argument names (a help command's); a flag's value isn't a command path")
+				case t != "string" && t != "[]string":
+					add(fmt.Sprintf("sets `complete.kind: command` but its type is %s; a command path is words, so the argument is a string or a list of strings", t))
+				case len(schema.Enum) > 0:
+					add("sets `complete.kind: command` and `enum`; the command names are the candidates, so an enum would never be offered")
+				}
+			case "executable", "user", "group", "host":
+				if t != "string" && t != "[]string" {
+					p := inputProblem(ptr, path, channel, name, fmt.Sprintf("sets `complete.kind: %s` but its type is %s, which can't hold the %s names the shell offers", kind, t, nativeKindNouns[kind]))
+					p.sev = severityWarning
+					problems = append(problems, p)
+				}
+			}
 		})
 	})
 	return problems
 }
+
+// nativeKindNouns names what each shell-completed `complete.kind` offers.
+var nativeKindNouns = map[string]string{"executable": "program", "user": "user", "group": "group", "host": "host"}
 
 // lintDefaultScalar requires a `default:` to be a scalar, or, on a repeatable (list or map)
 // input, a list or map of scalars, each seeded as one occurrence.
@@ -1193,39 +1234,6 @@ func lintConfigInputFiles(spec *Spec) []error {
 	return problems
 }
 
-// lintFrom restricts `from` to non-bool flags and allows one stdin consumer per command: a
-// from:stdin flag cannot coexist with a `stdin:` channel or another from:stdin flag.
-func lintFrom(spec *Spec) []error {
-	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		stdinClaim := "" // what already claimed this command's stdin
-		if c.Stdin != nil {
-			stdinClaim = "the `stdin` channel"
-		}
-		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
-			if schema == nil || len(schema.From) == 0 {
-				return
-			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
-			if channel != "flag" {
-				add("sets `from`, which applies to flags only")
-				return
-			}
-			if t := getSchemaType(schema); t == "bool" {
-				add("sets `from` but its type is bool; a bool takes no value to resolve")
-			}
-			if slices.Contains(schema.From, "stdin") {
-				if stdinClaim != "" {
-					add(fmt.Sprintf("sets `from: stdin` but %s already consumes stdin; stdin has one consumer", stdinClaim))
-					return
-				}
-				stdinClaim = fmt.Sprintf("flag %q", name)
-			}
-		})
-	})
-	return problems
-}
-
 // lintDeprecatedIdentifiers requires a command's deprecated_identifiers to be among its
 // aliases and a flag's to be among its declared or derived identifiers; any other token
 // could never be reported as deprecated.
@@ -1246,13 +1254,13 @@ func lintDeprecatedIdentifiers(spec *Spec) []error {
 		if c != &spec.Command && len(c.DeprecatedIdentifiers) > 0 {
 			subset(func(msg string) {
 				problems = append(problems, &problem{kind: "spec", ptr: ptr + "/deprecated_identifiers", loc: "command " + path, msg: msg})
-			}, c.Aliases, c.DeprecatedIdentifiers, "aliases")
+			}, slices.Concat(c.Aliases, c.HiddenAliases), c.DeprecatedIdentifiers, "aliases")
 		}
 		for i, f := range c.Flags {
 			if len(f.DeprecatedIdentifiers) > 0 {
 				subset(func(msg string) {
 					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name, msg))
-				}, flagIdentifiers(f), f.DeprecatedIdentifiers, "identifiers")
+				}, slices.Concat(flagIdentifiers(f), f.HiddenIdentifiers), f.DeprecatedIdentifiers, "identifiers")
 			}
 		}
 	})
@@ -1344,7 +1352,7 @@ func lintLocalTimeout(spec *Spec) []error {
 }
 
 // lintFlagGroups rejects a flag_groups entry referencing a flag the command does not
-// declare, which would silently never match.
+// declare, which would silently never match, or listing one flag twice.
 func lintFlagGroups(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -1352,39 +1360,21 @@ func lintFlagGroups(spec *Spec) []error {
 			return
 		}
 		known, ordered := flagNames(c)
+		// A flag set's rule naming a flag outside the set is lintFlagSets's to report, once.
+		own := ownGroupCount(c, spec.Command.FlagSets)
 		for i, g := range c.FlagGroups {
+			at := fmt.Sprintf("%s/flag_groups/%d", ptr, i)
+			listed := map[string]bool{}
 			for _, name := range g.Flags {
-				if !known[name] {
+				if !known[name] && i < own {
 					msg := fmt.Sprintf("`flag_groups` entry (%s) references unknown flag %q; it has no matching entry in this command's `flags`", g.Kind, name)
-					problems = append(problems, &problem{kind: "spec", ptr: fmt.Sprintf("%s/flag_groups/%d", ptr, i), loc: "command " + path, msg: didYouMean(msg, name, ordered)})
+					problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 				}
-			}
-		}
-	})
-	return problems
-}
-
-// lintFlagDependencies rejects a flag_dependencies entry whose When or Requires references a
-// flag the command does not declare.
-func lintFlagDependencies(spec *Spec) []error {
-	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		if c.inputs() == nil || len(c.inputs().FlagDependencies) == 0 {
-			return
-		}
-		known, ordered := flagNames(c)
-		for i, dep := range c.FlagDependencies {
-			report := func(name string) {
-				msg := fmt.Sprintf("`flag_dependencies` entry references unknown flag %q; it has no matching entry in this command's `flags`", name)
-				problems = append(problems, &problem{kind: "spec", ptr: fmt.Sprintf("%s/flag_dependencies/%d", ptr, i), loc: "command " + path, msg: didYouMean(msg, name, ordered)})
-			}
-			if !known[dep.When] {
-				report(dep.When)
-			}
-			for _, name := range dep.Requires {
-				if !known[name] {
-					report(name)
+				if listed[name] {
+					problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path,
+						msg: fmt.Sprintf("`flag_groups` entry (%s) lists flag %q twice; list each flag once", g.Kind, name)})
 				}
+				listed[name] = true
 			}
 		}
 	})
@@ -1402,7 +1392,7 @@ func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 		}
 		claimedBy := map[string]string{} // identifier -> the flag name that first claimed it
 		for i, f := range c.Flags {
-			for _, id := range flagIdentifiers(f) {
+			for _, id := range matchIdentifiers(f) {
 				if prev, dup := claimedBy[id]; dup {
 					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name,
 						fmt.Sprintf("identifier %q is already declared by flag %q", id, prev)))
@@ -1697,9 +1687,9 @@ func lintDefaultConstraints(spec *Spec) []error {
 				if n := len(values); schema.MinItems > 0 && n < schema.MinItems {
 					add(fmt.Sprintf("`default` has %d %s but `minItems` is %d; %s",
 						n, pluralWord("value", n), schema.MinItems, defaultFails))
-				} else if schema.MaxItems > 0 && n > schema.MaxItems {
+				} else if schema.MaxItems != nil && n > *schema.MaxItems {
 					add(fmt.Sprintf("`default` has %d %s but `maxItems` is %d; %s",
-						n, pluralWord("value", n), schema.MaxItems, defaultFails))
+						n, pluralWord("value", n), *schema.MaxItems, defaultFails))
 				}
 			}
 
@@ -1726,7 +1716,7 @@ const defaultFails = "every run that leaves it unset would fail"
 func defaultViolation(schema *InputSchema, label, v string) string {
 	if len(schema.Enum) > 0 && !enumMember(schema, v) {
 		return fmt.Sprintf("%s %q is not one of the declared `enum` values (%s)",
-			label, v, strings.Join(schema.Enum, ", "))
+			label, v, strings.Join(enumStrings(schema.Enum), ", "))
 	}
 
 	if n, err := strconv.ParseFloat(v, 64); err == nil {
@@ -1747,9 +1737,9 @@ func defaultViolation(schema *InputSchema, label, v string) string {
 	if ln := utf8.RuneCountInString(v); schema.MinLength > 0 && ln < schema.MinLength {
 		return fmt.Sprintf("%s %q is %d %s, below the declared `minLength` %d",
 			label, v, ln, pluralWord("character", ln), schema.MinLength)
-	} else if schema.MaxLength > 0 && ln > schema.MaxLength {
+	} else if schema.MaxLength != nil && ln > *schema.MaxLength {
 		return fmt.Sprintf("%s %q is %d %s, above the declared `maxLength` %d",
-			label, v, ln, pluralWord("character", ln), schema.MaxLength)
+			label, v, ln, pluralWord("character", ln), *schema.MaxLength)
 	}
 
 	if schema.Pattern != "" {
@@ -1796,7 +1786,7 @@ func lintItemConstraints(spec *Spec) []error {
 			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			it := &schema.Items.BaseSchema
 
-			if it.MinItems > 0 || it.MaxItems > 0 {
+			if it.MinItems > 0 || it.MaxItems != nil {
 				add("`minItems`/`maxItems` on `items` would count values inside ONE element, but an element of a " +
 					channel + " list is a single value; put the bound on the list itself")
 			}
@@ -1807,7 +1797,7 @@ func lintItemConstraints(spec *Spec) []error {
 						"they mean the same thing (a rule every element must pass), so declare it once", key))
 				}
 			}
-			conflict("enum", len(it.Enum) > 0 && !slices.Equal(it.Enum, schema.Enum))
+			conflict("enum", len(it.Enum) > 0 && !slices.Equal(enumStrings(it.Enum), enumStrings(schema.Enum)))
 			conflict("pattern", it.Pattern != "" && it.Pattern != schema.Pattern)
 			conflict("minimum", floatBoundsDiffer(bound(it.Minimum), bound(schema.Minimum)))
 			conflict("maximum", floatBoundsDiffer(bound(it.Maximum), bound(schema.Maximum)))
@@ -1815,7 +1805,7 @@ func lintItemConstraints(spec *Spec) []error {
 			conflict("exclusiveMaximum", floatBoundsDiffer(bound(it.ExclusiveMaximum), bound(schema.ExclusiveMaximum)))
 			conflict("multipleOf", floatBoundsDiffer(bound(it.MultipleOf), bound(schema.MultipleOf)))
 			conflict("minLength", it.MinLength != 0 && it.MinLength != schema.MinLength)
-			conflict("maxLength", it.MaxLength != 0 && it.MaxLength != schema.MaxLength)
+			conflict("maxLength", it.MaxLength != nil && (schema.MaxLength == nil || *it.MaxLength != *schema.MaxLength))
 		})
 	})
 	return problems
@@ -1833,6 +1823,7 @@ func lintExitStatus(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		seen := map[int]bool{}
+		names := map[string]string{} // generated constant suffix → the name that claimed it
 		for i, e := range c.ExitStatus {
 			at := &problem{kind: "spec", ptr: fmt.Sprintf("%s/exit_status/%d", ptr, i), loc: "command " + path}
 			switch {
@@ -1845,6 +1836,20 @@ func lintExitStatus(spec *Spec) []error {
 				problems = append(problems, at)
 			}
 			seen[e.Code] = true
+			if e.Name == "" {
+				continue
+			}
+			ident := toPascalCase(e.Name)
+			switch prev, dup := names[ident]; {
+			case dup && prev == e.Name:
+				problems = append(problems, &problem{kind: "spec", ptr: at.ptr + "/name", loc: at.loc,
+					msg: fmt.Sprintf("exit_status names two codes %q; give each code its own name", e.Name)})
+			case dup:
+				problems = append(problems, &problem{kind: "spec", ptr: at.ptr + "/name", loc: at.loc,
+					msg: fmt.Sprintf("exit_status names %q and %q both become the Go name Exit%s; rename one", prev, e.Name, ident)})
+			default:
+				names[ident] = e.Name
+			}
 		}
 	})
 	return problems

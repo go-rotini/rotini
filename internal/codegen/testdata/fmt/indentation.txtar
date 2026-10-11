@@ -1,0 +1,22 @@
+-- in --
+version: 1.0.0
+command:
+    name: tool
+    flags:
+    -   name: a
+        schema:
+            type: string
+    - name: b
+      identifiers:
+      - --b
+-- out --
+version: 1.0.0
+command:
+  name: tool
+  flags:
+    - name: a
+      schema:
+        type: string
+    - name: b
+      identifiers:
+        - --b

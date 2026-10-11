@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:21:20: command demo/list: flag "refresh": has `effects` but its command declares none; a flag's effects raise its command's, so declare the command's `effects` too
+spec: .rotini.spec.yaml:28:20: command demo/purge: flag "dry-run": has effects "read", which add nothing to its command's "destructive"; a flag's effects can only raise its command's; mark a preview with `role: dry-run`
+spec: .rotini.spec.yaml:34:16: command demo/db: sets `effects` on a `$ref` node; the child's handler is what runs, so declare its effects in the child spec

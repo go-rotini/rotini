@@ -1,0 +1,45 @@
+# An argument's env or config fallback fills a position the command line left out. Positionals
+# fill left to right, so an argument after one with a fallback needs a fallback or a default,
+# and raw words, or an argument after a variadic one, take no fallback.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    # Fine: both arguments fall back, the second to a default.
+    - name: deploy
+      arguments:
+        - name: env
+          schema:
+            type: string
+            variable: DEPLOY_ENV
+        - name: service
+          schema:
+            type: string
+            default: api
+    # The second argument has neither, so `gap web` would put web into <env>.
+    - name: gap
+      arguments:
+        - name: env
+          schema:
+            type: string
+            key: env
+        - name: service
+          schema:
+            type: string
+    # Raw words: a passthrough command, and a fallback after a variadic argument.
+    - name: run
+      passthrough: true
+      arguments:
+        - name: words
+          schema:
+            type: '[]string'
+            variable: RUN_WORDS
+    - name: tail
+      arguments:
+        - name: files
+          schema:
+            type: '[]string'
+        - name: last
+          schema:
+            type: string
+            variable: TAIL_LAST

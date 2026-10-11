@@ -252,7 +252,7 @@ func TestGenerateFeatures_inline(t *testing.T) {
 		"the acme control cli",
 		"acme <command> [flags]",
 		"deploy, dep",           // name + alias
-		"--config, -c string",   // typed flag row
+		"-c, --config string",   // typed flag row
 		"ACME_TOKEN string",     // env input row
 		"https://api.acme.test", // config default
 		"acme deploy web",       // example
@@ -354,7 +354,7 @@ func TestFlagGroups(t *testing.T) {
 		{Identifiers: []string{"--key"}, Group: "TLS"},
 		{Identifiers: []string{"--quiet"}},
 	}
-	groups := groupFlags(rows)
+	groups := groupFlags(rows, nil)
 
 	if len(groups) != 3 {
 		t.Fatalf("got %d buckets, want 3 (ungrouped, TLS, Output)", len(groups))
@@ -382,12 +382,12 @@ func TestFlagGroups(t *testing.T) {
 
 	plain := groupFlags([]templateDocFlagRow{
 		{Identifiers: []string{"--a"}}, {Identifiers: []string{"--b"}},
-	})
+	}, nil)
 	if len(plain) != 1 || plain[0].Title != "" || len(plain[0].Flags) != 2 {
 		t.Errorf("an ungrouped command should render one untitled bucket, got %+v", plain)
 	}
 
-	if groupFlags(nil) != nil {
+	if groupFlags(nil, nil) != nil {
 		t.Error("no flags should yield no buckets, so the section is omitted entirely")
 	}
 }
@@ -560,7 +560,7 @@ func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
 		{name: "old", aliases: []string{"o"}, deprecated: "use new"},
 		{name: "only", aliases: []string{"legacy"}, deprecatedIdentifiers: []string{"legacy"}, deprecated: "use only"},
 	}
-	rows := buildHelpData("app", cmdHelp{}, nil, children, nil, nil, "", false).CommandGroups[0].Commands
+	rows := buildHelpData("app", cmdHelp{}, nil, children, nil, nil, "", configReads{}).CommandGroups[0].Commands
 	want := []templateDocCommandRow{
 		{Name: "api-resources", Aliases: []string{"ar"}},
 		{Name: "old", Aliases: []string{"o"}, Deprecated: "use new"},
@@ -587,5 +587,51 @@ func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
 		if strings.Join(row.Identifiers, ",") != tt.ids || row.Deprecated != tt.message {
 			t.Errorf("flag %s row = %v %q, want %s %q", tt.f.Name, row.Identifiers, row.Deprecated, tt.ids, tt.message)
 		}
+	}
+}
+
+// TestHelpPage_secretDefaultHidden pins that help, man and markdown never show a secret
+// input's default on any channel, while an explicit default_text still shows.
+func TestHelpPage_secretDefaultHidden(t *testing.T) {
+	spec := `version: 0.0.0
+command:
+  name: acme
+  summary: acme control
+  config_files:
+    - name: project
+      path: .acme.yaml
+  flags:
+    - name: token
+      summary: api token
+      identifiers: [--token]
+      schema: {type: string, secret: true, default: hunter2}
+    - name: key
+      summary: signing key
+      identifiers: [--key]
+      schema: {type: string, secret: true, default: hunter3, default_text: from the vault}
+  arguments:
+    - name: pass
+      summary: a password
+      schema: {type: string, secret: true, default: hunter4}
+  env:
+    - name: api-key
+      summary: api key
+      schema: {type: string, secret: true, default: hunter5}
+  config:
+    - name: password
+      summary: db password
+      schema: {type: string, secret: true, default: hunter6}
+`
+	dir, _ := emitModule(t, spec, featureConfInline)
+	gen := readEmitted(t, dir, "internal/cmd/acme/zz_acme.go")
+	for _, leaked := range []string{"hunter2", "hunter4", "hunter5", "hunter6"} {
+		for _, shown := range []string{"default " + leaked, "default `" + leaked + "`", `default \"` + leaked} {
+			if strings.Contains(gen, shown) {
+				t.Errorf("a page shows the secret default %q", shown)
+			}
+		}
+	}
+	if !strings.Contains(gen, "default from the vault") {
+		t.Error("an explicit default_text on a secret input should still show")
 	}
 }

@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:18:22: command demo/wrap: sets `options_first` and `passthrough`; a passthrough command parses no flags after its name, so options_first has nothing to stop
+warning: spec: .rotini.spec.yaml:25:22: command demo/group: sets `options_first`, which has no effect: "group" takes no arguments, so there is no first argument for flags to stop at
+warning: spec: .rotini.spec.yaml:29:22: command demo/exec: sets `options_first`, which has no effect: its first argument is a passthrough argument, where flags already stop

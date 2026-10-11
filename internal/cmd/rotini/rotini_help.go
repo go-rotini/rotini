@@ -32,6 +32,9 @@ func (*rotiniHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintln(rtx.Stdout, help)
+	if _, err := fmt.Fprintln(rtx.Stdout, help); err != nil {
+		haltWithWriteError(rtx, err)
+		return
+	}
 	rtx.HaltWithCode(0)
 }

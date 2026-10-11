@@ -1,0 +1,8 @@
+# ops help environment
+
+the environment variables ops reads
+
+## Environment
+
+- `OPS_LOG` `string` — the log level (used by: ops)
+- `OPS_TOKEN` `string` — the API token (used by: ops)

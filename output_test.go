@@ -32,17 +32,15 @@ func outDef() Definition {
 		Name: "taskr",
 		Commands: []CommandDef{
 			{Name: "list", Output: &OutputDef{Type: reflect.TypeFor[outList](), Schema: outListSchema}},
-			{Name: "watch", Output: &OutputDef{Type: reflect.TypeFor[outTask](), Schema: outTaskSchema}},
+			{Name: "watch", Output: &OutputDef{Type: reflect.TypeFor[outTask](), Schema: outTaskSchema, Stream: true}},
 			{Name: "free"},
 		},
 	}
 }
 
 func outContext(cmd string) (*Context, *bytes.Buffer) {
-	rtx := NewContextFor(outDef(), []string{cmd})
 	var out bytes.Buffer
-	rtx.Stdout = &out
-	return rtx, &out
+	return NewContextFor(outDef(), []string{cmd}).WithStdout(&out), &out
 }
 
 var sampleList = outList{Tasks: []outTask{{ID: 1, Status: "done"}, {ID: 2, Status: "open"}}}
@@ -88,6 +86,8 @@ func TestWriteOutput_programBugs(t *testing.T) {
 			`taskr list: the output written is a rotini.outTask, but the command declares rotini.outList`},
 		{"toml as a stream", "free", func(rtx *Context) error { return rtx.WriteOutputItem(outTask{}, "toml", nil) },
 			"taskr free: write output as toml: toml cannot be written as a stream"},
+		{"one value on a stream", "watch", func(rtx *Context) error { return rtx.WriteOutput(outTask{}, "json", nil) },
+			"taskr watch: declares a stream (output_stream); write each item with WriteOutputItem"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -166,6 +166,17 @@ func TestWriteOutputItem(t *testing.T) {
 	if want := "---\nid: 1\nstatus: done\n---\nid: 2\nstatus: open\n"; out.String() != want {
 		t.Errorf("yaml stream = %q, want %q", out, want)
 	}
+	// A command without output_stream: true still writes items, checked against its declared type.
+	rtx, out = outContext("list")
+	if err := rtx.WriteOutputItem(sampleList, "json", nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := "{\"tasks\":[{\"id\":1,\"status\":\"done\"},{\"id\":2,\"status\":\"open\"}]}\n"; out.String() != want {
+		t.Errorf("items without a stream = %q, want %q", out, want)
+	}
+	if err := rtx.WriteOutputItem(outTask{}, "json", nil); err == nil || CategoryOf(err) != CategoryInternal {
+		t.Errorf("the wrong type without a stream: %v", err)
+	}
 }
 
 func TestWriteOutput_checks(t *testing.T) {
@@ -179,7 +190,7 @@ func TestWriteOutput_checks(t *testing.T) {
 	}
 
 	rtx, out = outContext("list")
-	rtx.outputChecks = true
+	rtx.WithOutputChecks(true)
 	err := rtx.WriteOutput(bad, "json", nil)
 	if err == nil || !strings.HasPrefix(err.Error(), "taskr list: output does not match its contract: output.tasks[1].status: ") {
 		t.Fatalf("checked: err = %v", err)
@@ -207,9 +218,12 @@ func TestWriteOutput_checks(t *testing.T) {
 
 func TestProgramWithOutputChecks(t *testing.T) {
 	t.Parallel()
-	p := NewProgram(outDef(), nil).WithOutputChecks()
+	p := NewProgram(outDef(), nil).WithOutputChecks(true)
 	if !p.newRunContext().outputChecks {
 		t.Error("WithOutputChecks did not reach the run's Context")
+	}
+	if p.WithOutputChecks(false).newRunContext().outputChecks {
+		t.Error("WithOutputChecks(false) did not turn the checks off")
 	}
 	if NewProgram(outDef(), nil).newRunContext().outputChecks {
 		t.Error("output checks are on by default")
@@ -236,10 +250,12 @@ func TestDecodeOutput(t *testing.T) {
 	if err != nil || len(items) != 2 {
 		t.Errorf("yaml stream: %+v %v", items, err)
 	}
-	// The declared type itself is one document, never a stream.
-	one, err := DecodeOutput[outTask](p, []byte(`{"id":7}`), "json")
-	if err != nil || one.ID != 7 {
-		t.Errorf("one item: %+v %v", one, err)
+	// A stream decodes into a slice of its item, never into one item; a single value never into a slice.
+	if _, err := DecodeOutput[outTask](p, []byte(`{"id":7}`), "json"); err == nil || !strings.Contains(err.Error(), "decode it into []rotini.outTask") {
+		t.Errorf("one item of a stream: %v", err)
+	}
+	if _, err := DecodeOutput[[]outList](p, []byte(`{"tasks":[]}`), "json"); err == nil || !strings.Contains(err.Error(), "not a stream; decode it into rotini.outList") {
+		t.Errorf("a single value as a stream: %v", err)
 	}
 
 	for _, tt := range []struct {

@@ -117,7 +117,7 @@ func TestCompletionMessages_switchIsListed(t *testing.T) {
 	if !strings.Contains(string(doc), `"messages_env": "APP_COMPLETION_MESSAGES"`) {
 		t.Errorf("contract is missing messages_env:\n%s", doc)
 	}
-	script, err := completionScript("app", "zsh", "APP_COMPLETION_MESSAGES")
+	script, err := completionScript("app", "zsh", completionEnvs{messages: "APP_COMPLETION_MESSAGES"})
 	if err != nil {
 		t.Fatal(err)
 	}

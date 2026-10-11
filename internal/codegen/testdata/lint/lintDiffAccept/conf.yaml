@@ -1,0 +1,14 @@
+# Each diff.accept entry names a rule `rotini diff` reports, and acknowledges one finding.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+diff:
+  accept:
+    - {rule: COMMAND_NO_DELETE, where: demo compact, reason: replaced by purge}
+    # A mistyped rule.
+    - {rule: COMAND_NO_DELETE, where: demo old, reason: gone}
+    # The same finding twice.
+    - {rule: COMMAND_NO_DELETE, where: demo compact, reason: again}

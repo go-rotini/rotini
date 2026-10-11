@@ -1,0 +1,39 @@
+# A one-dash word of several letters exact-matches before any bundle of short flags is tried.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Declared on the root, it also hides the bundle of the child's -x and -y.
+    - name: xy
+      identifiers: [-xy, --xy]
+      schema: { type: bool }
+  commands:
+    - name: run
+      flags:
+        - name: all
+          identifiers: [-a, --all]
+          schema: { type: bool }
+        - name: brief
+          identifiers: [-b, --brief]
+          schema: { type: bool }
+        - name: ab
+          identifiers: [-ab, --ab]
+          schema: { type: bool }
+        - name: number
+          identifiers: [-n, --number]
+          schema: { type: int }
+        - name: name
+          identifiers: [-name, --name]
+          schema: { type: string }
+        # No -r or -x: a warning only.
+        - name: rx
+          identifiers: [-rx, --rx]
+          schema: { type: bool }
+    - name: child
+      flags:
+        - name: ex
+          identifiers: [-x, --ex]
+          schema: { type: bool }
+        - name: why
+          identifiers: [-y, --why]
+          schema: { type: bool }

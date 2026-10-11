@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(taskr list *)",
+      "Bash(taskr ls *)",
+      "Bash(taskr remote show *)"
+    ],
+    "ask": [
+      "Bash(taskr purge *)",
+      "Bash(taskr remote sync *--prune*)"
+    ]
+  }
+}

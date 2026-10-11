@@ -7,6 +7,7 @@
        with "." or holding a "\" would be read as markup. Use:
          roff       one line of text (line breaks become spaces)
          roffBlock  paragraphs: lines escaped, blank lines become .PP breaks
+         roffIndented  the same, with .sp breaks, for text inside a .TP paragraph
          roffLines  lines kept as written, for inside .nf … .fi
          roffArg    one quoted argument of a request such as .TH or .SH
 
@@ -14,71 +15,143 @@
        paragraph breaks) and trailing whitespace, and ends the page with a newline.
 
        DATA: .PageName .Section .Source .Date .RelatedPages .Summary
-         .Description .Invocation .Usage/.UsageDerived .CommandGroups[] .Arguments[]
-         .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Output .ExitStatus[]
-         .Examples[] .SeeAlso[]   (.Output is nil when the command declares no output)
-         A flag row also carries .Env (its environment variables, in lookup order) and
+         .Description .Invocation .Usage/.UsageDerived .Passthrough .CommandGroups[]
+         .Arguments[] .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Stdin
+         .Output .ExitStatus[] .Examples[] .SeeAlso[]   (.Stdin and .Output are nil when the
+         command declares none). .Passthrough is the command's name when every word after it
+         is passed through unparsed, else "". A command or flag group carries .Description,
+         the paragraph the command's `groups` gives it.
+         A flag or argument row also carries .Env (its environment variables, in lookup order) and
          .ConfigKey (its config key, set only when the command reads config files);
          alsoSetBy .Env .ConfigKey "\\fB" "\\fR" renders them as "also set by ...".
-       HELPERS: roff, roffBlock, roffLines, roffArg, join, upper, lower, title, trim,
-                trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
-                hasPrefix, hasSuffix, first, last, alsoSetBy. */ -}}
-{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}{{end -}}
+         Argument, flag, env and config rows carry .Constraints (the declared bounds, lengths,
+         item counts and repeatability as a short note) and .Rules (the same as sentences,
+         plus pattern and separator), and .Accepts (what a time input accepts beyond its type's
+         default: a layout, relative times).
+         Argument, flag, env and config rows carry .EnumValues: every value that is not hidden,
+         in declared order, as {.Value .Summary .Aliases .Deprecated .DeprecatedSince .RemovedIn
+         .ReplacedBy .Note}, nil when no value declares more than its spelling (.Enum always
+         holds the values alone, hidden ones left out); listed .Enum .EnumValues leaves out the
+         deprecated ones too. An argument row carries .Passthrough when it and every word after it are
+         passed on as typed. An output carries .Stream when the command writes a stream of
+         .Type, one item at a time. An exit status row carries .Name (its snake_case name, or
+         "") and .Retryable. Command, argument, flag, env and config rows carry
+         .DeprecatedSince and .RemovedIn; deprecation .Deprecated .DeprecatedSince .RemovedIn
+         renders "deprecated since 1.4.0, removed in 2.0.0: <message>".
+         Argument, flag, env and config rows carry .Description (the input's longer text,
+         paragraphs separated by blank lines; roffIndented keeps it inside the option's .TP)
+         and .Stability ("experimental", "beta" or "" for stable, as declared), and command rows
+         carry .Stability. The page's own .Stability is the command's, inherited from its
+         ancestors; stabilityNote .Stability renders the line saying what it promises. An exit
+         status row carries .DocsURL, a link to more about the code, or "".
+         The page's .Effects says what running the command does, as declared ("destructive,
+         not idempotent, open world"), "" when it declares none; a flag row's .Effects says what
+         giving the flag adds ("destructive").
+         The root's page carries .Topics[] {.Name .Summary}, its help topics, and
+         .ResponseFiles, the response-file prefix ("" when response files are off). On a topic's page
+         .Topic is true: .Summary and .Description are the topic's, .Environment holds a
+         generated environment topic's rows, each with .Commands (the commands that read it),
+         and the rest is empty.
+       HELPERS: roff, roffBlock, roffIndented, roffLines, roffArg, join, upper, lower, title,
+                trim, trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
+                hasPrefix, hasSuffix, first, last, alsoSetBy, deprecation, stabilityNote, listed,
+                described. */ -}}
+{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}{{end -}}
+{{- define "rules"}}{{with .Rules}}.br
+{{roff (join . "; ")}}
+{{end}}{{end -}}
+{{- define "values"}}{{with .EnumValues}}.RS
+.RS 2
+{{range $i, $v := .}}{{if $i}}.br
+{{end}}\fB{{roff $v.Value}}\fR{{with $v.Summary}} \- {{roff .}}{{end}}{{with $v.Note}} {{roff .}}{{end}}
+{{end}}.RE
+.RE
+{{end}}{{end -}}
+{{- define "description"}}{{with .Description}}.sp
+{{roffIndented .}}
+{{end}}{{end -}}
 {{- define "flag"}}.TP
 {{range $i, $id := .Identifiers}}{{if $i}}, {{end}}\fB{{roff $id}}\fR{{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
-{{roff .Summary}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
-{{if or .Env .ConfigKey}}.br
+{{roff .Summary}}{{with .Effects}} ({{.}}){{end}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
+{{template "description" .}}{{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
-{{end}}{{end -}}
-.TH {{roffArg (upper .PageName)}} {{.Section}} "{{.Date}}" {{roffArg .Source}} "User Commands"
+{{end}}{{template "values" .}}{{end -}}
+.TH {{roffArg (upper .PageName)}} {{.Section}} "{{.Date}}" {{roffArg .Source}} {{if .Topic}}"Miscellaneous"{{else}}"User Commands"{{end}}
 .SH NAME
 {{roff .PageName}}{{with .Summary}} \- {{roff .}}{{end}}
-.SH SYNOPSIS
+{{if not .Topic}}.SH SYNOPSIS
 {{if .Usage}}.nf
 {{roffLines .Usage}}
 .fi
 {{else}}\fB{{roff .Invocation}}\fR {{roff (trimPrefix .Invocation .UsageDerived)}}
+{{end}}{{end}}{{with .Passthrough}}.PP
+Every word after \fB{{roff .}}\fR is passed through as written, so options go before \fB{{roff .}}\fR.
+{{end}}{{with .ResponseFiles}}.PP
+A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\fR), whose lines are read as arguments, one per line, until \fB\-\-\fR; to pass a word starting with \fB{{roff .}}\fR, double it (\fB{{roff .}}{{roff .}}x\fR).
 {{end}}
-{{with .Description}}.SH DESCRIPTION
-{{roffBlock .}}
-{{end}}
+{{if or .Description .Stability .Effects}}.SH DESCRIPTION
+{{with .Description}}{{roffBlock .}}
+{{end}}{{with .Stability}}{{if $.Description}}.PP
+{{end}}{{roff (stabilityNote .)}}
+{{end}}{{with .Effects}}{{if or $.Description $.Stability}}.PP
+{{end}}Effects: {{.}}
+{{end}}{{end}}
 {{range .CommandGroups}}.SH {{roffArg (upper (default "Commands" .Title))}}
-{{range .Commands}}.TP
+{{with .Description}}{{roffBlock .}}
+{{end}}{{range .Commands}}.TP
 \fB{{roff .Name}}\fR{{range .Aliases}}, \fB{{roff .}}\fR{{end}}
-{{roff .Summary}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}
+{{roff .Summary}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
+{{end}}{{end}}
+{{with .Topics}}.SH "HELP TOPICS"
+{{range .}}.TP
+\fB{{roff .Name}}\fR
+{{roff .Summary}}
 {{end}}{{end}}
 {{with .Arguments}}.SH ARGUMENTS
 {{range .}}.TP
 \fI{{if .Required}}<{{roff .Name}}{{if .Variadic}}...{{end}}>{{else}}[{{roff .Name}}{{if .Variadic}}...{{end}}]{{end}}\fR
-{{roff .Summary}}{{with .Default}} (default {{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}
-{{end}}{{end}}
+{{roff .Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
+{{template "description" .}}{{template "rules" .}}{{if or .Env .ConfigKey}}.br
+{{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
+{{end}}{{template "values" .}}{{end}}{{end}}
 {{range .FlagGroups}}.SH {{roffArg (upper (default "Options" .Title))}}
-{{range .Flags}}{{template "flag" .}}{{end}}{{end}}
+{{with .Description}}{{roffBlock .}}
+{{end}}{{range .Flags}}{{template "flag" .}}{{end}}{{end}}
 {{with .Cascading}}.SH "GLOBAL OPTIONS"
 {{range .}}{{template "flag" .}}{{end}}{{end}}
 {{with .Environment}}.SH ENVIRONMENT
 {{range .}}.TP
 \fB{{roff .Var}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
-{{roff .Summary}}{{template "notes" .}}
-{{end}}{{end}}
+{{roff .Summary}}{{with .Commands}} (used by: {{roff (join . ", ")}}){{end}}{{template "notes" .}}
+{{template "description" .}}{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
 {{with .Configuration}}.SH CONFIGURATION
 {{range .}}.TP
 \fB{{roff .Name}}\fR{{with .Location}} ({{roff .}}){{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}
+{{template "description" .}}{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
+{{with .Stdin}}.SH STDIN
+{{with .Description}}{{roffBlock .}}
+.PP
+{{end}}Reads {{if eq .Format "text"}}text{{else if eq .Format "lines"}}lines of text{{if .NUL}} separated by NUL bytes{{end}}{{else if eq .Format "bytes"}}raw bytes{{else if eq .Format "jsonl"}}JSON Lines, one \fB{{roff .Type}}\fR record per line,{{else}}a \fB{{roff .Format}}\fR document{{with .Type}} (\fB{{roff .}}\fR){{end}}{{end}} from standard input{{if .Stream}}, one at a time{{end}}{{with .Unless}}, when no {{roff .}} is given{{end}}.{{if .Required}} Required.{{end}}
+{{range .Fields}}.TP
+\fB{{roff .Name}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
+{{roff .Description}}{{if .Required}} (required){{end}}
 {{end}}{{end}}
 {{with .Output}}.SH OUTPUT
 {{with .Description}}{{roffBlock .}}
 .PP
-{{end}}Writes \fB{{roff .Type}}\fR to standard output.
+{{end}}{{if .Stream}}Writes a stream of \fB{{roff .Type}}\fR to standard output, one item at a time (JSON: one compact value per line; YAML: one document per item, each starting \fB\-\-\-\fR).{{else}}Writes \fB{{roff .Type}}\fR to standard output.{{end}}
 {{range .Fields}}.TP
 \fB{{roff .Name}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Description}}{{if .Required}} (required){{end}}
 {{end}}{{end}}
 {{with .ExitStatus}}.SH "EXIT STATUS"
 {{range .}}.TP
-\fB{{.Code}}\fR
-{{roff .Summary}}{{with .Output}} (writes \fB{{roff .}}\fR to standard output){{end}}
-{{end}}{{end}}
+\fB{{.Code}}\fR{{with .Name}} ({{roff .}}){{end}}
+{{roff .Summary}}{{if .Retryable}} (retryable){{end}}{{with .Output}} (writes \fB{{roff .}}\fR to standard output){{end}}
+{{with .DocsURL}}.br
+See \fI{{roff .}}\fR.
+{{end}}{{end}}{{end}}
 {{with .Examples}}.SH EXAMPLES
 .RS 4
 .nf

@@ -1,0 +1,10 @@
+spec: .rotini.spec.yaml:35:21: command demo/remote/bad: flag "dry-run": has role dry-run but is a string; the dry-run role marks a bool flag
+spec: .rotini.spec.yaml:38:21: command demo/remote/bad: flag "force": has role confirm, which the cascading flag "yes" this command inherits already has; a command gives each role to one flag
+spec: .rotini.spec.yaml:41:21: command demo/remote/bad: flag "page": has role page but is a float64; the page role marks an integer page number or a string page token
+spec: .rotini.spec.yaml:45:27: command demo/remote/bad: flag "format": names "yaml", which isn't one of its enum values (text, json)
+spec: .rotini.spec.yaml:48:27: command demo/remote/bad: flag "limit": has `role_value` but not `role: machine-output`; role_value names the enum value that selects JSON output
+spec: .rotini.spec.yaml:55:23: command demo/worse: flag "json": has `role_value` but is a bool flag; giving the flag selects JSON, so remove role_value
+spec: .rotini.spec.yaml:62:17: command demo/odd: flag "format": has role machine-output but no `role_value`; name the enum value that selects JSON (`role_value: json`)
+spec: .rotini.spec.yaml:68:17: command demo/odder: flag "mode": has role machine-output but is a string flag without an `enum`; list the output formats and name the JSON one in `role_value`
+warning: spec: .rotini.spec.yaml:54:17: command demo/worse: flag "json": has role machine-output but its command declares no `output`, so there is no JSON to select
+warning: spec: .rotini.spec.yaml:72:16: command demo/wipe: is destructive but has no flag with `role: dry-run` or `role: confirm`; an agent can neither preview it nor confirm it without a prompt

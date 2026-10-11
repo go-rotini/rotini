@@ -1,0 +1,47 @@
+# R0 — `rotini init --template daemon`: a long-running serve command whose seeded handler
+# works until its context ends, then tears down in PostRun.
+
+gomodinit example.com/demo
+
+wantexit 2 rotini init demo --template daemon --dry-run
+stderr 'create internal/cmd/demo/demo_serve\.go'
+! exists internal/cmd/demo
+
+exec rotini init demo --template daemon
+exists internal/cmd/demo/demo_serve.go
+grep 'func \(\*demoServeHandler\) PostRun' internal/cmd/demo/demo_serve.go
+! grep '//' internal/cmd/demo/demo_serve.go
+
+# The seeded handler is the author's: regenerating keeps it.
+cp internal/cmd/demo/demo_serve.go seeded.txt
+exec rotini generate ./cmd/demo/.rotini.spec.yaml --config ./cmd/demo/.rotini.conf.yaml
+cmp internal/cmd/demo/demo_serve.go seeded.txt
+
+exec go mod tidy
+exec go build -o demo$exe ./cmd/demo
+
+exec ./demo$exe --help
+stdout 'serve'
+exec ./demo$exe serve --help
+stdout '--interval'
+stdout '--for'
+
+# --for ends the run like a signal would: the loop stops, PostRun reports, exit 0.
+exec ./demo$exe serve --interval 10ms --for 200ms
+stdout 'working at'
+stderr '^demo serve: stopped$'
+
+! exec ./demo$exe serve --interval 0s
+stderr 'must be >= 1ms'
+
+# Every format works.
+mkdir second
+cd second
+gomodinit example.com/second
+exec rotini init svc --template daemon --format json
+exists cmd/svc/.rotini.spec.json
+exists internal/cmd/svc/svc_serve.go
+exec go mod tidy
+exec go build -o svc$exe ./cmd/svc
+exec ./svc$exe serve --interval 10ms --for 50ms
+stderr '^svc serve: stopped$'

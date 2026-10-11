@@ -1,0 +1,34 @@
+# `repeatable: false` turns a repeated single-value flag into an error. A flag whose
+# occurrences are its values, its count or one object's fields repeats by nature, and no other
+# kind of input is given more than once.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    DB:
+      type: object
+      properties:
+        host: {type: string}
+  flags:
+    - name: tags
+      identifiers: [--tag]
+      schema: {type: array, repeatable: false}
+    - name: labels
+      identifiers: [--label]
+      schema: {type: map, repeatable: false}
+    - name: verbose
+      identifiers: [-v, --verbose]
+      schema: {type: count, repeatable: false}
+    - name: db
+      identifiers: [--db]
+      schema: {$ref: '#/schemas/DB', repeatable: false}
+    # Fine: a single-value flag, either way.
+    - name: name
+      identifiers: [--name]
+      schema: {type: string, repeatable: false}
+    - name: level
+      identifiers: [--level]
+      schema: {type: int, repeatable: true}
+  env:
+    - name: token
+      schema: {type: string, repeatable: false}

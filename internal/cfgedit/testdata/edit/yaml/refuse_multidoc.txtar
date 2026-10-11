@@ -1,0 +1,8 @@
+-- in --
+a: 1
+---
+b: 2
+-- op --
+set a 2
+-- err --
+more than one YAML document

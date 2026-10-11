@@ -1,0 +1,7 @@
+-- in --
+# head
+a: 1
+-- op --
+unset a
+-- out --
+# head
