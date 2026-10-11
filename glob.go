@@ -44,12 +44,18 @@ func hasGlobArg(args []ArgDef) bool {
 
 // expandGlob expands one word as a Windows user expects a shell to: a word with `*`, `?` or `[`
 // becomes the sorted paths it matches, relative to dir (the run's directory, "" for the
-// process's) as the word was. A word naming an existing path, "-", and a pattern matching
-// nothing are kept as written, so the path check reports a missing match as it would on a
-// POSIX shell.
+// process's) as the word was. `[[]`, `[*]` and `[?]` stand for the character itself: a word
+// with no other metacharacter is that literal text, unexpanded, so ArgvOf's escaped values read
+// back exactly. "-" and a word naming an existing path are kept as written, and a pattern
+// matching nothing comes back with its escapes removed, so the path check reports a missing
+// match as it would on a POSIX shell.
 func expandGlob(dir, word string) []string {
 	if word == "-" || !strings.ContainsAny(word, "*?[") {
 		return []string{word}
+	}
+	literal, isPattern := unescapeGlob(word)
+	if !isPattern {
+		return []string{literal}
 	}
 	if _, err := os.Lstat(joinDir(dir, word)); err == nil {
 		return []string{word}
@@ -57,7 +63,7 @@ func expandGlob(dir, word string) []string {
 	pattern := joinDir(dir, word)
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
-		return []string{word}
+		return []string{literal}
 	}
 	if pattern != word {
 		for i, m := range matches {
@@ -67,4 +73,28 @@ func expandGlob(dir, word string) []string {
 		}
 	}
 	return matches
+}
+
+// globEscaper writes each glob metacharacter as a one-character class, which matches it
+// literally on every system (a backslash is a separator on Windows, not an escape).
+var globEscaper = strings.NewReplacer("[", "[[]", "*", "[*]", "?", "[?]")
+
+// unescapeGlob removes the escapes globEscaper writes, and reports whether word holds any
+// unescaped `*`, `?` or `[`.
+func unescapeGlob(word string) (literal string, isPattern bool) {
+	var b strings.Builder
+	b.Grow(len(word))
+	for i := 0; i < len(word); i++ {
+		c := word[i]
+		if c == '[' && i+2 < len(word) && word[i+2] == ']' && strings.IndexByte("[*?", word[i+1]) >= 0 {
+			b.WriteByte(word[i+1])
+			i += 2
+			continue
+		}
+		if c == '*' || c == '?' || c == '[' {
+			isPattern = true
+		}
+		b.WriteByte(c)
+	}
+	return b.String(), isPattern
 }

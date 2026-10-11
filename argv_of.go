@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"reflect"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -39,6 +40,7 @@ type argvConfig struct {
 	secrets bool
 	path    []string
 	hasPath bool
+	goos    string // the system whose rules the run follows: on Windows, glob arguments are escaped
 }
 
 // ArgvSecrets lets [ArgvOf] write secret flags and arguments into argv. Without it they are an
@@ -79,7 +81,9 @@ func ArgvPath(names ...string) ArgvOption {
 // that looks like a flag or a command stays a positional; it shows in [Context.DashIndex]. A
 // passthrough command's words follow its name as they are, except that with response files on,
 // a word before any "--" that starts with the prefix has it doubled. On a flag or argument
-// reading `@file` values, a value starting with @ is written with the @ doubled.
+// reading `@file` values, a value starting with @ is written with the @ doubled. On Windows,
+// where rotini expands a glob argument's words itself, each `*`, `?` and `[` in one is written
+// as `[*]`, `[?]` and `[[]`, which read back as the literal character.
 //
 // A value no command line can supply is an [*ArgvError], never silently dropped:
 //   - a secret flag or argument, unless [ArgvSecrets] is passed;
@@ -95,7 +99,12 @@ func ArgvPath(names ...string) ArgvOption {
 // Any other error is the program's mistake: T isn't an inputs type of def, or doesn't match the
 // command it names.
 func ArgvOf[T any](def Definition, v T, set Presence, opts ...ArgvOption) (argv, env []string, err error) {
-	var cfg argvConfig
+	return argvOf(runtime.GOOS, def, v, set, opts...)
+}
+
+// argvOf is [ArgvOf] for a run on goos.
+func argvOf[T any](goos string, def Definition, v T, set Presence, opts ...ArgvOption) (argv, env []string, err error) {
+	cfg := argvConfig{goos: goos}
 	for _, o := range opts {
 		if o != nil {
 			o(&cfg)
@@ -459,6 +468,11 @@ func (w *argvWriter) arguments(top string, ci reflect.Value, frame Command, leaf
 		}
 		if len(vals) == 0 {
 			return &ArgvError{Field: p, Reason: "an explicit empty list of arguments can't be written"}
+		}
+		if defs[j].Glob && w.cfg.goos == "windows" {
+			for i, s := range vals {
+				vals[i] = globEscaper.Replace(s)
+			}
 		}
 		counts[j] = len(vals)
 		words = append(words, vals...)

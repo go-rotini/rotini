@@ -15,14 +15,25 @@ exec go build -o globs$exe ./cmd/globs
 [windows] ! exec ./globs$exe nope*.txt
 [windows] stderr 'no such file: "nope\*\.txt"'
 
+# `[*]`, `[?]` and `[[]` stand for the character itself: a name holding `[`, or a missing name
+# reported as typed less the escapes.
+[windows] exec ./globs$exe 'x[[]1].log'
+[windows] stdout '^x\[1\]\.log$'
+[windows] ! exec ./globs$exe 'nope[*].txt'
+[windows] stderr 'no such file: "nope\*\.txt"'
+
 # Outside Windows a pattern is a literal name.
 [!windows] ! exec ./globs$exe *.txt
 [!windows] stderr 'no such file: "\*\.txt"'
+[!windows] exec ./globs$exe 'x[1].log'
+[!windows] stdout '^x\[1\]\.log$'
 
 -- a.txt --
 a
 -- b.txt --
 b
+-- x[1].log --
+x
 -- cmd/globs/.rotini.spec.yaml --
 version: 0.0.0
 command:

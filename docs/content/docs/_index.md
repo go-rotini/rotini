@@ -2244,7 +2244,9 @@ POSIX shells expand `*.txt` before the program sees it; the Windows shells don't
 on a variadic argument (`string`, `existingfile`, `existingdir` or `inputfile` elements) expands
 such words on Windows only, relative to the run's directory. A word naming an existing path is
 kept, and a pattern matching nothing is passed through, so the path check reports it as a POSIX
-shell would. Matching is case-sensitive and `**` is not supported.
+shell would. Matching is case-sensitive and `**` is not supported. `[*]`, `[?]` and `[[]` stand
+for a literal `*`, `?` and `[`: a word with no other pattern character, or a pattern matching
+nothing, arrives without them, and `rotini.ArgvOf` writes these characters that way on Windows.
 
 ### Filters
 
@@ -3509,11 +3511,13 @@ a value; build the `rotini.Presence` yourself to write a zero value. Flags are w
 (`--name=value`), each after its own command's name, and `--` always comes before the
 positionals, so a value that looks like a flag or a command stays a positional (it shows in
 `rtx.DashIndex()`). On a flag that reads `@file` values, a value starting with `@` is written
-`@@…`. Secrets are refused unless you pass `rotini.ArgvSecrets()`, since argv shows in the
-process list. A value no command line can supply is a `*rotini.ArgvError` naming the field:
-config and stdin inputs, an argument of a command other than the invoked one, `-` on a flag that
-reads stdin from it, an explicit empty list on a flag without a separator, and a time its layout
-can't show exactly.
+`@@…`. On Windows, `*`, `?` and `[` in a `glob: true` argument are written `[*]`, `[?]` and
+`[[]`, which read back as the characters themselves (see
+[patterns on Windows](#patterns-on-windows)). Secrets are refused unless you pass
+`rotini.ArgvSecrets()`, since argv shows in the process list. A value no command line can supply
+is a `*rotini.ArgvError` naming the field: config and stdin inputs, an argument of a command
+other than the invoked one, `-` on a flag that reads stdin from it, an explicit empty list on a
+flag without a separator, and a time its layout can't show exactly.
 
 ## Checking for breaking changes
 
