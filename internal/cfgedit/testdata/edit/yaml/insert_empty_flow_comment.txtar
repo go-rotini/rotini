@@ -1,0 +1,9 @@
+-- in --
+profiles:
+  prod: {} # p
+-- op --
+set profiles.prod.region "y"
+-- out --
+profiles:
+  prod: # p
+    region: y

@@ -92,5 +92,5 @@ jobs:
             url="https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/${VERSION}/${schema}"
             echo "→ $url"
             # An editor following this URL gets a 404 in silence, so the gate is here.
-            curl -fsSL "$url" | head -c 200 > /dev/null
+            curl -fsSL -o /dev/null "$url"
           done

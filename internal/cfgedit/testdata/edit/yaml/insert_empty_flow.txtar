@@ -1,0 +1,12 @@
+-- in --
+profiles:
+  prod: {}
+d: 2
+-- op --
+set profiles.prod.deploy.replicas 4
+-- out --
+profiles:
+  prod:
+    deploy:
+      replicas: 4
+d: 2

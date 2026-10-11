@@ -70,6 +70,12 @@ func (yamlEditor) set(src []byte, path []string, v any) ([]byte, error) {
 			return ed.replace(m, p, v)
 		}
 		switch {
+		case p.Value.Kind == YAMLMapping && len(p.Value.Pairs) == 0 && !m.Flow:
+			// An empty {} under a block key, as unset leaves a kept mapping, becomes a block
+			// mapping.
+			out := *ed
+			out.src = splice(src, p.Colon+1, p.Value.End, "")
+			return out.insertAt(nextLine(out.src, p.Colon), p.Col+ed.step, path[i+1:], v), nil
 		case p.Value.Kind == YAMLMapping:
 			m = p.Value
 		case p.Value.Empty && !m.Flow:

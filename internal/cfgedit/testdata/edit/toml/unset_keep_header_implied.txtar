@@ -1,0 +1,15 @@
+-- in --
+# profiles
+[profiles.prod.deploy] # d
+replicas = 3
+
+[other]
+a = 1
+-- op --
+unset profiles.prod.deploy.replicas keep 2
+-- out --
+# profiles
+[profiles.prod] # d
+
+[other]
+a = 1

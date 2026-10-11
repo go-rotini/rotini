@@ -201,6 +201,29 @@ func TestEditJSON(t *testing.T)   { runEditCases(t, JSON) }
 func TestEditJSONC(t *testing.T)  { runEditCases(t, JSONC) }
 func TestEditDotenv(t *testing.T) { runEditCases(t, Dotenv) }
 
+// TestSetUnsetKeptSet sets a profile's key in an empty file, unsets it keeping the profile, and
+// sets it again.
+func TestSetUnsetKeptSet(t *testing.T) {
+	for _, format := range []Format{YAML, JSON, JSONC, TOML} {
+		t.Run(string(format), func(t *testing.T) {
+			path := []string{"profiles", "prod", "deploy", "replicas"}
+			out, err := Set(nil, format, path, int64(3))
+			if err != nil {
+				t.Fatalf("set: %v", err)
+			}
+			if out, err = Unset(out, format, path, KeepParents(2)); err != nil {
+				t.Fatalf("unset: %v\n%s", err, out)
+			}
+			if out, err = Set(out, format, path, int64(4)); err != nil {
+				t.Fatalf("set after unset: %v\n%s", err, out)
+			}
+			if !bytes.Contains(out, []byte("4")) {
+				t.Errorf("set after unset:\n%s", out)
+			}
+		})
+	}
+}
+
 func TestEditErrors(t *testing.T) {
 	if _, err := Set([]byte("a: 1\n"), YAML, nil, "x"); err == nil {
 		t.Error("an empty path should fail")
