@@ -274,7 +274,7 @@ func TestSetConfigValue_createsByStrategy(t *testing.T) {
 	keys := []ConfigKey{{Key: "region", Type: "string"}}
 	t.Run("path", func(t *testing.T) {
 		dir := t.TempDir()
-		rtx := cwContext(dir, []string{"HOME=" + dir}, ConfigFile{Name: "app", Path: "~/a/b/app.yaml", Keys: keys})
+		rtx := cwContext(dir, []string{"HOME=" + dir, "USERPROFILE=" + dir}, ConfigFile{Name: "app", Path: "~/a/b/app.yaml", Keys: keys})
 		if err := SetConfigValue(rtx, "app", "region", "us"); err != nil {
 			t.Fatal(err)
 		}

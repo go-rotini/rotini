@@ -84,7 +84,7 @@ func TestExpand_argv(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := in.App.Flags
-	if f.File != filepath.Join(home, "f.txt") || f.Out != work+"/out.txt" || !slices.Equal(f.Paths, []string{"a1", "b2"}) || f.Raw != "~/$A" {
+	if f.File != home+"/f.txt" || f.Out != work+"/out.txt" || !slices.Equal(f.Paths, []string{"a1", "b2"}) || f.Raw != "~/$A" {
 		t.Errorf("flags = %+v", f)
 	}
 	if a := in.App.Arguments; a.Src != home+"/src" || !slices.Equal(a.Rest, []string{"a1", "b2x"}) {
@@ -100,11 +100,11 @@ func TestExpand_argv(t *testing.T) {
 
 func TestExpand_argvErrors(t *testing.T) {
 	_, home, work, conf := exSetup(t)
-	env := []string{"HOME=" + home, "OUTDIR=" + work}
+	env := []string{"HOME=" + home, "USERPROFILE=" + home, "OUTDIR=" + work}
 	for argv, want := range map[string]string{
 		"--paths=$A,$NOPE":   `--paths: $NOPE is not set (in "$NOPE")`,
 		"--out=${OUTDIR:-x}": `--out: only $NAME and ${NAME} are expanded (in "${OUTDIR:-x}")`,
-		"-f=~/missing":       `-f: no such file: "` + filepath.Join(home, "missing") + `" (written as "~/missing")`,
+		"-f=~/missing":       `-f: no such file: "` + home + `/missing" (written as "~/missing")`,
 	} {
 		_, err := exBind(t, work, conf, "", append(env, "A=1"), argv)
 		var pe *ParseError
@@ -186,12 +186,12 @@ func TestChannelPaths_checked(t *testing.T) {
 
 func TestExpand_layers(t *testing.T) {
 	_, home, work, _ := exSetup(t)
-	rtx := NewContextFor(exDef, []string{"--raw=x", "-f", "~/f.txt", "--paths=$A"}).WithDir(work).WithEnviron([]string{"HOME=" + home, "A=a", "OUTDIR=/o"})
+	rtx := NewContextFor(exDef, []string{"--raw=x", "-f", "~/f.txt", "--paths=$A"}).WithDir(work).WithEnviron([]string{"HOME=" + home, "USERPROFILE=" + home, "A=a", "OUTDIR=/o"})
 	argv, err := rtx.ArgvInputs[exInputs]()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f := argv.Values.App.Flags; f.File != filepath.Join(home, "f.txt") || !slices.Equal(f.Paths, []string{"a"}) {
+	if f := argv.Values.App.Flags; f.File != home+"/f.txt" || !slices.Equal(f.Paths, []string{"a"}) {
 		t.Errorf("argv layer = %+v", f)
 	}
 	if src := argv.Set["App.Flags.Paths"]; src.Raw != "a" {

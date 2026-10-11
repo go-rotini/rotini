@@ -76,8 +76,12 @@ func TestOSView_xdgConfigDir(t *testing.T) {
 	if got, err := v.xdgConfigDir("acme"); err != nil || got != filepath.Join("/home/u", ".config", "acme") {
 		t.Errorf("xdgConfigDir = %q, %v; want home/.config/acme", got, err)
 	}
-	v = newOSView([]string{"XDG_CONFIG_HOME=/xdg"}, "", runtime.GOOS)
-	if got, err := v.xdgConfigDir("acme"); err != nil || got != filepath.Join("/xdg", "acme") {
+	xdg := "/xdg"
+	if runtime.GOOS == "windows" {
+		xdg = `C:\xdg`
+	}
+	v = newOSView([]string{"XDG_CONFIG_HOME=" + xdg}, "", runtime.GOOS)
+	if got, err := v.xdgConfigDir("acme"); err != nil || got != filepath.Join(xdg, "acme") {
 		t.Errorf("xdgConfigDir = %q, %v; want /xdg/acme", got, err)
 	}
 	if _, err := newOSView([]string{}, "", runtime.GOOS).xdgConfigDir("acme"); err == nil {

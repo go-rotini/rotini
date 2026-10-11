@@ -3,12 +3,14 @@ package rotini
 import (
 	"errors"
 	"os/user"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 )
 
 func TestExpandValue(t *testing.T) {
-	view := newOSView([]string{"HOME=/home/ada", "USERPROFILE=C:\\Users\\ada", "A=/a", "B=$C", "T=~/x", "EMPTY="}, "", "linux")
+	view := newOSView([]string{"HOME=/home/ada", "USERPROFILE=/home/ada", "A=/a", "B=$C", "T=~/x", "EMPTY="}, "", "linux")
 	lookup := func(name string) (string, error) {
 		if name == "bob" {
 			return "/home/bob", nil
@@ -70,7 +72,11 @@ func TestExpandValue(t *testing.T) {
 
 func TestExpandValue_homeMissing(t *testing.T) {
 	_, err := expandValueFor("linux", "~/x", expandRule{home: true}, newOSView([]string{}, "", "linux"), allFeatures().expand.lookupUser)
-	if err == nil || err.Error() != `cannot expand "~/x": $HOME is not defined` {
+	want := `cannot expand "~/x": $HOME is not defined` // home() follows the running OS
+	if runtime.GOOS == "windows" {
+		want = `cannot expand "~/x": %userprofile% is not defined`
+	}
+	if err == nil || err.Error() != want {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -107,8 +113,13 @@ func TestExpandValues_listAndLabel(t *testing.T) {
 }
 
 func TestRelativeToFile(t *testing.T) {
-	got := relativeToFile([]string{"cache", "/abs", "-", ""}, "/etc/app/config.yaml")
-	want := []string{"/etc/app/cache", "/abs", "-", ""}
+	root := "/"
+	if runtime.GOOS == "windows" {
+		root = `C:\`
+	}
+	abs := filepath.Join(root, "abs")
+	got := relativeToFile([]string{"cache", abs, "-", ""}, filepath.Join(root, "etc", "app", "config.yaml"))
+	want := []string{filepath.Join(root, "etc", "app", "cache"), abs, "-", ""}
 	if !slices.Equal(got, want) {
 		t.Errorf("got %q, want %q", got, want)
 	}

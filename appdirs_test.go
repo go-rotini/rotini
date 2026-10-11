@@ -10,12 +10,16 @@ import (
 
 func TestAppDirsFor(t *testing.T) {
 	j := filepath.Join
-	home := j("/", "home", "ada")
+	root := "/"
+	if runtime.GOOS == "windows" {
+		root = `C:\`
+	}
+	home := j(root, "home", "ada")
 	homeOK := func() (string, error) { return home, nil }
 	full := map[string]string{
-		"XDG_CONFIG_HOME": j("/", "x", "config"), "XDG_DATA_HOME": j("/", "x", "data"),
-		"XDG_CACHE_HOME": j("/", "x", "cache"), "XDG_STATE_HOME": j("/", "x", "state"),
-		"AppData": j("/", "roam"), "LocalAppData": j("/", "local"), "home": j("/", "usr", "ada"),
+		"XDG_CONFIG_HOME": j(root, "x", "config"), "XDG_DATA_HOME": j(root, "x", "data"),
+		"XDG_CACHE_HOME": j(root, "x", "cache"), "XDG_STATE_HOME": j(root, "x", "state"),
+		"AppData": j(root, "roam"), "LocalAppData": j(root, "local"), "home": j(root, "usr", "ada"),
 	}
 	relative := map[string]string{"XDG_CONFIG_HOME": "rel", "XDG_DATA_HOME": "rel", "XDG_CACHE_HOME": "rel", "XDG_STATE_HOME": "rel"}
 	defaults := AppDirectories{
@@ -23,20 +27,20 @@ func TestAppDirsFor(t *testing.T) {
 		Cache: j(home, ".cache", "app"), State: j(home, ".local", "state", "app"),
 	}
 	fromXDG := AppDirectories{
-		Config: j("/", "x", "config", "app"), Data: j("/", "x", "data", "app"),
-		Cache: j("/", "x", "cache", "app"), State: j("/", "x", "state", "app"),
+		Config: j(root, "x", "config", "app"), Data: j(root, "x", "data", "app"),
+		Cache: j(root, "x", "cache", "app"), State: j(root, "x", "state", "app"),
 	}
 	darwin := AppDirectories{
 		Config: j(home, "Library", "Application Support", "app"), Data: j(home, "Library", "Application Support", "app"),
 		Cache: j(home, "Library", "Caches", "app"), State: j(home, "Library", "Application Support", "app", "state"),
 	}
 	windows := AppDirectories{
-		Config: j("/", "roam", "app"), Data: j("/", "local", "app"),
-		Cache: j("/", "local", "app", "cache"), State: j("/", "local", "app", "state"),
+		Config: j(root, "roam", "app"), Data: j(root, "local", "app"),
+		Cache: j(root, "local", "app", "cache"), State: j(root, "local", "app", "state"),
 	}
 	plan9 := AppDirectories{
-		Config: j("/", "usr", "ada", "lib", "app"), Data: j("/", "usr", "ada", "lib", "app"),
-		Cache: j("/", "usr", "ada", "lib", "cache", "app"), State: j("/", "usr", "ada", "lib", "app", "state"),
+		Config: j(root, "usr", "ada", "lib", "app"), Data: j(root, "usr", "ada", "lib", "app"),
+		Cache: j(root, "usr", "ada", "lib", "cache", "app"), State: j(root, "usr", "ada", "lib", "app", "state"),
 	}
 	for _, tc := range []struct {
 		goos, strategy string

@@ -15,7 +15,7 @@ func pathConformanceCases() []dataCase {
 		{"FLAG-26", func(t *testing.T) { // ~ in a command-line value is expanded to the injected home
 			_, home, work, conf := exSetup(t)
 			in, err := exBind(t, work, conf, "", []string{"HOME=" + home, "USERPROFILE=" + home}, "--file", "~/f.txt")
-			if err != nil || in.App.Flags.File != filepath.Join(home, "f.txt") {
+			if err != nil || in.App.Flags.File != home+"/f.txt" {
 				t.Errorf("--file = %q, %v", in.App.Flags.File, err)
 			}
 		}},
