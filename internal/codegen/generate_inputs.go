@@ -18,8 +18,7 @@ import (
 // a composed child whose types were generated under the child's own names.
 func inputsFields(rootPascal, path string) []fieldDef {
 	segments := strings.Split(path, "_")
-	fields := make([]fieldDef, 0, 1+len(segments))
-	fields = append(fields, fieldDef{Field: rootPascal, GoType: rootPascal + "CommandInputs"})
+	fields := []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs"}} //nolint:prealloc // a few fields; CodeQL flags 1+len as an overflow
 	for i := 1; i <= len(segments); i++ {
 		prefix := rootPascal + toPascalCase(strings.Join(segments[:i], "_"))
 		fields = append(fields, fieldDef{Field: prefix, GoType: prefix + "CommandInputs"})

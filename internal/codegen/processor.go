@@ -335,8 +335,7 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prun
 	}
 	prog.skipPrune = !prune
 	err = prog.generate()
-	notices := make([]error, 0, len(warnings)+len(prog.pruned)+len(prog.auditWarnings))
-	notices = append(notices, warnings...)
+	notices := slices.Clone(warnings)
 	if !pl.dry { // a dry run lists the removal as a change instead
 		for _, name := range prog.pruned {
 			notices = append(notices, fmt.Errorf("pruned %s; its command is no longer in the spec", name))
