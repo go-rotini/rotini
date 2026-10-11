@@ -3,6 +3,7 @@ package rotini
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/internal/codegen"
@@ -38,7 +39,7 @@ func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOpti
 		return
 	}
 
-	if _, err := fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", imported.Spec, imported.Conf); err != nil {
+	if _, err := fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", filepath.ToSlash(imported.Spec), filepath.ToSlash(imported.Conf)); err != nil {
 		haltWithWriteError(rtx, err)
 		return
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -219,7 +220,7 @@ func TestFormatFiles(t *testing.T) {
 	if want := "version: 1.0.0\ncommand:\n  name: tool\n  summary: s\n"; string(got) != want {
 		t.Fatalf("formatted:\n%s", got)
 	}
-	if info, _ := os.Stat(messy); info.Mode().Perm() != 0o600 {
+	if info, _ := os.Stat(messy); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 { // Windows has no permission bits
 		t.Errorf("mode = %v, want the file's own 0600 kept", info.Mode().Perm())
 	}
 	if changed, err := FormatFiles([]string{messy}, "", true); err != nil || len(changed) != 0 {

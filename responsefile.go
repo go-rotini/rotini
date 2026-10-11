@@ -92,7 +92,7 @@ func readResponseFile(view *osView, path string) ([]string, error) {
 // responseFileProblem names why a response file could not be read.
 func responseFileProblem(err error) error {
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	case pathMissing(err):
 		return errors.New("no such file")
 	case errors.Is(err, fs.ErrPermission):
 		return errors.New("permission denied")

@@ -1067,7 +1067,7 @@ func checkPathExists(label, typ, value, dir string) error {
 func checkExistingPath(label, typ, value, dir string) error {
 	info, err := os.Stat(joinDir(dir, value))
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	case pathMissing(err):
 		noun := "file"
 		if typ == "existingdir" {
 			noun = "directory"
@@ -1546,7 +1546,7 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 // it, path where it resolved.
 func unreadableFile(typed, path string, err error) string {
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	case pathMissing(err):
 		return fmt.Sprintf("no such file: %q", typed)
 	case errors.Is(err, fs.ErrPermission):
 		return fmt.Sprintf("permission denied reading %q", typed)

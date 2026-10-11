@@ -13,11 +13,8 @@ exec go build -o todo$exe ./cmd/todo
 exec ./todo$exe list -o json
 cp stdout tasks.json
 exec jq -r '.tasks[] | select(.status == "open") | .title' tasks.json
-cmp stdout want.txt
+stdout '\Awrite docs\r?\nfix the build\r?\n\z' # jq on Windows ends lines with CRLF
 
--- want.txt --
-write docs
-fix the build
 -- list.go.txt --
 package todo
 

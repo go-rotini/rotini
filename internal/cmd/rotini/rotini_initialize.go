@@ -71,7 +71,7 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 func seedLines(in codegen.Initialized) string {
 	var out strings.Builder
 	for _, s := range append([]codegen.SeedFiles{{Spec: in.Spec, Conf: in.Conf}}, in.Also...) {
-		fmt.Fprintf(&out, "spec: %s\nconf: %s\n", s.Spec, s.Conf)
+		fmt.Fprintf(&out, "spec: %s\nconf: %s\n", filepath.ToSlash(s.Spec), filepath.ToSlash(s.Conf))
 	}
 	return out.String()
 }

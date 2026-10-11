@@ -15,6 +15,7 @@ exec sh cover.sh.txt
 stdout 'coverage: [0-9.]+% of statements'
 stdout 'total:'
 exists cover.out
+[windows] cp covdemo covdemo$exe # the shell block builds it without .exe
 
 # A run that panics still exits through os.Exit, so its counters are written too.
 env GOCOVERDIR=$WORK/panic

@@ -115,7 +115,8 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	case exists && info.IsDir():
 		return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %q is a directory", path)})
 	case exists && !info.Mode().IsRegular() && info.Mode()&fs.ModeSymlink == 0:
-		f, err := os.OpenFile(target, os.O_WRONLY|os.O_TRUNC, 0)
+		// No O_TRUNC: it does nothing to a device or pipe, and Windows refuses it on NUL.
+		f, err := os.OpenFile(target, os.O_WRONLY, 0)
 		if err != nil {
 			return nil, &pathError{msg: fmt.Sprintf("could not open output file %q", path), err: err, detail: true}
 		}

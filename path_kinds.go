@@ -1,9 +1,7 @@
 package rotini
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -34,7 +32,7 @@ func checkStreamPath(label, typ, value, dir string) error {
 	if info, err := os.Stat(full); err == nil && info.IsDir() {
 		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %q is a directory", label, value), Flag: label}
 	}
-	if info, err := os.Stat(filepath.Dir(full)); errors.Is(err, fs.ErrNotExist) || (err == nil && !info.IsDir()) {
+	if info, err := os.Stat(filepath.Dir(full)); pathMissing(err) || (err == nil && !info.IsDir()) {
 		parent := filepath.Dir(value) + string(filepath.Separator)
 		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: no such directory: %q", label, parent), Flag: label}
 	}
