@@ -133,12 +133,6 @@ func Handlers() ProgramHandlers {
 	return &handlers{}
 }
 
-// Program is a program built with NewProgram(Handlers()).
-//
-// Deprecated: build the program in main with NewProgram(Handlers()). Program will be removed in a
-// later release.
-var Program = NewProgram(&handlers{})
-
 func (*handlers) Demo() rotini.Handler {
 	return &demoHandler{}
 }

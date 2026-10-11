@@ -60,12 +60,12 @@ func TestFileKeys_rendered(t *testing.T) {
 	}
 	got := renderInputSettings(gp)
 	for _, want := range []string{
-		`{Key: "deploy.timeout", Type: "time.Duration", Maximum: rotini.Ptr[float64](3.6e+12)}`,
+		`{Key: "deploy.timeout", Type: "time.Duration", Maximum: new(float64(3.6e+12))}`,
 		`{Key: "level", Type: "string", Enum: []string{"debug", "info"}, IgnoreCase: true}`,
 		`{Key: "mount", Type: "Mount", Object: true}`,
-		`{Key: "tags", Type: "[]string", Separator: ";", MaxItems: rotini.Ptr(3)}`,
+		`{Key: "tags", Type: "[]string", Separator: ";", MaxItems: new(3)}`,
 		`{Key: "token", Type: "string", Secret: true}`,
-		`{Key: "replicas", Type: "int", Minimum: rotini.Ptr[float64](1)}`,
+		`{Key: "replicas", Type: "int", Minimum: new(float64(1))}`,
 		`{Key: "ACME_REGION", Type: "string"}`,
 		`{Key: "ACME_PROFILE", Type: "string"}`,
 	} {

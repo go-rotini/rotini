@@ -15,7 +15,7 @@ func TestConstraintRendering(t *testing.T) {
 		MinLength:  3, MaxLength: new(20), MinItems: 1, MaxItems: new(5),
 		Pattern: "^x$"}
 	const wantTags = `min:"1" max:"10" xmin:"0" xmax:"100" multipleof:"2" minlen:"3" maxlen:"20" minitems:"1" maxitems:"5" pattern:"^x$"`
-	const wantLit = `Minimum: rotini.Ptr[float64](1), Maximum: rotini.Ptr[float64](10), ExclusiveMinimum: rotini.Ptr[float64](0), ExclusiveMaximum: rotini.Ptr[float64](100), MultipleOf: rotini.Ptr[float64](2), MinLength: 3, MaxLength: rotini.Ptr(20), MinItems: 1, MaxItems: rotini.Ptr(5), Pattern: "^x$"`
+	const wantLit = `Minimum: new(float64(1)), Maximum: new(float64(10)), ExclusiveMinimum: new(float64(0)), ExclusiveMaximum: new(float64(100)), MultipleOf: new(float64(2)), MinLength: 3, MaxLength: new(20), MinItems: 1, MaxItems: new(5), Pattern: "^x$"`
 	if got := constraintTags(s); got != wantTags {
 		t.Errorf("constraintTags:\n got=%s\nwant=%s", got, wantTags)
 	}

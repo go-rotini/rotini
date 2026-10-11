@@ -77,15 +77,33 @@ func FormatYAML(src []byte, kind, name string) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unknown document kind %q", kind)
 	}
-	p := &yamlPrinter{doc: doc, src: src, nl: lineEnding(src)}
-	out, err := p.document(root, sch)
+	out, err := printYAML(doc, src, sch, false)
 	if err != nil {
 		return nil, err
 	}
 	if err := sameValues(src, out); err != nil {
-		return nil, err
+		// Moving entries can change a value in rare YAML (a block scalar keeping its trailing
+		// blank lines, an anchor name used twice). Format in the author's key order, then try
+		// the canonical order once more on that tidier text, so formatting the result again
+		// gives the same result.
+		kept, kerr := printYAML(doc, src, sch, true)
+		if kerr != nil || sameValues(src, kept) != nil {
+			return nil, err
+		}
+		if keptDoc, ierr := cfgedit.IndexYAML(kept); ierr == nil {
+			if again, aerr := printYAML(keptDoc, kept, sch, false); aerr == nil && sameValues(src, again) == nil {
+				return again, nil
+			}
+		}
+		return kept, nil
 	}
 	return out, nil
+}
+
+// printYAML prints doc, whose source is src, with sch's key order unless keepOrder is set.
+func printYAML(doc *cfgedit.YAMLDoc, src []byte, sch *fmtSchema, keepOrder bool) ([]byte, error) {
+	p := &yamlPrinter{doc: doc, src: src, nl: lineEnding(src), keepOrder: keepOrder}
+	return p.document(doc.Root, sch)
 }
 
 // detectFormatKind tells a document's kind from its top-level keys, then from its file name.
@@ -151,6 +169,9 @@ type yamlPrinter struct {
 	doc *cfgedit.YAMLDoc
 	src []byte
 	nl  string
+
+	// keepOrder leaves every mapping in the author's key order.
+	keepOrder bool
 }
 
 // srcLine is a source line: its start offset, its indentation and its text after that.
@@ -533,7 +554,7 @@ func (p *yamlPrinter) order(m *cfgedit.YAMLNode, sch *fmtSchema) []int {
 	for i := range idx {
 		idx[i] = i
 	}
-	if sch == nil || len(sch.props) == 0 {
+	if p.keepOrder || sch == nil || len(sch.props) == 0 {
 		return idx
 	}
 	for _, pr := range m.Pairs {
@@ -586,15 +607,25 @@ func (p *yamlPrinter) keepsTrailingLines(n *cfgedit.YAMLNode) bool {
 }
 
 // anchorsBeforeAliases reports whether, in the given entry order, every alias in m's entries
-// still comes after the anchor it names when both are in m.
+// still comes after the anchor it names when both are in m. An anchor name defined
+// twice also keeps the order: an alias names the nearest definition above it, which moving
+// entries could change.
 func anchorsBeforeAliases(m *cfgedit.YAMLNode, order []int) bool {
 	defined := map[string]int{}
+	twice := false
 	for pos, i := range order {
-		walkAnchors(m.Pairs[i].Value, func(anchor, alias string) {
-			if anchor != "" {
-				defined[anchor] = pos
+		walkAnchors(m.Pairs[i].Value, func(anchor, _ string) {
+			if anchor == "" {
+				return
 			}
+			if _, seen := defined[anchor]; seen {
+				twice = true
+			}
+			defined[anchor] = pos
 		})
+	}
+	if twice {
+		return false
 	}
 	ok := true
 	for pos, i := range order {

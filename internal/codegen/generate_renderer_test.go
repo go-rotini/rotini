@@ -175,9 +175,9 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 	if !strings.Contains(string(out), "\"time\"\n\n\tchildcli \"example.com/child/cli\"") {
 		t.Error("imports should be grouped std then third-party")
 	}
-	// The Deprecated paragraph must sit directly on the var so gopls and staticcheck see it.
-	if !strings.Contains(string(out), "// later release.\nvar Program = NewProgram(&handlers{})") {
-		t.Error("var Program should carry its Deprecated doc comment")
+	// main builds the program with NewProgram(Handlers()); nothing is built at package init.
+	if strings.Contains(string(out), "var Program") {
+		t.Error("the generated file should not declare a Program variable")
 	}
 	// Own commands return a local handler; composed commands delegate to the child.
 	if !strings.Contains(string(out), "return &appHandler{}") {

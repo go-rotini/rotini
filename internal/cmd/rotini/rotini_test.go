@@ -16,7 +16,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-// These tests drive the companion cli through its generated Program, binding doubles for the
+// These tests drive the companion cli through NewProgram(Handlers()), binding doubles for the
 // codegen entry points (handlers use SetDependencyIfAbsent, so a test's double wins). Run is
 // used instead of Execute so nothing exits, with a fresh Program per test. Run's error is the
 // run's recorded failure, so on a failure path a non-nil error is expected.

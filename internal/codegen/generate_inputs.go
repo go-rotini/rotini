@@ -180,7 +180,7 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 			return
 		}
 		s := strconv.FormatFloat(*p, 'g', -1, 64)
-		visit(tag, field, s, rotiniPkgName+".Ptr[float64]("+s+")")
+		visit(tag, field, s, "new(float64("+s+"))")
 	}
 	intC := func(tag, field string, n int) {
 		if n == 0 {
@@ -194,7 +194,7 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 			return
 		}
 		s := strconv.Itoa(*p)
-		visit(tag, field, s, rotiniPkgName+".Ptr("+s+")")
+		visit(tag, field, s, "new("+s+")")
 	}
 	floatC("min", "Minimum", bound(schema.Minimum))
 	floatC("max", "Maximum", bound(schema.Maximum))

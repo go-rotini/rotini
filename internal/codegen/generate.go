@@ -3,8 +3,10 @@ package codegen
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -235,9 +237,43 @@ func (p *program) emitFeatures() error {
 func (p *program) emitStubs() error { return writeHandlerStubs(p, p.layout) }
 
 // emitEntrypoint writes the binary's main.go, create-once, when the conf declares an
-// entrypoint.
+// entrypoint, and notes an existing one that still uses the removed Program variable.
 func (p *program) emitEntrypoint() error {
-	return writeEntrypoint(p.plan, p.layout, string(detectFileFormat(p.specPath)))
+	if err := writeEntrypoint(p.plan, p.layout, string(detectFileFormat(p.specPath))); err != nil {
+		return err
+	}
+	if w := p.staleProgramVar(); w != nil {
+		p.auditWarnings = append(p.auditWarnings, w)
+	}
+	return nil
+}
+
+// programVarUse matches a package-qualified Program, as in cmd.Program.Execute().
+var programVarUse = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.Program\b`)
+
+// staleProgramVar reports an existing main.go that uses the generated package's Program
+// variable, which generated code no longer declares, with the line that replaces it.
+// main.go is create-once and belongs to the author, so it's never rewritten.
+func (p *program) staleProgramVar() error {
+	if p.layout.entrypointDir == "" {
+		return nil
+	}
+	path := filepath.Join(p.layout.entrypointDir, p.layout.entrypointFile)
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil //nolint:nilerr // a missing or unreadable main.go has nothing to report
+	}
+	for _, m := range programVarUse.FindAllSubmatch(src, -1) {
+		if pkg := string(m[1]); pkg != rotiniPkgName {
+			name, err := filepath.Rel(p.module.root, path)
+			if err != nil {
+				name = path
+			}
+			return fmt.Errorf("%s uses %s.Program, which generated code no longer declares; build the program with %s.NewProgram(%s.Handlers())",
+				filepath.ToSlash(name), pkg, pkg, pkg)
+		}
+	}
+	return nil
 }
 
 // prune deletes generated stubs and feature pages the spec no longer declares, sparing
