@@ -228,8 +228,13 @@ func completeFlagWord(cc completionContext, words []string, partial string, look
 			}
 			var ids []string
 			for _, id := range flagSpellings(f) {
-				if !claimed[id] {
+				switch {
+				case claimed[id]:
+				case slices.Contains(f.Identifiers, id):
 					ids = append(ids, withDescription(id, f.Summary))
+				default:
+					// The summary describes the flag, not its negated form, which sets it false.
+					ids = append(ids, id)
 				}
 			}
 			if !f.ShortCircuit && !cc.setAt(i)[f.Name] && (f.Required || needed[f.Name]) {

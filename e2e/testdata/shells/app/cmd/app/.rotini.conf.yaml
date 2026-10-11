@@ -1,0 +1,16 @@
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_rotini.go
+      package: app
+  features:
+    - type: completion
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/renders
+      descriptions_env: APP_DESCRIPTIONS
+      messages: declared
+      messages_env: APP_MESSAGES

@@ -1,7 +1,8 @@
 # R2 — the generated completion scripts, actually executed by the shells they target.
 #
-# The description-after-tab wire format differs per shell, and nothing else in the project
-# runs the scripts in a real shell.
+# The description-after-tab wire format differs per shell. This runs the shells installed on
+# the host, on every platform CI covers (macOS's bash 3.2 and Windows' PowerShell included); the
+# pinned Docker matrix in shells_test.go covers every completion kind in each shell.
 #
 # Each shell sources the script rotini generated and invokes the completion function directly,
 # which is what pressing TAB does. A script with a syntax error, a stray directive line leaking

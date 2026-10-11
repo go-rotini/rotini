@@ -38,7 +38,7 @@ TOOL := go tool -modfile=tools.mod
 # which the other tools' shared graph would override. Keep the version in step with editors.
 GOPLS := go run golang.org/x/tools/gopls@v0.23.0
 
-.PHONY: all bench-cli check-generated clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race tools-upgrade vuln vuln-tools rotini rotini-build rotini-install
+.PHONY: all bench-cli check-generated clean lint test test-acceptance test-bench test-completion-shells test-conformance test-e2e test-fuzz test-mutation test-race tools-upgrade vuln vuln-tools rotini rotini-build rotini-install
 
 all: clean lint test test-conformance test-acceptance test-e2e test-bench test-fuzz test-mutation test-race rotini-build rotini-install
 
@@ -133,6 +133,12 @@ test-conformance:
 # `rotini` binary through spec -> generate -> build -> RUN, the way a user does.
 test-e2e:
 	@go test -v -count=1 ./e2e/...
+
+# The completion scripts in one pinned Docker image per shell (bash 4 and 5, zsh, fish,
+# PowerShell, Nushell), against the same generated CLI and cases; needs docker. See
+# e2e/shells_test.go; add ARGS=-update-shells to rewrite e2e/testdata/shells/want.
+test-completion-shells:
+	@ROTINI_COMPLETION_SHELLS=1 go test -v -count=1 -run TestCompletionShells ./e2e/ $(ARGS)
 
 test-bench:
 	@go test -bench=. -benchmem -count=1 ./... | tee test_bench.out

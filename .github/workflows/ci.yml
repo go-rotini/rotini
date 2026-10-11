@@ -158,6 +158,20 @@ jobs:
       - name: End-to-end
         run: make test-e2e
 
+  # The completion scripts in one pinned Docker image per shell, against the same generated CLI
+  # and cases (e2e/shells_test.go). The runner's Docker builds the images.
+  completion-shells:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Completion shell matrix
+        run: make test-completion-shells
+
   benchmark:
     runs-on: ubuntu-latest
     steps:

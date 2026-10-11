@@ -61,6 +61,7 @@ make test              # every test in the module, with coverage
 make test-conformance  # the in-process input-conformance matrix
 make test-acceptance   # the process tier: real exit codes, pipes, __complete, signals
 make test-e2e          # testscript rigs: spec -> generate -> build -> RUN the binary
+make test-completion-shells  # completion in one pinned Docker image per shell (needs docker)
 make test-bench        # benchmarks
 make test-fuzz         # fuzz targets (60s each; see FUZZ_TARGETS in the Makefile)
 make test-mutation     # mutation tests (long-running, ~18 min)
@@ -69,7 +70,9 @@ make rotini-build      # build the codegen binary
 make rotini-install    # regenerate (go generate ./...) and install the tool
 ```
 
-`make all` runs the full chain. `test-mutation` is slow, so run it on its own rather than in
+`make all` runs the full chain except `test-completion-shells`. After a change to a completion
+script or to what completion offers, run `make test-completion-shells ARGS=-update-shells` and
+review the diff in `e2e/testdata/shells/want`. `test-mutation` is slow, so run it on its own rather than in
 a tight edit loop.
 
 ## Pull Requests

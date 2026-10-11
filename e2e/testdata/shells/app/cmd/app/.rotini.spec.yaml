@@ -1,0 +1,116 @@
+version: 0.0.0
+command:
+  name: app
+  summary: a CLI with every kind of completion
+  flags:
+    - name: config
+      summary: config file
+      identifiers: [--config]
+      schema:
+        type: string
+        complete: { kind: file, extensions: [yaml, yml] }
+    - name: dir
+      summary: work directory
+      identifiers: [--dir]
+      schema:
+        type: string
+        complete: { kind: directory }
+    - name: token
+      summary: API token
+      identifiers: [--token]
+      schema:
+        type: string
+        complete: { kind: none, message: "an API token, from your account page" }
+    - name: exec
+      summary: program to run
+      identifiers: [--exec]
+      schema:
+        type: string
+        complete: { kind: executable }
+    - name: user
+      summary: account to run as
+      identifiers: [--user]
+      schema:
+        type: string
+        complete: { kind: user }
+    - name: group
+      summary: group to run as
+      identifiers: [--group]
+      schema:
+        type: string
+        complete: { kind: group }
+    - name: host
+      summary: host to reach
+      identifiers: [--host]
+      schema:
+        type: string
+        complete: { kind: host }
+    - name: level
+      summary: how much to say
+      identifiers: [--level]
+      schema:
+        type: string
+        enum:
+          - { value: medium, summary: the default }
+          - { value: low, summary: quiet }
+          - { value: high, summary: loud }
+    - name: format
+      summary: output format
+      identifiers: [--format]
+      schema:
+        type: string
+        enum: [json, text, yaml]
+    - name: set
+      summary: override a setting
+      identifiers: [--set]
+      schema:
+        type: map
+        properties:
+          image: { type: string }
+          replicas: { type: string }
+    - name: color
+      summary: colorize output
+      identifiers: [--color]
+      schema: { type: bool, negatable: true }
+  commands:
+    - name: deploy
+      summary: deploy a service
+      flag_groups:
+        - { kind: mutually_exclusive, flags: [quiet, verbose] }
+      flags:
+        - name: env
+          summary: target environment
+          identifiers: [--env]
+          schema:
+            type: string
+            required: true
+            enum: [dev, prod]
+        - name: quiet
+          summary: say nothing
+          identifiers: [--quiet]
+          schema: { type: bool }
+        - name: verbose
+          summary: say everything
+          identifiers: [--verbose]
+          schema: { type: bool }
+      arguments:
+        - name: service
+          summary: the service to deploy
+          schema: { type: string }
+    - name: status
+      summary: show status
+    - name: remote
+      summary: manage remotes
+      commands:
+        - name: add
+          summary: add a remote
+        - name: remove
+          summary: remove a remote
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command to describe
+          schema:
+            type: '[]string'
+            complete: { kind: command }
