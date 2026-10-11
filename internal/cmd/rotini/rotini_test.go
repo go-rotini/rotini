@@ -16,7 +16,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-// These tests drive the companion cli through NewProgram(Handlers()), binding doubles for the
+// These tests drive the companion cli through NewProgram(), binding doubles for the
 // codegen entry points (handlers use SetDependencyIfAbsent, so a test's double wins). Run is
 // used instead of Execute so nothing exits, with a fresh Program per test. Run's error is the
 // run's recorded failure, so on a failure path a non-nil error is expected.
@@ -28,7 +28,7 @@ const testVersion = "9.9.9"
 func newTestCLI(t *testing.T) (*rotini.Program, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
-	p := NewProgram(Handlers()).
+	p := NewProgram().
 		WithStdout(out).
 		WithStderr(errb).
 		WithExit(func(int) { t.Error("a handler called the exit action; Run must not exit the process") }).
@@ -152,7 +152,7 @@ func TestCLI_writeErrorsFailTheRun(t *testing.T) {
 	} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			errb := &bytes.Buffer{}
-			p := NewProgram(Handlers()).
+			p := NewProgram().
 				WithStdout(failingWriter{}).
 				WithStderr(errb).
 				WithExit(func(int) { t.Error("Run must not exit the process") }).

@@ -58,7 +58,7 @@ var (
 // CategoryOf returns the [Category] an error carries, or [CategoryNone] when it matches neither
 // sentinel:
 //
-//	cmd.NewProgram(cmd.Handlers()).WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+//	cmd.NewProgram().WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 //	    worst := rotini.CategoryNone
 //	    for _, err := range out.Errors {
 //	        fmt.Fprintln(rtx.Stderr, err)

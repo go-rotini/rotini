@@ -299,7 +299,7 @@ One generated code target, chosen by 'type'. 'file' is the module-root-relative 
 Which code this target receives.
 
 - main: the program's entrypoint (main.go), created once and never overwritten.
-- cmd: the CLI package. Its directory holds the handler files you edit and the one generated file, which holds the typed input and output structs (what rtx.Inputs[T] and the per-source input methods fill), the command tree with NewProgram, ProgramHandlers and InputSettings, and the handler wiring (Handlers(), and Program, which is deprecated).
+- cmd: the CLI package. Its directory holds the handler files you edit and the one generated file, which holds the typed input and output structs (what rtx.Inputs[T] and the per-source input methods fill), the command tree with NewProgram, NewProgramWith, ProgramHandlers and InputSettings, and the handler wiring (Handlers()).
 - models: only the typed input and output structs, in their own package. Optional: without it they live in the cmd file. Declare it when a command uses a handler from another package (`handler:`) and that package needs the input types: the cmd package imports the handler package, so the handler package cannot import cmd back, and with models both import it instead. The cmd package re-exports every model as a type alias, so handler code inside cmd is unaffected either way.
 
 There is no 'runtime' target: the rotini runtime is imported from github.com/go-rotini/rotini, not generated.

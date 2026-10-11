@@ -63,7 +63,7 @@ package main
 
 import demo "example.com/demo/internal/cmd/demo"
 
-func main() { demo.NewProgram(demo.Handlers()).Execute() }
+func main() { demo.NewProgram().Execute() }
 -- internal/cmd/demo/demo.go --
 package demo
 

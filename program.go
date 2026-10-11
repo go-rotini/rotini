@@ -222,7 +222,7 @@ func (p *Program) WithStderr(w io.Writer) *Program {
 // does. This makes an end-to-end test or an embedding host possible:
 //
 //	code := -1
-//	err := cmd.NewProgram(cmd.Handlers()).
+//	err := cmd.NewProgram().
 //		WithArgs(argv).WithStdout(&out).WithStderr(&errs).
 //		WithExit(func(c int) { code = c }).
 //		Execute()
@@ -333,7 +333,7 @@ type Option func(*Program)
 
 // With applies each Option in order and returns the program:
 //
-//	cmd.NewProgram(cmd.Handlers()).
+//	cmd.NewProgram().
 //		With(
 //			rotini.WithDependency(tasks.Store, store),
 //			rotini.WithDependency(tasks.Client, client),
@@ -381,7 +381,7 @@ func (p *Program) WithInputReader(fn func(InputSettings) *InputReader) *Program 
 // the generated version command and --version flag.
 //
 //	var version = "0.0.0" // go build -ldflags "-X main.version=1.2.3"
-//	cmd.NewProgram(cmd.Handlers()).WithVersion(version).Execute()
+//	cmd.NewProgram().WithVersion(version).Execute()
 func (p *Program) WithVersion(version string) *Program {
 	p.version = version
 	return p

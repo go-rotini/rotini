@@ -253,6 +253,6 @@ import (
 )
 
 func main() {
-	life.NewProgram(life.Handlers()).
+	life.NewProgram().
 		Execute()
 }

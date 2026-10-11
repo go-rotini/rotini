@@ -79,6 +79,6 @@ import (
 )
 
 func main() {
-	cat.NewProgram(cat.Handlers()).
+	cat.NewProgram().
 		Execute()
 }

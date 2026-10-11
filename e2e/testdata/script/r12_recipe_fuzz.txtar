@@ -36,7 +36,7 @@ func FuzzRun(f *testing.F) {
 	f.Add("--help")
 	home := f.TempDir()
 	f.Fuzz(func(t *testing.T, joined string) {
-		p := NewProgram(Handlers()).
+		p := NewProgram().
 			WithEnviron([]string{"HOME=" + home}).
 			WithDir(home).
 			WithStdin(strings.NewReader("")).

@@ -126,7 +126,7 @@ import (
 )
 
 func main() {
-	root.NewProgram(root.Handlers()).
+	root.NewProgram().
 		Execute()
 }
 -- cmd/grand/.rotini.spec.yaml --

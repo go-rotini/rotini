@@ -442,7 +442,7 @@ func FuzzRun(f *testing.F) {
 	f.Add("--help")
 	home := f.TempDir()
 	f.Fuzz(func(t *testing.T, joined string) {
-		p := NewProgram(Handlers()).
+		p := NewProgram().
 			WithEnviron([]string{"HOME=" + home}).
 			WithDir(home).
 			WithStdin(strings.NewReader("")).
@@ -870,7 +870,7 @@ import (
 var version = "1.0.0"
 
 func main() {
-	cmd.NewProgram(cmd.Handlers()).
+	cmd.NewProgram().
 		WithVersion(version).
 		WithReporter(cmd.Report).
 		Execute()

@@ -121,6 +121,6 @@ import (
 )
 
 func main() {
-	dfl.NewProgram(dfl.Handlers()).
+	dfl.NewProgram().
 		Execute()
 }

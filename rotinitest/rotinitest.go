@@ -6,7 +6,7 @@
 //		t.Parallel()
 //		var in cmd.TaskrAddInputs
 //		in.TaskrAdd.Arguments.Title = "write docs"
-//		res := rotinitest.Run(t, cmd.NewProgram(cmd.Handlers()), in)
+//		res := rotinitest.Run(t, cmd.NewProgram(), in)
 //		rotinitest.ExitDocumented(t, res)
 //		if out := rotinitest.Output[cmd.TaskrAddOutput](t, res); out.Title != "write docs" {
 //			t.Errorf("added %+v", out)

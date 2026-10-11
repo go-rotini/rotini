@@ -148,6 +148,6 @@ import (
 )
 
 func main() {
-	paths.NewProgram(paths.Handlers()).
+	paths.NewProgram().
 		Execute()
 }

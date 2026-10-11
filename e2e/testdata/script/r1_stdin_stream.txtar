@@ -321,6 +321,6 @@ import (
 )
 
 func main() {
-	filter.NewProgram(filter.Handlers()).
+	filter.NewProgram().
 		Execute()
 }

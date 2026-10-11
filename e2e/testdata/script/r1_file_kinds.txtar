@@ -126,7 +126,7 @@ import (
 )
 
 func main() {
-	files.NewProgram(files.Handlers()).
+	files.NewProgram().
 		WithBufferedOutput(true).
 		Execute()
 }

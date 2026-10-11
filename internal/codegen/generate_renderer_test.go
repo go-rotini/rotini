@@ -175,7 +175,7 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 	if !strings.Contains(string(out), "\"time\"\n\n\tchildcli \"example.com/child/cli\"") {
 		t.Error("imports should be grouped std then third-party")
 	}
-	// main builds the program with NewProgram(Handlers()); nothing is built at package init.
+	// main builds the program with NewProgram(); nothing is built at package init.
 	if strings.Contains(string(out), "var Program") {
 		t.Error("the generated file should not declare a Program variable")
 	}

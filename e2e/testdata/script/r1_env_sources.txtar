@@ -119,6 +119,6 @@ import (
 )
 
 func main() {
-	svc.NewProgram(svc.Handlers()).
+	svc.NewProgram().
 		Execute()
 }

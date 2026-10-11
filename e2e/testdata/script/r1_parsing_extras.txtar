@@ -181,6 +181,6 @@ import (
 )
 
 func main() {
-	ship.NewProgram(ship.Handlers()).
+	ship.NewProgram().
 		Execute()
 }

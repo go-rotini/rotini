@@ -69,7 +69,7 @@ package main
 
 import todo "example.com/todo/internal/cmd/todo"
 
-func main() { todo.NewProgram(todo.Handlers()).WithReporter(todo.ReportWithUsage).Execute() }
+func main() { todo.NewProgram().WithReporter(todo.ReportWithUsage).Execute() }
 -- internal/cmd/todo/todo_add.go --
 package todo
 

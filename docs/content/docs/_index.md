@@ -390,7 +390,7 @@ for _, d := range rotini.Deprecations(rtx) {
 
   ```go
   at := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
-  code, err := cmd.NewProgram(cmd.Handlers()).
+  code, err := cmd.NewProgram().
   	WithClock(func() time.Time { return at }).
   	Run([]string{"log", "--since", "2h"}) // since is 10:00
   ```
@@ -1102,7 +1102,7 @@ A dependency the handlers share, such as a database or an API client, is registe
 {{< code title="sharing a dependency" language="golang" open="true" collapsible="false" copy="true" >}}
 var Store = rotini.NewDependency[*store.Store]("todo.store") // in the cmd package
 
-cmd.NewProgram(cmd.Handlers()).WithDependency(cmd.Store, openStore()) // in main.go
+cmd.NewProgram().WithDependency(cmd.Store, openStore()) // in main.go
 s := rtx.MustGetDependency(Store)                            // in a handler
 {{< /code >}}
 
@@ -1303,7 +1303,7 @@ func exitCode(out rotini.Outcome) int {
 - **List the codes** under `exit_status:`, so man and markdown pages and the contract say what
   they mean. `--help` leaves them out.
 
-Install it in `main.go` with `cmd.NewProgram(cmd.Handlers()).WithReporter(cmd.Report)`. Keeping it in the command
+Install it in `main.go` with `cmd.NewProgram().WithReporter(cmd.Report)`. Keeping it in the command
 package, rather than in `main.go`, lets tests install the same reporter (see [Testing](#testing)).
 The `Outcome` also carries `Infos` and `Successes`, from `rtx.RecordInfo` and
 `rtx.RecordSuccess`, for a reporter that prints those too.
@@ -1431,7 +1431,7 @@ func docsURL(def rotini.Definition, chain []rotini.Command, code int) string {
 }
 {{< /code >}}
 
-Install it with the program's own Definition: `p := cmd.NewProgram(cmd.Handlers())`, then
+Install it with the program's own Definition: `p := cmd.NewProgram()`, then
 `p.WithReporter(cmd.ReportWithLinks(p.Definition()))`.
 
 ### Handling errors in a handler
@@ -1639,7 +1639,7 @@ func main() {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	time.AfterFunc(10*time.Minute, func() { cancel(rotini.ExitCause(124)) })
 
-	cmd.NewProgram(cmd.Handlers()).
+	cmd.NewProgram().
 		WithContext(ctx).
 		WithSignals(os.Interrupt, syscall.SIGTERM).
 		WithVersion(version).
@@ -1694,7 +1694,7 @@ with one SIGTERM can't send the second, so a handler that ignores its context wo
 running. `WithTerminationTimeout` bounds the wait:
 
 {{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
-cmd.NewProgram(cmd.Handlers()).WithTerminationTimeout(10 * time.Second).Execute()
+cmd.NewProgram().WithTerminationTimeout(10 * time.Second).Execute()
 {{< /code >}}
 
 If the run hasn't returned 10 seconds after the first signal, the program exits with that
@@ -1755,7 +1755,7 @@ The root handler calls `connect(rtx, inputs)` after reading its inputs, and a co
 client with `rtx.MustGetDependency(clientDep)`. Each run starts with a copy of the program's
 dependencies, so `rtx.SetDependency` and `rtx.SetDependencyIfAbsent` never reach another run.
 `SetDependencyIfAbsent` keeps a value already registered, so a test that passes a double with
-`NewProgram(Handlers()).WithDependency(clientDep, fake)` gets it. `rtx.GetDependency` returns
+`NewProgram().WithDependency(clientDep, fake)` gets it. `rtx.GetDependency` returns
 the value and whether it is set; `rtx.MustGetDependency` treats a missing one as a fault, which
 reaches the reporter as a panic.
 
@@ -1771,7 +1771,7 @@ Code the spec does not describe can need a feature the list leaves out, for exam
 `InputSettings.Sources` entry, which needs `rotini.ConfigFiles()`. Add it in `main.go`:
 
 {{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
-cmd.NewProgram(cmd.Handlers()).
+cmd.NewProgram().
 	WithFeatures(rotini.ConfigFiles(), rotini.TOML()).
 	Execute()
 {{< /code >}}
@@ -2063,7 +2063,7 @@ against the declared shape before writing. It is off by default. Turn it on in t
 debug build:
 
 {{< code title="todo_test.go" language="go" open="true" collapsible="false" copy="true" >}}
-p := NewProgram(Handlers()).WithOutputChecks(true)
+p := NewProgram().WithOutputChecks(true)
 {{< /code >}}
 
 With checks on, a value that does not match is an internal error naming each field at fault,
@@ -2082,7 +2082,7 @@ slice of the item type, and only a stream is:
 
 {{< code title="todo_test.go" language="go" open="true" collapsible="false" copy="true" >}}
 var stdout bytes.Buffer
-p := NewProgram(Handlers()).WithStdout(&stdout)
+p := NewProgram().WithStdout(&stdout)
 p.Run([]string{"list", "-o", "yaml"})
 list, err := rotini.DecodeOutput[TodoListOutput](p, stdout.Bytes(), "yaml")
 {{< /code >}}
@@ -2099,7 +2099,7 @@ rule reads the command line itself rather than validated inputs. For a program t
 `--json` flag:
 
 {{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
-cmd.NewProgram(cmd.Handlers()).WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
+cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 	return slices.Contains(rtx.Argv, "--json")
 })).Execute()
 {{< /code >}}
@@ -2229,7 +2229,7 @@ result, so a full disk or a closed pipe is an error exit even when the handler i
 write errors:
 
 {{< code title="cmd/todo/main.go (buffered)" language="go" open="true" collapsible="false" copy="true" >}}
-cmd.NewProgram(cmd.Handlers()).WithBufferedOutput(true).Execute()
+cmd.NewProgram().WithBufferedOutput(true).Execute()
 {{< /code >}}
 
 Write through `rtx.Stdout`, never `os.Stdout`, or the output comes out of order. Flush before
@@ -2421,7 +2421,7 @@ tools read. Nothing appears unless you declare it, and none of it adds a flag or
   variable you name, so an agent's harness can ask for it:
 
   {{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
-cmd.NewProgram(cmd.Handlers()).WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
+cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 	return os.Getenv("TODO_AGENT") == "1"
 })).Execute()
 {{< /code >}}
@@ -3299,7 +3299,7 @@ has that command; by default it answers in the format rotini's own generated she
 Set the plugin format in `main.go`:
 
 {{< code title="cmd/docker-where/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
-cmd.NewProgram(cmd.Handlers()).
+cmd.NewProgram().
 	WithVersion(version).
 	WithCompletion(rotini.PluginCompletion).
 	Execute()
@@ -3396,7 +3396,7 @@ Build a fresh `Program` per test and run it with arguments, in-process: no subpr
 {{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAdd(t *testing.T) {
 	var out bytes.Buffer
-	code, err := NewProgram(Handlers()).WithStdout(&out).Run([]string{"add", "buy milk"})
+	code, err := NewProgram().WithStdout(&out).Run([]string{"add", "buy milk"})
 	if err != nil || code != 0 {
 		t.Fatalf("code %d, err %v", code, err)
 	}
@@ -3407,7 +3407,7 @@ func TestAdd(t *testing.T) {
 
 func TestAddRejectsUnknownPriority(t *testing.T) {
 	var stderr bytes.Buffer
-	code, err := NewProgram(Handlers()).WithStderr(&stderr).Run([]string{"add", "buy milk", "-p", "urgent"})
+	code, err := NewProgram().WithStderr(&stderr).Run([]string{"add", "buy milk", "-p", "urgent"})
 	if err == nil || code != 1 {
 		t.Fatalf("code %d, err %v", code, err)
 	}
@@ -3416,10 +3416,10 @@ func TestAddRejectsUnknownPriority(t *testing.T) {
 
 Keep two things in mind:
 
-- **`NewProgram(Handlers())` is built the way `main.go` builds it,** but the settings `main.go`
+- **`NewProgram()` is built the way `main.go` builds it,** but the settings `main.go`
   adds, such as a reporter, a version or dependencies, are missing until the test adds them too. With the
   [reporter above](#errors-and-exit-codes), the second test would call
-  `NewProgram(Handlers()).WithReporter(Report)` and expect exit code 2.
+  `NewProgram().WithReporter(Report)` and expect exit code 2.
 - **Environment variables and config files come from the process,** unless the test gives the
   run its own. `WithEnviron` sets the whole environment a run reads (env inputs, flag fallbacks,
   `HOME` and `XDG_CONFIG_HOME` for config discovery, plugin lookup), and `WithDir` sets the
@@ -3429,7 +3429,7 @@ Keep two things in mind:
 {{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAddDefaultPriority(t *testing.T) {
 	t.Parallel()
-	code, err := NewProgram(Handlers()).
+	code, err := NewProgram().
 		WithEnviron([]string{"HOME=" + t.TempDir(), "TODO_DEFAULTS_PRIORITY=high"}).
 		WithDir(t.TempDir()).
 		Run([]string{"add", "buy milk"})
@@ -3455,7 +3455,7 @@ func TestAddHigh(t *testing.T) {
 	var in TodoAddInputs
 	in.TodoAdd.Arguments.Title = "buy milk"
 	in.TodoAdd.Flags.Priority = "high"
-	res := rotinitest.Run(t, NewProgram(Handlers()), in)
+	res := rotinitest.Run(t, NewProgram(), in)
 	if res.Code != 0 {
 		t.Fatalf("code %d, err %v", res.Code, res.Err)
 	}
@@ -3488,7 +3488,7 @@ func TestAddHigh(t *testing.T) {
 - **`Argv0(name)`** runs a `multicall` program as if invoked as `name`; pass the inputs of the
   command that name runs.
 
-Pass a fresh `NewProgram(Handlers())` to every `Run`, with the dependencies `main.go` adds:
+Pass a fresh `NewProgram()` to every `Run`, with the dependencies `main.go` adds:
 `Run` sets the program's streams and environment. A command line that typed inputs can't express,
 such as a typo or an unknown flag, is still tested with `Program.Run`.
 
@@ -3498,7 +3498,7 @@ such as a typo or an unknown flag, is still tested with `Program.Run`.
 your own test helpers or for tools that drive a CLI.
 
 {{< code language="golang" open="true" collapsible="false" copy="true" >}}
-p := NewProgram(Handlers())
+p := NewProgram()
 argv, env, err := rotini.ArgvOf(p.Definition(), in, rotini.PresenceOf(in))
 code, err := p.WithEnviron(env).Run(argv)
 {{< /code >}}
@@ -3762,7 +3762,7 @@ func main() {
 	if info, ok := debug.ReadBuildInfo(); ok && v == "" {
 		v = info.Main.Version // a tag, a pseudo-version (+dirty with local edits), or (devel)
 	}
-	cmd.NewProgram(cmd.Handlers()).
+	cmd.NewProgram().
 		WithVersion(v).
 		Execute()
 }

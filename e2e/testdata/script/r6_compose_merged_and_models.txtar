@@ -235,6 +235,6 @@ import (
 )
 
 func main() {
-	root.NewProgram(root.Handlers()).
+	root.NewProgram().
 		Execute()
 }

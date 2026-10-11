@@ -73,7 +73,7 @@ func main() {
 	if info, ok := debug.ReadBuildInfo(); ok && v == "" {
 		v = info.Main.Version // a tag, a pseudo-version (+dirty with local edits), or (devel)
 	}
-	cmd.NewProgram(cmd.Handlers()).
+	cmd.NewProgram().
 		WithVersion(v).
 		Execute()
 }

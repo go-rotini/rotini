@@ -941,7 +941,7 @@ type CompletionFormat func(w io.Writer, result CompletionResult) error
 // the completion counterpart of [Program.Run]. It serves hosts that do not call the hidden
 // __complete entry, from the program's own code:
 //
-//	code, _ := cmd.NewProgram(cmd.Handlers()).Complete(words, rotini.PluginCompletion)
+//	code, _ := cmd.NewProgram().Complete(words, rotini.PluginCompletion)
 //
 // kubectl runs a separate kubectl_complete-<plugin> with only the plugin's words; a spec that
 // declares `multicall: {complete: kubectl_complete-}` answers it without code (see
@@ -1085,7 +1085,7 @@ func switchedOff(rtx *Context, env string) bool {
 // asked once per completion request, before anything is written, and applies to every shell
 // and to [PluginCompletion]:
 //
-//	cmd.NewProgram(cmd.Handlers()).WithCompletionMessages(func(rtx *rotini.Context) bool {
+//	cmd.NewProgram().WithCompletionMessages(func(rtx *rotini.Context) bool {
 //		return !settings.Quiet
 //	}).Execute()
 //
@@ -1101,7 +1101,7 @@ func (p *Program) WithCompletionMessages(fn func(rtx *Context) bool) *Program {
 // `descriptions_env` names. It is asked once per completion request, before anything is
 // written, and applies to every shell and to [PluginCompletion]:
 //
-//	cmd.NewProgram(cmd.Handlers()).WithCompletionDescriptions(func(rtx *rotini.Context) bool {
+//	cmd.NewProgram().WithCompletionDescriptions(func(rtx *rotini.Context) bool {
 //		return !settings.Plain
 //	}).Execute()
 //
@@ -1236,7 +1236,7 @@ func PluginCompletion(w io.Writer, result CompletionResult) error {
 // <name> …`) and the Flux CLI (`flux-<name> __complete …`) do with the format
 // [PluginCompletion] writes:
 //
-//	cmd.NewProgram(cmd.Handlers()).WithCompletion(rotini.PluginCompletion).Execute()
+//	cmd.NewProgram().WithCompletion(rotini.PluginCompletion).Execute()
 //
 // Rotini's generated completion scripts read rotini's own format, so a standalone CLI leaves
 // this unset. A host that runs a separately named completer without a __complete word, such

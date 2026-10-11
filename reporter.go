@@ -181,7 +181,7 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 // structured is the program's own rule, typically whether its format flag asks for json. The
 // run may have failed in parsing, so the rule should read [Context.Argv], not validated inputs:
 //
-//	cmd.NewProgram(cmd.Handlers()).WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
+//	cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 //	    return slices.Contains(rtx.Argv, "--json")
 //	})).Execute()
 func StructuredReporter(structured func(rtx *Context) bool) Reporter {

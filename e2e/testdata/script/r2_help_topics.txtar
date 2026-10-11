@@ -136,7 +136,7 @@ import (
 )
 
 func main() {
-	demo.NewProgram(demo.Handlers()).Execute()
+	demo.NewProgram().Execute()
 }
 -- internal/cmd/demo/demo_help.go --
 package demo

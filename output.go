@@ -340,7 +340,7 @@ func outputPath(pointer string) string {
 // it and every item is decoded. format is json, yaml or toml. It is for tests:
 //
 //	var stdout bytes.Buffer
-//	p := cmd.NewProgram(cmd.Handlers()).WithStdout(&stdout)
+//	p := cmd.NewProgram().WithStdout(&stdout)
 //	p.Run([]string{"list", "-o", "json"})
 //	list, err := rotini.DecodeOutput[cmd.TaskrListOutput](p, stdout.Bytes(), "json")
 //
@@ -535,7 +535,7 @@ func normalizeJSON(v any) (any, error) {
 // by default; enable it in tests or debug builds, and WithOutputChecks(false) turns it off
 // again:
 //
-//	p := cmd.NewProgram(cmd.Handlers()).WithOutputChecks(true)
+//	p := cmd.NewProgram().WithOutputChecks(true)
 //
 // Only output written through WriteOutput and WriteOutputItem is checked. To check captured
 // stdout, use [DecodeOutput].

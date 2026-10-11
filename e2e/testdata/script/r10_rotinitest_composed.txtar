@@ -96,7 +96,7 @@ package main
 import demo "example.com/suite/internal/cmd/demo"
 
 func main() {
-	demo.NewProgram(demo.Handlers()).Execute()
+	demo.NewProgram().Execute()
 }
 -- internal/cmd/demo/demo.go --
 package demo
@@ -191,7 +191,7 @@ func TestStatus(t *testing.T) {
 	t.Parallel()
 	var in status.StatusInputs
 	in.Status.Flags.Name = "web"
-	res := rotinitest.Run(t, demo.NewProgram(demo.Handlers()), in)
+	res := rotinitest.Run(t, demo.NewProgram(), in)
 	if out := rotinitest.Output[status.StatusOutput](t, res); out.Name != "web" {
 		t.Errorf("output %+v (argv %q)", out, res.Argv)
 	}
@@ -202,7 +202,7 @@ func TestStatusCheck(t *testing.T) {
 	var in status.StatusCheckInputs
 	in.Status.Flags.Name = "web"
 	in.StatusCheck.Flags.Fail = true
-	res := rotinitest.Run(t, demo.NewProgram(demo.Handlers()), in)
+	res := rotinitest.Run(t, demo.NewProgram(), in)
 	if want := []string{"status", "--name=web", "check", "--fail"}; !slices.Equal(res.Argv, want) {
 		t.Errorf("argv %q, want %q", res.Argv, want)
 	}
@@ -216,7 +216,7 @@ func TestProbe(t *testing.T) {
 	t.Parallel()
 	var in probe.ProbeInputs
 	in.Probe.Flags.Target = "db"
-	res := rotinitest.Run(t, demo.NewProgram(demo.Handlers()), in)
+	res := rotinitest.Run(t, demo.NewProgram(), in)
 	if want := []string{"status", "probe", "--target=db"}; !slices.Equal(res.Argv, want) {
 		t.Errorf("argv %q, want %q", res.Argv, want)
 	}

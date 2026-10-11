@@ -94,7 +94,7 @@ import (
 var version = "1.0.0"
 
 func main() {
-	cmd.NewProgram(cmd.Handlers()).
+	cmd.NewProgram().
 		WithVersion(version).
 		WithReporter(cmd.Report).
 		Execute()

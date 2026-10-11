@@ -126,7 +126,7 @@ import (
 var version = "1.2.3"
 
 func main() {
-	cmd.NewProgram(cmd.Handlers()).
+	cmd.NewProgram().
 		WithReporter(cmd.ReportWithStacks).
 		WithVersion(version).
 		Execute()

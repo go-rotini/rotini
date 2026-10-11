@@ -1,8 +1,8 @@
 # R0 — a main.go that still uses the generated Program variable gets told how to change it.
 #
-# Generated code no longer declares Program; main builds the program with
-# NewProgram(Handlers()). main.go belongs to the author and is never rewritten, so generate
-# names the file and the line to use instead, and leaves the file as it was.
+# Generated code no longer declares Program; main builds the program with NewProgram().
+# main.go belongs to the author and is never rewritten, so generate names the file and the
+# line to use instead, and leaves the file as it was.
 
 gomodinit example.com/demo
 
@@ -11,7 +11,7 @@ exec go mod tidy
 cp old-main.go.txt cmd/demo/main.go
 
 exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
-stderr 'cmd/demo/main.go uses cmd.Program, which generated code no longer declares; build the program with cmd.NewProgram\(cmd.Handlers\(\)\)'
+stderr 'cmd/demo/main.go uses cmd.Program, which generated code no longer declares; build the program with cmd.NewProgram\(\)'
 cmp cmd/demo/main.go old-main.go.txt
 
 ! exec go build ./...
@@ -41,5 +41,5 @@ import (
 )
 
 func main() {
-	cmd.NewProgram(cmd.Handlers()).Execute()
+	cmd.NewProgram().Execute()
 }

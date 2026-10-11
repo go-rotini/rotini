@@ -9,7 +9,7 @@ import (
 var version = "0.0.0"
 
 func main() {
-	cmd.NewProgram(cmd.Handlers()).
+	cmd.NewProgram().
 		WithVersion(version).
 		Execute()
 }

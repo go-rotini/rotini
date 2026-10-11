@@ -111,7 +111,7 @@ func (rtx *Context) bufferedOut() *bufferedStdout {
 // many small pieces of output much faster (two million lines: about 2.5s unbuffered, 0.06s
 // buffered). It is off by default, and WithBufferedOutput(false) turns it off again:
 //
-//	cmd.NewProgram(cmd.Handlers()).WithBufferedOutput(true).Execute()
+//	cmd.NewProgram().WithBufferedOutput(true).Execute()
 //
 // When the run ends, before the reporter runs, rotini flushes the buffer and checks the result:
 // a write that fails then (a full disk, a closed pipe) is recorded as an error, so the run

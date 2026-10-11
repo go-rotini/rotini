@@ -70,6 +70,6 @@ import (
 )
 
 func main() {
-	count.NewProgram(count.Handlers()).
+	count.NewProgram().
 		Execute()
 }

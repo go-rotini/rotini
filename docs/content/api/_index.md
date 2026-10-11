@@ -10,13 +10,13 @@ type and method is documented in full on
 
 ## In main.go
 
-`main.go` builds the program with the generated `NewProgram(Handlers())`, configures it and calls
+`main.go` builds the program with the generated `NewProgram()`, configures it and calls
 `Execute`. The generated `NewProgram` calls `rotini.NewWiredProgram` with the runtime features
 its spec uses:
 
 {{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func main() {
-	cmd.NewProgram(cmd.Handlers()).
+	cmd.NewProgram().
 		WithDependency(cmd.Store, openStore()). // something your handlers share
 		WithVersion(version).                   // what rtx.Version() returns
 		Execute()                               // runs the command, then exits with its code
@@ -166,14 +166,14 @@ Run a program in-process and check its exit code, error and output:
 {{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAdd(t *testing.T) {
 	var out bytes.Buffer
-	code, err := NewProgram(Handlers()).WithStdout(&out).Run([]string{"add", "buy milk"})
+	code, err := NewProgram().WithStdout(&out).Run([]string{"add", "buy milk"})
 	if err != nil || code != 0 {
 		t.Fatalf("code %d, err %v", code, err)
 	}
 }
 {{< /code >}}
 
-Build a fresh program per test with `NewProgram(Handlers())`, as `main.go` does. `Run` never
+Build a fresh program per test with `NewProgram()`, as `main.go` does. `Run` never
 calls `os.Exit`, and the error it returns joins every recorded error, so
 `errors.Is` and `errors.As` reach each one; see
 [handling errors in a handler](/docs#handling-errors-in-a-handler) for branching on them.

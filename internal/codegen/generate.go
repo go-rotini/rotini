@@ -269,8 +269,8 @@ func (p *program) staleProgramVar() error {
 			if err != nil {
 				name = path
 			}
-			return fmt.Errorf("%s uses %s.Program, which generated code no longer declares; build the program with %s.NewProgram(%s.Handlers())",
-				filepath.ToSlash(name), pkg, pkg, pkg)
+			return fmt.Errorf("%s uses %s.Program, which generated code no longer declares; build the program with %s.NewProgram()",
+				filepath.ToSlash(name), pkg, pkg)
 		}
 	}
 	return nil

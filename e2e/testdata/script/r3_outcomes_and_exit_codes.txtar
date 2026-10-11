@@ -219,6 +219,6 @@ import (
 )
 
 func main() {
-	out.NewProgram(out.Handlers()).
+	out.NewProgram().
 		Execute()
 }

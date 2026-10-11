@@ -217,10 +217,10 @@
 //	var Store = rotini.NewDependency[*store.Store]("tasks.store")
 //
 //	// main.go — the value's type is checked where it is supplied
-//	cmd.NewProgram(cmd.Handlers()).WithDependency(tasks.Store, store.New()).Execute()
+//	cmd.NewProgram().WithDependency(tasks.Store, store.New()).Execute()
 //
 //	// or several at once ([WithDependency] and [Program.With])
-//	cmd.NewProgram(cmd.Handlers()).
+//	cmd.NewProgram().
 //		With(
 //			rotini.WithDependency(tasks.Store, store.New()),
 //			rotini.WithDependency(tasks.Client, client.New()),

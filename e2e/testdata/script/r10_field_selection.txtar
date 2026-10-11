@@ -225,5 +225,5 @@ import (
 )
 
 func main() {
-	taskr.NewProgram(taskr.Handlers()).WithOutputChecks(true).Execute()
+	taskr.NewProgram().WithOutputChecks(true).Execute()
 }

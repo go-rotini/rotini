@@ -100,11 +100,16 @@ var InputSettings = rotini.InputSettings{
 	EnvPrefix: "DEMO",
 }
 
-// NewProgram builds the program from the generated command tree and handlers. Taking
-// ProgramHandlers makes the compiler check that every command has a handler. The switch finds
-// each command's handler without reflection, and the program links only the runtime features
-// the spec uses, which keeps the binary small.
-func NewProgram(handlers ProgramHandlers) *rotini.Program {
+// NewProgram builds the program from the generated command tree and handlers.
+func NewProgram() *rotini.Program {
+	return NewProgramWith(&handlers{})
+}
+
+// NewProgramWith builds the program with handlers in place of the generated ones, to swap or wrap
+// a command's handler: embed the set [Handlers] returns in a struct and override the methods to
+// replace. The switch finds each command's handler without reflection, and the program links
+// only the runtime features the spec uses, which keeps the binary small.
+func NewProgramWith(handlers ProgramHandlers) *rotini.Program {
 	return rotini.NewWiredProgram(definition, func(name string) (rotini.Handler, bool) {
 		switch name {
 		case "Demo":
@@ -128,7 +133,9 @@ type handlers struct{}
 
 var _ ProgramHandlers = (*handlers)(nil)
 
-// Handlers returns the generated ProgramHandlers, a new set on every call.
+// Handlers returns the generated ProgramHandlers, a new set on every call: what [NewProgram] uses,
+// what a set passed to [NewProgramWith] can embed, and how a spec that composes this one reaches
+// its handlers.
 func Handlers() ProgramHandlers {
 	return &handlers{}
 }
