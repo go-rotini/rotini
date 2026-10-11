@@ -20,7 +20,7 @@ exists internal/cmd/demo/demo.go
 exists internal/cmd/demo/zz_rotini.go
 
 # main.go builds the program itself rather than using a shared package variable.
-grep 'cmd\.NewProgram\(cmd\.Handlers\(\)\)' cmd/demo/main.go
+grep 'cmd\.NewProgram\(\)' cmd/demo/main.go
 
 exec go mod tidy
 exec go build -o demo$exe ./cmd/demo
