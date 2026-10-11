@@ -2,6 +2,8 @@
 # filter stays under 50 MB of resident memory.
 
 [!unix] skip 'peak memory is measured on unix'
+# Linux counts the parent's peak in a child's, and the race detector makes this test process big.
+[race] skip 'peak memory is not measured under the race detector'
 
 gomodinit example.com/count
 

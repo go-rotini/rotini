@@ -129,8 +129,11 @@ func TestScripts(t *testing.T) {
 			return nil
 		},
 		Condition: func(cond string) (bool, error) {
-			if cond == "pinnedgo" {
+			switch cond {
+			case "pinnedgo":
 				return pinnedToolchain(root)
+			case "race":
+				return raceEnabled, nil
 			}
 			return false, fmt.Errorf("unknown condition %q", cond)
 		},
