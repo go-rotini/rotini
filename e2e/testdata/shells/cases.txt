@@ -1,0 +1,27 @@
+# Each case is a name, a tab, and a command line; the | marks the cursor, which is always at the
+# end (a trailing space would not survive an editor). A third field, unordered, marks a case
+# whose candidates a shell reads from a directory, in the file system's order; the test sorts
+# them. Every shell's driver completes every case, and want/<shell>.txt holds what each one
+# offered.
+commands	app |
+command-prefix	app re|
+flags	app -|
+flag-set-left-out	app --format json --|
+negated	app --no-|
+enum-declared-order	app --level |
+enum	app --format |
+enum-inline	app --format=|
+file-extensions	app --config |	unordered
+directory	app --dir |	unordered
+none-with-message	app --token |
+executable	app --exec rotini-|
+user	app --user rotini|
+group	app --group rotini|
+host	app --host rotini-|
+map-keys	app --set |
+help-command	app help |
+help-command-deep	app help remote |
+completer	app deploy |
+required-first	app deploy -|
+group-left-out	app deploy --quiet -|
+sub-command-enum	app deploy --env |

@@ -1,0 +1,111 @@
+== commands
+deploy	deploy a service
+help	print help
+remote	manage remotes
+status	show status
+== command-prefix
+remote	manage remotes
+== flags
+--color	colorize output
+--config	config file
+--dir	work directory
+--exec	program to run
+--format	output format
+--group	group to run as
+--host	host to reach
+--level	how much to say
+--no-color	
+--set	override a setting
+--token	API token
+--user	account to run as
+== flag-set-left-out
+--color	colorize output
+--config	config file
+--dir	work directory
+--exec	program to run
+--group	group to run as
+--host	host to reach
+--level	how much to say
+--no-color	
+--set	override a setting
+--token	API token
+--user	account to run as
+== negated
+--no-color	
+== enum-declared-order
+medium	the default
+low	quiet
+high	loud
+== enum
+json	
+text	
+yaml	
+== enum-inline
+--format=json	
+--format=text	
+--format=yaml	
+== file-extensions
+a.yaml	
+b.yml	
+bin/	
+drivers/	
+src/	
+sub/	
+== directory
+bin/	
+drivers/	
+src/	
+sub/	
+== none-with-message
+== executable
+== user
+== group
+== host
+== map-keys
+image=	
+replicas=	
+== help-command
+deploy	deploy a service
+help	print help
+remote	manage remotes
+status	show status
+== help-command-deep
+add	add a remote
+remove	remove a remote
+== completer
+web	the web tier
+api	the public API
+db	the database
+== required-first
+--env	target environment
+--color	colorize output
+--config	config file
+--dir	work directory
+--exec	program to run
+--format	output format
+--group	group to run as
+--host	host to reach
+--level	how much to say
+--no-color	
+--quiet	say nothing
+--set	override a setting
+--token	API token
+--user	account to run as
+--verbose	say everything
+== group-left-out
+--env	target environment
+--color	colorize output
+--config	config file
+--dir	work directory
+--exec	program to run
+--format	output format
+--group	group to run as
+--host	host to reach
+--level	how much to say
+--no-color	
+--set	override a setting
+--token	API token
+--user	account to run as
+== sub-command-enum
+dev	
+prod	

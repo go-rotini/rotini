@@ -114,6 +114,25 @@ func TestComplete_negatedFormsOffered(t *testing.T) {
 	}
 }
 
+// TestComplete_negatedFormsUndescribed pins that the flag's summary goes on its declared
+// identifiers only: it describes the flag, and the negated form sets it false.
+func TestComplete_negatedFormsUndescribed(t *testing.T) {
+	for _, tc := range []struct {
+		flag FlagDef
+		want []string
+	}{
+		{FlagDef{Name: "color", Identifiers: []string{"--color"}, Type: "bool", Negatable: true, Summary: "colorize output"},
+			[]string{"--color\tcolorize output", "--no-color"}},
+		{FlagDef{Name: "color", Identifiers: []string{"--color"}, Type: "bool", Negatable: true, Negation: "--plain", Summary: "colorize output"},
+			[]string{"--color\tcolorize output", "--plain"}},
+	} {
+		def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{tc.flag}}
+		if got := complete(def, []string{"--"}, nil, nil); !slices.Equal(got, tc.want) {
+			t.Errorf("negation %q: -- = %q, want %q", tc.flag.Negation, got, tc.want)
+		}
+	}
+}
+
 // groupsDef has an exclusive pair, a one_of group, a required flag, a required_together pair
 // and a dependency.
 func groupsDef() Definition {

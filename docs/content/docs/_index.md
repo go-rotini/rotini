@@ -2914,7 +2914,8 @@ still take:
   are left out, and so are the flags a set flag forbids in `flag_dependencies`. Required flags not
   yet set come first, including those a group or a `flag_dependencies` entry requires.
 - **Deprecated** flags, identifiers, commands and aliases are left out. They still work when typed.
-- **Negatable flags** offer their `--no-` form.
+- **Negatable flags** offer their `--no-` form, without the flag's summary, which describes
+  setting it.
 - **Enum values** come in the order the spec declares them, each with its summary.
 - **Map keys** (`--set image=`) are completed up to the `=`, with no space after it, so the user
   types the value straight on. macOS's bash 3.2 still adds the space.
