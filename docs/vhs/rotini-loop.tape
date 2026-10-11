@@ -38,10 +38,13 @@ Type `export XDG_CONFIG_HOME="$DEMO/xdg" XDG_DATA_HOME="$ROTINI_DEMO_WORK/xdg/da
 Type `export GOBIN="$ROTINI_DEMO_WORK/bin" && export PATH="$GOBIN:$PATH"` Enter
 # Build the rotini tool once so `go tool rotini init` answers at its real speed, then empty the
 # throwaway download cache so the `go get` on camera still downloads.
-Type `( w=$(mktemp -d) && cd $w && go mod init warm && go get -tool github.com/go-rotini/rotini/cmd/rotini@latest && go tool rotini version ) >/dev/null 2>&1; [ "$GOMODCACHE" = "$ROTINI_DEMO_WORK/modcache" ] && go clean -modcache; echo ready` Enter
-Wait+Screen@300s /ready/
-Type `bash "$DEMO/start-tmux.sh"` Enter
-Sleep 2s
+# The marker is printed as setup-$((1+1)), so only the output, not the typed command, matches.
+Type `( w=$(mktemp -d) && cd $w && go mod init warm && go get -tool github.com/go-rotini/rotini/cmd/rotini@latest && go tool rotini version ) >/dev/null 2>&1; [ "$GOMODCACHE" = "$ROTINI_DEMO_WORK/modcache" ] && go clean -modcache; echo setup-$((1+1))` Enter
+Wait+Screen@300s /setup-2/
+Type `clear && bash "$DEMO/start-tmux.sh"` Enter
+# Show once tmux has drawn its split, so no setup line is ever on camera.
+Wait+Screen@30s /│/
+Sleep 1s
 Show
 
 # 1. Set up, in the left pane.
