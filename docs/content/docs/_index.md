@@ -130,9 +130,10 @@ Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst 
 
 ### Importing a Cobra CLI
 
-An existing Cobra program can start its spec for you; Cobra is the one framework `rotini import`
-reads today. Point `rotini import cobra` at the package that builds the command tree, usually the
-one declaring `rootCmd`:
+An existing Cobra program can start its spec for you (`rotini import` also reads
+[Kong](#importing-a-kong-cli) and [urfave/cli](#importing-a-urfavecli-cli) programs). Point
+`rotini import cobra` at the package that builds the command tree, usually the one declaring
+`rootCmd`:
 
 {{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
 go tool rotini import cobra ./cmd
@@ -193,6 +194,79 @@ or a plugin loader) aren't in the tree, so they aren't imported. Neither are vip
 declare `variable:` and `key:` on the inputs, `env_prefix`, and `config_files` with `discover`.
 The import runs the package's `init` functions, as its tests do, and fails with an explanation
 when one calls `flag.Parse`. See [the companion CLI](/cli#rotini-import) for its flags.
+
+### Importing a Kong CLI
+
+`rotini import kong` reads the model Kong builds from a program's grammar struct. Point it at the
+package that declares the grammar; it finds a package-level `var CLI struct{…}` (giving `&CLI`)
+or a grammar type named like `CLI` (giving `&CLI{}`), and `--root` names any other expression
+that yields a pointer to the grammar:
+
+{{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
+go tool rotini import kong --name acme --var version=1.4.2 ./cmd/acme
+{{< /code >}}
+
+Kong names a program after the binary it runs as, so the CLI takes its name from `--name`, else
+from the last element of the package's import path. Pass each variable the program gives
+`kong.Vars` with `--var name=value`: a `${name}` left out is reported, help keeps it as written,
+and a default, enum or environment variable built from it is dropped. Options the program passes
+to `kong.Parse` or `kong.New` in `main` (a description, configuration loaders, resolvers, mappers)
+aren't seen.
+
+| Kong | rotini spec |
+|---|---|
+| a `cmd:""` field, its `help`, `aliases`, `hidden`, `group`; a `Help()` method | a command with `summary`, `aliases`, `hidden`, `group`; `description` |
+| `passthrough:""` on a command | `passthrough: true` |
+| a flag's `short`, `name` and `aliases` | `identifiers` |
+| `env` | `variable` |
+| `required`, `default`, `enum`, `placeholder`, `negatable` | `required`, `default`, `enum`, `placeholder`, `negatable` |
+| Go field types, `type:"counter"`, `type:"existingfile"`, `type:"existingdir"`, `*os.File` | `type`, `count`, `existingfile`, `existingdir`, `inputfile` |
+| `sep`, `mapsep` | `separator` |
+| `xor`, `and` | `flag_groups` kinds `mutually_exclusive` (`one_of` when its flags are required), `required_together` |
+| `arg:""` fields | `arguments`; a slice is variadic, and `passthrough:""` makes it a passthrough argument |
+| flags of a command with sub-commands | flags with `cascading: true` |
+| `--help`, `kong.VersionFlag` | the seeded help and version flags |
+| `Run`, `BeforeApply`, `AfterApply`, `AfterRun` and the other hooks | hook pointers to `Run`, and to `CascadingPreRun`/`CascadingPostRun` on a command with sub-commands, else `PreRun`/`PostRun` |
+
+Kong has no help or completion command, so none is seeded. A default command (`default:"1"`) is
+dropped, and a branching argument becomes a command; each is noted. `type:"path"` imports as a
+string with a file hint, and a custom mapper as a string, both with a note.
+
+### Importing a urfave/cli CLI
+
+`rotini import urfave` reads a urfave/cli v3 command tree. Point it at the package that builds
+the root `*cli.Command`; it finds a package-level command variable that no other command lists,
+or a function such as `newApp()` that returns the root. A tree built inside `main` needs moving
+into such a function, or `--root` naming an expression that yields it:
+
+{{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
+go tool rotini import urfave --root 'buildApp(nil)' ./cmd/tasks
+{{< /code >}}
+
+The CLI takes the root command's `Name`, else `--name`, else the last element of the package's
+import path. urfave/cli adds its help command, help and version flags and completion command only
+while running, so the import adds them in the shape `rotini init` seeds.
+
+| urfave/cli | rotini spec |
+|---|---|
+| `Name`, `Aliases`, `Usage`, `Description`, `Category`, `Hidden`, `Deprecated` | `name`, `aliases`, `summary`, `description`, `group`, `hidden`, `deprecated` |
+| a flag's `Name` and `Aliases`; `Usage` with a back-quoted word; `Category` | `identifiers`; `summary` with that word as the `placeholder`; the flag's `group` |
+| flag types, `Value`, `Required`, `Hidden`, `Config.Count` | `type`, `default`, `required`, `hidden`, `count` |
+| a flag that isn't `Local`, on a command with sub-commands | `cascading: true` |
+| `Sources: cli.EnvVars(…)` | `variable` |
+| `TakesFile` | `complete: {kind: file}` |
+| `BoolWithInverseFlag` | `negatable` |
+| `OnlyOnce` | `repeatable: false` |
+| `MutuallyExclusiveFlags` | `flag_groups` kind `mutually_exclusive`, or `one_of` when `Required` |
+| `Arguments`, or the names in `ArgsUsage` | `arguments` with their counts |
+| `SkipFlagParsing`; `StopOnNthArg` | `passthrough: true`; `options_first: true` (1) or a passthrough argument |
+| `Before`, `Action`, `After` | hook pointers to `CascadingPreRun`, `Run`, `CascadingPostRun` |
+| the help command and flags, the version flag, `EnableShellCompletion` | the seeded help command (with its `h` alias) and flags; a hidden `completion` command taking the shell, with the completion feature on |
+
+A command with no `Arguments` accepts any positionals, so it imports with a trailing `args` list;
+`--strict` leaves that out and keeps only the arguments its `ArgsUsage` names. `DefaultCommand`,
+`PrefixMatchCommands` and `Suggest` are dropped, and `ShellComplete`, a flag's `Action` or
+`Validator`, and file sources are noted for porting.
 
 ## Commands, flags and arguments
 

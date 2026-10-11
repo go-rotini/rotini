@@ -319,13 +319,13 @@ func TestExplainTestFailure(t *testing.T) {
 		"some compile error":                                                               "the import failed: exit status 1\nsome compile error",
 	}
 	for output, want := range cases {
-		if err := explainTestFailure(ctx, fail, output); err == nil || !strings.Contains(err.Error(), want) {
+		if err := explainTestFailure(ctx, "cobra", fail, output); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("explainTestFailure(%q) = %v, want it to contain %q", output, err, want)
 		}
 	}
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	if err := explainTestFailure(canceled, fail, ""); err == nil || !strings.Contains(err.Error(), "import stopped") {
+	if err := explainTestFailure(canceled, "cobra", fail, ""); err == nil || !strings.Contains(err.Error(), "import stopped") {
 		t.Errorf("canceled: %v", err)
 	}
 }

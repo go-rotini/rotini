@@ -20,6 +20,8 @@ type ProgramHandlers interface {
 	RotiniHelp() rotini.Handler
 	RotiniImport() rotini.Handler
 	RotiniImportCobra() rotini.Handler
+	RotiniImportKong() rotini.Handler
+	RotiniImportUrfave() rotini.Handler
 	RotiniInitialize() rotini.Handler
 	RotiniMan() rotini.Handler
 	RotiniTree() rotini.Handler
@@ -69,12 +71,12 @@ var definition = rotini.Definition{
 					Flags: []rotini.FlagDef{
 						{Name: "root", Identifiers: []string{"--root"}, Summary: "a Go expression, evaluated in the package, that yields a command of the tree", Type: "string", Complete: rotini.Completion{Message: "--root EXPR: a Go expression, evaluated in the package, that yields a command of the tree"}},
 						{Name: "name", Identifiers: []string{"--name"}, Summary: "the CLI's name (default the program's root command name)", Type: "string", Complete: rotini.Completion{Message: "--name string: the CLI's name (default the program's root command name)"}},
-						{Name: "dir", Identifiers: []string{"--dir"}, Summary: "the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)", Type: "string", Complete: rotini.Completion{Message: "--dir string: the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)"}},
 						{Name: "strict", Identifiers: []string{"--strict"}, Summary: "give a command with no argument rule only the arguments its usage line names, not any number more", Type: "bool"},
+						{Name: "dir", Identifiers: []string{"--dir"}, Summary: "the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)", Type: "string", Complete: rotini.Completion{Message: "--dir string: the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)"}},
 						{Name: "format", Identifiers: []string{"--format"}, Summary: "the created rotini spec file format", Type: "string", Default: "yaml", Enum: []string{"yaml", "yml", "json", "jsonc", "toml"}, Complete: rotini.Completion{Message: "--format string: the created rotini spec file format"}},
 						{Name: "tags", Identifiers: []string{"--tags"}, Summary: "build tags for go test, comma separated", Type: "string", Complete: rotini.Completion{Message: "--tags string: build tags for go test, comma separated"}},
 						{Name: "timeout", Identifiers: []string{"--timeout"}, Summary: "how long the import's go test may run", Type: "time.Duration", Default: "2m", Complete: rotini.Completion{Message: "--timeout duration: how long the import's go test may run"}},
-						{Name: "importer_version", Identifiers: []string{"--importer-version"}, Summary: "the github.com/go-rotini/import version to run (default v0.1.0), or the path of a local checkout", Type: "string", Complete: rotini.Completion{Message: "--importer-version string: the github.com/go-rotini/import version to run (default v0.1.0), or the path of a local checkout"}},
+						{Name: "importer_version", Identifiers: []string{"--importer-version"}, Summary: "the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout", Type: "string", Complete: rotini.Completion{Message: "--importer-version string: the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout"}},
 						{Name: "force", Identifiers: []string{"--force"}, Summary: "replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate", Type: "bool"},
 						{Name: "dry-run", Identifiers: []string{"-n", "--dry-run"}, Summary: "show what the import would write, and change nothing", Type: "bool", Negatable: true},
 					},
@@ -83,6 +85,48 @@ var definition = rotini.Definition{
 					},
 					Inputs: reflect.TypeFor[RotiniImportCobraInputs](),
 					Usage:  "rotini import cobra [flags] <package>",
+				},
+				{Name: "kong",
+					Handler: "RotiniImportKong",
+					Summary: "import a Kong program",
+					Flags: []rotini.FlagDef{
+						{Name: "root", Identifiers: []string{"--root"}, Summary: "a Go expression, evaluated in the package, that yields a pointer to the grammar", Type: "string", Complete: rotini.Completion{Message: "--root EXPR: a Go expression, evaluated in the package, that yields a pointer to the grammar"}},
+						{Name: "name", Identifiers: []string{"--name"}, Summary: "the CLI's name (default the last element of the package's import path)", Type: "string", Complete: rotini.Completion{Message: "--name string: the CLI's name (default the last element of the package's import path)"}},
+						{Name: "var", Identifiers: []string{"--var"}, Summary: "a variable the program passes to kong.Vars, as name=value", Type: "map[string]string", Complete: rotini.Completion{Message: "--var NAME=VALUE: a variable the program passes to kong.Vars, as name=value"}},
+						{Name: "dir", Identifiers: []string{"--dir"}, Summary: "the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)", Type: "string", Complete: rotini.Completion{Message: "--dir string: the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)"}},
+						{Name: "format", Identifiers: []string{"--format"}, Summary: "the created rotini spec file format", Type: "string", Default: "yaml", Enum: []string{"yaml", "yml", "json", "jsonc", "toml"}, Complete: rotini.Completion{Message: "--format string: the created rotini spec file format"}},
+						{Name: "tags", Identifiers: []string{"--tags"}, Summary: "build tags for go test, comma separated", Type: "string", Complete: rotini.Completion{Message: "--tags string: build tags for go test, comma separated"}},
+						{Name: "timeout", Identifiers: []string{"--timeout"}, Summary: "how long the import's go test may run", Type: "time.Duration", Default: "2m", Complete: rotini.Completion{Message: "--timeout duration: how long the import's go test may run"}},
+						{Name: "importer_version", Identifiers: []string{"--importer-version"}, Summary: "the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout", Type: "string", Complete: rotini.Completion{Message: "--importer-version string: the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout"}},
+						{Name: "force", Identifiers: []string{"--force"}, Summary: "replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate", Type: "bool"},
+						{Name: "dry-run", Identifiers: []string{"-n", "--dry-run"}, Summary: "show what the import would write, and change nothing", Type: "bool", Negatable: true},
+					},
+					Arguments: []rotini.ArgDef{
+						{Name: "package", Type: "string", Required: true, Complete: rotini.Completion{Message: "<package>: the Go package that declares the grammar, such as ./cmd/acme"}},
+					},
+					Inputs: reflect.TypeFor[RotiniImportKongInputs](),
+					Usage:  "rotini import kong [flags] <package>",
+				},
+				{Name: "urfave",
+					Handler: "RotiniImportUrfave",
+					Summary: "import a urfave/cli v3 program",
+					Flags: []rotini.FlagDef{
+						{Name: "root", Identifiers: []string{"--root"}, Summary: "a Go expression, evaluated in the package, that yields the root command", Type: "string", Complete: rotini.Completion{Message: "--root EXPR: a Go expression, evaluated in the package, that yields the root command"}},
+						{Name: "name", Identifiers: []string{"--name"}, Summary: "the CLI's name (default the root command's name, else the last element of the package's import path)", Type: "string", Complete: rotini.Completion{Message: "--name string: the CLI's name (default the root command's name, else the last element of the package's import path)"}},
+						{Name: "strict", Identifiers: []string{"--strict"}, Summary: "give a command with no arguments declared only the arguments its usage text names, not any number more", Type: "bool"},
+						{Name: "dir", Identifiers: []string{"--dir"}, Summary: "the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)", Type: "string", Complete: rotini.Completion{Message: "--dir string: the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)"}},
+						{Name: "format", Identifiers: []string{"--format"}, Summary: "the created rotini spec file format", Type: "string", Default: "yaml", Enum: []string{"yaml", "yml", "json", "jsonc", "toml"}, Complete: rotini.Completion{Message: "--format string: the created rotini spec file format"}},
+						{Name: "tags", Identifiers: []string{"--tags"}, Summary: "build tags for go test, comma separated", Type: "string", Complete: rotini.Completion{Message: "--tags string: build tags for go test, comma separated"}},
+						{Name: "timeout", Identifiers: []string{"--timeout"}, Summary: "how long the import's go test may run", Type: "time.Duration", Default: "2m", Complete: rotini.Completion{Message: "--timeout duration: how long the import's go test may run"}},
+						{Name: "importer_version", Identifiers: []string{"--importer-version"}, Summary: "the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout", Type: "string", Complete: rotini.Completion{Message: "--importer-version string: the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout"}},
+						{Name: "force", Identifiers: []string{"--force"}, Summary: "replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate", Type: "bool"},
+						{Name: "dry-run", Identifiers: []string{"-n", "--dry-run"}, Summary: "show what the import would write, and change nothing", Type: "bool", Negatable: true},
+					},
+					Arguments: []rotini.ArgDef{
+						{Name: "package", Type: "string", Required: true, Complete: rotini.Completion{Message: "<package>: the Go package that builds the command tree, such as ./cmd/acme"}},
+					},
+					Inputs: reflect.TypeFor[RotiniImportUrfaveInputs](),
+					Usage:  "rotini import urfave [flags] <package>",
 				},
 			},
 		},
@@ -217,6 +261,16 @@ var definition = rotini.Definition{
 		},
 	},
 	CompletionMessages: &rotini.CompletionMessagesDef{Env: "ROTINI_COMPLETION_MESSAGES"},
+}
+
+type RotiniImportFlagSet struct {
+	Dir             string        `rotini:"dir"`
+	Format          string        `rotini:"format"`
+	Tags            string        `rotini:"tags"`
+	Timeout         time.Duration `rotini:"timeout"`
+	ImporterVersion string        `rotini:"importer_version"`
+	Force           bool          `rotini:"force"`
+	DryRun          bool          `rotini:"dry-run"`
 }
 
 type RotiniFlags struct {
@@ -360,16 +414,10 @@ type RotiniImportInputs struct {
 }
 
 type RotiniImportCobraFlags struct {
-	Root            string        `rotini:"root"`
-	Name            string        `rotini:"name"`
-	Dir             string        `rotini:"dir"`
-	Strict          bool          `rotini:"strict"`
-	Format          string        `rotini:"format"`
-	Tags            string        `rotini:"tags"`
-	Timeout         time.Duration `rotini:"timeout"`
-	ImporterVersion string        `rotini:"importer_version"`
-	Force           bool          `rotini:"force"`
-	DryRun          bool          `rotini:"dry-run"`
+	Root   string `rotini:"root"`
+	Name   string `rotini:"name"`
+	Strict bool   `rotini:"strict"`
+	RotiniImportFlagSet
 }
 
 type RotiniImportCobraArguments struct {
@@ -385,6 +433,50 @@ type RotiniImportCobraInputs struct {
 	Rotini            RotiniCommandInputs
 	RotiniImport      RotiniImportCommandInputs
 	RotiniImportCobra RotiniImportCobraCommandInputs
+}
+
+type RotiniImportKongFlags struct {
+	Root string            `rotini:"root"`
+	Name string            `rotini:"name"`
+	Var  map[string]string `rotini:"var"`
+	RotiniImportFlagSet
+}
+
+type RotiniImportKongArguments struct {
+	Package string `rotini:"package"`
+}
+
+type RotiniImportKongCommandInputs struct {
+	Flags     RotiniImportKongFlags
+	Arguments RotiniImportKongArguments
+}
+
+type RotiniImportKongInputs struct {
+	Rotini           RotiniCommandInputs
+	RotiniImport     RotiniImportCommandInputs
+	RotiniImportKong RotiniImportKongCommandInputs
+}
+
+type RotiniImportUrfaveFlags struct {
+	Root   string `rotini:"root"`
+	Name   string `rotini:"name"`
+	Strict bool   `rotini:"strict"`
+	RotiniImportFlagSet
+}
+
+type RotiniImportUrfaveArguments struct {
+	Package string `rotini:"package"`
+}
+
+type RotiniImportUrfaveCommandInputs struct {
+	Flags     RotiniImportUrfaveFlags
+	Arguments RotiniImportUrfaveArguments
+}
+
+type RotiniImportUrfaveInputs struct {
+	Rotini             RotiniCommandInputs
+	RotiniImport       RotiniImportCommandInputs
+	RotiniImportUrfave RotiniImportUrfaveCommandInputs
 }
 
 type RotiniInitializeFlags struct {
@@ -579,6 +671,10 @@ func Usage(path ...string) (string, error) {
 		return "rotini import <command>", nil
 	case "import cobra":
 		return "rotini import cobra [flags] <package>", nil
+	case "import kong":
+		return "rotini import kong [flags] <package>", nil
+	case "import urfave":
+		return "rotini import urfave [flags] <package>", nil
 	case "generate", "gen":
 		return "rotini generate [flags] [spec_file_path]", nil
 	case "validate", "val":
@@ -637,6 +733,10 @@ func NewProgramWith(handlers ProgramHandlers) *rotini.Program {
 			return handlers.RotiniImport(), true
 		case "RotiniImportCobra":
 			return handlers.RotiniImportCobra(), true
+		case "RotiniImportKong":
+			return handlers.RotiniImportKong(), true
+		case "RotiniImportUrfave":
+			return handlers.RotiniImportUrfave(), true
 		case "RotiniInitialize":
 			return handlers.RotiniInitialize(), true
 		case "RotiniMan":
@@ -705,6 +805,14 @@ func (*handlers) RotiniImportCobra() rotini.Handler {
 	return &rotiniImportCobraHandler{}
 }
 
+func (*handlers) RotiniImportKong() rotini.Handler {
+	return &rotiniImportKongHandler{}
+}
+
+func (*handlers) RotiniImportUrfave() rotini.Handler {
+	return &rotiniImportUrfaveHandler{}
+}
+
 func (*handlers) RotiniInitialize() rotini.Handler {
 	return &rotiniInitializeHandler{}
 }
@@ -729,9 +837,13 @@ var HelpRotini = "The companion CLI for Rotini, the spec-first Go CLI framework:
 
 var HelpRotiniInitialize = "Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize [flags] <name>\n\nArguments:\n  <name>    the root command name written to the created spec file (expected binary name)\n\nFlags:\n      --format string      the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --template string    start from a shape other than the plain seed [plugin|daemon|suite]\n                             plugin    a kubectl-style plugin named <host>-<plugin>, with completion through the host\n                             daemon    a long-running serve command that stops cleanly on a signal\n                             suite     two binaries composing one shared command from its own spec\n      --force              replace an existing spec and conf with the seed (never deletes a file)\n  -n, --[no-]dry-run       show what init would write, and change nothing\n\nGlobal Flags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n  rotini init mycli --dry-run\n  rotini init kubectl-hello --template plugin\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniImport = "Build a rotini spec, conf and handler stubs from an existing Go command-line program, read from the command tree it builds.\n\nUsage:\n  rotini import <command>\n\nCommands:\n  cobra    import a Cobra program\n\nGlobal Flags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini import cobra ./cmd\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniImport = "Build a rotini spec, conf and handler stubs from an existing Go command-line program, read from the command tree it builds.\n\nUsage:\n  rotini import <command>\n\nCommands:\n  cobra     import a Cobra program\n  kong      import a Kong program\n  urfave    import a urfave/cli v3 program\n\nGlobal Flags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini import cobra ./cmd\n  rotini import kong .\n  rotini import urfave ./cmd/acme\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniImportCobra = "Read the command tree a Cobra program builds in <package> and write a rotini spec and\nconf for it under cmd/<dir>, then generate, seeding handler stubs that match the\nimported spec. Anything that can't be carried across exactly is reported on stderr,\none line per item, and in comments in a YAML spec, with the file and line of each\nhook to port.\n\nThe import runs go test in the package with a test file added through -overlay and\nthe importer added to a temporary copy of go.mod, so the program's files and go.mod\nare left as they are. The package's init functions run, as they do in its tests. The\nroot is found from the package's code: a package-level command variable, or a root\nconstructor such as NewRootCmd(); --root names it otherwise.\n\nUsage:\n  rotini import cobra [flags] <package>\n\nArguments:\n  <package>    the Go package that builds the command tree, such as ./cmd\n\nFlags:\n      --root EXPR                  a Go expression, evaluated in the package, that yields a command of the tree\n      --name string                the CLI's name (default the program's root command name)\n      --dir string                 the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)\n      --strict                     give a command with no argument rule only the arguments its usage line names, not any number more\n      --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --tags string                build tags for go test, comma separated\n      --timeout duration           how long the import's go test may run (default 2m)\n      --importer-version string    the github.com/go-rotini/import version to run (default v0.1.0), or the path of a local checkout\n      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate\n  -n, --[no-]dry-run               show what the import would write, and change nothing\n\nGlobal Flags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini import cobra ./cmd\n  rotini import cobra --root 'cmds.New(false)' --name dlv ./pkg/terminal/cmds\n  rotini import cobra ./cmd --dir acme-rotini --strict\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniImportCobra = "Read the command tree a Cobra program builds in <package> and write a rotini spec and\nconf for it under cmd/<dir>, then generate, seeding handler stubs that match the\nimported spec. Anything that can't be carried across exactly is reported on stderr,\none line per item, and in comments in a YAML spec, with the file and line of each\nhook to port.\n\nThe import runs go test in the package with a test file added through -overlay and\nthe importer added to a temporary copy of go.mod, so the program's files and go.mod\nare left as they are. The package's init functions run, as they do in its tests. The\nroot is found from the package's code: a package-level command variable, or a root\nconstructor such as NewRootCmd(); --root names it otherwise.\n\nUsage:\n  rotini import cobra [flags] <package>\n\nArguments:\n  <package>    the Go package that builds the command tree, such as ./cmd\n\nFlags:\n      --root EXPR                  a Go expression, evaluated in the package, that yields a command of the tree\n      --name string                the CLI's name (default the program's root command name)\n      --strict                     give a command with no argument rule only the arguments its usage line names, not any number more\n      --dir string                 the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)\n      --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --tags string                build tags for go test, comma separated\n      --timeout duration           how long the import's go test may run (default 2m)\n      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout\n      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate\n  -n, --[no-]dry-run               show what the import would write, and change nothing\n\nGlobal Flags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini import cobra ./cmd\n  rotini import cobra --root 'cmds.New(false)' --name dlv ./pkg/terminal/cmds\n  rotini import cobra ./cmd --dir acme-rotini --strict\n\nUse \"rotini help <command>\" for more information about a command."
+
+var HelpRotiniImportKong = "Read the grammar a Kong program declares in <package> and write a rotini spec and\nconf for it under cmd/<dir>, then generate, seeding handler stubs that match the\nimported spec. Anything that can't be carried across exactly is reported on stderr,\none line per item, and in comments in a YAML spec, with the file and line of each\nhook to port.\n\nThe import runs go test in the package with a test file added through -overlay and\nthe importer added to a temporary copy of go.mod, so the program's files and go.mod\nare left as they are. The package's init functions run, as they do in its tests. The\ngrammar is found from the package's code: a package-level grammar variable such as\nvar CLI struct{...}, or a grammar type such as CLI; --root names it otherwise. The\nvariables the program passes to kong.Vars are given with --var; a variable left out\nis reported, and what was built from it is dropped.\n\nUsage:\n  rotini import kong [flags] <package>\n\nArguments:\n  <package>    the Go package that declares the grammar, such as ./cmd/acme\n\nFlags:\n      --root EXPR                  a Go expression, evaluated in the package, that yields a pointer to the grammar\n      --name string                the CLI's name (default the last element of the package's import path)\n      --var NAME=VALUE             a variable the program passes to kong.Vars, as name=value (repeatable)\n      --dir string                 the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)\n      --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --tags string                build tags for go test, comma separated\n      --timeout duration           how long the import's go test may run (default 2m)\n      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout\n      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate\n  -n, --[no-]dry-run               show what the import would write, and change nothing\n\nGlobal Flags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini import kong .\n  rotini import kong --var version=1.0.0 --name acme ./cmd/acme\n  rotini import kong --root '&grammar' --dir acme-rotini ./cmd/acme\n\nUse \"rotini help <command>\" for more information about a command."
+
+var HelpRotiniImportUrfave = "Read the command tree a urfave/cli v3 program builds in <package> and write a rotini\nspec and conf for it under cmd/<dir>, then generate, seeding handler stubs that match\nthe imported spec. Anything that can't be carried across exactly is reported on\nstderr, one line per item, and in comments in a YAML spec, with the file and line of\neach hook to port.\n\nThe import runs go test in the package with a test file added through -overlay and\nthe importer added to a temporary copy of go.mod, so the program's files and go.mod\nare left as they are. The package's init functions run, as they do in its tests. The\nroot is found from the package's code: a package-level command variable that no other\ncommand lists, or a root constructor such as newApp(); --root names it otherwise.\n\nUsage:\n  rotini import urfave [flags] <package>\n\nArguments:\n  <package>    the Go package that builds the command tree, such as ./cmd/acme\n\nFlags:\n      --root EXPR                  a Go expression, evaluated in the package, that yields the root command\n      --name string                the CLI's name (default the root command's name, else the last element of the package's import path)\n      --strict                     give a command with no arguments declared only the arguments its usage text names, not any number more\n      --dir string                 the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)\n      --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --tags string                build tags for go test, comma separated\n      --timeout duration           how long the import's go test may run (default 2m)\n      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout\n      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate\n  -n, --[no-]dry-run               show what the import would write, and change nothing\n\nGlobal Flags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini import urfave ./cmd/acme\n  rotini import urfave --root 'buildApp(nil)' --name tasks ./cmd/tasks\n  rotini import urfave ./cmd/acme --dir acme-rotini --strict\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniGenerate = "Generate a cli program from a rotini spec file and its conf.\n\nUsage:\n  rotini generate [flags] [spec_file_path]\n\nArguments:\n  [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)\n\nFlags:\n  -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)\n  -w, --watch            watch the spec and conf for changes and re-generate\n  -n, --[no-]dry-run     show what would be written, created or removed, and change nothing; exits 2 when something would change\n\nGlobal Flags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini generate\n  rotini generate ./path/to/.rotini.spec.json --watch\n  rotini generate --dry-run\n\nUse \"rotini help <command>\" for more information about a command."
 
@@ -766,6 +878,10 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniImport, nil
 	case "import cobra":
 		return HelpRotiniImportCobra, nil
+	case "import kong":
+		return HelpRotiniImportKong, nil
+	case "import urfave":
+		return HelpRotiniImportUrfave, nil
 	case "generate", "gen":
 		return HelpRotiniGenerate, nil
 	case "validate", "val":
@@ -795,9 +911,13 @@ var ManRotini = ".TH \"ROTINI\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nr
 
 var ManRotiniInitialize = ".TH \"ROTINI\\-INITIALIZE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-initialize \\- scaffold a cli program\n.SH SYNOPSIS\n\\fBrotini initialize\\fR [flags] <name>\n.SH DESCRIPTION\nScaffold a new rotini cli \\[u2014] write the spec + conf, then run the first\ngenerate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n.SH ARGUMENTS\n.TP\n\\fI<name>\\fR\nthe root command name written to the created spec file (expected binary name)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-template\\fR \\fIstring\\fR\nstart from a shape other than the plain seed [plugin|daemon|suite]\n.RS\n.RS 2\n\\fBplugin\\fR \\- a kubectl\\-style plugin named <host>\\-<plugin>, with completion\nthrough the host\n.br\n\\fBdaemon\\fR \\- a long\\-running serve command that stops cleanly on a signal\n.br\n\\fBsuite\\fR \\- two binaries composing one shared command from its own spec\n.RE\n.RE\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf with the seed (never deletes a file)\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what init would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini initialize mycli\n.sp\nrotini init mycli \\-\\-format json\n.sp\nrotini init mycli \\-\\-force\n.sp\nrotini init mycli \\-\\-dry\\-run\n.sp\nrotini init kubectl\\-hello \\-\\-template plugin\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
-var ManRotiniImport = ".TH \"ROTINI\\-IMPORT\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-import \\- build a rotini spec from an existing cli\n.SH SYNOPSIS\n\\fBrotini import\\fR <command>\n.SH DESCRIPTION\nBuild a rotini spec, conf and handler stubs from an existing Go command\\-line\nprogram, read from the command tree it builds.\n.SH \"COMMANDS\"\n.TP\n\\fBcobra\\fR\nimport a Cobra program\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini import cobra ./cmd\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1), \\fBrotini\\-import\\-cobra\\fR(1)\n"
+var ManRotiniImport = ".TH \"ROTINI\\-IMPORT\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-import \\- build a rotini spec from an existing cli\n.SH SYNOPSIS\n\\fBrotini import\\fR <command>\n.SH DESCRIPTION\nBuild a rotini spec, conf and handler stubs from an existing Go command\\-line\nprogram, read from the command tree it builds.\n.SH \"COMMANDS\"\n.TP\n\\fBcobra\\fR\nimport a Cobra program\n.TP\n\\fBkong\\fR\nimport a Kong program\n.TP\n\\fBurfave\\fR\nimport a urfave/cli v3 program\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini import cobra ./cmd\n.sp\nrotini import kong .\n.sp\nrotini import urfave ./cmd/acme\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1), \\fBrotini\\-import\\-cobra\\fR(1), \\fBrotini\\-import\\-kong\\fR(1),\n\\fBrotini\\-import\\-urfave\\fR(1)\n"
 
-var ManRotiniImportCobra = ".TH \"ROTINI\\-IMPORT\\-COBRA\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-import\\-cobra \\- import a Cobra program\n.SH SYNOPSIS\n\\fBrotini import cobra\\fR [flags] <package>\n.SH DESCRIPTION\nRead the command tree a Cobra program builds in <package> and write a rotini\nspec and\nconf for it under cmd/<dir>, then generate, seeding handler stubs that match the\nimported spec. Anything that can\\(aqt be carried across exactly is reported on\nstderr,\none line per item, and in comments in a YAML spec, with the file and line of\neach\nhook to port.\n.PP\nThe import runs go test in the package with a test file added through \\-overlay\nand\nthe importer added to a temporary copy of go.mod, so the program\\(aqs files and\ngo.mod\nare left as they are. The package\\(aqs init functions run, as they do in its\ntests. The\nroot is found from the package\\(aqs code: a package\\-level command variable, or\na root\nconstructor such as NewRootCmd(); \\-\\-root names it otherwise.\n.SH ARGUMENTS\n.TP\n\\fI<package>\\fR\nthe Go package that builds the command tree, such as ./cmd\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-root\\fR \\fIEXPR\\fR\na Go expression, evaluated in the package, that yields a command of the tree\n.TP\n\\fB\\-\\-name\\fR \\fIstring\\fR\nthe CLI\\(aqs name (default the program\\(aqs root command name)\n.TP\n\\fB\\-\\-dir\\fR \\fIstring\\fR\nthe directory under cmd/ and internal/cmd/ to write to (default the CLI\\(aqs\nname)\n.TP\n\\fB\\-\\-strict\\fR\ngive a command with no argument rule only the arguments its usage line names,\nnot any number more\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-tags\\fR \\fIstring\\fR\nbuild tags for go test, comma separated\n.TP\n\\fB\\-\\-timeout\\fR \\fIduration\\fR\nhow long the import\\(aqs go test may run (default 2m)\n.TP\n\\fB\\-\\-importer\\-version\\fR \\fIstring\\fR\nthe github.com/go\\-rotini/import version to run (default v0.1.0), or the path of\na local checkout\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf, and write into an internal/cmd/<dir> rotini\ndidn\\(aqt generate\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what the import would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini import cobra ./cmd\n.sp\nrotini import cobra \\-\\-root \\(aqcmds.New(false)\\(aq \\-\\-name dlv ./pkg/terminal/cmds\n.sp\nrotini import cobra ./cmd \\-\\-dir acme\\-rotini \\-\\-strict\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-import\\fR(1)\n"
+var ManRotiniImportCobra = ".TH \"ROTINI\\-IMPORT\\-COBRA\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-import\\-cobra \\- import a Cobra program\n.SH SYNOPSIS\n\\fBrotini import cobra\\fR [flags] <package>\n.SH DESCRIPTION\nRead the command tree a Cobra program builds in <package> and write a rotini\nspec and\nconf for it under cmd/<dir>, then generate, seeding handler stubs that match the\nimported spec. Anything that can\\(aqt be carried across exactly is reported on\nstderr,\none line per item, and in comments in a YAML spec, with the file and line of\neach\nhook to port.\n.PP\nThe import runs go test in the package with a test file added through \\-overlay\nand\nthe importer added to a temporary copy of go.mod, so the program\\(aqs files and\ngo.mod\nare left as they are. The package\\(aqs init functions run, as they do in its\ntests. The\nroot is found from the package\\(aqs code: a package\\-level command variable, or\na root\nconstructor such as NewRootCmd(); \\-\\-root names it otherwise.\n.SH ARGUMENTS\n.TP\n\\fI<package>\\fR\nthe Go package that builds the command tree, such as ./cmd\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-root\\fR \\fIEXPR\\fR\na Go expression, evaluated in the package, that yields a command of the tree\n.TP\n\\fB\\-\\-name\\fR \\fIstring\\fR\nthe CLI\\(aqs name (default the program\\(aqs root command name)\n.TP\n\\fB\\-\\-strict\\fR\ngive a command with no argument rule only the arguments its usage line names,\nnot any number more\n.TP\n\\fB\\-\\-dir\\fR \\fIstring\\fR\nthe directory under cmd/ and internal/cmd/ to write to (default the CLI\\(aqs\nname)\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-tags\\fR \\fIstring\\fR\nbuild tags for go test, comma separated\n.TP\n\\fB\\-\\-timeout\\fR \\fIduration\\fR\nhow long the import\\(aqs go test may run (default 2m)\n.TP\n\\fB\\-\\-importer\\-version\\fR \\fIstring\\fR\nthe github.com/go\\-rotini/import version to run (default v0.2.0), or the path of\na local checkout\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf, and write into an internal/cmd/<dir> rotini\ndidn\\(aqt generate\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what the import would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini import cobra ./cmd\n.sp\nrotini import cobra \\-\\-root \\(aqcmds.New(false)\\(aq \\-\\-name dlv ./pkg/terminal/cmds\n.sp\nrotini import cobra ./cmd \\-\\-dir acme\\-rotini \\-\\-strict\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-import\\fR(1)\n"
+
+var ManRotiniImportKong = ".TH \"ROTINI\\-IMPORT\\-KONG\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-import\\-kong \\- import a Kong program\n.SH SYNOPSIS\n\\fBrotini import kong\\fR [flags] <package>\n.SH DESCRIPTION\nRead the grammar a Kong program declares in <package> and write a rotini spec\nand\nconf for it under cmd/<dir>, then generate, seeding handler stubs that match the\nimported spec. Anything that can\\(aqt be carried across exactly is reported on\nstderr,\none line per item, and in comments in a YAML spec, with the file and line of\neach\nhook to port.\n.PP\nThe import runs go test in the package with a test file added through \\-overlay\nand\nthe importer added to a temporary copy of go.mod, so the program\\(aqs files and\ngo.mod\nare left as they are. The package\\(aqs init functions run, as they do in its\ntests. The\ngrammar is found from the package\\(aqs code: a package\\-level grammar variable\nsuch as\nvar CLI struct{...}, or a grammar type such as CLI; \\-\\-root names it otherwise.\nThe\nvariables the program passes to kong.Vars are given with \\-\\-var; a variable\nleft out\nis reported, and what was built from it is dropped.\n.SH ARGUMENTS\n.TP\n\\fI<package>\\fR\nthe Go package that declares the grammar, such as ./cmd/acme\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-root\\fR \\fIEXPR\\fR\na Go expression, evaluated in the package, that yields a pointer to the grammar\n.TP\n\\fB\\-\\-name\\fR \\fIstring\\fR\nthe CLI\\(aqs name (default the last element of the package\\(aqs import path)\n.TP\n\\fB\\-\\-var\\fR \\fINAME=VALUE\\fR\na variable the program passes to kong.Vars, as name=value (repeatable)\n.br\nrepeatable\n.TP\n\\fB\\-\\-dir\\fR \\fIstring\\fR\nthe directory under cmd/ and internal/cmd/ to write to (default the CLI\\(aqs\nname)\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-tags\\fR \\fIstring\\fR\nbuild tags for go test, comma separated\n.TP\n\\fB\\-\\-timeout\\fR \\fIduration\\fR\nhow long the import\\(aqs go test may run (default 2m)\n.TP\n\\fB\\-\\-importer\\-version\\fR \\fIstring\\fR\nthe github.com/go\\-rotini/import version to run (default v0.2.0), or the path of\na local checkout\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf, and write into an internal/cmd/<dir> rotini\ndidn\\(aqt generate\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what the import would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini import kong .\n.sp\nrotini import kong \\-\\-var version=1.0.0 \\-\\-name acme ./cmd/acme\n.sp\nrotini import kong \\-\\-root \\(aq&grammar\\(aq \\-\\-dir acme\\-rotini ./cmd/acme\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-import\\fR(1)\n"
+
+var ManRotiniImportUrfave = ".TH \"ROTINI\\-IMPORT\\-URFAVE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-import\\-urfave \\- import a urfave/cli v3 program\n.SH SYNOPSIS\n\\fBrotini import urfave\\fR [flags] <package>\n.SH DESCRIPTION\nRead the command tree a urfave/cli v3 program builds in <package> and write a\nrotini\nspec and conf for it under cmd/<dir>, then generate, seeding handler stubs that\nmatch\nthe imported spec. Anything that can\\(aqt be carried across exactly is reported\non\nstderr, one line per item, and in comments in a YAML spec, with the file and\nline of\neach hook to port.\n.PP\nThe import runs go test in the package with a test file added through \\-overlay\nand\nthe importer added to a temporary copy of go.mod, so the program\\(aqs files and\ngo.mod\nare left as they are. The package\\(aqs init functions run, as they do in its\ntests. The\nroot is found from the package\\(aqs code: a package\\-level command variable that\nno other\ncommand lists, or a root constructor such as newApp(); \\-\\-root names it\notherwise.\n.SH ARGUMENTS\n.TP\n\\fI<package>\\fR\nthe Go package that builds the command tree, such as ./cmd/acme\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-root\\fR \\fIEXPR\\fR\na Go expression, evaluated in the package, that yields the root command\n.TP\n\\fB\\-\\-name\\fR \\fIstring\\fR\nthe CLI\\(aqs name (default the root command\\(aqs name, else the last element of\nthe package\\(aqs import path)\n.TP\n\\fB\\-\\-strict\\fR\ngive a command with no arguments declared only the arguments its usage text\nnames, not any number more\n.TP\n\\fB\\-\\-dir\\fR \\fIstring\\fR\nthe directory under cmd/ and internal/cmd/ to write to (default the CLI\\(aqs\nname)\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-tags\\fR \\fIstring\\fR\nbuild tags for go test, comma separated\n.TP\n\\fB\\-\\-timeout\\fR \\fIduration\\fR\nhow long the import\\(aqs go test may run (default 2m)\n.TP\n\\fB\\-\\-importer\\-version\\fR \\fIstring\\fR\nthe github.com/go\\-rotini/import version to run (default v0.2.0), or the path of\na local checkout\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf, and write into an internal/cmd/<dir> rotini\ndidn\\(aqt generate\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what the import would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini import urfave ./cmd/acme\n.sp\nrotini import urfave \\-\\-root \\(aqbuildApp(nil)\\(aq \\-\\-name tasks ./cmd/tasks\n.sp\nrotini import urfave ./cmd/acme \\-\\-dir acme\\-rotini \\-\\-strict\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-import\\fR(1)\n"
 
 var ManRotiniGenerate = ".TH \"ROTINI\\-GENERATE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-generate \\- generate a cli program\n.SH SYNOPSIS\n\\fBrotini generate\\fR [flags] [spec_file_path]\n.SH DESCRIPTION\nGenerate a cli program from a rotini spec file and its conf.\n.SH ARGUMENTS\n.TP\n\\fI[spec_file_path]\\fR\npath to the spec file (default the .rotini.spec.* in the working directory)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-c\\fR, \\fB\\-\\-config\\fR \\fIstring\\fR\npath to the rotini conf file (default the .rotini.conf.* beside the spec)\n.TP\n\\fB\\-w\\fR, \\fB\\-\\-watch\\fR\nwatch the spec and conf for changes and re\\-generate\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what would be written, created or removed, and change nothing; exits 2 when\nsomething would change\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-v\\fR, \\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini generate\n.sp\nrotini generate ./path/to/.rotini.spec.json \\-\\-watch\n.sp\nrotini generate \\-\\-dry\\-run\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
@@ -836,6 +956,10 @@ func Man(path ...string) (string, error) {
 		return ManRotiniImport, nil
 	case "import cobra":
 		return ManRotiniImportCobra, nil
+	case "import kong":
+		return ManRotiniImportKong, nil
+	case "import urfave":
+		return ManRotiniImportUrfave, nil
 	case "generate", "gen":
 		return ManRotiniGenerate, nil
 	case "validate", "val":
@@ -870,6 +994,8 @@ func ManPages() []rotini.Page {
 		{Name: "rotini-initialize", Path: []string{"initialize"}, Content: ManRotiniInitialize},
 		{Name: "rotini-import", Path: []string{"import"}, Content: ManRotiniImport},
 		{Name: "rotini-import-cobra", Path: []string{"import", "cobra"}, Content: ManRotiniImportCobra},
+		{Name: "rotini-import-kong", Path: []string{"import", "kong"}, Content: ManRotiniImportKong},
+		{Name: "rotini-import-urfave", Path: []string{"import", "urfave"}, Content: ManRotiniImportUrfave},
 		{Name: "rotini-generate", Path: []string{"generate"}, Content: ManRotiniGenerate},
 		{Name: "rotini-validate", Path: []string{"validate"}, Content: ManRotiniValidate},
 		{Name: "rotini-tree", Path: []string{"tree"}, Content: ManRotiniTree},

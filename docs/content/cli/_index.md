@@ -133,7 +133,9 @@ Builds a spec, conf and handlers from an existing Go command-line program. `roti
 reads the command tree a Cobra program builds and writes the spec and conf under `cmd/<dir>/`,
 then generates, the way `init` does, with a handler for each imported command. See
 [importing a Cobra CLI](/docs#importing-a-cobra-cli) for what carries across and how to finish
-the move.
+the move. `rotini import kong` and `rotini import urfave` do the same for a Kong grammar and a
+urfave/cli v3 command tree; see [importing a Kong CLI](/docs#importing-a-kong-cli) and
+[importing a urfave/cli CLI](/docs#importing-a-urfavecli-cli).
 
 The import runs `go test` in the program's package, with a test file added through `-overlay` and
 the importer (`github.com/go-rotini/import`) added to a temporary copy of `go.mod`. The program's
@@ -155,10 +157,13 @@ conf: cmd/acme/.rotini.conf.yaml
 {{< /code >}}
 
 The root is found from the package's code: a package-level `*cobra.Command` variable (any one
-works, since the import walks up to the root), else a function such as `NewRootCmd()`. `--root`
-takes any Go expression that yields a command, evaluated in the package, so it can name an
-unexported identifier. The import refuses to write over an existing spec, into an
-`internal/cmd/<dir>` it didn't generate, or beside the program's own `cmd/<dir>/main.go`; pass
+works, since the import walks up to the root), else a function such as `NewRootCmd()`. For Kong
+it is a package-level grammar variable such as `var CLI struct{…}`, else a grammar type such as
+`CLI`; for urfave/cli, a package-level `*cli.Command` variable that no other command lists, else a
+function such as `newApp()`. `--root` takes any Go expression that yields a command (a pointer to
+the grammar, for Kong), evaluated in the package, so it can name an unexported identifier. The
+import refuses to write over an existing spec, into an `internal/cmd/<dir>` it didn't generate,
+or beside the program's own `cmd/<dir>/main.go`; pass
 `--dir` to write the rotini CLI beside it. `--dry-run` reports what it would write, as `init`
 does. The import runs with `GOWORK=off`, so the package must build from its own module.
 
@@ -172,7 +177,9 @@ Usage:
   rotini import <command>
 
 Commands:
-  cobra    import a Cobra program
+  cobra     import a Cobra program
+  kong      import a Kong program
+  urfave    import a urfave/cli v3 program
 
 Global Flags:
   -v, --version    print version
@@ -180,6 +187,8 @@ Global Flags:
 
 Examples:
   rotini import cobra ./cmd
+  rotini import kong .
+  rotini import urfave ./cmd/acme
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
@@ -206,12 +215,12 @@ Arguments:
 Flags:
       --root EXPR                  a Go expression, evaluated in the package, that yields a command of the tree
       --name string                the CLI's name (default the program's root command name)
-      --dir string                 the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)
       --strict                     give a command with no argument rule only the arguments its usage line names, not any number more
+      --dir string                 the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.1.0), or the path of a local checkout
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
       --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
@@ -223,6 +232,94 @@ Examples:
   rotini import cobra ./cmd
   rotini import cobra --root 'cmds.New(false)' --name dlv ./pkg/terminal/cmds
   rotini import cobra ./cmd --dir acme-rotini --strict
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
+{{< code title="$ rotini help import kong" language="text" open="true" collapsible="false" copy="false" >}}
+Read the grammar a Kong program declares in <package> and write a rotini spec and
+conf for it under cmd/<dir>, then generate, seeding handler stubs that match the
+imported spec. Anything that can't be carried across exactly is reported on stderr,
+one line per item, and in comments in a YAML spec, with the file and line of each
+hook to port.
+
+The import runs go test in the package with a test file added through -overlay and
+the importer added to a temporary copy of go.mod, so the program's files and go.mod
+are left as they are. The package's init functions run, as they do in its tests. The
+grammar is found from the package's code: a package-level grammar variable such as
+var CLI struct{...}, or a grammar type such as CLI; --root names it otherwise. The
+variables the program passes to kong.Vars are given with --var; a variable left out
+is reported, and what was built from it is dropped.
+
+Usage:
+  rotini import kong [flags] <package>
+
+Arguments:
+  <package>    the Go package that declares the grammar, such as ./cmd/acme
+
+Flags:
+      --root EXPR                  a Go expression, evaluated in the package, that yields a pointer to the grammar
+      --name string                the CLI's name (default the last element of the package's import path)
+      --var NAME=VALUE             a variable the program passes to kong.Vars, as name=value (repeatable)
+      --dir string                 the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)
+      --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
+      --tags string                build tags for go test, comma separated
+      --timeout duration           how long the import's go test may run (default 2m)
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
+      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
+  -n, --[no-]dry-run               show what the import would write, and change nothing
+
+Global Flags:
+  -v, --version    print version
+  -h, --help       print help
+
+Examples:
+  rotini import kong .
+  rotini import kong --var version=1.0.0 --name acme ./cmd/acme
+  rotini import kong --root '&grammar' --dir acme-rotini ./cmd/acme
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
+{{< code title="$ rotini help import urfave" language="text" open="true" collapsible="false" copy="false" >}}
+Read the command tree a urfave/cli v3 program builds in <package> and write a rotini
+spec and conf for it under cmd/<dir>, then generate, seeding handler stubs that match
+the imported spec. Anything that can't be carried across exactly is reported on
+stderr, one line per item, and in comments in a YAML spec, with the file and line of
+each hook to port.
+
+The import runs go test in the package with a test file added through -overlay and
+the importer added to a temporary copy of go.mod, so the program's files and go.mod
+are left as they are. The package's init functions run, as they do in its tests. The
+root is found from the package's code: a package-level command variable that no other
+command lists, or a root constructor such as newApp(); --root names it otherwise.
+
+Usage:
+  rotini import urfave [flags] <package>
+
+Arguments:
+  <package>    the Go package that builds the command tree, such as ./cmd/acme
+
+Flags:
+      --root EXPR                  a Go expression, evaluated in the package, that yields the root command
+      --name string                the CLI's name (default the root command's name, else the last element of the package's import path)
+      --strict                     give a command with no arguments declared only the arguments its usage text names, not any number more
+      --dir string                 the directory under cmd/ and internal/cmd/ to write to (default the CLI's name)
+      --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
+      --tags string                build tags for go test, comma separated
+      --timeout duration           how long the import's go test may run (default 2m)
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
+      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
+  -n, --[no-]dry-run               show what the import would write, and change nothing
+
+Global Flags:
+  -v, --version    print version
+  -h, --help       print help
+
+Examples:
+  rotini import urfave ./cmd/acme
+  rotini import urfave --root 'buildApp(nil)' --name tasks ./cmd/tasks
+  rotini import urfave ./cmd/acme --dir acme-rotini --strict
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}

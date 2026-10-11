@@ -17,7 +17,7 @@ import (
 
 // ImporterVersion is the github.com/go-rotini/import release `rotini import` runs unless
 // --importer-version names another.
-const ImporterVersion = "v0.1.0"
+const ImporterVersion = "v0.2.0"
 
 // importerModule is the importer's module; each framework's importer is a package in it
 // (importerModule + "/cobra").
@@ -27,18 +27,18 @@ const importerModule = "github.com/go-rotini/import"
 // go test -overlay; nothing is written in the program's tree. It compiles into the package,
 // so the root expression may name unexported identifiers, and every name it declares or
 // imports carries a rotiniImport prefix so it can't collide with the package's own. The
-// verbs are the package name, the test name, the root expression and the strict option.
-const importTestTemplate = `package %s
+// verbs are the package name, the importer's package, the test name and the importer call.
+const importTestTemplate = `package %[1]s
 
 import (
 	rotiniimport "github.com/go-rotini/import"
-	rotiniimportcobra "github.com/go-rotini/import/cobra"
+	rotiniimport%[2]s "github.com/go-rotini/import/%[2]s"
 	rotiniimportos "os"
 	rotiniimporttesting "testing"
 )
 
-func %s(rotiniImportT *rotiniimporttesting.T) {
-	rotiniImportResult, rotiniImportErr := rotiniimportcobra.FromCobra((%s).Root(), rotiniimportcobra.Options{Strict: %t})
+func %[3]s(rotiniImportT *rotiniimporttesting.T) {
+	rotiniImportResult, rotiniImportErr := %[4]s
 	if rotiniImportErr != nil {
 		rotiniImportT.Fatal(rotiniImportErr)
 	}
@@ -53,6 +53,7 @@ type importRun struct {
 	ctx        context.Context
 	moduleRoot string
 	opts       ImportOptions
+	fw         importFramework
 	work       string // the temporary directory holding the modfile, overlay and output
 	modfile    string
 	workspace  bool // the environment names a go.work, which the run turns off
@@ -62,17 +63,21 @@ type importRun struct {
 var importRunner = runImporter
 
 // runImporter runs the importer over opts.Package and returns its description, plus info
-// notes about the run itself (the root it picked, a Cobra upgrade). The program's files and
-// go.mod are never written: the importer is added to a copy of go.mod in a temporary
+// notes about the run itself (the root it picked, a framework upgrade). The program's files
+// and go.mod are never written: the importer is added to a copy of go.mod in a temporary
 // directory, which is removed on every path.
 func runImporter(ctx context.Context, moduleRoot string, opts ImportOptions) (*importResult, []importNote, error) {
+	fw, err := frameworkFor(opts)
+	if err != nil {
+		return nil, nil, err
+	}
 	work, err := os.MkdirTemp("", "rotini-import-*")
 	if err != nil {
 		return nil, nil, fmt.Errorf("create a temporary directory: %w", err)
 	}
 	defer os.RemoveAll(work)
 
-	r := &importRun{ctx: ctx, moduleRoot: moduleRoot, opts: opts, work: work, modfile: filepath.Join(work, "import.mod")}
+	r := &importRun{ctx: ctx, moduleRoot: moduleRoot, opts: opts, fw: fw, work: work, modfile: filepath.Join(work, "import.mod")}
 	gowork := exec.CommandContext(ctx, "go", "env", "GOWORK")
 	if gw, err := gowork.Output(); err == nil {
 		v := strings.TrimSpace(string(gw))
@@ -83,25 +88,29 @@ func runImporter(ctx context.Context, moduleRoot string, opts ImportOptions) (*i
 	}
 
 	var notes []importNote
-	listed, err := r.goOutput("list", "-modfile="+r.modfile, "-mod=mod", "-f", "{{.Dir}}\n{{.Name}}", opts.Package)
+	listed, err := r.goOutput("list", "-modfile="+r.modfile, "-mod=mod", "-f", "{{.Dir}}\n{{.Name}}\n{{.ImportPath}}", opts.Package)
 	if err != nil {
 		return nil, nil, r.explainBuild(err)
 	}
-	pkgDir, pkgName, _ := strings.Cut(listed, "\n")
+	pkg := strings.SplitN(listed, "\n", 3)
+	if len(pkg) != 3 {
+		return nil, nil, fmt.Errorf("go list %s: unexpected output %q", opts.Package, listed)
+	}
+	pkgDir, pkgName, importPath := pkg[0], pkg[1], pkg[2]
 
 	root := opts.Root
 	if root == "" {
 		var how string
-		if root, how, err = findImportRoot(pkgDir); err != nil {
+		if root, how, err = fw.findRoot(pkgDir); err != nil {
 			return nil, nil, err
 		}
 		notes = append(notes, importNote{Level: "info", Msg: fmt.Sprintf("the root is %s (%s); pass --root to choose another", root, how)})
 	}
-	if n, ok := r.cobraUpgrade(); ok {
+	if n, ok := r.frameworkUpgrade(); ok {
 		notes = append(notes, n)
 	}
 
-	res, err := r.runTest(pkgDir, pkgName, root)
+	res, err := r.runTest(pkgDir, pkgName, fw.call(root, opts, binaryName(importPath)))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -162,32 +171,31 @@ func localImporter(v string) string {
 	return ""
 }
 
-// cobraUpgrade reports, as an info note, when adding the importer raised the program's
-// Cobra version.
-func (r *importRun) cobraUpgrade() (importNote, bool) {
-	const cobra = "github.com/spf13/cobra"
-	before, err := r.goOutput("list", "-m", "-modfile="+filepath.Join(r.work, "orig.mod"), "-mod=mod", "-f", "{{.Version}}", cobra)
+// frameworkUpgrade reports, as an info note, when adding the importer raised the version of
+// the program's framework.
+func (r *importRun) frameworkUpgrade() (importNote, bool) {
+	before, err := r.goOutput("list", "-m", "-modfile="+filepath.Join(r.work, "orig.mod"), "-mod=mod", "-f", "{{.Version}}", r.fw.module)
 	if err != nil {
 		return importNote{}, false
 	}
-	after, err := r.goOutput("list", "-m", "-modfile="+r.modfile, "-mod=mod", "-f", "{{.Version}}", cobra)
+	after, err := r.goOutput("list", "-m", "-modfile="+r.modfile, "-mod=mod", "-f", "{{.Version}}", r.fw.module)
 	if err != nil || after == before {
 		return importNote{}, false
 	}
-	return importNote{Level: "info", Msg: fmt.Sprintf("cobra upgraded from %s to %s for the import; the tree may differ", before, after)}, true
+	return importNote{Level: "info", Msg: fmt.Sprintf("%s upgraded from %s to %s for the import; the tree may differ", r.fw.label, before, after)}, true
 }
 
-// runTest adds the import test to the package through an overlay, with the package's own
-// test files blanked (their tests, TestMain and compile errors stay out), runs it, and reads
-// the description it writes.
-func (r *importRun) runTest(pkgDir, pkgName, root string) (*importResult, error) {
+// runTest adds the import test, which runs call, to the package through an overlay, with
+// the package's own test files blanked (their tests, TestMain and compile errors stay out),
+// runs it, and reads the description it writes.
+func (r *importRun) runTest(pkgDir, pkgName, call string) (*importResult, error) {
 	suffix := make([]byte, 4)
 	if _, err := rand.Read(suffix); err != nil {
 		return nil, fmt.Errorf("prepare the import test: %w", err)
 	}
 	testName := "TestRotiniImport_" + hex.EncodeToString(suffix)
 	testFile := filepath.Join(r.work, "zz_rotini_import_test.go")
-	src := fmt.Sprintf(importTestTemplate, pkgName, testName, root, r.opts.Strict)
+	src := fmt.Sprintf(importTestTemplate, pkgName, r.fw.pkg, testName, call)
 	if err := os.WriteFile(testFile, []byte(src), 0o600); err != nil {
 		return nil, fmt.Errorf("prepare the import test: %w", err)
 	}
@@ -221,7 +229,15 @@ func (r *importRun) runTest(pkgDir, pkgName, root string) (*importResult, error)
 	args = append(args, r.opts.Package)
 	stderr, err := r.goRun(args, "ROTINI_IMPORT_OUT="+out)
 	if err != nil {
-		return nil, explainTestFailure(r.ctx, err, stderr)
+		if pkg := importerModule + "/" + r.fw.pkg; strings.Contains(stderr, "does not contain package "+pkg) ||
+			strings.Contains(stderr, "no required module provides package "+pkg) {
+			version := r.opts.ImporterVersion
+			if version == "" {
+				version = ImporterVersion
+			}
+			return nil, fmt.Errorf("the importer %s@%s has no %s package; pass an --importer-version that has it", importerModule, version, r.fw.pkg)
+		}
+		return nil, explainTestFailure(r.ctx, r.fw.pkg, err, stderr)
 	}
 	f, err := os.Open(out)
 	if err != nil {
@@ -231,9 +247,9 @@ func (r *importRun) runTest(pkgDir, pkgName, root string) (*importResult, error)
 	return readImportResult(f)
 }
 
-// explainTestFailure names the cause of a failed import run when it is a known one, else
-// shows the end of go test's output.
-func explainTestFailure(ctx context.Context, err error, output string) error {
+// explainTestFailure names the cause of a failed import run when it is a known one, such as
+// the importer's own error (prefixed "<pkg> import:"), else shows the end of go test's output.
+func explainTestFailure(ctx context.Context, pkg string, err error, output string) error {
 	switch {
 	case ctx.Err() != nil:
 		return fmt.Errorf("import stopped: %w", context.Cause(ctx))
@@ -242,7 +258,7 @@ func explainTestFailure(ctx context.Context, err error, output string) error {
 			"move the flag.Parse call into main, or import from a package that doesn't call it")
 	}
 	for line := range strings.SplitSeq(output, "\n") {
-		if i := strings.Index(line, "cobra import: walking the command tree panicked:"); i >= 0 {
+		if i := strings.Index(line, pkg+" import: "); i >= 0 {
 			return errors.New(strings.TrimSpace(line[i:]))
 		}
 	}

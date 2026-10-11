@@ -3,6 +3,7 @@ package rotini
 import (
 	"context"
 	"errors"
+	"reflect"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -91,9 +92,9 @@ func TestCLI_importCobra(t *testing.T) {
 	if code, _ := p.Run(argv); code != 0 {
 		t.Fatalf("exit = %d, stderr %q", code, errb.String())
 	}
-	want := codegen.ImportOptions{Package: "./cmd", Root: "newRoot()", Name: "acme", Dir: "acme-rotini", Strict: true,
+	want := codegen.ImportOptions{Framework: codegen.FrameworkCobra, Package: "./cmd", Root: "newRoot()", Name: "acme", Dir: "acme-rotini", Strict: true,
 		Format: "json", Tags: "dev", Timeout: 30 * time.Second, ImporterVersion: "../import", Force: true}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("options = %+v, want %+v", got, want)
 	}
 	if !strings.HasPrefix(errb.String(), "[lossy] acme: a note\nimported 1 commands") {
@@ -101,6 +102,46 @@ func TestCLI_importCobra(t *testing.T) {
 	}
 	if want := "spec: cmd/acme/.rotini.spec.yaml\nconf: cmd/acme/.rotini.conf.yaml\n[12:00:00] 1ms\n"; out.String() != want {
 		t.Errorf("stdout = %q, want %q", out.String(), want)
+	}
+}
+
+// `rotini import kong` and `rotini import urfave` pass their own inputs and the shared ones
+// through, and report like `import cobra`.
+func TestCLI_importKongAndURFave(t *testing.T) {
+	cases := []struct {
+		argv []string
+		want codegen.ImportOptions
+	}{
+		{[]string{"import", "kong", ".", "--root", "&cli", "--name", "shell", "--var", "version=1.0.0", "--var", "stage=prod",
+			"--dir", "shell-rotini", "--format", "toml", "--tags", "dev", "--timeout", "1m", "--importer-version", "../import", "--force"},
+			codegen.ImportOptions{Framework: codegen.FrameworkKong, Package: ".", Root: "&cli", Name: "shell",
+				Vars: map[string]string{"version": "1.0.0", "stage": "prod"}, Dir: "shell-rotini", Format: "toml", Tags: "dev",
+				Timeout: time.Minute, ImporterVersion: "../import", Force: true}},
+		{[]string{"import", "urfave", "./cmd/tasks", "--root", "newApp()", "--strict"},
+			codegen.ImportOptions{Framework: codegen.FrameworkURFave, Package: "./cmd/tasks", Root: "newApp()", Strict: true,
+				Format: "yaml", Timeout: 2 * time.Minute}},
+	}
+	for _, tc := range cases {
+		p, out, errb := newTestCLI(t)
+		var got codegen.ImportOptions
+		p.WithDependency(importDep, codegen.ImportFn(func(_ context.Context, opts codegen.ImportOptions) (codegen.Imported, error) {
+			got = opts
+			return codegen.Imported{Summary: "imported 3 commands, 3 flags: 0 lossy, 0 unsupported, 0 info", Spec: "s", Conf: "c", Result: "done"}, nil
+		}))
+		if code, _ := p.Run(tc.argv); code != 0 {
+			t.Fatalf("%v: exit = %d, stderr %q", tc.argv, code, errb.String())
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%v: options = %+v, want %+v", tc.argv, got, tc.want)
+		}
+		if out.String() != "spec: s\nconf: c\ndone\n" || !strings.HasPrefix(errb.String(), "imported 3 commands") {
+			t.Errorf("%v: stdout %q, stderr %q", tc.argv, out.String(), errb.String())
+		}
+	}
+
+	p, _, errb := newTestCLI(t)
+	if code, _ := p.Run([]string{"import", "kong", ".", "--strict"}); code == 0 || !strings.Contains(errb.String(), "--strict") {
+		t.Errorf("import kong --strict: exit %d, stderr %q", code, errb.String())
 	}
 }
 

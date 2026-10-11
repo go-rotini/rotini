@@ -12,13 +12,19 @@ import (
 
 // ImportOptions configures [Processor.Import].
 type ImportOptions struct {
+	// Framework is the program's framework: [FrameworkCobra] (the default, ""),
+	// [FrameworkKong] or [FrameworkURFave].
+	Framework string
 	// Package is the Go package that builds the program's command tree, such as ./cmd.
 	Package string
-	// Root is a Go expression, evaluated in Package, that yields a command of the tree; ""
-	// finds one.
+	// Root is a Go expression, evaluated in Package, that yields a command of the tree (a
+	// pointer to the grammar, for Kong); "" finds one.
 	Root string
-	// Name is the CLI's name; "" keeps the program's root command name.
+	// Name is the CLI's name; "" keeps the program's root command name, else (Kong, or a
+	// urfave/cli root with no name) the last element of Package's import path.
 	Name string
+	// Vars are the Kong variables the program passes to kong.Vars, for ${name} interpolations.
+	Vars map[string]string
 	// Dir names cmd/<dir> and internal/cmd/<dir>; "" uses the CLI's name.
 	Dir string
 	// Strict imports a command with no argument rule as taking only the arguments its usage
@@ -53,7 +59,7 @@ type Imported struct {
 	Changes []string
 }
 
-// Import reads the command tree a Cobra program builds in opts.Package and writes a spec and
+// Import reads the command tree a program builds in opts.Package and writes a spec and
 // conf for it under cmd/<dir>, then validates and generates, seeding handler stubs from the
 // imported spec. The program's files and go.mod are left as they are. Notes are returned even
 // when the import fails after reading the tree.
@@ -77,6 +83,9 @@ func (p *Processor) importWith(ctx context.Context, opts ImportOptions, pl *plan
 	}
 	if opts.Dir != "" && !cliNameRe.MatchString(opts.Dir) {
 		return Imported{}, fmt.Errorf("invalid --dir %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Dir)
+	}
+	if _, err := frameworkFor(opts); err != nil {
+		return Imported{}, err
 	}
 	f, err := normalizeFormat(opts.Format)
 	if err != nil {

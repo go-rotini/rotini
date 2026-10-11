@@ -53,7 +53,7 @@ func (sb *importSpecBuilder) command(c *importCommand, path string, isRoot bool)
 	m.set("description", c.Description)
 	m.set("examples", examples)
 	m.set("group", c.Group)
-	if isRoot {
+	if isRoot && slices.ContainsFunc(c.Commands, func(sub *importCommand) bool { return sub.Builtin == "help" }) {
 		m.set("footer", fmt.Sprintf("Use %q for more information about a command.", sb.name+" help <command>"))
 	}
 	m.set("hidden", c.Hidden)
@@ -71,6 +71,7 @@ func (sb *importSpecBuilder) command(c *importCommand, path string, isRoot bool)
 		am := newYAMLMap()
 		am.set("name", a.Name)
 		am.set("summary", a.Summary)
+		am.set("passthrough", a.Passthrough)
 		am.set("schema", importSchemaMap(a.Schema))
 		args = append(args, am)
 	}
@@ -92,7 +93,7 @@ func (sb *importSpecBuilder) command(c *importCommand, path string, isRoot bool)
 		subPath := path + " " + sub.Name
 		switch sub.Builtin {
 		case "help":
-			subs = append(subs, sb.helpCommand(subPath))
+			subs = append(subs, sb.helpCommand(sub, subPath))
 			continue
 		case "completion":
 			sb.completion = true
@@ -103,13 +104,14 @@ func (sb *importSpecBuilder) command(c *importCommand, path string, isRoot bool)
 	return m
 }
 
-// helpCommand is the seed's help command.
-func (sb *importSpecBuilder) helpCommand(path string) *yamlMap {
+// helpCommand is the seed's help command, keeping the framework's aliases for it.
+func (sb *importSpecBuilder) helpCommand(c *importCommand, path string) *yamlMap {
 	m := newYAMLMap()
 	if sb.comments {
 		m.comments = sb.commentsFor(path)
 	}
 	m.set("name", "help")
+	m.set("aliases", c.Aliases)
 	m.set("summary", "print help")
 	m.set("description", "Print help for a command.")
 	arg := newYAMLMap()
@@ -139,6 +141,7 @@ func importFlagMap(f *importFlag) *yamlMap {
 		summary = "print version"
 	}
 	m.set("summary", summary)
+	m.set("group", f.Group)
 	m.set("cascading", f.Cascading)
 	m.set("short_circuit", f.ShortCircuit)
 	m.set("hidden", f.Hidden)
@@ -181,6 +184,21 @@ func importSchemaMap(s *importSchema) *yamlMap {
 	m.set("separator", s.Separator)
 	m.set("implicit_value", s.ImplicitValue)
 	m.set("placeholder", s.Placeholder)
+	switch len(s.Variable) {
+	case 0:
+	case 1:
+		m.set("variable", s.Variable[0])
+	default:
+		m.set("variable", s.Variable)
+	}
+	switch v := s.Negatable.(type) {
+	case bool, string:
+		m.set("negatable", v)
+	}
+	if s.Repeatable != nil {
+		// set skips false, which is the value that matters here.
+		m.pairs = append(m.pairs, yamlPair{key: "repeatable", value: *s.Repeatable})
+	}
 	if s.Complete != nil {
 		cm := newYAMLMap()
 		cm.set("kind", s.Complete.Kind)

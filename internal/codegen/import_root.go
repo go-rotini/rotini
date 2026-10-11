@@ -29,26 +29,13 @@ var rootConstructors = []string{
 // preferred), else a parameterless function returning one, named like a root constructor.
 // how says which rule matched. With neither, the error lists what it found.
 func findImportRoot(pkgDir string) (expr, how string, err error) {
-	files, err := filepath.Glob(filepath.Join(pkgDir, "*.go"))
+	files, err := parsePackage(pkgDir)
 	if err != nil {
-		return "", "", fmt.Errorf("read the package: %w", err)
+		return "", "", err
 	}
-	slices.Sort(files)
 	var vars, funcs, others []string
-	fset := token.NewFileSet()
-	for _, path := range files {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return "", "", fmt.Errorf("read the package: %w", err)
-		}
-		f, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
-		if err != nil {
-			continue
-		}
-		alias := cobraAlias(f)
+	for _, f := range files {
+		alias := importAlias(f, cobraImportPath, "cobra")
 		if alias == "" {
 			continue
 		}
@@ -100,11 +87,51 @@ func rootNotFound(funcs, others []string) error {
 	return errors.New(b.String())
 }
 
-// cobraAlias returns the name a file imports the cobra package under, or "" when it doesn't.
-func cobraAlias(f *ast.File) string {
+// parsePackage parses the non-test files of the package in pkgDir, in name order, skipping
+// any that don't parse.
+func parsePackage(pkgDir string) ([]*ast.File, error) {
+	paths, err := filepath.Glob(filepath.Join(pkgDir, "*.go"))
+	if err != nil {
+		return nil, fmt.Errorf("read the package: %w", err)
+	}
+	slices.Sort(paths)
+	var files []*ast.File
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read the package: %w", err)
+		}
+		if f, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution); err == nil {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
+
+// packageSpecs returns the package-level specs of files declared with tok: *ast.TypeSpec for
+// token.TYPE, *ast.ValueSpec for token.VAR.
+func packageSpecs(files []*ast.File, tok token.Token) []ast.Spec {
+	var specs []ast.Spec
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			if d, ok := decl.(*ast.GenDecl); ok && d.Tok == tok {
+				specs = append(specs, d.Specs...)
+			}
+		}
+	}
+	return specs
+}
+
+// importAlias returns the name a file imports the package at path under (def when it names
+// none), or "" when it doesn't import it.
+func importAlias(f *ast.File, path, def string) string {
 	for _, imp := range f.Imports {
-		path, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || path != cobraImportPath {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || p != path {
 			continue
 		}
 		if imp.Name != nil {
@@ -113,7 +140,7 @@ func cobraAlias(f *ast.File) string {
 			}
 			return imp.Name.Name
 		}
-		return "cobra"
+		return def
 	}
 	return ""
 }

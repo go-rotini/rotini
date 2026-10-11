@@ -51,9 +51,10 @@ type importCommand struct {
 }
 
 type importArgument struct {
-	Name    string        `json:"name"`
-	Summary string        `json:"summary"`
-	Schema  *importSchema `json:"schema"`
+	Name        string        `json:"name"`
+	Summary     string        `json:"summary"`
+	Passthrough bool          `json:"passthrough"`
+	Schema      *importSchema `json:"schema"`
 }
 
 type importFlag struct {
@@ -62,6 +63,7 @@ type importFlag struct {
 	Identifiers           []string      `json:"identifiers"`
 	Cascading             bool          `json:"cascading"`
 	ShortCircuit          bool          `json:"short_circuit"`
+	Group                 string        `json:"group"`
 	Hidden                bool          `json:"hidden"`
 	Deprecated            string        `json:"deprecated"`
 	DeprecatedIdentifiers []string      `json:"deprecated_identifiers"`
@@ -82,6 +84,10 @@ type importSchema struct {
 	ImplicitValue string            `json:"implicit_value"`
 	Placeholder   string            `json:"placeholder"`
 	Complete      *importComplete   `json:"complete"`
+	Variable      []string          `json:"variable"`
+	// Negatable is true, or the one negated identifier ("--plain").
+	Negatable  any   `json:"negatable"`
+	Repeatable *bool `json:"repeatable"`
 }
 
 type importEnumValue struct {

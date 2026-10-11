@@ -17,16 +17,22 @@ import (
 	"time"
 )
 
-// importCmd returns the `rotini import cobra` command line, ending with args. The import runs
-// the release of github.com/go-rotini/import that rotini pins, downloaded into a temporary
-// go.mod, or the local checkout ROTINI_IMPORT_SHIM names. The programs it reads are copies of
-// that repository's corpus, under testdata/import.
+// importCmd returns the `rotini import cobra` command line, ending with args.
 func importCmd(t *testing.T, args ...string) []string {
+	t.Helper()
+	return frameworkImportCmd(t, "cobra", args...)
+}
+
+// frameworkImportCmd returns the `rotini import <framework>` command line, ending with args.
+// The import runs the release of github.com/go-rotini/import that rotini pins, downloaded
+// into a temporary go.mod, or the local checkout ROTINI_IMPORT_SHIM names. The programs it
+// reads are copies of that repository's corpus, under testdata/import.
+func frameworkImportCmd(t *testing.T, framework string, args ...string) []string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("runs go test and go build in imported modules; skipped under -short")
 	}
-	cmd := []string{"import", "cobra"}
+	cmd := []string{"import", framework}
 	if shim := os.Getenv("ROTINI_IMPORT_SHIM"); shim != "" {
 		if _, err := os.Stat(filepath.Join(shim, "go.mod")); err != nil {
 			t.Fatalf("ROTINI_IMPORT_SHIM: %v", err)
@@ -36,49 +42,97 @@ func importCmd(t *testing.T, args ...string) []string {
 	return append(cmd, args...)
 }
 
-// TestImportCobra imports each of the importer's own corpus programs, then validates,
+// importCase is one corpus program to import and round-trip.
+type importCase struct {
+	framework, fixture, pkg, cli string
+	args                         []string
+	// completion is set when the program has a completion command, which the import keeps.
+	completion bool
+	// runs is a command line the built CLI must accept.
+	runs []string
+}
+
+// TestImportCobra imports each of the importer's own Cobra corpus programs, then validates,
 // regenerates, builds and runs the imported CLI. The program's own files, go.mod and go.sum
 // must be byte-identical after the import.
 func TestImportCobra(t *testing.T) {
 	importCmd(t)
+	roundTrip(t, []importCase{
+		// ssh stops parsing flags at its first argument, so a word after it that looks like a
+		// flag is an argument.
+		{framework: "cobra", fixture: "demo", pkg: ".", cli: "acme", completion: true, runs: []string{"ssh", "node1", "--not-a-flag", "-t"}},
+		{framework: "cobra", fixture: "cobracli", pkg: "./cmd", cli: "acmecli", args: []string{"--strict"}, completion: true},
+	})
+}
+
+// TestImportKong imports the importer's Kong corpus programs and round-trips them, as
+// TestImportCobra does.
+func TestImportKong(t *testing.T) {
+	frameworkImportCmd(t, "kong")
+	roundTrip(t, []importCase{
+		// ssh's command is a passthrough argument: the words after the node are taken as typed.
+		{framework: "kong", fixture: "kong-demo", pkg: ".", cli: "acme", args: []string{"--name", "acme", "--var", "stage=staging"},
+			runs: []string{"ssh", "node1", "uptime", "--not-a-flag"}},
+		// No --name: the CLI is named after the module, as go build names its binary.
+		{framework: "kong", fixture: "kong-readme", pkg: ".", cli: "shell", runs: []string{"rm", "--force", "a.txt"}},
+	})
+}
+
+// TestImportURFave imports the importer's urfave/cli corpus programs and round-trips them, as
+// TestImportCobra does.
+func TestImportURFave(t *testing.T) {
+	frameworkImportCmd(t, "urfave")
+	roundTrip(t, []importCase{
+		// exec takes every word after its name as typed.
+		{framework: "urfave", fixture: "urfave-demo", pkg: ".", cli: "acme", completion: true, runs: []string{"exec", "ls", "--not-a-flag"}},
+		{framework: "urfave", fixture: "urfave-demo", pkg: ".", cli: "acme", args: []string{"--strict", "--dir", "acme-strict"}, completion: true},
+		// The root has no name: the CLI is named after the module.
+		{framework: "urfave", fixture: "urfave-readme", pkg: ".", cli: "tasks", runs: []string{"template", "add", "x"}},
+	})
+}
+
+// roundTrip imports each case's program, checks that a dry run and the import leave the
+// program's tree byte-identical, then validates, regenerates, builds and runs the imported CLI.
+// When the pinned importer release has no package for the framework and no checkout is
+// named, the case is skipped.
+func roundTrip(t *testing.T, cases []importCase) {
+	t.Helper()
 	bin := rotiniBin(t)
 	root := repoRoot(t)
-	cases := []struct {
-		fixture, pkg, cli string
-		args              []string
-		// runs is a command line the built CLI must accept: ssh stops parsing flags at its
-		// first argument, so a word after it that looks like a flag is an argument.
-		runs []string
-	}{
-		{fixture: "demo", pkg: ".", cli: "acme", runs: []string{"ssh", "node1", "--not-a-flag", "-t"}},
-		{fixture: "cobracli", pkg: "./cmd", cli: "acmecli", args: []string{"--strict"}},
-	}
 	for _, tc := range cases {
-		t.Run(tc.fixture, func(t *testing.T) {
-			dir := importFixture(t, "corpus/"+tc.fixture)
-			before := treeHash(t, dir)
-			run := runIn(t, dir)
+		dir := tc.cli
+		if i := slices.Index(tc.args, "--dir"); i >= 0 {
+			dir = tc.args[i+1]
+		}
+		t.Run(tc.fixture+"/"+dir, func(t *testing.T) {
+			fixture := importFixture(t, "corpus/"+tc.fixture)
+			before := treeHash(t, fixture)
+			run := runIn(t, fixture)
 
 			// A dry run writes nothing.
-			cmd := exec.Command(bin, importCmd(t, append([]string{"--dry-run", tc.pkg}, tc.args...)...)...)
-			cmd.Dir = dir
-			if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "dry run:") {
+			cmd := exec.Command(bin, frameworkImportCmd(t, tc.framework, append([]string{"--dry-run", tc.pkg}, tc.args...)...)...)
+			cmd.Dir = fixture
+			out, err := cmd.CombinedOutput()
+			if missing := "has no " + tc.framework + " package"; err != nil && strings.Contains(string(out), missing) && os.Getenv("ROTINI_IMPORT_SHIM") == "" {
+				t.Skipf("the pinned importer release %s; set ROTINI_IMPORT_SHIM to a checkout of github.com/go-rotini/import that has it", missing)
+			}
+			if err == nil || !strings.Contains(string(out), "dry run:") {
 				t.Fatalf("import --dry-run: %v\n%s", err, out)
 			}
-			if treeHash(t, dir) != before {
+			if treeHash(t, fixture) != before {
 				t.Fatal("a dry run changed the module")
 			}
 
-			out := run(bin, importCmd(t, append([]string{tc.pkg}, tc.args...)...)...)
-			if !strings.Contains(out, "spec: cmd/"+tc.cli+"/.rotini.spec.yaml") || !strings.Contains(out, "imported ") {
-				t.Fatalf("import output:\n%s", out)
+			got := run(bin, frameworkImportCmd(t, tc.framework, append([]string{tc.pkg}, tc.args...)...)...)
+			if !strings.Contains(got, "spec: cmd/"+dir+"/.rotini.spec.yaml") || !strings.Contains(got, "imported ") {
+				t.Fatalf("import output:\n%s", got)
 			}
-			if after := treeHash(t, dir); after != before {
+			if after := treeHash(t, fixture); after != before {
 				t.Fatal("the import changed the program's files, go.mod or go.sum")
 			}
 
-			spec := filepath.Join("cmd", tc.cli, ".rotini.spec.yaml")
-			conf := filepath.Join("cmd", tc.cli, ".rotini.conf.yaml")
+			spec := filepath.Join("cmd", dir, ".rotini.spec.yaml")
+			conf := filepath.Join("cmd", dir, ".rotini.conf.yaml")
 			run(bin, "validate", spec, "--config", conf)
 			if got := run(bin, "generate", spec, "--config", conf); strings.Contains(got, "created:") {
 				t.Errorf("a generate right after the import created files:\n%s", got)
@@ -87,20 +141,22 @@ func TestImportCobra(t *testing.T) {
 			run("go", "mod", "edit", "-require=github.com/go-rotini/rotini@v0.0.0",
 				"-replace=github.com/go-rotini/rotini="+strings.ReplaceAll(root, `\`, `/`))
 			run("go", "mod", "tidy")
-			exe := tc.cli
+			exe := dir
 			if runtime.GOOS == "windows" {
 				exe += ".exe"
 			}
-			run("go", "build", "-o", exe, "./cmd/"+tc.cli)
-			help := run(filepath.Join(dir, exe), "--help")
-			if !strings.Contains(help, "Usage:") || !strings.Contains(help, "completion") {
+			run("go", "build", "-o", exe, "./cmd/"+dir)
+			help := run(filepath.Join(fixture, exe), "--help")
+			if !strings.Contains(help, "Usage:\n  "+tc.cli) {
 				t.Errorf("%s --help:\n%s", tc.cli, help)
 			}
-			if script := run(filepath.Join(dir, exe), "completion", "bash"); !strings.Contains(script, "bash completion for "+tc.cli) {
-				t.Errorf("%s completion bash printed no script:\n%.200s", tc.cli, script)
+			if tc.completion {
+				if script := run(filepath.Join(fixture, exe), "completion", "bash"); !strings.Contains(script, "bash completion for "+tc.cli) {
+					t.Errorf("%s completion bash printed no script:\n%.200s", tc.cli, script)
+				}
 			}
 			if tc.runs != nil {
-				run(filepath.Join(dir, exe), tc.runs...)
+				run(filepath.Join(fixture, exe), tc.runs...)
 			}
 		})
 	}
@@ -268,7 +324,7 @@ func copyFixture(t *testing.T, from string) string {
 }
 
 // importedCLIs are the CLI names the import tests write under cmd/.
-var importedCLIs = []string{"acme", "acmecli", "dlv", "kubectl"}
+var importedCLIs = []string{"acme", "acme-strict", "acmecli", "dlv", "kubectl", "shell", "tasks"}
 
 // importFixture copies the corpus program name ("corpus/demo", "network/delve") to a
 // temporary directory, adds a package of its own under internal/cmd, and returns it.
