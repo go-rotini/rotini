@@ -440,3 +440,18 @@ func TestExplainDecodeFailure_passesOtherErrorsThrough(t *testing.T) {
 		t.Errorf("a non-decode error was rewritten: %v", got)
 	}
 }
+
+// A keyword location given as the evaluation path maps back to where the keyword sits in the
+// schema; a location that's already static is kept.
+func TestStaticLocation(t *testing.T) {
+	for in, want := range map[string]string{
+		"#/properties/command/$ref/properties/flags/items/$ref/additionalProperties": "#/definitions/FlagInput/additionalProperties",
+		"#/properties/command/$ref/anyOf":                                            "#/definitions/Command/anyOf",
+		"#/definitions/FlagInput/additionalProperties":                               "#/definitions/FlagInput/additionalProperties",
+		"#/properties/nope/$ref/type":                                                "#/properties/nope/$ref/type",
+	} {
+		if got := staticLocation(in); got != want {
+			t.Errorf("staticLocation(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
