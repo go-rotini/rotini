@@ -39,8 +39,8 @@ type ImportOptions struct {
 	// ImporterVersion is the github.com/go-rotini/import release to run, or the path of a
 	// local checkout; "" means [ImporterVersion].
 	ImporterVersion string
-	// Force replaces an existing spec and conf, and writes into an internal/cmd/<dir> that
-	// isn't rotini-generated.
+	// Force replaces an existing spec and conf, writes into an internal/cmd/<dir> that isn't
+	// rotini-generated, and writes beside an existing cmd/<dir>/main.go (which is kept).
 	Force bool
 }
 

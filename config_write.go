@@ -96,7 +96,9 @@ func ParseConfigValue(fn func(raw string) error) ConfigWriteOption {
 //
 // Errors are [*InputError] values: a usage error for what the user can fix (an unknown key,
 // an invalid value, a file that can't be parsed or written), an internal one for the author's
-// mistakes (an unknown file name, a key of a custom type without [ParseConfigValue]).
+// mistakes (an unknown file name, a key of a custom type without [ParseConfigValue]). A
+// feature the write needs that the program doesn't wire ([ConfigFiles], the file's codec,
+// [Schemas]) is a [*WiringError].
 func SetConfigValue(rtx *Context, file, key, raw string, opts ...ConfigWriteOption) error {
 	return writeConfigValue(rtx, file, key, &raw, opts)
 }

@@ -4,8 +4,8 @@ package rotini
 // command, shown by the generated Help function for its name. Completion offers topic names
 // with the root's sub-commands when it completes a command path (`help <TAB>`).
 type TopicDef struct {
-	Name    string
-	Summary string
+	Name    string // the word after `help`
+	Summary string // the one-line description completion shows beside the name
 }
 
 // topicCandidates returns the root's help topics as completion candidates, each with its

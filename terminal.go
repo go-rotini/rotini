@@ -14,8 +14,8 @@ import "reflect"
 //
 // It checks the device itself, so /dev/null, a character device that is not a terminal,
 // reports false. On Windows only a console counts: a mintty or Cygwin pseudo-terminal is a
-// pipe to the program, so it reports false. This is the one terminal check rotini offers; it
-// still never styles output or prompts.
+// pipe to the program, so it reports false. This is the only terminal check rotini offers;
+// rotini itself never styles output or prompts.
 func IsTerminal(stream any) bool {
 	f, ok := stream.(interface{ Fd() uintptr })
 	if !ok {

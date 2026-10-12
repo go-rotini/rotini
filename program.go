@@ -53,10 +53,11 @@ const (
 //     [Program.WithBufferedOutput] to buffer stdout
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
 //     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion],
-//     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions], and the environment and working directory a run reads,
-//     [Program.WithEnviron] and [Program.WithDir], and the clock relative times read,
-//     [Program.WithClock]; [Program.WithTerminationTimeout] bounds the wait after a signal, and
-//     [Program.WithArgv0] sets the name a multicall program dispatches on
+//     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions]; the environment
+//     and working directory a run reads, [Program.WithEnviron] and [Program.WithDir]; the clock
+//     relative times read, [Program.WithClock]; [Program.WithTerminationTimeout] bounds the
+//     wait after a signal, and [Program.WithArgv0] sets the name a multicall program dispatches
+//     on
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
@@ -82,7 +83,7 @@ const (
 // sequential runs, they take effect on the next one.
 //
 // Methods do not check for a nil receiver. The zero value is not usable; start from
-// [NewProgram] or [NewProgramFunc].
+// [NewWiredProgram], [NewProgramFunc] or [NewProgram].
 type Program struct {
 	ctx        context.Context
 	args       []string
@@ -135,7 +136,7 @@ type Program struct {
 }
 
 // NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
-// calls the method of handlers named by each [Command.Handler] in def to obtain that
+// calls the method of handlers named by each [CommandDef.Handler] (and [Definition.Handler]) in def to obtain that
 // command's [Handler]. A nil handlers value is accepted here; a run that reaches dispatch then
 // fails with a [*WiringError].
 //

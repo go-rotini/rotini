@@ -182,7 +182,7 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 // run may have failed in parsing, so the rule should read [Context.Argv], not validated inputs:
 //
 //	cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
-//	    return slices.Contains(rtx.Argv, "--json")
+//		return slices.Contains(rtx.Argv, "--json")
 //	})).Execute()
 func StructuredReporter(structured func(rtx *Context) bool) Reporter {
 	return func(ctx context.Context, rtx *Context, out Outcome) {
@@ -194,11 +194,11 @@ func StructuredReporter(structured func(rtx *Context) bool) Reporter {
 	}
 }
 
-// reportStructured writes the outcome as JSON lines on stderr.
 // structuredSchemaVersion is the version of StructuredReporter's line format, written first on
 // every line. It changes only when a line's shape changes in a way that breaks a reader.
 const structuredSchemaVersion = 1
 
+// reportStructured writes the outcome as JSON lines on stderr.
 func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 	// A non-zero code a handler set is kept, as in the default reporter.
 	errs, exitCode := settleReported(ctx, rtx, out)

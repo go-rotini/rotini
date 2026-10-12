@@ -1,3 +1,5 @@
+// Package rotini holds the handlers of the rotini companion CLI. The command tree, inputs,
+// help and man pages are generated into zz_rotini.go from cmd/rotini/.rotini.spec.yaml.
 package rotini
 
 import (

@@ -268,7 +268,7 @@ func TestUniqueItems_envAndConfigLists(t *testing.T) {
 }
 
 // TestChannelLists_perElementBounds pins that a list env input's elements meet its numeric
-// bounds: the list used to be checked as strings, skipping them.
+// bounds, checked per element as numbers.
 func TestChannelLists_perElementBounds(t *testing.T) {
 	var in struct {
 		App struct {

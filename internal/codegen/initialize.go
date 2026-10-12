@@ -40,7 +40,8 @@ type InitializeDryRunFn = InitializeFn
 
 // InitOptions are init's choices besides the CLI's name.
 type InitOptions struct {
-	// Format is the spec and conf format: yaml (the default), json, jsonc or toml.
+	// Format is the spec and conf format: yaml (the default; yml is the same), json, jsonc or
+	// toml.
 	Format string
 	// Template is the shape to start from: plugin, daemon or suite; "" for the plain seed.
 	Template string

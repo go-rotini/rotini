@@ -242,7 +242,7 @@ func TestInjectedEnv_errorsNameTheInjectedVariable(t *testing.T) {
 }
 
 // TestInjectedEnv_mapFlagIgnoresKeyVariables pins that a map flag's env fallback reads only its
-// one declared variable: LABELS_K=v no longer adds a key.
+// one declared variable: LABELS_K=v adds no key.
 func TestInjectedEnv_mapFlagIgnoresKeyVariables(t *testing.T) {
 	rtx := NewContextFor(tbListDef(), nil).WithEnviron([]string{"LABELS_K=v", "LABELS_X=y"})
 	var in tbListInputs

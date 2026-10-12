@@ -172,7 +172,7 @@ type Command struct {
 	Effects *Effects `json:"effects,omitempty"`
 	// Environment-variable inputs for this command
 	Env []EnvInput `json:"env,omitempty"`
-	// Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
+	// Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, the unprefixed name does not bind: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
 	//
 	// In a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a parent that declares none adopts the child's, a parent that declares one wins, and two children with different prefixes are rejected.
 	EnvPrefix string `json:"env_prefix,omitempty"`
@@ -190,7 +190,7 @@ type Command struct {
 	//
 	// A set lives in the spec that declares it: a composed child uses its own sets, never its parent's.
 	FlagSets map[string]FlagSet `json:"flag_sets,omitempty"`
-	// Flag inputs for this command
+	// Flag inputs for this command. Each applies only when this command is the one run, unless it is `cascading`.
 	Flags []FlagInput `json:"flags,omitempty"`
 	// Text rendered at the bottom of the page. Ignored when 'help' is set.
 	Footer string `json:"footer,omitempty"`
@@ -234,7 +234,7 @@ type Command struct {
 	Passthrough bool `json:"passthrough,omitempty"`
 	// Auto-expose external '<prefix>*' executables as plugin sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared plugins. Presence enables discovery.
 	PluginDiscovery *PluginDiscovery `json:"plugin_discovery,omitempty"`
-	// Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time; a leading ~ and $VAR references are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+	// Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. A relative path is resolved against the run's directory; $VAR references and then a leading ~ are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
 	PluginPath string `json:"plugin_path,omitempty"`
 	// Declared plugins: separate executables dispatched as first-class sub-commands of this command.
 	Plugins []PluginSpec `json:"plugins,omitempty"`
@@ -308,7 +308,7 @@ type ConfigurationFile struct {
 	Format string `json:"format,omitempty"`
 	// Logical name for the config file (e.g. 'app-config'). It anchors per-input pins (schema 'file:') and config_source claims, so it must be unique within its chain (this command and its ancestors) — a name collision in scope is an error.
 	Name string `json:"name"`
-	// File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.
+	// File path. A leading `~` or `~user` and `$VAR` or `${VAR}` references (with the shell forms `${VAR:-x}`, `${VAR:?message}` and the like) are expanded from the run's environment, and a relative path is resolved against the run's directory. Exactly one of 'path' or 'discover' must be set.
 	Path string `json:"path,omitempty"`
 	// Named sets of settings in this file, one chosen per run by a declared input (`--profile prod`, `ACME_PROFILE=prod`). The keys under `<under>.<name>` are read as if they sat at the top of the file and win over the file's other top-level keys, which every profile shares. Merging is per key: a list is replaced, not joined, and a map's entries merge. Precedence is otherwise unchanged: command line, environment, configuration files (the selected profile, then the shared keys), default. Profiles that aren't selected are not read or checked, and the file's `schema` checks the shared keys merged with the selected profile, without the `<under>` key. Not allowed on a `format: dotenv` or `as: env` file.
 	Profiles *ConfigurationFileProfiles `json:"profiles,omitempty"`
@@ -322,7 +322,7 @@ type ConfigurationFileDiscover struct {
 	App string `json:"app,omitempty"`
 	// The file name to look for in each searched directory (e.g. '.acme.toml', 'config.yaml').
 	File string `json:"file"`
-	// 'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
+	// 'walk-up': search from the run's directory (the working directory, unless a `role: chdir` flag or Program.WithDir sets another) upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
 	//
 	// 'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. This is the portable choice. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows).
 	//
@@ -536,7 +536,7 @@ type InputSchema struct {
 	Base string `json:"base,omitempty"`
 	// Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 	//
-	// Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
+	// Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback, which the completer can replace for one request with rtx.SetCompletionFallback.
 	Complete *CompletionHint `json:"complete,omitempty"`
 	// Flag and env inputs only: names a config_files entry whose file path this input supplies, so a user can point the program at a config file (`--config ./other.yaml`). The command line and environment are read first, then the file they name is opened. The path comes from the flag if set on the command line, then the env input's variable, then the flag's default, then the entry's own path or discover. A path supplied this way must exist: unlike a declared path, a missing file is then an error, because the user asked for it. The input's type must be string. At most one flag and one env input may name the same entry.
 	ConfigSource string `json:"config_source,omitempty"`

@@ -65,7 +65,7 @@ func TestParse_declaredShortBeatsFloatWord(t *testing.T) {
 	}
 }
 
-// TestParse_floatNameIsAFlagWord pins that "-inf" is no longer a number: with no -i declared it
+// TestParse_floatNameIsAFlagWord pins that "-inf" is not read as a number: with no -i declared it
 // is an unknown flag, and a negative non-finite value is passed after "--".
 func TestParse_floatNameIsAFlagWord(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", Arguments: []ArgDef{{Name: "n", Type: "float64"}}}

@@ -29,6 +29,7 @@ type ArgvError struct {
 	Reason string
 }
 
+// Error returns "rotini: <field>: <reason>".
 func (e *ArgvError) Error() string {
 	return fmt.Sprintf("rotini: %s: %s", e.Field, e.Reason)
 }
@@ -90,6 +91,7 @@ func ArgvPath(names ...string) ArgvOption {
 //   - a secret flag or argument that refuses a literal value (its from: leaves out value), even
 //     with [ArgvSecrets]: pass it through a file or stdin;
 //   - a config or stdin input (write the file, or supply stdin, yourself);
+//   - a [FlagDef.Local] flag of a command other than the invoked one;
 //   - an argument of a command other than the invoked one, or one after an unset argument;
 //   - "-" on a flag or argument that reads stdin from it;
 //   - an explicit empty list or map on a flag without a separator, or a nil pointer in set;
@@ -272,7 +274,7 @@ func (w *argvWriter) frame(top string, ci reflect.Value, frame Command, leaf boo
 	return w.arguments(top, ci, frame, leaf)
 }
 
-// identifier picks the spelling ArgvOf writes a flag with: its first long identifier that isn't
+// argvIdentifier picks the spelling ArgvOf writes a flag with: its first long identifier that isn't
 // deprecated, else its first short one that isn't, else its first.
 func argvIdentifier(fd FlagDef) string {
 	for _, long := range []bool{true, false} {

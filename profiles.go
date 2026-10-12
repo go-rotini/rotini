@@ -484,7 +484,8 @@ func locateConfigFile(rtx *Context, name string) (locatedConfigFile, error) {
 // ConfigProfiles returns the names of the profiles the named config_files entry defines, sorted.
 // It reads the file the running command would read: the path its config_source input gives, or
 // its discover search, from the run's environment and directory. A file that does not exist
-// defines none. It suits a completer for the profile selector:
+// defines none. It returns an [*InputError] when no such file is in scope for the command or
+// the file declares no profiles. It suits a completer for the profile selector:
 //
 //	names, err := rotini.ConfigProfiles(rtx, "app")
 func ConfigProfiles(rtx *Context, file string) ([]string, error) {

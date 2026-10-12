@@ -151,9 +151,10 @@ var machineFormats = []string{"json", "yaml", "toml"}
 // ever passes those three. An empty format means json.
 //
 // It returns an internal error, and writes nothing, when the command declares a stream
-// (output_stream), when v is not the type the command declares as its output, when no renderer is passed for a format rotini does not write, or, with
-// [Program.WithOutputChecks], when v does not match the declared shape. A renderer's error is
-// returned unwrapped. A command that declares no output may still use it; nothing is checked.
+// (output_stream), when v is not the type the command declares as its output, when no renderer
+// is passed for a format rotini does not write, or, with [Program.WithOutputChecks], when v does
+// not match the declared shape. A renderer's error is returned unwrapped. A command that declares
+// no output may still use it; nothing is checked.
 //
 // v may be a [Selection] made from a value of the declared type by [SelectFields]: it is checked
 // as that type, and against the declared shape with every `required` removed.
@@ -204,10 +205,10 @@ func (rtx *Context) WriteOutputItemTo[T any](w io.Writer, item T, format string,
 //
 //	taskr list: output does not match its contract: output.tasks[2].status: value is not in enum
 //
-// It writes nothing. [Program.WithOutputChecks] makes every WriteOutput call check.
-// A [Selection] is checked as the type it was selected from, against the schema with every
-// `required` removed.
-// For a stream whose items come in several kinds, v is checked as one item, against its kind.
+// It writes nothing, and is an internal error on a command that declares no output schema.
+// [Program.WithOutputChecks] makes every WriteOutput call check. A [Selection] is checked as the
+// type it was selected from, against the schema with every `required` removed. For a stream
+// whose items come in several kinds, v is checked as one item, against its kind.
 func (rtx *Context) CheckOutput(v any) error {
 	cmd := rtx.invokedCommand()
 	name := rtx.commandName()
@@ -724,16 +725,15 @@ func normalizeJSON(v any) (any, error) {
 	return out, nil
 }
 
-// WithOutputChecks makes every [Context.WriteOutput] and [Context.WriteOutputItem] call check
-// its value against the command's declared output schema before writing it. A value that does
-// not match is an internal error naming each field at fault, and nothing is written. It is off
-// by default; enable it in tests or debug builds, and WithOutputChecks(false) turns it off
-// again:
+// WithOutputChecks makes every [Context.WriteOutput] and [Context.WriteOutputItem] call, and
+// their To forms, check the value against the command's declared output schema before writing
+// it. A value that does not match is an internal error naming each field at fault, and nothing
+// is written. It is off by default; enable it in tests or debug builds:
 //
 //	p := cmd.NewProgram().WithOutputChecks(true)
 //
-// Only output written through WriteOutput and WriteOutputItem is checked. To check captured
-// stdout, use [DecodeOutput].
+// Only output written through those methods is checked. To check captured stdout, use
+// [DecodeOutput].
 func (p *Program) WithOutputChecks(enabled bool) *Program {
 	p.outputChecks = enabled
 	return p

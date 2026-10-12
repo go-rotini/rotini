@@ -45,13 +45,15 @@
 //     handler: { import: …, convention: … }. Codegen emits the delegating call and seeds no
 //     stub. It does not cascade: an inline sub-command without its own handler gets a stub.
 //  3. Local composition — a "$ref" to a sibling spec in the same module. The child's tree
-//     merges in, the parent winning on an overlapping key, and each composed command
-//     delegates to the child's generated package.
+//     mounts there, and each composed command delegates to the child's generated package.
+//     The parent may replace the mounted command's identity and presentation keys (name,
+//     summary, help, …), but not the inputs or output its handler is built against.
 //  4. Module composition — a "$ref" to mod://<module>@<version>/<path>, resolved through the
 //     Go module cache and pinned by go.sum, delegating to that module's generated package.
-//  5. Declared plugin — a sibling binary <program>-<name>, dispatched at run time rather than
-//     composed at codegen; a dispatch failure is a [*PluginError]. Plugin discovery dispatches
-//     an unmatched token to <prefix><token> the same way.
+//  5. Declared plugin — a separate executable the spec names, found beside the program, in
+//     its plugin_path or on PATH, and dispatched at run time rather than composed at codegen;
+//     a dispatch failure is a [*PluginError]. Plugin discovery dispatches an unmatched token
+//     to <prefix><token> the same way.
 //
 // A composed child is generated on its own, so its typed inputs start at its own root and do
 // not include a parent's cascading flags. The parent passes those as a [Dependency]: the child's
@@ -88,7 +90,9 @@
 // stubs do first. A handler that never calls it reads the raw [Context.Argv] and gets no
 // validation; [Context.CheckInputs] checks inputs it collects another way. A flag marked
 // short_circuit in the spec ([FlagDef.ShortCircuit]), such as --help, waives every declared
-// requirement when it is set on the command line, so the handler can act on it.
+// requirement when it is set on the command line, so the handler can act on it. A flag of a
+// command with sub-commands is accepted only when that command is the one run, unless the
+// spec marks it cascading ([FlagDef.Local]).
 //
 // A run reads the process environment and working directory unless the program gives it its
 // own with [Program.WithEnviron] and [Program.WithDir]. Env inputs and fallbacks, config file
@@ -109,8 +113,9 @@
 //     int32, int64 and rune (also integer); the unsigned integers uint, uint8, uint16, uint32,
 //     uint64 and byte; the floats float32 and float64 (also number); and any, which holds the
 //     raw text. complex64, complex128 and uintptr have no parser and are refused.
-//   - An integer, or a list of them, with `base: prefixed` also takes 0x, 0o and 0b literals
-//     (0xFF, -0b1010, 1_000); a value without a prefix is still decimal, so 010 is ten.
+//   - An integer is decimal on every channel, leading zeros included (010 is ten). With
+//     `base: prefixed`, an integer or a list of them also takes 0x, 0o and 0b literals
+//     (0xFF, -0b1010, 1_000), and bounds and enums compare the number the value reads as.
 //   - Value types: duration with Go's units plus d and w (7d, 2w3d); time and datetime
 //     (RFC 3339) and date (2026-09-29), each taking `layout:` for another format, or a list of
 //     formats tried in order, and `relative:` for a time measured from the run's clock (2h ago,
@@ -195,15 +200,17 @@
 //   - [*ParseError] — the argv channel. [ParseError.Kind] identifies the failure; Token and
 //     Candidates are the facts a "did you mean" needs.
 //   - [*InputError] — the env, config, stdin and flag-fallback channels, carrying the channel,
-//     the input and a message, with the recon cause reachable via errors.As. An env or config
-//     value outside its enum also carries Token and Candidates.
+//     the input and a message, with the recon cause reachable via errors.As. A word outside a
+//     known set (an env or config enum value, a configuration profile, a key given to a
+//     configuration write) also carries Token and Candidates.
 //   - [*PluginError] — a plugin dispatch, recorded as an error. A missing discovered plugin is
 //     a usage error; a missing declared plugin, or a plugin that cannot start, is internal; a
 //     timeout is neither. A missing discovered plugin carries Candidates: the names the
 //     command knows, to rank its Name against.
 //   - [*DependencyError] and [*PanicError] arrive as panics, as does a [*WiringError] from the
-//     program's wiring. [Context.Inputs] returns one [*WiringError] as an error instead: config
-//     inputs requested on a program built without an [InputSettings].
+//     program's wiring. [Context.Inputs] returns a [*WiringError] as an error instead: config
+//     inputs requested on a program built without an [InputSettings], or an input that needs
+//     a [Feature] the program does not wire.
 //
 // Rotini prints no "did you mean" suggestions and no help on error. A program that wants
 // either branches on the error in its handler (errors.As to the type, then its Kind or
@@ -261,7 +268,8 @@
 //     to be supplied; [Program.WithParser] replaces only the parser [Context.Parser] returns,
 //     which has no options.
 //
-//   - [Deprecations] reports the deprecated aliases and identifiers this invocation used.
+//   - [Deprecations] reports each deprecated command, alias, flag identifier, argument and
+//     enum value this invocation used.
 //
 //   - [Context.WriteOutput] writes a command's output in the format the handler passes: json,
 //     yaml and toml by rotini, any other by the handler's renderer. [Context.WriteOutputItem]
@@ -309,9 +317,9 @@
 //
 // # Batteries
 //
-// Rotini does nothing on import, starts no background goroutine and touches no terminal. It
-// ships no styler, table, spinner, prompt, pager or process runner; use golang.org/x/term,
-// os/exec and similar libraries. Its two small helpers:
+// Rotini does nothing on import, starts no goroutine that outlives a run and touches no
+// terminal. It ships no styler, table, spinner, prompt, pager or process runner; use
+// golang.org/x/term, os/exec and similar libraries. Its two small helpers:
 //
 //   - [StripANSI] removes ANSI escape sequences, making a styled string safe for a man page, a
 //     markdown page or a completion description.
@@ -327,7 +335,7 @@
 // remain shared, so a concurrent host synchronizes those. See [Program.Run].
 //
 // Rotini ships no loop. A host calls [Program.RunContext] once per line or request; supplying
-// the context leaves signal handling to the host.
+// the context leaves signal handling to the host unless [Program.WithSignals] is set.
 //
 // # What rotini does not ship
 //

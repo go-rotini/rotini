@@ -12,7 +12,7 @@ import (
 )
 
 // A custom negated identifier replaces the derived one: it sets the flag false, takes no value,
-// and --no-<x> is no longer accepted.
+// and --no-<x> is not accepted.
 func TestParse_customNegation(t *testing.T) {
 	type inputs struct {
 		App struct {

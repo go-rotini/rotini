@@ -1,6 +1,9 @@
 //go:generate go tool -modfile=../../tools.mod jsonschema generate -package codegen -root Spec -o ../../internal/codegen/schema_spec.go ../../internal/codegen/schema-spec.json
 //go:generate go tool -modfile=../../tools.mod jsonschema generate -package codegen -root Conf -o ../../internal/codegen/schema_conf.go ../../internal/codegen/schema-conf.json
 //go:generate go run . generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+
+// Command rotini scaffolds, validates and generates rotini CLIs. Its commands are declared in
+// .rotini.spec.yaml and generated into internal/cmd/rotini.
 package main
 
 import (

@@ -22,7 +22,8 @@ const completeCommand = "__complete"
 // dynamic completion candidates for one of its flags' values. Completion resolves the handler
 // of the command that declares the flag and, if it implements this interface, calls
 // CompleteFlagValue with the flag's logical name and the word being typed. A nil return falls
-// back to the flag's static enum; a non-nil return, empty included, is authoritative.
+// back to the static candidates (a map flag's key paths, else its enum); a non-nil return,
+// empty included, replaces them.
 //
 // rtx carries the resolved chain, the completion words in [Context.Argv] (the last is the word
 // being typed), the program's base context in [Context.Context], and the dependencies
@@ -52,7 +53,8 @@ type FlagValueCompleter interface {
 // ArgValueCompleter is the positional-argument counterpart of [FlagValueCompleter]: completion
 // calls CompleteArgValue on the invoked command's handler with the argument's logical name and
 // the word being typed. The same contract applies: a nil return falls back to the static
-// enum, candidates keep their order, and a candidate may carry a "value\tdescription" suffix.
+// candidates (command paths for a `complete: command` argument, else its enum), candidates
+// keep their order, and a candidate may carry a "value\tdescription" suffix.
 type ArgValueCompleter interface {
 	CompleteArgValue(rtx *Context, arg, partial string) []string
 }
@@ -201,8 +203,8 @@ func completePendingFlagValue(cc completionContext, words []string, partial stri
 
 // completeFlagWord completes a word beginning with "-": either a flag name, or a flag's value in
 // the inline "--flag=value" form. Only declared, visible, current flags are offered, and the
-// whole chain contributes, since ancestor flags resolve on descendants. Unset required flags
-// come first.
+// whole chain contributes, since ancestor flags resolve on descendants, except an ancestor's
+// local flags. Unset required flags come first.
 func completeFlagWord(cc completionContext, words []string, partial string, lookup HandlerLookup, rtx *Context) completionAnswer {
 	if name, val, hasInline := splitFlag(partial); hasInline {
 		fd, idx, negated, found := findFlagMatch(cc.chain, name)
@@ -852,7 +854,7 @@ func completionHintFor(def Definition, words []string) Completion {
 	// "--flag=<TAB>": the word carries its own flag.
 	if strings.HasPrefix(partial, "-") {
 		if name, val, hasInline := splitFlag(partial); hasInline {
-			if fd, _, negated, found := findFlagMatch(cc.chain, name); found && !negated && takesValue(fd) {
+			if fd, idx, negated, found := findFlagMatch(cc.chain, name); found && !negated && takesValue(fd) && (!fd.Local || idx == len(cc.chain)-1) {
 				if isMapType(fd.Type) && strings.Contains(val, "=") {
 					return mapValueHint(fd)
 				}
@@ -911,11 +913,10 @@ type CompletionResult struct {
 	// off ([Program.WithCompletionDescriptions]).
 	Candidates []CompletionCandidate
 	// Hint is the spec's declared `complete:` hint for the input being completed, or the zero
-	// value when it declares none. A completer's [Context.SetCompletionFallback] replaces its
-	// Kind and Extensions for the request. A completer that answers still wins over it: the hint is the
-	// fallback for when Candidates is empty, except kind "none", which also means "never offer
-	// files" when there are candidates. Kind "command" is answered in Candidates, and means
-	// "none" to the shell.
+	// value when it declares none; a completer's [Context.SetCompletionFallback] replaces its
+	// Kind and Extensions. The hint is the fallback for when Candidates is empty, except kind
+	// "none", which also means "never offer files" when there are candidates. Kind "command" is
+	// answered in Candidates, and means "none" to the shell.
 	Hint Completion
 	// Messages are lines for the shell to show, not offer: what completers added with
 	// [Context.AddCompletionMessage], in order, or else, when there are no candidates, the

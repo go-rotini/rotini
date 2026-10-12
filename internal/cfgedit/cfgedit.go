@@ -32,7 +32,8 @@ var (
 	ErrUnsupported = errors.New("unsupported format")
 
 	// ErrVerify marks an edit whose result didn't decode to the original document with only
-	// the intended change. It is a bug in cfgedit, never in the file; nothing is returned.
+	// the intended change. It is a bug in cfgedit, never in the file, and no edited bytes are
+	// returned with it.
 	ErrVerify = errors.New("edit verification failed")
 )
 
@@ -42,6 +43,7 @@ type RefusedError struct {
 	Reason string // why, in a few words: "the path goes through an alias"
 }
 
+// Error names the path and reason and tells the user to edit the file by hand.
 func (e *RefusedError) Error() string {
 	return fmt.Sprintf("can't edit %q: %s; edit the file by hand", e.Path, e.Reason)
 }

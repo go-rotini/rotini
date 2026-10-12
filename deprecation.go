@@ -12,7 +12,7 @@ type Deprecation struct {
 	Kind       string // "flag", "argument" or "command"
 	Name       string // the input's logical name (the flag/argument/command name)
 	Identifier string // the token actually used on argv (e.g. "--conf", "build"); an argument's <name>
-	Message    string // the spec's `deprecated:` message, when the input is deprecated as a whole
+	Message    string // the spec's `deprecated:` message, or ""
 	Since      string // the spec's `deprecated_since:` release (X.Y.Z), or ""
 	RemovedIn  string // the release that removes this token: its own planned removal, else the input's `removed_in:`, or ""
 	// Value is the deprecated enum value as typed, when the deprecation is about the value given

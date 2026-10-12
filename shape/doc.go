@@ -9,7 +9,7 @@
 //	    schema: { type: shape.Template, import: github.com/go-rotini/rotini/shape, placeholder: TEMPLATE }
 //
 // A template that does not parse is a usage error when the flag is read. The handler passes
-// [Render] to WriteOutput or WriteOutputItem as the renderer:
+// [Render] to [rotini.Context.WriteOutput] or [rotini.Context.WriteOutputItem] as the renderer:
 //
 //	if !in.Flags.Format.IsZero() {
 //	    return rtx.WriteOutput(list, "template", shape.Render[TodoListOutput](in.Flags.Format))
@@ -35,9 +35,9 @@
 // # Security
 //
 // The template is end-user input that the program runs. It sees only the value passed to
-// Execute or Render, already reduced to maps, slices, strings, numbers and bools, so it can call
-// no method of the program's types, and its functions reach no file, environment, process or
-// network. Render outputs, not inputs: the inputs value may hold secrets.
+// [Template.Execute] or [Render], already reduced to maps, slices, strings, numbers and bools,
+// so it can call no method of the program's types, and its functions reach no file,
+// environment, process or network. Render outputs, not inputs: the inputs value may hold secrets.
 //
 // # Binary size
 //

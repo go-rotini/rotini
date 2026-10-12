@@ -184,8 +184,10 @@ func (f *OutputFile) Name() string { return f.name }
 
 // Close commits the file: the temporary file is closed and renamed into place. If a write
 // failed, or closing or renaming fails (a full disk often shows only here), the temporary file
-// is removed, an existing file is left as it was, and the error is returned. Close on stdout,
-// or after Close or Abort, does nothing.
+// is removed, an existing file is left as it was, and the error is returned. Without
+// [Overwrite], a file that appeared at the path since [CreateOutput] is not replaced and Close
+// returns the same usage error CreateOutput would. A file written directly (a device or a named
+// pipe) is only closed. Close on stdout, or after Close or Abort, does nothing.
 func (f *OutputFile) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -21,14 +21,15 @@ import (
 // not be located, it exceeded its declared timeout, or it could not be spawned.
 type PluginErrorKind int
 
+// The plugin-dispatch failure kinds.
 const (
-	// PluginNotFound: no binary was found next to the executable, in the
-	// plugin path, or on PATH.
+	// PluginNotFound means no binary was found next to the executable, in the plugin path, or
+	// on PATH.
 	PluginNotFound PluginErrorKind = iota
-	// PluginTimeout: the plugin ran past its declared timeout and was killed.
+	// PluginTimeout means the plugin ran past its declared timeout and was killed.
 	PluginTimeout
-	// PluginStartFailed: the binary was found but could not be started (a fork,
-	// exec or pipe failure). The plugin's own non-zero exit is not an error kind.
+	// PluginStartFailed means the binary was found but could not be started (a fork, exec or
+	// pipe failure). The plugin's own non-zero exit is not an error kind.
 	PluginStartFailed
 )
 
@@ -97,9 +98,9 @@ func (e *PluginError) Unwrap() []error {
 // Args. Dir is the command's plugin path, searched after the host binary's own directory and
 // before PATH; empty means none.
 type PluginDispatch struct {
-	Def  PluginDef
-	Args []string
-	Dir  string
+	Def  PluginDef // the plugin, declared or built from the discovery prefix and token
+	Args []string  // the arguments passed to the binary
+	Dir  string    // the command's plugin path; "" for none
 	// Discovered marks a plugin-discovery dispatch rather than a declared plugin, which
 	// decides the error category when the binary cannot be resolved.
 	Discovered bool

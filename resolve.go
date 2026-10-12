@@ -17,7 +17,7 @@ import (
 // Fields copy the matching [Definition] (root) or [CommandDef] fields; an empty slice means the
 // command declares none of that kind.
 type Command struct {
-	Name                  string
+	Name                  string   // the command's name; the program's name for the root
 	Handler               string   // ProgramHandlers method for this command; see [CommandDef.Handler]
 	Matched               string   // the argv token that resolved this command (name or an alias); "" for the root
 	DeprecatedIdentifiers []string // aliases of this command that are deprecated

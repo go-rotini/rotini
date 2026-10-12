@@ -29,7 +29,7 @@ import (
 //
 // Env values fill the generated <Prefix>Env struct and config-file values <Prefix>Config. The
 // two channels use independent registries, so an env var never leaks into a config field or the
-// reverse. Flags may additionally fall back to env and config.
+// reverse. Flags and arguments may also fall back to env and config.
 type InputReader struct {
 	parser       *Parser
 	configFiles  []ConfigFile
@@ -1259,9 +1259,8 @@ func storeFlagValue(store *parsedInputs, name string) (explicit, defaulted strin
 	return explicit, defaulted
 }
 
-// discoverDirs resolves a Discover strategy to the ordered directories searched: "walk-up" is
-// the run's working directory up to the filesystem root, "xdg" is $XDG_CONFIG_HOME/<app> when
-// that is absolute, else ~/.config/<app>, from the run's environment.
+// discoverDirs resolves a Discover strategy to the ordered directories searched, from the run's
+// view; see [DiscoverDef.Strategy].
 func discoverDirs(d *DiscoverDef, view *osView) ([]string, error) {
 	switch d.Strategy {
 	case "walk-up":
@@ -1313,10 +1312,10 @@ func envRegistry(v reflect.Value, envPrefix string, view *osView) (*recon.Regist
 
 // spellings gives env and config inputs the value spellings flags accept and recon's decode
 // does not: days and weeks in a duration (7d), yes/no, on/off and y/n for a bool (see
-// parseBool), a declared layout or relative form for a time field instead of RFC 3339, and the
-// 0x, 0o and 0b literals of an integer field that declares base: prefixed, whose other values
-// are decimal. Only the keys of those typed fields are rewritten; a string input whose value is
-// "yes" keeps it.
+// parseBool), a declared layout or relative form for a time field instead of RFC 3339, and
+// decimal integers, where a leading zero does not mean octal, plus the 0x, 0o and 0b literals
+// of an integer field that declares base: prefixed. Only the keys of those typed fields are
+// rewritten; a string input whose value is "yes" keeps it.
 type spellings struct {
 	recon.Source
 
@@ -1325,8 +1324,8 @@ type spellings struct {
 }
 
 // valueKeys maps the recon keys of an Env or Config struct's bool fields, its duration fields,
-// its time fields that declare layouts or relative forms, and its integer fields that declare
-// base: prefixed, to how their text is read.
+// its time fields that declare layouts or relative forms, its map fields, and its plain integer
+// fields, to how their text is read.
 type valueKeys struct {
 	bools     map[string]bool
 	times     map[string]timeSpec
@@ -1831,8 +1830,8 @@ const (
 )
 
 // InputError reports a failure acquiring or decoding one of a command's non-argv input
-// channels: environment variables, configuration files, a typed stdin payload, or a flag's
-// env/config fallback. It is the counterpart of the argv channel's [*ParseError].
+// channels: environment variables, configuration files, a typed stdin payload, or a flag's or
+// argument's env/config fallback. It is the counterpart of the argv channel's [*ParseError].
 //
 // Error names the channel, the input, and what went wrong. The underlying recon, decode or OS
 // Cause is reachable via errors.As but kept out of the message, and the value of an input
@@ -1861,12 +1860,10 @@ type InputError struct {
 	usage bool // true → CategoryUsage (ErrUsage); false → CategoryInternal
 }
 
-// Error returns Msg: the channel, the input, and what went wrong. A secret input's value is
-// redacted.
+// Error returns Msg.
 func (e *InputError) Error() string { return e.Msg }
 
-// Unwrap exposes the Cause and the category sentinel, so errors.Is/As reach both the original
-// recon error and [ErrUsage]/[ErrInternal].
+// Unwrap returns Cause, when set, and the category sentinel, [ErrUsage] or [ErrInternal].
 func (e *InputError) Unwrap() []error {
 	sentinel := ErrInternal
 	if e.usage {

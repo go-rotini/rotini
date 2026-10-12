@@ -34,8 +34,9 @@ type InputSource struct {
 	// Origin names where in the layer the value came from: "argv:--port" (the identifier as
 	// typed), "argv:<target>" (an argument), "env:TASKR_PORT", "env:TASKR_TOKEN_FILE" (read
 	// from the file a variable_file variable names), "env:TASKR_HTTP__*" (a nested env family),
-	// "config:user#deploy.port" (a configuration file's name and key), "default"
-	// or "stdin". It is "" for a hand-built layer, which names itself by Layer.
+	// "config:user#deploy.port" (a configuration file's name and key),
+	// "config:user#profiles.prod.port" (a key of the selected profile), "default" or "stdin". It
+	// is "" for a hand-built layer, which names itself by Layer.
 	Origin string
 }
 
@@ -57,9 +58,9 @@ type Presence map[FieldPath]InputSource
 // "[redacted]" whatever the layer gave. Both need a rotini layer in the merge, which says what
 // the spec declares.
 type InputLayer[T any] struct {
-	Name   string
-	Values T
-	Set    Presence
+	Name   string   // the layer's name, as [InputSource.Layer] reports it
+	Values T        // the supplied values; fields Set doesn't name are ignored
+	Set    Presence // the fields the layer supplied
 
 	core *layerCore // validation data: nil for hand-built layers
 }
@@ -109,8 +110,9 @@ type layerCore struct {
 //
 // Inputs delegates to [InputReader.Read]; errors are [*ParseError] and [*InputError] values, or
 // a [*WiringError] when a command declares config inputs and the program has no
-// [InputSettings], or when an input needs a [Feature] the program does not wire. On error the returned T is partially filled and must not be used. A command
-// line that doesn't parse is reported before any other channel is read. Use
+// [InputSettings], or when an input needs a [Feature] the program does not wire. On error the
+// returned T is partially filled and must not be used. A command line that doesn't parse is
+// reported before any other channel is read. Use
 // [Context.InputsWithReport] for a merged value and per-field provenance alongside the error.
 func (rtx *Context) Inputs[T any]() (T, error) {
 	var t T
@@ -166,17 +168,18 @@ func (rtx *Context) ArgvInputs[T any]() (InputLayer[T], error) {
 }
 
 // EnvInputs acquires the environment channel: every Env input, by its explicit variable or the
-// SNAKE_UPPER projection of its key, plus the env fallback of any flag that declares a recon
-// key. A missing required input or a constraint violation is this call's error.
+// SNAKE_UPPER projection of its key, plus the env fallback of any flag or argument that declares
+// one. A missing required input or a constraint violation is this call's error.
 func (rtx *Context) EnvInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := envLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())
 	return InputLayer[T]{Name: "env", Values: t, Set: set, core: core}, err
 }
 
-// FileInputs acquires the configuration-files channel: every Config input from the InputSettings
-// sources, declared order being precedence, plus the config fallback of any flag that declares
-// a recon key. Required and constraint failures are this call's errors.
+// FileInputs acquires the configuration-files channel: every Config input from the
+// configuration files in scope for the command chain (the nearest command's first) and any
+// custom [InputSettings.Sources] after them, plus the config fallback of any flag or argument
+// that declares one. Required and constraint failures are this call's errors.
 func (rtx *Context) FileInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := filesLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())

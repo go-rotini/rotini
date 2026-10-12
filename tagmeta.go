@@ -18,9 +18,9 @@ import (
 //	enumhide:"<list>"     the hidden and deprecated values, which messages leave out
 //	layoutlist:"<list>"   every layout, when there are several
 //
-// A tag with any other escape reads as absent. Fields written before these tags hold JSON
-// instead: enum:"<array>", enumalias:"<object>", enumunlisted:"<array>" and layouts:"<array>".
-// They are read when none of the list tags is present.
+// A tag with any other escape reads as absent. The JSON forms enum:"<array>",
+// enumalias:"<object>", enumunlisted:"<array>" and layouts:"<array>" are also accepted, and are
+// read when none of the list tags is present.
 
 // tagTimeSpec reads an env or config field's time tags: layout:"<first>", layoutlist (or the
 // JSON layouts) when there are several, and relative:"past"; and an integer field's

@@ -188,7 +188,7 @@ const (
 	ParseKindNoArguments                   // a positional was given to a command that accepts none
 	ParseKindTooManyArguments              // more positionals than the command's declared (non-variadic) arity
 	ParseKindInternal                      // a parser API misuse: nil parser/context, a bad out argument, or an inputs type that does not describe the running command
-	ParseKindMisplacedFlag                 // a flag was typed where it can't apply, such as before a plugin's name
+	ParseKindMisplacedFlag                 // a flag was typed where it can't apply: before a plugin's name, or a local flag while running a command below its own
 )
 
 // String renders the kind as a short, stable label (for logs and tests).
@@ -281,14 +281,16 @@ func NewParser() *Parser {
 //	var in MycliInputs
 //	if err := parser.Parse(rtx, &in); err != nil { /* handler owns it */ }
 //
-// It applies declared defaults, fills out by reflection from the `rotini:"…"` struct tags, then
-// validates. Built-ins and any [encoding.TextUnmarshaler] are coerced, and a trailing []string
-// absorbs the remaining positionals. Parse does not consult env or config fallbacks;
+// It applies declared defaults, expands the values of inputs that declare `expand`, fills out
+// by reflection from the `rotini:"…"` struct tags, then validates. Built-ins and any
+// [encoding.TextUnmarshaler] are coerced, and a slice field of the arguments takes the
+// positionals the fields around it leave. Parse does not consult env or config fallbacks;
 // [Context.Inputs] does.
 //
 // It returns a [*ParseError] when out is not a non-nil pointer, a flag is unknown or missing
 // its value, a value cannot be coerced, a required input is absent, a value falls outside a
-// declared enum, or any declared constraint, flag group or flag dependency is violated.
+// declared enum, or any declared constraint, flag group or flag dependency is violated. A check
+// the program's features do not wire is a [*WiringError].
 //
 // Unlike [Context.Inputs] and the per-channel layer methods, Parse does not check that out
 // describes the running command: it binds what fits and leaves the rest zeroed, so one struct

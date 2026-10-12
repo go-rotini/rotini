@@ -9,7 +9,7 @@ import (
 type InputSettings struct {
 	ConfigFiles []ConfigFile // per-command config_files sources, each tagged with its Scope; the input reader scopes them to the invoked chain (cascade, nearest-wins)
 	// EnvPrefix scopes every derived env-var name under "<EnvPrefix>_". Explicit variable
-	// names are exempt, and with a prefix set the unprefixed names no longer bind.
+	// names are exempt, and with a prefix set the unprefixed names don't bind.
 	EnvPrefix string
 	// Sources are custom recon sources — a secrets manager, a remote config service —
 	// joined into the config precedence after the declared config_files, so explicit
@@ -31,7 +31,7 @@ type ConfigFile struct {
 	// unscoped, in scope for every command; generated descriptors always set it.
 	Scope    string
 	Path     string       // fixed file path (may contain ~)
-	Format   string       // "json" | "yaml" | "toml"; "" lets the input reader infer from the extension
+	Format   string       // "json", "yaml", "toml", "jsonc" or "dotenv"; "" infers it from the file extension
 	Discover *DiscoverDef // run-time location strategy, instead of a fixed Path
 	PathFrom *PathFromDef // runtime inputs that supply/override the path (spec config_source)
 	// Schema is the self-contained JSON Schema the input reader validates the loaded document

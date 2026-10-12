@@ -76,8 +76,9 @@ func (s *Suggestor) For(err error) []string {
 }
 
 // SuggestionFacts returns the token err rejected and the candidates it was checked against: a
-// mistyped flag, command or enum value ([*ParseError]), an env or config value outside its enum
-// ([*InputError]), or a mistyped sub-command at a command with plugin discovery
+// mistyped flag, command or enum value ([*ParseError]); an env or config value outside its enum,
+// an unknown configuration profile, or an unknown key or enum value given to a configuration
+// write ([*InputError]); or a mistyped sub-command at a command with plugin discovery
 // ([*PluginError], whose Name is the token). It searches err's tree in order, through wrapped
 // and joined errors, and returns the first error that carries both. ok is false when none
 // does; an error whose token was redacted, because the input is secret, never counts. It ranks

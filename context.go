@@ -39,10 +39,10 @@ import (
 //   - dependencies — [Context.GetDependency] and [Context.MustGetDependency] read one;
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
-//     [Context.RecordError], and [Context.Failed]; during completion,
-//     [Context.AddCompletionMessage], [Context.SetCompletionOptions] and
-//     [Context.SetCompletionFallback], [Context.PartialInputs] reads
-//     what has been typed so far, and [Context.Context] is the program's base context
+//     [Context.RecordError], and [Context.Failed]; during completion, a completer adds to
+//     its answer with [Context.AddCompletionMessage], [Context.SetCompletionOptions] and
+//     [Context.SetCompletionFallback], and reads what has been typed so far with
+//     [Context.PartialInputs]
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
 //   - rotini's own settings — [Context.Version], [Context.Help] and [Context.Parser] read them;
@@ -284,7 +284,9 @@ const frameUnset = -1
 //	────                                 ─────────     ─────────────────
 //	mig's CascadingPreRun                mig           false
 //	db's CascadingPreRun                 db            false
+//	status's CascadingPreRun             status        true
 //	the leaf's PreRun / Run / PostRun    status        true
+//	status's CascadingPostRun            status        true
 //	db's CascadingPostRun                db            false
 //	mig's CascadingPostRun               mig           false
 //
@@ -662,8 +664,8 @@ func (rtx *Context) WithHelp(help HelpFunc) *Context {
 	return rtx
 }
 
-// WithParser sets the parser [Context.Parser] returns. [Parser] has no options, so this changes
-// nothing today; see [Program.WithParser]. It is for a Context built with [NewContextFor];
+// WithParser sets the parser [Context.Parser] returns. [Parser] has no options, so every parser
+// behaves alike; see [Program.WithParser]. It is for a Context built with [NewContextFor];
 // during a run, the change lasts for the rest of that run. A nil parser restores the default.
 func (rtx *Context) WithParser(parser *Parser) *Context {
 	if rtx != nil {

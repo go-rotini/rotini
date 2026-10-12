@@ -156,7 +156,7 @@
         "type": { "$ref": "#/definitions/RotiniType" },
         "kind": { "$ref": "#/definitions/Kind" },
         "required": { "type": "boolean" },
-        "cascading": { "type": "boolean", "description": "true when the command declares it and every command beneath it accepts it too." },
+        "cascading": { "type": "boolean", "description": "true when the command declares it and every command beneath it accepts it too. Absent: the flag is accepted only when its own command is the one run, never with a sub-command." },
         "inherited": { "type": "boolean", "description": "true when an ancestor declares it as cascading." },
         "short_circuit": { "type": "boolean", "description": "true when setting it on the command line waives the command's required inputs and other rules, as --help does: an agent can pass it without supplying anything else." },
         "env": { "type": "array", "items": { "type": "string" }, "description": "The environment variables the flag falls back to when it is not on the command line, in lookup order: the first one set wins." },
@@ -357,14 +357,14 @@
       "properties": {
         "name": { "type": "string" },
         "format": { "type": "string", "description": "The file's format, when declared; otherwise its extension says." },
-        "path": { "type": "string", "description": "A fixed path, which may start with ~." },
+        "path": { "type": "string", "description": "A fixed path, as declared: a leading `~` and `$VAR` references in it are expanded at run time, and a relative path is resolved against the run's directory." },
         "discover": {
           "type": "object",
           "required": ["strategy", "file"],
           "additionalProperties": false,
           "description": "How the file is found at run time, instead of a fixed path.",
           "properties": {
-            "strategy": { "type": "string", "description": "walk-up: from the working directory upward. xdg: $XDG_CONFIG_HOME/<app>, else ~/.config/<app>. native: the platform's config directory (~/Library/Application Support/<app> on macOS, %AppData%\\<app> on Windows, as xdg elsewhere). xdg-system: each directory of $XDG_CONFIG_DIRS (default /etc/xdg) joined with <app>." },
+            "strategy": { "type": "string", "description": "walk-up: from the run's directory upward. xdg: $XDG_CONFIG_HOME/<app>, else ~/.config/<app>. native: the platform's config directory (~/Library/Application Support/<app> on macOS, %AppData%\\<app> on Windows, as xdg elsewhere). xdg-system: each directory of $XDG_CONFIG_DIRS (default /etc/xdg) joined with <app>." },
             "app": { "type": "string" },
             "file": { "type": "string", "description": "The file name looked for." }
           }

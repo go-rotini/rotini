@@ -17,8 +17,9 @@ import (
 //	teardown  leaf → root              CascadingPostRun    —                       its CascadingPreRun began
 //
 // Teardown unwinds in reverse for exactly the steps whose forward hook began, and runs to
-// completion: a panic or HaltWithCode inside teardown neither aborts the rest nor displaces the
-// first failure. Only [Context.Exit], or a panic under WithTeardownOnPanic(false), skips what
+// completion: a panic or [Context.HaltWithCode] inside teardown neither aborts the rest nor
+// displaces the first failure. Only [Context.Exit], or a panic under
+// [Program.WithTeardownOnPanic](false), skips what
 // remains. Recovered panics reach the reporter after all teardown. A custom lifecycle changes
 // only the plan; halting, unwind, reporting and exit-code semantics are fixed.
 

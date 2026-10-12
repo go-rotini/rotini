@@ -22,15 +22,18 @@ import (
 // as warnings with a file:line, since an unused method is legal Go.
 //
 // The same pass also reports a handler that acquires a different command's generated inputs
-// type (see wrongInputsTypes), which compiles but reads the wrong shape at run time.
+// type (see wrongInputsTypes), which compiles but reads the wrong shape at run time, exit codes
+// the command's exit_status doesn't list (undocumentedExitCodes), stream writes on a command
+// whose output isn't marked output_stream (unmarkedStreams), and a root handler without the
+// CascadingPreRun a short-circuit --help needs (missingRootHook).
 
 // auditedHooks are the hook names a near-miss is measured against. Run is excluded: it has no
 // no-op, so a misspelled Run already fails the assertion, and a three-letter target would match
 // ordinary helper names within edit distance 2.
 var auditedHooks = []string{"CascadingPreRun", "PreRun", "PostRun", "CascadingPostRun"}
 
-// auditHooks records warnings for near-miss hook names on handler types and for calls that
-// acquire another command's inputs type. It runs last in a generate pass, so it sees the final
+// auditHooks records the warnings described above (near-miss hook names, another command's
+// inputs type, undocumented exit codes, unmarked streams, a missing root hook). It runs last in a generate pass, so it sees the final
 // set of stubs.
 //
 // It covers the cmd package and every in-module package named by a spec's `handler:` block;

@@ -15,11 +15,12 @@
 //
 // [Run] writes the inputs value as a command line with [rotini.ArgvOf], so the program parses
 // it exactly as it would a user's. Each run gets its own environment and working directory
-// ([rotini.Program.WithEnviron], [rotini.Program.WithDir]): only the variables the inputs set,
-// plus HOME and XDG_CONFIG_HOME pointing into a temporary directory. A developer's own variables
-// and configuration files never leak in, and tests can call t.Parallel.
+// ([rotini.Program.WithEnviron], [rotini.Program.WithDir]): only the variables the inputs set
+// and those [Env] adds, plus HOME, USERPROFILE and XDG_CONFIG_HOME pointing into a temporary
+// directory. A developer's own variables and configuration files never leak in, and tests can
+// call t.Parallel.
 //
-// What it doesn't do:
+// Limits:
 //   - Pass a fresh program to every call, built as main builds it (with the dependencies main
 //     adds). Run sets its streams and environment, so a program shared between tests, such as
 //     the generated package's Program variable, leaks state between them.
@@ -52,10 +53,10 @@ import (
 
 // Result is what a [Run] produced.
 type Result struct {
-	Code           int    // the exit code
-	Err            error  // the error the run reported, nil on success
-	Stdout, Stderr []byte // what the program wrote
-	Argv           []string
+	Code           int      // the exit code
+	Err            error    // the error the run reported, nil on success
+	Stdout, Stderr []byte   // what the program wrote
+	Argv           []string // the command line Run wrote
 	Env            []string // the run's whole environment
 	Dir            string   // the run's working directory
 
@@ -227,8 +228,8 @@ func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result {
 }
 
 // Output decodes the run's stdout as JSON into T, the generated output type of the command
-// that ran, and checks it against the command's declared schema; see [rotini.DecodeOutput]. A
-// failure fails the test.
+// that ran (a slice of it for a stream), and checks it against the command's declared schema;
+// see [rotini.DecodeOutput]. A failure fails the test.
 func Output[T any](tb testing.TB, res Result) T {
 	tb.Helper()
 	return OutputAs[T](tb, res, "json")

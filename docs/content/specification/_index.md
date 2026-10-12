@@ -122,7 +122,7 @@ Your own labels for this command, for your tools to read: string keys, each with
 
 array of [`FlagInput`](#flaginput)
 
-Flag inputs for this command
+Flag inputs for this command. Each applies only when this command is the one run, unless it is `cascading`.
 
 #### `arguments`
 
@@ -158,7 +158,7 @@ Configuration files this command reads values from, each at a fixed 'path' or fo
 
 `string`
 
-Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
+Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, the unprefixed name does not bind: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
 
 In a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a parent that declares none adopts the child's, a parent that declares one wins, and two children with different prefixes are rejected.
 
@@ -260,7 +260,7 @@ Auto-expose external '&lt;prefix&gt;\*' executables as plugin sub-commands of th
 
 `string`
 
-Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time; a leading ~ and $VAR references are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. A relative path is resolved against the run's directory; $VAR references and then a leading ~ are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
 
 #### `timeout`
 
@@ -848,7 +848,7 @@ The file's format. When omitted, the format is inferred from the file extension;
 
 `string`
 
-File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.
+File path. A leading `~` or `~user` and `$VAR` or `${VAR}` references (with the shell forms `${VAR:-x}`, `${VAR:?message}` and the like) are expanded from the run's environment, and a relative path is resolved against the run's directory. Exactly one of 'path' or 'discover' must be set.
 
 ### `profiles`
 
@@ -1269,7 +1269,7 @@ It applies wherever the input reads text: the command line, a flag's or argument
 
 Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 
-Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
+Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback, which the completer can replace for one request with rtx.SetCompletionFallback.
 
 ### `config_source`
 
@@ -1453,7 +1453,7 @@ A run-time location strategy for a configuration file, instead of a fixed 'path'
 
 `string` · **required** · one of `walk-up`, `xdg`, `native`, `xdg-system`
 
-'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
+'walk-up': search from the run's directory (the working directory, unless a `role: chdir` flag or Program.WithDir sets another) upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
 
 'xdg': search $XDG_CONFIG_HOME/&lt;app&gt;, defaulting to ~/.config/&lt;app&gt;, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/&lt;app&gt; reads the same path everywhere, and a dotfiles repository works unchanged across machines. This is the portable choice. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows).
 

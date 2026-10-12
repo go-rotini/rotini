@@ -15,10 +15,11 @@ var ErrMultipleDocuments = errors.New("the file holds more than one YAML documen
 // LayoutError is a construct the span index doesn't handle, such as a complex mapping key. It
 // matches [ErrRefused].
 type LayoutError struct {
-	Line   int
-	Reason string
+	Line   int    // the 1-based source line
+	Reason string // what the index can't handle
 }
 
+// Error returns the line and reason.
 func (e *LayoutError) Error() string { return fmt.Sprintf("line %d: %s", e.Line, e.Reason) }
 
 // Is reports whether target is [ErrRefused].

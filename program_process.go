@@ -7,9 +7,9 @@ import (
 
 // WithTerminationTimeout bounds how long a run may take to finish after the first trapped
 // signal halts it. When the run hasn't returned within d (teardown and the reporter included),
-// the exit action is called with the signal's exit code (128+n), as a second signal does:
-// buffered stdout is flushed on a best-effort basis, the remaining teardown doesn't run, and
-// the reporter may not have printed.
+// the exit action is called with the first signal's exit code (128+n). As with a second signal
+// (which exits with 130), buffered stdout is flushed on a best-effort basis, the remaining
+// teardown doesn't run, and the reporter may not have printed.
 //
 // d <= 0 restores the default: wait for teardown, or for a second signal. It has no effect when
 // rotini installs no signal trap (see [Program.WithSignals] and
