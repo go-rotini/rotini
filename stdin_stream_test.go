@@ -510,9 +510,17 @@ func TestStdinStream_constantMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.GC()
-	var ms runtime.MemStats
-	var peak uint64
+	// Measure what the stream retains: live heap after a collection, against a baseline taken
+	// before reading. Heap in use without a collection also counts garbage the stream has already
+	// let go of, and what earlier tests left live, so it varied with test order.
+	retained := func() uint64 {
+		var ms runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&ms)
+		return ms.HeapAlloc
+	}
+	base := retained()
+	var growth uint64
 	n, read := 0, 0
 	for line, err := range in.App.Stdin {
 		if err != nil {
@@ -520,17 +528,18 @@ func TestStdinStream_constantMemory(t *testing.T) {
 		}
 		n++
 		read += len(line) + 1
-		if read >= 4<<20 {
+		if read >= 32<<20 {
 			read = 0
-			runtime.ReadMemStats(&ms)
-			peak = max(peak, ms.HeapInuse)
+			if now := retained(); now > base {
+				growth = max(growth, now-base)
+			}
 		}
 	}
 	if n < size/80 {
 		t.Fatalf("read %d lines, want about %d", n, size/80)
 	}
-	if peak > 16<<20 {
-		t.Errorf("heap in use peaked at %d MB, want under 16 MB", peak>>20)
+	if growth > 16<<20 {
+		t.Errorf("the stream retained %d MB while reading %d MB, want under 16 MB", growth>>20, size>>20)
 	}
 }
 
