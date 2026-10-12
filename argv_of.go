@@ -238,6 +238,10 @@ func (w *argvWriter) frame(top string, ci reflect.Value, frame Command, leaf boo
 			err = fmt.Errorf("rotini: ArgvOf: %s: %q declares no flag %q", p, frame.Name, logical)
 			return
 		}
+		if fd.Local && !leaf {
+			err = &ArgvError{Field: p, Reason: fmt.Sprintf("the flag applies only when %q is the command run, and it is an ancestor", frame.Name)}
+			return
+		}
 		err = w.flag(p, fd, f)
 	})
 	if err != nil {

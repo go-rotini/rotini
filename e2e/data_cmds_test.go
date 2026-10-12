@@ -107,10 +107,10 @@ func dataCmds() map[string]func(ts *testscript.TestScript, neg bool, args []stri
 			cmd.Stdin, cmd.Stdout = in, io.Discard
 			var stderr strings.Builder
 			cmd.Stderr = &stderr
-			if err := cmd.Run(); err != nil {
+			peak, ok, err := runPeakRSS(cmd)
+			if err != nil {
 				ts.Fatalf("rssbelow: %v: %v\n%s", args[2:], err, stderr.String())
 			}
-			peak, ok := maxRSS(cmd.ProcessState)
 			if !ok {
 				ts.Logf("rssbelow: peak memory is not reported on this platform")
 				return

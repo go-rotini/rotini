@@ -114,3 +114,25 @@ db	the database
 == sub-command-enum
 dev	
 prod	
+== fallback-extensions
+./a.yaml	
+./b.yml	
+./bin	
+./drivers	
+./src	
+./sub	
+== fallback-directory
+src	
+sub	
+== fallback-with-candidates
+db	
+drivers	
+== fallback-none
+== fallback-file
+c.txt	
+cases.txt	
+completion_bash.sh	
+completion_fish.fish	
+completion_nushell.nu	
+completion_powershell.ps1	
+completion_zsh.zsh	

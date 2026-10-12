@@ -1,5 +1,5 @@
 # After a sub-command's name, an identifier means the nearest command's flag, so a descendant
-# reusing a cascading or short-circuit ancestor's identifier hides it there.
+# reusing a cascading ancestor's identifier hides it there.
 version: 0.0.0
 command:
   name: demo

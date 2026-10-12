@@ -53,7 +53,7 @@ Commands:
   diff                compare two versions of a cli's contract
 
 Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -114,7 +114,7 @@ Flags:
   -n, --[no-]dry-run       show what init would write, and change nothing
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -182,7 +182,7 @@ Commands:
   urfave    import a urfave/cli v3 program
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -225,7 +225,7 @@ Flags:
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -270,7 +270,7 @@ Flags:
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -313,7 +313,7 @@ Flags:
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -390,7 +390,7 @@ Flags:
   -n, --[no-]dry-run     show what would be written, created or removed, and change nothing; exits 2 when something would change
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -439,7 +439,7 @@ Flags:
       --format string    how to report problems — text, or json (one object listing every problem, on stdout) (default text) [text|json]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Output:
@@ -497,7 +497,7 @@ Arguments:
   [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -565,7 +565,7 @@ Flags:
       --format string     how to write the findings (default text) [text|json]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Output:
@@ -603,7 +603,7 @@ Arguments:
   <key>    the key path, such as command.flags.schema.from
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -655,7 +655,7 @@ Flags:
       --kind string    what the files are, when their keys and names don't tell [spec|conf|command]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -680,7 +680,7 @@ Arguments:
   [command...]    name of the command to print help for
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -717,7 +717,7 @@ Arguments:
   <shell>    the shell to print the script for [bash|zsh|fish|powershell|nushell]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -751,7 +751,7 @@ Flags:
       --dir string    write every page into this directory instead of printing one
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -807,7 +807,7 @@ Flags:
       --format string    output format (default text) [text|json]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Output:

@@ -28,6 +28,7 @@ type enumMeta struct {
 	oldEnum, newEnum map[string]enumValue // the entries' enum_values
 	typed            bool                 // both entries state a rotini type, which is compared instead of the JSON type
 	skipFormat       bool                 // the format follows the entries' layouts or relative values, compared instead
+	skipPattern      bool                 // the pattern follows the entries' integer base, compared instead
 }
 
 // walk compares two schemas in a direction. A `$ref` naming the same definition on both sides
@@ -68,7 +69,9 @@ func (d *differ) walkSchema(st stability, dir direction, where string, o, n any,
 	d.enum(st, dir, where, om, nm, meta)
 	if dir == in {
 		d.bounds(st, where, om, nm)
-		d.pattern(st, where, om, nm)
+		if meta == nil || !meta.skipPattern {
+			d.pattern(st, where, om, nm)
+		}
 		d.defaults(st, where, om, nm)
 		if meta == nil || !meta.skipFormat {
 			d.format(st, where, om, nm)

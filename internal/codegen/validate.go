@@ -497,7 +497,13 @@ func (w *schemaBlockWalker) command(node any, ptr string) {
 		}
 	}
 	if out, ok := c["output"]; ok {
-		w.block(out, false, ptr+"/output", "the output schema", "")
+		w.block(out, false, ptr+"/output", outputBlockNoun, "")
+		if m, ok := out.(map[string]any); ok {
+			kinds, _ := m["oneOf"].([]any)
+			for i, k := range kinds {
+				w.block(k, false, fmt.Sprintf("%s/output/oneOf/%d", ptr, i), "an output kind's schema", "")
+			}
+		}
 	}
 	if statuses, ok := c["exit_status"].([]any); ok {
 		for i, s := range statuses {
@@ -518,6 +524,9 @@ func (w *schemaBlockWalker) command(node any, ptr string) {
 		w.command(sub, fmt.Sprintf("%s/commands/%d", ptr, i))
 	}
 }
+
+// outputBlockNoun names a command's own output schema, the one block that may hold oneOf.
+const outputBlockNoun = "the output schema"
 
 // entrySchemas checks the `schema` of each entry in a list such as flags or config_files.
 func (w *schemaBlockWalker) entrySchemas(list any, input bool, ptr, noun, channel string) {
@@ -544,8 +553,12 @@ func (w *schemaBlockWalker) block(node any, input bool, ptr, noun, channel strin
 		allowed = w.sets.input
 	}
 	for _, k := range slices.Sorted(maps.Keys(m)) {
-		if !allowed[k] {
+		switch {
+		case !allowed[k]:
 			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + escapePointer(k), msg: unknownSchemaKey(k, noun, channel)})
+		case k == "oneOf" && noun != outputBlockNoun:
+			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + k,
+				msg: fmt.Sprintf("`oneOf` in %s; it is accepted only on a command's `output`, listing the kinds of a stream's items", noun)})
 		}
 	}
 	if props, ok := m["properties"].(map[string]any); ok {

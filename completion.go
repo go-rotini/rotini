@@ -42,7 +42,9 @@ const completeCommand = "__complete"
 // Candidates are offered in the order returned. A candidate may carry a one-line description
 // after a tab, "value\tdescription", which every shell shows beside the value (bash on the
 // second TAB) unless the conf's `descriptions_env` switches descriptions off.
-// [Context.SetCompletionOptions] asks the shell not to add a space after the inserted value.
+// [Context.SetCompletionOptions] asks the shell not to add a space after the inserted value, and
+// [Context.SetCompletionFallback] chooses what the shell falls back to, in place of the
+// declared `complete:` hint.
 type FlagValueCompleter interface {
 	CompleteFlagValue(rtx *Context, flag, partial string) []string
 }
@@ -204,7 +206,7 @@ func completePendingFlagValue(cc completionContext, words []string, partial stri
 func completeFlagWord(cc completionContext, words []string, partial string, lookup HandlerLookup, rtx *Context) completionAnswer {
 	if name, val, hasInline := splitFlag(partial); hasInline {
 		fd, idx, negated, found := findFlagMatch(cc.chain, name)
-		if !found || negated || !takesValue(fd) {
+		if !found || negated || !takesValue(fd) || (fd.Local && idx != len(cc.chain)-1) {
 			return completionAnswer{} // a flag that takes no value has nothing to offer after "="
 		}
 		vals := flagValueCandidates(lookup, rtx, cc.chain, words, idx, fd, val)
@@ -223,7 +225,7 @@ func completeFlagWord(cc completionContext, words []string, partial string, look
 		var mine []string
 		for _, f := range v.Flags {
 			mine = append(mine, matchSpellings(f)...)
-			if !offerFlag(f, cc.setAt(i), hidden) {
+			if !offerFlag(f, cc.setAt(i), hidden) || (f.Local && i != len(cc.chain)-1) {
 				continue
 			}
 			var ids []string
@@ -909,7 +911,8 @@ type CompletionResult struct {
 	// off ([Program.WithCompletionDescriptions]).
 	Candidates []CompletionCandidate
 	// Hint is the spec's declared `complete:` hint for the input being completed, or the zero
-	// value when it declares none. A completer that answers still wins over it: the hint is the
+	// value when it declares none. A completer's [Context.SetCompletionFallback] replaces its
+	// Kind and Extensions for the request. A completer that answers still wins over it: the hint is the
 	// fallback for when Candidates is empty, except kind "none", which also means "never offer
 	// files" when there are candidates. Kind "command" is answered in Candidates, and means
 	// "none" to the shell.
@@ -1018,6 +1021,9 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 	rtx.mu.RLock()
 	result.NoSpace = asked.NoSpace || allKeys || answer.noSpace
 	result.KeepOrder = asked.KeepOrder || answer.keepOrder
+	if fb := rtx.completionFallback; fb != nil {
+		result.Hint.Kind, result.Hint.Extensions = fb.Kind, fb.Extensions
+	}
 	rtx.mu.RUnlock()
 	if p.def.CompletionMessages != nil && p.completionMessagesOn(rtx) {
 		result.Messages = completionMessages(added, result)

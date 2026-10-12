@@ -1,0 +1,97 @@
+# R10 — `metadata:` is the author's own: it reaches the Definition and the contract as written,
+# shows on no page, and `rotini diff` rates any change to it as safe.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+grep 'Metadata: map\[string\]string\{"owner": "platform-team"\}' internal/cmd/app/zz_app.go
+grep 'Name: "force".*Metadata: map\[string\]string\{"audit": "yes"\}' internal/cmd/app/zz_app.go
+grep '"metadata": \{' cli-contract.json
+grep '"owner": "storage-team"' cli-contract.json
+grep '"source": "vault"' cli-contract.json
+cp cli-contract.json v1.json
+
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+exec ./app$exe purge --help
+stdout 'Usage:'
+! stdout 'storage-team'
+! stdout 'audit'
+
+# Every metadata change is safe, so diff passes.
+cp v2.spec.yaml cmd/app/.rotini.spec.yaml
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout '^Safe:'
+stdout 'METADATA_CHANGED +app purge +metadata "owner": "storage-team" → "data-team"'
+stdout 'METADATA_REMOVED +app purge --force +metadata "audit" removed'
+stdout 'METADATA_ADDED +app purge \$APP_TOKEN +metadata "rotate" added: "90d"'
+stdout '^0 breaking, 0 possibly breaking, 0 expected, 3 safe, 0 accepted$'
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a metadata demo
+  metadata: { owner: platform-team }
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: purge
+      summary: delete everything
+      metadata: { owner: storage-team }
+      flags:
+        - name: force
+          summary: skip the prompt
+          identifiers: [--force]
+          metadata: { audit: "yes" }
+          schema: { type: bool }
+      env:
+        - name: token
+          metadata: { source: vault }
+          schema: { type: string, variable: APP_TOKEN }
+-- v2.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a metadata demo
+  metadata: { owner: platform-team }
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: purge
+      summary: delete everything
+      metadata: { owner: data-team }
+      flags:
+        - name: force
+          summary: skip the prompt
+          identifiers: [--force]
+          schema: { type: bool }
+      env:
+        - name: token
+          metadata: { source: vault, rotate: 90d }
+          schema: { type: string, variable: APP_TOKEN }
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/app/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true

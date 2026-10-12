@@ -74,6 +74,7 @@ type command struct {
 	Stability             string            `json:"stability"`
 	Effects               *effects          `json:"effects"`
 	Agent                 *bool             `json:"agent"`
+	Metadata              map[string]string `json:"metadata"`
 }
 
 // input is an argument, flag, environment variable or config key. The four share most facts,
@@ -107,6 +108,7 @@ type input struct {
 	DottedKeys            bool                 `json:"dotted_keys"`
 	Layouts               []string             `json:"layouts"`
 	Relative              string               `json:"relative"`
+	Base                  string               `json:"base"`
 	Expand                []string             `json:"expand"`
 	RelativeTo            string               `json:"relative_to"`
 	Secret                bool                 `json:"secret"`
@@ -126,6 +128,7 @@ type input struct {
 	RoleValue             string               `json:"role_value"` // flag
 	Effects               *effects             `json:"effects"`    // flag
 	Agent                 *bool                `json:"agent"`
+	Metadata              map[string]string    `json:"metadata"`
 }
 
 type enumValue struct {
@@ -184,12 +187,13 @@ type discover struct {
 }
 
 type stdin struct {
-	Format         string `json:"format"`
-	Type           string `json:"type"`
-	Required       bool   `json:"required"`
-	Schema         any    `json:"schema"`
-	Separator      string `json:"separator"`
-	UnlessArgument string `json:"unless_argument"`
+	Format         string            `json:"format"`
+	Type           string            `json:"type"`
+	Required       bool              `json:"required"`
+	Schema         any               `json:"schema"`
+	Separator      string            `json:"separator"`
+	UnlessArgument string            `json:"unless_argument"`
+	Metadata       map[string]string `json:"metadata"`
 }
 
 type pluginDiscovery struct {

@@ -68,7 +68,7 @@ func selectorProblems(sel profileSelector, p *ConfigurationFileProfiles, at func
 			at("select", severityError, fmt.Sprintf("profiles.select names %s, which sets `key`; the selector is read before any configuration file, so it can't come from one", name))
 		}
 		if hasChildren && !f.Cascading {
-			at("select", severityWarning, fmt.Sprintf("profiles.select names %s, which isn't cascading; it still parses after a sub-command, but the sub-commands' help won't list it; set `cascading: true`", name))
+			at("select", severityWarning, fmt.Sprintf("profiles.select names %s, which isn't cascading, so its sub-commands don't accept it and can't select a profile; set `cascading: true`", name))
 		}
 	}
 	if e := sel.env; e != nil {

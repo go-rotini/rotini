@@ -95,6 +95,7 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.CheckInputs(v, rotini.PresenceOf(v))` | check values you collected yourself against the spec; see [checking inputs you collected yourself](/docs#checking-inputs-you-collected-yourself) |
 | `rtx.PartialInputs[T]()` | what has been typed so far, in a completer; see [completers](/docs#completers) |
 | `rtx.SetCompletionOptions(rotini.CompletionOptions{…})` | ask the shell, from a completer, to add no space after the candidate (`NoSpace`) or keep the answer's order (`KeepOrder`); see [completers](/docs#completers) |
+| `rtx.SetCompletionFallback(rotini.Completion{…})` | choose, from a completer, what the shell falls back to for this request (files, directories, none, file extensions); see [completers](/docs#completers) |
 | `rtx.CommandChain()` / `rtx.CommandPath()` | the commands from the root to the invoked one |
 | `rtx.DashIndex()` | how many arguments came before a `--` the user typed |
 | `rtx.Now()` | the run's one clock reading, the one relative times are measured from |

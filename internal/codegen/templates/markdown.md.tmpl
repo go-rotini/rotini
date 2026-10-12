@@ -16,8 +16,8 @@
          alsoSetBy .Env .ConfigKey "`" "`" renders them as "also set by ...".
          Argument, flag, env and config rows carry .Constraints (the declared bounds, lengths,
          item counts and repeatability as a short note) and .Rules (the same as sentences,
-         plus pattern and separator), and .Accepts (what a time input accepts beyond its type's
-         default: a layout, relative times).
+         plus pattern and separator), and .Accepts (what a time or integer input accepts beyond its type's
+         default: a layout, relative times, base prefixes).
          Argument, flag, env and config rows carry .EnumValues: every value that is not hidden,
          in declared order, as {.Value .Summary .Aliases .Deprecated .DeprecatedSince .RemovedIn
          .ReplacedBy .Note}, nil when no value declares more than its spelling (.Enum always
@@ -154,10 +154,17 @@ Reads {{if eq .Format "text"}}text{{else if eq .Format "lines"}}lines of text{{i
 {{with .Description}}{{.}}
 
 {{end -}}
-{{if .Stream}}Writes a stream of `{{.Type}}` to stdout, one item at a time (JSON: one compact value per line; YAML: one document per item, each starting `---`).{{else}}Writes `{{.Type}}` to stdout.{{end}}
+{{if .Kinds}}Writes a stream of items to stdout, one at a time (JSON: one compact value per line; YAML: one document per item, each starting `---`). Each item's `{{.Tag}}` says which kind it is.{{else if .Stream}}Writes a stream of `{{.Type}}` to stdout, one item at a time (JSON: one compact value per line; YAML: one document per item, each starting `---`).{{else}}Writes `{{.Type}}` to stdout.{{end}}
 
 {{range .Fields}}- `{{.Name}}`{{with .Type}} `{{.}}`{{end}}{{with .Description}} — {{.}}{{end}}{{if .Required}} (required){{end}}
-{{end}}
+{{end}}{{$tag := .Tag}}{{range .Kinds}}
+### `{{$tag}}: {{.Value}}`{{with .Type}} (`{{.}}`){{end}}
+
+{{with .Description}}{{.}}
+
+{{end -}}
+{{range .Fields}}- `{{.Name}}`{{with .Type}} `{{.}}`{{end}}{{with .Description}} — {{.}}{{end}}{{if .Required}} (required){{end}}
+{{end}}{{end}}
 {{end -}}
 {{- with .ExitStatus}}## Exit Status
 

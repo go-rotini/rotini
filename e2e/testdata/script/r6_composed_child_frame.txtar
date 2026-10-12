@@ -54,10 +54,12 @@ command:
     - name: quiet
       summary: the umbrella's own flag, which the child's frame must never see
       identifiers: [--quiet]
+      cascading: true
       schema: { type: bool }
     - name: shared
       summary: a name the child also declares, to pin the shadowing rule
       identifiers: [--shared]
+      cascading: true
       schema: { type: bool }
     - name: help
       summary: print help
@@ -84,10 +86,12 @@ command:
     - name: loud
       summary: read by the child's own cascading hook
       identifiers: [--loud]
+      cascading: true
       schema: { type: bool }
     - name: shared
       summary: a name the umbrella also declares
       identifiers: [--shared]
+      cascading: true
       schema: { type: bool }
     - name: help
       summary: print help

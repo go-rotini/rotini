@@ -28,7 +28,7 @@ func parseArgvStore(p *Parser, rtx *Context, out any) (*parsedInputs, []Command,
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
 	}
-	chain := rtx.CommandChain()
+	chain := rtx.chainRef()
 	if len(chain) == 0 {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}

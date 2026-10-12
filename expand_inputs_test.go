@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -105,7 +104,7 @@ func TestExpand_argvErrors(t *testing.T) {
 	for argv, want := range map[string]string{
 		"--paths=$A,$NOPE":   `--paths: $NOPE is not set (in "$NOPE")`,
 		"--out=${OUTDIR:-x}": `--out: only $NAME and ${NAME} are expanded (in "${OUTDIR:-x}")`,
-		"-f=~/missing":       `-f: no such file: ` + strconv.Quote(home+"/missing") + ` (written as "~/missing")`,
+		"-f=~/missing":       `-f: no such file: ` + quotePath(home+"/missing") + ` (written as "~/missing")`,
 	} {
 		_, err := exBind(t, work, conf, "", append(env, "A=1"), argv)
 		var pe *ParseError

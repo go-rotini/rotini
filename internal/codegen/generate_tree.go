@@ -406,7 +406,16 @@ func overlayCommand(child, parent Command) Command {
 		m.PluginPath = parent.PluginPath
 	}
 	overlaySpellings(&m, parent)
+	overlayMetadata(&m, parent)
 	return m
+}
+
+// overlayMetadata applies the `metadata` a `$ref` node declares to the mounted command m,
+// replacing the composed command's; see [overlayCommand].
+func overlayMetadata(m *Command, parent Command) {
+	if len(parent.Metadata) > 0 {
+		m.Metadata = parent.Metadata
+	}
 }
 
 // loadComposedSpec locates and loads the spec a `$ref` names, relative to base, and marks

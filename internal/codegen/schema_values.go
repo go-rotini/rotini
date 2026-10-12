@@ -1,6 +1,9 @@
 package codegen
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Accessors for the input keys the spec lets take more than one shape. The generated spec
 // type holds each as decoded (`any`); every reader goes through these. A malformed value,
@@ -57,6 +60,46 @@ func relative(s *InputSchema) string {
 		return ""
 	}
 	return s.Relative
+}
+
+// prefixedBase is the one value of `base`: an integer input also takes 0x, 0o and 0b literals.
+const prefixedBase = "prefixed"
+
+// intBase reads `base`: prefixed, or "".
+func intBase(s *InputSchema) string {
+	if s == nil {
+		return ""
+	}
+	return s.Base
+}
+
+// prefixedText spells v in decimal when it is an integer literal as a `base: prefixed` input
+// reads it (an optional sign, a 0x, 0o or 0b prefix or none, `_` between digits), else returns
+// it unchanged. Without a prefix the digits are decimal, so "010" is "10".
+func prefixedText(v string) string {
+	sign, body := "", v
+	if body != "" && (body[0] == '+' || body[0] == '-') {
+		sign, body = body[:1], body[1:]
+	}
+	var mag uint64
+	var err error
+	if len(body) > 2 && body[0] == '0' && strings.ContainsRune("xXoObB", rune(body[1])) {
+		mag, err = strconv.ParseUint(body, 0, 64)
+	} else {
+		if body == "" || body[0] == '_' || strings.HasSuffix(body, "_") || strings.Contains(body, "__") ||
+			strings.Trim(body, "0123456789_") != "" {
+			return v
+		}
+		mag, err = strconv.ParseUint(strings.ReplaceAll(body, "_", ""), 10, 64)
+	}
+	if err != nil {
+		return v
+	}
+	d := strconv.FormatUint(mag, 10)
+	if sign == "-" && mag != 0 {
+		d = "-" + d
+	}
+	return d
 }
 
 // negatedForms returns a flag's negated identifiers: its custom form, else "--no-<x>" for each

@@ -59,6 +59,13 @@ command:
     Region:
       type: string
       enum: [eu, us, ap]
+    Rollout:
+      type: object
+      properties:
+        kind: { type: string, const: result }
+        version: { type: string }
+      description: How a rollout ended.
+      required: [kind, version]
   flag_sets:
     Paging:
       summary: how long listings are paged
@@ -144,12 +151,14 @@ command:
       group: Deploying
       deprecated: use ship
       effects: { kind: write, idempotent: true, open_world: true }
+      metadata: { owner: platform-team }
       flags:
         - name: env
           identifiers: [-e, --env]
           summary: the environment
           description: The environment to ship to. Each one has its own cluster and credentials.
           stability: beta
+          metadata: { audit: "true" }
           schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, repeatable: false, complete: { kind: none, message: "one of dev, staging or prod" } }
         - name: target
           identifiers: [--target]
@@ -187,6 +196,10 @@ command:
           identifiers: [--replicas]
           summary: how many replicas
           schema: { type: int, exclusiveMinimum: 0, exclusiveMaximum: 100, multipleOf: 1 }
+        - name: mode
+          identifiers: [--mode]
+          summary: file mode for what it writes
+          schema: { type: uint32, base: prefixed, default: '0o644', maximum: 0o777 }
         - name: id
           identifiers: [--id]
           summary: a request id
@@ -285,6 +298,17 @@ command:
       handler:
         import: github.com/example/deploy/internal/logs
         convention: Logs
+    - name: rollout
+      summary: roll a service out, reporting progress as it goes
+      output:
+        oneOf:
+          - type: object
+            properties:
+              kind: { type: string, const: progress }
+              percent: { type: integer, minimum: 0, maximum: 100 }
+            required: [kind, percent]
+          - $ref: "#/schemas/Rollout"
+      output_stream: true
     - name: exec
       summary: run a command in a service
       agent: false

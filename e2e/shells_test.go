@@ -36,7 +36,9 @@ var shells = []shell{
 // generated and calls the shell's completion the way TAB does, and the candidates, descriptions
 // and messages it prints must match testdata/shells/want/<shell>.txt. Each image adds the
 // account rotiniuser, the group rotinigroup and the host rotini-host, so the user, group and host
-// kinds have a known answer. Run it with `make test-completion-shells`; -update-shells rewrites
+// kinds have a known answer. A subset of the cases also runs the same scripts against a binary
+// built with the previous release, matching want/skew-<shell>.txt: a user who updates one side
+// and not the other still gets completions. Run it with `make test-completion-shells`; -update-shells rewrites
 // the want files.
 func TestCompletionShells(t *testing.T) {
 	if os.Getenv("ROTINI_COMPLETION_SHELLS") == "" {
@@ -65,11 +67,7 @@ func TestCompletionShells(t *testing.T) {
 	mustRun(t, app, nil, rotiniBin(t), "generate", "cmd/app/.rotini.spec.yaml", "--config", "cmd/app/.rotini.conf.yaml")
 	mustRun(t, app, goenv, "go", "mod", "tidy")
 
-	// /w in the container: the program on PATH, the scripts, the drivers, the cases, and files
-	// for the path kinds to find.
-	bin := filepath.Join(work, "bin")
-	mustRun(t, app, append(goenv, "GOOS=linux", "GOARCH="+arch, "CGO_ENABLED=0"), "go", "build", "-o", filepath.Join(bin, "app"), "./cmd/app")
-	mustWrite(t, filepath.Join(bin, "rotini-exe-demo"), "#!/bin/sh\n", 0o755)
+	scripts := map[string]string{}
 	for script, file := range map[string]string{
 		"bash": "completion_bash.sh", "zsh": "completion_zsh.zsh", "fish": "completion_fish.fish",
 		"powershell": "completion_powershell.ps1", "nushell": "completion_nushell.nu",
@@ -78,43 +76,90 @@ func TestCompletionShells(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mustWrite(t, filepath.Join(work, file), string(body), 0o644)
-	}
-	if err := os.CopyFS(filepath.Join(work, "drivers"), os.DirFS(filepath.Join(src, "drivers"))); err != nil {
-		t.Fatal(err)
+		scripts[file] = string(body)
 	}
 	cases, err := os.ReadFile(filepath.Join(src, "cases.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustWrite(t, filepath.Join(work, "cases.txt"), string(cases), 0o644)
-	for _, f := range []string{"a.yaml", "b.yml", "c.txt", "sub/d.yaml"} {
-		mustWrite(t, filepath.Join(work, f), "", 0o644)
+	linux := []string{"GOOS=linux", "GOARCH=" + arch, "CGO_ENABLED=0"}
+	mustRun(t, app, append(goenv, linux...), "go", "build", "-o", filepath.Join(work, "bin", "app"), "./cmd/app")
+	stageShells(t, work, src, scripts, string(cases))
+
+	// The same scripts against a binary built entirely with the previous release: its own code
+	// generation, its own runtime, and a fixture (testdata/shells/skew) written for it.
+	skew := t.TempDir()
+	skewApp := filepath.Join(skew, "src")
+	if err := os.CopyFS(skewApp, os.DirFS(filepath.Join(src, "skew"))); err != nil {
+		t.Fatal(err)
 	}
+	mustWrite(t, filepath.Join(skewApp, "go.mod"), "module example.com/shells\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini "+skewRelease+"\n", 0o600)
+	mustRun(t, skewApp, goenv, "go", "run", "github.com/go-rotini/rotini/cmd/rotini@"+skewRelease, "generate", "cmd/app/.rotini.spec.yaml", "--config", "cmd/app/.rotini.conf.yaml")
+	mustRun(t, skewApp, goenv, "go", "mod", "tidy")
+	mustRun(t, skewApp, append(goenv, linux...), "go", "build", "-o", filepath.Join(skew, "bin", "app"), "./cmd/app")
+	skewCases := keepCases(string(cases), "commands", "flags", "enum", "file-extensions", "directory", "none-with-message", "completer", "sub-command-enum")
+	stageShells(t, skew, src, scripts, skewCases)
 
 	for _, sh := range shells {
 		t.Run(sh.name, func(t *testing.T) {
 			image := "rotini-completion-" + sh.name
 			mustRun(t, src, nil, "docker", "build", "--quiet", "--tag", image, "--file", filepath.Join("images", sh.name+".Dockerfile"), "images")
-			args := []string{"run", "--rm", "--network", "none", "--add-host", "rotini-host:10.0.0.7",
-				"--volume", work + ":/w", "--workdir", "/w", "--env", "HOME=/tmp", image, "env", "PATH=/w/bin:/usr/local/bin:/usr/bin:/bin"}
-			got := sortUnordered(mustRun(t, "", nil, "docker", append(args, sh.run...)...), string(cases))
-			if strings.Contains(got, ":rotini:") {
-				t.Errorf("a directive reached the shell's candidates:\n%s", got)
-			}
-			want := filepath.Join(src, "want", sh.name+".txt")
-			if *updateShells {
-				mustWrite(t, want, got, 0o644)
-				return
-			}
-			b, err := os.ReadFile(want)
-			if err != nil {
-				t.Fatalf("%v (run with -update-shells to create it)", err)
-			}
-			if got != string(b) {
-				t.Errorf("%s completion differs from %s\n--- got\n%s--- want\n%s", sh.name, want, got, b)
-			}
+			runShell(t, sh, image, work, string(cases), filepath.Join(src, "want", sh.name+".txt"))
+			runShell(t, sh, image, skew, skewCases, filepath.Join(src, "want", "skew-"+sh.name+".txt"))
 		})
+	}
+}
+
+// skewRelease is the release whose binary the skew run pairs with this tree's completion scripts.
+const skewRelease = "v1.4.3"
+
+// stageShells lays out dir as /w in the container: the scripts, the drivers, the cases, files for
+// the path kinds to find, and beside the program in bin, an executable for the executable kind.
+func stageShells(t *testing.T, dir, src string, scripts map[string]string, cases string) {
+	t.Helper()
+	for file, body := range scripts {
+		mustWrite(t, filepath.Join(dir, file), body, 0o644)
+	}
+	if err := os.CopyFS(filepath.Join(dir, "drivers"), os.DirFS(filepath.Join(src, "drivers"))); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(dir, "cases.txt"), cases, 0o644)
+	mustWrite(t, filepath.Join(dir, "bin", "rotini-exe-demo"), "#!/bin/sh\n", 0o755)
+	for _, f := range []string{"a.yaml", "b.yml", "c.txt", "sub/d.yaml"} {
+		mustWrite(t, filepath.Join(dir, f), "", 0o644)
+	}
+}
+
+// keepCases returns the lines of cases naming one of names.
+func keepCases(cases string, names ...string) string {
+	var b strings.Builder
+	for line := range strings.Lines(cases) {
+		if name, _, _ := strings.Cut(line, "\t"); slices.Contains(names, name) {
+			b.WriteString(line)
+		}
+	}
+	return b.String()
+}
+
+// runShell runs sh's driver over the layout in dir and compares its answers with want.
+func runShell(t *testing.T, sh shell, image, dir, cases, want string) {
+	t.Helper()
+	args := []string{"run", "--rm", "--network", "none", "--add-host", "rotini-host:10.0.0.7",
+		"--volume", dir + ":/w", "--workdir", "/w", "--env", "HOME=/tmp", image, "env", "PATH=/w/bin:/usr/local/bin:/usr/bin:/bin"}
+	got := sortUnordered(mustRun(t, "", nil, "docker", append(args, sh.run...)...), cases)
+	if strings.Contains(got, ":rotini:") {
+		t.Errorf("a directive reached the shell's candidates:\n%s", got)
+	}
+	if *updateShells {
+		mustWrite(t, want, got, 0o644)
+		return
+	}
+	b, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("%v (run with -update-shells to create it)", err)
+	}
+	if got != string(b) {
+		t.Errorf("%s completion differs from %s\n--- got\n%s--- want\n%s", sh.name, want, got, b)
 	}
 }
 

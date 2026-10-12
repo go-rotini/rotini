@@ -119,6 +119,9 @@ func dependencyCanonical(fd FlagDef, v string) string {
 			return strconv.FormatBool(b)
 		}
 	case isNumericType(fd.Type):
+		if fd.Base == basePrefixed {
+			v = prefixedText(v)
+		}
 		if n, ok := parseNumber(v); ok {
 			return formatNum(n)
 		}

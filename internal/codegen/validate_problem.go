@@ -3,8 +3,22 @@ package codegen
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
+
+// quotePath quotes a file path for a message as the user typed it: like %q, except that a
+// backslash stays a single backslash, so a Windows path reads as written. A path that needs
+// any other escaping (a quote, a control character, invalid UTF-8) is quoted as %q would.
+// The runtime package keeps its own copy.
+func quotePath(p string) string {
+	if strings.Contains(p, `\`) {
+		if s := strings.ReplaceAll(p, `\`, "/"); strconv.Quote(s) == `"`+s+`"` {
+			return `"` + p + `"`
+		}
+	}
+	return strconv.Quote(p)
+}
 
 // severity classifies a problem. The zero value is an error, which fails validation; a
 // warning is reported but does not fail.

@@ -23,10 +23,10 @@ import (
 // They are read when none of the list tags is present.
 
 // tagTimeSpec reads an env or config field's time tags: layout:"<first>", layoutlist (or the
-// JSON layouts) when there are several, and relative:"past". A malformed list reads as the
-// first layout alone.
+// JSON layouts) when there are several, and relative:"past"; and an integer field's
+// base:"prefixed". A malformed list reads as the first layout alone.
 func tagTimeSpec(tag reflect.StructTag) timeSpec {
-	ts := timeSpec{layout: tag.Get("layout"), relative: tag.Get("relative")}
+	ts := timeSpec{layout: tag.Get("layout"), relative: tag.Get("relative"), base: tag.Get("base")}
 	if v, ok := tag.Lookup("layoutlist"); ok {
 		if list, ok := splitTagList(v); ok {
 			ts.layouts = list
@@ -40,10 +40,11 @@ func tagTimeSpec(tag reflect.StructTag) timeSpec {
 }
 
 // channelEnum reads an env or config field's enum tags: the main values, ignorecase:"true",
-// the aliases and the hidden values.
+// the aliases and the hidden values; and base:"prefixed", which matches integers by value.
 func channelEnum(tag reflect.StructTag) enumSet {
 	var e enumSet
 	e.ignoreCase = tag.Get("ignorecase") == "true"
+	e.prefixed = tag.Get("base") == basePrefixed
 	var aliases map[string]string
 	var unlisted []string
 	_, hasList := tag.Lookup("enumlist")

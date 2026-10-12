@@ -7,19 +7,21 @@ import (
 )
 
 // enumSet is an input's enum as matching reads it: its main values, what they declare beyond
-// their spelling (aliases, hidden, deprecated), and whether case is ignored.
+// their spelling (aliases, hidden, deprecated), whether case is ignored, and whether integers
+// match by value whatever their base (base: prefixed).
 type enumSet struct {
 	values     []string
 	described  []EnumValue
 	ignoreCase bool
+	prefixed   bool
 }
 
 func flagEnum(fd FlagDef) enumSet {
-	return enumSet{values: fd.Enum, described: fd.EnumValues, ignoreCase: fd.IgnoreCase}
+	return enumSet{values: fd.Enum, described: fd.EnumValues, ignoreCase: fd.IgnoreCase, prefixed: fd.Base == basePrefixed}
 }
 
 func argEnum(ad ArgDef) enumSet {
-	return enumSet{values: ad.Enum, described: ad.EnumValues, ignoreCase: ad.IgnoreCase}
+	return enumSet{values: ad.Enum, described: ad.EnumValues, ignoreCase: ad.IgnoreCase, prefixed: ad.Base == basePrefixed}
 }
 
 // declared reports whether the input has an enum at all.
@@ -35,6 +37,15 @@ func (e enumSet) match(v string) (string, bool) {
 	for _, d := range e.described {
 		if slices.Contains(d.Aliases, v) {
 			return d.Value, true
+		}
+	}
+	if e.prefixed {
+		if n, ok := prefixedDecimal(v); ok {
+			for _, m := range e.values {
+				if prefixedText(m) == n {
+					return m, true
+				}
+			}
 		}
 	}
 	if !e.ignoreCase {
@@ -61,10 +72,10 @@ func (e enumSet) has(v string) bool {
 	return ok
 }
 
-// rewrites reports whether matching can change a value's spelling: a case-insensitive enum, or
-// one with aliases.
+// rewrites reports whether matching can change a value's spelling: a case-insensitive enum, one
+// with aliases, or one of integers in any base.
 func (e enumSet) rewrites() bool {
-	if e.ignoreCase {
+	if e.ignoreCase || e.prefixed {
 		return true
 	}
 	for _, d := range e.described {

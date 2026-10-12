@@ -335,6 +335,7 @@ func (d *differ) input(st stability, kind, w string, o, n *input) {
 	d.lifecycle(st, w, inputLifecycle(o), inputLifecycle(n))
 	d.hidden(st, RuleInputHidden, RuleInputUnhidden, w, o.Hidden, n.Hidden)
 	d.agent(st, w, o.Agent, n.Agent)
+	d.metadata(st, w, o.Metadata, n.Metadata)
 	if o.Secret != n.Secret {
 		d.add(st, Safe, RuleInputSecretChanged, w, onOff("the value is a secret", n.Secret), "")
 	}
@@ -352,6 +353,7 @@ func (d *differ) input(st stability, kind, w string, o, n *input) {
 	d.from(st, w, o, n)
 	d.implicitValue(st, w, o, n)
 	d.flipped(st, w, o.IgnoreCase, n.IgnoreCase, flip{Safe, RuleInputIgnoreCaseAdded, "enum values now match whatever their case"}, flip{Breaking, RuleInputIgnoreCaseRemoved, "enum values now match case"})
+	d.flipped(st, w, o.Base != "", n.Base != "", flip{Safe, RuleInputBaseAdded, "0x, 0o and 0b integer literals now accepted"}, flip{Breaking, RuleInputBaseRemoved, "0x, 0o and 0b integer literals no longer accepted"})
 	d.layouts(st, w, o.Layouts, n.Layouts)
 	switch o.Relative {
 	case n.Relative:
@@ -378,6 +380,7 @@ func (d *differ) input(st stability, kind, w string, o, n *input) {
 	meta.oldEnum, meta.newEnum = o.EnumValues, n.EnumValues
 	meta.typed = o.Type != "" && n.Type != ""
 	meta.skipFormat = len(o.Layouts)+len(n.Layouts) > 0 || o.Relative != "" || n.Relative != ""
+	meta.skipPattern = o.Base != "" || n.Base != ""
 	d.walk(st, in, w, o.Schema, n.Schema, meta)
 }
 

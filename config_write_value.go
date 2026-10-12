@@ -101,7 +101,7 @@ func configValueError(key string, err error) error {
 func (k ConfigKey) flagDef() FlagDef {
 	return FlagDef{
 		Name: k.Key, Type: k.Type, Enum: k.Enum, EnumValues: k.EnumValues, IgnoreCase: k.IgnoreCase,
-		Layout: k.Layout, Layouts: k.Layouts, Separator: k.separator(), Secret: k.Secret, Constraints: k.Constraints,
+		Layout: k.Layout, Layouts: k.Layouts, Base: k.Base, Separator: k.separator(), Secret: k.Secret, Constraints: k.Constraints,
 	}
 }
 

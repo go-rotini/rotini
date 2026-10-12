@@ -9,10 +9,36 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
+
+func TestQuotePath(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"/home/me/app.yaml", `"/home/me/app.yaml"`},
+		{"dir/with space/é.txt", `"dir/with space/é.txt"`},
+		{`C:\Users\me\app.yaml`, `"C:\Users\me\app.yaml"`},
+		{`\\server\share\x`, `"\\server\share\x"`},
+		{`C:\a"b`, `"C:\\a\"b"`},
+		{"a/b\"c", `"a/b\"c"`},
+		{"C:\\a\nb", `"C:\\a\nb"`},
+		{"C:\\a\x00b", `"C:\\a\x00b"`},
+		{"C:\\a\xffb", `"C:\\a\xffb"`},
+		{"/a/\xffb", `"/a/\xffb"`},
+		{"", `""`},
+	} {
+		if got := quotePath(tc.in); got != tc.want {
+			t.Errorf("quotePath(%q) = %s, want %s", tc.in, got, tc.want)
+		}
+		if !strings.Contains(tc.in, `\`) {
+			if got, q := quotePath(tc.in), fmt.Sprintf("%q", tc.in); got != q {
+				t.Errorf("quotePath(%q) = %s, want %%q's %s", tc.in, got, q)
+			}
+		}
+	}
+}
 
 // outputDir is a run context whose directory is a fresh temporary one.
 func outputDir(t *testing.T) (*Context, string) {

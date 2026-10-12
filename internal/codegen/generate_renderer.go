@@ -546,7 +546,7 @@ type templateDocArgumentRow struct {
 	Passthrough bool        // the argument and every word after it are passed on as typed
 	Deprecated  string
 	Constraints string   // the declared constraints as a short note (1..65535); "" for none
-	Accepts     string   // the forms a time input accepts beyond RFC 3339, as a short note; "" for none
+	Accepts     string   // what the input accepts beyond its type's default, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
 	Env         []string // the env fallback variables, in lookup order; nil for an argument with no fallback
 	ConfigKey   string   // the config fallback key; "" for none, or when the page's command reads no config files
@@ -573,7 +573,7 @@ type templateDocFlagRow struct {
 	Env         []string // the env fallback variables, in lookup order (first preferred); nil for an argv-only flag
 	ConfigKey   string   // the config fallback key; "" for an argv-only flag, or when the page's command reads no config files
 	Constraints string   // the declared constraints as a short note (1..65535, repeatable); "" for none
-	Accepts     string   // the forms a time input accepts beyond RFC 3339, as a short note; "" for none
+	Accepts     string   // what the input accepts beyond its type's default, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
 	Effects     string   // what giving the flag adds to its command's effects ("destructive"); "" for none
 
@@ -608,7 +608,7 @@ type templateDocEnvRow struct {
 	EnumValues  []enumValue // every value that is not hidden, in declared order; nil when no value declares more than its spelling
 	Deprecated  string
 	Constraints string   // the declared constraints as a short note; "" for none
-	Accepts     string   // the forms a time input accepts beyond RFC 3339, as a short note; "" for none
+	Accepts     string   // what the input accepts beyond its type's default, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
@@ -627,7 +627,7 @@ type templateDocConfigRow struct {
 	EnumValues  []enumValue // every value that is not hidden, in declared order; nil when no value declares more than its spelling
 	Deprecated  string
 	Constraints string   // the declared constraints as a short note; "" for none
-	Accepts     string   // the forms a time input accepts beyond RFC 3339, as a short note; "" for none
+	Accepts     string   // what the input accepts beyond its type's default, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
@@ -777,6 +777,25 @@ func wrapRoffText(line string, width int) []string {
 	return out
 }
 
+// sanitizeOutputDoc is sanitizeDocData for the Output section, its kinds included.
+func sanitizeOutputDoc(out templateDocOutput, clean func(string) string) *templateDocOutput {
+	cleanFields := func(fields []templateDocOutputField) []templateDocOutputField {
+		fields = append([]templateDocOutputField(nil), fields...)
+		for i := range fields {
+			fields[i].Description = clean(fields[i].Description)
+		}
+		return fields
+	}
+	out.Description = clean(out.Description)
+	out.Fields = cleanFields(out.Fields)
+	out.Kinds = append([]templateDocOutputKind(nil), out.Kinds...)
+	for i := range out.Kinds {
+		out.Kinds[i].Description = clean(out.Kinds[i].Description)
+		out.Kinds[i].Fields = cleanFields(out.Kinds[i].Fields)
+	}
+	return &out
+}
+
 // sanitizeDocData replaces tabs and newlines in row text with spaces, since they would corrupt
 // tabwriter columns. Block fields (Header, Description, Footer, Usage) are left intact. Row
 // slices are copied so the input is not mutated.
@@ -859,13 +878,7 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 		d.ExitStatus[i].Summary, d.ExitStatus[i].DocsURL = clean(d.ExitStatus[i].Summary), clean(d.ExitStatus[i].DocsURL)
 	}
 	if d.Output != nil {
-		out := *d.Output
-		out.Description = clean(out.Description)
-		out.Fields = append([]templateDocOutputField(nil), out.Fields...)
-		for i := range out.Fields {
-			out.Fields[i].Description = clean(out.Fields[i].Description)
-		}
-		d.Output = &out
+		d.Output = sanitizeOutputDoc(*d.Output, clean)
 	}
 	if d.Stdin != nil {
 		in := *d.Stdin

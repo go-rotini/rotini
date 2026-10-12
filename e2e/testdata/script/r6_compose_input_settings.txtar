@@ -68,6 +68,7 @@ command:
   flags:
     - name: region
       summary: the deployment region
+      cascading: true
       identifiers:
         - --region
       schema:

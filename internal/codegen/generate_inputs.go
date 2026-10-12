@@ -127,6 +127,9 @@ func constraintTags(schema *InputSchema) string {
 	if r := relative(schema); r != "" {
 		parts = append(parts, "relative:"+strconv.Quote(r))
 	}
+	if base := intBase(schema); base != "" {
+		parts = append(parts, "base:"+strconv.Quote(base))
+	}
 	if schema != nil && len(schema.Enum) > 0 {
 		parts = append(parts, "enumlist:"+strconv.Quote(tagList(enumStrings(schema.Enum))))
 		if schema.IgnoreCase {
@@ -278,6 +281,9 @@ func reconTag(key string, schema *InputSchema) string {
 	parts := []string{key}
 	if schema != nil {
 		if d := defaultString(schema.Default); d != "" {
+			if intBase(schema) == prefixedBase {
+				d = prefixedText(d) // recon reads a leading 0 as octal; the input reads decimal
+			}
 			parts = append(parts, "default="+d)
 		}
 		if schema.Required {

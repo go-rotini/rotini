@@ -36,7 +36,8 @@
          .Constraints     on argument, flag, env and config rows: the declared bounds, lengths,
                           item counts and repeatability as a short note (1..65535); .Rules: the
                           same as sentences, plus pattern and separator; .Accepts: what a
-                          time input accepts beyond its type's default (a layout, relative times)
+                          time or integer input accepts beyond its type's default (a layout,
+                          relative times, base prefixes)
          .EnumValues      on argument, flag, env and config rows: every value that is not hidden,
                           in declared order, as {.Value .Summary .Aliases .Deprecated
                           .DeprecatedSince .RemovedIn .ReplacedBy .Note}, nil when no value declares
@@ -57,6 +58,8 @@
          .Output          {.Description .Type .Fields[] .Stream}, nil when
                           the command declares no output; .Fields[] {.Name .Type .Description .Required};
                           .Stream: the command writes a stream of .Type, one item at a time
+                          .Tag .Kinds[]: a stream whose items come in several kinds; .Tag names the
+                          property saying which, .Kinds[] {.Value .Type .Description .Fields[]}
          .Examples[]      strings
          .Description     on argument, flag, env and config rows too: the input's longer text,
                           paragraphs separated by blank lines ("" for none). Help shows .Summary
@@ -143,9 +146,11 @@
 {{end -}}
 {{- with .Output}}{{$.Headings.Output}}
 {{with .Description}}  {{.}}
-{{end}}  {{if .Stream}}a stream of {{.Type}}, one item at a time (JSON: one compact value per line; YAML: one document per item, each starting ---){{else}}{{.Type}}{{end}}
+{{end}}  {{if .Kinds}}a stream of items, one at a time (JSON: one compact value per line; YAML: one document per item, each starting ---); each item's {{.Tag}} says which kind it is:{{else if .Stream}}a stream of {{.Type}}, one item at a time (JSON: one compact value per line; YAML: one document per item, each starting ---){{else}}{{.Type}}{{end}}
 {{range .Fields}}    {{.Name}}{{with .Type}} {{.}}{{end}}	{{.Description}}{{if .Required}} (required){{end}}
-{{end}}
+{{end}}{{$tag := .Tag}}{{range .Kinds}}  {{$tag}}: {{.Value}}{{with .Type}} ({{.}}){{end}}{{with .Description}}  {{.}}{{end}}
+{{range .Fields}}    {{.Name}}{{with .Type}} {{.}}{{end}}	{{.Description}}{{if .Required}} (required){{end}}
+{{end}}{{end}}
 {{end -}}
 {{- with .Examples}}{{$.Headings.Examples}}
 {{range .}}  {{.}}

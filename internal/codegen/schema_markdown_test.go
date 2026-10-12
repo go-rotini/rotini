@@ -236,7 +236,7 @@ var commandKeyGroups = []struct {
 	title string
 	keys  []string
 }{
-	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers", "deprecated_since", "removed_in", "deprecated_identifiers_removed_in", "hidden_aliases", "replaced_by", "stability"}},
+	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers", "deprecated_since", "removed_in", "deprecated_identifiers_removed_in", "hidden_aliases", "replaced_by", "stability", "metadata"}},
 	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies", "response_files", "flag_sets", "use"}},
 	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "options_first", "plugins", "plugin_discovery", "plugin_path", "timeout", "multicall"}},
 	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "groups", "header", "footer", "headings", "help", "man", "markdown", "topics"}},
@@ -546,6 +546,7 @@ var inputKeySamples = map[string]string{
 	"variable_file":    `{"type": "string", "variable": "X_VAR", "variable_file": "X_VAR_FILE"}`,
 	"repeatable":       `{"type": "string", "repeatable": false}`,
 	"relative":         `{"type": "time", "relative": "past"}`,
+	"base":             `{"type": "int", "base": "prefixed"}`,
 	"glob":             `{"type": "[]existingfile", "glob": true}`,
 	"expand":           `{"type": "string", "expand": ["home"]}`,
 	"relative_to":      `{"type": "string", "key": "k", "relative_to": "config"}`,
@@ -553,24 +554,33 @@ var inputKeySamples = map[string]string{
 	"uniqueItems":      `{"type": "array", "uniqueItems": true}`,
 }
 
+// probeInputKey validates a spec declaring one input (decl, see probeChannels) whose schema is
+// schema, and returns any warnings and the validation error.
+func probeInputKey(t *testing.T, schema, decl string) ([]error, error) {
+	t.Helper()
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	spec := "version: 0.0.0\ncommand:\n  name: demo\n  summary: s\n" +
+		"  schemas:\n    Name: {type: string}\n" +
+		"  output: {type: object, properties: {id: {type: string}}}\n" +
+		"  config_files:\n    - name: main\n      path: c.yaml\n" +
+		fmt.Sprintf(decl, schema)
+	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
+	writeTestFile(t, dir, ".rotini.conf.yaml", lintFixtureConf)
+	var warnings []error
+	err := NewProcessor("0.0.0").Validate(filepath.Join(dir, ".rotini.spec.yaml"), filepath.Join(dir, ".rotini.conf.yaml"),
+		false, "collect", "", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
+	return warnings, err
+}
+
 // inputChannelTable renders which input-schema keys each channel accepts by validating every
-// sample on every channel, so the table always matches the lint rules.
+// sample on every channel, so the table always matches the lint rules. Only an error means a
+// key is not accepted: a warning flags a risky use of a key the channel still takes.
 func inputChannelTable(t *testing.T) string {
 	t.Helper()
 	accepts := func(schema, decl string) bool {
-		dir := t.TempDir()
-		writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
-		spec := "version: 0.0.0\ncommand:\n  name: demo\n  summary: s\n" +
-			"  schemas:\n    Name: {type: string}\n" +
-			"  output: {type: object, properties: {id: {type: string}}}\n" +
-			"  config_files:\n    - name: main\n      path: c.yaml\n" +
-			fmt.Sprintf(decl, schema)
-		writeTestFile(t, dir, ".rotini.spec.yaml", spec)
-		writeTestFile(t, dir, ".rotini.conf.yaml", lintFixtureConf)
-		var warnings []error
-		err := NewProcessor("0.0.0").Validate(filepath.Join(dir, ".rotini.spec.yaml"), filepath.Join(dir, ".rotini.conf.yaml"),
-			false, "collect", "", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
-		return err == nil && len(warnings) == 0
+		_, err := probeInputKey(t, schema, decl)
+		return err == nil
 	}
 	// A plain input must pass on every channel, or rejections below would be the probe's fault.
 	for _, ch := range probeChannels {
@@ -618,6 +628,19 @@ func TestInputChannelTableCoversEveryKey(t *testing.T) {
 		if _, ok := inputKeySamples[key]; !ok {
 			t.Errorf("schema key %q has no sample in inputKeySamples, so the reference's channel table omits it", key)
 		}
+	}
+}
+
+// TestInputChannelTableIgnoresWarnings pins that a key whose sample only draws a warning on a
+// channel is still marked accepted there: a secret flag that takes a typed value is warned
+// about, not rejected.
+func TestInputChannelTableIgnoresWarnings(t *testing.T) {
+	warnings, err := probeInputKey(t, inputKeySamples["secret"], probeChannels[0].decl)
+	if err != nil || len(warnings) == 0 {
+		t.Fatalf("a secret flag should validate with a warning; got err %v, warnings %v", err, warnings)
+	}
+	if row := "| `secret` | ✓ | ✓ | ✓ | ✓ |\n"; !strings.Contains(inputChannelTable(t), row) {
+		t.Errorf("the channel table does not mark secret as accepted on every channel; want row %q", row)
 	}
 }
 

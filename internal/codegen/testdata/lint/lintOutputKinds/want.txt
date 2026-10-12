@@ -1,0 +1,9 @@
+spec: .rotini.spec.yaml:29:11: command demo/once: lists kinds of item under `oneOf`, which only a stream may do; set `output_stream: true` to write items of several kinds one at a time, or declare one shape as `output`
+spec: .rotini.spec.yaml:34:9: command demo/beside: declares `type` beside `oneOf`; `oneOf` stands alone on `output` (with an optional `description`), so move them into each kind
+spec: .rotini.spec.yaml:43:13: command demo/scalar: `oneOf` entry 2 is not an object schema; each kind of item is an object with a tag property naming its kind
+spec: .rotini.spec.yaml:49:11: command demo/untagged: no property says which kind an item is; give every kind the same property as a required string with a `const` naming the kind, such as `kind: {type: string, const: progress}` listed in `required`
+spec: .rotini.spec.yaml:61:13: command demo/partial: `oneOf` entry 2 has no `kind` tagging its kind, which the other kinds have; declare `kind` as a string with a `const` naming the kind, and list it in `required`
+spec: .rotini.spec.yaml:71:11: command demo/twotags: every kind could be told apart by any of `kind`, `type`; exactly one property may be a required string with a `const` in every kind, so drop the `const` from the others or leave them out of `required`
+spec: .rotini.spec.yaml:87:13: command demo/same: `oneOf` entries 1 and 2 both set `kind` to "result"; each kind needs its own value
+spec: .rotini.spec.yaml:96:13: command demo/names: `oneOf` entry 1's `kind` value "task.done" can't name its generated Go type; use letters, digits, '-' or '_'
+spec: .rotini.spec.yaml:104:13: command demo/names: `oneOf` entries 2 and 3 would both generate the type <Prefix>OutputTaskStarted; give the kinds values that differ in more than punctuation or case

@@ -15,6 +15,18 @@ type templateDocOutput struct {
 	Type        string                   // the shape as a type name: TaskList, []Task, object
 	Fields      []templateDocOutputField // the top-level fields of an object shape, by name
 	Stream      bool                     // the command writes a stream of Type, one item at a time
+	// For a stream whose items come in several kinds: the property naming each item's kind,
+	// and the kinds in declared order. Type is then the kinds' values joined by " | ".
+	Tag   string
+	Kinds []templateDocOutputKind
+}
+
+// templateDocOutputKind is one kind of item in a stream whose items come in several kinds.
+type templateDocOutputKind struct {
+	Value       string                   // the tag's value for this kind
+	Type        string                   // the named schema a `$ref` kind is; "" for one written inline
+	Description string                   // the kind's description, or its named schema's
+	Fields      []templateDocOutputField // its top-level fields, by name
 }
 
 // templateDocOutputField is one top-level field of an output shape.
@@ -30,24 +42,47 @@ func outputDoc(shape *Schema, schemas map[string]Schema) *templateDocOutput {
 	if shape == nil {
 		return nil
 	}
+	if tag, kinds := outputKinds(shape, schemas); kinds != nil {
+		d := &templateDocOutput{Description: shape.Description, Tag: tag}
+		values := make([]string, len(kinds))
+		for i, k := range kinds {
+			values[i] = k.value
+			description := k.decl.Description
+			if description == "" {
+				description = k.shape.Description
+			}
+			d.Kinds = append(d.Kinds, templateDocOutputKind{Value: k.value, Type: k.ref, Description: description, Fields: shapeFields(&k.shape)})
+		}
+		d.Type = strings.Join(values, " | ")
+		return d
+	}
 	d := &templateDocOutput{Type: shapeTypeName(shape), Description: shape.Description}
 	resolved := resolveShape(shape, schemas)
 	if d.Description == "" && resolved != nil {
 		d.Description = resolved.Description
 	}
-	if resolved == nil || len(resolved.Properties) == 0 {
-		return d
+	if resolved != nil {
+		d.Fields = shapeFields(resolved)
 	}
-	for _, name := range slices.Sorted(maps.Keys(resolved.Properties)) {
-		p := resolved.Properties[name]
-		d.Fields = append(d.Fields, templateDocOutputField{
+	return d
+}
+
+// shapeFields lists an object shape's top-level fields, by name.
+func shapeFields(s *Schema) []templateDocOutputField {
+	if len(s.Properties) == 0 {
+		return nil
+	}
+	fields := make([]templateDocOutputField, 0, len(s.Properties))
+	for _, name := range slices.Sorted(maps.Keys(s.Properties)) {
+		p := s.Properties[name]
+		fields = append(fields, templateDocOutputField{
 			Name:        name,
 			Type:        shapeTypeName(&p),
 			Description: p.Description,
-			Required:    slices.Contains(resolved.Required, name),
+			Required:    slices.Contains(s.Required, name),
 		})
 	}
-	return d
+	return fields
 }
 
 // resolveShape follows a shape's $ref to the document-level schema it names, so its fields can

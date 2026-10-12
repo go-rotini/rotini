@@ -66,6 +66,7 @@ func TestPlacementHint_channelKeys(t *testing.T) {
 		"glob":           "type: '[]string'\nglob: true",
 		"expand":         "type: string\nexpand: [home]",
 		"relative":       "type: time.Time\nrelative: past",
+		"base":           "type: int\nbase: prefixed",
 	}
 	entries := map[string]string{
 		"flag":     "  flags:\n    - name: x\n      schema:\n",

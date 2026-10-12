@@ -60,7 +60,7 @@ func Deprecations(rtx *Context) []Deprecation {
 	}
 	argv := rtx.Argv
 	var out []Deprecation
-	chain := rtx.CommandChain()
+	chain := rtx.chainRef()
 	store := quietParse(chain, argv)
 	for i, frame := range chain {
 		// A command deprecated as a whole reports however it was invoked; one with only

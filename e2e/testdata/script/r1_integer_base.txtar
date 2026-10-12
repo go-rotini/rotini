@@ -1,0 +1,117 @@
+# R1 — integer bases: `base: prefixed` lets an integer input take 0x, 0o and 0b literals. A
+# value without a prefix is still decimal, so 010 is ten. Codegen carries the key into the
+# Definition and the env field's tags, help notes it, and a bad literal is a usage error.
+
+gomodinit example.com/perm
+
+exec rotini validate cmd/perm/.rotini.spec.yaml --config cmd/perm/.rotini.conf.yaml
+exec rotini generate cmd/perm/.rotini.spec.yaml --config cmd/perm/.rotini.conf.yaml
+grep 'Name: "mode".*Base: "prefixed"' internal/cmd/perm/zz_perm.go
+grep 'base:"prefixed"' internal/cmd/perm/zz_perm.go
+
+exec go mod tidy
+exec go build -o perm$exe ./cmd/perm
+
+exec ./perm$exe --help
+stdout '--mode uint32 .*\(default 0o644\).*\(accepts 0x, 0o and 0b prefixes\)'
+
+# Each prefix, a decimal value with a leading zero, and the default.
+exec ./perm$exe --mode 0o755 --mask 0xFF --n 010
+stdout '^mode=755 mask=0xff n=10 limit=0$'
+exec ./perm$exe --mask 0b1010_1010 --n -0x1F
+stdout '^mode=644 mask=0xaa n=-31 limit=0$'
+
+# The environment input reads the same literals.
+env PERM_LIMIT=0x40
+exec ./perm$exe
+stdout 'limit=64$'
+env PERM_LIMIT=
+
+# Bounds compare the number; a malformed literal and an out-of-range one are invalid values.
+! exec ./perm$exe --mode 0o1000
+stderr '--mode must be <= 511 \(got 0o1000\)'
+! exec ./perm$exe --n 1__0
+stderr '--n: "1__0" is not a valid integer'
+! exec ./perm$exe --mask 0x100
+stderr '--mask: "0x100" is not a valid uint8 \(out of range: 0 to 255\)'
+
+-- cmd/perm/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: perm
+  summary: integer bases
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help]
+      short_circuit: true
+      schema: { type: bool }
+    - name: mode
+      summary: the file mode
+      identifiers: [--mode]
+      schema: { type: uint32, base: prefixed, default: '0o644', maximum: 511 }
+    - name: mask
+      summary: a bit mask
+      identifiers: [--mask]
+      schema: { type: uint8, base: prefixed }
+    - name: n
+      summary: a number
+      identifiers: [--n]
+      schema: { type: int, base: prefixed }
+  env:
+    - name: limit
+      summary: a limit
+      schema: { type: int, base: prefixed, variable: PERM_LIMIT }
+-- cmd/perm/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/perm/main.go
+    - type: cmd
+      file: internal/cmd/perm/zz_perm.go
+      package: perm
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/perm/perm.go --
+package perm
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type permHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*permHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[PermInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Perm.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	f := in.Perm.Flags
+	fmt.Fprintf(rtx.Stdout, "mode=%o mask=%#x n=%d limit=%d\n", f.Mode, f.Mask, f.N, in.Perm.Env.Limit)
+}
+-- cmd/perm/main.go --
+package main
+
+import (
+	perm "example.com/perm/internal/cmd/perm"
+)
+
+func main() {
+	perm.NewProgram().
+		Execute()
+}

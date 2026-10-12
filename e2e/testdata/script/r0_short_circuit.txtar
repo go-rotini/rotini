@@ -1,6 +1,6 @@
 # R0 — short-circuit flags: --help and --version replace the run.
 #
-# The root's --help and --version are short_circuit (and --help cascading), the shape
+# The root's --help and --version are short_circuit and cascading, the shape
 # `rotini init` seeds. Setting one on the command line waives every declared requirement of the
 # chain, so `rtx.Inputs` succeeds and the root's single CascadingPreRun answers it for every
 # command; sub-command stubs carry no help code of their own. What cannot be read (an unknown
@@ -84,6 +84,7 @@ command:
     - name: version
       summary: print version
       identifiers: [-v, --version]
+      cascading: true
       short_circuit: true
       schema: { type: bool }
   commands:

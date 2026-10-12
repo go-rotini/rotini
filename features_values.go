@@ -28,9 +28,12 @@ func Bounds() Feature {
 	}}
 }
 
-// checkValueBounds enforces the numeric or length bounds on one value of element type elem.
-func checkValueBounds(label, elem string, c Constraints, v string, secret bool) error {
+// checkValueBounds enforces the numeric or length bounds on one value of element type elem,
+// read under base when it is an integer.
+func checkValueBounds(label, elem, base string, c Constraints, v string, secret bool) error {
 	switch {
+	case isNumericType(elem) && base == basePrefixed:
+		return checkNumericBounds(label, c, v, secret, prefixedNumber, formatNum)
 	case isNumericType(elem):
 		return checkNumericBounds(label, c, v, secret, parseNumber, formatNum)
 	case measuredFor(elem) != nil:

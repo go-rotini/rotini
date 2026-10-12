@@ -164,23 +164,23 @@ func TestCheckConstraints_wiring(t *testing.T) {
 	c := Constraints{MaxLength: new(3), Pattern: "^a", MaxItems: new(5)}
 	vals := []string{"abc", "bcd", "abcdef"}
 	full := newFeatureSet([]Feature{Bounds(), Patterns()})
-	want := checkConstraints(allFeatures(), "--s", "[]string", c, vals, false, "")
+	want := checkConstraints(allFeatures(), "--s", "[]string", "", c, vals, false, "")
 	if want == nil || !strings.Contains(want.Error(), "must match ^a") {
 		t.Fatalf("legacy = %v, want the pattern error on the second value", want)
 	}
-	if got := checkConstraints(full, "--s", "[]string", c, vals, false, ""); errText(got) != errText(want) {
+	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, ""); errText(got) != errText(want) {
 		t.Errorf("wired = %v, want %v", got, want)
 	}
 	vals = []string{"abcdef", "bcd"}
-	if got := checkConstraints(full, "--s", "[]string", c, vals, false, ""); got == nil || !strings.Contains(got.Error(), "at most 3") {
+	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, ""); got == nil || !strings.Contains(got.Error(), "at most 3") {
 		t.Errorf("length before pattern: got %v", got)
 	}
 
-	wantMissing(t, checkConstraints(noFeatures, "--s", "[]string", Constraints{MinItems: 1}, nil, false, ""), "bounds", "Bounds()")
-	wantMissing(t, checkConstraints(noFeatures, "--n", "int", Constraints{Minimum: new(1.0)}, []string{"5"}, false, ""), "bounds", "Bounds()")
-	wantMissing(t, checkConstraints(noFeatures, "--d", "time.Duration", Constraints{Maximum: new(1.0)}, []string{"1s"}, false, ""), "bounds", "Bounds()")
-	wantMissing(t, checkConstraints(noFeatures, "--s", "string", Constraints{Pattern: "x"}, []string{"x"}, false, ""), "patterns", "Patterns()")
-	wantMissing(t, checkConstraints(noFeatures, "<in>", "inputfile", Constraints{}, []string{"-"}, false, ""), "stream-paths", "StreamPaths()")
+	wantMissing(t, checkConstraints(noFeatures, "--s", "[]string", "", Constraints{MinItems: 1}, nil, false, ""), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(noFeatures, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, ""), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(noFeatures, "--d", "time.Duration", "", Constraints{Maximum: new(1.0)}, []string{"1s"}, false, ""), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(noFeatures, "--s", "string", "", Constraints{Pattern: "x"}, []string{"x"}, false, ""), "patterns", "Patterns()")
+	wantMissing(t, checkConstraints(noFeatures, "<in>", "inputfile", "", Constraints{}, []string{"-"}, false, ""), "stream-paths", "StreamPaths()")
 
 	// A constraint that checks nothing for its type, or no value to check, needs no feature.
 	for _, tt := range []struct {
@@ -195,7 +195,7 @@ func TestCheckConstraints_wiring(t *testing.T) {
 		{"string", Constraints{MinItems: 1}, []string{"x"}},
 		{"[]string", Constraints{UniqueItems: true}, []string{"x", "x"}},
 	} {
-		if err := checkConstraints(noFeatures, "--x", tt.typ, tt.c, tt.vals, false, ""); err != nil {
+		if err := checkConstraints(noFeatures, "--x", tt.typ, "", tt.c, tt.vals, false, ""); err != nil {
 			t.Errorf("%s %+v: %v, want nothing to check", tt.typ, tt.c, err)
 		}
 	}
@@ -204,7 +204,7 @@ func TestCheckConstraints_wiring(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "f"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkConstraints(noFeatures, "--f", "existingfile", Constraints{}, []string{"f", "missing"}, false, dir); err == nil || !strings.Contains(err.Error(), "no such file") {
+	if err := checkConstraints(noFeatures, "--f", "existingfile", "", Constraints{}, []string{"f", "missing"}, false, dir); err == nil || !strings.Contains(err.Error(), "no such file") {
 		t.Errorf("existingfile stays core: %v", err)
 	}
 }

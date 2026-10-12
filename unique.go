@@ -34,8 +34,8 @@ func duplicateItem(label, v string, secret bool) error {
 
 // uniqueKeyFor returns how a command-line value of type typ compares for uniqueness: as the
 // value its element type reads it as, or as written when it doesn't read (binding reports
-// that). ts is a time input's layouts and relative forms; an enum folds an alias, or a value
-// in another case, to the main value it binds as.
+// that). ts is a time input's layouts and relative forms, or an integer input's base; an enum
+// folds an alias, or a value in another case, to the main value it binds as.
 func uniqueKeyFor(typ string, ts timeSpec, enum enumSet) func(string) string {
 	elem := constraintElemType(typ)
 	if enum.declared() && enum.rewrites() {
@@ -43,6 +43,9 @@ func uniqueKeyFor(typ string, ts timeSpec, enum enumSet) func(string) string {
 	}
 	if t, ok := shapeType(elem); ok {
 		return func(v string) string {
+			if ts.base == basePrefixed {
+				v = prefixedText(v)
+			}
 			f := reflect.New(t).Elem()
 			if coerce(f, []string{v}, noFeatures) != nil {
 				return v

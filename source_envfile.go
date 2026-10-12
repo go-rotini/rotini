@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // This file builds the environment a run's inputs read: the run's own environment, under
@@ -295,6 +296,20 @@ func hasFileVars(v reflect.Value) bool {
 	if v.Kind() != reflect.Struct {
 		return false
 	}
+	if cached, ok := fileVarTypes.Load(v.Type()); ok {
+		if found, ok := cached.(bool); ok {
+			return found
+		}
+	}
+	found := typeHasFileVars(v)
+	fileVarTypes.Store(v.Type(), found)
+	return found
+}
+
+// fileVarTypes caches hasFileVars by inputs type, since the answer depends only on tags.
+var fileVarTypes sync.Map // reflect.Type -> bool
+
+func typeHasFileVars(v reflect.Value) bool {
 	has := func(f reflect.StructField) bool { return f.Tag.Get("envfile") != "" }
 	for _, ci := range v.Fields() {
 		if ci.Kind() != reflect.Struct {
@@ -347,7 +362,7 @@ func readEnvFile(view *osView, variable, path string) (string, error) {
 		return "", fmt.Errorf("%s: %s", variable, unreadableFile(path, view.abs(path), err))
 	}
 	if len(data) > envFileCap {
-		return "", fmt.Errorf("%s: %q is larger than 1 MiB", variable, path)
+		return "", fmt.Errorf("%s: %s is larger than 1 MiB", variable, quotePath(path))
 	}
 	return trimAcquiredPayload(string(data)), nil
 }

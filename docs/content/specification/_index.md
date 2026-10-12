@@ -110,6 +110,12 @@ With `deprecated`: the command to use instead, as its path below this spec's roo
 
 How settled this command is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it in the parent's command list, and a line on its own pages; the contract carries it. Its inputs, sub-commands, output and exit codes are as unstable as it is. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time: to gate an experimental command, check in its handler.
 
+#### `metadata`
+
+`object`
+
+Your own labels for this command, for your tools to read: string keys, each with a string value (`{owner: platform-team, tier: internal}`). Rotini never acts on them and shows them on no page (help, man, markdown, completion). It copies them as written into the generated Definition (CommandDef.Metadata, or Definition.Metadata on the root), where a handler reads them as rtx.Command().Metadata, and into the contract. `rotini diff` rates any change to them as safe. Sub-commands don't inherit them. Set next to a `$ref`, they replace the composed command's.
+
 ### Inputs
 
 #### `flags`
@@ -209,7 +215,7 @@ Git and https URLs are not accepted. Either way, the mounted command uses the ha
 
 The composed spec is the base, and the parent can adjust it where it is mounted:
 
-- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path, hidden_aliases, replaced_by) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
+- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path, hidden_aliases, replaced_by, metadata) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
 - A 'commands:' list next to the $ref is added to the child's own sub-commands: its inline entries get their own handler files, and its $ref entries are mounted as further children.
 - `handler:` on a $ref command points it at a different handler package.
 - Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, use, output, plugins, plugin_discovery, passthrough, options_first) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
@@ -372,13 +378,13 @@ Root only: help topics, pages that aren't commands. `<program> help <topic>` sho
 
 [`Schema`](#schema)
 
-The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '&lt;Prefix&gt;Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type &lt;Prefix&gt;Output Task', so convert a value with &lt;Prefix&gt;Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
+The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '&lt;Prefix&gt;Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type &lt;Prefix&gt;Output Task', so convert a value with &lt;Prefix&gt;Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item, and a stream whose items come in several kinds declares them with `oneOf`.
 
 #### `output_stream`
 
 `boolean` · default `false`
 
-When true, the command writes a stream of items rather than one value, and `output:` declares one item. Write each item with rtx.WriteOutputItem: JSON is one compact value per line, YAML one document per item, each starting `---`. Help, man and markdown say so in the OUTPUT section, and the contract marks the command `stream: true`. Needs `output`. `rotini generate` warns when a handler calls WriteOutputItem on a command without it.
+When true, the command writes a stream of items rather than one value, and `output:` declares one item. Write each item with rtx.WriteOutputItem: JSON is one compact value per line, YAML one document per item, each starting `---`. Help, man and markdown say so in the OUTPUT section, and the contract marks the command `stream: true`. Needs `output`. `rotini generate` warns when a handler calls WriteOutputItem on a command without it. When the items come in several kinds (progress updates, then a result), `output:` lists one schema per kind under `oneOf`, each tagged by the same required string property holding a `const` (`kind: {type: string, const: progress}`); see `oneOf`.
 
 #### `schemas`
 
@@ -427,7 +433,7 @@ Whether this flag is a tool parameter for AI agents (tool exports and the MCP co
 
 `boolean` · default `false`
 
-When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: at run time a flag may be written anywhere after the name of the command that declares it — after its sub-commands' names too — regardless of this setting, but never before that name (a flag written before a sub-command's name belongs to an ancestor, which is how two commands may declare the same flag). cascading controls whether descendants document it.
+When true, this flag applies to its command and to every command below it: it may be written anywhere after its command's name, after its sub-commands' names too, and every descendant's generated help lists it (under the 'Global Flags' section). When false (the default), the flag applies only when its own command is the one run: given with any of its sub-commands, before or after their names, it is a usage error naming the command it belongs to, and descendants' help and completion leave it out. A flag is never accepted before its own command's name (one written before a sub-command's name belongs to an ancestor, which is how two commands may declare the same flag). Environment and configuration values are unaffected.
 
 ### `deprecated`
 
@@ -489,9 +495,15 @@ Identifiers the command line accepts for this flag but that are never listed: he
 
 array of `string`
 
-CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle. Reusing an identifier of a cascading or short-circuit ancestor flag is a warning, since after this command's name it means this flag; it is an error when this command's flags take every identifier of that flag, which then can't be given after this command's name at all. A flag of the same name that redeclares the switch is not reported.
+CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle. Reusing an identifier of a cascading ancestor flag is a warning, since after this command's name it means this flag; it is an error when this command's flags take every identifier of that flag, which then can't be given after this command's name at all. A flag of the same name that redeclares the switch is not reported.
 
 A single dash and one digit (`-4`) declares a digit option, on a bool or count flag (`identifiers: ['-4', --ipv4]`; quoted, since a bare -4 is a number in YAML). A word starting with that dash and digit is then the flag, on this command and every command below it, while other negative numbers still parse as numbers. `rotini validate` rejects it when an argument of this command or one below it takes negative numbers.
+
+### `metadata`
+
+`object`
+
+Your own labels for this flag, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the generated FlagDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
 
 ### `removed_in`
 
@@ -584,6 +596,12 @@ Longer text about this argument, paragraphs separated by blank lines, shown unde
 
 When true, the argument is omitted from generated help (it still parses on the command line).
 
+### `metadata`
+
+`object`
+
+Your own labels for this argument, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the generated ArgDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
+
 ### `passthrough`
 
 `boolean` · default `false`
@@ -653,6 +671,12 @@ Longer text about this environment variable, paragraphs separated by blank lines
 
 When true, the input is omitted from generated help (it is still bound).
 
+### `metadata`
+
+`object`
+
+Your own labels for this environment variable, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+
 ### `removed_in`
 
 `string`
@@ -716,6 +740,12 @@ Longer text about this config value, paragraphs separated by blank lines, shown 
 
 When true, the input is omitted from generated help (it is still bound).
 
+### `metadata`
+
+`object`
+
+Your own labels for this config value, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+
 ### `removed_in`
 
 `string`
@@ -756,6 +786,12 @@ The four document formats (json, yaml, jsonc, toml) decode it into the generated
 The raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as one string (`*string`), 'lines' binds its lines (`*[]string`, a trailing newline adds no empty element; with `stream: true`, `iter.Seq2[string, error]`), and 'bytes' binds the payload byte for byte (`*[]byte`), nothing trimmed. Their schema type is implied when left out ('string' for text and bytes, '[]string' for lines); none generates a &lt;Prefix&gt;Stdin type, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help, man and markdown pages and the contract.
 
 One leading UTF-8 byte-order mark is removed before the payload is read, in every format but 'bytes'. A declared stdin that is not streamed is held in memory for the run.
+
+### `metadata`
+
+`object`
+
+Your own labels for this command's stdin, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
 
 ### `schema`
 
@@ -1111,11 +1147,23 @@ Build the topic's text from the spec. 'environment' lists every environment vari
 
 JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.
 
+### `const`
+
+The one value this property may hold (standard JSON Schema semantics), checked wherever the shape is: output checks, stdin payloads, config files and object flags. Its Go field keeps the declared `type`. In a stream whose items come in several kinds (`oneOf` on `output`), each kind names itself with a required string property holding a `const`, such as `kind: {type: string, const: progress}`.
+
 ### `description`
 
 `string`
 
 What this shape or property is, in a sentence. Rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema uses `summary:` on the input instead.
+
+### `oneOf`
+
+array of [`Schema`](#schema)
+
+On a command's `output` with `output_stream: true` only: the stream's items come in several kinds, one schema per kind, each an object written inline or a `$ref` to a named object schema. Every kind declares the same property, its tag, as a required string with a `const` naming the kind (`kind: {type: string, const: progress}`), and no two kinds share a value. Nothing else may sit beside `oneOf`.
+
+The generated &lt;Prefix&gt;Output is then an interface that only the kinds' types satisfy: a `$ref` kind is its named schema's type, and an inline kind gets &lt;Prefix&gt;Output&lt;Value&gt; (&lt;Prefix&gt;OutputProgress for `progress`). rtx.WriteOutputItem takes any kind, fills in an empty tag from the item's type, and refuses an item whose tag names another kind. rotini.DecodeOutput decodes each item into its kind's type by reading the tag. Help, man and markdown list each kind with its fields; the contract and the output schema files describe the stream as standard JSON Schema `oneOf`.
 
 ### `required`
 
@@ -1162,6 +1210,7 @@ document instead; see [StdinSpec](#stdinspec).
 | Key | flag | argument | env | config |
 |---|:-:|:-:|:-:|:-:|
 | `$ref` | ✓ | ✓ | ✓ | ✓ |
+| `base` | ✓ | ✓ | ✓ | ✓ |
 | `complete` | ✓ | ✓ | — | — |
 | `config_source` | ✓ | — | ✓ | — |
 | `default` | ✓ | ✓ | ✓ | ✓ |
@@ -1198,13 +1247,21 @@ document instead; see [StdinSpec](#stdinspec).
 | `relative_to` | ✓ | ✓ | — | ✓ |
 | `repeatable` | ✓ | — | — | — |
 | `required` | ✓ | ✓ | ✓ | ✓ |
-| `secret` | — | ✓ | ✓ | ✓ |
+| `secret` | ✓ | ✓ | ✓ | ✓ |
 | `separator` | ✓ | ✓ | ✓ | — |
 | `type` | ✓ | ✓ | ✓ | ✓ |
 | `uniqueItems` | ✓ | ✓ | ✓ | ✓ |
 | `values_from` | ✓ | ✓ | — | — |
 | `variable` | ✓ | ✓ | ✓ | — |
 | `variable_file` | ✓ | ✓ | ✓ | — |
+
+### `base`
+
+`string` · one of `prefixed`
+
+Integer inputs only (the int and uint types, integer, and lists of them): with `base: prefixed`, a value may also be written with a base prefix after an optional sign — `0x1F` or `0X1F` (hexadecimal), `0o17` (octal), `0b101` (binary) — and `_` may separate digits, as in Go literals (`1_000`, `0xFF_FF`). A value without a prefix is still decimal: `010` is ten, never octal. Misplaced underscores (`_1`, `1_`, `1__0`, `-_1`) are invalid, and a value out of the type's range is an error as usual.
+
+It applies wherever the input reads text: the command line, a flag's or argument's environment and config fallbacks, env inputs, config values written as strings, and `default` and `enum` values. Bounds, enum and `uniqueItems` compare the number a value reads as, so `0x10` and `16` are the same. Without `base`, an integer is decimal from every source, so `0x10` is an invalid value. Help notes what the input accepts. `prefixed` is the only value.
 
 ### `complete`
 

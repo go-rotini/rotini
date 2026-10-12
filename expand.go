@@ -57,7 +57,7 @@ func expandValue(v string, r expandRule, view *osView) (string, error) {
 
 // noUserLookup is the user lookup of a run without path expansion, which finds no user.
 func noUserLookup(name string) (string, error) {
-	return "", missingFeature("path-expansion", "PathExpansion()", fmt.Sprintf("path %q names another user's home", "~"+name))
+	return "", missingFeature("path-expansion", "PathExpansion()", fmt.Sprintf("path %s names another user's home", quotePath("~"+name)))
 }
 
 // expandValueFor is expandValue with the operating system and the user lookup (a user's home
@@ -97,7 +97,7 @@ func expandHome(goos, v string, view *osView, lookupUser func(string) (string, e
 	if end == 1 {
 		h, herr := view.home()
 		if herr != nil {
-			return "", "", &expandError{fmt.Sprintf("cannot expand %q: %s", v, homeReason(herr))}
+			return "", "", &expandError{fmt.Sprintf("cannot expand %s: %s", quotePath(v), homeReason(herr))}
 		}
 		return h, v[1:], nil
 	}
@@ -107,7 +107,7 @@ func expandHome(goos, v string, view *osView, lookupUser func(string) (string, e
 		return "", "", we
 	}
 	if uerr != nil || dir == "" {
-		return "", "", &expandError{fmt.Sprintf("cannot expand %q: no such user", "~"+name)}
+		return "", "", &expandError{fmt.Sprintf("cannot expand %s: no such user", quotePath("~"+name))}
 	}
 	return dir, v[end:], nil
 }
@@ -141,11 +141,11 @@ func expandEnv(written, s string, view *osView) (string, error) {
 		case next < len(s) && s[next] == '{':
 			end := strings.IndexByte(s[next:], '}')
 			if end < 0 {
-				return "", &expandError{fmt.Sprintf("unclosed ${ in %q", written)}
+				return "", &expandError{fmt.Sprintf("unclosed ${ in %s", quotePath(written))}
 			}
 			name = s[next+1 : next+end]
 			if !isVarName(name) {
-				return "", &expandError{fmt.Sprintf("only $NAME and ${NAME} are expanded (in %q)", written)}
+				return "", &expandError{fmt.Sprintf("only $NAME and ${NAME} are expanded (in %s)", quotePath(written))}
 			}
 			next += end + 1
 		case next < len(s) && isVarFirstByte(s[next]):
@@ -161,7 +161,7 @@ func expandEnv(written, s string, view *osView) (string, error) {
 		}
 		val, _ := view.inputLookup(name)
 		if val == "" {
-			return "", &expandError{fmt.Sprintf("$%s is not set (in %q)", name, written)}
+			return "", &expandError{fmt.Sprintf("$%s is not set (in %s)", name, quotePath(written))}
 		}
 		b.WriteString(val)
 		i = next

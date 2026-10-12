@@ -2,7 +2,8 @@
 # filter stays under 128 MB of resident memory, far below what holding the input would take.
 
 [!unix] skip 'peak memory is measured on unix'
-# Linux counts the parent's peak in a child's, and the race detector makes this test process big.
+# The race detector makes this test process big, and outside Linux a child's reported peak can
+# include the memory it shared with it before exec.
 [race] skip 'peak memory is not measured under the race detector'
 
 gomodinit example.com/count

@@ -148,6 +148,8 @@ func TestSetConfigValue_checksAsTheCommandLine(t *testing.T) {
 		{ConfigKey{Key: "n", Type: "string", Enum: []string{"a", "b"}}, "c"},
 		{ConfigKey{Key: "n", Type: "rotini.ByteSize", Maximum: new(1024.0)}, "2KiB"},
 		{ConfigKey{Key: "n", Type: "time.Time", Layout: "2006-01-02"}, "yesterday"},
+		{ConfigKey{Key: "n", Type: "int", Base: basePrefixed, Maximum: new(255.0)}, "0x100"},
+		{ConfigKey{Key: "n", Type: "int", Base: basePrefixed}, "1__0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key.Type+"="+tt.raw, func(t *testing.T) {

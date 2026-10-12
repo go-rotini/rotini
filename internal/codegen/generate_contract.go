@@ -83,6 +83,8 @@ type contractCommand struct {
 
 	Effects *Effects `json:"effects,omitempty"` // what running it does, as declared
 	Agent   *bool    `json:"agent,omitempty"`   // offered to AI agents (true) or kept from them (false), as declared
+
+	Metadata map[string]string `json:"metadata,omitempty"` // the author's own labels, as written
 }
 
 type contractArgument struct {
@@ -101,6 +103,7 @@ type contractArgument struct {
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
 	Relative        string                       `json:"relative,omitempty"`
+	Base            string                       `json:"base,omitempty"`          // prefixed: also takes 0x, 0o and 0b integer literals
 	VariableFile    string                       `json:"variable_file,omitempty"` // a variable naming a file that holds the fallback value
 	Expand          []string                     `json:"expand,omitempty"`
 	RelativeTo      string                       `json:"relative_to,omitempty"`
@@ -115,6 +118,7 @@ type contractArgument struct {
 	Description     string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
 	Stability       string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
 	Agent           *bool                        `json:"agent,omitempty"`       // as declared: offered to AI agents (true) or kept from them (false)
+	Metadata        map[string]string            `json:"metadata,omitempty"`    // the author's own labels, as written
 }
 
 type contractFlag struct {
@@ -140,6 +144,7 @@ type contractFlag struct {
 	DottedKeys            bool                         `json:"dotted_keys,omitempty"`
 	Layouts               []string                     `json:"layouts,omitempty"`
 	Relative              string                       `json:"relative,omitempty"`
+	Base                  string                       `json:"base,omitempty"` // prefixed: also takes 0x, 0o and 0b integer literals
 	Expand                []string                     `json:"expand,omitempty"`
 	RelativeTo            string                       `json:"relative_to,omitempty"`
 	Secret                bool                         `json:"secret,omitempty"`
@@ -164,6 +169,8 @@ type contractFlag struct {
 	RoleValue string   `json:"role_value,omitempty"` // with role machine-output: the enum value that selects JSON
 	Effects   *Effects `json:"effects,omitempty"`    // what giving it adds to its command's effects, as declared
 	Agent     *bool    `json:"agent,omitempty"`      // a tool parameter (true) or not (false), as declared
+
+	Metadata map[string]string `json:"metadata,omitempty"` // the author's own labels, as written
 }
 
 type contractEnv struct {
@@ -181,6 +188,7 @@ type contractEnv struct {
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
 	Relative        string                       `json:"relative,omitempty"`
+	Base            string                       `json:"base,omitempty"` // prefixed: also takes 0x, 0o and 0b integer literals
 	Expand          []string                     `json:"expand,omitempty"`
 	RelativeTo      string                       `json:"relative_to,omitempty"`
 	Hidden          bool                         `json:"hidden,omitempty"`
@@ -192,6 +200,7 @@ type contractEnv struct {
 	Description     string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
 	Stability       string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
 	Agent           *bool                        `json:"agent,omitempty"`       // as declared: offered to AI agents (true) or kept from them (false)
+	Metadata        map[string]string            `json:"metadata,omitempty"`    // the author's own labels, as written
 }
 
 type contractConfig struct {
@@ -205,6 +214,7 @@ type contractConfig struct {
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
 	Relative        string                       `json:"relative,omitempty"`
+	Base            string                       `json:"base,omitempty"` // prefixed: also takes 0x, 0o and 0b integer literals
 	Expand          []string                     `json:"expand,omitempty"`
 	RelativeTo      string                       `json:"relative_to,omitempty"`
 	Secret          bool                         `json:"secret,omitempty"`
@@ -217,6 +227,7 @@ type contractConfig struct {
 	Description     string                       `json:"description,omitempty"` // the input's longer text; the parameter description when set
 	Stability       string                       `json:"stability,omitempty"`   // as declared: experimental or beta; unset is stable
 	Agent           *bool                        `json:"agent,omitempty"`       // as declared: offered to AI agents (true) or kept from them (false)
+	Metadata        map[string]string            `json:"metadata,omitempty"`    // the author's own labels, as written
 }
 
 // contractFlagGroup is a flag_groups entry: a rule over a set of the command's flags.
@@ -288,13 +299,14 @@ func contractEnumValues(schema *InputSchema) map[string]contractEnumValue {
 }
 
 type contractStdin struct {
-	Format         string `json:"format,omitempty"`
-	Type           string `json:"type,omitempty"`
-	Required       bool   `json:"required,omitempty"`
-	Schema         any    `json:"schema,omitempty"`
-	Stream         bool   `json:"stream,omitempty"`          // read one item at a time (lines or jsonl)
-	Separator      string `json:"separator,omitempty"`       // "nul": lines are separated by NUL bytes
-	UnlessArgument string `json:"unless_argument,omitempty"` // stdin is read only when this argument gets no file, or "-"
+	Format         string            `json:"format,omitempty"`
+	Type           string            `json:"type,omitempty"`
+	Required       bool              `json:"required,omitempty"`
+	Schema         any               `json:"schema,omitempty"`
+	Stream         bool              `json:"stream,omitempty"`          // read one item at a time (lines or jsonl)
+	Separator      string            `json:"separator,omitempty"`       // "nul": lines are separated by NUL bytes
+	UnlessArgument string            `json:"unless_argument,omitempty"` // stdin is read only when this argument gets no file, or "-"
+	Metadata       map[string]string `json:"metadata,omitempty"`        // the author's own labels, as written
 }
 
 type contractExit struct {
@@ -411,11 +423,11 @@ func (p *program) emitContract() error {
 func underModule(root, key, rel string) (string, error) {
 	p := filepath.FromSlash(rel)
 	if filepath.IsAbs(p) {
-		return "", fmt.Errorf("%s %q must be module-root-relative, not absolute", key, rel)
+		return "", fmt.Errorf("%s %s must be module-root-relative, not absolute", key, quotePath(rel))
 	}
 	abs := filepath.Join(root, p)
 	if r, err := filepath.Rel(root, abs); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("%s %q must resolve under the module root", key, rel)
+		return "", fmt.Errorf("%s %s must resolve under the module root", key, quotePath(rel))
 	}
 	return abs, nil
 }
@@ -512,9 +524,10 @@ func outputSchemaDoc(shape *Schema, schemas map[string]Schema) (map[string]any, 
 	return body, true
 }
 
-// outputDefLiteral renders a command's `Output: &rotini.OutputDef{Type, Schema, Stream}` field,
-// or "" when it declares no output. typeName is its generated <Prefix>Output type; Schema is
-// omitted when the shape cannot be rendered self-contained.
+// outputDefLiteral renders a command's `Output: &rotini.OutputDef{…}` field: Type, Schema and
+// Stream, plus Tag and Kinds for a stream whose items come in several kinds; or "" when it
+// declares no output. typeName is its generated <Prefix>Output type; a Schema is omitted when
+// the shape cannot be rendered self-contained.
 func outputDefLiteral(typeName string, shape *Schema, schemas map[string]Schema, stream bool) string {
 	if shape == nil {
 		return ""
@@ -529,6 +542,28 @@ func outputDefLiteral(typeName string, shape *Schema, schemas map[string]Schema,
 	}
 	if stream {
 		b.WriteString(", Stream: true")
+	}
+	if tag, kinds := outputKinds(shape, schemas); kinds != nil {
+		qualifier := typeName[:strings.LastIndex(typeName, ".")+1] // a composed cli's package, or ""
+		fmt.Fprintf(&b, ", Tag: %q, Kinds: []%s.OutputKind{", tag, rotiniPkgName)
+		for i, k := range kinds {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			name := k.typeName(typeName)
+			if k.ref != "" {
+				name = qualifier + k.ref
+			}
+			fmt.Fprintf(&b, "{Value: %q, Type: reflect.TypeFor[%s]()", k.value, name)
+			if doc, ok := outputSchemaDoc(&k.decl, schemas); ok {
+				if raw, err := json.Marshal(doc); err == nil {
+					b.WriteString(", Schema: ")
+					b.WriteString(goRawString(string(raw)))
+				}
+			}
+			b.WriteString("}")
+		}
+		b.WriteString("}")
 	}
 	b.WriteString("},\n")
 	return b.String()
@@ -633,7 +668,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		Stream:                n.stream,
 		Stability:             n.help.Stability,
 		Effects:               n.help.Effects,
-		Agent:                 n.help.Agent,
+		Agent:                 n.help.Agent, Metadata: n.help.Metadata,
 	}
 	in := n.inputs
 	if in == nil {
@@ -671,12 +706,12 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 		arg := contractArgument{
 			Name: a.Name, Summary: a.Summary, Type: f.typ, Kind: f.kind, Required: req, Variadic: isVariadicSchema(a.Schema),
 			Passthrough: a.Passthrough, Separator: f.separator, From: f.from, Glob: a.Schema != nil && a.Schema.Glob,
-			IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative,
+			IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative, Base: f.base,
 			VariableFile: f.variableFile, Expand: f.expand, RelativeTo: f.relativeTo,
 			Secret: f.secret, Hidden: a.Hidden, EnumValues: contractEnumValues(a.Schema),
 			Deprecated: a.Deprecated, DeprecatedSince: a.DeprecatedSince, RemovedIn: a.RemovedIn,
 			Schema: schemaOf(a.Schema), Description: a.Description, Stability: a.Stability,
-			Agent: a.Agent,
+			Agent: a.Agent, Metadata: a.Metadata,
 		}
 		arg.Env, arg.ConfigKey = argumentFallback(a, p.envPrefix, reads.any)
 		arg.ValuesFrom = valuesFrom(a.Schema)
@@ -697,14 +732,14 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 			Type: facts.typ, Kind: facts.kind, Required: req,
 			Cascading: f.Cascading && !inherited, Inherited: inherited, ShortCircuit: f.ShortCircuit, Role: f.Role,
 			ConfigSource: facts.configSource, Separator: facts.separator, From: facts.from, ImplicitValue: facts.implicitValue,
-			IgnoreCase: facts.ignoreCase, DottedKeys: facts.dottedKeys, Layouts: facts.layouts, Relative: facts.relative,
+			IgnoreCase: facts.ignoreCase, DottedKeys: facts.dottedKeys, Layouts: facts.layouts, Relative: facts.relative, Base: facts.base,
 			Secret: facts.secret, VariableFile: facts.variableFile, Expand: facts.expand, RelativeTo: facts.relativeTo,
 			Hidden: f.Hidden, Deprecated: f.Deprecated, DeprecatedSince: f.DeprecatedSince, RemovedIn: f.RemovedIn,
 			DeprecatedIdentifiers: f.DeprecatedIdentifiers, IdentifiersRemovedIn: f.DeprecatedIdentifiersRemovedIn,
 			EnumValues: contractEnumValues(f.Schema), Schema: schemaOf(f.Schema),
 			ValuesFrom:  valuesFrom(f.Schema),
 			Description: f.Description, Stability: f.Stability,
-			RoleValue: f.RoleValue, Effects: f.Effects, Agent: f.Agent,
+			RoleValue: f.RoleValue, Effects: f.Effects, Agent: f.Agent, Metadata: f.Metadata,
 		}
 		if f.Schema != nil && f.Schema.Repeatable != nil && !*f.Schema.Repeatable {
 			cf.Repeatable = f.Schema.Repeatable
@@ -780,11 +815,11 @@ func (p *program) contractSources(c *contractCommand, in *Inputs, scope *schemaS
 			Name: e.Name, Variables: strings.Split(envVarName(e, p.envPrefix), ","), Summary: e.Summary,
 			Type: f.typ, Kind: f.kind, Required: e.Schema != nil && e.Schema.Required, Secret: f.secret,
 			VariableFile: f.variableFile, ConfigSource: f.configSource, Nesting: f.nesting, Separator: f.separator,
-			IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative, Expand: f.expand, RelativeTo: f.relativeTo,
+			IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative, Base: f.base, Expand: f.expand, RelativeTo: f.relativeTo,
 			Hidden: e.Hidden, Deprecated: e.Deprecated, DeprecatedSince: e.DeprecatedSince, RemovedIn: e.RemovedIn,
 			EnumValues: contractEnumValues(e.Schema), Schema: defs.rename(scope, inputJSONSchema(e.Schema)),
 			Description: e.Description, Stability: e.Stability,
-			Agent: e.Agent,
+			Agent: e.Agent, Metadata: e.Metadata,
 		})
 	}
 	for _, cfg := range in.Config {
@@ -798,18 +833,19 @@ func (p *program) contractSources(c *contractCommand, in *Inputs, scope *schemaS
 		f := contractFactsOf(cfg.Schema, schemas)
 		c.Config = append(c.Config, contractConfig{
 			Name: cfg.Name, Key: key, File: file, Summary: cfg.Summary, Type: f.typ, Kind: f.kind,
-			Required: cfg.Schema != nil && cfg.Schema.Required, IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative,
+			Required: cfg.Schema != nil && cfg.Schema.Required, IgnoreCase: f.ignoreCase, Layouts: f.layouts, Relative: f.relative, Base: f.base,
 			Expand: f.expand, RelativeTo: f.relativeTo,
 			Secret: f.secret, Hidden: cfg.Hidden, Deprecated: cfg.Deprecated, DeprecatedSince: cfg.DeprecatedSince,
 			RemovedIn: cfg.RemovedIn, EnumValues: contractEnumValues(cfg.Schema),
 			Schema:      defs.rename(scope, inputJSONSchema(cfg.Schema)),
 			Description: cfg.Description, Stability: cfg.Stability,
-			Agent: cfg.Agent,
+			Agent: cfg.Agent, Metadata: cfg.Metadata,
 		})
 	}
 	if in.Stdin != nil {
 		st := &contractStdin{
 			Format: in.Stdin.Format, Stream: in.Stdin.Stream, Separator: in.Stdin.Separator, UnlessArgument: in.Stdin.UnlessArgument,
+			Metadata: in.Stdin.Metadata,
 		}
 		if s := in.Stdin.Schema; s != nil {
 			st.Required = s.Required
@@ -853,8 +889,40 @@ func inputJSONSchema(s *InputSchema) any {
 		}
 		setTimeFormat(doc, format)
 	}
+	if intBase(s) == prefixedBase {
+		allowPrefixedText(doc)
+	}
 	moveValueConstraints(doc, base.Type)
 	return doc
+}
+
+// prefixedPattern matches the text a `base: prefixed` input reads as an integer: an optional
+// sign, then a 0x, 0o or 0b literal or decimal digits, with `_` between digits.
+const prefixedPattern = `^[+-]?(0[xX](_?[0-9a-fA-F])+|0[oO](_?[0-7])+|0[bB](_?[01])+|[0-9](_?[0-9])*)$`
+
+// allowPrefixedText lets a `base: prefixed` input's value, or each value of a list, be a
+// string matching prefixedPattern as well as an integer. The pattern is a value constraint, so
+// a list's moves onto its items with the rest.
+func allowPrefixedText(doc map[string]any) {
+	target := doc
+	if items, ok := doc["items"].(map[string]any); ok {
+		target = items
+	}
+	switch t := target["type"].(type) {
+	case string:
+		if t != "integer" {
+			return // lint reports a base on a non-integer input
+		}
+		target["type"] = []any{"integer", "string"}
+	case []any:
+		if !slices.Contains(t, any("integer")) {
+			return
+		}
+		target["type"] = append(slices.Clone(t), "string")
+	default:
+		return
+	}
+	doc["pattern"] = prefixedPattern
 }
 
 // valueConstraints are the keys that constrain each value, not the list or map holding them.

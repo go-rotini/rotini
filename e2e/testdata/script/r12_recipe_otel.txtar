@@ -2,13 +2,15 @@
 # on with SetContext, so a command's own spans are its children, and the root's teardown ends
 # it, marked failed when the command failed. The handler files are the ones the guide
 # shows; printer.go stands in for an exporter and is not on the page.
-# It needs the network on a cold module cache: `go get` fetches third-party modules.
+# It needs the network on a cold module cache: `go get` fetches third-party modules, so it
+# opts in to the module proxy.
 
 gomodinit example.com/tracedemo
 
 exec rotini generate cmd/tracedemo/.rotini.spec.yaml --config cmd/tracedemo/.rotini.conf.yaml
 cp root.go.txt internal/cmd/tracedemo/tracedemo.go
 cp work.go.txt internal/cmd/tracedemo/tracedemo_work.go
+env GOPROXY=$ROTINI_NETWORK_GOPROXY
 exec go get go.opentelemetry.io/otel@v1.44.0 go.opentelemetry.io/otel/trace@v1.44.0 go.opentelemetry.io/otel/sdk@v1.44.0
 exec go mod tidy
 exec go build -o tracedemo$exe ./cmd/tracedemo

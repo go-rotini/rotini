@@ -15,6 +15,8 @@ jobs:
   release:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semrel.outputs.version }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -73,3 +75,11 @@ jobs:
         run: gh release edit v${{ steps.semrel.outputs.version }} --draft=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Install and use the module as published, on every OS.
+  fidelity:
+    needs: release
+    if: needs.release.outputs.version != ''
+    uses: ./.github/workflows/release-fidelity.yml
+    with:
+      version: v${{ needs.release.outputs.version }}

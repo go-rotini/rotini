@@ -458,11 +458,11 @@ Accepted:
 	}
 }
 
-// Every rule in the catalog has a fixture pair, here or in internal/codegen's spec-built
-// tables.
+// Every rule in the catalog has a fixture pair, in this package's tests or in
+// internal/codegen's spec-built tables.
 func TestRules_everyRuleTested(t *testing.T) {
 	var src []byte
-	for _, path := range []string{"diff_test.go", "../codegen/diff_test.go", "../codegen/diff_agent_test.go"} {
+	for _, path := range []string{"diff_test.go", "kinds_test.go", "../codegen/diff_test.go", "../codegen/diff_agent_test.go"} {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)

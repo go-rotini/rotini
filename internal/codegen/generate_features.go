@@ -118,6 +118,7 @@ type cmdHelp struct {
 	Topics      []Topic           // command.topics: help topics, read from the root only
 	Effects     *Effects          // command.effects: what running it does; nil when undeclared
 	Agent       *bool             // command.agent: offered to AI agents (true), kept from them (false), or unset
+	Metadata    map[string]string // command.metadata: the author's own labels, copied verbatim
 }
 
 // commandHelp gathers the doc fields of a command.
@@ -128,7 +129,7 @@ func commandHelp(c Command) cmdHelp {
 		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso, Groups: c.Groups,
 		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
 		Stability: c.Stability, Topics: c.Topics,
-		Effects: c.Effects, Agent: c.Agent,
+		Effects: c.Effects, Agent: c.Agent, Metadata: c.Metadata,
 	}
 }
 

@@ -68,7 +68,6 @@ command:
   flags:
     - name: version
       identifiers:
-        - -v
         - --version
       summary: print version
       cascading: true

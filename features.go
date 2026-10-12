@@ -163,7 +163,7 @@ type schemaHooks struct {
 
 type boundHooks struct {
 	items     func(label string, c Constraints, n int) error
-	value     func(label, elem string, c Constraints, v string, secret bool) error // numeric, measured, length
+	value     func(label, elem, base string, c Constraints, v string, secret bool) error // numeric, measured, length
 	unique    func(label string, vals []string, key func(string) string, secret bool) error
 	uniqueKey func(typ string, ts timeSpec, enum enumSet) func(string) string
 	typed     func(label string, elems []reflect.Value, secret bool) error

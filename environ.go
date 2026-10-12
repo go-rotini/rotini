@@ -283,7 +283,7 @@ func (v *osView) expandTilde(p string) (string, error) {
 	expand := v.clockRef().features().expand
 	if expand == nil || expand.lookupUser == nil {
 		return "", missingFeature("path-expansion", "PathExpansion()",
-			fmt.Sprintf("path %q names another user's home", p))
+			fmt.Sprintf("path %s names another user's home", quotePath(p)))
 	}
 	home, err := expand.lookupUser(name)
 	if err != nil {

@@ -27,7 +27,7 @@ func TestExpandValue(t *testing.T) {
 		"tilde":                {in: "~", rule: both, want: "/home/ada"},
 		"tilde slash":          {in: "~/x/y", rule: both, want: "/home/ada/x/y"},
 		"tilde backslash":      {goos: "windows", in: `~\x`, rule: both, want: `C:\Users\ada\x`},
-		"backslash elsewhere":  {in: `~\x`, rule: both, err: `cannot expand "~\\x": no such user`},
+		"backslash elsewhere":  {in: `~\x`, rule: both, err: `cannot expand "~\x": no such user`},
 		"named user":           {in: "~bob/x", rule: both, want: "/home/bob/x"},
 		"unknown user":         {in: "~nosuch/x", rule: both, err: `cannot expand "~nosuch": no such user`},
 		"tilde inside":         {in: "a~/x", rule: both, want: "a~/x"},

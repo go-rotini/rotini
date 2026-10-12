@@ -1,0 +1,208 @@
+# R10 — a stream whose items come in several kinds: `output: {oneOf: [...]}` with
+# `output_stream: true`.
+#
+# Each kind names itself in the same property (`kind`). The generated RunrDeployOutput is an
+# interface the kinds' types satisfy, WriteOutputItem fills an empty tag from the item's type,
+# and DecodeOutput reads each line back into the type its tag names.
+
+gomodinit example.com/runr
+
+exec rotini generate cmd/runr/.rotini.spec.yaml --config cmd/runr/.rotini.conf.yaml
+exec go mod tidy
+exec go vet ./...
+exec go build -o runr$exe ./cmd/runr
+
+grep 'type RunrDeployOutput interface\{ isRunrDeployOutput\(\) \}' internal/cmd/runr/zz_runr.go
+grep 'type RunrDeployOutputProgress struct' internal/cmd/runr/zz_runr.go
+grep 'func \(Result\) isRunrDeployOutput\(\) \{\}' internal/cmd/runr/zz_runr.go
+
+# NDJSON: one compact value per line, each tagged with its kind.
+exec ./runr$exe deploy
+cmp stdout deploy.json
+exec ./runr$exe deploy -o yaml
+stdout -count=3 '^---$'
+stdout '^kind: progress$'
+
+# A tag naming another kind is the program's bug, and that item is not written.
+! exec ./runr$exe mislabel
+! stdout .
+stderr 'runr mislabel: the item is a runr.RunrMislabelOutputStep, the "step" kind, but its kind is "done"'
+
+# The help page, the output schema and the contract describe each kind.
+grep 'each item''s kind says which kind it is:' internal/cmd/runr/zz_runr.go
+grep 'kind: result \(Result\)  How the deploy ended\.' internal/cmd/runr/zz_runr.go
+grep '"oneOf"' schemas/output/runr-deploy.output.json
+grep '"const": "progress"' cli-contract.json
+
+# A rotinitest test decodes the stream into each item's own type.
+exec go test -count=1 ./internal/cmd/runr
+
+-- deploy.json --
+{"kind":"progress","percent":50}
+{"kind":"progress","percent":100}
+{"kind":"result","succeeded":true,"version":"1.2.0"}
+-- cmd/runr/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: runr
+  summary: run deploys
+  flags:
+    - name: output
+      summary: how to write the result
+      identifiers: [-o, --output]
+      cascading: true
+      schema: {type: string, default: json, enum: [json, yaml]}
+  schemas:
+    Result:
+      type: object
+      description: How the deploy ended.
+      required: [kind, succeeded, version]
+      properties:
+        kind: {type: string, const: result}
+        succeeded: {type: boolean}
+        version: {type: string}
+  commands:
+    - name: deploy
+      summary: deploy, reporting progress as it goes
+      output_stream: true
+      output:
+        oneOf:
+          - type: object
+            required: [kind, percent]
+            properties:
+              kind: {type: string, const: progress}
+              percent: {type: integer, minimum: 0, maximum: 100}
+          - $ref: "#/schemas/Result"
+    - name: mislabel
+      summary: write an item whose tag names another kind
+      output_stream: true
+      output:
+        oneOf:
+          - type: object
+            required: [kind]
+            properties:
+              kind: {type: string, const: step}
+          - type: object
+            required: [kind]
+            properties:
+              kind: {type: string, const: done}
+-- cmd/runr/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  schemas:
+    output:
+      dir: schemas/output
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/runr/main.go
+    - type: cmd
+      file: internal/cmd/runr/zz_runr.go
+      package: runr
+  features:
+    - type: help
+      enabled: true
+-- cmd/runr/main.go --
+package main
+
+import runr "example.com/runr/internal/cmd/runr"
+
+func main() {
+	runr.NewProgram().Execute()
+}
+-- internal/cmd/runr/runr.go --
+package runr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type runrHandler struct{ rotini.NoHooks }
+
+func (*runrHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/runr/runr_deploy.go --
+package runr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type runrDeployHandler struct{ rotini.NoHooks }
+
+func (*runrDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[RunrDeployInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	items := []RunrDeployOutput{
+		RunrDeployOutputProgress{Percent: 50},
+		RunrDeployOutputProgress{Percent: 100},
+		Result{Succeeded: true, Version: "1.2.0"},
+	}
+	for _, item := range items {
+		if err := rtx.WriteOutputItem(item, in.Runr.Flags.Output, nil); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+}
+-- internal/cmd/runr/runr_mislabel.go --
+package runr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type runrMislabelHandler struct{ rotini.NoHooks }
+
+func (*runrMislabelHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if err := rtx.WriteOutputItem(RunrMislabelOutputStep{Kind: "done"}, "json", nil); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- internal/cmd/runr/runr_test.go --
+package runr_test
+
+import (
+	"testing"
+
+	"github.com/go-rotini/rotini/rotinitest"
+
+	"example.com/runr/internal/cmd/runr"
+)
+
+func TestDeploy(t *testing.T) {
+	t.Parallel()
+	var in runr.RunrDeployInputs
+	res := rotinitest.Run(t, runr.NewProgram(), in)
+	items := rotinitest.Output[[]runr.RunrDeployOutput](t, res)
+	if len(items) != 3 {
+		t.Fatalf("decoded %d items, want 3: %s", len(items), res.Stdout)
+	}
+	if p, ok := items[0].(runr.RunrDeployOutputProgress); !ok || p.Percent != 50 || p.Kind != "progress" {
+		t.Errorf("item 0 = %#v, want progress at 50", items[0])
+	}
+	r, ok := items[2].(runr.Result)
+	if !ok || !r.Succeeded || r.Version != "1.2.0" {
+		t.Errorf("item 2 = %#v, want the result", items[2])
+	}
+}
+
+func TestDeployYAML(t *testing.T) {
+	t.Parallel()
+	var in runr.RunrDeployInputs
+	in.Runr.Flags.Output = "yaml"
+	res := rotinitest.Run(t, runr.NewProgram(), in)
+	items := rotinitest.OutputAs[[]runr.RunrDeployOutput](t, res, "yaml")
+	if _, ok := items[1].(runr.RunrDeployOutputProgress); !ok || len(items) != 3 {
+		t.Errorf("decoded %#v", items)
+	}
+}

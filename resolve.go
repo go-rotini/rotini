@@ -56,6 +56,9 @@ type Command struct {
 	// Usage is the command's usage line; see [CommandDef.Usage] and [Context.Usage].
 	Usage string
 
+	// Metadata is the command's own labels; see [CommandDef.Metadata].
+	Metadata map[string]string
+
 	// pluginPathRaw is PluginPath as declared, for re-expanding it against a run's injected
 	// environment; view is that run's environment, used by [Command.PluginBinary] and
 	// [Command.DiscoveredPlugins]. Both are set by the runtime; nil reads the process.
@@ -79,7 +82,7 @@ func rootFrame(def Definition) Command {
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Plugins: def.Plugins, PluginDiscovery: def.PluginDiscovery,
 		PluginPath: expandPluginPath(def.PluginPath), pluginPathRaw: def.PluginPath, Passthrough: def.Passthrough, OptionsFirst: def.OptionsFirst,
-		Output: def.Output, Usage: def.Usage,
+		Output: def.Output, Usage: def.Usage, Metadata: def.Metadata,
 	}
 }
 
@@ -92,7 +95,7 @@ func cmdFrame(c CommandDef) Command {
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Plugins: c.Plugins, PluginDiscovery: c.PluginDiscovery,
 		PluginPath: expandPluginPath(c.PluginPath), pluginPathRaw: c.PluginPath, Passthrough: c.Passthrough, OptionsFirst: c.OptionsFirst,
-		Output: c.Output, Usage: c.Usage,
+		Output: c.Output, Usage: c.Usage, Metadata: c.Metadata,
 	}
 }
 
@@ -103,7 +106,13 @@ func cmdFrame(c CommandDef) Command {
 //
 // It is lenient by design: unknown flags, missing values and bad input are left to the parser.
 func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
-	chain := []Command{rootFrame(def)}
+	var buf [4]Command // most chains fit, so the result is allocated once, at its final size
+	chain, plugin := descend(append(buf[:0], rootFrame(def)), def, argv)
+	return slices.Clone(chain), plugin
+}
+
+// descend is resolveChain's walk, appending each command it descends into to chain.
+func descend(chain []Command, def Definition, argv []string) ([]Command, *PluginDispatch) {
 	if def.Passthrough {
 		return chain, nil // a passthrough root: every token is a positional
 	}

@@ -432,20 +432,30 @@ func TestResolveVersion(t *testing.T) {
 	}
 }
 
-// The root's -v and --version print the bound version, like the version sub-command.
+// The root's --version prints the bound version, like the version sub-command.
 func TestCLI_rootVersionFlag(t *testing.T) {
-	for _, flag := range []string{"-v", "--version"} {
-		p, out, _ := newTestCLI(t)
-		code, err := p.Run([]string{flag})
-		if err != nil {
-			t.Fatalf("Run(%s): %v", flag, err)
-		}
-		if code != 0 {
-			t.Errorf("Run(%s) exit = %d, want 0", flag, code)
-		}
-		if got := strings.TrimSpace(out.String()); got != "v"+testVersion {
-			t.Errorf("Run(%s) = %q, want %q", flag, got, "v"+testVersion)
-		}
+	p, out, _ := newTestCLI(t)
+	code, err := p.Run([]string{"--version"})
+	if err != nil {
+		t.Fatalf("Run(--version): %v", err)
+	}
+	if code != 0 {
+		t.Errorf("Run(--version) exit = %d, want 0", code)
+	}
+	if got := strings.TrimSpace(out.String()); got != "v"+testVersion {
+		t.Errorf("Run(--version) = %q, want %q", got, "v"+testVersion)
+	}
+}
+
+// --version has no short form, matching what `rotini init` seeds, so -v is an unknown flag.
+func TestCLI_noShortVersionFlag(t *testing.T) {
+	p, out, errb := newTestCLI(t)
+	code, err := p.Run([]string{"-v"})
+	if err == nil || code == 0 {
+		t.Errorf("Run(-v) = %d, %v; want a usage error", code, err)
+	}
+	if out.Len() != 0 || !strings.Contains(errb.String(), `unknown flag "-v"`) {
+		t.Errorf("Run(-v) stdout %q, stderr %q", out.String(), errb.String())
 	}
 }
 

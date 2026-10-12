@@ -40,7 +40,8 @@ import (
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
 //     [Context.RecordError], and [Context.Failed]; during completion,
-//     [Context.AddCompletionMessage] and [Context.SetCompletionOptions], [Context.PartialInputs] reads
+//     [Context.AddCompletionMessage], [Context.SetCompletionOptions] and
+//     [Context.SetCompletionFallback], [Context.PartialInputs] reads
 //     what has been typed so far, and [Context.Context] is the program's base context
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
@@ -127,6 +128,8 @@ type Context struct {
 	// completionOptions collects what [Context.SetCompletionOptions] asks for. It is non-nil
 	// only while a completion request runs.
 	completionOptions *CompletionOptions
+	// completionFallback is what [Context.SetCompletionFallback] chose, or nil.
+	completionFallback *Completion
 
 	// stdinRead is the run's stdin, read at most once and shared by every consumer: argv can
 	// be parsed several times in one run and inputs collected more than once, but stdin can be
@@ -229,6 +232,12 @@ func NewContextFor(def Definition, argv []string) *Context {
 // run, and must be treated as read-only.
 func (rtx *Context) CommandChain() []Command {
 	return slices.Clone(rtx.chain)
+}
+
+// chainRef is the run's chain itself, not a copy, for Rotini's own readers, which never write
+// to it.
+func (rtx *Context) chainRef() []Command {
+	return rtx.chain
 }
 
 // invokedCommand is the last command of the chain, whichever hook is running.
@@ -737,7 +746,7 @@ func (rtx *Context) Help() string {
 	if help == nil {
 		return ""
 	}
-	chain := rtx.CommandChain()
+	chain := rtx.chainRef()
 	path := make([]string, 0, len(chain))
 	for i := 1; i <= rtx.frameIndex() && i < len(chain); i++ {
 		path = append(path, chain[i].Name)

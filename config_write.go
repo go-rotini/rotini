@@ -22,6 +22,7 @@ type ConfigKey struct {
 	IgnoreCase bool        // Enum matches without regard to case
 	Layout     string      // a time input's layout; see [FlagDef.Layout]
 	Layouts    []string    // every layout when there are several; see [FlagDef.Layouts]
+	Base       string      // an integer input's base; see [FlagDef.Base]
 	Separator  string      // what splits a list or map value given as one string; "" is ","
 	Secret     bool        // the value is a secret
 	Object     bool        // the value is an object, which is set by editing the file

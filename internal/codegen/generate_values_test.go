@@ -75,7 +75,7 @@ func valuesProgram(t *testing.T) *program {
 // direction, the enum's aliases, hidden and deprecated values, and an argument's acquisition.
 func TestLiterals_valueKeys(t *testing.T) {
 	gp := valuesProgram(t)
-	flags := flagDefsLiteral(gp.rootInputs, nil)
+	flags := flagDefsLiteral(gp.rootInputs, nil, false)
 	for _, want := range []string{
 		`Name: "color", Identifiers: []string{"--color"}, Summary: "color output", Type: "bool", Negatable: true, Negation: "--plain"`,
 		`Name: "fancy", Identifiers: []string{"--fancy"}, Summary: "fancy output", Type: "bool", Negatable: true}`,

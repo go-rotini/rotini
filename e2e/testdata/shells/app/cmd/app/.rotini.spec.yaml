@@ -4,48 +4,56 @@ command:
   summary: a CLI with every kind of completion
   flags:
     - name: config
+      cascading: true
       summary: config file
       identifiers: [--config]
       schema:
         type: string
         complete: { kind: file, extensions: [yaml, yml] }
     - name: dir
+      cascading: true
       summary: work directory
       identifiers: [--dir]
       schema:
         type: string
         complete: { kind: directory }
     - name: token
+      cascading: true
       summary: API token
       identifiers: [--token]
       schema:
         type: string
         complete: { kind: none, message: "an API token, from your account page" }
     - name: exec
+      cascading: true
       summary: program to run
       identifiers: [--exec]
       schema:
         type: string
         complete: { kind: executable }
     - name: user
+      cascading: true
       summary: account to run as
       identifiers: [--user]
       schema:
         type: string
         complete: { kind: user }
     - name: group
+      cascading: true
       summary: group to run as
       identifiers: [--group]
       schema:
         type: string
         complete: { kind: group }
     - name: host
+      cascading: true
       summary: host to reach
       identifiers: [--host]
       schema:
         type: string
         complete: { kind: host }
     - name: level
+      cascading: true
       summary: how much to say
       identifiers: [--level]
       schema:
@@ -55,12 +63,14 @@ command:
           - { value: low, summary: quiet }
           - { value: high, summary: loud }
     - name: format
+      cascading: true
       summary: output format
       identifiers: [--format]
       schema:
         type: string
         enum: [json, text, yaml]
     - name: set
+      cascading: true
       summary: override a setting
       identifiers: [--set]
       schema:
@@ -69,6 +79,7 @@ command:
           image: { type: string }
           replicas: { type: string }
     - name: color
+      cascading: true
       summary: colorize output
       identifiers: [--color]
       schema: { type: bool, negatable: true }

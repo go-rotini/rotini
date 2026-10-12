@@ -188,6 +188,7 @@ func (d *differ) command(st stability, oc, nc *command) {
 	d.lifecycle(st, w, lifecycleOf(oc), lifecycleOf(nc))
 	d.hidden(st, RuleCommandHidden, RuleCommandUnhidden, w, oc.Hidden, nc.Hidden)
 	d.agent(st, w, oc.Agent, nc.Agent)
+	d.metadata(st, w, oc.Metadata, nc.Metadata)
 	if oc.Plugin || nc.Plugin {
 		return // a plugin's inputs and output are its own program's
 	}
@@ -300,6 +301,25 @@ func (d *differ) lifecycle(st stability, where string, o, n lifecycleFacts) {
 	}
 }
 
+// metadata compares an item's own labels, key by key. Rotini never acts on them, so every
+// change is safe.
+func (d *differ) metadata(st stability, where string, o, n map[string]string) {
+	for _, k := range slices.Sorted(maps.Keys(o)) {
+		nv, ok := n[k]
+		switch {
+		case !ok:
+			d.add(st, Safe, RuleMetadataRemoved, where, "metadata "+strconv.Quote(k)+" removed", "")
+		case nv != o[k]:
+			d.add(st, Safe, RuleMetadataChanged, where, fmt.Sprintf("metadata %q: %q → %q", k, o[k], nv), "")
+		}
+	}
+	for _, k := range slices.Sorted(maps.Keys(n)) {
+		if _, ok := o[k]; !ok {
+			d.add(st, Safe, RuleMetadataAdded, where, fmt.Sprintf("metadata %q added: %q", k, n[k]), "")
+		}
+	}
+}
+
 func stabilityName(s string) string {
 	if s == "" {
 		return "stable"
@@ -399,6 +419,7 @@ func (d *differ) stdin(st stability, oc, nc *command) {
 	if o.Separator != n.Separator {
 		d.add(st, Breaking, RuleStdinSeparatorChanged, w, fmt.Sprintf("stdin separator %q → %q", o.Separator, n.Separator), "")
 	}
+	d.metadata(st, w, o.Metadata, n.Metadata)
 	d.walk(st, in, w, o.Schema, n.Schema, nil)
 }
 
@@ -449,7 +470,9 @@ func (d *differ) output(st stability, where string, o, n any) {
 	case o == nil:
 		d.add(st, Safe, RuleOutputAdded, where, "output declared", "")
 	default:
-		d.walk(st, out, where, o, n, nil)
+		if !d.outputKinds(st, where, o, n) {
+			d.walk(st, out, where, o, n, nil)
+		}
 	}
 }
 

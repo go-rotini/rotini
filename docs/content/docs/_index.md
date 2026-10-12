@@ -74,9 +74,11 @@ Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sum
 Beyond the schemas, `validate` catches specs that can never work: bounds or lengths that leave no
 value, enum values that aren't the declared type, `required` with a `default`, contradictory flag
 groups, config keys read with two types, an identifier that hides every identifier of a parent's
-cascading or short-circuit flag, and `-ab` beside `-a` and `-b`. It warns, without failing,
+cascading flag, and `-ab` beside `-a` and `-b`. It warns, without failing,
 about an identifier that hides only some of them, one-dash multi-letter identifiers, flags with
-no long form, and a literal default on a secret input. Two opt-in conf keys add warnings:
+no long form, a literal default on a secret input, and a `--help` or other short-circuit flag
+that isn't cascading on a command whose sub-commands don't declare their own. Two opt-in conf
+keys add warnings:
 `validate.flags_first` for env and config inputs no flag or argument can set, and
 `validate.posix_names` for a program name that isn't a POSIX utility name.
 
@@ -301,15 +303,16 @@ rules:
   item counts are checked when the handler reads its inputs with `rtx.Inputs`, which the generated
   handler does first. A bad value is a usage error naming the flag the user typed.
   An empty value (`--name ""`, `--name=`, `''`) counts as given; add `minLength: 1` to refuse it.
-- **A flag works anywhere after the command that declares it**, including after a sub-command's
-  name. A flag written *before* a sub-command's name belongs to a parent, which is what lets a
-  parent and a sub-command both declare a flag with the same name. A *different* flag that
-  reuses an identifier of a cascading or short-circuit parent flag is flagged by `validate`.
-- **`cascading: true` also lists a flag in its sub-commands' help**, under "Global Flags"
-  (GLOBAL OPTIONS in man pages). It changes help only: parsing is the same, and a sub-command's
-  handler sees a parent's flags either way, since its generated inputs include them. Mark a flag
-  that sub-commands use `cascading: true` so their help shows it. To rename the heading, set
-  `cascading:` under the command's [`headings:`](/specification#headings).
+- **A flag applies to its own command** unless it is `cascading: true`. Given with a
+  sub-command, before or after its name, it is a usage error naming the command it belongs to
+  (`--init belongs to "app", not "app db migrate"`).
+- **`cascading: true` makes a flag apply to every command below its own**: it works anywhere
+  after its command's name, a sub-command's handler reads it through its generated inputs, and
+  sub-commands' help lists it under "Global Flags" (GLOBAL OPTIONS in man pages). Rename the
+  heading with `cascading:` under the command's [`headings:`](/specification#headings).
+- **A flag written before a sub-command's name belongs to a parent**, which lets a parent and a
+  sub-command both declare a flag with the same name. A *different* flag that reuses an
+  identifier of a cascading parent flag is flagged by `validate`.
 
 Mistakes are reported before your code runs:
 
@@ -471,6 +474,9 @@ for _, d := range rotini.Deprecations(rtx) {
   ```
 
   `today` follows the clock's time zone, which is the process's unless the clock says otherwise.
+- **`base: prefixed`** on an integer also accepts `0x1F`, `0o17` and `0b101`, with a sign and `_`
+  between digits, wherever the value comes from; a value without a prefix is still decimal, so
+  `010` is ten. Without `base`, every source is decimal-only: `PORT=0x10` is an invalid value.
 - **`type: regexp`** is compiled when parsed into a `*regexp.Regexp`, so a bad expression is a
   usage error naming the flag. The syntax is Go's RE2, which has no backreferences or lookaround.
 - **`type: glob`** is a `rotini.Glob`, a `path.Match` pattern checked when parsed, with a `Match`
@@ -596,6 +602,21 @@ commands:
         identifiers: [-o, --output]
         hidden_identifiers: [--out]
         schema: { type: string }
+{{< /code >}}
+
+### Your own metadata
+
+`metadata` on a command, flag, argument, env or config input, or `stdin` holds labels of your
+own, string keys with string values, for tools you write: an owner to page, a team, an audit
+tag. Rotini never acts on them and shows them on no page. They are copied as written into the
+generated definition (`CommandDef.Metadata`, `FlagDef.Metadata`, `ArgDef.Metadata`, and
+`rtx.Command().Metadata` in a handler) and into the contract, and `rotini diff` rates any change
+to them as safe:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+commands:
+  - name: purge
+    metadata: { owner: storage-team, audit: "true" }
 {{< /code >}}
 
 ## Where values come from
@@ -1985,6 +2006,91 @@ program, not mistakes by the user. A renderer's own error is returned as it is.
 lands on stdout, such as a progress line before the JSON document. Write progress, notes and
 prompts to `rtx.Stderr`.
 
+### Streams of several kinds
+
+Some streams carry items of more than one shape: progress while the work runs, then a result.
+List one schema per kind under `oneOf`, each written inline or as a `$ref`. Every kind names
+itself in the same property, a required string holding a `const`:
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: runr
+  schemas:
+    Result:
+      type: object
+      description: How the deploy ended.
+      required: [kind, succeeded, version]
+      properties:
+        kind: { type: string, const: result }
+        succeeded: { type: boolean }
+        version: { type: string }
+  commands:
+    - name: deploy
+      summary: deploy, reporting progress as it goes
+      output_stream: true
+      output:
+        oneOf:
+          - type: object
+            required: [kind, percent]
+            properties:
+              kind: { type: string, const: progress }
+              percent: { type: integer, minimum: 0, maximum: 100 }
+          - $ref: "#/schemas/Result"
+{{< /code >}}
+
+`RunrDeployOutput` is then an interface that only the kinds' types satisfy:
+`RunrDeployOutputProgress` for the kind written inline, and `Result` for the named one. Pass
+any of them to `WriteOutputItem`, which fills in an empty `kind` from the item's type:
+
+{{< code title="internal/cmd/runr/runr_deploy.go" language="go" open="true" collapsible="false" copy="true" >}}
+package runr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type runrDeployHandler struct{ rotini.NoHooks }
+
+func (*runrDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[RunrDeployInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	items := []RunrDeployOutput{
+		RunrDeployOutputProgress{Percent: 50},
+		RunrDeployOutputProgress{Percent: 100},
+		Result{Succeeded: true, Version: "1.2.0"},
+	}
+	for _, item := range items {
+		if err := rtx.WriteOutputItem(item, in.Runr.Flags.Output, nil); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+}
+{{< /code >}}
+
+```console
+$ runr deploy
+{"kind":"progress","percent":50}
+{"kind":"progress","percent":100}
+{"kind":"result","succeeded":true,"version":"1.2.0"}
+```
+
+An item whose `kind` names another kind, or a value whose type is none of the kinds, is an
+internal error, and nothing is written. Output checks check each item against its own kind.
+`rotini.DecodeOutput[[]RunrDeployOutput]`, and `rotinitest.Output` with the same type, decode
+each item into the type its `kind` names, so a test switches on the item's type.
+
+`rotini validate` checks the kinds: each is an object, exactly one property tags every kind,
+and no two kinds share a value. Help, man and markdown list each kind with its fields, the
+contract and the output schema files describe the stream as JSON Schema `oneOf`, and
+`rotini diff` reports a kind added as safe and a kind removed, or its value changed, as
+breaking.
+
 ### Templates
 
 The `github.com/go-rotini/rotini/shape` package lets the user format the output with a Go
@@ -2967,6 +3073,10 @@ the command that declares the flag, and `rtx` gives it:
   inserted candidate, for a value the user goes on typing. fish adds none only after a value
   ending in one of `@=/:.,`. `KeepOrder: true` keeps the whole answer in the order given,
   sub-command names included.
+- `rtx.SetCompletionFallback(rotini.Completion{Kind: "file"})`: what the shell falls back to
+  for this request, in place of the input's `complete:`. It takes the same kinds, and
+  `Extensions` for files; the zero value leaves it to the shell's own default. It combines with
+  candidates the way `complete:` does.
 
 {{< code title="internal/cmd/todo/todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
@@ -2974,6 +3084,19 @@ func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial strin
 	ctx, cancel := context.WithTimeout(rtx.Context(), 2*time.Second)
 	defer cancel()
 	return listTasks(ctx, in.Todo.Flags.List)
+}
+{{< /code >}}
+
+An argument that takes a remote name or a local path can offer the remote names that match, and
+the user's files otherwise:
+
+{{< code title="internal/cmd/todo/todo_import.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func (*todoImportHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
+	if names := remoteListsMatching(rtx.Context(), partial); len(names) > 0 {
+		return names
+	}
+	rtx.SetCompletionFallback(rotini.Completion{Kind: "file", Extensions: []string{"json"}})
+	return []string{}
 }
 {{< /code >}}
 
@@ -3209,8 +3332,8 @@ The names users try first. Each is an ordinary spec entry:
 
 | Flag | Meaning | Declared with |
 |---|---|---|
-| `-h`, `--help` | print help | `short_circuit: true`; `rotini init` declares it |
-| `--version` | print the version | `short_circuit: true`, long only so `-v` stays free; `rotini init` declares it |
+| `-h`, `--help` | print help | `short_circuit: true` and `cascading: true`; `rotini init` declares it |
+| `--version` | print the version | `short_circuit: true` and `cascading: true`, long only so `-v` stays free; `rotini init` declares it |
 | `-v`, `--verbose` | more output; `-vv` for more still | `type: count` (see [the recipe](#-v-and--vv-as-log-levels)) |
 | `-q`, `--quiet` | less output | `type: bool` |
 | `-o`, `--output <format>` | output format | an `enum`; `role: machine-output` with `role_value: json` |
@@ -3741,6 +3864,7 @@ or on what the old contract planned.
 | `EXIT_STATUS_ADDED`, `EXIT_NAME_ADDED`, `EXIT_RETRYABLE_ADDED` | an exit status added, named, or now retryable | safe |
 | `DEPRECATION_ADDED`, `DEPRECATION_CHANGED`, `DEPRECATION_REMOVED`, `LIFECYCLE_CHANGED`, `REPLACED_BY_CHANGED` | deprecation, planned removal and replacement | safe |
 | `STABILITY_PROMOTED`, `STABILITY_DEMOTED` | stability | safe, possibly breaking |
+| `METADATA_ADDED`, `METADATA_REMOVED`, `METADATA_CHANGED` | a `metadata` key of a command or input added, removed, or given another value | safe |
 | `FLAG_NO_DELETE` | a flag removed | breaking; expected when planned; possibly breaking when it was hidden |
 | `FLAG_REPLACED` | a flag removed for the `replaced_by` it named | expected |
 | `FLAG_ADDED`, `FLAG_REQUIRED_ADDED` | a flag added, optional or required (a short-circuit flag is never required) | safe, breaking |
@@ -3768,6 +3892,7 @@ or on what the old contract planned.
 | `INPUT_IGNORE_CASE_REMOVED`, `INPUT_IGNORE_CASE_ADDED` | enum case matching | breaking, safe |
 | `INPUT_LAYOUT_NO_DELETE`, `INPUT_LAYOUT_ADDED`, `INPUT_LAYOUT_FIRST_CHANGED` | time layouts | breaking, safe, possibly breaking |
 | `INPUT_RELATIVE_ADDED`, `INPUT_RELATIVE_CHANGED`, `INPUT_RELATIVE_TO_CHANGED` | relative times, or what relative paths resolve against | safe, breaking, breaking |
+| `INPUT_BASE_ADDED`, `INPUT_BASE_REMOVED` | 0x, 0o and 0b integer literals | safe, breaking |
 | `INPUT_EXPAND_ADDED`, `INPUT_EXPAND_REMOVED` | `~` or `$VAR` expansion | possibly breaking, breaking |
 | `INPUT_VALUES_FROM_ADDED`, `INPUT_VALUES_FROM_REMOVED`, `INPUT_VALUES_FROM_CHANGED` | an enum that follows output fields | breaking, safe, possibly breaking |
 | `INPUT_ENV_NO_DELETE`, `INPUT_ENV_ADDED`, `INPUT_CONFIG_KEY_CHANGED`, `INPUT_CONFIG_KEY_ADDED`, `INPUT_VARIABLE_FILE_NO_DELETE`, `INPUT_VARIABLE_FILE_ADDED` | a fallback variable, config key or file variable | breaking when removed or renamed, safe when added |
@@ -3788,6 +3913,8 @@ or on what the old contract planned.
 | `OUTPUT_TYPE_CHANGED`, `OUTPUT_PROPERTY_NO_DELETE`, `OUTPUT_PROPERTY_REQUIRED_REMOVED` | an output value's type, a property removed, or no longer always written | breaking |
 | `OUTPUT_PROPERTY_ADDED`, `OUTPUT_ENUM_ADDED`, `OUTPUT_ENUM_VALUE_REMOVED` | a property added; an output value limited to fewer values | safe |
 | `OUTPUT_ENUM_VALUE_ADDED`, `OUTPUT_ENUM_REMOVED` | an output value that may now be something new | possibly breaking |
+| `OUTPUT_KIND_NO_DELETE`, `OUTPUT_KIND_TAG_CHANGED` | in a stream whose items come in several kinds: a kind removed (or its tag value changed), or the tag property renamed | breaking |
+| `OUTPUT_KIND_ADDED` | a kind of item added to such a stream | safe |
 | `EFFECTS_ADDED`, `EFFECTS_REMOVED` | a command's or flag's `effects` declared, or no longer declared (agents then assume the worst) | safe, possibly breaking |
 | `EFFECTS_RAISED`, `EFFECTS_LOWERED` | a riskier kind, no longer idempotent or no longer local; or the reverse | possibly breaking, safe |
 | `AGENT_REMOVED`, `AGENT_ADDED` | a command or input kept from AI agents (`agent: false`, or `agent: true` dropped); or offered again | possibly breaking, safe |

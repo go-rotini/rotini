@@ -1313,8 +1313,10 @@ func envRegistry(v reflect.Value, envPrefix string, view *osView) (*recon.Regist
 
 // spellings gives env and config inputs the value spellings flags accept and recon's decode
 // does not: days and weeks in a duration (7d), yes/no, on/off and y/n for a bool (see
-// parseBool), and a declared layout or relative form for a time field instead of RFC 3339. Only
-// the keys of those typed fields are rewritten; a string input whose value is "yes" keeps it.
+// parseBool), a declared layout or relative form for a time field instead of RFC 3339, and the
+// 0x, 0o and 0b literals of an integer field that declares base: prefixed, whose other values
+// are decimal. Only the keys of those typed fields are rewritten; a string input whose value is
+// "yes" keeps it.
 type spellings struct {
 	recon.Source
 
@@ -1323,13 +1325,71 @@ type spellings struct {
 }
 
 // valueKeys maps the recon keys of an Env or Config struct's bool fields, its duration fields,
-// and its time fields that declare layouts or relative forms, to how their text is read.
+// its time fields that declare layouts or relative forms, and its integer fields that declare
+// base: prefixed, to how their text is read.
 type valueKeys struct {
 	bools     map[string]bool
 	times     map[string]timeSpec
 	timeMaps  map[string]timeSpec // map[string]time.Time fields, whose values are times
 	maps      map[string]bool     // every map field, which a configuration file holds as leaves
 	durations map[string]bool
+	prefixed  map[string]prefixedKey
+}
+
+// prefixedKey is how an integer field's text arrives: one value, or a list, which a string
+// holds split on sep. prefixed is the field's base: prefixed; without it the text is decimal.
+type prefixedKey struct {
+	list     bool
+	sep      string
+	prefixed bool
+}
+
+// text is one value of the field in decimal: a prefixed literal converted, or decimal digits
+// without the leading zeros the config library would read as octal. Anything else is kept, for
+// validation to report.
+func (k prefixedKey) text(s string) string {
+	if k.prefixed {
+		return prefixedText(s)
+	}
+	return plainDecimalText(s)
+}
+
+// decimal spells v, an integer field's value, in decimal, so binding reads it as the command
+// line does: a string, each part of a list string, or each string in a list.
+func (k prefixedKey) decimal(v recon.Value) recon.Value {
+	switch v.Kind() {
+	case recon.StringKind:
+		s := v.String()
+		if !k.list {
+			return recon.NewValue(k.text(s))
+		}
+		if s == "" {
+			return v
+		}
+		sep := k.sep
+		if sep == "" {
+			sep = "," // recon's default
+		}
+		parts := strings.Split(s, sep)
+		for i, p := range parts {
+			parts[i] = k.text(strings.TrimSpace(p))
+		}
+		return recon.NewValue(strings.Join(parts, sep))
+	case recon.SliceKind:
+		items, err := v.AsSlice()
+		if err != nil {
+			return v
+		}
+		out := make([]recon.Value, len(items))
+		for i, it := range items {
+			out[i] = it
+			if it.Kind() == recon.StringKind {
+				out[i] = recon.NewValue(k.text(it.String()))
+			}
+		}
+		return recon.NewValue(out)
+	}
+	return v
 }
 
 func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
@@ -1339,6 +1399,9 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 	}
 	if tv, ok := s.timeMapValue(path, v); ok {
 		return tv, true, nil
+	}
+	if k, ok := s.keys.prefixed[path.String()]; ok {
+		return k.decimal(v), true, nil
 	}
 	if v.Kind() != recon.StringKind {
 		return v, found, err
@@ -1367,7 +1430,7 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 
 // channelValueKeys collects [valueKeys] from each command's Env or Config struct.
 func channelValueKeys(v reflect.Value, structName string) valueKeys {
-	keys := valueKeys{bools: map[string]bool{}, times: map[string]timeSpec{}, timeMaps: map[string]timeSpec{}, maps: map[string]bool{}, durations: map[string]bool{}}
+	keys := valueKeys{bools: map[string]bool{}, times: map[string]timeSpec{}, timeMaps: map[string]timeSpec{}, maps: map[string]bool{}, durations: map[string]bool{}, prefixed: map[string]prefixedKey{}}
 	if v.Kind() != reflect.Struct {
 		return keys
 	}
@@ -1384,6 +1447,10 @@ func channelValueKeys(v reflect.Value, structName string) valueKeys {
 			sf := ct.Field(j)
 			key := reconKey(sf.Tag.Get("recon"))
 			if key == "" {
+				continue
+			}
+			if plainIntegerField(sf.Type) {
+				keys.prefixed[key] = prefixedKey{list: derefType(sf.Type).Kind() == reflect.Slice, sep: recon.ParseTag(sf.Tag.Get("recon")).Separator, prefixed: sf.Tag.Get("base") == basePrefixed}
 				continue
 			}
 			switch ft := derefType(sf.Type); {
@@ -1559,7 +1626,8 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		f := st.Field(j)
 		c, has := channelConstraints(f.Tag)
 		enum := channelEnum(f.Tag)
-		if !has && !enum.declared() && f.Tag.Get("path") == "" {
+		decimal := decimalOnly(f)
+		if !channelChecked(f.Tag, has, enum, decimal) {
 			continue
 		}
 		key := reconKey(f.Tag.Get("recon"))
@@ -1604,6 +1672,9 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		if len(vals) == 1 && vals[0] == "" && isPathType(typ) {
 			typ = channelGoType(s.Field(j).Type()) // an empty path is no path: nothing to check
 		}
+		if err := checkDecimal(decimal, f.Tag, typ, label, vals, secret); err != nil {
+			return withOrigin(err, origin)
+		}
 		if err := checkChannelEnum(channelOf(cfg), label, enum, boundStrings(s.Field(j), vals), secret); err != nil {
 			return withOrigin(err, origin)
 		}
@@ -1618,11 +1689,55 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 			}
 			continue
 		}
-		if err := checkConstraints(view.clockRef().features(), label, typ, c, vals, secret, view.base()); err != nil {
+		if err := checkConstraints(view.clockRef().features(), label, typ, f.Tag.Get("base"), c, vals, secret, view.base()); err != nil {
 			return withOrigin(err, origin)
 		}
 	}
 	return nil
+}
+
+// channelChecked reports whether a field of an Env or Config struct has anything to check:
+// constraints, an enum, a path kind, or a decimal-only integer.
+func channelChecked(tag reflect.StructTag, constrained bool, enum enumSet, decimal bool) bool {
+	return constrained || enum.declared() || decimal || tag.Get("path") != ""
+}
+
+// decimalOnly reports whether f is an integer field read as decimal only: one that doesn't
+// declare base: prefixed.
+func decimalOnly(f reflect.StructField) bool {
+	return f.Tag.Get("base") != basePrefixed && plainIntegerField(f.Type)
+}
+
+// checkDecimal refuses a value of an integer field that isn't decimal, when decimal says the
+// field doesn't declare base: prefixed: without it an integer is decimal on every channel, as
+// on the command line.
+func checkDecimal(decimal bool, tag reflect.StructTag, typ, label string, vals []string, secret bool) error {
+	if !decimal {
+		return nil
+	}
+	return checkValueShape(typ, "", label, "", listItems(tag, typ, vals), secret)
+}
+
+// listItems splits each of vals on the recon separator of a list field, since an environment
+// variable or a config string holds the whole list; other fields' vals are returned as they are.
+func listItems(tag reflect.StructTag, typ string, vals []string) []string {
+	if !isArrayType(typ) {
+		return vals
+	}
+	sep := recon.ParseTag(tag.Get("recon")).Separator
+	if sep == "" {
+		sep = "," // recon's default
+	}
+	var out []string
+	for _, v := range vals {
+		if v == "" {
+			continue
+		}
+		for part := range strings.SplitSeq(v, sep) {
+			out = append(out, strings.TrimSpace(part))
+		}
+	}
+	return out
 }
 
 // withOrigin appends origin, a " (from configuration file …)" suffix, to a value error's message.

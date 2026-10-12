@@ -69,7 +69,7 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 		return ""
 	}
 	fd := rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: defType}
-	withTimeForms(&fd, schema)
+	withValueForms(&fd, schema)
 	// Measured-type bounds are checked here because lintDefaultConstraints cannot read "3s".
 	if measuredTypes[strings.TrimPrefix(getSchemaType(schema), "[]")] {
 		fd.Constraints = rotini.Constraints{

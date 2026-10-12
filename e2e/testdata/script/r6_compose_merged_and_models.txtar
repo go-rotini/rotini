@@ -57,6 +57,7 @@ command:
     - name: target
       summary: what to act on
       identifiers: ["-t", "--target"]
+      cascading: true
       schema:
         type: string
         default: all

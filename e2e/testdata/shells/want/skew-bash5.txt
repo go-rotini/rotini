@@ -1,0 +1,33 @@
+== commands
+deploy	deploy a service
+status	show status
+== flags
+--config	config file
+--dir	work directory
+--format	output format
+--token	API token
+== enum
+json	
+text	
+yaml	
+== file-extensions
+a.yaml	
+b.yml	
+bin	
+drivers	
+src	
+sub	
+== directory
+bin	
+drivers	
+src	
+sub	
+== none-with-message
+! an API token, from your account page
+== completer
+web	the web tier
+api	the public API
+db	the database
+== sub-command-enum
+dev	
+prod	

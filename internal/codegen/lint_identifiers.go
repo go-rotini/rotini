@@ -62,14 +62,14 @@ func lintShadowedIdentifiers(spec *Spec) []error {
 	return problems
 }
 
-// ancestorOwners maps each identifier of a cascading or short-circuit ancestor flag in chain,
+// ancestorOwners maps each identifier of a cascading ancestor flag in chain,
 // negated forms included, to the nearest ancestor flag declaring it.
 func ancestorOwners(chain []*Command) map[string]*ancestorFlag {
 	owners := map[string]*ancestorFlag{}
 	paths := chainPaths(chain)
 	for i, a := range chain[:len(chain)-1] {
 		for _, f := range commandFlags(a) {
-			if !f.Cascading && !f.ShortCircuit {
+			if !f.Cascading {
 				continue
 			}
 			owner := &ancestorFlag{flag: f, path: paths[i]}

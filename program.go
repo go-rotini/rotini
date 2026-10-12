@@ -650,6 +650,10 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 	}
 
 	rtx.Argv = argv
+	if p.resolver == nil {
+		// DefaultResolver's chain is new on every call, so it needs no copy.
+		return p.dispatch(ctx, rtx.adoptChain(res.Chain), rtx)
+	}
 	return p.dispatch(ctx, rtx.bindChain(res.Chain), rtx)
 }
 
@@ -657,7 +661,11 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 // and returns the copy. The copy keeps marking the invoked command from writing into a slice a
 // custom resolver may share between runs.
 func (rtx *Context) bindChain(chain []Command) []Command {
-	chain = slices.Clone(chain)
+	return rtx.adoptChain(slices.Clone(chain))
+}
+
+// adoptChain is bindChain for a chain the run owns, without the copy.
+func (rtx *Context) adoptChain(chain []Command) []Command {
 	markInvoked(chain)
 	bindChainView(chain, rtx.view)
 	rtx.chain = chain

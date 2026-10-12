@@ -937,7 +937,7 @@ func layerChain(rtx *Context) ([]Command, error) {
 	if rtx == nil {
 		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: parse on nil context"}
 	}
-	chain := rtx.CommandChain()
+	chain := rtx.chainRef()
 	if len(chain) == 0 {
 		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}

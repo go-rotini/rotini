@@ -79,7 +79,7 @@ func TestDefinitionTypeReachesEmittedLiterals(t *testing.T) {
 			{Name: "dir", Schema: &InputSchema{Type: "existingdir"}},
 		},
 	}
-	got := flagDefsLiteral(in, nil) + argDefsLiteral(in, nil)
+	got := flagDefsLiteral(in, nil, false) + argDefsLiteral(in, nil)
 	for _, want := range []string{`Type: "existingfile"`, `Type: "count"`, `Type: "existingdir"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("emitted literals missing %s\ngot: %s", want, got)
@@ -104,7 +104,7 @@ func TestFlagDefsLiteral_objectFlags(t *testing.T) {
 			Default: []any{map[string]any{"host": "x"}, map[string]any{"host": "y"}}}},
 		{Name: "label", Identifiers: []string{"--label"}, Schema: &InputSchema{Ref: "#/schemas/Label"}},
 	}}
-	got := flagDefsLiteral(in, schemas)
+	got := flagDefsLiteral(in, schemas, false)
 	for _, want := range []string{
 		`Default: "{\"host\":\"a, b\",\"pool\":{\"max\":3}}"`,
 		`Defaults: []string{"{\"host\":\"x\"}", "{\"host\":\"y\"}"}`,
@@ -143,7 +143,7 @@ func TestLayoutFor(t *testing.T) {
 		Flags:     []FlagInput{{Name: "due", Identifiers: []string{"--due"}, Schema: &InputSchema{Type: "date"}}},
 		Arguments: []ArgumentInput{{Name: "at", Schema: &InputSchema{Type: "time", Layout: "unix"}}},
 	}
-	if lit := flagDefsLiteral(in, nil) + argDefsLiteral(in, nil); !strings.Contains(lit, `Layout: "2006-01-02"`) || !strings.Contains(lit, `Layout: "unix"`) {
+	if lit := flagDefsLiteral(in, nil, false) + argDefsLiteral(in, nil); !strings.Contains(lit, `Layout: "2006-01-02"`) || !strings.Contains(lit, `Layout: "unix"`) {
 		t.Errorf("literal does not carry the layouts:\n%s", lit)
 	}
 	if tags := constraintTags(&InputSchema{Type: "date"}); tags != `layout:"2006-01-02"` {
@@ -158,9 +158,24 @@ func TestFlagDefsLiteral_shortCircuit(t *testing.T) {
 		{Name: "help", Identifiers: []string{"--help"}, ShortCircuit: true, Schema: &InputSchema{Type: "bool"}},
 		{Name: "verbose", Identifiers: []string{"--verbose"}, Schema: &InputSchema{Type: "bool"}},
 	}}
-	lit := flagDefsLiteral(in, nil)
+	lit := flagDefsLiteral(in, nil, false)
 	if n := strings.Count(lit, "ShortCircuit: true"); n != 1 {
 		t.Errorf("literal has %d ShortCircuit: true, want exactly 1 (only --help):\n%s", n, lit)
+	}
+}
+
+// TestFlagDefsLiteral_local pins that only a non-cascading flag of a command with sub-commands
+// is marked Local; a leaf's flags have no sub-commands to keep them from.
+func TestFlagDefsLiteral_local(t *testing.T) {
+	in := &Inputs{Flags: []FlagInput{
+		{Name: "help", Identifiers: []string{"--help"}, Cascading: true, Schema: &InputSchema{Type: "bool"}},
+		{Name: "init", Identifiers: []string{"--init"}, Schema: &InputSchema{Type: "bool"}},
+	}}
+	if lit := flagDefsLiteral(in, nil, true); strings.Count(lit, "Local: true") != 1 || !strings.Contains(lit, `Name: "init", Identifiers: []string{"--init"}, Type: "bool", Local: true`) {
+		t.Errorf("branch literal marks the wrong flags Local:\n%s", lit)
+	}
+	if lit := flagDefsLiteral(in, nil, false); strings.Contains(lit, "Local") {
+		t.Errorf("leaf literal marks a flag Local:\n%s", lit)
 	}
 }
 
@@ -169,7 +184,7 @@ func TestDefsLiteral_deprecatedMessages(t *testing.T) {
 		Flags:     []FlagInput{{Name: "conf", Identifiers: []string{"--conf"}, Deprecated: "use --config"}},
 		Arguments: []ArgumentInput{{Name: "legacy", Deprecated: "no longer read"}},
 	}
-	lit := flagDefsLiteral(in, nil) + argDefsLiteral(in, nil)
+	lit := flagDefsLiteral(in, nil, false) + argDefsLiteral(in, nil)
 	for _, want := range []string{`Deprecated: "use --config"`, `Deprecated: "no longer read"`} {
 		if !strings.Contains(lit, want) {
 			t.Errorf("literal missing %s:\n%s", want, lit)

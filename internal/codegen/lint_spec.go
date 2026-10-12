@@ -47,6 +47,7 @@ var specLints = []func(*Spec) []error{
 	lintGroupConflicts,
 	lintDuplicateFlagIdentifiers,
 	lintShadowedIdentifiers,
+	lintShortCircuitScope,
 	lintSingleDashIdentifiers,
 	lintShortOnlyFlags,
 	lintDigitIdentifiers,
@@ -99,9 +100,11 @@ var specLints = []func(*Spec) []error{
 	lintRepeatable,
 	lintUniqueItems,
 	lintOutputStream,
+	lintOutputKinds,
 	lintDeprecationLifecycle,
 	lintArgumentFallback,
 	lintRelativeTime,
+	lintIntegerBase,
 	lintPatternKinds,
 	lintEnumValueKeys,
 	lintStdinStream,
@@ -452,11 +455,14 @@ func lintSeparator(spec *Spec) []error {
 }
 
 // enumMember reports whether v is one of schema's enum members, the way the runtime matches:
-// exactly, or regardless of case under ignore_case.
+// exactly, regardless of case under ignore_case, or by value under base: prefixed.
 func enumMember(schema *InputSchema, v string) bool {
 	spellings := enumStrings(schema.Enum)
 	for a := range enumAliases(schema.Enum) {
 		spellings = append(spellings, a) // an alias is accepted; lintEnumValueKeys asks for the value
+	}
+	if intBase(schema) == prefixedBase && slices.ContainsFunc(spellings, func(m string) bool { return prefixedText(m) == prefixedText(v) }) {
+		return true
 	}
 	if schema.IgnoreCase {
 		return slices.ContainsFunc(spellings, func(m string) bool { return strings.EqualFold(m, v) })
@@ -1187,8 +1193,8 @@ func lintPatternCompiles(spec *Spec) []error {
 		for _, name := range slices.Sorted(maps.Keys(c.Schemas)) {
 			orphans(path, ptr+"/schemas/"+name, fmt.Sprintf("schema %q", name), c.Schemas[name].BaseSchema)
 		}
-		if c.Output != nil {
-			orphans(path, ptr+"/output", "output", c.Output.BaseSchema)
+		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+			orphans(path, s.ptr, "output", s.schema.BaseSchema)
 		}
 		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
 			if schema != nil {
@@ -1316,8 +1322,8 @@ func lintImportConsistency(spec *Spec) []error {
 				walkSchemaTree(s.BaseSchema, record(site{"command " + path, ptr}))
 			}
 		})
-		if c.Output != nil {
-			walkSchemaTree(c.Output.BaseSchema, record(site{"command " + path, ptr + "/output"}))
+		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+			walkSchemaTree(s.schema.BaseSchema, record(site{"command " + path, s.ptr}))
 		}
 	})
 	for _, name := range slices.Sorted(maps.Keys(spec.Command.Schemas)) {
@@ -1441,8 +1447,8 @@ func lintSchemaRefs(spec *Spec) []error {
 			}
 			walkSchemaTree(s.BaseSchema, checkAt("command "+path, subject, ptr))
 		})
-		if c.Output != nil {
-			walkSchemaTree(c.Output.BaseSchema, checkAt("command "+path, "output", ptr+"/output"))
+		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+			walkSchemaTree(s.schema.BaseSchema, checkAt("command "+path, "output", s.ptr))
 		}
 	})
 	for _, name := range names {
@@ -1719,7 +1725,11 @@ func defaultViolation(schema *InputSchema, label, v string) string {
 			label, v, strings.Join(enumStrings(schema.Enum), ", "))
 	}
 
-	if n, err := strconv.ParseFloat(v, 64); err == nil {
+	num := v
+	if intBase(schema) == prefixedBase {
+		num = prefixedText(v)
+	}
+	if n, err := strconv.ParseFloat(num, 64); err == nil {
 		switch {
 		case bound(schema.Minimum) != nil && n < *bound(schema.Minimum):
 			return fmt.Sprintf("%s %s is below the declared `minimum` %s", label, v, formatBound(*bound(schema.Minimum)))

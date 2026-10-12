@@ -78,6 +78,51 @@ func TestDiff_effectsAndAgentRules(t *testing.T) {
 	})
 }
 
+// Metadata is the author's own: every change to it, on any command or input, is safe.
+func TestDiff_metadataRules(t *testing.T) {
+	sub := func(lines string) string { return "  commands:\n    - name: rm\n" + lines }
+	inputs := func(meta string) string {
+		return "  config_files:\n    - {name: main, path: ~/.app.yaml}\n" +
+			"  flags:\n    - {name: force, identifiers: [--force], schema: {type: bool}" + meta + "}\n" +
+			"  arguments:\n    - {name: target, schema: {type: string}" + meta + "}\n" +
+			"  env:\n    - {name: token, schema: {type: string, variable: APP_TOKEN}" + meta + "}\n" +
+			"  config:\n    - {name: region, schema: {type: string, key: region}" + meta + "}\n" +
+			"  stdin: {format: text" + meta + "}\n"
+	}
+	runDiffCases(t, []diffCase{
+		{
+			name: "root key added", old: "", new: "  metadata: {owner: platform}\n",
+			want: []string{"safe METADATA_ADDED app"},
+		},
+		{
+			name: "command key removed", old: sub("      metadata: {owner: platform, tier: internal}\n"), new: sub("      metadata: {owner: platform}\n"),
+			want: []string{"safe METADATA_REMOVED app rm"},
+		},
+		{
+			name: "command value changed", old: sub("      metadata: {owner: platform}\n"), new: sub("      metadata: {owner: storage}\n"),
+			want: []string{"safe METADATA_CHANGED app rm"},
+		},
+		{
+			name: "every input kind", old: inputs(""), new: inputs(", metadata: {audit: \"true\"}"),
+			want: []string{
+				"safe METADATA_ADDED app --force", "safe METADATA_ADDED app <target>", "safe METADATA_ADDED app $APP_TOKEN",
+				"safe METADATA_ADDED app config region", "safe METADATA_ADDED app stdin",
+			},
+		},
+		{
+			name: "every input kind changed", old: inputs(", metadata: {audit: \"true\"}"), new: inputs(", metadata: {audit: \"false\"}"),
+			want: []string{
+				"safe METADATA_CHANGED app --force", "safe METADATA_CHANGED app <target>", "safe METADATA_CHANGED app $APP_TOKEN",
+				"safe METADATA_CHANGED app config region", "safe METADATA_CHANGED app stdin",
+			},
+		},
+		{
+			name: "beta command", old: sub("      stability: beta\n      metadata: {owner: a}\n"), new: sub("      stability: beta\n"),
+			want: []string{"safe METADATA_REMOVED app rm"},
+		},
+	})
+}
+
 func TestDiff_roleRules(t *testing.T) {
 	format := func(lines string) string {
 		return "  flags:\n    - name: format\n      identifiers: [--format]\n" + lines + "      schema: {type: string, enum: [text, json]}\n"

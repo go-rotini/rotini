@@ -19,12 +19,12 @@ func TestCheckNumberBounds_nonFinite(t *testing.T) {
 	}
 	for _, v := range []string{"nan", "NaN", "inf", "+Inf", "-inf", "infinity"} {
 		for kind, c := range bounds {
-			err := checkConstraints(allFeatures(), "--ratio", "float64", c, []string{v}, false, "")
+			err := checkConstraints(allFeatures(), "--ratio", "float64", "", c, []string{v}, false, "")
 			if err == nil || !strings.Contains(err.Error(), "--ratio must be a finite number (got "+v+")") {
 				t.Errorf("%s with %s: err = %v, want a finite-number error", v, kind, err)
 			}
 		}
-		if err := checkConstraints(allFeatures(), "--ratio", "float64", Constraints{}, []string{v}, false, ""); err != nil {
+		if err := checkConstraints(allFeatures(), "--ratio", "float64", "", Constraints{}, []string{v}, false, ""); err != nil {
 			t.Errorf("%s unbounded: err = %v, want accepted", v, err)
 		}
 	}

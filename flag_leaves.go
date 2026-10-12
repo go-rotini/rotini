@@ -3,6 +3,7 @@ package rotini
 import (
 	"iter"
 	"reflect"
+	"slices"
 	"sync"
 )
 
@@ -24,23 +25,39 @@ func typeLeaves(t reflect.Type) iter.Seq[reflect.StructField] {
 
 // walkLeaves is the loop behind structLeaves.
 func walkLeaves(s reflect.Value, yield func(reflect.StructField, reflect.Value) bool) {
-	t := s.Type()
-	if !embedsStruct(t) {
-		for j := range t.NumField() {
-			if !yield(t.Field(j), s.Field(j)) {
-				return
-			}
+	for _, sf := range leafFields(s.Type()) {
+		f := s.Field(sf.Index[0])
+		if len(sf.Index) > 1 {
+			f = s.FieldByIndex(sf.Index)
 		}
-		return
-	}
-	for _, sf := range reflect.VisibleFields(t) {
-		if sf.Anonymous && sf.Type.Kind() == reflect.Struct {
-			continue
-		}
-		if !yield(sf, s.FieldByIndex(sf.Index)) {
+		if !yield(sf, f) {
 			return
 		}
 	}
+}
+
+// leaves caches leafFields by type.
+var leaves sync.Map // reflect.Type -> []reflect.StructField
+
+// leafFields is the fields walkLeaves yields for t, in order. Callers must not modify them.
+func leafFields(t reflect.Type) []reflect.StructField {
+	if v, ok := leaves.Load(t); ok {
+		if fields, ok := v.([]reflect.StructField); ok {
+			return fields
+		}
+	}
+	var fields []reflect.StructField
+	if !embedsStruct(t) {
+		fields = slices.Collect(t.Fields())
+	} else {
+		for _, sf := range reflect.VisibleFields(t) {
+			if !sf.Anonymous || sf.Type.Kind() != reflect.Struct {
+				fields = append(fields, sf)
+			}
+		}
+	}
+	leaves.Store(t, fields)
+	return fields
 }
 
 // embedding caches embedsStruct by type, since every input walk asks.

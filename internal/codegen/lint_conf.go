@@ -143,7 +143,7 @@ func lintPackageColocation(conf *Conf) []error {
 		if prev, ok := byFile[p.File]; ok && prev != p.Package {
 			problems = append(problems, &problem{
 				kind: "conf", ptr: packagePointer(i), loc: "generate.packages",
-				msg: fmt.Sprintf("file %q is targeted by package %q and %q; targets sharing a file must declare the same package", p.File, prev, p.Package),
+				msg: fmt.Sprintf("file %s is targeted by package %q and %q; targets sharing a file must declare the same package", quotePath(p.File), prev, p.Package),
 			})
 			continue
 		}
@@ -205,7 +205,7 @@ func lintFeatureDirs(conf *Conf) []error {
 				kind: "conf",
 				ptr:  featurePointer(featureIndex(conf, name)),
 				loc:  "generate.features." + name + ".embed_dir",
-				msg:  fmt.Sprintf("%q must resolve under the cmd package %q so //go:embed can reach it", f.EmbedDir, cmdDir),
+				msg:  fmt.Sprintf("%s must resolve under the cmd package %s so //go:embed can reach it", quotePath(f.EmbedDir), quotePath(cmdDir)),
 			})
 		}
 	}
@@ -278,7 +278,7 @@ func lintSchemaFiles(conf *Conf) []error {
 		problems = append(problems, &problem{
 			kind: "conf", ptr: "/generate/schemas/" + label + "/file",
 			loc: "generate.schemas." + label + ".file",
-			msg: fmt.Sprintf("%q %s", sc.File, why),
+			msg: fmt.Sprintf("%s %s", quotePath(sc.File), why),
 		})
 	}
 	check("spec", conf.Generate.Schemas.Spec)

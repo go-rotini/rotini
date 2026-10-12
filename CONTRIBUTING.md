@@ -61,7 +61,7 @@ make test              # every test in the module, with coverage
 make test-conformance  # the in-process input-conformance matrix
 make test-acceptance   # the process tier: real exit codes, pipes, __complete, signals
 make test-e2e          # testscript rigs: spec -> generate -> build -> RUN the binary
-make test-completion-shells  # completion in one pinned Docker image per shell (needs docker)
+make test-completion-shells  # completion in one pinned Docker image per shell, also against the previous release's binary (needs docker and the module proxy)
 make test-bench        # benchmarks
 make test-fuzz         # fuzz targets (60s each; see FUZZ_TARGETS in the Makefile)
 make test-mutation     # mutation tests (long-running, ~18 min)

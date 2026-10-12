@@ -539,7 +539,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 	raw := false
 
 	addFlag := func(idx int, fd FlagDef, value, typed string) error {
-		return store.recordArgvFlag(idx, fd, value, typed, acq)
+		return store.recordScopedFlag(chain, idx, fd, value, typed, acq)
 	}
 	addArg := func(value string) error {
 		return store.recordArg(chain[leaf], leaf, value, acq)
@@ -569,7 +569,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 			// name belongs to one of its ancestors, never to it.
 			extra, err := consumeFlagToken(chain[:depth], tok, argv, i, addFlag)
 			if err != nil {
-				return nil, err
+				return nil, withRunCandidates(err, chain[:depth], leaf)
 			}
 			i += extra
 			noteDetached(store, chain[:depth], tok, argv, i)
@@ -607,6 +607,37 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 
 	store.expandGlobs(chain[leaf].Arguments, leaf, acq.goos)
 	return store, nil
+}
+
+// withRunCandidates narrows an unknown-flag error's candidates to the flags the run accepts,
+// whose invoked command is chain frame leaf.
+func withRunCandidates(err error, reached []Command, leaf int) error {
+	var pe *ParseError
+	if errors.As(err, &pe) && pe.Kind == ParseKindUnknownFlag {
+		pe.Candidates = acceptedFlagIdentifiers(reached, leaf)
+	}
+	return err
+}
+
+// recordScopedFlag is recordArgvFlag for a run of chain, refusing a [FlagDef.Local] flag of
+// any frame but the invoked command's.
+func (p *parsedInputs) recordScopedFlag(chain []Command, idx int, fd FlagDef, value, typed string, acq argvAcq) error {
+	if fd.Local && idx != len(chain)-1 {
+		return localFlagError(chain, idx, typed)
+	}
+	return p.recordArgvFlag(idx, fd, value, typed, acq)
+}
+
+// localFlagError reports a [FlagDef.Local] flag of chain frame idx given while running a
+// command below it.
+func localFlagError(chain []Command, idx int, typed string) error {
+	return &ParseError{
+		Kind:    ParseKindMisplacedFlag,
+		Msg:     fmt.Sprintf("%s belongs to %q, not %q", typed, pathOf(chain[:idx+1]), pathOf(chain)),
+		Command: chain[len(chain)-1].Name,
+		Flag:    typed,
+		Token:   typed,
+	}
 }
 
 // passthroughArg returns the index of args' passthrough argument, which lint keeps last, or
@@ -685,7 +716,7 @@ func shortCircuited(chain []Command, store *parsedInputs) bool {
 // requirement.
 func checkFlagShape(fd FlagDef, label string, vals []string) error {
 	if !isMapType(fd.Type) {
-		return checkValueShape(fd.Type, label, label, vals, fd.Secret)
+		return checkValueShape(fd.Type, fd.Base, label, label, vals, fd.Secret)
 	}
 	for _, v := range vals {
 		if err := checkMapPair(label, v, fd.Secret); err != nil {
@@ -756,14 +787,15 @@ func shapeType(name string) (reflect.Type, bool) {
 }
 
 // checkValueShape reports the first of vals that does not convert to typ (or, for a list, its
-// element type), as binding would. Types [shapeType] does not know are left to binding.
-func checkValueShape(typ, label, flag string, vals []string, secret bool) error {
+// element type), as binding would, an integer under base. Types [shapeType] does not know are
+// left to binding.
+func checkValueShape(typ, base, label, flag string, vals []string, secret bool) error {
 	t, ok := shapeType(strings.TrimPrefix(typ, "[]"))
 	if !ok {
 		return nil
 	}
 	for _, v := range vals {
-		if err := coerce(reflect.New(t).Elem(), []string{v}, noFeatures); err != nil {
+		if err := coerceTime(reflect.New(t).Elem(), []string{v}, timeSpec{base: base}); err != nil {
 			return coerceFailure(label, flag, err, secret)
 		}
 	}
@@ -785,7 +817,7 @@ func checkFlagValues(fd FlagDef, label string, vals []string, dir string, clock 
 		}
 	}
 	fs := clock.features()
-	if err := checkConstraints(fs, label, fd.Type, fd.Constraints, vals, fd.Secret, dir); err != nil {
+	if err := checkConstraints(fs, label, fd.Type, fd.Base, fd.Constraints, vals, fd.Secret, dir); err != nil {
 		return err
 	}
 	if fd.UniqueItems && !isObjectFlag(fd) {
@@ -930,7 +962,7 @@ func validateArgs(leaf Command, si scopeInputs, waived bool, dir string, clock *
 			if len(vals) == 0 {
 				continue
 			}
-			if err := checkValueShape(ad.Type, "<"+ad.Name+">", "", vals, ad.Secret); err != nil {
+			if err := checkValueShape(ad.Type, ad.Base, "<"+ad.Name+">", "", vals, ad.Secret); err != nil {
 				return err
 			}
 			continue
@@ -956,7 +988,7 @@ func checkArgValues(ad ArgDef, vals []string, dir string, clock *runClock) error
 	}
 	label := "<" + ad.Name + ">"
 	fs := clock.features()
-	if err := checkConstraints(fs, label, ad.Type, ad.Constraints, vals, ad.Secret, dir); err != nil {
+	if err := checkConstraints(fs, label, ad.Type, ad.Base, ad.Constraints, vals, ad.Secret, dir); err != nil {
 		return err
 	}
 	if ad.UniqueItems {
@@ -979,9 +1011,10 @@ func hasVariadicArg(args []ArgDef) bool {
 // scalar, possibly many for a repeatable flag or variadic argument). Numeric bounds apply to
 // numeric and measured types, length and pattern to strings and paths, item counts to arrays
 // and maps; per-value checks apply to each element, in that order. A constraint on any other
-// type, which a valid spec cannot produce, is skipped. A secret input's value and length are
-// redacted. A check the run's features do not wire is a [*WiringError].
-func checkConstraints(fs *featureSet, label, typ string, c Constraints, values []string, secret bool, dir string) error {
+// type, which a valid spec cannot produce, is skipped. base is an integer input's base rule,
+// which numeric bounds read values under. A secret input's value and length are redacted. A
+// check the run's features do not wire is a [*WiringError].
+func checkConstraints(fs *featureSet, label, typ, base string, c Constraints, values []string, secret bool, dir string) error {
 	if (isArrayType(typ) || isMapType(typ)) && (c.MinItems > 0 || c.MaxItems != nil) {
 		if fs.bounds == nil {
 			return missingBounds(label)
@@ -999,7 +1032,7 @@ func checkConstraints(fs *featureSet, label, typ string, c Constraints, values [
 			if fs.bounds == nil {
 				return missingBounds(label)
 			}
-			if err := fs.bounds.value(label, elem, c, v, secret); err != nil {
+			if err := fs.bounds.value(label, elem, base, c, v, secret); err != nil {
 				return err
 			}
 		}
@@ -1074,26 +1107,26 @@ func checkExistingPath(label, typ, value, dir string) error {
 		}
 		return &ParseError{
 			Kind: ParseKindInvalidValue,
-			Msg:  fmt.Sprintf("%s: no such %s: %q", label, noun, value),
+			Msg:  fmt.Sprintf("%s: no such %s: %s", label, noun, quotePath(value)),
 			Flag: label,
 		}
 	case err != nil:
 		// A permission or I/O failure is reported in rotini's words, never the raw OS error.
 		return &ParseError{
 			Kind: ParseKindInvalidValue,
-			Msg:  fmt.Sprintf("%s: cannot read %q", label, value),
+			Msg:  fmt.Sprintf("%s: cannot read %s", label, quotePath(value)),
 			Flag: label,
 		}
 	case typ == "existingfile" && info.IsDir():
 		return &ParseError{
 			Kind: ParseKindInvalidValue,
-			Msg:  fmt.Sprintf("%s: %q is a directory, not a file", label, value),
+			Msg:  fmt.Sprintf("%s: %s is a directory, not a file", label, quotePath(value)),
 			Flag: label,
 		}
 	case typ == "existingdir" && !info.IsDir():
 		return &ParseError{
 			Kind: ParseKindInvalidValue,
-			Msg:  fmt.Sprintf("%s: %q is not a directory", label, value),
+			Msg:  fmt.Sprintf("%s: %s is not a directory", label, quotePath(value)),
 			Flag: label,
 		}
 	}
@@ -1547,14 +1580,14 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 func unreadableFile(typed, path string, err error) string {
 	switch {
 	case pathMissing(err):
-		return fmt.Sprintf("no such file: %q", typed)
+		return fmt.Sprintf("no such file: %s", quotePath(typed))
 	case errors.Is(err, fs.ErrPermission):
-		return fmt.Sprintf("permission denied reading %q", typed)
+		return fmt.Sprintf("permission denied reading %s", quotePath(typed))
 	}
 	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
-		return fmt.Sprintf("%q is a directory, not a file", typed)
+		return fmt.Sprintf("%s is a directory, not a file", quotePath(typed))
 	}
-	return fmt.Sprintf("cannot read %q", typed)
+	return fmt.Sprintf("cannot read %s", quotePath(typed))
 }
 
 // isShortCluster reports whether name is a candidate POSIX short-flag cluster: a single-dash
@@ -1724,10 +1757,16 @@ func childCommandNames(cur Command) []string {
 // chainFlagIdentifiers is the non-hidden flag vocabulary of the whole chain, for an
 // unknown-flag [*ParseError]'s Candidates.
 func chainFlagIdentifiers(chain []Command) []string {
+	return acceptedFlagIdentifiers(chain, len(chain)-1)
+}
+
+// acceptedFlagIdentifiers is chainFlagIdentifiers for a run whose invoked command is chain frame
+// leaf, which may lie beyond chain: a [FlagDef.Local] flag of any other frame is left out.
+func acceptedFlagIdentifiers(chain []Command, leaf int) []string {
 	var ids []string
-	for _, v := range slices.Backward(chain) {
+	for i, v := range slices.Backward(chain) {
 		for _, f := range v.Flags {
-			if !f.Hidden {
+			if !f.Hidden && (!f.Local || i == leaf) {
 				ids = append(ids, f.Identifiers...)
 				ids = append(ids, negatedIdentifiers(f)...)
 			}

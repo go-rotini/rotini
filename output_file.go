@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -113,12 +114,12 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	}
 	switch {
 	case exists && info.IsDir():
-		return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %q is a directory", path)})
+		return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %s is a directory", quotePath(path))})
 	case exists && !info.Mode().IsRegular() && info.Mode()&fs.ModeSymlink == 0:
 		// No O_TRUNC: it does nothing to a device or pipe, and Windows refuses it on NUL.
 		f, err := os.OpenFile(target, os.O_WRONLY, 0)
 		if err != nil {
-			return nil, &pathError{msg: fmt.Sprintf("could not open output file %q", path), err: err, detail: true}
+			return nil, &pathError{msg: fmt.Sprintf("could not open output file %s", quotePath(path)), err: err, detail: true}
 		}
 		return rtx.trackOutput(&OutputFile{rtx: rtx, name: path, w: f, file: f, target: target}), nil
 	case exists && !cfg.overwrite:
@@ -135,14 +136,14 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	}
 	f, tmp, err := createTemp(target, perm)
 	if err != nil {
-		return nil, &pathError{msg: fmt.Sprintf("could not create output file %q", path), err: err, detail: true}
+		return nil, &pathError{msg: fmt.Sprintf("could not create output file %s", quotePath(path)), err: err, detail: true}
 	}
 	if keepMode {
 		// The temporary file was created through the umask; give it the replaced file's mode.
 		if err := f.Chmod(perm); err != nil {
 			_ = f.Close()
 			_ = os.Remove(tmp)
-			return nil, &pathError{msg: fmt.Sprintf("could not create output file %q", path), err: err, detail: true}
+			return nil, &pathError{msg: fmt.Sprintf("could not create output file %s", quotePath(path)), err: err, detail: true}
 		}
 	}
 	return rtx.trackOutput(&OutputFile{
@@ -199,13 +200,13 @@ func (f *OutputFile) Close() error {
 	cerr := f.file.Close()
 	if f.tmp == "" {
 		if err := cmp.Or(f.werr, cerr); err != nil {
-			return &pathError{msg: fmt.Sprintf("could not write output file %q", f.name), err: err, detail: true}
+			return &pathError{msg: fmt.Sprintf("could not write output file %s", quotePath(f.name)), err: err, detail: true}
 		}
 		return nil
 	}
 	if err := cmp.Or(f.werr, cerr); err != nil {
 		_ = os.Remove(f.tmp)
-		return &pathError{msg: fmt.Sprintf("could not write output file %q", f.name), err: err, detail: true}
+		return &pathError{msg: fmt.Sprintf("could not write output file %s", quotePath(f.name)), err: err, detail: true}
 	}
 	if !f.overwrite {
 		if _, err := os.Lstat(f.target); err == nil {
@@ -215,7 +216,7 @@ func (f *OutputFile) Close() error {
 	}
 	if err := renameOutput(f.tmp, f.target); err != nil {
 		_ = os.Remove(f.tmp)
-		return &pathError{msg: fmt.Sprintf("could not replace output file %q", f.name), err: err, detail: true}
+		return &pathError{msg: fmt.Sprintf("could not replace output file %s", quotePath(f.name)), err: err, detail: true}
 	}
 	return nil
 }
@@ -239,14 +240,14 @@ func (f *OutputFile) Abort() error {
 		return nil
 	}
 	if err := os.Remove(f.tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return &pathError{msg: fmt.Sprintf("could not remove the temporary file for %q", f.name), err: err, detail: true}
+		return &pathError{msg: fmt.Sprintf("could not remove the temporary file for %s", quotePath(f.name)), err: err, detail: true}
 	}
 	return nil
 }
 
 // existsError is the error for an output file that exists and may not be replaced.
 func existsError(path string) error {
-	return UsageError(&pathError{msg: fmt.Sprintf("output file %q already exists", path), err: fs.ErrExist})
+	return UsageError(&pathError{msg: fmt.Sprintf("output file %s already exists", quotePath(path)), err: fs.ErrExist})
 }
 
 // pathError is a file error in rotini's words that still matches its cause with errors.Is.
@@ -273,6 +274,18 @@ func (e *pathError) Error() string {
 }
 
 func (e *pathError) Unwrap() error { return e.err }
+
+// quotePath quotes a file path for a message as the user typed it: like %q, except that a
+// backslash stays a single backslash, so a Windows path reads as written. A path that needs
+// any other escaping (a quote, a control character, invalid UTF-8) is quoted as %q would.
+func quotePath(p string) string {
+	if strings.Contains(p, `\`) {
+		if s := strings.ReplaceAll(p, `\`, "/"); strconv.Quote(s) == `"`+s+`"` {
+			return `"` + p + `"`
+		}
+	}
+	return strconv.Quote(p)
+}
 
 // trackOutput registers f with the run, which aborts it when the run settles with f still
 // open. It returns f.

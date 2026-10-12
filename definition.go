@@ -61,6 +61,9 @@ type Definition struct {
 	Topics []TopicDef
 	// Effects is what running the root command does (spec effects:); nil when undeclared.
 	Effects *Effects
+	// Metadata is the root command's own labels (spec metadata:), as written; rotini never
+	// reads them. nil when undeclared.
+	Metadata map[string]string
 }
 
 // ExitStatusDef is one exit code a command documents: the spec's `exit_status` entry.
@@ -230,6 +233,9 @@ type CommandDef struct {
 	// Effects is what running the command does (spec effects:); nil when undeclared. Not
 	// inherited by sub-commands.
 	Effects *Effects
+	// Metadata is the command's own labels (spec metadata:), as written; rotini never reads
+	// them. nil when undeclared. Not inherited by sub-commands.
+	Metadata map[string]string
 }
 
 // Constraints carries the validation bounds a spec may declare on a flag or argument. The
@@ -304,6 +310,10 @@ type FlagDef struct {
 	// (2h or -2h ago, yesterday), "future" (2h or +2h from now, tomorrow) or "both" (a sign is
 	// required), plus now and today. Absolute values are tried first. Empty means absolute only.
 	Relative string
+	// Base "prefixed" lets an integer input (or a list of them) also take 0x, 0o and 0b
+	// literals, with an optional sign and `_` between digits (`0xFF`, `-0b1010`, `1_000`). A
+	// value without a prefix is decimal: `010` is ten. Empty means decimal only.
+	Base string
 	// ObjectSchema is the JSON Schema of an object-valued flag's value — set when the spec's
 	// schema is a named object (`$ref: '#/schemas/DB'`), or a list of them. The flag then
 	// takes JSON, key=value pairs, a YAML @file, or one field per flag (--db.host=…); see
@@ -338,6 +348,11 @@ type FlagDef struct {
 	// so [Context.Inputs] succeeds and the handler decides what to do. Errors reading the
 	// command line are still reported.
 	ShortCircuit bool
+	// Local makes the flag usable only when its command is the one run: given with any of the
+	// command's sub-commands, before or after their names, it is a usage error. Generated code
+	// sets it on every flag of a command with sub-commands that the spec doesn't mark
+	// `cascading`. Without it, a flag is also accepted after its sub-commands' names.
+	Local bool
 	// NoRepeat makes a single-value flag given more than once on the command line an error
 	// (spec `repeatable: false`) instead of the last value winning.
 	NoRepeat   bool
@@ -355,6 +370,9 @@ type FlagDef struct {
 	// Effects is what giving the flag adds to its command's effects (spec effects:); nil when
 	// undeclared. A run's effect is the highest of its command's and every given flag's.
 	Effects *Effects
+	// Metadata is the flag's own labels (spec metadata:), as written; rotini never reads them.
+	// nil when undeclared.
+	Metadata map[string]string
 }
 
 // Completion is a declarative hint about what an input's value is, for the shell to complete.
@@ -406,6 +424,8 @@ type ArgDef struct {
 	// [FlagDef.Relative].
 	Layouts  []string
 	Relative string
+	// Base is how an integer argument's value may be written; see [FlagDef.Base].
+	Base string
 	// Deprecated is the argument's deprecation message: supplying it reports a [Deprecation]
 	// carrying it.
 	Deprecated string
@@ -428,5 +448,8 @@ type ArgDef struct {
 	// paths it matches, on Windows only, where the shell passes patterns through. A word
 	// that names an existing path, or matches nothing, is kept as written.
 	Glob bool
+	// Metadata is the argument's own labels (spec metadata:), as written; rotini never reads
+	// them. nil when undeclared.
+	Metadata map[string]string
 	Constraints
 }

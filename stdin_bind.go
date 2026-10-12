@@ -45,7 +45,7 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argV
 	tag := parseStdinTag(raw)
 	fs := rtx.features()
 	if fs.stdin == nil || (slices.Contains(stdinFormats, tag.format) && !fs.hasStdinFormat(tag.format)) {
-		path := pathOf(rtx.CommandChain())
+		path := pathOf(rtx.chainRef())
 		we := missingFeature("stdin:"+tag.format, fmt.Sprintf("Stdin(%q)", tag.format), fmt.Sprintf("command %q reads stdin as %s", path, tag.format))
 		we.Command = path
 		return we
@@ -55,7 +55,7 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argV
 
 // stdinSubject names the running command's stdin in a wiring error.
 func stdinSubject(rtx *Context) string {
-	return fmt.Sprintf("stdin of command %q", pathOf(rtx.CommandChain()))
+	return fmt.Sprintf("stdin of command %q", pathOf(rtx.chainRef()))
 }
 
 // bindStdin reads stdin into the leaf's Stdin field sf per its tag: everything fillStdin does

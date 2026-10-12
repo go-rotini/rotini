@@ -1,0 +1,104 @@
+# R1 — integers from the environment are decimal unless the input declares `base: prefixed`,
+# as on the command line: a leading zero is still decimal, a 0x literal is an invalid value
+# naming the variable, and the declared bounds hold.
+
+gomodinit example.com/perm
+
+exec rotini generate cmd/perm/.rotini.spec.yaml --config cmd/perm/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o perm$exe ./cmd/perm
+
+env PERM_LIMIT=010
+exec ./perm$exe
+stdout 'limit=10$'
+
+env PERM_LIMIT=0x10
+wantexit 1 ./perm$exe
+stderr 'PERM_LIMIT'
+stderr '"0x10" is not a valid'
+
+env PERM_LIMIT=1000
+wantexit 1 ./perm$exe
+stderr 'PERM_LIMIT'
+stderr '100'
+
+-- cmd/perm/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: perm
+  summary: integer bases
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help]
+      short_circuit: true
+      schema: { type: bool }
+    - name: mode
+      summary: the file mode
+      identifiers: [--mode]
+      schema: { type: uint32, base: prefixed, default: '0o644', maximum: 511 }
+    - name: mask
+      summary: a bit mask
+      identifiers: [--mask]
+      schema: { type: uint8, base: prefixed }
+    - name: n
+      summary: a number
+      identifiers: [--n]
+      schema: { type: int, base: prefixed }
+  env:
+    - name: limit
+      summary: a limit
+      schema: { type: int, maximum: 100, variable: PERM_LIMIT }
+-- cmd/perm/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/perm/main.go
+    - type: cmd
+      file: internal/cmd/perm/zz_perm.go
+      package: perm
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/perm/perm.go --
+package perm
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type permHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*permHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[PermInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Perm.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	f := in.Perm.Flags
+	fmt.Fprintf(rtx.Stdout, "mode=%o mask=%#x n=%d limit=%d\n", f.Mode, f.Mask, f.N, in.Perm.Env.Limit)
+}
+-- cmd/perm/main.go --
+package main
+
+import (
+	perm "example.com/perm/internal/cmd/perm"
+)
+
+func main() {
+	perm.NewProgram().
+		Execute()
+}

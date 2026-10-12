@@ -1,0 +1,107 @@
+# A stream whose items come in several kinds lists them under `oneOf`: object kinds told apart
+# by exactly one tag property, a required string holding a `const`, with a value per kind.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    Result:
+      type: object
+      properties:
+        kind: { type: string, const: result }
+        ok: { type: boolean }
+      required: [kind, ok]
+  commands:
+    # Correct: an inline kind and a named one, tagged by `kind`. No problem.
+    - name: watch
+      output_stream: true
+      output:
+        oneOf:
+          - type: object
+            properties:
+              kind: { type: string, const: progress }
+              percent: { type: integer }
+            required: [kind, percent]
+          - $ref: "#/schemas/Result"
+    # Kinds without output_stream.
+    - name: once
+      output:
+        oneOf:
+          - $ref: "#/schemas/Result"
+    # Something beside oneOf.
+    - name: beside
+      output_stream: true
+      output:
+        type: object
+        oneOf:
+          - $ref: "#/schemas/Result"
+    # A kind that is not an object.
+    - name: scalar
+      output_stream: true
+      output:
+        oneOf:
+          - $ref: "#/schemas/Result"
+          - type: string
+    # No property tags any kind.
+    - name: untagged
+      output_stream: true
+      output:
+        oneOf:
+          - type: object
+            properties:
+              percent: { type: integer }
+          - type: object
+            properties:
+              ok: { type: boolean }
+    # One kind lacks the tag the others have.
+    - name: partial
+      output_stream: true
+      output:
+        oneOf:
+          - $ref: "#/schemas/Result"
+          - type: object
+            properties:
+              kind: { type: string }
+              percent: { type: integer }
+            required: [kind]
+    # Two properties could be the tag.
+    - name: twotags
+      output_stream: true
+      output:
+        oneOf:
+          - type: object
+            properties:
+              kind: { type: string, const: a }
+              type: { type: string, const: x }
+            required: [kind, type]
+          - type: object
+            properties:
+              kind: { type: string, const: b }
+              type: { type: string, const: y }
+            required: [kind, type]
+    # Two kinds share a value.
+    - name: same
+      output_stream: true
+      output:
+        oneOf:
+          - $ref: "#/schemas/Result"
+          - type: object
+            properties:
+              kind: { type: string, const: result }
+            required: [kind]
+    # Values that can't name a type, or name the same one.
+    - name: names
+      output_stream: true
+      output:
+        oneOf:
+          - type: object
+            properties:
+              kind: { type: string, const: task.done }
+            required: [kind]
+          - type: object
+            properties:
+              kind: { type: string, const: task-started }
+            required: [kind]
+          - type: object
+            properties:
+              kind: { type: string, const: task_started }
+            required: [kind]

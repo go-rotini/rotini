@@ -318,7 +318,7 @@ func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []e
 		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg})
 	}
 	if clean := path.Clean(filepath.ToSlash(f.File)); f.File != "" && (clean == ".." || strings.HasPrefix(clean, "../")) {
-		add("file", severityError, fmt.Sprintf("%q must resolve under the module root", f.File))
+		add("file", severityError, fmt.Sprintf("%s must resolve under the module root", quotePath(f.File)))
 	}
 	problems = append(problems, embedKnobProblems(i, f, pf)...)
 	switch {

@@ -36,6 +36,31 @@ func (rtx *Context) SetCompletionOptions(opts CompletionOptions) {
 	}
 }
 
+// SetCompletionFallback chooses, from a [FlagValueCompleter] or [ArgValueCompleter], what the
+// shell falls back to for this request, in place of the input's declared `complete:` hint.
+// Kind and Extensions mean what they mean there: "file", optionally narrowed to Extensions,
+// "directory", "none", and the shell's own "executable", "user", "group" and "host". The zero
+// Completion leaves the fallback to the shell's own default. Message is not used; a completer
+// adds messages with [Context.AddCompletionMessage].
+//
+//	if remotes := listRemotes(partial); len(remotes) > 0 {
+//		return remotes
+//	}
+//	rtx.SetCompletionFallback(rotini.Completion{Kind: "file"})
+//	return []string{}
+//
+// It combines with any candidates exactly as the declared hint does. The last call wins. It does
+// nothing outside a completion request.
+func (rtx *Context) SetCompletionFallback(fallback Completion) {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	if rtx.completionOptions != nil {
+		fallback.Extensions = slices.Clone(fallback.Extensions)
+		fallback.Message = ""
+		rtx.completionFallback = &fallback
+	}
+}
+
 // PartialInputs reads what has been typed so far, for a completer: the command line up to the
 // word being completed, over the environment, over the declared defaults, in that precedence.
 // T is the inputs type of the running command, anchored as [Context.Inputs] anchors it; a

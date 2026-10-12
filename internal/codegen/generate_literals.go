@@ -3,6 +3,8 @@ package codegen
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,9 +15,10 @@ import (
 // InputSettings, and their *Def elements. Field derivation lives in generate_inputs.go.
 
 // writeInputDefsLiteral writes the fields an Inputs contributes to a Definition or
-// CommandDef literal, omitting empty ones. renderDefinition and rnodesLiteral share it.
-func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Schema) {
-	if fl := flagDefsLiteral(in, schemas); fl != "" {
+// CommandDef literal, omitting empty ones. renderDefinition and rnodesLiteral share it. branch
+// is whether the command has sub-commands, which its non-cascading flags don't apply to.
+func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Schema, branch bool) {
+	if fl := flagDefsLiteral(in, schemas, branch); fl != "" {
 		fmt.Fprintf(b, "Flags: %s,\n", fl)
 	}
 	if al := argDefsLiteral(in, schemas); al != "" {
@@ -43,12 +46,13 @@ func renderDefinition(gp *program) string {
 	if gp.rootPassthrough {
 		b.WriteString("Passthrough: true,\n")
 	}
-	writeInputDefsLiteral(&b, gp.rootInputs, gp.schemas)
+	writeInputDefsLiteral(&b, gp.rootInputs, gp.schemas, len(gp.tree) > 0)
 	b.WriteString(outputDefLiteral(gp.rootPascal+"Output", gp.rootOutput, gp.schemas, gp.rootStream))
 	b.WriteString(inputsTypeLiteral(gp.rootPascal + "Inputs"))
 	b.WriteString(exitStatusLiteral(gp.rootHelp.ExitStatus))
 	fmt.Fprintf(&b, "Usage: %q,\n", rootUsage(gp))
 	b.WriteString(effectsField(gp.rootHelp.Effects))
+	writeMetadataField(&b, "%s: %s,\n", gp.rootHelp.Metadata)
 	b.WriteString(multicallLiteral(gp))
 	if cl := rnodesLiteral(gp.rootName, gp.rootDisplay, gp.tree, gp.schemas); cl != "" {
 		fmt.Fprintf(&b, "Commands: %s,\n", cl)
@@ -239,7 +243,7 @@ func pluginDefsLiteral(host string, rcs []PluginSpec) string {
 
 // flagDefsLiteral renders the []rotini.FlagDef literal for a command's flags, or "" when
 // there are none.
-func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
+func flagDefsLiteral(in *Inputs, schemas map[string]Schema, branch bool) string {
 	if in == nil {
 		return ""
 	}
@@ -278,9 +282,7 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 				fmt.Fprintf(b, ", Negation: %q", custom)
 			}
 		}
-		if f.ShortCircuit {
-			b.WriteString(", ShortCircuit: true")
-		}
+		writeScopeFields(b, f, branch)
 		if f.Schema != nil && f.Schema.Repeatable != nil && !*f.Schema.Repeatable {
 			b.WriteString(", NoRepeat: true")
 		}
@@ -301,7 +303,32 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 			fmt.Fprintf(b, ", Role: %q", f.Role)
 		}
 		b.WriteString(flagEffectsField(f.Effects))
+		writeMetadataField(b, ", %s: %s", f.Metadata)
 	})
+}
+
+// writeMetadataField writes a Def literal's Metadata field, keys sorted, through format ("%s: %s"
+// with the field name and its Go value), or nothing when m is empty.
+func writeMetadataField(b *strings.Builder, format string, m map[string]string) {
+	if len(m) == 0 {
+		return
+	}
+	pairs := make([]string, 0, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		pairs = append(pairs, strconv.Quote(k)+": "+strconv.Quote(m[k]))
+	}
+	fmt.Fprintf(b, format, "Metadata", "map[string]string{"+strings.Join(pairs, ", ")+"}")
+}
+
+// writeScopeFields writes the fields that say where flag f applies: ShortCircuit, and Local on
+// a non-cascading flag of a command with sub-commands (branch).
+func writeScopeFields(b *strings.Builder, f FlagInput, branch bool) {
+	if f.ShortCircuit {
+		b.WriteString(", ShortCircuit: true")
+	}
+	if branch && !f.Cascading {
+		b.WriteString(", Local: true")
+	}
 }
 
 // layoutsFor is the layouts a time input is parsed under, tried in order: its declared `layout:`,
@@ -462,6 +489,7 @@ func argDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if a.Schema != nil && len(a.Schema.From) > 0 {
 			fmt.Fprintf(b, ", From: %s", goStringSlice(a.Schema.From))
 		}
+		writeMetadataField(b, ", %s: %s", a.Metadata)
 		if a.Schema != nil && a.Schema.Glob {
 			b.WriteString(", Glob: true")
 		}
@@ -534,7 +562,7 @@ func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Sc
 		if n.replacedBy.text != "" {
 			fmt.Fprintf(b, "ReplacedBy: %q,\n", n.replacedBy.text)
 		}
-		writeInputDefsLiteral(b, n.inputs, schemas)
+		writeInputDefsLiteral(b, n.inputs, schemas, len(n.children) > 0)
 		if !n.composed {
 			b.WriteString(outputDefLiteral(n.prefix+"Output", n.output, schemas, n.stream))
 		} else if n.outputType != "" { // declared in the composed cli's package
@@ -548,6 +576,7 @@ func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Sc
 		b.WriteString(exitStatusLiteral(n.help.ExitStatus))
 		fmt.Fprintf(b, "Usage: %q,\n", nodeUsage(invocation, n))
 		b.WriteString(effectsField(n.help.Effects))
+		writeMetadataField(b, "%s: %s,\n", n.help.Metadata)
 		if cl := rnodesLiteral(host, usageInvocation(invocation, n), n.children, schemas); cl != "" {
 			fmt.Fprintf(b, "Commands: %s,\n", cl)
 		}
@@ -606,6 +635,9 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	}
 	if r := relative(schema); r != "" {
 		fmt.Fprintf(b, ", Relative: %q", r)
+	}
+	if base := intBase(schema); base != "" {
+		fmt.Fprintf(b, ", Base: %q", base)
 	}
 	if c := constraintFields(schema); c != "" {
 		b.WriteString(", ")

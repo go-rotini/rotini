@@ -1,0 +1,50 @@
+version: 1.4.3
+command:
+  name: app
+  summary: the shells fixture, for a binary built with rotini v1.4.3
+  flags:
+    - name: config
+      cascading: true
+      summary: config file
+      identifiers: [--config]
+      schema:
+        type: string
+        complete: { kind: file, extensions: [yaml, yml] }
+    - name: dir
+      cascading: true
+      summary: work directory
+      identifiers: [--dir]
+      schema:
+        type: string
+        complete: { kind: directory }
+    - name: token
+      cascading: true
+      summary: API token
+      identifiers: [--token]
+      schema:
+        type: string
+        complete: { kind: none, message: "an API token, from your account page" }
+    - name: format
+      cascading: true
+      summary: output format
+      identifiers: [--format]
+      schema:
+        type: string
+        enum: [json, text, yaml]
+  commands:
+    - name: deploy
+      summary: deploy a service
+      flags:
+        - name: env
+          summary: target environment
+          identifiers: [--env]
+          schema:
+            type: string
+            required: true
+            enum: [dev, prod]
+      arguments:
+        - name: service
+          summary: the service to deploy
+          schema: { type: string }
+    - name: status
+      summary: show status

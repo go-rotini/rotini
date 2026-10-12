@@ -3,7 +3,6 @@ package rotini
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -52,7 +51,7 @@ func TestParse_streamPathKinds(t *testing.T) {
 		{name: "a missing input file", argv: []string{"missing.txt"}, wantErr: `<files>: no such file: "missing.txt"`},
 		{name: "a directory as input", argv: []string{"-i", "sub"}, wantErr: `-i: "sub" is a directory, not a file`},
 		{name: "a directory as output", argv: []string{"-o", "sub"}, wantErr: `-o: "sub" is a directory`},
-		{name: "a missing output directory", argv: []string{"-o", filepath.Join("missing", "out.txt")}, wantErr: `-o: no such directory: ` + strconv.Quote("missing"+string(filepath.Separator))},
+		{name: "a missing output directory", argv: []string{"-o", filepath.Join("missing", "out.txt")}, wantErr: `-o: no such directory: ` + quotePath("missing"+string(filepath.Separator))},
 		{name: "two dashes in a list", argv: []string{"-", "a.txt", "-"}, wantErr: `<files>: "-" (stdin) can be given only once; <files> already reads it`},
 		{name: "a dash flag and a dash argument", argv: []string{"--input", "-", "-"}, wantErr: `<files>: "-" (stdin) can be given only once; --input already reads it`},
 	}

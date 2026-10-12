@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -71,6 +72,9 @@ func valuesFromNode(output *Schema, schemas map[string]Schema, path string) (*Sc
 	segs := strings.Split(path, ".")
 	if segs[0] != "output" {
 		return nil, fmt.Errorf("values_from %q must start with output", path)
+	}
+	if len(output.OneOf) > 0 {
+		return nil, errors.New("output lists several kinds of item under oneOf, so it has no one set of fields to list")
 	}
 	node, err := valuesFromStep(output, schemas, "output")
 	if err != nil {

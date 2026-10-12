@@ -18,7 +18,7 @@ var definition = rotini.Definition{
 	Name:    "demo",
 	Handler: "Demo",
 	Flags: []rotini.FlagDef{
-		{Name: "verbose", Identifiers: []string{"--verbose", "-v"}, Summary: "verbose output", Type: "bool"},
+		{Name: "verbose", Identifiers: []string{"--verbose", "-v"}, Summary: "verbose output", Type: "bool", Local: true},
 	},
 	Inputs: reflect.TypeFor[DemoInputs](),
 	Usage:  "demo [flags] <command>",

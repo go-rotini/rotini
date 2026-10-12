@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -52,7 +51,7 @@ func TestFlagSet_pathsAndOrigins(t *testing.T) {
 	}
 
 	_, err = NewContextFor(fsPathDef, []string{"--file", "~/missing"}).WithDir(work).WithEnviron(env).Inputs[fsPathInputs]()
-	if want := `--file: no such file: ` + strconv.Quote(home+"/missing") + ` (written as "~/missing")`; err == nil || err.Error() != want {
+	if want := `--file: no such file: ` + quotePath(home+"/missing") + ` (written as "~/missing")`; err == nil || err.Error() != want {
 		t.Errorf("missing set file = %v, want %q", err, want)
 	}
 }
@@ -143,7 +142,7 @@ func TestParser_expands(t *testing.T) {
 	}
 	rtx = NewContextFor(exDef, []string{"-f", "~/nope"}).WithDir(work).WithEnviron(env)
 	err := rtx.Parser().Parse(rtx, &in)
-	if want := `-f: no such file: ` + strconv.Quote(home+"/nope") + ` (written as "~/nope")`; err == nil || err.Error() != want {
+	if want := `-f: no such file: ` + quotePath(home+"/nope") + ` (written as "~/nope")`; err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %q", err, want)
 	}
 }

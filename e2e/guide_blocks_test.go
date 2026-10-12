@@ -53,6 +53,7 @@ var guideBlocks = []pinnedBlock{
 	{"cmd/logs/.rotini.spec.yaml (filter)", "r12_recipe_filter.txtar", "spec.yaml.txt"},
 	{"internal/cmd/logs/logs_grep.go (filter)", "r12_recipe_filter.txtar", "grep.go.txt"},
 	{"internal/cmd/todo/todo_deploy.go", "r12_explain_inputs.txtar", "deploy.go.txt"},
+	{"internal/cmd/runr/runr_deploy.go", "r10_output_kinds.txtar", "internal/cmd/runr/runr_deploy.go"},
 }
 
 func TestGuideBlocksMatchScripts(t *testing.T) {

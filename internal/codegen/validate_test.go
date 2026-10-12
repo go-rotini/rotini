@@ -256,6 +256,7 @@ var schemaBlockLocations = map[string]string{
 	"BaseSchema.properties":    "  output: { type: object, properties: { p: { type: string, bogus: 1 } } }\n",
 	"BaseSchema.items":         "  output: { type: array, items: { type: string, bogus: 1 } }\n",
 	"ExitStatusEntry.output":   "  exit_status:\n    - code: 3\n      output: { type: object, bogus: 1 }\n",
+	"Schema.oneOf":             "  output_stream: true\n  output:\n    oneOf:\n      - { type: object, bogus: 1 }\n",
 }
 
 func TestSchemaBlockProblems_reachesEveryBlockLocation(t *testing.T) {
@@ -331,6 +332,28 @@ func TestSchemaBlockProblems_acceptsEveryDefinedKey(t *testing.T) {
 		"  output: { type: object, required: [id], properties: { id: { type: integer, minimum: 1 } } }\n")
 	if len(clean) != 0 {
 		t.Errorf("valid schema blocks reported problems: %v", clean)
+	}
+}
+
+// TestSchemaBlockProblems_oneOfOnlyOnOutput pins that `oneOf` is accepted on a command's own
+// output and refused, positioned, in every other object schema.
+func TestSchemaBlockProblems_oneOfOnlyOnOutput(t *testing.T) {
+	kinds := "oneOf: [{ type: object, properties: { kind: { type: string, const: a } }, required: [kind] }]"
+	if problems := blockProblems(t, "  output_stream: true\n  output: { "+kinds+" }\n"); len(problems) != 0 {
+		t.Errorf("oneOf on output reported problems: %v", problems)
+	}
+	for name, body := range map[string]string{
+		"named schema":   "  schemas:\n    X: { " + kinds + " }\n",
+		"property":       "  output: { type: object, properties: { p: { " + kinds + " } } }\n",
+		"items":          "  output: { type: array, items: { " + kinds + " } }\n",
+		"exit status":    "  exit_status:\n    - code: 3\n      output: { " + kinds + " }\n",
+		"inside a kind":  "  output_stream: true\n  output:\n    oneOf:\n      - { " + kinds + " }\n",
+		"input property": "  stdin:\n    format: json\n    schema: { type: object, properties: { p: { " + kinds + " } } }\n",
+	} {
+		problems := blockProblems(t, body)
+		if len(problems) != 1 || !strings.Contains(problems[0].Error(), "accepted only on a command's `output`") {
+			t.Errorf("%s: problems = %v, want one saying oneOf is accepted only on output", name, problems)
+		}
 	}
 }
 

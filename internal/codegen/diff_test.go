@@ -555,6 +555,14 @@ func TestDiff_valueRules(t *testing.T) {
 			want: []string{"breaking INPUT_RELATIVE_CHANGED app --v"},
 		},
 		{
+			name: "base added", old: cmd("{type: int, maximum: 255}"), new: cmd("{type: int, maximum: 255, base: prefixed}"),
+			want: []string{"safe INPUT_BASE_ADDED app --v"},
+		},
+		{
+			name: "base removed", old: cmd("{type: '[]uint8', base: prefixed}"), new: cmd("{type: '[]uint8'}"),
+			want: []string{"breaking INPUT_BASE_REMOVED app --v"},
+		},
+		{
 			name: "expand added", old: cmd("{type: string}"), new: cmd("{type: string, expand: [home]}"),
 			want: []string{"possibly_breaking INPUT_EXPAND_ADDED app --v"},
 		},
@@ -964,6 +972,28 @@ func TestDiff_stdinOutputExitRules(t *testing.T) {
 			old:  out("        type: object\n        properties: {s: {type: string, enum: [a, b]}}\n"),
 			new:  out("        type: object\n        properties: {s: {type: string, enum: [a, c]}}\n"),
 			want: []string{"possibly_breaking OUTPUT_ENUM_VALUE_ADDED app run output.s value c", "safe OUTPUT_ENUM_VALUE_REMOVED app run output.s value b"},
+		},
+		{
+			name: "output kinds added, removed and changed",
+			old: sub("      output_stream: true\n      output:\n        oneOf:\n" +
+				"          - {type: object, required: [kind], properties: {kind: {type: string, const: progress}, pct: {type: integer}}}\n" +
+				"          - {type: object, required: [kind], properties: {kind: {type: string, const: result}}}\n"),
+			new: sub("      output_stream: true\n      output:\n        oneOf:\n" +
+				"          - {type: object, required: [kind], properties: {kind: {type: string, const: progress}, pct: {type: string}}}\n" +
+				"          - {type: object, required: [kind], properties: {kind: {type: string, const: log}}}\n"),
+			want: []string{
+				"breaking OUTPUT_TYPE_CHANGED app run output[kind=progress].pct",
+				"breaking OUTPUT_KIND_NO_DELETE app run output[kind=result]",
+				"safe OUTPUT_KIND_ADDED app run output[kind=log]",
+			},
+		},
+		{
+			name: "output kind tag renamed",
+			old: sub("      output_stream: true\n      output:\n        oneOf:\n" +
+				"          - {type: object, required: [kind], properties: {kind: {type: string, const: a}}}\n"),
+			new: sub("      output_stream: true\n      output:\n        oneOf:\n" +
+				"          - {type: object, required: [type], properties: {type: {type: string, const: a}}}\n"),
+			want: []string{"breaking OUTPUT_KIND_TAG_CHANGED app run output"},
 		},
 		{
 			name: "shared definition changed once",

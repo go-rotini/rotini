@@ -111,3 +111,13 @@ db	the database
 == sub-command-enum
 dev	
 prod	
+== fallback-extensions
+<_files -g *.(yaml|yml)>
+== fallback-directory
+<_files -/>
+== fallback-with-candidates
+<_files -/>
+db	the database
+== fallback-none
+== fallback-file
+<_files>

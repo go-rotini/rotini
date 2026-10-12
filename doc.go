@@ -29,7 +29,7 @@
 // `rotini generate` compiles the spec into a framework file — the [Definition] literal, typed
 // per-command input structs, embedded help, man and markdown pages, and completion scripts —
 // plus one handler stub per command, created once and then owned by the program. `rotini init`
-// scaffolds a working CLI: a spec declaring -h/--help, -v/--version and the help and version
+// scaffolds a working CLI: a spec declaring -h/--help, --version and the help and version
 // commands, a conf, an entrypoint, and a stub per command wired to the generated help pages
 // and the program's version. All of it may be edited or deleted.
 //
@@ -109,6 +109,8 @@
 //     int32, int64 and rune (also integer); the unsigned integers uint, uint8, uint16, uint32,
 //     uint64 and byte; the floats float32 and float64 (also number); and any, which holds the
 //     raw text. complex64, complex128 and uintptr have no parser and are refused.
+//   - An integer, or a list of them, with `base: prefixed` also takes 0x, 0o and 0b literals
+//     (0xFF, -0b1010, 1_000); a value without a prefix is still decimal, so 010 is ten.
 //   - Value types: duration with Go's units plus d and w (7d, 2w3d); time and datetime
 //     (RFC 3339) and date (2026-09-29), each taking `layout:` for another format, or a list of
 //     formats tried in order, and `relative:` for a time measured from the run's clock (2h ago,
@@ -301,7 +303,8 @@
 //     [Context.AddCompletionMessage], and [Program.WithCompletionMessages] decides when they
 //     show. A completer reads what has been typed so far with [Context.PartialInputs] and the
 //     program's context with [Context.Context], and asks for no trailing space with
-//     [Context.SetCompletionOptions]; [Program.WithCompletionDescriptions] decides whether
+//     [Context.SetCompletionOptions], and chooses the shell's fallback for one request with
+//     [Context.SetCompletionFallback]; [Program.WithCompletionDescriptions] decides whether
 //     candidates carry descriptions.
 //
 // # Batteries

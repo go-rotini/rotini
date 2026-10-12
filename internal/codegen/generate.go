@@ -328,10 +328,10 @@ func (p *program) resolveFeatures() error {
 		if f.cfg.Embed {
 			rel, err := filepath.Rel(p.layout.cmdDir, absEmbedDir)
 			if err != nil {
-				return fmt.Errorf("feature %s embed_dir %q is not under the cmd package: %w", f.desc.name, f.cfg.EmbedDir, err)
+				return fmt.Errorf("feature %s embed_dir %s is not under the cmd package: %w", f.desc.name, quotePath(f.cfg.EmbedDir), err)
 			}
 			if strings.HasPrefix(rel, "..") {
-				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmd package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(p.conf.Generate.cmdTarget().File)))
+				return fmt.Errorf("generate.features.%s.embed_dir %s must resolve under the cmd package %s so //go:embed can reach it", f.desc.name, quotePath(f.cfg.EmbedDir), quotePath(path.Dir(filepath.ToSlash(p.conf.Generate.cmdTarget().File))))
 			}
 			embedRel = filepath.ToSlash(rel)
 		}
@@ -366,11 +366,11 @@ func writeSchemas(pl *planner, conf *Conf, moduleRoot string) error {
 		}
 		rel := filepath.FromSlash(sc.File)
 		if filepath.IsAbs(rel) {
-			return fmt.Errorf("generate.schemas.%s.file %q must be module-root-relative, not absolute", label, sc.File)
+			return fmt.Errorf("generate.schemas.%s.file %s must be module-root-relative, not absolute", label, quotePath(sc.File))
 		}
 		abs := filepath.Join(moduleRoot, rel)
 		if r, err := filepath.Rel(moduleRoot, abs); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("generate.schemas.%s.file %q must resolve under the module root", label, sc.File)
+			return fmt.Errorf("generate.schemas.%s.file %s must resolve under the module root", label, quotePath(sc.File))
 		}
 		return pl.write(abs, content)
 	}

@@ -207,7 +207,7 @@ func (p *program) embedExamples(f *Feature, feature string, examples []exampleTe
 	dir := filepath.Join(p.module.root, filepath.FromSlash(f.EmbedDir))
 	rel, err := filepath.Rel(p.layout.cmdDir, dir)
 	if err != nil || strings.HasPrefix(rel, "..") {
-		return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmd package so //go:embed can reach it", feature, f.EmbedDir)
+		return fmt.Errorf("generate.features.%s.embed_dir %s must resolve under the cmd package so //go:embed can reach it", feature, quotePath(f.EmbedDir))
 	}
 	for i, e := range examples {
 		name := file(e)

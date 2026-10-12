@@ -4,4 +4,5 @@ spec: .rotini.spec.yaml:22:7: command taskr: example "taskr list --status closed
 spec: .rotini.spec.yaml:23:7: command taskr: example "taskr add" does not parse: missing required input: <title>
 spec: .rotini.spec.yaml:24:7: command taskr: example "taskr list --json --status open" does not parse: flags --json and --status are mutually exclusive
 spec: .rotini.spec.yaml:25:7: command taskr: example "echo x | taskr add one two" does not parse: taskr add accepts at most 1 argument (got 2)
+warning: spec: .rotini.spec.yaml:30:7: command taskr: flag "help": is short_circuit but not cascading, so it applies only to "taskr": `taskr list --help` is a usage error; set `cascading: true` so every sub-command answers it
 warning: spec: .rotini.spec.yaml:26:7: command taskr: example "taskr add \"unclosed" has an unclosed quote
