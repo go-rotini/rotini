@@ -522,6 +522,9 @@ func checkTypedStdin(fs *featureSet, ci reflect.Value, schemas map[string]string
 		return internalBind(channelStdin, "", "invalid stdin schema", err)
 	}
 	if err := validator.Validate(doc); err != nil {
+		if errors.Is(err, errSchemaUnfinished) {
+			return usageBind(channelStdin, "", stdinUnfinished, err)
+		}
 		fs.schemas.patternMessages(js, err)
 		return reconBind(channelStdin, err)
 	}

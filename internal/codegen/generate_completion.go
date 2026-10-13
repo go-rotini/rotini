@@ -289,6 +289,13 @@ _PROG_quote_all() {
                 pre=${pre%?}
             done
         done
+        # The pattern matches bytes, while ${#pre} and ${v:p} count characters: a byte that isn't
+        # valid UTF-8 can leave pre ending inside another candidate's character.
+        for v in "${COMPREPLY[@]}"; do
+            while [[ ${v:0:${#pre}} != "$pre" ]]; do
+                pre=${pre%?}
+            done
+        done
     fi
     p=${#pre}
     _PROG_quote "$pre"
@@ -463,11 +470,11 @@ _PROG() {
             directive=${line#:rotini:}
             continue
         fi
-        # _describe reads a backslash in a name as an escape, and a colon as the end of it.
+        # _describe reads a backslash as an escape, and a colon in a name as the end of it.
         if [[ $line == *$'\t'* ]]; then
             name=${line%%$'\t'*}
             desc=${line#*$'\t'}
-            pairs+=("${${name//\\/\\\\}//:/\\:}:${desc//:/\\:}")
+            pairs+=("${${name//\\/\\\\}//:/\\:}:${${desc//\\/\\\\}//:/\\:}")
         else
             pairs+=("${${line//\\/\\\\}//:/\\:}")
         fi
@@ -574,7 +581,9 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
     # Each word as the program receives it, without the quotes it was typed with.
     $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object {
         if ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
-            $_ -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) { $_.Value } else { $_.Extent.Text }
+            $_ -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) { $_.Value }
+        elseif ($_.Extent.Text -ceq "@('--%')") { '--%' }
+        else { $_.Extent.Text }
     })
     $partial = ''
     if ($wordToComplete -ne '' -and $tokens.Count) { $partial = $tokens[-1] }
@@ -584,7 +593,8 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
         $legacy = $PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy'
         $tokens += $(if ($legacy) { '""' } else { '' })
     }
-    $lines = @(PROG __complete @tokens 2>$null)
+    # Passed as an array, not splatted: splatting drops a --% word.
+    $lines = @(PROG __complete $tokens 2>$null)
     # Output: candidates as "name<TAB>description", then ":rotini:message <text>" lines (not
     # shown in PowerShell), then a ":rotini:option <word>..." line, then a ":rotini:<directive>"
     # line (none, file, file <exts>, directory, executable, user, group, host). PowerShell shows
@@ -599,10 +609,14 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
         $tip = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { $text }
         # PowerShell inserts the text as typed, so quote one with spaces, wildcards, shell
         # characters or a leading ~ (a home directory to native commands). PowerShell splits a
-        # bare argument that starts with - at its first ., and reads --% as the end of parsing.
-        # It reads the typographic quotes U+2018 to U+201E as quotes too, and inside single
-        # quotes doubles each form of single quote.
-        $insert = if ($text -match '^~|^-.*\.|^--%$|[\s''"$&|;<>(){}@#,*?\[\]` + "`" + `\u2018-\u201E]') { "'" + ($text -replace '[''\u2018-\u201B]', '$0$0') + "'" } else { $text }
+        # bare argument that starts with a dash (- or U+2013 to U+2015) at a ., and reads one
+        # ending in : as a parameter awaiting its value, so quote a dashed value holding either.
+        # It drops the argument --% however it is quoted, and passes it only from an array. It
+        # reads the typographic quotes U+2018 to U+201E as quotes too, and inside single quotes
+        # doubles each form of single quote.
+        $insert = if ($text -ceq '--%') { "@('--%')" }
+            elseif ($text -match '^~|^[-\u2013-\u2015].*[.:]|[\s''"$&|;<>(){}@#,*?\[\]` + "`" + `\u2018-\u201E]') { "'" + ($text -replace '[''\u2018-\u201B]', '$0$0') + "'" }
+            else { $text }
         [System.Management.Automation.CompletionResult]::new($insert, $text, 'ParameterValue', $tip)
     }
 

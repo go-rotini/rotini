@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -131,6 +132,9 @@ func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, 
 			return internalBind(channelStdin, "", "invalid stdin schema", err)
 		}
 		if err := validator.Validate(m); err != nil {
+			if errors.Is(err, errSchemaUnfinished) {
+				return usageBind(channelStdin, "", stdinUnfinished, err)
+			}
 			fs.schemas.patternMessages(js, err)
 			return reconBind(channelStdin, err)
 		}

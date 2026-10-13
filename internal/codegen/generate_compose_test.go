@@ -469,4 +469,9 @@ func TestLintComposedTree_missingRefWithoutModule(t *testing.T) {
 	if problems := lintComposedTree(spec, filepath.Join(dir, "app", ".rotini.spec.yaml")); len(problems) != 0 {
 		t.Errorf("with the file in place: %v", problems)
 	}
+	// A $ref naming a directory is reported too, as the composer reports it.
+	dirSpec := &Spec{Command: Command{Name: "app", Commands: []Command{{Ref: "../status"}}}}
+	if problems := lintComposedTree(dirSpec, filepath.Join(dir, "app", ".rotini.spec.yaml")); len(problems) != 1 || !strings.Contains(problems[0].Error(), `compose "../status"`) {
+		t.Errorf("a directory: %v, want one problem naming the ref", problems)
+	}
 }

@@ -78,7 +78,7 @@ deploy:
   # how many
   replicas: 3
   timeout: 5s
-tags: [x, y]
+tags: [x, "y"]
 level: info
 verbose: true
 `

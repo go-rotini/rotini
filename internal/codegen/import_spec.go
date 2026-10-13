@@ -364,20 +364,75 @@ func groupDropped(notes []importNote) []importNote {
 }
 
 // hookLocation writes a hook's file for a spec comment without a machine's own directories:
-// relative to the module root, with "../" for a file outside it, such as in a local replace
-// target, or else under "~/" for one in the home directory. A file on another volume keeps only
-// its name.
+// relative to the module root for a file inside it, as module@version/path for one in the
+// module cache, under "~/" for one elsewhere in the home directory, and otherwise relative to
+// the module root, such as for a local replace target. A file on another volume keeps only its
+// name.
 func hookLocation(moduleRoot, file string) string {
 	if !filepath.IsAbs(file) {
 		return file
 	}
-	if rel, err := filepath.Rel(moduleRoot, file); err == nil {
+	rel, relErr := filepath.Rel(moduleRoot, file)
+	if relErr == nil && !relLeaves(rel) {
 		return filepath.ToSlash(rel)
 	}
+	if rel, ok := relUnder(moduleCache(), file); ok {
+		return unescapeModulePath(rel)
+	}
 	if home, err := os.UserHomeDir(); err == nil {
-		if rel, err := filepath.Rel(home, file); err == nil && !strings.HasPrefix(rel, "..") {
-			return "~/" + filepath.ToSlash(rel)
+		if rel, ok := relUnder(home, file); ok {
+			return "~/" + rel
 		}
 	}
+	if relErr == nil {
+		return filepath.ToSlash(rel)
+	}
 	return filepath.Base(file)
+}
+
+// relLeaves reports whether a relative path leaves its base directory.
+func relLeaves(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// relUnder returns file relative to dir, with forward slashes, when file is inside dir.
+func relUnder(dir, file string) (string, bool) {
+	if dir == "" {
+		return "", false
+	}
+	rel, err := filepath.Rel(dir, file)
+	if err != nil || relLeaves(rel) || rel == "." {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
+// moduleCache returns the module cache directory as the go command finds it: $GOMODCACHE, or
+// pkg/mod in the first GOPATH entry, $HOME/go by default.
+func moduleCache() string {
+	if dir := os.Getenv("GOMODCACHE"); dir != "" {
+		return dir
+	}
+	gopath := filepath.SplitList(os.Getenv("GOPATH"))
+	if len(gopath) > 0 && gopath[0] != "" {
+		return filepath.Join(gopath[0], "pkg", "mod")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, "go", "pkg", "mod")
+	}
+	return ""
+}
+
+// unescapeModulePath undoes the module cache's case encoding, where "!a" stands for "A".
+func unescapeModulePath(p string) string {
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		if p[i] == '!' && i+1 < len(p) && p[i+1] >= 'a' && p[i+1] <= 'z' {
+			i++
+			b.WriteByte(p[i] - 'a' + 'A')
+			continue
+		}
+		b.WriteByte(p[i])
+	}
+	return b.String()
 }

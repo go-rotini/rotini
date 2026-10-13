@@ -160,7 +160,7 @@ $'o\342\200\231neil;touch pwned'
 $'\342\200\234q\342\200\235'	
 back\\slash	
 a\\:b	
-C:\\Users\\me	
+C:\\Users\\me	a path: C:\Users\me
 a\!b	
 ends\'	
 \{a\,b\}	
@@ -170,6 +170,8 @@ true
 null	
 -foo.bar	
 --%	
+$'\342\200\223a.b'	
+-a:	
 == quote-shared
 x';'touch\ pwned	
 x\;touch\ pwnedz	

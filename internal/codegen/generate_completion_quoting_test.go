@@ -24,11 +24,13 @@ var hostileCandidates = []string{
 }
 
 // completionQuotingDir returns a directory holding a fake "my-prog" that answers __complete
-// with the lines of $CANDS and records the words it was given in $ARGS_OUT.
+// with the lines of $CANDS and records the words it was given in $ARGS_OUT. Run any other way,
+// it prints an ARG line for each argument it receives.
 func completionQuotingDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	fake := "#!/bin/sh\necho >> calls.txt\nshift\nprintf '%s\\n' \"$@\" > \"$ARGS_OUT\"\ncat \"$CANDS\"\n"
+	fake := "#!/bin/sh\nif [ \"$1\" != __complete ]; then for a; do printf 'ARG %s\\n' \"$a\"; done; exit 0; fi\n" +
+		"echo >> calls.txt\nshift\nprintf '%s\\n' \"$@\" > \"$ARGS_OUT\"\ncat \"$CANDS\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "my-prog"), []byte(fake), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +102,21 @@ var bashQuotingCases = []quotingCase{
 		name: "after :", line: "my-prog host:", words: [][]string{{"my-prog", "host:"}, {"my-prog", "host", ":"}},
 		keep: "my-prog host:", sent: "host:",
 		cands: []string{"host:8080", "host:a b", "host:x;touch pwned", "host:~root"},
+	},
+	{
+		name: "invalid UTF-8", line: "my-prog --v x", words: [][]string{{"my-prog", "--v", "x"}},
+		keep: "my-prog --v ", fixed: []string{"--v"}, sent: "x",
+		cands: []string{"x\xc3", "xé", "x\xc3\xa9\xff"},
+	},
+	{
+		name: "invalid UTF-8 in single quotes", line: "my-prog --v 'x", words: [][]string{{"my-prog", "--v", "'x"}},
+		keep: "my-prog --v '", quote: "'", fixed: []string{"--v"}, sent: "x",
+		cands: []string{"x\xc3", "xé"},
+	},
+	{
+		name: "invalid UTF-8 in double quotes", line: `my-prog --v "x`, words: [][]string{{"my-prog", "--v", `"x`}},
+		keep: `my-prog --v "`, quote: `"`, fixed: []string{"--v"}, sent: "x",
+		cands: []string{"x\xc3", "xé"},
 	},
 	{
 		name: "open single quote", line: "my-prog --v 'i", words: [][]string{{"my-prog", "--v", "'i"}},
@@ -318,8 +335,9 @@ printf '%s\n' "${#COMPREPLY[@]}" "${COMPREPLY[0]}" "${COMPREPLY[n-1]}"
 }
 
 // TestCompletionScript_pwshInsertsLiteralWords completes hostile candidates with the PowerShell
-// script through TabExpansion2, the function PowerShell's TAB calls, and parses each inserted
-// text: it must be one argument holding the candidate, PowerShell's typographic quotes included.
+// script through TabExpansion2, the function PowerShell's TAB calls, then runs each completed
+// line: the program must receive the candidate as one argument, PowerShell's typographic quotes,
+// dashes and --% included.
 func TestCompletionScript_pwshInsertsLiteralWords(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -338,41 +356,53 @@ func TestCompletionScript_pwshInsertsLiteralWords(t *testing.T) {
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Prints each inserted text's parse: VALUE <the argument> for one plain argument, or BAD.
+	// Prints INSERT and the inserted text for each candidate, then runs the completed line, which
+	// prints an ARG line for each argument the program receives.
 	driver := `param($Script, $Line)
 . $Script
-foreach ($m in (TabExpansion2 -inputScript $Line -cursorColumn $Line.Length).CompletionMatches) {
-    $errs = $null
-    $ast = [System.Management.Automation.Language.Parser]::ParseInput("my-prog " + $m.CompletionText, [ref]$null, [ref]$errs)
-    $els = @($ast.EndBlock.Statements | ForEach-Object { $_.PipelineElements } | ForEach-Object { $_.CommandElements })
-    if ($errs.Count -eq 0 -and $ast.EndBlock.Statements.Count -eq 1 -and $els.Count -eq 2 -and
-        ($els[1] -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
-         $els[1] -is [System.Management.Automation.Language.CommandParameterAst])) {
-        "VALUE " + $els[1].Extent.Text.Trim() + [char]9 + $(if ($els[1].Value) { $els[1].Value } else { $els[1].Extent.Text })
-    } else {
-        "BAD " + $m.CompletionText
-    }
+$c = TabExpansion2 -inputScript $Line -cursorColumn $Line.Length
+foreach ($m in $c.CompletionMatches) {
+    "INSERT " + $m.CompletionText
+    $run = $Line.Substring(0, $c.ReplacementIndex) + $m.CompletionText + $Line.Substring($c.ReplacementIndex + $c.ReplacementLength)
+    try { Invoke-Expression $run } catch { "FAILED $_" }
 }
 `
 	driverPath := filepath.Join(dir, "driver.ps1")
 	if err := os.WriteFile(driverPath, []byte(driver), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cands := append(slices.Clone(hostileCandidates), "x’;touch pwned;’", "”;touch pwned;“", "a’b")
+	cands := append(slices.Clone(hostileCandidates), "x’;touch pwned;’", "”;touch pwned;“", "a’b",
+		"–a.b", "—a.b", "―a.b", "-a:", "-a:b", "–a:", "--%x")
 	for _, line := range []string{"my-prog --v ", "my-prog --v '"} {
 		run := runQuotingDriver(t, dir, cands, pwsh, "-NoProfile", "-NonInteractive", "-File", driverPath, scriptPath, line)
-		var got []string
+		var inserted []string
+		var got [][]string
 		for out := range strings.Lines(run.out) {
 			out = strings.TrimRight(out, "\r\n")
-			if bad, ok := strings.CutPrefix(out, "BAD "); ok {
-				t.Errorf("%q: the inserted text %q isn't one plain argument", line, bad)
-			}
-			if _, v, ok := strings.Cut(out, "\t"); ok && strings.HasPrefix(out, "VALUE ") {
-				got = append(got, v)
+			switch {
+			case strings.HasPrefix(out, "INSERT "):
+				inserted = append(inserted, strings.TrimPrefix(out, "INSERT "))
+				got = append(got, nil)
+			case strings.HasPrefix(out, "ARG ") && len(got) > 0:
+				got[len(got)-1] = append(got[len(got)-1], strings.TrimPrefix(out, "ARG "))
+			default:
+				t.Errorf("%q: unexpected output %q", line, out)
 			}
 		}
-		if line == "my-prog --v " && !slices.Equal(got, cands) {
-			t.Errorf("%q: the arguments are\n%q\nwant\n%q", line, got, cands)
+		if len(got) != len(cands) {
+			t.Fatalf("%q: %d candidates completed, want %d\n%s", line, len(got), len(cands), run.out)
+		}
+		for i, c := range cands {
+			if want := []string{"--v", c}; !slices.Equal(got[i], want) {
+				t.Errorf("%q: inserting %q, the program received %q, want %q", line, inserted[i], got[i], want)
+			}
+		}
+	}
+	// A --% earlier on the line reaches __complete as the word itself.
+	for _, line := range []string{"my-prog @('--%') ", "my-prog '--%' "} {
+		run := runQuotingDriver(t, dir, []string{"a"}, pwsh, "-NoProfile", "-NonInteractive", "-File", driverPath, scriptPath, line)
+		if want := []string{"--%", ""}; !slices.Equal(run.sent, want) {
+			t.Errorf("%q: the program got %q to complete, want %q", line, run.sent, want)
 		}
 	}
 }

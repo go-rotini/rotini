@@ -39,6 +39,7 @@ func FuzzEdit(f *testing.F) {
 	f.Add(uint8(4), "[deploy]\n# timeout = 5\n", "deploy.timeout", "", true)
 	f.Add(uint8(0), "deploy: {}\n", "deploy.timeout", "", true)
 	f.Add(uint8(1), "", "deploy.timeout", "", true)
+	f.Add(uint8(0), "{0:\n\n}", "0", "A", false)
 	f.Fuzz(func(t *testing.T, which uint8, src, key, value string, remove bool) {
 		format := formats[int(which)%len(formats)]
 		path := strings.Split(key, ".")

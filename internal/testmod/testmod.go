@@ -8,69 +8,62 @@
 package testmod
 
 import (
-	"fmt"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
-// A Replace is one replace directive: Old, and optionally its version, replaced by New, a
-// module path and version or a local directory.
+// A Replace is one replace directive: the module Old, at OldVersion or at every version when
+// that is empty, replaced by the module New at NewVersion, or by the local directory New when
+// NewVersion is empty.
 type Replace struct {
-	Old, New string
+	Old, OldVersion, New, NewVersion string
 }
 
-// Replaces returns the replace directives of the go.mod in repoRoot, with each local directory
-// made absolute. It returns none when the file can't be read.
+// Replaces returns the replace directives of the go.mod in repoRoot, as the go command reads
+// them, with each local directory made absolute. It returns none when the file can't be read.
 func Replaces(repoRoot string) []Replace {
-	data, err := os.ReadFile(filepath.Join(repoRoot, "go.mod"))
+	if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err != nil {
+		return nil
+	}
+	cmd := exec.Command("go", "mod", "edit", "-json")
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
-	var out []Replace
-	inBlock := false
-	for line := range strings.SplitSeq(string(data), "\n") {
-		if i := strings.Index(line, "//"); i >= 0 {
-			line = line[:i]
-		}
-		line = strings.TrimSpace(line)
-		switch {
-		case inBlock && line == ")":
-			inBlock = false
-			continue
-		case line == "replace (":
-			inBlock = true
-			continue
-		case !inBlock:
-			rest, ok := strings.CutPrefix(line, "replace ")
-			if !ok {
-				continue
-			}
-			line = rest
-		}
-		old, repl, ok := strings.Cut(line, "=>")
-		if !ok {
-			continue
-		}
-		old, repl = strings.Join(strings.Fields(old), " "), strings.TrimSpace(repl)
-		if fields := strings.Fields(repl); len(fields) == 1 && isLocal(fields[0]) {
-			repl = fields[0]
-			if !filepath.IsAbs(repl) {
-				repl = filepath.Join(repoRoot, repl)
-			}
-			repl = filepath.ToSlash(repl)
-		} else {
-			repl = strings.Join(fields, " ")
-		}
-		out = append(out, Replace{Old: old, New: repl})
+	var mod struct {
+		Replace []struct {
+			Old struct {
+				Path    string `json:"Path"`
+				Version string `json:"Version"`
+			} `json:"Old"`
+			New struct {
+				Path    string `json:"Path"`
+				Version string `json:"Version"`
+			} `json:"New"`
+		} `json:"Replace"`
 	}
-	return out
-}
-
-// isLocal reports whether a replacement is a directory rather than a module path.
-func isLocal(p string) bool {
-	return filepath.IsAbs(p) || strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../") ||
-		strings.HasPrefix(p, `.\`) || strings.HasPrefix(p, `..\`) || p == "." || p == ".."
+	if err := json.Unmarshal(out, &mod); err != nil {
+		return nil
+	}
+	var replaces []Replace
+	for _, r := range mod.Replace {
+		dir := r.New.Path
+		if r.New.Version == "" {
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(repoRoot, dir)
+			}
+			dir = filepath.ToSlash(dir)
+		}
+		replaces = append(replaces, Replace{Old: r.Old.Path, OldVersion: r.Old.Version, New: dir, NewVersion: r.New.Version})
+	}
+	return replaces
 }
 
 // Directives returns repoRoot's replace directives as go.mod lines, each ending in a newline,
@@ -78,7 +71,16 @@ func isLocal(p string) bool {
 func Directives(repoRoot string) string {
 	var b strings.Builder
 	for _, r := range Replaces(repoRoot) {
-		fmt.Fprintf(&b, "replace %s => %s\n", r.Old, r.New)
+		fields := []string{"replace", Quote(r.Old)}
+		if r.OldVersion != "" {
+			fields = append(fields, r.OldVersion)
+		}
+		fields = append(fields, "=>", Quote(r.New))
+		if r.NewVersion != "" {
+			fields = append(fields, r.NewVersion)
+		}
+		b.WriteString(strings.Join(fields, " "))
+		b.WriteByte('\n')
 	}
 	return b.String()
 }
@@ -88,7 +90,29 @@ func EditFlags(repoRoot string) []string {
 	replaces := Replaces(repoRoot)
 	flags := make([]string, 0, len(replaces))
 	for _, r := range replaces {
-		flags = append(flags, "-replace="+strings.ReplaceAll(r.Old, " ", "@")+"="+strings.ReplaceAll(r.New, " ", "@"))
+		old, repl := r.Old, r.New
+		if r.OldVersion != "" {
+			old += "@" + r.OldVersion
+		}
+		if r.NewVersion != "" {
+			repl += "@" + r.NewVersion
+		}
+		flags = append(flags, "-replace="+old+"="+repl)
 	}
 	return flags
+}
+
+// Quote returns s as a go.mod token: quoted when it holds a space, a quote or another character
+// go.mod would read as syntax, as it is otherwise.
+func Quote(s string) string {
+	if s == "" || strings.Contains(s, "//") || strings.Contains(s, "/*") {
+		return strconv.Quote(s)
+	}
+	for _, r := range s {
+		switch {
+		case strings.ContainsRune(" \"'`", r), len(s) > 1 && strings.ContainsRune("()[]{},", r), !unicode.IsPrint(r):
+			return strconv.Quote(s)
+		}
+	}
+	return s
 }

@@ -183,7 +183,7 @@ func TestNoHooks_stillRequiresRunAtCompileTime(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("go.mod", "module dhcheck\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+root+"\n"+testmod.Directives(root))
+	write("go.mod", "module dhcheck\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+testmod.Quote(root)+"\n"+testmod.Directives(root))
 	write("main.go", `package main
 
 import "github.com/go-rotini/rotini"

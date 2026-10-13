@@ -304,6 +304,9 @@ func validateObject(doc map[string]any, schema string) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, errSchemaUnfinished) {
+		return errors.New("the value could not be fully checked against its schema")
+	}
 	applyPatternMessages(schema, err)
 	var msgs []string
 	collectValidation(err, &msgs)

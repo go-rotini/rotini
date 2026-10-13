@@ -41,8 +41,21 @@ jobs:
             exit 1
           fi
 
+      # go test can race with its own deadline and fail with a bare "context deadline exceeded"
+      # and no failing input; as in make test-fuzz, that outcome counts as a pass.
       - name: Fuzz for 10 minutes
-        run: go test -run='^$' -fuzz="^${TARGET}\$" -fuzztime=10m "$PACKAGE"
+        run: |
+          set +e
+          go test -run='^$' -fuzz="^${TARGET}\$" -fuzztime=10m "$PACKAGE" 2>&1 | tee fuzz.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            if grep -q '^    context deadline exceeded$' fuzz.log && ! grep -q 'Failing input written' fuzz.log; then
+              echo "fuzz time elapsed; deadline race in go test, no failing input"
+              exit 0
+            fi
+            exit "$status"
+          fi
 
       - name: Keep the failing input
         if: failure()

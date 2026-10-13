@@ -2263,3 +2263,98 @@ func TestConfigMap_takesJSONShape(t *testing.T) {
 		t.Errorf("m = %#v\nwant %#v", in.App.Config.M, want)
 	}
 }
+
+// A configuration file that can't be read is named once, with the cause and none of the
+// reader's own prefixes.
+func TestConfigFileProblem_readFailures(t *testing.T) {
+	dir := t.TempDir()
+	big := filepath.Join(dir, "big.yaml")
+	f, err := os.Create(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(recon.MaxFileSize + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var in struct {
+		App struct {
+			Flags, Arguments struct{}
+			Config           struct {
+				X string `rotini:"x" recon:"x"`
+			}
+		}
+	}
+	err = NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: big}}}).
+		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	if want := fmt.Sprintf("could not open configuration file %s: is larger than the %d MiB limit", big, recon.MaxFileSize>>20); err == nil || err.Error() != want {
+		t.Errorf("too large: %v\nwant %s", err, want)
+	}
+
+	loop := filepath.Join(dir, "loop.yaml")
+	cause := fmt.Errorf("recon: read %q: %w", loop, &os.PathError{Op: "open", Path: loop, Err: errors.New("too many levels of symbolic links")})
+	if got, want := configFileProblem(loop, cause), "could not open configuration file "+loop+": cannot be read: too many levels of symbolic links"; got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+type tomlTimeInputs struct {
+	App struct {
+		Flags struct {
+			F map[string]any    `rotini:"f" recon:"f"`
+			S map[string]string `rotini:"s" recon:"s"`
+			L []string          `rotini:"l" recon:"l"`
+		}
+		Arguments struct{}
+		Config    struct {
+			P  *map[string]any  `rotini:"p" recon:"p"`
+			LM []map[string]any `rotini:"lm" recon:"lm"`
+			M  map[string]any   `rotini:"m" recon:"m"`
+		}
+	}
+}
+
+// A TOML date-time reaches an untyped config field, behind a pointer or in a list of maps too,
+// and a map or list flag's config fallback as RFC 3339 text, as a JSON or YAML file gives it.
+func TestInputs_tomlTimeAsText(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "app.toml")
+	body := "l = [2024-01-02T03:04:05Z]\n[f]\nt = 2024-01-02T03:04:05Z\n[s]\nt = 2024-01-02T03:04:05Z\n" +
+		"[p]\nt = 2024-01-02T03:04:05Z\n[m]\nt = 2024-01-02T03:04:05Z\n[[lm]]\nt = 2024-01-02T03:04:05Z\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "f", Identifiers: []string{"--f"}, Type: "map"},
+		{Name: "s", Identifiers: []string{"--s"}, Type: "map[string]string"},
+		{Name: "l", Identifiers: []string{"--l"}, Type: "[]string"},
+	}}
+	set := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg}}}
+	in, err := NewContextFor(def, nil).WithInputSettings(set).Inputs[tomlTimeInputs]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "2024-01-02T03:04:05Z"
+	c := in.App.Config
+	for name, got := range map[string]any{
+		"map flag": in.App.Flags.F["t"], "map[string]string flag": in.App.Flags.S["t"], "list flag": strings.Join(in.App.Flags.L, ","),
+		"*map[string]any": func() any {
+			if c.P == nil {
+				return nil
+			}
+			return (*c.P)["t"]
+		}(),
+		"[]map[string]any": func() any {
+			if len(c.LM) == 0 {
+				return nil
+			}
+			return c.LM[0]["t"]
+		}(),
+		"map[string]any": c.M["t"],
+	} {
+		if got != want {
+			t.Errorf("%s: %#v, want %q", name, got, want)
+		}
+	}
+}

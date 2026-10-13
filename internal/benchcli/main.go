@@ -60,7 +60,7 @@ func run(root string, runs, warm int) error {
 		return fmt.Errorf("write the fixture: %w", err)
 	}
 	gomod := fmt.Sprintf("module example.com/app\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini v0.0.0 => %s\n%s",
-		filepath.ToSlash(root), testmod.Directives(root))
+		testmod.Quote(filepath.ToSlash(root)), testmod.Directives(root))
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o600); err != nil {
 		return fmt.Errorf("write go.mod: %w", err)
 	}

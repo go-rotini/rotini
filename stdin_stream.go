@@ -280,7 +280,7 @@ func checkJSONLRecord(schema string, v any) error {
 	}
 	result, err := compiled.ValidateValue(doc)
 	if err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: could not check the record against its schema", line), err)
+		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: the record could not be fully checked against its schema", line), err)
 	}
 	if err := documentResult(schema, result); err != nil {
 		if ie, ok := errors.AsType[*InputError](err); ok {

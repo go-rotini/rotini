@@ -58,11 +58,16 @@ func TestRun_hostSignalLetsPluginCleanUp(t *testing.T) {
 	ready, stopping := filepath.Join(dir, "ready"), filepath.Join(dir, "stopping")
 	proceed, marker := filepath.Join(dir, "proceed"), filepath.Join(dir, "cleaned")
 	writeFakeBinary(t, "app-wait", "#!/bin/sh\n"+
-		"trap 'touch "+stopping+"; while [ ! -e "+proceed+" ]; do sleep 0.01; done; touch "+marker+"; exit 0' USR1\n"+
+		"trap 'touch "+stopping+"; i=0; while [ ! -e "+proceed+" ] && [ $i -lt 6000 ]; do sleep 0.01; i=$((i+1)); done; touch "+marker+"; exit 0' USR1\n"+
 		"touch "+ready+"\nsleep 30 >/dev/null 2>&1 &\nwait\n")
+	// However the test ends, the plugin's handler is let go, so the plugin never outlives it.
+	t.Cleanup(func() { _ = os.WriteFile(proceed, nil, 0o600) })
 	def := Definition{Name: "app", Handler: "App", Plugins: []PluginDef{{Name: "wait", Binary: "app-wait"}}}
 
 	p, _, _ := pluginProgram(def, []string{"wait"})
+	// A grace period longer than the test's own waits, so a loaded machine can't end the plugin
+	// before the test lets it go.
+	p.WithTerminationTimeout(time.Minute)
 	done := make(chan int, 1)
 	go func() {
 		code, _ := p.Run(p.args)

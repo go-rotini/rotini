@@ -19,7 +19,7 @@ func TestGenerateCompose_localRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/comp\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n"+testmod.Directives(repoRoot))
+	writeTestFile(t, dir, "go.mod", "module example.com/comp\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+testmod.Quote(filepath.ToSlash(repoRoot))+"\n"+testmod.Directives(repoRoot))
 
 	writeTestFile(t, dir, "cmd/child/.rotini.spec.yaml", `version: 0.0.0
 command:

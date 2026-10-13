@@ -126,13 +126,7 @@ func TestSchemaCheck_timesAreText(t *testing.T) {
 // A schema check that stops before it finishes, such as at jsonschema's evaluation limit, reports
 // the configuration file as not fully checked, never as invalid.
 func TestSchemaCheck_unfinishedIsNotInvalid(t *testing.T) {
-	var b strings.Builder
-	b.WriteString(`{"$ref":"#/$defs/d0","$defs":{`)
-	for i := range 21 {
-		fmt.Fprintf(&b, `"d%d":{"allOf":[{"$ref":"#/$defs/d%d"},{"$ref":"#/$defs/d%d"}]},`, i, i+1, i+1)
-	}
-	b.WriteString(`"d21":{"type":"object"}}}`)
-	schema := b.String()
+	schema := unfinishedSchema()
 	v, err := schemaValidator(schema)
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +150,38 @@ func TestSchemaCheck_unfinishedIsNotInvalid(t *testing.T) {
 		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err == nil || !strings.Contains(err.Error(), "could not be fully checked against its schema") || strings.Contains(err.Error(), "invalid") {
 		t.Errorf("err = %v, want the file reported as not fully checked", err)
+	}
+}
+
+// unfinishedSchema returns a schema whose $ref chains double at each step, which a jsonschema
+// with an evaluation limit stops checking before it finishes.
+func unfinishedSchema() string {
+	var b strings.Builder
+	b.WriteString(`{"$ref":"#/$defs/d0","$defs":{`)
+	for i := range 21 {
+		fmt.Fprintf(&b, `"d%d":{"allOf":[{"$ref":"#/$defs/d%d"},{"$ref":"#/$defs/d%d"}]},`, i, i+1, i+1)
+	}
+	b.WriteString(`"d21":{"type":"object"}}}`)
+	return b.String()
+}
+
+// An object flag and a stdin document whose schema check stops before it finishes are reported
+// as not fully checked, never as a mismatch or a read failure.
+func TestSchemaCheck_unfinishedObjectAndStdin(t *testing.T) {
+	schema := unfinishedSchema()
+	v, err := schemaValidator(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Validate(map[string]any{}); err == nil {
+		t.Skip("this jsonschema finishes the check: it has no evaluation limit")
+	}
+	if err := validateObject(map[string]any{"a": 1}, schema); err == nil || err.Error() != "the value could not be fully checked against its schema" {
+		t.Errorf("object flag: %v", err)
+	}
+	_, err = ssRead[stDocInputs](t, strings.NewReader(`{"name":"a"}`), InputSettings{StdinSchemas: map[string]string{"stDocStdin": schema}})
+	if err == nil || err.Error() != stdinUnfinished {
+		t.Errorf("stdin document: %v", err)
 	}
 }
 

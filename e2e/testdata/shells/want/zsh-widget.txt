@@ -38,6 +38,7 @@ Safe
 dev
 prod
 == quote-all
+C:\Users\me
 a b
 it's $HOME
 say "hi"
@@ -50,7 +51,6 @@ o’neil;touch pwned
 “q”
 back\slash
 a\:b
-C:\Users\me
 a!b
 ends'
 {a,b}
@@ -60,3 +60,5 @@ true
 null
 -foo.bar
 --%
+–a.b
+-a:

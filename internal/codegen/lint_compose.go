@@ -51,8 +51,9 @@ func specHasRefs(spec *Spec) bool {
 	return found
 }
 
-// missingLocalRefs reports each local $ref of spec that names no file, as the composer would.
-// It is the check that runs when the composer can't, for want of the module.
+// missingLocalRefs reports each local $ref of spec that names no file, or one the composer can't
+// read as a spec, as the composer would. It is the check that runs when the composer can't, for
+// want of the module.
 func missingLocalRefs(spec *Spec, specPath string) []error {
 	var problems []error
 	base := filepath.Dir(specPath)
@@ -64,6 +65,10 @@ func missingLocalRefs(spec *Spec, specPath string) []error {
 		if _, err := os.Stat(locator); errors.Is(err, os.ErrNotExist) {
 			problems = append(problems, &problem{kind: "spec", ptr: rootPointer, loc: "command " + spec.Command.Name,
 				msg: fmt.Sprintf("composition: compose %q: %s: %v", ref, locator, os.ErrNotExist)})
+		} else if _, err := readSpec(locator); err != nil {
+			// A directory, or a file that isn't a spec.
+			problems = append(problems, &problem{kind: "spec", ptr: rootPointer, loc: "command " + spec.Command.Name,
+				msg: fmt.Sprintf("composition: compose %q: %v", ref, err)})
 		}
 	}
 	return problems

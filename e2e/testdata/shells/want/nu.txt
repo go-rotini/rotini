@@ -156,7 +156,7 @@ r#'it's $HOME'#
 '“q”'	
 'back\slash'	
 'a\:b'	
-'C:\Users\me'	
+'C:\Users\me'	a path: C:\Users\me
 'a!b'	
 r#'ends''#	
 '{a,b}'	
@@ -166,6 +166,8 @@ true
 'null'	
 -foo.bar	
 '--%'	
+'–a.b'	
+-a:	
 == quote-shared
 'x;touch pwned'	
 'x;touch pwnedz'	

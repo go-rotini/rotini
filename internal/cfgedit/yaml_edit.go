@@ -172,6 +172,12 @@ func (ed *yamlEdit) replace(m *YAMLNode, p *YAMLPair, v any) ([]byte, error) {
 		if str, ok := v.(string); ok && old.Kind == YAMLScalar {
 			text = keepQuoting(old.Style, str, text)
 		}
+		if m.Flow {
+			var err error
+			if text, err = ed.quoteBeforeBlankLine(old, v, text); err != nil {
+				return nil, err
+			}
+		}
 		switch {
 		case old.Empty:
 			return splice(ed.src, old.Start, old.End, " "+text), nil
@@ -377,4 +383,36 @@ func refuseYAMLStream(format Format, src []byte, path []string) error {
 		return refused(path, "the file holds more than one YAML document")
 	}
 	return nil
+}
+
+// blankLineFollows reports whether the white space that starts at offset at holds a blank line.
+func blankLineFollows(src []byte, at int) bool {
+	breaks := 0
+	for ; at < len(src); at++ {
+		switch src[at] {
+		case '\n':
+			breaks++
+			if breaks > 1 {
+				return true
+			}
+		case ' ', '\t', '\r':
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// quoteBeforeBlankLine returns text, v as written in place of old inside {…}, quoted when a
+// blank line follows old: the yaml reader keeps those line breaks at the end of a plain value,
+// so only a quoted one reads back as itself. A value that isn't a string is refused there.
+func (ed *yamlEdit) quoteBeforeBlankLine(old *YAMLNode, v any, text string) (string, error) {
+	if isCollection(v) || strings.HasPrefix(text, `"`) || strings.HasPrefix(text, "'") || !blankLineFollows(ed.src, old.End) {
+		return text, nil
+	}
+	str, ok := v.(string)
+	if !ok {
+		return "", refused(ed.path, "a blank line follows its value inside {…}")
+	}
+	return strconv.Quote(str), nil
 }

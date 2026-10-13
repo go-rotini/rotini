@@ -42,7 +42,7 @@ log:
   file: "/var/log/app.log"
   tags:
     - x
-    - y
+    - "y"
 servers:
   - a
   - b

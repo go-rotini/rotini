@@ -189,17 +189,39 @@ func readsIntegersExactly(format Format) bool {
 	return false
 }
 
-var (
-	jsonExact = sync.OnceValue(func() bool {
+// lazy holds a value computed on first use, as [sync.OnceValue] does. Its function is passed
+// at the call site rather than stored in a package variable, so a program that never asks for
+// the value links neither the function nor what it calls: the probes below would otherwise link
+// every format's reader, and the YAML 1.1 pattern the regexp engine.
+type lazy[T any] struct {
+	once sync.Once
+	get  func() T
+}
+
+func (l *lazy[T]) value(f func() T) T {
+	l.once.Do(func() { l.get = sync.OnceValue(f) })
+	return l.get()
+}
+
+var jsonExactOnce, jsoncExactOnce, yamlExactOnce, tomlReadsNULOnce lazy[bool]
+
+func jsonExact() bool {
+	return jsonExactOnce.value(func() bool {
 		return readsBack(JSON, `{"a": 18446744073709551615, "b": -9223372036854775808, "c": 9007199254740993}`)
 	})
-	jsoncExact = sync.OnceValue(func() bool {
+}
+
+func jsoncExact() bool {
+	return jsoncExactOnce.value(func() bool {
 		return readsBack(JSONC, `{"a": 18446744073709551615, "b": -9223372036854775808, "c": 9007199254740993}`)
 	})
-	yamlExact = sync.OnceValue(func() bool {
+}
+
+func yamlExact() bool {
+	return yamlExactOnce.value(func() bool {
 		return readsBack(YAML, "a: 18446744073709551615\nb: -9223372036854775808\nc: 9007199254740993\n")
 	})
-)
+}
 
 // readsBack reports whether src, a document with the keys a, b and c, decodes to the
 // integers its text holds.
@@ -218,13 +240,15 @@ func readsBack(format Format, src string) bool {
 
 // tomlReadsNUL reports whether the TOML reader rotini uses reads back a key holding U+0000 as
 // one key, apart from the dotted path its pieces would make.
-var tomlReadsNUL = sync.OnceValue(func() bool {
-	m, err := decode(TOML, []byte(`"a\u0000b" = 1`+"\n[a]\nb = 2\n"))
-	if err != nil {
-		return false
-	}
-	nul, _ := number(m["a\x00b"])
-	sub, _ := m["a"].(map[string]any)
-	dotted, _ := number(sub["b"])
-	return nul == "1" && dotted == "2" && len(m) == 2
-})
+func tomlReadsNUL() bool {
+	return tomlReadsNULOnce.value(func() bool {
+		m, err := decode(TOML, []byte(`"a\u0000b" = 1`+"\n[a]\nb = 2\n"))
+		if err != nil {
+			return false
+		}
+		nul, _ := number(m["a\x00b"])
+		sub, _ := m["a"].(map[string]any)
+		dotted, _ := number(sub["b"])
+		return nul == "1" && dotted == "2" && len(m) == 2
+	})
+}

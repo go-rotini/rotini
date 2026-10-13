@@ -35,16 +35,17 @@ stdout 'Usage:'
 
 # The program links only the runtime features its spec uses, and this one uses none: no plugin
 # execution, response files, chdir or multicall routing, configuration files or codecs, schemas,
-# regular expressions, extra value kinds or path expansion. nm needs the unstripped binary; the
-# first check proves it sees rotini's symbols.
-[linux] [pinnedgo] exec go build -o app-full ./cmd/app
-[linux] [pinnedgo] ! nosym app-full github.com/go-rotini/rotini.(*Program).runWith
-[linux] [pinnedgo] nosym app-full github.com/go-rotini/recon.New github.com/go-rotini/recon.NewFileSource github.com/go-rotini/recon.DefaultCodecs github.com/go-rotini/recon.(*Registry).Bind github.com/go-rotini/recon.NewJSONSchemaValidator
-[linux] [pinnedgo] nosym app-full github.com/go-rotini/jsonschema.Compile github.com/go-rotini/jsonschema.(*Schema).Validate github.com/go-rotini/yaml.Unmarshal github.com/go-rotini/yaml.(*Decoder).Decode github.com/go-rotini/toml.Unmarshal github.com/go-rotini/jsonc.Unmarshal github.com/go-rotini/dotenv.Parse
-[linux] [pinnedgo] nosym app-full encoding/json.Unmarshal encoding/json.Marshal encoding/json.Valid encoding/json.(*Decoder).Decode
-[linux] [pinnedgo] nosym app-full regexp.Compile regexp.MustCompile regexp.(*Regexp). regexp/syntax.Parse net/mail.ParseAddress net/mail.(*Address).String os/exec. os/user.Lookup
-[linux] [pinnedgo] nosym app-full github.com/go-rotini/rotini.(*Program).execPlugin github.com/go-rotini/rotini.expandResponseFiles github.com/go-rotini/rotini.multicallArgv github.com/go-rotini/rotini.(*Program).applyChdir
-[linux] [pinnedgo] nosym app-full github.com/go-rotini/rotini.bindObjectFlag github.com/go-rotini/rotini.(*InputReader).reconcileFlags github.com/go-rotini/rotini.expandValues
+# regular expressions, extra value kinds or path expansion. nm needs the unstripped binary,
+# built for linux/amd64 on every host; the first check proves it sees rotini's symbols.
+env GOOS=linux GOARCH=amd64
+exec go build -o app-full ./cmd/app
+! nosym app-full github.com/go-rotini/rotini.(*Program).runWith
+nosym app-full github.com/go-rotini/recon.New github.com/go-rotini/recon.NewFileSource github.com/go-rotini/recon.DefaultCodecs github.com/go-rotini/recon.(*Registry).Bind github.com/go-rotini/recon.NewJSONSchemaValidator
+nosym app-full github.com/go-rotini/jsonschema.Compile github.com/go-rotini/jsonschema.(*Schema).Validate github.com/go-rotini/yaml.Unmarshal github.com/go-rotini/yaml.(*Decoder).Decode github.com/go-rotini/yaml.Parse github.com/go-rotini/toml.Unmarshal github.com/go-rotini/jsonc.Unmarshal github.com/go-rotini/dotenv.Parse
+nosym app-full encoding/json.Unmarshal encoding/json.Marshal encoding/json.Valid encoding/json.(*Decoder).Decode
+nosym app-full regexp.Compile regexp.MustCompile regexp.(*Regexp). regexp/syntax.Parse net/mail.ParseAddress net/mail.(*Address).String os/exec. os/user.Lookup
+nosym app-full github.com/go-rotini/rotini.(*Program).execPlugin github.com/go-rotini/rotini.expandResponseFiles github.com/go-rotini/rotini.multicallArgv github.com/go-rotini/rotini.(*Program).applyChdir
+nosym app-full github.com/go-rotini/rotini.bindObjectFlag github.com/go-rotini/rotini.(*InputReader).reconcileFlags github.com/go-rotini/rotini.expandValues
 
 -- cmd/app/.rotini.conf.yaml --
 version: 0.0.0

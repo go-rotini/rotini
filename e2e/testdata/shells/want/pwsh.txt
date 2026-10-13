@@ -162,7 +162,7 @@ db	the database
 '“q”'	“q”
 back\slash	
 a\:b	
-C:\Users\me	
+C:\Users\me	a path: C:\Users\me
 a!b	
 'ends'''	ends'
 '{a,b}'	{a,b}
@@ -171,25 +171,63 @@ a!b
 true	
 null	
 '-foo.bar'	-foo.bar
-'--%'	--%
+@('--%')	--%
+'–a.b'	–a.b
+'-a:'	-a:
+run 'a b': argv: [quote] [--odd] [a b]
+run 'it''s $HOME': argv: [quote] [--odd] [it's $HOME]
+run 'say "hi"': argv: [quote] [--odd] [say "hi"]
+run '`touch pwned`': argv: [quote] [--odd] [`touch pwned`]
+run '$(touch pwned)': argv: [quote] [--odd] [$(touch pwned)]
+run 'x;touch pwned': argv: [quote] [--odd] [x;touch pwned]
+run 'star*': argv: [quote] [--odd] [star*]
+run '~root': argv: [quote] [--odd] [~root]
+run 'o’’neil;touch pwned': argv: [quote] [--odd] [o’neil;touch pwned]
+run '“q”': argv: [quote] [--odd] [“q”]
+run back\slash: argv: [quote] [--odd] [back\slash]
+run a\:b: argv: [quote] [--odd] [a\:b]
+run C:\Users\me: argv: [quote] [--odd] [C:\Users\me]
+run a!b: argv: [quote] [--odd] [a!b]
+run 'ends''': argv: [quote] [--odd] [ends']
+run '{a,b}': argv: [quote] [--odd] [{a,b}]
+run 'a&b|c<d>e': argv: [quote] [--odd] [a&b|c<d>e]
+run '#hash': argv: [quote] [--odd] [#hash]
+run true: argv: [quote] [--odd] [true]
+run null: argv: [quote] [--odd] [null]
+run '-foo.bar': argv: [quote] [--odd] [-foo.bar]
+run @('--%'): argv: [quote] [--odd] [--%]
+run '–a.b': argv: [quote] [--odd] [–a.b]
+run '-a:': argv: [quote] [--odd] [-a:]
 == quote-shared
 'x;touch pwned'	x;touch pwned
 'x;touch pwnedz'	x;touch pwnedz
 'x y'	x y
 'x,y'	x,y
+run 'x;touch pwned': argv: [quote] [--pair] [x;touch pwned]
+run 'x;touch pwnedz': argv: [quote] [--pair] [x;touch pwnedz]
+run 'x y': argv: [quote] [--pair] [x y]
+run 'x,y': argv: [quote] [--pair] [x,y]
 == quote-typed-quote
 'it''s $HOME'	it's $HOME
+run 'it''s $HOME': argv: [quote] [--odd] [it's $HOME]
 == quote-typed-quote-shared
 'x;touch pwned'	x;touch pwned
 'x;touch pwnedz'	x;touch pwnedz
 'x y'	x y
 'x,y'	x,y
+run 'x;touch pwned': argv: [quote] [--pair] [x;touch pwned]
+run 'x;touch pwnedz': argv: [quote] [--pair] [x;touch pwnedz]
+run 'x y': argv: [quote] [--pair] [x y]
+run 'x,y': argv: [quote] [--pair] [x,y]
 == quote-typed-backslash
 == quote-colon
 host:8080	
 host:9090	
+run host:8080: argv: [quote] [--addr] [host:8080]
+run host:9090: argv: [quote] [--addr] [host:9090]
 == quote-inline
 '--odd=x;touch pwned'	--odd=x;touch pwned
+run '--odd=x;touch pwned': argv: [quote] [--odd=x;touch pwned]
 == plain-value
 ./a.yaml	/w/a.yaml
 ./b.yml	/w/b.yml

@@ -462,7 +462,7 @@ func fallbackTimes(t reflect.Type, def FlagDef, vals []string) []string {
 
 // reconTime binds text to a time as the config library binds an env or config input's value.
 func reconTime(s string) (time.Time, bool) {
-	reg, err := recon.New(recon.WithoutWatch(), recon.WithSources(recon.NewMapSource("time", map[string]any{"t": s})))
+	reg, err := recon.NewWithCodecs(nil, recon.WithoutWatch(), recon.WithSources(recon.NewMapSource("time", map[string]any{"t": s})))
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -490,7 +490,7 @@ func mapLeaves(reg *recon.Registry, key string) (entries []string, source string
 			return nil, "", err
 		}
 		if found {
-			entries = append(entries, rest+"="+v.String())
+			entries = append(entries, rest+"="+valueText(v))
 			source = v.Source()
 		}
 	}
@@ -519,7 +519,7 @@ func fallbackValues(val recon.Value, sep string) ([]string, error) {
 			if it.Kind() == recon.NullKind {
 				return nil, nullItem(i)
 			}
-			out[i] = it.String()
+			out[i] = valueText(it)
 			// A list of objects (a config file's list of mounts) goes through as JSON, one
 			// occurrence per element — the form an object flag decodes.
 			if it.Kind() == recon.MapKind {
@@ -537,8 +537,17 @@ func fallbackValues(val recon.Value, sep string) ([]string, error) {
 		sort.Strings(out)
 		return out, nil
 	}
-	// Value.String, not AsString: AsString returns "" for a numeric or bool value.
-	return splitValue(val.String(), sep)
+	// The value's text, not AsString: AsString returns "" for a numeric or bool value.
+	return splitValue(valueText(val), sep)
+}
+
+// valueText is a reconciled value as a flag reads it: a time, such as a TOML date-time, as RFC
+// 3339 text, the form a JSON or YAML file writes it in, and anything else as its own text.
+func valueText(v recon.Value) string {
+	if t, ok := v.Any().(time.Time); ok {
+		return t.Format(time.RFC3339Nano)
+	}
+	return v.String()
 }
 
 // nullItem is the error for a configuration list whose item i (from 0) is null, which no
@@ -614,7 +623,7 @@ func flattenMap(prefix string, m map[string]recon.Value, out *[]string) {
 			flattenMap(key, sub, out)
 			continue
 		}
-		*out = append(*out, key+"="+v.String())
+		*out = append(*out, key+"="+valueText(v))
 	}
 }
 
@@ -1010,8 +1019,9 @@ func bindConfigWaived(reg *recon.Registry, target any, waived bool) error {
 }
 
 // anyAsJSONShape gives the values a configuration file binds into an untyped field (any, or a
-// map or list of any) the shape a JSON or YAML file gives them, whatever the format: a time,
-// such as a TOML date-time, as RFC 3339 text. v is the bound struct, or a pointer to it.
+// pointer, list or map holding any) the shape a JSON or YAML file gives them, whatever the
+// format: a time, such as a TOML date-time, as RFC 3339 text. v is the bound struct, or a
+// pointer to it.
 func anyAsJSONShape(v reflect.Value) {
 	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
@@ -1026,23 +1036,83 @@ func anyAsJSONShape(v reflect.Value) {
 		if !f.CanSet() || f.IsZero() {
 			continue
 		}
-		switch x := f.Interface().(type) {
-		case map[string]any:
-			if out, changed := jsonShape(x); changed {
-				f.Set(reflect.ValueOf(out))
-			}
-		case []any:
-			if out, changed := jsonShape(x); changed {
-				f.Set(reflect.ValueOf(out))
-			}
-		default:
-			if f.Kind() == reflect.Interface {
-				if out, changed := jsonShape(x); changed {
-					f.Set(reflect.ValueOf(&out).Elem())
+		if out, changed := shapeAny(f); changed {
+			f.Set(out)
+		}
+	}
+}
+
+// holdsAny reports whether a value of type t can hold an untyped value: t is an interface, or a
+// pointer, list or map of one.
+func holdsAny(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Interface:
+		return true
+	case reflect.Pointer, reflect.Slice, reflect.Map:
+		return holdsAny(t.Elem())
+	}
+	return false
+}
+
+// shapeAny is v with the untyped values it holds in JSON's shape (see [jsonShape]). Whatever
+// it changes is copied, never changed in place; changed reports whether v held a time.
+func shapeAny(v reflect.Value) (out reflect.Value, changed bool) {
+	if !holdsAny(v.Type()) {
+		return v, false
+	}
+	switch v.Kind() {
+	case reflect.Interface:
+		if v.IsNil() {
+			return v, false
+		}
+		o, ok := jsonShape(v.Interface())
+		if !ok {
+			return v, false
+		}
+		out = reflect.New(v.Type()).Elem()
+		out.Set(reflect.ValueOf(o))
+		return out, true
+	case reflect.Pointer:
+		if v.IsNil() {
+			return v, false
+		}
+		e, ok := shapeAny(v.Elem())
+		if !ok {
+			return v, false
+		}
+		out = reflect.New(v.Type().Elem())
+		out.Elem().Set(e)
+		return out, true
+	case reflect.Slice:
+		for i := range v.Len() {
+			if e, ok := shapeAny(v.Index(i)); ok {
+				if !changed {
+					out = reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+					reflect.Copy(out, v)
+					changed = true
 				}
+				out.Index(i).Set(e)
+			}
+		}
+	case reflect.Map:
+		iter := v.MapRange()
+		for iter.Next() {
+			if e, ok := shapeAny(iter.Value()); ok {
+				if !changed {
+					out = reflect.MakeMapWithSize(v.Type(), v.Len())
+					for k, e := range v.Seq2() {
+						out.SetMapIndex(k, e)
+					}
+					changed = true
+				}
+				out.SetMapIndex(iter.Key(), e)
 			}
 		}
 	}
+	if !changed {
+		return v, false
+	}
+	return out, true
 }
 
 // jsonShape is v with each time.Time as its RFC 3339 text. A map or list holding one is
@@ -1408,7 +1478,7 @@ func configFileProblem(path string, err error) string {
 		}
 		return fmt.Sprintf("could not parse configuration file %s: %s", loc, decodeMessage(pe))
 	}
-	reason := "cannot be read: " + err.Error()
+	reason := "cannot be read: " + innermostCause(err).Error()
 	info, statErr := os.Stat(path)
 	switch {
 	case statErr == nil && info.IsDir():
@@ -1417,10 +1487,32 @@ func configFileProblem(path string, err error) string {
 		reason = "no such file"
 	case errors.Is(err, fs.ErrPermission):
 		reason = "permission denied"
+	case errors.Is(err, recon.ErrFileTooLarge):
+		reason = fmt.Sprintf("is larger than the %d MiB limit", recon.MaxFileSize>>20)
 	case errors.Is(err, recon.ErrUnsupportedFormat):
 		reason = "unsupported format"
 	}
 	return fmt.Sprintf("could not open configuration file %s: %s", path, reason)
+}
+
+// innermostCause returns the error at the end of err's chain, which names the cause without
+// the paths and prefixes the layers above it add.
+func innermostCause(err error) error {
+	for {
+		next := errors.Unwrap(err)
+		if multi, ok := errors.AsType[interface {
+			error
+			Unwrap() []error
+		}](err); ok && next == nil {
+			if errs := multi.Unwrap(); len(errs) > 0 {
+				next = errs[0]
+			}
+		}
+		if next == nil {
+			return err
+		}
+		err = next
+	}
 }
 
 // absPath makes p absolute against the run's directory, or the process working directory when
@@ -2335,6 +2427,9 @@ func channelDesc(channel string) string {
 // errSchemaUnfinished marks a schema check that stopped before it finished, so the document
 // is reported as not fully checked rather than invalid.
 var errSchemaUnfinished = errors.New("the schema check did not finish")
+
+// stdinUnfinished reports a stdin document whose schema check stopped before it finished.
+const stdinUnfinished = "stdin could not be fully checked against its schema"
 
 // schemaVerdict is what a failed schema check says of a document: "is invalid: <detail>", or
 // "could not be fully checked against its schema" when the check stopped before it finished.

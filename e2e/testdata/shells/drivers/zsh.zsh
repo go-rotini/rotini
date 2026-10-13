@@ -12,7 +12,7 @@ typeset -A compstate
 source $1
 
 _describe() {
-    local keep=0 pair value desc i
+    local keep=0 pair value desc i c part
     [[ $1 == -V ]] && { keep=1; shift; }
     local array=$2
     shift 2
@@ -20,23 +20,23 @@ _describe() {
     [[ "$*" == *"-S "* ]] && print '# nospace'
     [[ "$*" == *"-M "* ]] && print '# ignore-case'
     for pair in "${(@P)array}"; do
-        # name:description. As _describe reads it, a backslash in the name escapes the
-        # character after it, and the first colon not escaped ends the name.
-        value= desc= i=1
+        # name:description. As _describe reads it, a backslash escapes the character after it,
+        # and the first colon not escaped ends the name.
+        value= desc= i=1 part=name
         while (( i <= ${#pair} )); do
-            if [[ ${pair[i]} == '\' ]]; then
-                value+=${pair[i+1]}
-                (( i += 2 ))
+            c=${pair[i]}
+            if [[ $c == '\' ]]; then
+                c=${pair[i+1]}
+                (( i++ ))
+            elif [[ $part == name && $c == ':' ]]; then
+                part=desc
+                (( i++ ))
                 continue
             fi
-            if [[ ${pair[i]} == ':' ]]; then
-                desc=${pair[i+1,-1]}
-                break
-            fi
-            value+=${pair[i]}
+            if [[ $part == name ]]; then value+=$c; else desc+=$c; fi
             (( i++ ))
         done
-        print -r -- "$value"$'\t'"${desc//\\:/:}"
+        print -r -- "$value"$'\t'"$desc"
     done
 }
 _message() { print -r -- "! ${@[-1]}"; }

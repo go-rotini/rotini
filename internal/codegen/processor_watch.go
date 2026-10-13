@@ -7,17 +7,18 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/go-rotini/fs"
 )
 
 // runOrWatch runs pass once, or with watch re-runs it whenever a file it reads changes until
-// interrupted, sending each result to onResult. confPath must already be resolved. Without
-// watch, a failed pass's error is returned instead of reported.
+// interrupted or terminated, sending each result to onResult. confPath must already be
+// resolved. Without watch, a failed pass's error is returned instead of reported.
 func runOrWatch(specPath, confPath string, watch bool, pass func() (string, error), onResult func(result string, err error)) error {
 	if watch {
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		return watchLoop(ctx, specPath, confPath, pass, onResult)
 	}

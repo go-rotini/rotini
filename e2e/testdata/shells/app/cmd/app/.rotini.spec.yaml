@@ -113,7 +113,7 @@ command:
               - "“q”"
               - 'back\slash'
               - 'a\:b'
-              - 'C:\Users\me'
+              - { value: 'C:\Users\me', summary: 'a path: C:\Users\me' }
               - "a!b"
               - "ends'"
               - "{a,b}"
@@ -123,6 +123,8 @@ command:
               - "null"
               - "-foo.bar"
               - "--%"
+              - "–a.b"
+              - "-a:"
         - name: pair
           summary: values sharing a prefix up to a shell character
           identifiers: [--pair]

@@ -161,7 +161,7 @@ o’neil\;touch\ pwned
 “q”	
 back\\slash	
 a\\:b	
-C:\\Users\\me	
+C:\\Users\\me	a path: C:\Users\me
 a\!b	
 ends\'	
 \{a\,b\}	
@@ -171,6 +171,8 @@ true
 null	
 -foo.bar	
 --%	
+–a.b	
+-a:	
 == quote-shared
 x';'touch\ pwned	
 x\;touch\ pwnedz	

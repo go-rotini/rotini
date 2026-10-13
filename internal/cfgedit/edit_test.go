@@ -352,6 +352,27 @@ func TestSetYAMLUnicodeLineBreaks(t *testing.T) {
 	}
 }
 
+// A string set inside {…} where a blank line follows the value is quoted, since the yaml reader
+// keeps those line breaks at the end of a plain value; any other value is refused there.
+func TestSetYAMLFlowValueBeforeBlankLine(t *testing.T) {
+	for _, c := range []struct{ src, key, want string }{
+		{"{0:\n\n}", "0", "{0: \"A\"\n\n}"},
+		{"{a: \n\n}", "a", "{a: \"A\" \n\n}"},
+		{"{a:\n\n, b: 1}", "a", "{a: \"A\"\n\n, b: 1}"},
+		{"{a: [x]\n \n}", "a", "{a: \"A\"\n \n}"},
+		{"{a: 'x'\n\n}", "a", "{a: 'A'\n\n}"},
+		{"{a:\n}", "a", "{a: A\n}"},
+	} {
+		out, err := Set([]byte(c.src), YAML, []string{c.key}, "A")
+		if err != nil || string(out) != c.want {
+			t.Errorf("Set(%q) = %q, %v; want %q", c.src, out, err, c.want)
+		}
+	}
+	if _, err := Set([]byte("{a:\n\n}"), YAML, []string{"a"}, int64(5)); !errors.Is(err, ErrRefused) {
+		t.Errorf("setting a number before a blank line: %v, want ErrRefused", err)
+	}
+}
+
 // A TOML key holding U+0000 is written when the TOML reader reads it back, and refused as a
 // value error otherwise; it never fails verification.
 func TestSetTOMLKeyWithNUL(t *testing.T) {
@@ -368,5 +389,24 @@ func TestSetTOMLKeyWithNUL(t *testing.T) {
 	got, err := decode(TOML, out)
 	if v, ok := lookup(got, []string{"deploy\x00timeout"}); err != nil || !ok || v != "0" {
 		t.Errorf("wrote %q, which reads back as %v (%v)", out, got, err)
+	}
+}
+
+// A string a YAML 1.1 reader would read as a boolean, null, number or timestamp is written
+// quoted, whatever this package's yaml reader makes of it.
+func TestSetYAMLQuotesYAML11Scalars(t *testing.T) {
+	for _, v := range []string{"1_000", "0b101", "0x1F", "017", "1:30", "190:20:30.15", "2026-01-02",
+		"2001-12-14t21:59:43.10-05:00", "2001-12-14 21:59:43.10 -5", "yes", "No", "on", "OFF", "y", "~", ".inf", ".NaN"} {
+		for src, want := range map[string]string{"z: 1\n": "z: 1\nk: %s\n", "{k: x}\n": "{k: %s}\n"} {
+			out, err := Set([]byte(src), YAML, []string{"k"}, v)
+			if err != nil || string(out) != strings.Replace(want, "%s", strconv.Quote(v), 1) {
+				t.Errorf("Set(%q, %q) = %q, %v; want it quoted", src, v, out, err)
+			}
+		}
+	}
+	for _, v := range []string{"abc", "1_0x", "12:60", "empty"} {
+		if out, err := Set([]byte("z: 1\n"), YAML, []string{"k"}, v); err != nil || string(out) != "z: 1\nk: "+v+"\n" {
+			t.Errorf("Set(%q) = %q, %v; want it plain", v, out, err)
+		}
 	}
 }

@@ -371,7 +371,7 @@ require github.com/go-rotini/rotini %s
 tool github.com/go-rotini/rotini/cmd/rotini
 
 replace github.com/go-rotini/rotini %s => %s
-%s`, module, version, version, strings.ReplaceAll(root, `\`, `/`), testmod.Directives(root))
+%s`, module, version, version, testmod.Quote(strings.ReplaceAll(root, `\`, `/`)), testmod.Directives(root))
 }
 
 // goEnv returns one `go env` value, preferring an already-set environment variable. Results are

@@ -123,7 +123,7 @@ func buildShellsFixture(t *testing.T, src, fixture, name, dir string, goenv, lin
 		t.Fatal(err)
 	}
 	gomod := "module example.com/shells\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\n" +
-		"replace github.com/go-rotini/rotini => " + repoRoot(t) + "\n" + testmod.Directives(repoRoot(t))
+		"replace github.com/go-rotini/rotini => " + testmod.Quote(repoRoot(t)) + "\n" + testmod.Directives(repoRoot(t))
 	if err := os.WriteFile(filepath.Join(app, "go.mod"), []byte(gomod), 0o600); err != nil {
 		t.Fatal(err)
 	}

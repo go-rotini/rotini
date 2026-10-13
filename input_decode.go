@@ -118,7 +118,7 @@ func validateDocumentJSON(schema string, raw []byte) error {
 	}
 	result, err := compiled.Validate(raw)
 	if err != nil {
-		return usageBind(channelStdin, "", "could not check stdin against its schema", err)
+		return usageBind(channelStdin, "", stdinUnfinished, err)
 	}
 	return documentResult(schema, result)
 }

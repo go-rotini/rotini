@@ -136,7 +136,7 @@ func TestValueTypes_generateCompilingCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/vt\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n"+testmod.Directives(repoRoot))
+	writeTestFile(t, dir, "go.mod", "module example.com/vt\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+testmod.Quote(filepath.ToSlash(repoRoot))+"\n"+testmod.Directives(repoRoot))
 	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", "version: 0.0.0\n")
 	t.Chdir(dir)
@@ -288,7 +288,7 @@ command:
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/app\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n"+testmod.Directives(repoRoot))
+	writeTestFile(t, dir, "go.mod", "module example.com/app\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+testmod.Quote(filepath.ToSlash(repoRoot))+"\n"+testmod.Directives(repoRoot))
 	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", "version: 0.0.0\n")
 	t.Chdir(dir)

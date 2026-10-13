@@ -74,7 +74,7 @@ func modelsModule(t *testing.T, conf, handlerImport, qualifier string) string {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/cyc\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n"+testmod.Directives(repoRoot))
+	writeTestFile(t, dir, "go.mod", "module example.com/cyc\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+testmod.Quote(filepath.ToSlash(repoRoot))+"\n"+testmod.Directives(repoRoot))
 	writeTestFile(t, dir, ".rotini.spec.yaml", modelsSpec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", conf)
 	writeTestFile(t, dir, "handlers/deploy.go", modelsHandler(handlerImport, qualifier))
