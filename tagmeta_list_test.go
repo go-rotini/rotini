@@ -270,7 +270,8 @@ func TestChannelEnum_listAndJSONTags(t *testing.T) {
 	}
 }
 
-// legacyInferScalar is inferScalar as written with encoding/json.
+// legacyInferScalar is inferScalar as written with encoding/json: an integer literal that
+// fits is an int64, any other number a float64.
 func legacyInferScalar(text string) any {
 	switch text {
 	case "true":
@@ -284,10 +285,14 @@ func legacyInferScalar(text string) any {
 		return text
 	}
 	var n float64
-	if err := json.Unmarshal([]byte(text), &n); err == nil {
-		return n
+	if err := json.Unmarshal([]byte(text), &n); err != nil {
+		return text
 	}
-	return text
+	var i int64
+	if !strings.ContainsAny(text, ".eE") && json.Unmarshal([]byte(text), &i) == nil {
+		return i
+	}
+	return n
 }
 
 var scalarSeeds = []string{

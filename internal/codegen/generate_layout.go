@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"go/token"
 	"path"
 	"path/filepath"
 	"strings"
@@ -55,14 +56,18 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 }
 
 // goPkgName derives a Go package name from a directory path: its last segment with every
-// non-identifier rune dropped, so "agentic-cooking" becomes "agenticcooking". The import path
-// keeps the original segment.
+// non-identifier rune dropped, so "agentic-cooking" becomes "agenticcooking", and a Go keyword
+// or "main" (a program, which can't be imported) suffixed with "cli", so "go" becomes "gocli".
+// The import path keeps the original segment.
 func goPkgName(dir string) string {
 	var b strings.Builder
 	for _, r := range filepath.Base(dir) {
 		if r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
 			b.WriteRune(r)
 		}
+	}
+	if token.IsKeyword(b.String()) || b.String() == "main" {
+		return b.String() + "cli"
 	}
 	return b.String()
 }

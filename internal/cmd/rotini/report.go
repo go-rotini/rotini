@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/internal/codegen"
@@ -55,6 +56,10 @@ func commandNames() []string {
 // no conf is found it prints "conf: none (defaults)". A resolution failure halts with a usage
 // error.
 func resolveInputs(rtx *rotini.Context, specPath, confPath string) (spec, conf string, ok bool) {
+	if err := notDirectories(specPath, confPath); err != nil {
+		rtx.HaltWith(rotini.UsageError(err))
+		return "", "", false
+	}
 	spec, conf, err := codegen.ResolvePaths(specPath, confPath)
 	if err != nil {
 		rtx.HaltWith(rotini.UsageError(err))
@@ -71,6 +76,17 @@ func resolveInputs(rtx *rotini.Context, specPath, confPath string) (spec, conf s
 	return spec, conf, true
 }
 
+// notDirectories returns an error naming the first of paths that is a directory, where a file
+// is wanted.
+func notDirectories(paths ...string) error {
+	for _, p := range paths {
+		if info, err := os.Stat(p); p != "" && err == nil && info.IsDir() {
+			return fmt.Errorf("%s is a directory; name the file in it", p)
+		}
+	}
+	return nil
+}
+
 // haltWithWriteError halts on a failed write to stdout, so a full disk or a closed pipe fails
 // the run instead of leaving a short file behind and exiting 0.
 func haltWithWriteError(rtx *rotini.Context, err error) {
@@ -81,8 +97,9 @@ func haltWithWriteError(rtx *rotini.Context, err error) {
 func writeError(err error) error { return fmt.Errorf("write output: %w", err) }
 
 // printResult returns a pass's result callback: it prints the result line to stdout on success
-// and each problem to stderr on failure. In watch mode it is the only report a pass gets. A
-// failed write to stdout is recorded, so the run exits non-zero.
+// and each problem to stderr on failure. In watch mode it is the only report a pass gets, so a
+// buffered stdout is flushed after each line rather than at exit. A failed write to stdout is
+// recorded, so the run exits non-zero.
 func printResult(rtx *rotini.Context) func(string, error) {
 	return func(result string, err error) {
 		if err != nil {
@@ -93,6 +110,12 @@ func printResult(rtx *rotini.Context) func(string, error) {
 		}
 		if _, err := fmt.Fprintln(rtx.Stdout, result); err != nil {
 			rtx.RecordError(writeError(err))
+			return
+		}
+		if f, ok := rtx.Stdout.(interface{ Flush() error }); ok {
+			if err := f.Flush(); err != nil {
+				rtx.RecordError(writeError(err))
+			}
 		}
 	}
 }

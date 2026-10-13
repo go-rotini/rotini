@@ -23,7 +23,7 @@ func verify(format Format, after []byte, want map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: the edited file doesn't decode: %w", ErrVerify, err)
 	}
-	if format == JSON && !json.Valid(after[bomLen(after):]) {
+	if body := after[bomLen(after):]; format == JSON && len(bytes.TrimSpace(body)) > 0 && !json.Valid(body) {
 		return nil, fmt.Errorf("%w: the edited file isn't valid JSON", ErrVerify)
 	}
 	if !equalValue(want, got) {
@@ -99,7 +99,7 @@ func setPath(m map[string]any, path []string, v any) {
 }
 
 // unsetPath deletes path from m, then deletes each mapping on the path the deletion leaves
-// empty, deepest first, except the first keep.
+// empty, deepest first, except the first keep. An absent key changes nothing.
 func unsetPath(m map[string]any, path []string, keep int) {
 	chain := []map[string]any{m}
 	for _, seg := range path[:len(path)-1] {
@@ -108,6 +108,9 @@ func unsetPath(m map[string]any, path []string, keep int) {
 			return
 		}
 		chain = append(chain, next)
+	}
+	if _, ok := chain[len(chain)-1][path[len(path)-1]]; !ok {
+		return // an absent key leaves the document as it is
 	}
 	delete(chain[len(chain)-1], path[len(path)-1])
 	for i := len(chain) - 1; i > 0 && i > keep && len(chain[i]) == 0; i-- {

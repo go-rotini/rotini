@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-rotini/recon"
 )
@@ -43,7 +44,7 @@ func parseArgvStore(p *Parser, rtx *Context, out any) (*parsedInputs, []Command,
 // one entry point every reader of argv values and defaults goes through. Nothing is expanded
 // when no flag or argument v describes declares `expand`.
 func expandInputs(fs *featureSet, v reflect.Value, chain []Command, store *parsedInputs, anchor int, view *osView) error {
-	if !hasExpansionIn(v, "Flags", "Arguments") {
+	if !hasArgvExpansion(v) {
 		return nil
 	}
 	if fs.expand == nil {
@@ -328,7 +329,7 @@ func layerView(rtx *Context, chain []Command, v reflect.Value, store *parsedInpu
 	if b == nil || !hasExpansion(v) {
 		return view
 	}
-	overrides := map[string]string{}
+	overrides := map[string]pathOverride{}
 	if store != nil {
 		overrides = b.pathOverrides(chain, store, view)
 	}
@@ -339,7 +340,11 @@ func layerView(rtx *Context, chain []Command, v reflect.Value, store *parsedInpu
 }
 
 // hasExpansion reports whether any input v describes declares `expand`.
-func hasExpansion(v reflect.Value) bool {
+func hasExpansion(v reflect.Value) bool { return typeFact(&expansionFacts, v, expansionOf) }
+
+var expansionFacts sync.Map // reflect.Type → bool
+
+func expansionOf(v reflect.Value) bool {
 	if v.Kind() != reflect.Struct {
 		return false
 	}
@@ -362,6 +367,13 @@ func hasExpansion(v reflect.Value) bool {
 	return false
 }
 
+// hasArgvExpansion reports whether a flag or argument of v declares `expand`.
+func hasArgvExpansion(v reflect.Value) bool {
+	return typeFact(&argvExpansionFacts, v, func(v reflect.Value) bool { return hasExpansionIn(v, "Flags", "Arguments") })
+}
+
+var argvExpansionFacts sync.Map // reflect.Type → bool
+
 // hasExpansionIn reports whether an input in the named sub-structs of v's command frames (a
 // flag set's flags included) declares `expand`.
 func hasExpansionIn(v reflect.Value, structs ...string) bool {
@@ -370,7 +382,11 @@ func hasExpansionIn(v reflect.Value, structs ...string) bool {
 }
 
 // hasPathRules reports whether any input v describes declares `expand` or `relative_to`.
-func hasPathRules(v reflect.Value) bool {
+func hasPathRules(v reflect.Value) bool { return typeFact(&pathRuleFacts, v, pathRulesOf) }
+
+var pathRuleFacts sync.Map // reflect.Type → bool
+
+func pathRulesOf(v reflect.Value) bool {
 	_, ok := firstTagged(v, []string{"Flags", "Arguments", "Env", "Config"}, func(t reflect.StructTag) bool { return tagExpandRule(t).declared() })
 	return ok
 }

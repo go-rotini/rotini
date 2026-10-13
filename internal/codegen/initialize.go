@@ -79,6 +79,9 @@ func (p *Processor) initialize(name string, opt InitOptions, pl *planner) ([]See
 	if !cliNameRe.MatchString(name) {
 		return nil, fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
 	}
+	if windowsDeviceElement(name) != "" {
+		return nil, fmt.Errorf("invalid CLI name %q: it is a Windows device name, which the go tool refuses as a directory in an import path on every system", name)
+	}
 
 	moduleRoot, modulePath, err := findModule()
 	if err != nil {

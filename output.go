@@ -660,7 +660,7 @@ func decodeOutputDocument(data []byte, format string) (any, error) {
 	var err error
 	switch format {
 	case "json":
-		err = json.Unmarshal(data, &doc)
+		doc, err = unmarshalExact(data)
 	case "yaml":
 		err = yaml.Unmarshal(data, &doc)
 	default:
@@ -680,6 +680,7 @@ func decodeStream(data []byte, format string) ([]any, error) {
 	switch format {
 	case "json":
 		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.UseNumber()
 		for {
 			var doc any
 			if err := dec.Decode(&doc); err != nil {
@@ -712,15 +713,26 @@ func decodeStream(data []byte, format string) ([]any, error) {
 }
 
 // normalizeJSON round-trips a decoded value through JSON, so a yaml or toml document takes the
-// same shape a json one does (map[string]any, float64) before it is checked.
+// same shape a json one does (map[string]any, json.Number) before it is checked.
 func normalizeJSON(v any) (any, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // wrapped by DecodeOutput
 	}
+	return unmarshalExact(raw)
+}
+
+// unmarshalExact is json.Unmarshal into an any that keeps numbers as [json.Number], so an
+// integer past 2^53 isn't rounded through float64.
+func unmarshalExact(data []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := dec.Decode(&out); err != nil {
 		return nil, err //nolint:wrapcheck // wrapped by DecodeOutput
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("invalid character after top-level value")
 	}
 	return out, nil
 }

@@ -11,17 +11,17 @@ json
 text	
 yaml	
 == file-extensions
-a.yaml	/w/a.yaml
-b.yml	/w/b.yml
-bin	/w/bin
-drivers	/w/drivers
-src	/w/src
-sub	/w/sub
+./a.yaml	/w/a.yaml
+./b.yml	/w/b.yml
+./bin	/w/bin
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub
 == directory
-bin	/w/bin
-drivers	/w/drivers
-src	/w/src
-sub	/w/sub
+./bin	/w/bin
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub
 == none-with-message
 <nothing: the file fallback stopped>
 == completer

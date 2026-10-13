@@ -1,0 +1,5 @@
+warning: spec: .rotini.spec.yaml:11:7: command demo: flag "name": sets `complete.message`, but the conf's completion feature is off or doesn't set `messages`, so it is never shown; enable completion with `messages: declared`, or remove the message
+warning: spec: .rotini.spec.yaml:14:7: command demo: flag "mode": sets `complete.message`, but the conf's completion feature is off or doesn't set `messages`, so it is never shown; enable completion with `messages: declared`, or remove the message
+warning: spec: .rotini.spec.yaml:8:7: command demo: flag "dir": has the enum value "$HOME", which the carapace spec leaves out: carapace runs a value starting with "$" as a macro
+warning: spec: .rotini.spec.yaml:8:7: command demo: flag "dir": has the enum value "a ||| b", which the carapace spec leaves out: carapace splits a value at " ||| " into modifiers
+warning: spec: .rotini.spec.yaml:14:7: command demo: flag "mode": has a completion message holding " ||| ", which the carapace spec leaves out: carapace would split it into modifiers

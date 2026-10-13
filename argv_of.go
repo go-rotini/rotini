@@ -883,7 +883,7 @@ func anyText(key string, v any) (string, error) {
 		if math.IsNaN(x) || math.IsInf(x, 0) {
 			return "", fmt.Errorf("the value of %q is %v, which has no JSON spelling", key, x)
 		}
-		return strconv.FormatFloat(x, 'g', -1, 64), nil
+		return strconv.FormatFloat(x, 'g', -1, rv.Type().Bits()), nil
 	}
 	return "", fmt.Errorf("the value of %q is a %T; only text, numbers, booleans and null can be written", key, v)
 }

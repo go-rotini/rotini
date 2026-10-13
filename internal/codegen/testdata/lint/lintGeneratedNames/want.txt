@@ -1,0 +1,5 @@
+spec: .rotini.spec.yaml:10:21: command demo schema "CompletionBash": generates the Go name CompletionBash (its type), which the completion feature's CompletionBash variable also declares; rename one
+spec: .rotini.spec.yaml:8:11: command demo schema "Help": generates the Go name Help (its type), which the help feature's Help function also declares; rename one
+spec: .rotini.spec.yaml:16:7: command demo/run: generates the Go name DemoRunFlags (its Flags type), which schema "DemoRunFlags" also declares; rename one
+spec: .rotini.spec.yaml:20:7: command demo/run-command: generates the Go name DemoRunCommandInputs (its Inputs type), which command demo/run's CommandInputs type also declares; rename one
+spec: .rotini.spec.yaml:25:7: command demo/build-exit: generates the Go name DemoBuildExitInputs (its Inputs type), which command demo/build's exit constant for "inputs" also declares; rename one

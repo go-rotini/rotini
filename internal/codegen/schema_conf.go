@@ -121,7 +121,7 @@ type PackageConfig struct {
 	//
 	// You rarely need it: rotini only ever removes files it wrote that no longer match the spec, such as a handler file whose command has left the spec (identified by the generated marker it carries), and it reports each one. A handler file goes in two steps: the next generate disables it with `//go:build ignore`, and the one after deletes it. A file you wrote is never removed, whatever it is named, and neither are test files or the editable feature templates. Use 'keep' when you have kept a handler file whose command is gone and left its marker in place, or to protect a rendered output file under an embed_dir.
 	Keep []string `json:"keep,omitempty"`
-	// Go package name written at the top of 'file'. Defaults to the file's parent-directory name (sanitized to a valid Go identifier). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'.
+	// Go package name written at the top of 'file'. Defaults to the file's parent-directory name, sanitized to a valid Go identifier (a Go keyword or 'main' gets a 'cli' suffix: 'internal/cmd/go' is package 'gocli'). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'.
 	Package string `json:"package,omitempty"`
 	// Which code this target receives.
 	//

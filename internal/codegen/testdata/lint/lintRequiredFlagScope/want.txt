@@ -1,0 +1,2 @@
+warning: spec: .rotini.spec.yaml:8:7: command demo: flag "token": is required but isn't cascading, so it applies only when `demo` itself runs, not to its sub-commands (`demo build` neither takes it nor requires it); set `cascading: true` if the sub-commands need it too
+warning: spec: .rotini.spec.yaml:36:11: command demo/remote: flag "name": is required but isn't cascading, so it applies only when `demo remote` itself runs, not to its sub-commands (`demo remote add` neither takes it nor requires it); set `cascading: true` if the sub-commands need it too

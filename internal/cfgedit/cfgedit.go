@@ -93,12 +93,18 @@ func Set(src []byte, format Format, path []string, value any) ([]byte, error) {
 			return nil, fmt.Errorf("cfgedit: %q: %w", strings.Join(path, "."), err)
 		}
 	}
+	if err := fits(format, v); err != nil {
+		return nil, fmt.Errorf("cfgedit: %q: %w", strings.Join(path, "."), err)
+	}
 	ed, err := editorFor(format)
 	if err != nil {
 		return nil, err
 	}
 	if loneCR(src) {
 		return nil, refused(path, "the file ends lines with a lone carriage return")
+	}
+	if err := refuseYAMLStream(format, src, path); err != nil {
+		return nil, err
 	}
 	before, err := decode(format, src)
 	if err != nil {
@@ -130,6 +136,9 @@ func Unset(src []byte, format Format, path []string, opts ...Option) ([]byte, er
 	}
 	if loneCR(src) {
 		return nil, refused(path, "the file ends lines with a lone carriage return")
+	}
+	if err := refuseYAMLStream(format, src, path); err != nil {
+		return nil, err
 	}
 	before, err := decode(format, src)
 	if err != nil {
@@ -238,6 +247,41 @@ func normalizeValue(v any) (any, error) {
 		return out, nil
 	}
 	return nil, fmt.Errorf("can't write a value of type %T", v)
+}
+
+// maxExactJSON is the largest integer a JSON reader that holds numbers as float64, as rotini's
+// does, reads back exactly.
+const maxExactJSON = 1 << 53
+
+// fits returns an error for an integer in v that format can't hold exactly: one beyond ±2^53 in
+// JSON, and one above the largest int64 in YAML and TOML.
+func fits(format Format, v any) error {
+	switch x := v.(type) {
+	case []any:
+		for _, item := range x {
+			if err := fits(format, item); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		for _, k := range sortedKeys(x) {
+			if err := fits(format, x[k]); err != nil {
+				return err
+			}
+		}
+	case int64:
+		if (format == JSON || format == JSONC) && (x > maxExactJSON || x < -maxExactJSON) {
+			return fmt.Errorf("JSON can't hold %d exactly; integers are limited to ±2^53", x)
+		}
+	case uint64:
+		switch {
+		case (format == JSON || format == JSONC) && x > maxExactJSON:
+			return fmt.Errorf("JSON can't hold %d exactly; integers are limited to ±2^53", x)
+		case (format == YAML || format == TOML) && x > math.MaxInt64:
+			return fmt.Errorf("%s integers are 64-bit signed; %d is too large", strings.ToUpper(string(format)), x)
+		}
+	}
+	return nil
 }
 
 // normalizeScalar is normalizeValue for a list item or map value, which must be a scalar.

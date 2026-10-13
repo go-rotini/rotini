@@ -71,6 +71,11 @@ func (p *Program) WithReporter(fn Reporter) *Program {
 // the final authority, since rtx.Exit overrides it during the reporter stage. The exit floor
 // lives in defaultReporter, so a custom reporter does not inherit it.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
+	// A signal that arrived after the last forward step (during teardown, say) still ends
+	// the run with its code.
+	if stopped, _ := rtx.stopState(); !stopped && signalCanceled(ctx) {
+		rtx.HaltWithCode(canceledExitCode(ctx))
+	}
 	rtx.endStdin()
 	rtx.abortOutputs()
 	rtx.settleOutput()

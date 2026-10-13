@@ -30,3 +30,10 @@ fallback-directory	app deploy s|	unordered
 fallback-with-candidates	app deploy d|	unordered
 fallback-none	app deploy b|
 fallback-file	app deploy c|	unordered
+quote-all	app quote --odd |
+quote-shared	app quote --pair x|
+quote-typed-quote	app quote --odd 'it|
+quote-typed-backslash	app quote --odd it\'|
+quote-colon	app quote --addr host:|
+quote-inline	app quote --odd=x|
+plain-value	app quote --note |	unordered

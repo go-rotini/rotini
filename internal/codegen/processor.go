@@ -142,6 +142,10 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode, re
 // ready-to-build program. opt.Force replaces an existing seed spec and conf. It never deletes
 // files; stale handlers are pruned by the next generate.
 func (p *Processor) Initialize(name string, opt InitOptions) (Initialized, error) {
+	// Plan the whole init first, so a seed that fails to validate or generate writes nothing.
+	if _, err := p.initializeWith(name, opt, newPlanner(true)); err != nil {
+		return Initialized{}, err
+	}
 	return p.initializeWith(name, opt, newPlanner(false))
 }
 
@@ -361,8 +365,9 @@ func failFast(failMode string, rc *reconciledConf) bool {
 	return mode == "fast"
 }
 
-// run resolves the spec and conf paths once, so watch mode watches exactly the files read,
-// then runs pass once or per change, reporting a timed summary to onResult.
+// run resolves the spec and conf paths, then runs pass once or, in watch mode, per change,
+// reporting a timed summary to onResult. While watching, a conf discovered beside the spec is
+// looked for again on every pass.
 func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPath, confPath string) (warnings []error, err error), onResult func(result string, err error), onWarnings func([]error)) error {
 	resolvedSpec, err := resolveSpecPath(specPath)
 	if err != nil {
@@ -375,7 +380,11 @@ func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPat
 
 	timed := func() (string, error) {
 		start := time.Now()
-		warnings, err := pass(resolvedSpec, resolvedConf)
+		conf := resolvedConf
+		if watch && confPath == "" {
+			conf = resolveConfBesideSpec(resolvedSpec, "") // a conf created while watching
+		}
+		warnings, err := pass(resolvedSpec, conf)
 		if onWarnings != nil && len(warnings) > 0 {
 			onWarnings(warnings)
 		}

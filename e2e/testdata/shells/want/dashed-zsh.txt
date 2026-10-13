@@ -1,0 +1,17 @@
+== commands
+deploy	deploy a service
+status	show status
+== flags
+--format	output format
+--quiet	say less
+-q	say less
+== enum
+json	
+text	
+== sub-command-flags
+--env	target environment
+--format	output format
+--quiet	say less
+== sub-command-enum
+prod	production
+staging	pre-production

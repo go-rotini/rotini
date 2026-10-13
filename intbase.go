@@ -132,8 +132,9 @@ func plainDecimalText(s string) string {
 }
 
 // plainIntegerField reports whether t is an integer field, or a list of them, whose text
-// [plainDecimalText] reads; a []byte holds bytes.
+// [plainDecimalText] reads. A plain []uint8 is a list of integers, as on the command line; a
+// named byte type ([HexBytes], [Base64Bytes]) holds bytes.
 func plainIntegerField(t reflect.Type) bool {
 	ft := derefType(t)
-	return isPlainInteger(ft) && (ft.Kind() != reflect.Slice || ft.Elem().Kind() != reflect.Uint8)
+	return isPlainInteger(ft) && (ft.Kind() != reflect.Slice || ft.Elem().Kind() != reflect.Uint8 || ft.Name() == "")
 }

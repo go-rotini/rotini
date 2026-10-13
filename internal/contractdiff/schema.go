@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -87,7 +88,7 @@ func (d *differ) walkSchema(st stability, dir direction, where string, o, n any,
 // definitions compares each definition both contracts hold, once per direction it is used in:
 // input when a caller's value reaches it, output when the program's does.
 func (d *differ) definitions() {
-	oldUse, newUse := d.old.definitionUse(), d.new.definitionUse()
+	oldUse, newUse := d.old.definitionUse(d.useStability), d.new.definitionUse(nil)
 	for _, name := range slices.Sorted(maps.Keys(d.old.Definitions)) {
 		nd, ok := d.new.Definitions[name]
 		if !ok {
@@ -99,9 +100,10 @@ func (d *differ) definitions() {
 		if len(users.commands) > 0 {
 			note = "used by " + strings.Join(users.commands, ", ")
 		}
+		st := settled(oldUse[name].levels)
 		start := len(d.findings)
 		for _, dir := range users.directions() {
-			d.walk("", dir, "definitions."+name, od, nd, nil)
+			d.walk(st, dir, "definitions."+name, od, nd, nil)
 		}
 		for i := start; i < len(d.findings); i++ {
 			d.findings[i].Note = joinNote(d.findings[i].Note, note)
@@ -109,10 +111,37 @@ func (d *differ) definitions() {
 	}
 }
 
-// use records how a definition is used: by which commands, and in which directions.
+// useStability is the effective stability of one use of a definition in the old contract: the
+// least settled of the command's and, for an input, the input's own.
+func (d *differ) useStability(c *command, e *input) stability {
+	st := d.commandStability(c)
+	if e != nil {
+		st = leastStable(st, e.Stability)
+	}
+	return st
+}
+
+// settled is the most settled of a definition's uses, "" when it has none: a change is rated
+// for the use it can break most.
+func settled(levels []stability) stability {
+	st, found := stability("experimental"), false
+	for _, s := range levels {
+		if !found || stabilityRank(string(s)) > stabilityRank(string(st)) {
+			st, found = s, true
+		}
+	}
+	if !found {
+		return ""
+	}
+	return st
+}
+
+// use records how a definition is used: by which commands, in which directions, and at what
+// stability each use is.
 type use struct {
 	in, out  bool
 	commands []string
+	levels   []stability
 }
 
 func (u use) directions() []direction {
@@ -129,14 +158,16 @@ func (u use) directions() []direction {
 func mergeUse(a, b use) use {
 	cmds := slices.Concat(a.commands, b.commands)
 	slices.Sort(cmds)
-	return use{in: a.in || b.in, out: a.out || b.out, commands: slices.Compact(cmds)}
+	return use{in: a.in || b.in, out: a.out || b.out, commands: slices.Compact(cmds), levels: slices.Concat(a.levels, b.levels)}
 }
 
 // definitionUse works out, for each definition, which commands reach it and in which
-// direction, through other definitions too.
-func (doc *document) definitionUse() map[string]use {
+// direction, through other definitions too. With level set, it also records each use's
+// stability.
+func (doc *document) definitionUse(level func(c *command, e *input) stability) map[string]use {
 	uses := map[string]use{}
-	mark := func(dir direction, cmd string, schema any) {
+	mark := func(dir direction, c *command, e *input, schema any) {
+		cmd := c.Name
 		queue := refsIn(schema)
 		seen := map[string]bool{}
 		for len(queue) > 0 {
@@ -155,24 +186,28 @@ func (doc *document) definitionUse() map[string]use {
 			if !slices.Contains(u.commands, cmd) {
 				u.commands = append(u.commands, cmd)
 			}
+			if level != nil {
+				u.levels = append(u.levels, level(c, e))
+			}
 			uses[name] = u
 			queue = append(queue, refsIn(doc.Definitions[name])...)
 		}
 	}
-	for _, c := range doc.Commands {
+	for i := range doc.Commands {
+		c := &doc.Commands[i]
 		for _, list := range [][]input{c.Arguments, c.Flags, c.Env, c.Config} {
-			for _, e := range list {
-				if !e.Inherited {
-					mark(in, c.Name, e.Schema)
+			for j := range list {
+				if e := &list[j]; !e.Inherited {
+					mark(in, c, e, e.Schema)
 				}
 			}
 		}
 		if c.Stdin != nil {
-			mark(in, c.Name, stripLocal(c.Stdin.Schema))
+			mark(in, c, nil, stripLocal(c.Stdin.Schema))
 		}
-		mark(out, c.Name, stripLocal(c.Output))
+		mark(out, c, nil, stripLocal(c.Output))
 		for _, e := range c.ExitStatus {
-			mark(out, c.Name, stripLocal(e.Output))
+			mark(out, c, nil, stripLocal(e.Output))
 		}
 	}
 	return uses
@@ -331,7 +366,7 @@ func (d *differ) enum(st stability, dir direction, where string, o, n map[string
 			ev = meta.oldEnum[jsonText(v)]
 		}
 		if ev.ReplacedBy != "" && containsValue(ne, ev.ReplacedBy) {
-			d.add(st, Expected, RuleEnumValueReplaced, vw, "value "+jsonText(v)+" removed; replaced by "+ev.ReplacedBy, note)
+			d.replaced(st, RuleEnumValueReplaced, vw, "value "+jsonText(v)+" removed; replaced by "+ev.ReplacedBy, ev.RemovedIn, ev.Hidden, note)
 			continue
 		}
 		d.removalWith(st, RuleEnumValueNoDelete, vw, "value "+jsonText(v)+" no longer accepted", ev.RemovedIn, ev.Hidden, note)
@@ -421,16 +456,7 @@ func (d *differ) bounds(st stability, where string, o, n map[string]any) {
 			widened = append(widened, fmt.Sprintf("%s %v → %v", b.key, ov, nv))
 		}
 	}
-	om, oHas := o["multipleOf"].(float64)
-	nmv, nHas := n["multipleOf"].(float64)
-	switch {
-	case !oHas && nHas:
-		added = append(added, fmt.Sprintf("multipleOf %v", nmv))
-	case oHas && !nHas:
-		removed = append(removed, fmt.Sprintf("multipleOf %v", om))
-	case oHas && om != nmv:
-		narrowed = append(narrowed, fmt.Sprintf("multipleOf %v → %v", om, nmv))
-	}
+	added, narrowed, widened, removed = multipleOf(o, n, added, narrowed, widened, removed)
 	ou, _ := o["uniqueItems"].(bool)
 	nu, _ := n["uniqueItems"].(bool)
 	switch {
@@ -451,6 +477,33 @@ func (d *differ) bounds(st stability, where string, o, n map[string]any) {
 	if len(removed) > 0 {
 		d.add(st, Safe, RuleInputBoundRemoved, where, "no longer limited: "+strings.Join(removed, ", "), "")
 	}
+}
+
+// multipleOf adds a multipleOf change to the lists bounds keeps.
+func multipleOf(o, n map[string]any, added, narrowed, widened, removed []string) (a, nr, w, r []string) {
+	om, oHas := o["multipleOf"].(float64)
+	nm, nHas := n["multipleOf"].(float64)
+	switch {
+	case !oHas && nHas:
+		added = append(added, fmt.Sprintf("multipleOf %v", nm))
+	case oHas && !nHas:
+		removed = append(removed, fmt.Sprintf("multipleOf %v", om))
+	case oHas && om != nm && isMultiple(om, nm):
+		widened = append(widened, fmt.Sprintf("multipleOf %v → %v", om, nm))
+	case oHas && om != nm:
+		narrowed = append(narrowed, fmt.Sprintf("multipleOf %v → %v", om, nm))
+	}
+	return added, narrowed, widened, removed
+}
+
+// isMultiple reports whether a is a whole multiple of b, so every multiple of a is one of b.
+// The ratio's fractional part may differ from zero only by rounding error (0.3 / 0.1).
+func isMultiple(a, b float64) bool {
+	if b <= 0 || a < b {
+		return false
+	}
+	r := a / b
+	return math.Abs(r-math.Round(r)) <= 1e-9
 }
 
 func (d *differ) pattern(st stability, where string, o, n map[string]any) {

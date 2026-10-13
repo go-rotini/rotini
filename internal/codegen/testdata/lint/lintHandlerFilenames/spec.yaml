@@ -10,3 +10,6 @@ command:
       filename: shared.go
     - name: probe
       filename: probe_test.go
+    # demo_aB.go and demo_ab.go are one file on macOS and Windows.
+    - name: aB
+    - name: ab

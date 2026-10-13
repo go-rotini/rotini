@@ -269,3 +269,56 @@ func TestNormalizeValue(t *testing.T) {
 		}
 	}
 }
+
+// Removing a key that is absent under an empty mapping leaves the file as it is, in every format
+// that nests.
+func TestUnsetAbsentUnderEmptyParent(t *testing.T) {
+	for format, src := range map[Format]string{
+		YAML:  "deploy: {}\n",
+		JSON:  `{"deploy": {}}`,
+		JSONC: "{\n  \"deploy\": {} // none yet\n}\n",
+		TOML:  "[deploy]\n# timeout = 5\n",
+	} {
+		got, err := Unset([]byte(src), format, []string{"deploy", "timeout"})
+		if err != nil || string(got) != src {
+			t.Errorf("%s: Unset = %q, %v; want the file unchanged", format, got, err)
+		}
+	}
+}
+
+// Removing a key from a blank strict-JSON file (missing, empty or a byte-order mark alone) leaves
+// it as it is.
+func TestUnsetBlankJSON(t *testing.T) {
+	for _, src := range []string{"", "  \n", bom} {
+		got, err := Unset([]byte(src), JSON, []string{"deploy", "timeout"})
+		if err != nil || string(got) != src {
+			t.Errorf("Unset(%q) = %q, %v; want the file unchanged", src, got, err)
+		}
+	}
+}
+
+// An integer a format can't hold exactly is refused before the edit, as the caller's problem
+// rather than a verification failure.
+func TestSetIntegerBeyondFormat(t *testing.T) {
+	for _, tc := range []struct {
+		format Format
+		value  any
+		want   string
+	}{
+		{JSON, int64(9007199254740993), "JSON can't hold 9007199254740993 exactly"},
+		{JSONC, int64(math.MinInt64), "JSON can't hold"},
+		{JSON, []any{uint64(1 << 60)}, "JSON can't hold"},
+		{YAML, uint64(math.MaxUint64), "YAML integers are 64-bit signed"},
+		{TOML, map[string]any{"a": uint64(math.MaxUint64)}, "TOML integers are 64-bit signed"},
+	} {
+		_, err := Set(nil, tc.format, []string{"big"}, tc.value)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || errors.Is(err, ErrVerify) {
+			t.Errorf("%s %v: err = %v, want %q", tc.format, tc.value, err, tc.want)
+		}
+	}
+	for format, v := range map[Format]any{JSON: int64(1 << 53), YAML: uint64(math.MaxInt64), TOML: int64(math.MinInt64)} {
+		if _, err := Set(nil, format, []string{"big"}, v); err != nil {
+			t.Errorf("%s %v: %v", format, v, err)
+		}
+	}
+}

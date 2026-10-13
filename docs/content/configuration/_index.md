@@ -328,7 +328,7 @@ You rarely need it: rotini only ever removes files it wrote that no longer match
 
 `string`
 
-Go package name written at the top of 'file'. Defaults to the file's parent-directory name (sanitized to a valid Go identifier). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'.
+Go package name written at the top of 'file'. Defaults to the file's parent-directory name, sanitized to a valid Go identifier (a Go keyword or 'main' gets a 'cli' suffix: 'internal/cmd/go' is package 'gocli'). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'.
 
 
 ## SchemasConfig

@@ -1,0 +1,9 @@
+-- in --
+a:
+  s: 1
+  # note under a
+b: 2
+-- op --
+unset a.s
+-- out --
+b: 2

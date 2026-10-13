@@ -318,13 +318,14 @@ func TestManPages_sourceDateEpoch(t *testing.T) {
 // TestManPages_nameCollision pins that validate reports two commands sharing a man page name,
 // placed in the spec, and only when the man feature is on.
 func TestManPages_nameCollision(t *testing.T) {
-	// Two commands that differ only in case. A dash collision (`tag-remove` against
-	// `tag remove`) is refused earlier by the handler-file rule.
+	// Two commands that differ only in case, one with its own handler file. A dash collision
+	// (`tag-remove` against `tag remove`) is refused earlier by the handler-file rule.
 	const spec = `version: 0.0.0
 command:
   name: notes
   commands:
-    - name: Remove
+    - name: reMove
+      filename: re_move.go
     - name: remove
 `
 	dir := t.TempDir()
@@ -338,7 +339,7 @@ command:
 		got = err
 	}
 	if got == nil || !strings.Contains(got.Error(), `"notes-remove"`) ||
-		!strings.Contains(got.Error(), "notes Remove") || !strings.Contains(got.Error(), "notes remove") {
+		!strings.Contains(got.Error(), "notes reMove") || !strings.Contains(got.Error(), "notes remove") {
 		t.Fatalf("validate = %v, want a man page name collision naming both commands", got)
 	}
 	if !strings.Contains(got.Error(), ".rotini.spec.yaml:") {

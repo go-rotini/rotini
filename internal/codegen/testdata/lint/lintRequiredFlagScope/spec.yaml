@@ -1,0 +1,40 @@
+# A flag that isn't cascading applies only when its own command runs, so a required flag on a
+# command with sub-commands doesn't reach them.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Required, but `demo build` doesn't take it: a warning.
+    - name: token
+      identifiers: [--token]
+      schema: { type: string, required: true }
+    # In a flag group: a rule for demo's own run, so nothing to report.
+    - name: json
+      identifiers: [--json]
+      schema: { type: bool }
+    - name: yaml
+      identifiers: [--yaml]
+      schema: { type: bool }
+    # Cascading: every sub-command takes it, and checks it.
+    - name: region
+      identifiers: [--region]
+      cascading: true
+      schema: { type: string, required: true }
+  flag_groups:
+    - kind: mutually_exclusive
+      flags: [json, yaml]
+  commands:
+    - name: build
+      flags:
+        # Required on a leaf command: nothing to report.
+        - name: target
+          identifiers: [--target]
+          schema: { type: string, required: true }
+    - name: remote
+      flags:
+        # Required on a nested parent: reported with its full path.
+        - name: name
+          identifiers: [--name]
+          schema: { type: string, required: true }
+      commands:
+        - name: add

@@ -79,6 +79,9 @@ type program struct {
 	configFiles     []scopedConfigFile // per-command config-file sources, tagged with their command path (for the input reader's cascade)
 	envPrefix       string             // document-level env_prefix for DERIVED env-var names
 	adoptedPrefixes map[string]string  // env_prefix → child root name, from composed children (see resolveEnvPrefix)
+	// pathSegments maps each underscore-joined command path to its command names. A name may
+	// itself contain '_', so a path is never split back on it.
+	pathSegments map[string][]string
 
 	root         genCommand               // the root command (own)
 	own          []genCommand             // inline sub-commands, sorted by prefix
@@ -347,7 +350,7 @@ func (p *program) resolveFeatures() error {
 			return err
 		}
 
-		p.featureBlocks = append(p.featureBlocks, buildFeatureBlock(nodes, embedRel, f.desc, f.cfg.Embed, contents))
+		p.featureBlocks = append(p.featureBlocks, buildFeatureBlock(nodes, embedRel, f.desc, f.cfg.Embed, contents, !f.desc.perShell && treeHasAliases(p.tree)))
 		p.featureOutputs = append(p.featureOutputs, featureOutput{desc: f.desc, absEmbedDir: absEmbedDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
 	}
 	return nil
@@ -476,6 +479,7 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		ExitCodes:     exitConstantsDecl(gp.exitConstants(), lay.splitModels),
 		Contract:      contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo) + examplesDecl(gp.examples),
 		UsageFunc:     usageFuncDecl(gp),
+		CanonicalPath: canonicalPathDecl(gp.tree),
 	})
 }
 

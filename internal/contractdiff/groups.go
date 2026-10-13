@@ -57,10 +57,39 @@ func (d *differ) flagGroups(st stability, oc, nc *command) {
 		}
 	}
 	for j, ng := range nc.FlagGroups {
-		if !used[j] {
+		switch {
+		case used[j]:
+		case groupRejectsOld(ng, oc):
 			d.add(st, Breaking, RuleFlagGroupAdded, groupWhere(oc.Name, ng), "flag group added", "")
+		default:
+			d.add(st, Safe, RuleFlagGroupAdded, groupWhere(oc.Name, ng), "flag group added", "over flags a command line couldn't give before")
 		}
 	}
+}
+
+// hasFlag reports whether command c has a flag named name.
+func hasFlag(c *command, name string) bool {
+	return slices.ContainsFunc(c.Flags, func(f input) bool { return f.Name == name })
+}
+
+// groupRejectsOld reports whether a new group can reject a command line the old command
+// accepted: mutually_exclusive when two of its flags are old ones, required_together when one
+// is, and at_least_one and one_of always, since a command line that gave none of its flags
+// worked before.
+func groupRejectsOld(g flagGroup, oc *command) bool {
+	old := 0
+	for _, f := range g.Flags {
+		if hasFlag(oc, f) {
+			old++
+		}
+	}
+	switch g.Kind {
+	case "mutually_exclusive":
+		return old >= 2
+	case "required_together":
+		return old >= 1
+	}
+	return true
 }
 
 // flagGroup compares a matched pair of groups.
@@ -190,8 +219,18 @@ func (d *differ) flagDependencies(st stability, oc, nc *command) {
 			d.add(st, Safe, RuleFlagDependencyLoosened, w, strings.Join(loose, "; "), "")
 		}
 	}
+	d.addedDependencies(st, oc, nc)
+}
+
+// addedDependencies reports the flag dependencies the new contract adds: safe when the `when`
+// flag is new, since no old command line gives it.
+func (d *differ) addedDependencies(st stability, oc, nc *command) {
 	for _, nd := range nc.FlagDependencies {
-		if !slices.ContainsFunc(oc.FlagDependencies, func(o flagDependency) bool { return dependencyKey(o) == dependencyKey(nd) }) {
+		switch {
+		case slices.ContainsFunc(oc.FlagDependencies, func(o flagDependency) bool { return dependencyKey(o) == dependencyKey(nd) }):
+		case nd.When != "" && !hasFlag(oc, nd.When):
+			d.add(st, Safe, RuleFlagDependencyAdded, dependencyWhere(oc.Name, nd), "flag dependency added", "on a flag a command line couldn't give before")
+		default:
 			d.add(st, Breaking, RuleFlagDependencyAdded, dependencyWhere(oc.Name, nd), "flag dependency added", "")
 		}
 	}

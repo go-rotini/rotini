@@ -141,7 +141,7 @@ const envFileCap = 1 << 20
 //
 // A .env file's own config_source is read from the command line and the run's environment
 // only; overrides holds those paths.
-func (b *InputReader) inputView(chain []Command, v reflect.Value, overrides map[string]string, waived bool, view *osView) (*osView, error) {
+func (b *InputReader) inputView(chain []Command, v reflect.Value, overrides map[string]pathOverride, waived bool, view *osView) (*osView, error) {
 	if !readsEnv(v) && !b.envPathSource(chain) {
 		return view, nil
 	}
@@ -169,7 +169,7 @@ func (b *InputReader) inputView(chain []Command, v reflect.Value, overrides map[
 
 // envFileView is [InputReader.inputView] through the env-files hook. With no .env file in scope
 // and no input reading a variable_file, the view is the run's own.
-func (b *InputReader) envFileView(fs *featureSet, chain []Command, v reflect.Value, overrides map[string]string, waived bool, view *osView) (*osView, error) {
+func (b *InputReader) envFileView(fs *featureSet, chain []Command, v reflect.Value, overrides map[string]pathOverride, waived bool, view *osView) (*osView, error) {
 	files := b.chainFiles(chain, true)
 	if len(files) == 0 && !hasFileVars(v) {
 		return view, nil
@@ -200,7 +200,7 @@ func (b *InputReader) envPathSource(chain []Command) bool {
 }
 
 // readDotenv reads one .env file into a layer, or nil when the file is absent.
-func (b *InputReader) readDotenv(f ConfigFile, overrides map[string]string, waived bool, view *osView) (*dotenvLayer, error) {
+func (b *InputReader) readDotenv(f ConfigFile, overrides map[string]pathOverride, waived bool, view *osView) (*dotenvLayer, error) {
 	src, path, err := b.openFileSource(f, overrides, view)
 	if err != nil {
 		if waived && !isWiringError(err) {
@@ -210,7 +210,8 @@ func (b *InputReader) readDotenv(f ConfigFile, overrides map[string]string, waiv
 	}
 	defer src.Close()
 	if !waived {
-		if err := validateConfigFile(view.clockRef().features(), f, src); err != nil {
+		check := func() error { return validateConfigFile(view.clockRef().features(), f, src) }
+		if err := view.files.check(checkedKey{name: f.Name, path: path}, check); err != nil {
 			return nil, err
 		}
 	}

@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -33,6 +34,9 @@ type parsedInputs struct {
 	// been a valid value for it (`--dry-run server` for `--dry-run=server`), the likely cause
 	// of an unexpected positional. [0] is the flag as typed, [1] the word; nil when none.
 	detached *[2]string
+	// detachedSecret records that the detached word followed a secret flag, so no message
+	// repeats it.
+	detachedSecret bool
 
 	// dashedFirst records that a "--" came before the leaf's first positional, which ended
 	// command lookup there, so a sub-command's name after it is a positional.
@@ -74,7 +78,13 @@ func (p *parsedInputs) detachedHint(extra []string) string {
 	if p == nil || p.detached == nil || !slices.Contains(extra, p.detached[1]) {
 		return ""
 	}
-	return fmt.Sprintf("; %s takes its value attached: %s=%s", p.detached[0], p.detached[0], p.detached[1])
+	return fmt.Sprintf("; %s takes its value attached: %s=%s", p.detached[0], p.detached[0], redactValue(p.detached[1], p.detachedSecret))
+}
+
+// secretWord reports whether word is the detached value of a secret flag, which a message
+// must not repeat.
+func (p *parsedInputs) secretWord(word string) bool {
+	return p != nil && p.detached != nil && p.detachedSecret && p.detached[1] == word
 }
 
 // lateFlagHint is the hint a too-many-arguments error carries when one of the extra words is
@@ -658,7 +668,8 @@ func flagNamed(chain []Command, name string) bool {
 		return true
 	}
 	if isShortCluster(name) {
-		_, _, ok := findFlagIndex(chain, name[:2])
+		_, w := utf8.DecodeRuneInString(name[1:])
+		_, _, ok := findFlagIndex(chain, name[:1+w])
 		return ok
 	}
 	return false
@@ -680,6 +691,7 @@ func noteDetached(store *parsedInputs, chain []Command, tok string, argv []strin
 		return
 	}
 	store.detached = &[2]string{tok, next}
+	store.detachedSecret = fd.Secret
 }
 
 // shortCircuited reports whether a short-circuit flag ([FlagDef.ShortCircuit]) is set to true
@@ -864,9 +876,14 @@ func strayCommand(leaf Command, si scopeInputs, store *parsedInputs) error {
 			Candidates: slices.DeleteFunc(childCommandNames(leaf), func(n string) bool { return n == tok }),
 		}
 	}
+	shown := strconv.Quote(tok)
+	if store.secretWord(tok) {
+		tok = redactValue(tok, true)
+		shown = tok
+	}
 	return &ParseError{
 		Kind:       ParseKindUnknownCommand,
-		Msg:        fmt.Sprintf("unknown command %q for %q", tok, leaf.Name) + store.detachedHint(si.args[:1]),
+		Msg:        fmt.Sprintf("unknown command %s for %q", shown, leaf.Name) + store.detachedHint(si.args[:1]),
 		Command:    leaf.Name,
 		Token:      tok,
 		Candidates: childCommandNames(leaf),
@@ -932,7 +949,7 @@ func validate(chain []Command, store *parsedInputs) error {
 				err = checkFlagValues(fd, fsi.label(fd), fsi.flags[fd.Name], store.dir, store.clock)
 			}
 			if err != nil {
-				return withSource(withWritten(err, fsi.flags[fd.Name], fsi.written), fsi.origin[fd.Name])
+				return withSource(withWritten(scoped(err, f.Name, fsi.label(fd)), fsi.flags[fd.Name], fsi.written), fsi.origin[fd.Name])
 			}
 		}
 	}
@@ -965,7 +982,7 @@ func validateArgs(leaf Command, si scopeInputs, waived bool, dir string, clock *
 				continue
 			}
 			if err := checkValueShape(ad.Type, ad.Base, "<"+ad.Name+">", "", vals, ad.Secret); err != nil {
-				return err
+				return scoped(err, leaf.Name, "")
 			}
 			continue
 		}
@@ -973,7 +990,7 @@ func validateArgs(leaf Command, si scopeInputs, waived bool, dir string, clock *
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		} // an absent variadic still gets a MinItems check
 		if err := checkArgValues(ad, vals, dir, clock); err != nil {
-			return withSource(withWritten(err, vals, si.written), si.argOrigin[i])
+			return withSource(withWritten(scoped(err, leaf.Name, ""), vals, si.written), si.argOrigin[i])
 		}
 	}
 	return nil
@@ -1133,6 +1150,20 @@ func checkExistingPath(label, typ, value, dir string) error {
 		}
 	}
 	return nil
+}
+
+// scoped fills the Command and Flag a [*ParseError] in err left empty, for a check that knows
+// which command and flag it judged. Other errors pass through.
+func scoped(err error, command, flag string) error {
+	if pe, ok := errors.AsType[*ParseError](err); ok {
+		if pe.Command == "" {
+			pe.Command = command
+		}
+		if pe.Flag == "" {
+			pe.Flag = flag
+		}
+	}
+	return err
 }
 
 // constraintViolation builds the one error shape every bound check returns.
@@ -1296,10 +1327,11 @@ func coveredFrame(chain []Command, store *parsedInputs, has func(Command) bool) 
 // provided on argv (a default or fallback does not count), read from the store's argvSet so
 // flags inside short clusters count.
 func validateFlagGroups(chain []Command, store *parsedInputs) error {
-	for i, f := range chain {
+	for i := range chain {
 		if !store.covers(i) {
 			continue
 		}
+		f := ruleFrame(chain, i)
 		for _, g := range f.FlagGroups {
 			all := make([]string, 0, len(g.Flags))
 			var set []string
@@ -1314,7 +1346,7 @@ func validateFlagGroups(chain []Command, store *parsedInputs) error {
 				}
 			}
 			if err := checkFlagGroup(g.Kind, set, all); err != nil {
-				return err
+				return scoped(err, f.Name, "")
 			}
 		}
 	}
@@ -1474,14 +1506,56 @@ func applyDefaults(chain []Command, store *parsedInputs) {
 	}
 }
 
+// ruleFrame is chain frame i as its presence rules (required flags, flag groups and flag
+// dependencies) apply to a run of chain. A [FlagDef.Local] flag applies only when its command
+// is the one run, so on an ancestor frame its rules are left out: the flag isn't required, a
+// group naming it is dropped (a mutually exclusive group keeps checking its other members),
+// and a dependency triggered by it, or requiring it, is dropped. A dependency that forbids it,
+// or that it would turn off, still applies: the flag can't be set there.
+func ruleFrame(chain []Command, i int) Command {
+	f := chain[i]
+	if i == len(chain)-1 || !slices.ContainsFunc(f.Flags, func(fd FlagDef) bool { return fd.Local }) {
+		return f
+	}
+	local := func(name string) bool {
+		fd, ok := findFlagDef(f.Flags, name)
+		return ok && fd.Local
+	}
+	flags := slices.Clone(f.Flags)
+	for k := range flags {
+		if flags[k].Local {
+			flags[k].Required = false
+		}
+	}
+	var groups []FlagGroup
+	for _, g := range f.FlagGroups {
+		kept := slices.DeleteFunc(slices.Clone(g.Flags), local)
+		switch {
+		case len(kept) == len(g.Flags):
+			groups = append(groups, g)
+		case g.Kind == FlagGroupMutuallyExclusive && len(kept) > 1:
+			groups = append(groups, FlagGroup{Kind: g.Kind, Flags: kept})
+		}
+	}
+	var deps []FlagDependency
+	for _, d := range f.FlagDependencies {
+		if !local(d.When) && !slices.ContainsFunc(d.Requires, local) {
+			deps = append(deps, d)
+		}
+	}
+	f.Flags, f.FlagGroups, f.FlagDependencies = flags, groups, deps
+	return f
+}
+
 // requiredErrors reports required flags (across the covered chain) and required leaf
 // arguments that were neither provided nor defaulted.
 func requiredErrors(chain []Command, store *parsedInputs) error {
 	var missing []string
-	for i, f := range chain {
+	for i := range chain {
 		if !store.covers(i) {
 			continue
 		}
+		f := ruleFrame(chain, i)
 		si := store.scopes[i]
 		for _, fd := range f.Flags {
 			if fd.Required {
@@ -1500,7 +1574,11 @@ func requiredErrors(chain []Command, store *parsedInputs) error {
 		}
 	}
 	if len(missing) > 0 {
-		return &ParseError{Kind: ParseKindMissingRequired, Msg: "missing required " + plural("input", len(missing)) + ": " + strings.Join(missing, ", ")}
+		e := &ParseError{Kind: ParseKindMissingRequired, Msg: "missing required " + plural("input", len(missing)) + ": " + strings.Join(missing, ", "), Command: leaf.Name}
+		if len(missing) == 1 && strings.HasPrefix(missing[0], "-") {
+			e.Flag = missing[0]
+		}
+		return e
 	}
 	return nil
 }
@@ -1533,7 +1611,8 @@ func plural(word string, n int) string {
 // trailing line ending removed (trimAcquiredPayload, as the stdin channel does) and is then
 // coerced and validated like a literal value. Without the matching mode, '@' and '-' are
 // ordinary characters. Sentinels are argv grammar only: defaults and fallbacks never resolve.
-// A relative `@file` path resolves against acq.dir; the error names it as typed.
+// A relative `@file` path resolves against acq.dir; the error names it as typed. A file larger
+// than 64 MiB is an error rather than a value.
 func resolveFlagValue(fd FlagDef, label, value string, acq argvAcq) (string, error) {
 	return resolveAcquired(fd.From, label, label, value, acq)
 }
@@ -1546,7 +1625,7 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 		return value[1:], nil // a doubled @ is one literal @: @@alice is the value @alice
 	case strings.HasPrefix(value, "@") && slices.Contains(from, "file"):
 		path := joinDir(acq.dir, value[1:])
-		data, err := os.ReadFile(path)
+		data, err := readValueFile(path)
 		if err != nil {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
@@ -1581,6 +1660,8 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 // it, path where it resolved.
 func unreadableFile(typed, path string, err error) string {
 	switch {
+	case errors.Is(err, errValueFileTooLarge):
+		return fmt.Sprintf("%s is larger than 64 MiB", quotePath(typed))
 	case pathMissing(err):
 		return fmt.Sprintf("no such file: %s", quotePath(typed))
 	case errors.Is(err, fs.ErrPermission):
@@ -1590,6 +1671,29 @@ func unreadableFile(typed, path string, err error) string {
 		return fmt.Sprintf("%s is a directory, not a file", quotePath(typed))
 	}
 	return fmt.Sprintf("cannot read %s", quotePath(typed))
+}
+
+// valueFileCap bounds an `@file` value, so a device or an endless file (`@/dev/zero`) fails
+// instead of filling memory.
+const valueFileCap = 64 << 20
+
+var errValueFileTooLarge = errors.New("value file too large")
+
+// readValueFile reads an `@file` value's file, up to valueFileCap bytes.
+func readValueFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // unreadableFile words it
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, valueFileCap+1))
+	if err != nil {
+		return nil, err //nolint:wrapcheck // unreadableFile words it
+	}
+	if len(data) > valueFileCap {
+		return nil, errValueFileTooLarge
+	}
+	return data, nil
 }
 
 // isShortCluster reports whether name is a candidate POSIX short-flag cluster: a single-dash
@@ -1608,8 +1712,10 @@ func isShortCluster(name string) bool {
 // last flag belongs to that flag, a bool included (-Aw=false sets -w false).
 func parseCluster(chain []Command, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value, typed string) error) (int, error) {
 	var prev FlagDef
-	for k := range len(body) {
-		short := "-" + body[k:k+1]
+	var w int
+	for k := 0; k < len(body); k += w {
+		_, w = utf8.DecodeRuneInString(body[k:])
+		short := "-" + body[k:k+w]
 		fdef, idx, ok := findFlagIndex(chain, short)
 		if !ok {
 			if err := digitsAfterSwitch(prev, body, k, hasInline); err != nil {
@@ -1618,7 +1724,7 @@ func parseCluster(chain []Command, body, inline string, hasInline bool, argv []s
 			return 0, &ParseError{Kind: ParseKindUnknownFlag, Msg: fmt.Sprintf("unknown flag %q", short), Flag: short, Token: short, Candidates: chainFlagIdentifiers(chain)}
 		}
 		prev = fdef
-		if fdef.Type == "bool" && hasInline && k == len(body)-1 {
+		if fdef.Type == "bool" && hasInline && k+w == len(body) {
 			return 0, addFlag(idx, fdef, inline, short)
 		}
 		if fdef.Type == "bool" || fdef.Type == "count" {
@@ -1632,7 +1738,7 @@ func parseCluster(chain []Command, body, inline string, hasInline bool, argv []s
 			continue
 		}
 		// A value-taking flag ends the cluster: its value is whatever follows.
-		switch rest := body[k+1:]; {
+		switch rest := body[k+w:]; {
 		case rest != "" && hasInline:
 			return 0, addFlag(idx, fdef, rest+"="+inline, short)
 		case rest != "":
@@ -2054,7 +2160,8 @@ func fieldArgDefs(v reflect.Value, defs []ArgDef) []ArgDef {
 // splitValue splits one value on a list input's separator, CSV-style: an item in double quotes
 // keeps the separator ("a,b"), leading spaces are trimmed, and an empty value is no items — so
 // `--tags ""` clears to an empty list. With no separator the value is one item, untouched. A
-// NUL separator splits on the byte alone.
+// NUL separator splits on the byte alone. A line break outside double quotes is an error: it
+// is neither the separator nor part of an item.
 func splitValue(value, sep string) ([]string, error) {
 	if sep == "" {
 		return []string{value}, nil
@@ -2065,8 +2172,12 @@ func splitValue(value, sep string) ([]string, error) {
 	if sep == "\x00" {
 		return strings.Split(value, sep), nil // NUL can't be a CSV delimiter; nothing is quoted
 	}
+	comma, _ := utf8.DecodeRuneInString(sep)
+	if strings.ContainsAny(value, "\r\n") && unquotedLineBreak(value, comma) {
+		return nil, fmt.Errorf("the value holds a line break outside quotes; separate items with %q, or quote an item that holds one", sep)
+	}
 	r := csv.NewReader(strings.NewReader(value))
-	r.Comma, _ = utf8.DecodeRuneInString(sep)
+	r.Comma = comma
 	r.TrimLeadingSpace = true
 	r.LazyQuotes = true
 	r.FieldsPerRecord = -1
@@ -2075,6 +2186,37 @@ func splitValue(value, sep string) ([]string, error) {
 		return nil, fmt.Errorf("could not split %q on %q: %w", value, sep, err)
 	}
 	return items, nil
+}
+
+// unquotedLineBreak reports whether value has a '\n' or '\r' outside a quoted item, reading
+// quotes as splitValue's CSV reader does: a quote opens an item only at its start (after
+// leading spaces), a doubled quote inside is one quote, and a quote closes the item only
+// before the separator, a line break or the end.
+func unquotedLineBreak(value string, comma rune) bool {
+	start, quoted := true, false
+	for i := 0; i < len(value); {
+		r, w := utf8.DecodeRuneInString(value[i:])
+		i += w
+		next, _ := utf8.DecodeRuneInString(value[i:])
+		switch {
+		case quoted:
+			if r == '"' && next == '"' {
+				i++
+			} else if r == '"' && (i == len(value) || next == comma || next == '\n' || next == '\r') {
+				quoted = false
+			}
+		case r == '\n' || r == '\r':
+			return true
+		case r == comma:
+			start = true
+		case start && unicode.IsSpace(r):
+		case start && r == '"':
+			start, quoted = false, true
+		default:
+			start = false
+		}
+	}
+	return false
 }
 
 // variadicAt returns the variadic argument that positional number pos lands in, if any.
@@ -2265,12 +2407,19 @@ func notValid(value, typeName string) error {
 
 // coerceNumber fills an integer, unsigned or float field. Each is parsed at 64 bits and then
 // checked against the field's width, so a value too big for a narrower field is rejected
-// rather than wrapped.
+// rather than wrapped. A decimal integer outside the field's range, a negative one for an
+// unsigned field included, is reported with the range.
 func coerceNumber(f reflect.Value, last string) error {
 	switch f.Kind() {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		n, err := strconv.ParseUint(last, 10, 64)
 		if err != nil {
+			if errors.Is(err, strconv.ErrRange) {
+				return outOfRange(last, f.Type())
+			}
+			if _, ierr := strconv.ParseInt(last, 10, 64); strings.HasPrefix(last, "-") && (ierr == nil || errors.Is(ierr, strconv.ErrRange)) {
+				return outOfRange(last, f.Type())
+			}
 			return notValid(last, "non-negative integer")
 		}
 		if f.OverflowUint(n) {
@@ -2288,6 +2437,9 @@ func coerceNumber(f reflect.Value, last string) error {
 		f.SetFloat(x)
 	default:
 		n, err := strconv.ParseInt(last, 10, 64)
+		if errors.Is(err, strconv.ErrRange) {
+			return outOfRange(last, f.Type())
+		}
 		if err != nil {
 			return notValid(last, "integer")
 		}

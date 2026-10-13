@@ -12,15 +12,15 @@ import (
 
 // inputsFields returns the fields of a command's <Prefix>Inputs struct: one per ancestor plus
 // the command itself, in root-to-leaf order, each named after that command's PascalCase prefix.
+// segments are the command's names below the root.
 //
 // The fields carry no struct tag. The input reader maps them to chain frames by position,
 // counting back from the running frame; names are not matched because an umbrella may rename
 // a composed child whose types were generated under the child's own names.
-func inputsFields(rootPascal, path string) []fieldDef {
-	segments := strings.Split(path, "_")
+func inputsFields(rootPascal string, segments []string) []fieldDef {
 	fields := []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs"}} //nolint:prealloc // a few fields; CodeQL flags 1+len as an overflow
 	for i := 1; i <= len(segments); i++ {
-		prefix := rootPascal + toPascalCase(strings.Join(segments[:i], "_"))
+		prefix := rootPascal + toPascalCase(strings.Join(segments[:i], "-"))
 		fields = append(fields, fieldDef{Field: prefix, GoType: prefix + "CommandInputs"})
 	}
 	return fields

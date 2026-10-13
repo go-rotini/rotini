@@ -99,7 +99,7 @@ func argFallback(reg *recon.Registry, field reflect.Value, sf reflect.StructFiel
 	if err != nil {
 		return nil, "", reconBind(channelArgument, err)
 	}
-	if !found {
+	if !found || val.Kind() == recon.NullKind { // a null leaves the default in place
 		return nil, "", nil
 	}
 	source := val.Source()
@@ -146,28 +146,32 @@ func argFallback(reg *recon.Registry, field reflect.Value, sf reflect.StructFiel
 
 // recordArgFallbacks is reconcileArgs for the per-channel layers ([Context.EnvInputs],
 // [Context.FileInputs]): each argument whose fallback this layer supplies is bound, recorded as
-// present, and noted by index for the merged report, which places positionals in order.
-func recordArgFallbacks(set Presence, ci reflect.Value, frame Command, topName, layerName string, reg *recon.Registry, rd fallbackRead) (map[int]string, error) {
-	var placed map[int]string
+// present, and noted by position for the merged report, which places positionals in order.
+// origins names where each argument's value came from, by argument index.
+func recordArgFallbacks(set Presence, ci reflect.Value, frame Command, topName, layerName string, reg *recon.Registry, rd fallbackRead) (placed, origins map[int]string, err error) {
 	args := commandArgs(ci)
 	if !args.IsValid() || hasArgTail(frame.Arguments) {
-		return placed, nil
+		return nil, nil, nil
 	}
 	at := args.Type()
 	pos := 0
 	for i := range min(len(frame.Arguments), at.NumField()) {
 		ad := frame.Arguments[i]
-		vals, _, err := argFallback(reg, args.Field(i), at.Field(i), ad, rd)
+		vals, origin, err := argFallback(reg, args.Field(i), at.Field(i), ad, rd)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if vals == nil {
 			pos++
 			continue
 		}
 		if err := coerceTime(args.Field(i), vals, argTimeSpec(ad, rd.view.clockRef())); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		if origins == nil {
+			origins = map[int]string{}
+		}
+		origins[i] = origin
 		set[fieldPath(topName, "Arguments", at.Field(i).Name)] = InputSource{
 			Layer:  layerName,
 			Raw:    redactValue(strings.Join(vals, ", "), ad.Secret),
@@ -181,5 +185,5 @@ func recordArgFallbacks(set Presence, ci reflect.Value, frame Command, topName, 
 			pos++
 		}
 	}
-	return placed, nil
+	return placed, origins, nil
 }

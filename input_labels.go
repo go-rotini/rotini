@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"encoding"
 	"errors"
 	"fmt"
 	"reflect"
@@ -123,8 +124,9 @@ func (l channelLabels) bind(channel string, err error) error {
 	var eve *recon.EmptyValueError
 	switch {
 	case errors.As(err, &ce):
-		return usageBind(channel, ce.Path.String(),
-			fmt.Sprintf("%s: expected %s%s", label(ce.Path.String()), cleanType(ce.Target), l.origin(ce.Source)), err)
+		path, typ := ce.Path.String(), cleanType(ce.Target)
+		return usageBind(channel, path,
+			fmt.Sprintf("%s: expected %s%s", label(path), typ, l.origin(ce.Source)), err)
 	case errors.As(err, &mre):
 		return usageBind(channel, mre.Path.String(),
 			fmt.Sprintf("%s is required", label(mre.Path.String())), err)
@@ -137,6 +139,85 @@ func (l channelLabels) bind(channel string, err error) error {
 	default:
 		return usageBind(channel, "", fmt.Sprintf("could not read %s input", channelDesc(channel)), err)
 	}
+}
+
+// bindStruct is [channelLabels.bind] for a bind of the Env or Config struct s from reg: a value
+// its field's type cannot hold is reported as the command line reports one, with the value
+// (redacted for a secret input), why it doesn't fit, and where it came from.
+func (l channelLabels) bindStruct(channel string, err error, reg *recon.Registry, s reflect.Value) error {
+	if ce, ok := errors.AsType[*recon.CoercionError](err); ok && reg != nil && l.view != nil {
+		path := ce.Path.String()
+		if msg, ok := l.valueProblem(reg, s, path, ce.Secret); ok {
+			return usageBind(channel, path, l.name(channel, path)+": "+msg+l.origin(ce.Source), err)
+		}
+	}
+	return l.bind(channel, err)
+}
+
+// valueProblem coerces the value reg holds at path into the type of the field of s that reads
+// it, as a command-line value of that type, and words the failure. ok is false when there is no
+// such field or value, the field's type is not a number, bool, time or duration (or a list of
+// them), or the value coerces.
+func (l channelLabels) valueProblem(reg *recon.Registry, s reflect.Value, path string, secret bool) (string, bool) {
+	if s.Kind() != reflect.Struct {
+		return "", false
+	}
+	for f := range s.Type().Fields() {
+		if reconKey(f.Tag.Get("recon")) != path || !scalarShaped(f.Type) {
+			continue
+		}
+		val, found, err := reg.Get(path)
+		if err != nil || !found {
+			return "", false
+		}
+		ts := tagTimeSpec(f.Tag)
+		ts.clock = l.view.clockRef()
+		cerr := coerceTime(reflect.New(f.Type).Elem(), channelTexts(val, f.Tag, f.Type), ts)
+		if _, ok := errors.AsType[*coerceError](cerr); !ok {
+			return "", false
+		}
+		return coerceMessage(cerr, secret), true
+	}
+	return "", false
+}
+
+// scalarShaped reports whether t, or the element of a list t, is a number, bool, time or
+// duration that reads its text as the command line does.
+func scalarShaped(t reflect.Type) bool {
+	t = derefType(t)
+	if t.Kind() == reflect.Slice && (t.Elem().Kind() != reflect.Uint8 || t.Name() == "") {
+		t = derefType(t.Elem())
+	}
+	if t == timeType || t == durationType {
+		return true
+	}
+	if reflect.PointerTo(t).Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) {
+		return false
+	}
+	switch t.Kind() {
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return true
+	}
+	return false
+}
+
+// channelTexts is val as the text items a command-line value of type t would hold: a list's
+// elements, or a string a list field reads split on its separator, else the one value.
+func channelTexts(val recon.Value, tag reflect.StructTag, t reflect.Type) []string {
+	if items, err := val.AsSlice(); err == nil && val.Kind() == recon.SliceKind {
+		out := make([]string, len(items))
+		for i, it := range items {
+			out[i] = channelString(it)
+		}
+		return out
+	}
+	text := channelString(val)
+	if derefType(t).Kind() == reflect.Slice {
+		return listItems(tag, "[]", []string{text})
+	}
+	return []string{text}
 }
 
 // checkEnvMaps rejects an environment value for a map input that is not key=value pairs, as

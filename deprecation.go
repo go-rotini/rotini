@@ -129,8 +129,8 @@ func flagDeprecations(fd FlagDef, used []string) []Deprecation {
 }
 
 // quietParse tokenizes argv against chain the way the parser does, on a copy of the chain with
-// value acquisition off, so asking what argv says never reads a file or stdin. nil when argv
-// does not parse.
+// value acquisition and glob expansion off, so asking what argv says never reads a file, a
+// directory or stdin. nil when argv does not parse.
 func quietParse(chain []Command, argv []string) *parsedInputs {
 	store, err := quietTokens(chain, argv)
 	if err != nil {
@@ -141,6 +141,12 @@ func quietParse(chain []Command, argv []string) *parsedInputs {
 
 // quietTokens is quietParse that also returns the parse error.
 func quietTokens(chain []Command, argv []string) (*parsedInputs, error) {
+	return parseArgvTokens(quietChain(chain), argv, argvAcq{})
+}
+
+// quietChain is a copy of chain whose flags and arguments acquire nothing and whose arguments
+// expand no globs.
+func quietChain(chain []Command) []Command {
 	quiet := make([]Command, len(chain))
 	for i, frame := range chain {
 		flags := make([]FlagDef, len(frame.Flags))
@@ -152,12 +158,13 @@ func quietTokens(chain []Command, argv []string) (*parsedInputs, error) {
 		args := make([]ArgDef, len(frame.Arguments))
 		for j, ad := range frame.Arguments {
 			ad.From = nil
+			ad.Glob = false
 			args[j] = ad
 		}
 		frame.Arguments = args
 		quiet[i] = frame
 	}
-	return parseArgvTokens(quiet, argv, argvAcq{})
+	return quiet
 }
 
 // argumentDeprecations reports each deprecated argument of the leaf that argv supplied a value

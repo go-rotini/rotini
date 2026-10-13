@@ -171,7 +171,7 @@ func TestChannelPaths_checked(t *testing.T) {
 		t.Errorf("a relative file in the run's directory = %v", err)
 	}
 	_, err := exBind(t, work, conf, "", []string{"HOME=" + home, "APP_LOG=/nonexistent"})
-	if err == nil || err.Error() != `APP_LOG: no such file: "/nonexistent"` || !errors.Is(err, ErrUsage) {
+	if err == nil || err.Error() != `environment variable APP_LOG: no such file: "/nonexistent"` || !errors.Is(err, ErrUsage) {
 		t.Errorf("missing env file = %v", err)
 	}
 	_, err = exBind(t, work, conf, "", []string{"HOME=" + home, "APP_LOG=" + work})

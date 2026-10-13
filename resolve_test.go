@@ -303,3 +303,15 @@ func TestResolve_agreesWithTheParserOnFlagValues(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveChain_discoveryTokenNotAPath(t *testing.T) {
+	def := Definition{Name: "acme", Handler: "App", PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}}
+	for _, tok := range []string{"x/../evil", `a\b`, ".", "..", "/abs", "a\x00b"} {
+		if _, plugin := resolveChain(def, []string{tok}); plugin != nil {
+			t.Errorf("%q dispatched to %q, want a positional", tok, plugin.Def.Binary)
+		}
+	}
+	if _, plugin := resolveChain(def, []string{"good-name.v2"}); plugin == nil {
+		t.Error("a plain token stopped dispatching")
+	}
+}

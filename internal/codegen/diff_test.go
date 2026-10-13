@@ -720,7 +720,7 @@ func TestDiff_argumentRules(t *testing.T) {
 		},
 		{
 			name: "became variadic", old: args("{name: a, schema: {type: string}}"), new: args("{name: a, schema: {type: \"[]string\"}}"),
-			want: []string{"possibly_breaking ARGUMENT_VARIADIC_ADDED app <a>", "safe INPUT_TYPE_WIDENED app <a>", "breaking INPUT_KIND_CHANGED app <a>"},
+			want: []string{"possibly_breaking ARGUMENT_VARIADIC_ADDED app <a>", "breaking INPUT_KIND_CHANGED app <a>"},
 		},
 		{
 			name: "passthrough added", old: args("{name: a, schema: {type: \"[]string\"}}"), new: args("{name: a, passthrough: true, schema: {type: \"[]string\"}}"),

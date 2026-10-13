@@ -1,0 +1,6 @@
+-- in --
+a = 'x' # c
+-- op --
+set a "y"
+-- out --
+a = 'y' # c

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -161,13 +162,32 @@ func parseByteSize(s string) (int64, error) {
 	if !ok {
 		return 0, fmt.Errorf("%q has an unknown unit %q; use B, K/KB, M/MB, G/GB, T/TB, P/PB, E/EB (decimal) or Ki, Mi, Gi, Ti, Pi, Ei (binary)", s, unit)
 	}
+	return byteCount(s, number, mult)
+}
+
+// byteCount is the number of bytes number (digits, with an optional fraction) of a unit of
+// mult bytes makes, for parseByteSize reading s. A whole number is counted exactly; a fraction
+// is rounded to the nearest byte.
+func byteCount(s, number string, mult float64) (int64, error) {
+	tooLarge := fmt.Errorf("%q is too large to count in bytes", s)
+	if !strings.Contains(number, ".") {
+		n, err := strconv.ParseUint(number, 10, 64)
+		if err != nil {
+			return 0, tooLarge // number is digits only, so the error is its range
+		}
+		hi, lo := bits.Mul64(n, uint64(mult))
+		if hi != 0 || lo > math.MaxInt64 {
+			return 0, tooLarge
+		}
+		return int64(lo), nil
+	}
 	n, err := strconv.ParseFloat(number, 64)
 	if err != nil {
-		return 0, fmt.Errorf("%q is not a size: %w", s, err)
+		return 0, tooLarge // number is a plain decimal, so the error is its range
 	}
 	bytes := math.Round(n * mult)
-	if bytes > math.MaxInt64 {
-		return 0, fmt.Errorf("%q is too large to count in bytes", s)
+	if bytes >= 1<<63 { // float64(math.MaxInt64) rounds up to 2^63, which int64 can't hold
+		return 0, tooLarge
 	}
 	return int64(bytes), nil
 }
@@ -302,12 +322,11 @@ func parseTimeLayout(s, layout string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	switch layout {
 	case layoutUnix:
-		secs, err := strconv.ParseFloat(s, 64)
-		if err != nil {
+		t, ok := parseUnixSeconds(s)
+		if !ok {
 			return time.Time{}, errors.New("want a Unix timestamp in seconds, e.g. 1759104000")
 		}
-		whole, frac := math.Modf(secs)
-		return time.Unix(int64(whole), int64(math.Round(frac*1e9))).UTC(), nil
+		return t, nil
 	case layoutUnixMilli:
 		ms, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
@@ -320,6 +339,34 @@ func parseTimeLayout(s, layout string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("write it as %s", layout)
 	}
 	return t, nil
+}
+
+// parseUnixSeconds reads a Unix timestamp in seconds written as [-]digits[.digits], the
+// fraction rounded to the nanosecond. ok is false for any other text and for seconds outside
+// int64.
+func parseUnixSeconds(s string) (time.Time, bool) {
+	digits := strings.TrimPrefix(s, "-")
+	whole, frac, _ := strings.Cut(digits, ".")
+	if whole == "" || skipDigits(whole, 0) != len(whole) || skipDigits(frac, 0) != len(frac) ||
+		(strings.Contains(digits, ".") && frac == "") {
+		return time.Time{}, false
+	}
+	secs, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	var nanos int64
+	if frac != "" {
+		f, err := strconv.ParseFloat("0."+frac, 64)
+		if err != nil {
+			return time.Time{}, false
+		}
+		nanos = int64(math.Round(f * 1e9))
+	}
+	if len(digits) < len(s) {
+		secs, nanos = -secs, -nanos
+	}
+	return time.Unix(secs, nanos).UTC(), true
 }
 
 // layoutLabel names a layout's kind of value for an error message.

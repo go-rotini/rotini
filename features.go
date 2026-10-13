@@ -127,7 +127,7 @@ type profileHooks struct {
 }
 
 type envFileHooks struct {
-	view func(b *InputReader, chain []Command, v reflect.Value, overrides map[string]string, waived bool, view *osView) (*osView, error)
+	view func(b *InputReader, chain []Command, v reflect.Value, overrides map[string]pathOverride, waived bool, view *osView) (*osView, error)
 }
 
 type fallbackHooks struct {
@@ -151,7 +151,7 @@ type objectHooks struct {
 	bind func(f reflect.Value, raw []string, fd FlagDef, fs *featureSet) error
 }
 
-// mapValidator checks a decoded document; *recon.JSONSchemaValidator is one.
+// mapValidator checks a decoded document.
 type mapValidator interface{ Validate(m map[string]any) error }
 
 type schemaHooks struct {

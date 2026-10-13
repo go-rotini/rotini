@@ -81,7 +81,8 @@ func FileMode(perm fs.FileMode) OutputOption {
 // An existing regular file is replaced only with [Overwrite](true); otherwise CreateOutput
 // returns a usage error that matches [fs.ErrExist]. The check is repeated before the rename,
 // but a file created in between is still replaced. A symbolic link is followed, so the file
-// it points to is replaced and the link is kept. Replacing a file gives it a new identity: hard
+// it points to is replaced and the link is kept; a link to a file that doesn't exist is a usage
+// error. Replacing a file gives it a new identity: hard
 // links to the old one, its owner and its extended attributes are not carried over. On Windows,
 // the rename is retried briefly while another program holds the file open, and a read-only
 // file cannot be replaced.
@@ -106,11 +107,16 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	info, err := os.Lstat(target)
 	exists := err == nil
 	if exists && info.Mode()&fs.ModeSymlink != 0 {
-		if resolved, rerr := filepath.EvalSymlinks(target); rerr == nil {
-			target = resolved
-			info, err = os.Stat(target)
-			exists = err == nil
+		resolved, rerr := filepath.EvalSymlinks(target)
+		if errors.Is(rerr, fs.ErrNotExist) {
+			return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %s is a symbolic link to a file that doesn't exist", quotePath(path)), err: rerr})
 		}
+		if rerr != nil {
+			return nil, &pathError{msg: fmt.Sprintf("could not follow output file %s", quotePath(path)), err: rerr, detail: true}
+		}
+		target = resolved
+		info, err = os.Stat(target)
+		exists = err == nil
 	}
 	switch {
 	case exists && info.IsDir():

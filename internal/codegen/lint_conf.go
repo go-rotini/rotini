@@ -67,6 +67,7 @@ var confLints = []func(*Conf) []error{
 	lintSchemaDirs,
 	lintDiffAccept,
 	lintFeatureKeys,
+	lintPackageNames,
 }
 
 // lintFeatureSection rejects `section`, the man page section number, on any feature but man,

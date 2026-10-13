@@ -1023,3 +1023,27 @@ func TestComplete_followsTheParsersFlagValueRule(t *testing.T) {
 		t.Errorf("complete --color=n = %v, want [--color=never]", got)
 	}
 }
+
+// An enum that ignores case completes a partial word typed in any case; one that doesn't stays
+// case-sensitive.
+func TestComplete_enumIgnoreCase(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Enum: []string{"fast", "slow", "Safe"}, IgnoreCase: true},
+		{Name: "list", Identifiers: []string{"--list"}, Type: "[]string", Separator: ",", Enum: []string{"fast", "slow"}, IgnoreCase: true},
+		{Name: "strict", Identifiers: []string{"--strict"}, Type: "string", Enum: []string{"fast", "slow"}},
+	}}
+	for _, c := range []struct {
+		words []string
+		want  []string
+	}{
+		{[]string{"--mode", "S"}, []string{"slow", "Safe"}},
+		{[]string{"--mode", "SL"}, []string{"slow"}},
+		{[]string{"--mode", "s"}, []string{"slow", "Safe"}},
+		{[]string{"--list", "FAST,S"}, []string{"FAST,slow"}},
+		{[]string{"--strict", "S"}, nil},
+	} {
+		if got := complete(def, c.words, nil, nil); !reflect.DeepEqual(got, c.want) && (len(got) > 0 || len(c.want) > 0) {
+			t.Errorf("complete(%q) = %q, want %q", c.words, got, c.want)
+		}
+	}
+}

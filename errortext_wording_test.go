@@ -79,7 +79,7 @@ func TestUsageErrorWording(t *testing.T) {
 		want string
 	}{
 		{"a required env input names every variable", nil, "environment variable APP_REGION (or REGION) is required"},
-		{"env coercion names the variable set", []string{"REGION=us", "APP_PORT=abc"}, "environment variable APP_PORT: expected int"},
+		{"env coercion names the variable set", []string{"REGION=us", "APP_PORT=abc"}, `environment variable APP_PORT: "abc" is not a valid integer`},
 		{"an env map key must not be whitespace", []string{"APP_REGION=us", "APP_LABELS= =v"}, `environment variable APP_LABELS needs a key before "=" (got "=v")`},
 	}
 	for _, tc := range env {
@@ -93,7 +93,7 @@ func TestUsageErrorWording(t *testing.T) {
 	config := []struct {
 		name, file, want string
 	}{
-		{"config coercion names the key and file", "api:\n  port: abc\n", "config key api.port: expected int (from configuration file %s)"},
+		{"config coercion names the key and file", "api:\n  port: abc\n", `config key api.port: "abc" is not a valid integer (from configuration file %s)`},
 		{"a config constraint names the key and file", "api:\n  port: 500\n", "config key api.port must be <= 100 (got 500) (from configuration file %s)"},
 		{"a config enum names the key and file", "tier: bronze\n", `invalid value "bronze" for config key tier (one of: gold, silver) (from configuration file %s)`},
 	}

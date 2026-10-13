@@ -23,6 +23,7 @@ type shell struct {
 }
 
 var shells = []shell{
+	{"bash3", []string{"bash", "drivers/bash.sh", "completion_bash.sh", "cases.txt"}},
 	{"bash4", []string{"bash", "drivers/bash.sh", "completion_bash.sh", "cases.txt"}},
 	{"bash5", []string{"bash", "drivers/bash.sh", "completion_bash.sh", "cases.txt"}},
 	{"zsh", []string{"zsh", "-f", "drivers/zsh.zsh", "completion_zsh.zsh", "cases.txt"}},
@@ -53,37 +54,14 @@ func TestCompletionShells(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	work := t.TempDir()
-	app := filepath.Join(work, "src")
-	if err := os.CopyFS(app, os.DirFS(filepath.Join(src, "app"))); err != nil {
-		t.Fatal(err)
-	}
-	gomod := "module example.com/shells\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\n" +
-		"replace github.com/go-rotini/rotini => " + repoRoot(t) + "\n"
-	if err := os.WriteFile(filepath.Join(app, "go.mod"), []byte(gomod), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	goenv := []string{"GOWORK=off", "GOFLAGS=-mod=mod"}
-	mustRun(t, app, nil, rotiniBin(t), "generate", "cmd/app/.rotini.spec.yaml", "--config", "cmd/app/.rotini.conf.yaml")
-	mustRun(t, app, goenv, "go", "mod", "tidy")
-
-	scripts := map[string]string{}
-	for script, file := range map[string]string{
-		"bash": "completion_bash.sh", "zsh": "completion_zsh.zsh", "fish": "completion_fish.fish",
-		"powershell": "completion_powershell.ps1", "nushell": "completion_nushell.nu",
-	} {
-		body, err := os.ReadFile(filepath.Join(app, "internal", "cmd", "app", "renders", "completion_"+script+".txt"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		scripts[file] = string(body)
-	}
+	linux := []string{"GOOS=linux", "GOARCH=" + arch, "CGO_ENABLED=0"}
+	work := t.TempDir()
+	scripts := buildShellsFixture(t, src, "app", "app", work, goenv, linux)
 	cases, err := os.ReadFile(filepath.Join(src, "cases.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	linux := []string{"GOOS=linux", "GOARCH=" + arch, "CGO_ENABLED=0"}
-	mustRun(t, app, append(goenv, linux...), "go", "build", "-o", filepath.Join(work, "bin", "app"), "./cmd/app")
 	stageShells(t, work, src, scripts, string(cases))
 
 	// The same scripts against a binary built entirely with the previous release: its own code
@@ -100,14 +78,55 @@ func TestCompletionShells(t *testing.T) {
 	skewCases := keepCases(string(cases), "commands", "flags", "enum", "file-extensions", "directory", "none-with-message", "completer", "sub-command-enum")
 	stageShells(t, skew, src, scripts, skewCases)
 
+	// A program whose name has a dash, which no shell variable name may hold.
+	dashed := t.TempDir()
+	dashedScripts := buildShellsFixture(t, src, "dashed", "my-app", dashed, goenv, linux)
+	dashedCases, err := os.ReadFile(filepath.Join(src, "dashed-cases.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageShells(t, dashed, src, dashedScripts, string(dashedCases))
+
 	for _, sh := range shells {
 		t.Run(sh.name, func(t *testing.T) {
 			image := "rotini-completion-" + sh.name
 			mustRun(t, src, nil, "docker", "build", "--quiet", "--tag", image, "--file", filepath.Join("images", sh.name+".Dockerfile"), "images")
 			runShell(t, sh, image, work, string(cases), filepath.Join(src, "want", sh.name+".txt"))
 			runShell(t, sh, image, skew, skewCases, filepath.Join(src, "want", "skew-"+sh.name+".txt"))
+			runShell(t, sh, image, dashed, string(dashedCases), filepath.Join(src, "want", "dashed-"+sh.name+".txt"))
 		})
 	}
+}
+
+// buildShellsFixture generates the CLI named name from testdata/shells/<fixture> with this
+// tree's rotini, builds it for Linux into dir/bin, and returns its completion scripts by the file
+// names the drivers read.
+func buildShellsFixture(t *testing.T, src, fixture, name, dir string, goenv, linux []string) map[string]string {
+	t.Helper()
+	app := filepath.Join(dir, "src")
+	if err := os.CopyFS(app, os.DirFS(filepath.Join(src, fixture))); err != nil {
+		t.Fatal(err)
+	}
+	gomod := "module example.com/shells\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\n" +
+		"replace github.com/go-rotini/rotini => " + repoRoot(t) + "\n"
+	if err := os.WriteFile(filepath.Join(app, "go.mod"), []byte(gomod), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, app, nil, rotiniBin(t), "generate", "cmd/"+name+"/.rotini.spec.yaml", "--config", "cmd/"+name+"/.rotini.conf.yaml")
+	mustRun(t, app, goenv, "go", "mod", "tidy")
+	scripts := map[string]string{}
+	for script, file := range map[string]string{
+		"bash": "completion_bash.sh", "zsh": "completion_zsh.zsh", "fish": "completion_fish.fish",
+		"powershell": "completion_powershell.ps1", "nushell": "completion_nushell.nu",
+	} {
+		body, err := os.ReadFile(filepath.Join(app, "internal", "cmd", name, "renders", "completion_"+script+".txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		scripts[file] = string(body)
+	}
+	mustRun(t, app, append(goenv, linux...), "go", "build", "-o", filepath.Join(dir, "bin", name), "./cmd/"+name)
+	return scripts
 }
 
 // skewRelease is the release whose binary the skew run pairs with this tree's completion scripts.

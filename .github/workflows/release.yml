@@ -17,16 +17,34 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.semrel.outputs.version }}
+    env:
+      TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
+      # Release exactly the commit CI tested.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
+      # When main has moved past the tested commit, the newer commit's own CI run releases it.
+      - name: Check the tested commit is still the tip of main
+        id: tip
+        run: |
+          tip=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$tip" = "$TESTED_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main is at $tip, past the tested commit $TESTED_SHA; its own CI run releases it"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        if: steps.tip.outputs.current == 'true'
         with:
           go-version-file: go.mod
 
       - name: Determine version
+        if: steps.tip.outputs.current == 'true'
         uses: go-semantic-release/action@2e9dc4247a6004f8377781bef4cb9dad273a741f # v1
         id: semrel
         with:
@@ -64,6 +82,7 @@ jobs:
         if: steps.semrel.outputs.version != ''
         run: |
           gh release create v${{ steps.semrel.outputs.version }} \
+            --target "$TESTED_SHA" \
             --draft \
             --generate-notes \
             sbom.spdx.json

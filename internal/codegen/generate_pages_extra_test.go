@@ -121,7 +121,7 @@ func TestTopics_resolverAndPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodes := flattenFeature(gp, manFeatureDesc)
-	block := buildFeatureBlock(nodes, "", manFeatureDesc, false, make([]string, len(nodes)))
+	block := buildFeatureBlock(nodes, "", manFeatureDesc, false, make([]string, len(nodes)), false)
 	var cases []string
 	for _, c := range block.Cases {
 		cases = append(cases, c.PathsLiteral)

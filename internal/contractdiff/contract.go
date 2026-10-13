@@ -215,6 +215,9 @@ var errNotContract = errors.New("not a rotini contract")
 func decode(which string, raw []byte) (*document, error) {
 	var d document
 	if err := json.Unmarshal(raw, &d); err != nil {
+		if _, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
+			return nil, fmt.Errorf("the %s contract has the wrong shape: %w", which, err)
+		}
 		return nil, fmt.Errorf("the %s contract is not JSON: %w", which, err)
 	}
 	if d.Format != format {

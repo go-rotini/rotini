@@ -247,3 +247,26 @@ func TestSignalExitCode_mapping(t *testing.T) {
 		}
 	}
 }
+
+// teardownSignal raises SIGUSR1 in PostRun, after the last forward hook.
+type teardownSignal struct{ NoHooks }
+
+func (teardownSignal) Run(context.Context, *Context) {}
+func (teardownSignal) PostRun(ctx context.Context, _ *Context) {
+	_ = syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+	}
+}
+
+// A signal that arrives during teardown still ends the run with 128+n.
+func TestDefaultSignals_duringTeardownSetsCode(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App"}
+	p := NewProgramFunc(def, func(string) (Handler, bool) { return teardownSignal{}, true }).
+		WithStdout(&bytes.Buffer{}).WithStderr(&bytes.Buffer{}).WithSignals(syscall.SIGUSR1)
+	code, err := p.Run(nil)
+	if want := 128 + int(syscall.SIGUSR1); code != want || err != nil {
+		t.Errorf("code = %d, err = %v; want %d and no error", code, err, want)
+	}
+}

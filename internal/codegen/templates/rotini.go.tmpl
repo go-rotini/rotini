@@ -123,6 +123,9 @@ type {{.Prefix}}Inputs struct {
 {{- with .UsageFunc}}
 {{.}}
 {{end}}
+{{- with .CanonicalPath}}
+{{.}}
+{{end}}
 {{- with .InputSettings}}
 {{.}}
 {{end}}
@@ -208,7 +211,7 @@ const ManSection = "{{.Section}}"
 // (command names or aliases; no arguments for the root command). It returns an
 // error when path does not match a known command.
 func {{.Resolver}}(path ...string) (string, error) {
-	switch strings.Join(path, " ") {
+	switch {{.PathSwitch}} {
 {{- range .Cases}}
 	case {{.PathsLiteral}}:
 		return {{.Var}}, nil

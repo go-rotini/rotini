@@ -164,3 +164,106 @@ func TestLocalFlag_completionHint(t *testing.T) {
 		t.Errorf("--dsn= under migrate: hint %q, want none", got.Hint.Kind)
 	}
 }
+
+// localRulesDef has a root whose local flags carry every presence rule (required, groups and
+// dependencies) above a sub-command, plus a cascading --level the rules also name.
+func localRulesDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true, Local: true},
+			{Name: "a", Identifiers: []string{"--a"}, Type: "bool", Local: true},
+			{Name: "b", Identifiers: []string{"--b"}, Type: "bool", Local: true},
+			{Name: "c", Identifiers: []string{"--c"}, Type: "bool", Local: true},
+			{Name: "x", Identifiers: []string{"--x"}, Type: "bool"},
+			{Name: "y", Identifiers: []string{"--y"}, Type: "bool"},
+			{Name: "level", Identifiers: []string{"--level"}, Type: "string"},
+		},
+		FlagGroups: []FlagGroup{
+			{Kind: FlagGroupOneOf, Flags: []string{"a", "b"}},
+			{Kind: FlagGroupMutuallyExclusive, Flags: []string{"c", "x", "y"}},
+		},
+		FlagDependencies: []FlagDependency{{When: "level", Requires: []string{"c"}}},
+		Commands:         []CommandDef{{Name: "sub", Handler: "AppSub"}},
+	}
+}
+
+type localRulesApp struct {
+	Flags struct {
+		Token string `rotini:"token"`
+		A     bool   `rotini:"a"`
+		B     bool   `rotini:"b"`
+		C     bool   `rotini:"c"`
+		X     bool   `rotini:"x"`
+		Y     bool   `rotini:"y"`
+		Level string `rotini:"level"`
+	}
+}
+
+type localRulesRoot struct{ App localRulesApp }
+
+type localRulesSub struct {
+	App    localRulesApp
+	AppSub struct{}
+}
+
+// A local flag's required, group and dependency rules apply only when its command is run: under
+// a sub-command, where the flag can't be given, they are left out, and every reader agrees.
+func TestLocalFlag_rulesOnlyWhenRun(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string // "" = valid
+	}{
+		{[]string{"sub"}, ""},
+		{[]string{"--level", "v", "sub"}, ""},
+		{[]string{"sub", "--x", "--y"}, "mutually exclusive"},
+		{[]string{}, "missing required input: --token"},
+		{[]string{"--token", "t"}, "exactly one of --a, --b is required"},
+		{[]string{"--token", "t", "--a", "--level", "v"}, "flag --c is required when --level is set"},
+		{[]string{"--token", "t", "--a", "--level", "v", "--c"}, ""},
+	} {
+		rtx := NewContextFor(localRulesDef(), tc.argv)
+		if len(tc.argv) > 0 && slices.Contains(tc.argv, "sub") {
+			checkLocalRules[localRulesSub](t, rtx, tc.argv, tc.want)
+		} else {
+			checkLocalRules[localRulesRoot](t, rtx, tc.argv, tc.want)
+		}
+	}
+}
+
+func checkLocalRules[T any](t *testing.T, rtx *Context, argv []string, want string) {
+	t.Helper()
+	check := func(api string, err error) {
+		t.Helper()
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%s %q: %v, want valid", api, argv, err)
+		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+			t.Errorf("%s %q: %v, want %q", api, argv, err, want)
+		}
+	}
+	_, err := rtx.Inputs[T]()
+	check("Inputs", err)
+	in, rep, err := rtx.InputsWithReport[T]()
+	check("InputsWithReport", err)
+	if err == nil {
+		check("InputReport.Validate", rep.Validate())
+	}
+	check("CheckInputs", rtx.CheckInputs(in, PresenceOf(in)))
+}
+
+// Completion doesn't list an ancestor's local flag as required, nor a cascading flag because a
+// group or dependency names a local one.
+func TestLocalFlag_completionRequiredFirst(t *testing.T) {
+	def := localRulesDef()
+	def.FlagGroups = []FlagGroup{{Kind: FlagGroupAtLeastOne, Flags: []string{"a", "y"}}}
+	def.FlagDependencies = []FlagDependency{{When: "a", Requires: []string{"x"}}}
+	got := complete(def, []string{"sub", "--"}, nil, nil)
+	want := []string{"--level", "--x", "--y"}
+	if !slices.Equal(got, want) {
+		t.Errorf("sub --: %q, want %q in plain order", got, want)
+	}
+	if got := complete(def, []string{"--"}, nil, nil); len(got) == 0 || got[0] != "--a" {
+		t.Errorf("root --: %q, want the required flags first", got)
+	}
+}

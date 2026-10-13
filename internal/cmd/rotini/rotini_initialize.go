@@ -3,6 +3,7 @@ package rotini
 import (
 	"context"
 	"fmt"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,13 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	args := inputs.RotiniInitialize.Arguments
 	flags := inputs.RotiniInitialize.Flags
+
+	// The name becomes the generated Go package's name, which a keyword can't be, and main
+	// can't be imported.
+	if token.IsKeyword(args.Name) || args.Name == "main" {
+		rtx.HaltWith(rotini.UsageError(fmt.Errorf("invalid CLI name %q: it would name the generated Go package, and %s; choose another name", args.Name, reservedWhy(args.Name))))
+		return
+	}
 
 	version := rtx.Version()
 	opt := codegen.InitOptions{Format: flags.Format, Template: flags.Template, Force: flags.Force}
@@ -65,6 +73,13 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if !requiresRuntime(".") {
 		rtx.RecordWarning(fmt.Errorf("go.mod does not require %s yet; run `go get %s` before building ./cmd/%s", runtimeModule, runtimeModule, args.Name))
 	}
+}
+
+func reservedWhy(name string) string {
+	if name == "main" {
+		return "a package named main can't be imported"
+	}
+	return name + " is a Go keyword"
 }
 
 // seedLines lists the spec and conf of every CLI init wrote, the named one first.

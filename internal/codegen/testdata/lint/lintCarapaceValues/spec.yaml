@@ -1,0 +1,16 @@
+# The carapace spec runs a value starting with $ as a macro and splits a value or message at
+# " ||| " into modifiers, so those are left out of it. A message with unbalanced parentheses
+# still fits inside $message(...).
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: dir
+      identifiers: [--dir]
+      schema: { type: string, enum: [$HOME, /tmp, "a ||| b"] }
+    - name: name
+      identifiers: [--name]
+      schema: { type: string, complete: { message: "a name (no spaces)) please" } }
+    - name: mode
+      identifiers: [--mode]
+      schema: { type: string, complete: { message: "one ||| two" } }

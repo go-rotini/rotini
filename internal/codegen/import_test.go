@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go/build"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-rotini/yaml"
 )
@@ -93,8 +96,7 @@ func TestImport(t *testing.T) {
 	for _, want := range []string{
 		"[info] acme: the root is rootCmd",
 		"[lossy] acme deploy: --at is a time flag",
-		`[lossy] acme: example "# a comment" dropped: it doesn't run acme`,
-		`[lossy] acme: example "other run" dropped: it doesn't run acme`,
+		`[lossy] acme: 2 examples dropped, as they don't run acme: "# a comment", "other run"`,
 		`[lossy] acme: example "acme deploy nope" dropped: it doesn't parse: `,
 	} {
 		if !strings.Contains(notes, want) {
@@ -372,5 +374,171 @@ func TestExplainBuild(t *testing.T) {
 	if !errors.Is(err, fail) || !strings.Contains(err.Error(), "rotini import runs with GOWORK=off") ||
 		!strings.Contains(err.Error(), "import from a package that builds from its own module") {
 		t.Errorf("in a workspace: %v", err)
+	}
+}
+
+// TestImportRefusesGoNameClashes pins that a program whose names make one Go name is refused
+// before anything is written.
+func TestImportRefusesGoNameClashes(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/acme\n\ngo 1.26\n")
+	t.Chdir(dir)
+	restore := importRunner
+	t.Cleanup(func() { importRunner = restore })
+	importRunner = func(context.Context, string, ImportOptions) (*importResult, []importNote, error) {
+		res, err := readImportResult(strings.NewReader(`{"format": "rotini-import/1", "command": {"name": "acme",
+			"flags": [{"name": "x-y", "identifiers": ["--x-y"], "schema": {"type": "string"}}, {"name": "x_y", "identifiers": ["--x_y"], "schema": {"type": "string"}}],
+			"commands": [{"name": "sub-cmd"}, {"name": "sub_cmd"}]}}`))
+		return res, nil, err
+	}
+	_, err := NewProcessor("1.4.0").Import(context.Background(), ImportOptions{Package: "."})
+	if err == nil || !strings.Contains(err.Error(), "can't be imported") || !strings.Contains(err.Error(), `flag "x_y"`) || !strings.Contains(err.Error(), "AcmeSubCmd") {
+		t.Fatalf("err = %v, want the clashes refused", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cmd")); !os.IsNotExist(err) {
+		t.Error("the refused import wrote files")
+	}
+}
+
+// TestYAMLString_quotesIndicators pins that a value starting with a YAML indicator is quoted,
+// since other YAML parsers reject it plain.
+func TestYAMLString_quotesIndicators(t *testing.T) {
+	for _, s := range []string{",", ",x", "@x", "`x", "%x", "[x", "{x", "#x", "&x", "*x", "!x", "|x", ">x", `"x`, "'x"} {
+		if got := yamlString(s, 0); got == s {
+			t.Errorf("yamlString(%q) left it plain", s)
+		}
+	}
+	for _, s := range []string{"x,y", "a@b", "-x", "plain"} {
+		if got := yamlString(s, 0); got != s {
+			t.Errorf("yamlString(%q) = %q, want it plain", s, got)
+		}
+	}
+}
+
+// TestYAMLString_quotesYAML11Typed pins that strings YAML 1.1 readers take as numbers or
+// timestamps are quoted, while look-alikes they read as strings stay plain.
+func TestYAMLString_quotesYAML11Typed(t *testing.T) {
+	for _, s := range []string{"1:20", "-1:20:30", "190:20:30.15", "2001-12-14", "2001-12-14t21:59:43.10-05:00",
+		"2001-12-14 21:59:43.10 -5", "1_000", "0b101", "0x_ff", "+12", "017", ".inf", "-.Inf", ".NaN", "1_0.5"} {
+		if got := yamlString(s, 0); got == s {
+			t.Errorf("yamlString(%q) left it plain", s)
+		}
+	}
+	for _, s := range []string{"12:30pm", "1.2.3", "v1:20", "2001-12-14x", "a:b", "1:2:3:x", "host:8080"} {
+		if got := yamlString(s, 0); got != s {
+			t.Errorf("yamlString(%q) = %q, want it plain", s, got)
+		}
+	}
+}
+
+// TestImportTestArgs_vetOff pins that the import's go test runs without vet, which before Go
+// 1.23 can't see the overlaid test file and fails the import.
+func TestImportTestArgs_vetOff(t *testing.T) {
+	r := &importRun{modfile: "go.mod", opts: ImportOptions{Package: "./cmd", Tags: "x"}}
+	args := r.testArgs("overlay.json", "TestRotiniImport_1", time.Minute)
+	if !slices.Contains(args, "-vet=off") || args[len(args)-1] != "./cmd" || !slices.Contains(args, "-overlay") {
+		t.Errorf("go test args = %q, want -vet=off with the overlay, ending in the package", args)
+	}
+}
+
+// TestRootImports pins that a --root expression can use the package's own imports: the import
+// test repeats the ones it names, under the names the package uses, and none it doesn't name
+// or that the package's own declarations shadow.
+func TestRootImports(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "a.go", "package cmd\n\nimport (\n\t\"github.com/cli/cli/v2/pkg/cmd/factory\"\n\tghroot \"github.com/cli/cli/v2/pkg/cmd/root\"\n\t\"os\"\n)\n\nvar config = 1\n")
+	writeTestFile(t, dir, "b.go", "package cmd\n\nimport yaml \"gopkg.in/yaml.v3\"\n")
+	writeTestFile(t, dir, "c_test.go", "package cmd\n\nimport \"net/http\"\n")
+	got, _ := rootImports(dir, `ghroot.NewCmdRoot(factory.New("x"), config.V, http.X, yaml.Y, os.Args)`, nil, nil)
+	want := "\n\tfactory \"github.com/cli/cli/v2/pkg/cmd/factory\"\n\tghroot \"github.com/cli/cli/v2/pkg/cmd/root\"\n\tos \"os\"\n\tyaml \"gopkg.in/yaml.v3\""
+	if got != want {
+		t.Errorf("rootImports = %q, want %q", got, want)
+	}
+	for path, want := range map[string]string{"gopkg.in/yaml.v3": "yaml", "github.com/a/b/v2": "b", "github.com/mattn/go-isatty": "isatty", "os": "os"} {
+		if got := defaultImportName(path); got != want {
+			t.Errorf("defaultImportName(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// TestRootImports_ambiguousConstrainedRenamed pins that a name the package's files import
+// from different paths is left out and reported, that a file the build excludes doesn't
+// count, and that a package whose name isn't the one its path suggests is found by its name.
+func TestRootImports_ambiguousConstrainedRenamed(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "a.go", "package cmd\n\nimport (\n\t\"log\"\n\t\"example.com/cfg\"\n)\n")
+	writeTestFile(t, dir, "b.go", "package cmd\n\nimport log \"example.com/mylog\"\n")
+	writeTestFile(t, dir, "c_other.go", "//go:build ignore\n\npackage cmd\n\nimport cfg \"example.com/othercfg\"\n")
+	writeTestFile(t, dir, "d.go", "package cmd\n\nimport \"example.com/go-weird\"\n")
+	match := build.Default.MatchFile
+	names := func(paths []string) map[string]string {
+		out := map[string]string{}
+		for _, p := range paths {
+			if p == "example.com/go-weird" {
+				out[p] = "strange"
+			}
+		}
+		return out
+	}
+	got, ambiguous := rootImports(dir, `cfg.Root(log.X, strange.Y)`, match, names)
+	if want := "\n\tcfg \"example.com/cfg\"\n\tstrange \"example.com/go-weird\""; got != want {
+		t.Errorf("rootImports = %q, want %q", got, want)
+	}
+	if want := []string{"log (example.com/mylog, log)"}; !slices.Equal(ambiguous, want) {
+		t.Errorf("ambiguous = %q, want %q", ambiguous, want)
+	}
+}
+
+// TestImport_vendorModWritesNothing pins that a repository keeping its module in vendor.mod
+// imports with the module read from vendor.mod, and that no go.mod or go.sum is ever put into
+// the program's tree, in a dry run or a real one.
+func TestImport_vendorModWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "vendor.mod", "module example.com/acme\n\ngo 1.26\n")
+	writeTestFile(t, dir, "vendor.sum", "")
+	t.Chdir(dir)
+	fakeImporter(t)
+	fake := importRunner
+	importRunner = func(ctx context.Context, moduleRoot string, opts ImportOptions) (*importResult, []importNote, error) {
+		for _, f := range []string{"go.mod", "go.sum"} {
+			if _, err := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+				t.Errorf("%s exists in the program's tree during the import: %v", f, err)
+			}
+		}
+		return fake(ctx, moduleRoot, opts)
+	}
+	p := NewProcessor("1.4.0")
+	planned, err := p.ImportDryRun(context.Background(), ImportOptions{Package: "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(planned.Notes, "\n"), "vendor.mod") {
+		t.Errorf("notes = %q, want one about vendor.mod", planned.Notes)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
+		t.Errorf("the dry run wrote into the module: %v", entries)
+	}
+}
+
+// TestRunImporter_vendorMod pins that the go commands an import runs find a vendor.mod
+// module's root through an overlaid go.mod, without writing one: the run gets as far as the
+// importer's missing package, past go list and the module edit.
+func TestRunImporter_vendorMod(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go")
+	}
+	importer := t.TempDir()
+	writeTestFile(t, importer, "go.mod", "module github.com/go-rotini/import\n\ngo 1.22\n")
+	writeTestFile(t, importer, "imp.go", "package imp\n")
+	dir := t.TempDir()
+	writeTestFile(t, dir, "vendor.mod", "module example.com/shell\n\ngo 1.22\n")
+	writeTestFile(t, dir, "main.go", "package main\n\nvar CLI struct{}\n\nfunc main() {}\n")
+	t.Chdir(dir)
+	_, _, err := runImporter(context.Background(), dir, ImportOptions{Framework: FrameworkKong, Package: ".", Root: "&CLI", ImporterVersion: importer})
+	if err == nil || !strings.Contains(err.Error(), "has no kong package") {
+		t.Errorf("err = %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
+		t.Errorf("the run wrote into the module: %v", entries)
 	}
 }

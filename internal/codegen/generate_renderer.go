@@ -63,11 +63,14 @@ func convert(yamlBytes []byte, target fileFormat) ([]byte, error) {
 
 	switch target {
 	case formatJSON:
-		out, err := json.MarshalIndent(value, "", "  ")
-		if err != nil {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(value); err != nil {
 			return nil, fmt.Errorf("encode json: %w", err)
 		}
-		return append(out, '\n'), nil
+		return buf.Bytes(), nil
 	case formatJSONC:
 		byPath := map[string][]jsonc.Comment{}
 		for path, lines := range comments {
@@ -439,6 +442,8 @@ type templateFeature struct {
 	Pages     []templateFeaturePage
 	Vars      []templateFeatureVar
 	Cases     []templateFeatureCase
+	// PathSwitch is the expression a path resolver switches on (see resolverSwitch).
+	PathSwitch string
 }
 
 // templateRotiniData is the data for the generated cmd file.
@@ -471,6 +476,7 @@ type templateRotiniData struct {
 	ExitCodes     string // pre-rendered named exit-code constants (or their re-exports); "" when none
 	Contract      string // pre-rendered Contract variable (generate.contract.go); "" when off
 	UsageFunc     string // pre-rendered Usage function, always emitted; it imports "fmt" and "strings"
+	CanonicalPath string // pre-rendered alias-to-name path mapping the resolvers use; "" without aliases
 
 	// FlagSets are the flag set structs; empty when the types are split into the models file.
 	FlagSets []templateFlagSet
@@ -973,6 +979,8 @@ func templateFuncMap() template.FuncMap {
 			return elems[len(elems)-1]
 		},
 		"alsoSetBy": alsoSetBy,
+		// A Markdown code span that holds any text, backticks included.
+		"code": markdownCode,
 		// "deprecated since 1.4.0, removed in 2.0.0: <message>", for a deprecated item's note.
 		"deprecation": deprecationNote,
 		// "This command is experimental: …", the line a command's own page shows for its stability.
@@ -988,6 +996,27 @@ func templateFuncMap() template.FuncMap {
 		"roffIndented": roffIndented,
 		"roffArg":      roffArg,
 	}
+}
+
+// markdownCode renders s as a CommonMark code span: fenced with one more backtick than its
+// longest run of backticks, and padded with a space when it starts or ends with a backtick, or
+// with a space at both ends, so the renderer shows s exactly.
+func markdownCode(s string) string {
+	longest, run := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	fence := strings.Repeat("`", longest+1)
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") ||
+		strings.HasPrefix(s, " ") && strings.HasSuffix(s, " ") && strings.TrimSpace(s) != "" {
+		return fence + " " + s + " " + fence
+	}
+	return fence + s + fence
 }
 
 // titleASCII upper-cases the first ASCII letter of each word; words are split on space, tab,

@@ -59,6 +59,8 @@ import (
 
 // TestMain hands control to testscript, which requires it to run scripts.
 func TestMain(m *testing.M) {
+	// The go commands tests start build throwaway modules, which a workspace would reject.
+	os.Setenv("GOWORK", "off")
 	testscript.Main(m, map[string]func(){})
 }
 

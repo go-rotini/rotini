@@ -52,18 +52,50 @@ func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep {
 	for i, h := range handlers {
 		steps = append(steps, LifecycleStep{
 			Name: "cascading:" + chain[i].Name,
-			Do:   AsCommand(i, h.CascadingPreRun),
-			Undo: AsCommand(i, h.CascadingPostRun),
+			Do:   hookOf(i, h, hookCascadingPreRun),
+			Undo: hookOf(i, h, hookCascadingPostRun),
 		})
 	}
 	leafIdx := len(handlers) - 1
 	leaf := handlers[leafIdx]
 	leafName := chain[len(chain)-1].Name
 	steps = append(steps,
-		LifecycleStep{Name: "prerun:" + leafName, Do: AsCommand(leafIdx, leaf.PreRun), Undo: AsCommand(leafIdx, leaf.PostRun)},
-		LifecycleStep{Name: "run:" + leafName, Do: AsCommand(leafIdx, leaf.Run)},
+		LifecycleStep{Name: "prerun:" + leafName, Do: hookOf(leafIdx, leaf, hookPreRun), Undo: hookOf(leafIdx, leaf, hookPostRun)},
+		LifecycleStep{Name: "run:" + leafName, Do: hookOf(leafIdx, leaf, hookRun)},
 	)
 	return steps
+}
+
+// handlerHook names one of a [Handler]'s hooks.
+type handlerHook uint8
+
+const (
+	hookCascadingPreRun handlerHook = iota
+	hookPreRun
+	hookRun
+	hookPostRun
+	hookCascadingPostRun
+)
+
+// hookOf is AsCommand(i, h.<which>) as one closure: the method value AsCommand would wrap is
+// a second allocation per hook.
+func hookOf(i int, h Handler, which handlerHook) func(context.Context, *Context) {
+	return func(ctx context.Context, rtx *Context) {
+		prev := rtx.setFrame(i)
+		defer rtx.setFrame(prev)
+		switch which {
+		case hookCascadingPreRun:
+			h.CascadingPreRun(ctx, rtx)
+		case hookPreRun:
+			h.PreRun(ctx, rtx)
+		case hookRun:
+			h.Run(ctx, rtx)
+		case hookPostRun:
+			h.PostRun(ctx, rtx)
+		case hookCascadingPostRun:
+			h.CascadingPostRun(ctx, rtx)
+		}
+	}
 }
 
 // AsCommand labels a hook with the chain index of the command it belongs to, so that

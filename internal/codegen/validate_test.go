@@ -421,7 +421,7 @@ func TestValidate_typeErrorsAreReportedByTheSchemaWithPositions(t *testing.T) {
 func TestExplainDecodeFailure_schemaAcceptsButTypesReject(t *testing.T) {
 	p := NewProcessor("0.0.0")
 	body := blockSpecHead + "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n" +
-		"      schema: { type: string, minLength: 99999999999999999999999 }\n"
+		"      schema: { type: string, minLength: 1e30 }\n"
 	_, err := decodeData[Spec](formatYAML, []byte(body), "s.yaml")
 	if err == nil {
 		t.Skip("this YAML library accepted the overflow; no schema/type disagreement to exercise")

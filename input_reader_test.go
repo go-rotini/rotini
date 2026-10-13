@@ -2,6 +2,8 @@ package rotini
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -513,6 +515,34 @@ func TestInputReader_envNesting(t *testing.T) {
 	}
 	if len(in.App.Env.HTTP) != 2 {
 		t.Errorf("http = %#v, want exactly timeout + retry (the decoy must not join the family)", in.App.Env.HTTP)
+	}
+}
+
+// A family whose variables collide, a value and keys under it, is an error whatever the
+// environment's order; so is an empty key segment. On Windows the prefix ignores case, as
+// every other variable name does there.
+func TestInputReader_envNestingConflicts(t *testing.T) {
+	for _, env := range [][]string{
+		{"ACME_HTTP__RETRY=1", "ACME_HTTP__RETRY__MAX=9"},
+		{"ACME_HTTP__RETRY__MAX=9", "ACME_HTTP__RETRY=1"},
+	} {
+		_, err := NewContextFor(tbAppDef(), nil).WithEnviron(env).Inputs[tbNestInputs]()
+		if err == nil || err.Error() != "environment variables ACME_HTTP__RETRY and ACME_HTTP__RETRY__MAX both set retry" || CategoryOf(err) != CategoryUsage {
+			t.Errorf("%q: %v, want a usage error naming both variables", env, err)
+		}
+	}
+	_, err := NewContextFor(tbAppDef(), nil).WithEnviron([]string{"ACME_HTTP____X=1"}).Inputs[tbNestInputs]()
+	if err == nil || !strings.Contains(err.Error(), "ACME_HTTP____X has an empty key segment") {
+		t.Errorf("doubled separator: %v", err)
+	}
+
+	fam, err := envFamily(newOSView([]string{"acme_http__Timeout=30"}, "", "windows"), "ACME_HTTP", "__")
+	if err != nil || fam["timeout"] != "30" {
+		t.Errorf("windows: %v, %v; want the lower-case variable in the family", fam, err)
+	}
+	fam, _ = envFamily(newOSView([]string{"acme_http__Timeout=30"}, "", "linux"), "ACME_HTTP", "__")
+	if len(fam) != 0 {
+		t.Errorf("linux: %v, want no family: names are case-sensitive", fam)
 	}
 }
 
@@ -1120,14 +1150,14 @@ func TestInputError_envCoercion_isCleanUsage(t *testing.T) {
 		t.Errorf("CategoryOf = %v, want usage", CategoryOf(err))
 	}
 
-	// Non-leaky message: names the input in plain language, never echoes recon
-	// internals or the bad value.
+	// Names the input in plain language and words the value as the command line does, never
+	// echoing recon internals.
 	msg := err.Error()
-	if !strings.HasPrefix(msg, "environment variable LOUD: expected") {
-		t.Errorf("message = %q, want a clean environment-variable phrasing", msg)
+	if msg != `environment variable LOUD: "junk" is not a valid boolean` {
+		t.Errorf("message = %q, want the command line's phrasing", msg)
 	}
-	if strings.Contains(msg, "recon") || strings.Contains(msg, "junk") {
-		t.Errorf("message = %q, leaks recon text or the bad value", msg)
+	if strings.Contains(msg, "recon") {
+		t.Errorf("message = %q, leaks recon text", msg)
 	}
 
 	// The recon cause is still reachable for a handler that wants the detail.
@@ -1516,6 +1546,60 @@ func TestInputReader_badFallbackValueIsAUsageError(t *testing.T) {
 	})
 }
 
+type nullFallbackInputs struct {
+	App struct {
+		Flags struct {
+			Mode string `rotini:"mode" recon:"mode"`
+			Port int    `rotini:"port" recon:"port"`
+		}
+		Arguments struct {
+			Target string `rotini:"target" recon:"target"`
+		}
+		Config struct {
+			Level string `rotini:"level" recon:"level,default=info"`
+		}
+	}
+}
+
+// A null config value (`mode:`, `mode: null`, JSON null) supplies nothing: the flag's or
+// argument's declared default applies, and a config input keeps its default.
+func TestInputReader_nullFallbackKeepsDefault(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Default: "fast"},
+			{Name: "port", Identifiers: []string{"--port"}, Type: "int", Default: "8080"},
+		},
+		Arguments: []ArgDef{{Name: "target", Type: "string", Default: "here"}},
+	}
+	for _, c := range []struct{ format, body string }{
+		{"yaml", "mode:\nport:\ntarget:\nlevel:\n"},
+		{"yaml", "mode: null\nport: ~\ntarget: null\nlevel: null\n"},
+		{"json", `{"mode": null, "port": null, "target": null, "level": null}`},
+	} {
+		cfg := writeConfig(t, c.body)
+		var in nullFallbackInputs
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: c.format}}}).
+			Read(NewContextFor(def, nil), &in)
+		if err != nil {
+			t.Fatalf("%s %q: %v", c.format, c.body, err)
+		}
+		f, a := in.App.Flags, in.App.Arguments
+		if f.Mode != "fast" || f.Port != 8080 || a.Target != "here" || in.App.Config.Level != "info" {
+			t.Errorf("%s %q: mode=%q port=%d target=%q level=%q, want the defaults", c.format, c.body, f.Mode, f.Port, a.Target, in.App.Config.Level)
+		}
+	}
+	// A null in a higher file lets a lower file's value through.
+	project, user := writeConfig(t, "mode:\nlevel: null\n"), writeConfig(t, "mode: slow\nlevel: debug\n")
+	var in nullFallbackInputs
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{
+		{Name: "project", Path: project, Format: "yaml"}, {Name: "user", Path: user, Format: "yaml"},
+	}}).Read(NewContextFor(def, nil), &in)
+	if err != nil || in.App.Flags.Mode != "slow" || in.App.Config.Level != "debug" {
+		t.Errorf("two files: mode=%q level=%q err=%v, want slow and debug from the lower file", in.App.Flags.Mode, in.App.Config.Level, err)
+	}
+}
+
 // ── enums on env and config inputs ──────────────────────────────────────.
 
 type tbChannelEnumInputs struct {
@@ -1544,7 +1628,7 @@ func TestInputReader_channelEnumEnforced(t *testing.T) {
 	t.Run("env rejects a non-member, naming the variable", func(t *testing.T) {
 		t.Setenv("MODE", "bogus")
 		_, err := bind(t, InputSettings{})
-		if err == nil || CategoryOf(err) != CategoryUsage || !strings.Contains(err.Error(), `invalid value "bogus" for MODE (one of: fast, slow)`) {
+		if err == nil || CategoryOf(err) != CategoryUsage || !strings.Contains(err.Error(), `invalid value "bogus" for environment variable MODE (one of: fast, slow)`) {
 			t.Fatalf("err = %v, want a usage error naming MODE and its members", err)
 		}
 	})
@@ -1675,7 +1759,7 @@ func TestInputReader_severalVariableNames(t *testing.T) {
 	})
 	t.Run("an error names the variable that was set", func(t *testing.T) {
 		t.Setenv("AWS_REGION", "mars")
-		if _, err := bind(t); err == nil || !strings.Contains(err.Error(), "for AWS_REGION") {
+		if _, err := bind(t); err == nil || !strings.Contains(err.Error(), "for environment variable AWS_REGION") {
 			t.Fatalf("err = %v, want it to name AWS_REGION", err)
 		}
 	})
@@ -1979,5 +2063,158 @@ func TestTrimAcquiredPayload_oneRuleForBothPaths(t *testing.T) {
 	}
 	if *channel != "  hello  " {
 		t.Errorf("payload = %q, want %q — leading and trailing spaces are content", *channel, "  hello  ")
+	}
+}
+
+// A bad integer in an env or config input is worded one way, whichever check finds it, and as
+// the command line words it: the variable or key, the value (left out for a secret) and, for one
+// outside its type's range, the range.
+func TestInputReader_envIntegerWording(t *testing.T) {
+	type in struct {
+		App struct {
+			Env struct {
+				N     int     `rotini:"n" recon:"n" env:"APP_N"`
+				U8    uint8   `rotini:"u8" recon:"u8" env:"APP_U8"`
+				Pin   int     `rotini:"pin" recon:"pin,secret" env:"APP_PIN"`
+				Ports []int   `rotini:"ports" recon:"ports" env:"APP_PORTS"`
+				Pins  []uint8 `rotini:"pins" recon:"pins" env:"APP_PINS"`
+			}
+		}
+	}
+	for env, want := range map[string]string{
+		"APP_N=0x10":                 `environment variable APP_N: "0x10" is not a valid integer`,
+		"APP_N= 5":                   `environment variable APP_N: " 5" is not a valid integer`,
+		"APP_N=99999999999999999999": fmt.Sprintf(`environment variable APP_N: "99999999999999999999" is not a valid int (out of range: %d to %d)`, math.MinInt, math.MaxInt),
+		"APP_U8=256":                 `environment variable APP_U8: "256" is not a valid uint8 (out of range: 0 to 255)`,
+		"APP_U8=-1":                  `environment variable APP_U8: "-1" is not a valid uint8 (out of range: 0 to 255)`,
+		"APP_PIN=12x4":               `environment variable APP_PIN: "[redacted]" is not a valid integer`,
+		"APP_PORTS=1,x":              `environment variable APP_PORTS: "x" is not a valid integer`,
+		"APP_PINS=1,300":             `environment variable APP_PINS: "300" is not a valid uint8 (out of range: 0 to 255)`,
+	} {
+		_, err := NewContextFor(tbAppDef(), nil).WithEnviron([]string{env}).Inputs[in]()
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: %v, want %q", env, err, want)
+		}
+	}
+}
+
+// A config input reads a value as a flag's fallback does: a number 1 or 0 fills a bool, a plain
+// []uint8 is a list of integers, and a value its type can't hold is worded as on the command
+// line, with the value and the file.
+func TestInputReader_configValueWording(t *testing.T) {
+	type in struct {
+		App struct {
+			Config struct {
+				B    bool    `rotini:"b" recon:"b"`
+				I8   int8    `rotini:"i8" recon:"i8"`
+				L8   []int8  `rotini:"l8" recon:"l8"`
+				Pins []uint8 `rotini:"pins" recon:"pins"`
+			}
+		}
+	}
+	for body, want := range map[string]string{
+		"b: 1\n":            "",
+		"b: 0\n":            "",
+		"pins: \"1,2\"\n":   "",
+		"b: 2\n":            `config key b: "2" is not a valid boolean`,
+		"i8: 200\n":         `config key i8: "200" is not a valid int8 (out of range: -128 to 127)`,
+		"i8: 1.5\n":         `config key i8: "1.5" is not a valid integer`,
+		"l8: [1, 200]\n":    `config key l8: "200" is not a valid int8 (out of range: -128 to 127)`,
+		"pins: [1, 300]\n":  `config key pins: "300" is not a valid uint8 (out of range: 0 to 255)`,
+		"pins: \"1,300\"\n": `config key pins: "300" is not a valid uint8 (out of range: 0 to 255)`,
+	} {
+		cfg := writeConfig(t, body)
+		var v in
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(NewContextFor(tbAppDef(), nil), &v)
+		if want == "" {
+			if err != nil {
+				t.Errorf("%q: %v", body, err)
+			}
+			continue
+		}
+		if want += " (from configuration file " + cfg + ")"; err == nil || err.Error() != want {
+			t.Errorf("%q: %v, want %q", body, err, want)
+		}
+	}
+	read := func(body string) (b bool, pins []uint8) {
+		var v in
+		cfg := writeConfig(t, body)
+		if err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(NewContextFor(tbAppDef(), nil), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v.App.Config.B, v.App.Config.Pins
+	}
+	if b, _ := read("b: 1\n"); !b {
+		t.Error("b: 1 did not read as true")
+	}
+	if _, pins := read("pins: \"1,2\"\n"); !slices.Equal(pins, []uint8{1, 2}) {
+		t.Errorf("pins: \"1,2\" = %v, want [1 2]", pins)
+	}
+}
+
+// The decimal check of an env or config integer reads the value as the field's own type: an
+// unsigned field takes values above the int64 maximum, and a value outside the type's range
+// names the range.
+func TestCheckDecimal_fieldType(t *testing.T) {
+	type fields struct {
+		U64 uint64   `recon:"u64"`
+		L64 []uint64 `recon:"l64"`
+		I8  int8     `recon:"i8"`
+	}
+	st := reflect.TypeFor[fields]()
+	for _, tc := range []struct {
+		field string
+		vals  []string
+		want  string
+	}{
+		{"U64", []string{"18446744073709551615"}, ""},
+		{"L64", []string{"1,18446744073709551615"}, ""},
+		{"U64", []string{"18446744073709551616"}, `u: "18446744073709551616" is not a valid uint64 (out of range: 0 to 18446744073709551615)`},
+		{"I8", []string{"200"}, `u: "200" is not a valid int8 (out of range: -128 to 127)`},
+		{"I8", []string{"0x10"}, `u: "0x10" is not a valid integer`},
+	} {
+		f, _ := st.FieldByName(tc.field)
+		err := checkDecimal(true, f, "u", tc.vals, false)
+		if got := fmt.Sprint(err); (tc.want == "" && err != nil) || (tc.want != "" && got != tc.want) {
+			t.Errorf("%s %q: %v, want %q", tc.field, tc.vals, err, tc.want)
+		}
+	}
+}
+
+// A configuration file's schema failure under a compound keyword (oneOf, anyOf) names the
+// failure beneath it, as a stdin document's check does.
+func TestConfigSchema_reportsCauses(t *testing.T) {
+	cfg := writeConfig(t, "db:\n  port: abc\n")
+	schema := `{"type":"object","properties":{"db":{"type":"object","properties":{"port":{"oneOf":[{"type":"integer"},{"type":"string","pattern":"^[0-9]+$"}]}}}}}`
+	var in struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Config    struct {
+				Name string `rotini:"name" recon:"name"`
+			}
+		}
+	}
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml", Schema: schema}}}).
+		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	if err == nil || !strings.Contains(err.Error(), "is invalid: db.port: ") || !strings.Contains(err.Error(), "integer") {
+		t.Fatalf("err = %v, want the failure under oneOf at db.port", err)
+	}
+}
+
+func BenchmarkFallbackValues(b *testing.B) {
+	items := make([]any, 10)
+	for i := range items {
+		items[i] = fmt.Sprint("item", i)
+	}
+	list, scalar := recon.NewValue(items), recon.NewValue("a,b,c")
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := fallbackValues(list, ""); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := fallbackValues(scalar, ","); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

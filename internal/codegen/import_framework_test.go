@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -122,7 +123,7 @@ func TestImportTestFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		src := fmt.Sprintf(importTestTemplate, "main", fw.pkg, "TestRotiniImport_x", fw.call(tc.root, tc.opts, "shell"))
+		src := fmt.Sprintf(importTestTemplate, "main", fw.pkg, "TestRotiniImport_x", fw.call(tc.root, tc.opts, "shell"), "")
 		if _, err := parser.ParseFile(token.NewFileSet(), "x_test.go", src, 0); err != nil {
 			t.Errorf("%s test file doesn't parse: %v\n%s", fw.pkg, err, src)
 		}
@@ -288,5 +289,39 @@ func TestImporterWithoutPackage(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
 		t.Errorf("the run wrote into the module: %v", entries)
+	}
+}
+
+// TestCommentsFor_unlocatedHookNamesFunc pins that a hook the importer couldn't locate is
+// named by its function in the spec comment, instead of ending in an empty position.
+func TestCommentsFor_unlocatedHookNamesFunc(t *testing.T) {
+	sb := &importSpecBuilder{moduleRoot: "/m", res: &importResult{
+		Source: importSource{Framework: "cobra"},
+		Hooks: []importHook{
+			{Path: "app", Framework: "RunE", Rotini: "Run", Func: "(*server).run"},
+			{Path: "app", Framework: "PreRunE", Rotini: "PreRun", Func: "pre", File: "/m/cmd/a.go", Line: 3},
+			{Path: "app", Framework: "PostRunE", Rotini: "PostRun"},
+		},
+	}}
+	got := sb.commentsFor("app")
+	want := []string{"cobra RunE -> rotini Run: (*server).run", "cobra PreRunE -> rotini PreRun: cmd/a.go:3", "cobra PostRunE -> rotini PostRun"}
+	if !slices.Equal(got, want) {
+		t.Errorf("commentsFor = %q, want %q", got, want)
+	}
+}
+
+// TestFindRoot_reportsSyntaxError pins that when no root is found and a file of the package
+// doesn't parse, each root finder names that file's syntax error.
+func TestFindRoot_reportsSyntaxError(t *testing.T) {
+	for name, find := range map[string]func(string) (string, string, error){
+		"cobra": findImportRoot, "kong": findKongRoot, "urfave": findURFaveRoot,
+	} {
+		dir := t.TempDir()
+		writeTestFile(t, dir, "a.go", "package main\n\nfunc main() {}\n")
+		writeTestFile(t, dir, "main.go", "package main\n\nvar s = \"broken\n\"\n")
+		_, _, err := find(dir)
+		if err == nil || !strings.Contains(err.Error(), "main.go:3: ") || !strings.Contains(err.Error(), "fix it or pass --root") {
+			t.Errorf("%s: err = %v, want main.go's syntax error", name, err)
+		}
 	}
 }

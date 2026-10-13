@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -244,7 +245,8 @@ func TestSplitPairs(t *testing.T) {
 func TestInferScalar(t *testing.T) {
 	for text, want := range map[string]any{
 		"true": true, "false": false, "null": nil,
-		"5": float64(5), "-2.5": -2.5, "1e3": float64(1000), "0": float64(0),
+		"5": int64(5), "-2.5": -2.5, "1e3": float64(1000), "0": int64(0), "-7": int64(-7),
+		"9223372036854775808": 9223372036854775808.0,
 		// Not JSON, so text: a shell user's "yes", a zero-padded id, Go's digit separators, hex.
 		"yes": "yes", "007": "007", "1_000": "1_000", "0x10": "0x10", "True": "True",
 		"": "", "v2": "v2", "-": "-", "5 ": "5 ", "NaN": "NaN",
@@ -269,8 +271,15 @@ func TestObjectFlag_freeFormValuesTypeLikeJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fromPairs, fromJSON) {
-		t.Errorf("key=value gave %#v, JSON gave %#v — one value, two meanings", fromPairs, fromJSON)
+	// Compared as they bind: through their JSON form, which a recon that decodes 5 as int64 and
+	// one that decodes it as float64 both write as 5.
+	pairsJSON, _ := json.Marshal(fromPairs)
+	jsonJSON, _ := json.Marshal(fromJSON)
+	if string(pairsJSON) != string(jsonJSON) {
+		t.Errorf("key=value gave %s, JSON gave %s — one value, two meanings", pairsJSON, jsonJSON)
+	}
+	if got := fromPairs["spec"].(map[string]any)["replicas"]; got != int64(5) {
+		t.Errorf("replicas=5 typed as %#v, want int64(5), as an exact JSON integer", got)
 	}
 }
 

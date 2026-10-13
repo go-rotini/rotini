@@ -56,15 +56,15 @@ func configTarget(rtx *Context, name string) (configFileTarget, error) {
 func (lf locatedConfigFile) writePath() (string, error) {
 	f := lf.file
 	if p, ok := lf.paths[f.Name]; ok {
-		resolved, err := lf.view.expandPath(p)
-		if err == nil {
-			resolved, err = absPath(lf.view, resolved)
+		if p.emptyFlag != "" {
+			return "", usageBind(channelConfig, f.Name, p.emptyFlag+" was given an empty path; name a configuration file", nil)
 		}
+		resolved, err := p.resolve(lf.view)
 		if err != nil {
 			if isWiringError(err) {
 				return "", err
 			}
-			return "", usageBind(channelConfig, f.Name, fmt.Sprintf("could not resolve configuration file path %s: %v", p, err), err)
+			return "", usageBind(channelConfig, f.Name, fmt.Sprintf("could not resolve configuration file path %s: %v", p.path, err), err)
 		}
 		return resolved, nil
 	}
@@ -215,6 +215,10 @@ func (t configFileTarget) write(key string, data []byte) error {
 	if err == nil {
 		_, err = f.Write(data)
 	}
+	if err == nil {
+		// On disk before the rename, so a crash can't leave an empty file in the config's place.
+		err = syncFile(f)
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -225,5 +229,21 @@ func (t configFileTarget) write(key string, data []byte) error {
 		_ = os.Remove(tmp)
 		return fail("write", err)
 	}
+	syncDir(filepath.Dir(t.target))
 	return nil
+}
+
+// syncFile flushes f's content to stable storage.
+var syncFile = (*os.File).Sync
+
+// syncDir flushes a directory's entries, so a rename into it survives a crash. It is best
+// effort: some file systems can't sync a directory, and Windows can't open one for it.
+func syncDir(dir string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = syncFile(d) //nolint:errcheck // best effort, as the doc says
+		_ = d.Close()
+	}
 }

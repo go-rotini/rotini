@@ -116,10 +116,17 @@
 //   - An integer is decimal on every channel, leading zeros included (010 is ten). With
 //     `base: prefixed`, an integer or a list of them also takes 0x, 0o and 0b literals
 //     (0xFF, -0b1010, 1_000), and bounds and enums compare the number the value reads as.
+//     A list of uint8 (or byte) is a list of integers on every channel, not raw bytes.
+//   - A typed configuration format (YAML, TOML, JSON, JSONC) holds numbers, not text: a whole
+//     number written as a float (450.0, 1e3) fills an integer input, and 1 or 0 fills a bool.
+//     A null list item is refused. Text (the command line, the environment, .env files) spells
+//     an integer as one.
 //   - Value types: duration with Go's units plus d and w (7d, 2w3d); time and datetime
 //     (RFC 3339) and date (2026-09-29), each taking `layout:` for another format, or a list of
 //     formats tried in order, and `relative:` for a time measured from the run's clock (2h ago,
-//     today; see [Program.WithClock]); url, email, timezone, mac, ip, cidr and hostport;
+//     today; see [Program.WithClock]). From the environment and configuration files, a time
+//     with neither also takes the forms the configuration library reads, such as a date-time
+//     without an offset, read as UTC; url, email, timezone, mac, ip, cidr and hostport;
 //     bytesize ([ByteSize]: 512Mi, 10MB), hexbytes ([HexBytes]) and base64bytes
 //     ([Base64Bytes]); regexp (a compiled *regexp.Regexp) and glob ([Glob], a checked
 //     path.Match pattern).

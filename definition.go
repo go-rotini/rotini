@@ -352,7 +352,9 @@ type FlagDef struct {
 	// command line are still reported.
 	ShortCircuit bool
 	// Local makes the flag usable only when its command is the one run: given with any of the
-	// command's sub-commands, before or after their names, it is a usage error. Generated code
+	// command's sub-commands, before or after their names, it is a usage error. Its rules
+	// (Required, and the flag groups and dependencies that need it) apply only then too, so
+	// a sub-command's run doesn't demand a flag it can't be given. Generated code
 	// sets it on every flag of a command with sub-commands that the spec doesn't mark
 	// `cascading`. Without it, a flag is also accepted after its sub-commands' names.
 	Local bool

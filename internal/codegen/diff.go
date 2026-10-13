@@ -140,6 +140,9 @@ func readGitContract(spec, contractFile string) ([]byte, error) {
 	if ref == "" {
 		return nil, errors.New("git:<ref> names no revision")
 	}
+	if strings.HasPrefix(ref, "-") {
+		return nil, fmt.Errorf("git:%s: a revision can't start with '-'", spec)
+	}
 	if file == "" {
 		return nil, errNoContractFile
 	}
@@ -152,7 +155,7 @@ func readGitContract(spec, contractFile string) ([]byte, error) {
 		return nil, err
 	}
 	var stderr bytes.Buffer
-	cmd := exec.Command("git", "-C", root, "show", ref+":./"+file)
+	cmd := exec.Command("git", "-C", root, "show", "--end-of-options", ref+":./"+file)
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {

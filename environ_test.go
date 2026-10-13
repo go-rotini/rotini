@@ -547,3 +547,31 @@ type funcHandler struct {
 }
 
 func (f funcHandler) Run(_ context.Context, rtx *Context) { f.run(rtx) }
+
+// The operator of a ${...} reference is the one right after the name: an operator character in
+// the word it applies is part of that word, as in a POSIX shell.
+func TestOSView_expandPathBracedOperator(t *testing.T) {
+	v := newOSView([]string{"SET=val"}, "", runtime.GOOS)
+	for in, want := range map[string]string{
+		"${NOPE-a:-b}.yaml": "a:-b.yaml",
+		"${NOPE:-a-b}":      "a-b",
+		"${SET+x:-y}":       "x:-y",
+		"${NOPE:?a-b}x":     "",
+	} {
+		got, err := v.expandPath(in)
+		if want == "" {
+			if !errors.Is(err, errUnsetPathVariable) || !strings.Contains(err.Error(), "NOPE: a-b") {
+				t.Errorf("expandPath(%q) = %q, %v; want the unset-variable error naming NOPE", in, got, err)
+			}
+			continue
+		}
+		if err != nil || got != want {
+			t.Errorf("expandPath(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"${}", "${1x}", "${A B}", "${A=b}"} {
+		if got, err := v.expandPath(in); err == nil {
+			t.Errorf("expandPath(%q) = %q, want an invalid-reference error", in, got)
+		}
+	}
+}

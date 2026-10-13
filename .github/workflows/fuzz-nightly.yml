@@ -33,6 +33,14 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      # go test -fuzz exits 0 when no target matches, so a renamed target would drop out silently.
+      - name: Check the target exists
+        run: |
+          if ! go test -list "^${TARGET}\$" "$PACKAGE" | grep -qx "$TARGET"; then
+            echo "::error::$TARGET is not a fuzz target in $PACKAGE; update the matrix"
+            exit 1
+          fi
+
       - name: Fuzz for 10 minutes
         run: go test -run='^$' -fuzz="^${TARGET}\$" -fuzztime=10m "$PACKAGE"
 

@@ -93,3 +93,38 @@ func checkPinnedBlocks(t *testing.T, page string, blocks []pinnedBlock) {
 		}
 	}
 }
+
+// TestReadmeQuickStartMatchesScript pins r0_readme_quickstart's fixtures to the README's quick
+// start: the spec fragment and the handler, so the script proves the README's code works.
+func TestReadmeQuickStartMatchesScript(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join("..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, quick, ok := strings.Cut(string(readme), "## Quick start")
+	if !ok {
+		t.Fatal("the README has no quick start")
+	}
+	quick, _, _ = strings.Cut(quick, "\n## ")
+	archive, err := txtar.ParseFile(filepath.Join("testdata", "script", "r0_readme_quickstart.txtar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range []struct{ fence, file string }{{"```yaml\n", "hello.spec.yaml.txt"}, {"```go\n", "hello.go.txt"}} {
+		_, block, ok := strings.Cut(quick, pin.fence)
+		if !ok {
+			t.Errorf("the quick start has no %q block", strings.TrimSpace(pin.fence))
+			continue
+		}
+		block, _, _ = strings.Cut(block, "```")
+		var got string
+		for _, f := range archive.Files {
+			if f.Name == pin.file {
+				got = string(f.Data)
+			}
+		}
+		if got != block {
+			t.Errorf("r0_readme_quickstart's %s is not the README's block.\n--- fixture\n%s\n--- README\n%s", pin.file, got, block)
+		}
+	}
+}

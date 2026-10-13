@@ -65,7 +65,13 @@ func completionScript(prog, shell string, envs completionEnvs) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish, powershell, nushell)", shell)
 	}
-	script := strings.ReplaceAll(tmpl, "PROG", prog)
+	script := tmpl
+	if shell == "bash" || shell == "fish" {
+		// Variable names can't hold "-", so the script's own functions and variables use an
+		// identifier form of the name; the program is still registered under its real name.
+		script = strings.ReplaceAll(script, "_PROG", "_"+shellIdentifier(prog))
+	}
+	script = strings.ReplaceAll(script, "PROG", prog)
 	var header string
 	if envs.messages != "" {
 		header += "# Set " + envs.messages + "=off to hide completion messages.\n"
@@ -79,6 +85,13 @@ func completionScript(prog, shell string, envs completionEnvs) (string, error) {
 		script = head + title + header + rest
 	}
 	return script, nil
+}
+
+// shellIdentifier returns prog in a form a shell variable name can hold, writing "_" as "_5f"
+// and "-" as "_2d", so two program names never share one: my-app and my_app installed side by
+// side keep their own functions.
+func shellIdentifier(prog string) string {
+	return strings.NewReplacer("_", "_5f", "-", "_2d").Replace(prog)
 }
 
 const bashCompletionTemplate = `# bash completion for PROG
@@ -103,7 +116,7 @@ _PROG_show_messages() {
     _PROG_messages_supported || return 0
     if (( ! ${#COMPREPLY[@]} )) && [[ -z $1 || $1 == file* ]]; then
         _PROG_compopt -o filenames
-        COMPREPLY=($(compgen -f -- "${COMP_WORDS[$COMP_CWORD]}")) || true
+        _PROG_add_lines < <(compgen -f -- "$cur")
     fi
     _PROG_print_messages
     if (( ${#COMPREPLY[@]} )); then
@@ -111,6 +124,15 @@ _PROG_show_messages() {
     else
         printf '%s' "${PS1@P}${COMP_LINE}"
     fi
+    return 0
+}
+
+# Appends each line of standard input to COMPREPLY as one candidate, unexpanded.
+_PROG_add_lines() {
+    local line
+    while IFS= read -r line; do
+        COMPREPLY+=("$line")
+    done
     return 0
 }
 
@@ -145,26 +167,188 @@ _PROG_describe() {
     return 0
 }
 
+# Sets args to the words after the program up to the cursor's word, as the program will receive
+# them. A word the completion word breaks split (--flag=value, host:port, user@host) is joined
+# again, and each word's quotes and backslashes are removed. For the cursor's word it also sets
+# lead, open and cur (see _PROG_unquote). COMP_LINE places the words; without it, COMP_WORDS is
+# taken as is.
+_PROG_words() {
+    local i word space pos=0 last
+    local -a raw=()
+    for (( i = 0; i <= COMP_CWORD; i++ )); do
+        word=${COMP_WORDS[i]}
+        space=${COMP_LINE:pos}
+        space=${space%%[![:space:]]*}
+        (( pos += ${#space} ))
+        if [[ ${COMP_LINE:pos:${#word}} != "$word" ]]; then
+            raw=("${COMP_WORDS[@]:0:COMP_CWORD+1}")
+            break
+        fi
+        (( pos += ${#word} ))
+        last=$(( ${#raw[@]} - 1 ))
+        if (( i > 1 )) && [[ -z $space && -n $joins ]] && [[ $word == ["$joins"]* || ${raw[last]} == *["$joins"] ]]; then
+            raw[last]+=$word
+        else
+            raw+=("$word")
+        fi
+    done
+    for (( i = 1; i < ${#raw[@]}; i++ )); do
+        _PROG_unquote "${raw[i]}"
+        args+=("$REPLY")
+    done
+    cur=${REPLY:${#lead}}
+    return 0
+}
+
+# Sets REPLY to $1 with its quotes and backslashes removed, expanding nothing. Readline replaces
+# only the end of the word: the text after a quote the word leaves open (open is set to that
+# quote), or else after the last unquoted word break. lead is set to the unquoted text before
+# that part, and cur to the part itself.
+_PROG_unquote() {
+    local w=$1 c q="" i=0 brk="" qlead=""
+    REPLY=""
+    while (( i < ${#w} )); do
+        c=${w:i:1}
+        if [[ $q == "'" ]]; then
+            if [[ $c == "'" ]]; then q=""; else REPLY+=$c; fi
+        elif [[ $q == '"' ]]; then
+            if [[ $c == '"' ]]; then
+                q=""
+            elif [[ $c == '\' && ${w:i+1:1} == [\"\\\$\` + "`" + `] ]]; then
+                (( i++ ))
+                REPLY+=${w:i:1}
+            else
+                REPLY+=$c
+            fi
+        else
+            case $c in
+                [\'\"])
+                    q=$c
+                    qlead=$REPLY
+                    ;;
+                \\)
+                    (( i++ ))
+                    REPLY+=${w:i:1}
+                    ;;
+                *)
+                    REPLY+=$c
+                    [[ -n $joins && $joins == *"$c"* ]] && brk=$REPLY
+                    ;;
+            esac
+        fi
+        (( i++ ))
+    done
+    open=$q
+    lead=$brk
+    [[ -n $q ]] && lead=$qlead
+    return 0
+}
+
+# Sets REPLY to $1 quoted for readline to insert: inside the quote the word leaves open, or else
+# with backslashes. Pieces quoted this way can be joined.
+_PROG_quote() {
+    REPLY=""
+    [[ -n $1 ]] || return 0
+    case $open in
+        "'")
+            REPLY=${1//\'/\'\\\'\'}
+            ;;
+        '"')
+            REPLY=${1//\\/\\\\}
+            REPLY=${REPLY//\"/\\\"}
+            REPLY=${REPLY//\$/\\\$}
+            REPLY=${REPLY//\` + "`" + `/\\\` + "`" + `}
+            # History expansion reads ! even inside double quotes.
+            REPLY=${REPLY//!/\"\'!\'\"}
+            ;;
+        *)
+            printf -v REPLY '%q' "$1"
+            ;;
+    esac
+    return 0
+}
+
+# Quotes each candidate in COMPREPLY as one literal word for readline to insert. Readline
+# inserts the text several candidates share, so the first candidate quotes the character where
+# they part in another way, and the shared text never ends inside one character's quoting.
+_PROG_quote_all() {
+    local i p=0 c first pre head
+    first=${COMPREPLY[0]}
+    if (( ${#COMPREPLY[@]} > 1 )); then
+        while (( p < ${#first} )); do
+            c=${first:p:1}
+            for i in "${!COMPREPLY[@]}"; do
+                [[ ${COMPREPLY[i]:p:1} == "$c" ]] || break 2
+            done
+            (( p++ ))
+        done
+    fi
+    _PROG_quote "${first:0:p}"
+    pre=$REPLY
+    for i in "${!COMPREPLY[@]}"; do
+        c=${COMPREPLY[i]:p:1}
+        head=""
+        if (( i == 0 && ${#COMPREPLY[@]} > 1 )) && [[ -z $open && -n $c ]]; then
+            printf -v head '%q' "$c"
+            if [[ $head == "$c" ]]; then
+                head=""
+            elif [[ $c == "'" ]]; then
+                head="\"'\""
+            else
+                head="'$c'"
+            fi
+        fi
+        if [[ -n $head ]]; then
+            _PROG_quote "${COMPREPLY[i]:p+1}"
+        else
+            _PROG_quote "${COMPREPLY[i]:p}"
+        fi
+        REPLY=$pre$head$REPLY
+        # Readline closes the quote left open, unless the text already ends with that quote.
+        case $open in
+            "")
+                # bash before 5 leaves a leading ~ bare, which would expand to a home directory.
+                [[ $REPLY == "~"* ]] && REPLY="\\$REPLY"
+                ;;
+            "'")
+                [[ ${COMPREPLY[i]} == *"'" ]] && REPLY=${REPLY%"'\\''"}"'\\'"
+                ;;
+            '"')
+                [[ ${COMPREPLY[i]} == *'"' ]] && REPLY=${REPLY%'\"'}'"\"'
+                [[ ${COMPREPLY[i]} == *'!' ]] && REPLY+='"'
+                ;;
+        esac
+        COMPREPLY[i]=$REPLY
+    done
+    return 0
+}
+
 _PROG_complete() {
-    local args line cur directive="" options="" ext exts
+    local line value cur="" lead="" open="" directive="" options="" ext exts i REPLY joins
+    local -a args=()
     __PROG_messages=()
     __PROG_descs=()
     __PROG_described=0
-    # Slice before narrowing IFS: bash 3.2 joins the slice into one word otherwise.
-    args=("${COMP_WORDS[@]:1:$COMP_CWORD}")
-    cur="${COMP_WORDS[$COMP_CWORD]}"
+    # The word breaks that can sit inside one word; the rest end the word or quote.
+    joins=${COMP_WORDBREAKS//[[:space:]\"\'\;\|\&\(\)\<\>]/}
+    # Before narrowing IFS: bash 3.2 joins an array slice into one word otherwise.
+    _PROG_words
     COMPREPLY=()
     local IFS=$'\n'
     # Output: candidates as "name<TAB>description", then ":rotini:message <text>" lines, then
     # a ":rotini:option <word>..." line (nospace, keep-order), then a ":rotini:<directive>"
     # line (none, file, file <exts>, directory, executable, user, group, host).
-    for line in $(PROG __complete "${args[@]}" 2>/dev/null); do
+    # Read line by line: an unquoted $(...) would also glob-expand each candidate.
+    while IFS= read -r line; do
         case "$line" in
             ":rotini:message "*) __PROG_messages+=("${line#:rotini:message }") ;;
             ":rotini:option "*) options=" ${line#:rotini:option } " ;;
             ":rotini:"*) directive="${line#:rotini:}" ;;
             *)
-                COMPREPLY+=("${line%%$'\t'*}")
+                # Readline replaces only the text after lead.
+                value=${line%%$'\t'*}
+                [[ $value == "$lead"* ]] && value=${value:${#lead}}
+                COMPREPLY+=("$value")
                 if [[ $line == *$'\t'* ]]; then
                     __PROG_descs+=("${line#*$'\t'}")
                     __PROG_described=1
@@ -173,7 +357,7 @@ _PROG_complete() {
                 fi
                 ;;
         esac
-    done
+    done < <(PROG __complete "${args[@]}" 2>/dev/null)
 
     [[ $options == *" nospace "* ]] && _PROG_compopt -o nospace
     [[ $options == *" keep-order "* ]] && _PROG_compopt -o nosort
@@ -183,37 +367,46 @@ _PROG_complete() {
             ;;
         directory)
             _PROG_compopt -o filenames
-            COMPREPLY+=($(compgen -d -- "$cur")) || true
+            _PROG_add_lines < <(compgen -d -- "$cur")
             ;;
         file)
             _PROG_compopt -o filenames
-            COMPREPLY+=($(compgen -f -- "$cur")) || true
+            _PROG_add_lines < <(compgen -f -- "$cur")
             ;;
         file\ *)
             _PROG_compopt -o filenames
             exts="${directive#file }"
-            COMPREPLY+=($(compgen -d -- "$cur")) || true
+            _PROG_add_lines < <(compgen -d -- "$cur")
             for ext in ${exts// /$'\n'}; do
-                COMPREPLY+=($(compgen -f -X "!*.$ext" -- "$cur")) || true
+                _PROG_add_lines < <(compgen -f -X "!*.$ext" -- "$cur")
             done
             ;;
         executable)
             _PROG_compopt +o default
-            COMPREPLY+=($(compgen -c -- "$cur")) || true
+            _PROG_add_lines < <(compgen -c -- "$cur")
             ;;
         user)
             _PROG_compopt +o default
-            COMPREPLY+=($(compgen -u -- "$cur")) || true
+            _PROG_add_lines < <(compgen -u -- "$cur")
             ;;
         group)
             _PROG_compopt +o default
-            COMPREPLY+=($(compgen -g -- "$cur")) || true
+            _PROG_add_lines < <(compgen -g -- "$cur")
             ;;
         host)
             _PROG_compopt +o default
-            COMPREPLY+=($(compgen -A hostname -- "$cur")) || true
+            _PROG_add_lines < <(compgen -A hostname -- "$cur")
             ;;
     esac
+    # Readline inserts a candidate, or what several share, as given: quote each one so spaces
+    # and shell characters stay part of the word. The listing (COMP_TYPE 63) shows them as
+    # they are. -o filenames quotes file names, and every candidate with them, where bash has
+    # compopt to set it.
+    if (( ${#COMPREPLY[@]} )) && [[ $COMP_TYPE != 63 ]]; then
+        if [[ $directive != file* && $directive != directory ]] || ! type compopt >/dev/null 2>&1; then
+            _PROG_quote_all
+        fi
+    fi
     _PROG_describe
     _PROG_show_messages "$directive"
 }
@@ -223,10 +416,18 @@ complete -o default -F _PROG_complete PROG
 const zshCompletionTemplate = `#compdef PROG
 # zsh completion for PROG
 _PROG() {
-    local -a lines pairs exts msgs opts
+    local -a args lines pairs exts msgs opts
     local line name desc directive="" options="" msg
-    # (@) keeps the empty current word, so "PROG --flag " completes the flag's values.
-    lines=(${(f)"$(PROG __complete "${(@)words[2,$CURRENT]}" 2>/dev/null)"})
+    # (Q) removes the quotes and backslashes the words were typed with. Inside a quote the
+    # current word is the text after it, so it is quoted again first. The empty current word is
+    # passed too, so "PROG --flag " completes the flag's values.
+    args=("${(@Q)words[2,CURRENT-1]}")
+    if [[ -n $compstate[quote] ]]; then
+        args+=("${(Q)${:-$compstate[quote]$PREFIX$SUFFIX$compstate[quote]}}")
+    else
+        args+=("${(Q)words[CURRENT]}")
+    fi
+    lines=(${(f)"$(PROG __complete "${args[@]}" 2>/dev/null)"})
     # Output: candidates as "name<TAB>description", then ":rotini:message <text>" lines, then
     # a ":rotini:option <word>..." line (nospace, keep-order), then a ":rotini:<directive>"
     # line (none, file, file <exts>, directory, executable, user, group, host).
@@ -272,63 +473,58 @@ _PROG() {
         user) _users ;;
         group) _groups ;;
         host) _hosts ;;
+        # No directive: files, as the other shells fall back to.
+        "") (( $#pairs )) || _files ;;
     esac
 }
 compdef _PROG PROG
 `
 
 const fishCompletionTemplate = `# fish completion for PROG
-function __PROG_raw
-    set -l cur (commandline -ct)
-    set -l tokens (commandline -opc)
-    # Quoted so an empty current word is still passed.
-    set -a tokens "$cur"
-    PROG __complete $tokens[2..-1] 2>/dev/null
-end
-
 # Output: candidates as "name<TAB>description", then ":rotini:message <text>" lines (fish
 # doesn't show them), then a ":rotini:option <word>..." line, then a ":rotini:<directive>" line
 # (none, file, file <exts>, directory, executable, user, group, host). The candidates come in
 # the order to show them, so they are registered with --keep-order (fish 3.1 or later). fish
 # adds no space after a candidate ending in = on its own.
-function __PROG_load
-    set -g __PROG_results
-    set -g __PROG_directive ""
-    for line in (__PROG_raw)
+
+# Prints the candidates, or when there are none, what fish completes for the directive. One
+# call per TAB, so the program runs once.
+function __PROG_complete
+    # The words without the quotes and backslashes they were typed with; the current word is
+    # quoted so that, even empty, it is passed.
+    set -l cur (string unescape -- (commandline -ct))
+    set -l tokens (commandline -opc)
+    set -a tokens "$cur"
+    set -l results
+    set -l directive ""
+    for line in (PROG __complete $tokens[2..-1] 2>/dev/null)
         if string match -q ':rotini:message *' -- $line
             continue
         else if string match -q ':rotini:option *' -- $line
             continue
         else if string match -q ':rotini:*' -- $line
-            set -g __PROG_directive (string replace ':rotini:' '' -- $line)
+            set directive (string replace ':rotini:' '' -- $line)
         else
-            set -a __PROG_results $line
+            set -a results $line
         end
+    end
+    if set -q results[1]
+        printf '%s\n' $results
+    else if test "$directive" != none
+        __PROG_files "$directive" "$cur"
     end
 end
 
-function __PROG_has_results
-    __PROG_load
-    test (count $__PROG_results) -gt 0
-end
-
-function __PROG_wants_files
-    __PROG_load
-    test (count $__PROG_results) -eq 0; and test "$__PROG_directive" != none
-end
-
-# The shell's own completions for a directive: paths, and the names fish's own helpers list
-# (checked with fish 4.6).
+# The shell's own completions for directive $1, with $2 the current word: paths, and the names
+# fish's own helpers list (checked with fish 4.6).
 function __PROG_files
-    __PROG_load
-    switch $__PROG_directive
+    switch $argv[1]
         case directory
             __fish_complete_directories (commandline -ct)
         case 'file *'
-            set -l cur (commandline -ct)
-            __fish_complete_directories $cur
-            for ext in (string split ' ' -- (string replace 'file ' '' -- $__PROG_directive))
-                for f in $cur*.$ext
+            __fish_complete_directories (commandline -ct)
+            for ext in (string split ' ' -- (string replace 'file ' '' -- $argv[1]))
+                for f in $argv[2]*.$ext
                     test -f $f; and echo $f
                 end
             end
@@ -346,14 +542,19 @@ function __PROG_files
 end
 
 complete -c PROG -f
-complete -c PROG -f -k -n '__PROG_has_results' -a '$__PROG_results'
-complete -c PROG -f -n '__PROG_wants_files' -a '(__PROG_files)'
+complete -c PROG -f -k -a '(__PROG_complete)'
 `
 
 const powershellCompletionTemplate = `# PowerShell completion for PROG
 Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
-    $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })
+    # Each word as the program receives it, without the quotes it was typed with.
+    $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+            $_ -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) { $_.Value } else { $_.Extent.Text }
+    })
+    $partial = ''
+    if ($wordToComplete -ne '' -and $tokens.Count) { $partial = $tokens[-1] }
     # Pass the empty current word; before PowerShell 7.3, and with Legacy argument passing, an
     # empty argument only survives as '""'.
     if ($wordToComplete -eq '') {
@@ -373,7 +574,12 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
         $parts = $_ -split "` + "`" + `t", 2
         $text = $parts[0]
         $tip = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { $text }
-        [System.Management.Automation.CompletionResult]::new($text, $text, 'ParameterValue', $tip)
+        # PowerShell inserts the text as typed, so quote one with spaces, wildcards, shell
+        # characters or a leading ~ (a home directory to native commands). PowerShell reads the
+        # typographic quotes U+2018 to U+201E as quotes too, and inside single quotes doubles
+        # each form of single quote.
+        $insert = if ($text -match '^~|[\s''"$&|;<>(){}@#,*?\[\]` + "`" + `\u2018-\u201E]') { "'" + ($text -replace '[''\u2018-\u201B]', '$0$0') + "'" } else { $text }
+        [System.Management.Automation.CompletionResult]::new($insert, $text, 'ParameterValue', $tip)
     }
 
     if ($directive) {
@@ -384,36 +590,33 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
         switch -Wildcard ($hint) {
             # An empty string stops PowerShell's fallback to file names.
             'none' { if (-not $candidates) { '' }; return }
+            # PowerShell's own file name completion keeps the typed folder and quotes the names.
             'directory' {
-                Get-ChildItem -Directory -Filter "$wordToComplete*" -ErrorAction SilentlyContinue |
-                    ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderContainer', $_.FullName) }
+                [System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete) |
+                    Where-Object { $_.ResultType -eq 'ProviderContainer' }
             }
             'file *' {
-                Get-ChildItem -Directory -Filter "$wordToComplete*" -ErrorAction SilentlyContinue |
-                    ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderContainer', $_.FullName) }
-                foreach ($ext in ($hint -replace '^file ', '') -split ' ') {
-                    Get-ChildItem -File -Filter "$wordToComplete*.$ext" -ErrorAction SilentlyContinue |
-                        ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderItem', $_.FullName) }
-                }
+                $exts = ($hint -replace '^file ', '') -split ' '
+                [System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete) |
+                    Where-Object { $_.ResultType -eq 'ProviderContainer' -or $exts -contains [System.IO.Path]::GetExtension($_.ToolTip).TrimStart('.') }
             }
             'file' {
-                Get-ChildItem -Filter "$wordToComplete*" -ErrorAction SilentlyContinue |
-                    ForEach-Object { [System.Management.Automation.CompletionResult]::new($_.Name, $_.Name, 'ProviderItem', $_.FullName) }
+                [System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete)
             }
             'executable' {
-                $names = @(Get-Command -CommandType Application -Name "$wordToComplete*" -ErrorAction SilentlyContinue |
+                $names = @(Get-Command -CommandType Application -Name "$partial*" -ErrorAction SilentlyContinue |
                     ForEach-Object { $_.Name } | Sort-Object -Unique)
             }
             'user' {
                 $names = @()
                 if (Get-Command Get-LocalUser -ErrorAction SilentlyContinue) {
-                    $names = @(Get-LocalUser -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object { $_.Name })
+                    $names = @(Get-LocalUser -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$partial*" } | ForEach-Object { $_.Name })
                 }
             }
             'group' {
                 $names = @()
                 if (Get-Command Get-LocalGroup -ErrorAction SilentlyContinue) {
-                    $names = @(Get-LocalGroup -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$wordToComplete*" } | ForEach-Object { $_.Name })
+                    $names = @(Get-LocalGroup -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$partial*" } | ForEach-Object { $_.Name })
                 }
             }
             'host' { $names = @() }
@@ -443,12 +646,25 @@ def "nu-complete PROG" [place: record] {
     let options = ($lines | where ($it | str starts-with ':rotini:option ') | each { str substring 15.. | split row ' ' } | flatten)
     let directive = ($lines | where ($it | str starts-with ':rotini:') and not ($it | str starts-with ':rotini:message ') and not ($it | str starts-with ':rotini:option ') | each { str substring 8.. } | append '' | first)
     let space = not ('nospace' in $options)
+    # Nushell inserts a value as given: one that isn't a plain word goes in single quotes, or
+    # in a raw string when it holds a single quote, so it stays one literal argument.
+    let quote = {|v|
+        if ($v =~ '^[\w.:/=+-]+$') and not ($v | str starts-with '~') {
+            $v
+        } else if not ($v | str contains "'") {
+            $"'($v)'"
+        } else {
+            mut hashes = '#'
+            while ($v | str contains $"'($hashes)") { $hashes = $hashes + '#' }
+            $"r($hashes)'($v)'($hashes)"
+        }
+    }
     mut found = ($lines | where not ($it | str starts-with ':rotini:') | each {|line|
         let parts = ($line | split row --number 2 "\t")
         if ($parts | length) > 1 and ($parts.1 | is-not-empty) {
-            {value: $parts.0, description: $parts.1, append_whitespace: $space}
+            {value: (do $quote $parts.0), description: $parts.1, append_whitespace: $space}
         } else {
-            {value: $parts.0, append_whitespace: $space}
+            {value: (do $quote $parts.0), append_whitespace: $space}
         }
     })
     let words = ($directive | split row ' ')
@@ -462,8 +678,10 @@ def "nu-complete PROG" [place: record] {
                 if ($found | is-empty) { return null }
                 $found = ($found | append ($partial | commandline complete --type path | each {|p| {value: $p, append_whitespace: false} }))
             } else {
-                let paths = ($partial | commandline complete --type path | where {|p| ($p | str ends-with '/') or (($p | path parse | get extension) in $exts) })
-                $found = ($found | append ($paths | each {|p| {value: $p, append_whitespace: (not ($p | str ends-with '/'))} }))
+                # Nushell quotes a path it completes; the name is read inside the quotes.
+                let bare = {|p| $p | str replace --regex "^[\"'` + "`" + `](.*)[\"'` + "`" + `]$" '$1' }
+                let paths = ($partial | commandline complete --type path | where {|p| (do $bare $p | str ends-with '/') or ((do $bare $p | path parse | get extension) in $exts) })
+                $found = ($found | append ($paths | each {|p| {value: $p, append_whitespace: (not (do $bare $p | str ends-with '/'))} }))
             }
         }
         '' => {

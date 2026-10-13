@@ -78,11 +78,8 @@ func (p *Processor) importWith(ctx context.Context, opts ImportOptions, pl *plan
 	if opts.Package == "" {
 		return Imported{}, errors.New("a package is required, such as ./cmd")
 	}
-	if opts.Name != "" && !cliNameRe.MatchString(opts.Name) {
-		return Imported{}, fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
-	}
-	if opts.Dir != "" && !cliNameRe.MatchString(opts.Dir) {
-		return Imported{}, fmt.Errorf("invalid --dir %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Dir)
+	if err := checkImportNames(opts); err != nil {
+		return Imported{}, err
 	}
 	if _, err := frameworkFor(opts); err != nil {
 		return Imported{}, err
@@ -91,14 +88,21 @@ func (p *Processor) importWith(ctx context.Context, opts ImportOptions, pl *plan
 	if err != nil {
 		return Imported{}, err
 	}
-	moduleRoot, _, err := findModule()
+	moduleRoot, _, modFile, err := findModuleFile()
 	if err != nil {
 		return Imported{}, err
+	}
+	var vendorNote string
+	if filepath.Base(modFile) == "vendor.mod" {
+		vendorNote = "the module is in vendor.mod, so the import read it in place of go.mod"
 	}
 
 	res, runNotes, err := importRunner(ctx, moduleRoot, opts)
 	if err != nil {
 		return Imported{}, err
+	}
+	if vendorNote != "" {
+		runNotes = append(runNotes, importNote{Path: res.Command.Name, Level: "info", Msg: vendorNote})
 	}
 	name := opts.Name
 	if name == "" {
@@ -121,7 +125,7 @@ func (p *Processor) importWith(ctx context.Context, opts ImportOptions, pl *plan
 		specYAML = sb.build(version)
 	}
 	out := Imported{Summary: res.stats(slices.Concat(runNotes, sb.dropped))}
-	for _, n := range slices.Concat(runNotes, res.Notes, sb.dropped) {
+	for _, n := range slices.Concat(runNotes, res.Notes, groupDropped(sb.dropped)) {
 		out.Notes = append(out.Notes, n.String())
 	}
 
@@ -138,6 +142,9 @@ func (p *Processor) importWith(ctx context.Context, opts ImportOptions, pl *plan
 	}
 	confBytes, err := importDocument(importConf(version, dir, sb.completion), f, FormatKindConf)
 	if err != nil {
+		return out, err
+	}
+	if err := importNameClashes(specPath, specBytes, f); err != nil {
 		return out, err
 	}
 	if err := pl.write(specPath, specBytes); err != nil {
@@ -158,6 +165,32 @@ func (p *Processor) importWith(ctx context.Context, opts ImportOptions, pl *plan
 		out.Changes = pl.Changes()
 	}
 	return out, nil
+}
+
+// importNameClashes refuses, before anything is written, a program whose commands, flags or
+// other names would generate the same Go name, which no spec can express.
+func importNameClashes(specPath string, specBytes []byte, f fileFormat) error {
+	spec, derr := decodeData[Spec](f, specBytes, specPath)
+	if derr != nil {
+		return nil //nolint:nilerr // a spec that doesn't decode is reported by the validation after writing
+	}
+	problems := lintGoNames(spec)
+	if len(problems) == 0 {
+		return nil
+	}
+	locateProblems(problems, displayPath(specPath), newSourceLocator(f, specBytes))
+	return errors.Join(append([]error{errors.New("the program has names that differ only in case, \"-\" or \"_\", which make the same Go name, so it can't be imported; rename them in the program and import again")}, problems...)...)
+}
+
+// checkImportNames refuses a --name or --dir that can't name a rotini CLI or its directory.
+func checkImportNames(opts ImportOptions) error {
+	if opts.Name != "" && !cliNameRe.MatchString(opts.Name) {
+		return fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
+	}
+	if opts.Dir != "" && !cliNameRe.MatchString(opts.Dir) {
+		return fmt.Errorf("invalid --dir %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Dir)
+	}
+	return nil
 }
 
 // checkImportTarget refuses to write over an existing spec or conf, into an

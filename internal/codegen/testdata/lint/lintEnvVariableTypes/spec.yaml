@@ -1,0 +1,73 @@
+# One environment variable read as two types: a value right for one input fails the other.
+version: 0.0.0
+command:
+  name: demo
+  env_prefix: APP
+  flags:
+    - name: one
+      identifiers: [--one]
+      schema: { type: string, variable: SAME }
+    # SAME again, as an int.
+    - name: two
+      identifiers: [--two]
+      schema: { type: int, variable: SAME }
+    # Same type as one: nothing to report.
+    - name: three
+      identifiers: [--three]
+      schema: { type: string, variable: SAME }
+    - name: level
+      identifiers: [--level]
+      cascading: true
+      schema: { type: int, variable: LEVEL }
+    # DAY as a date and as a datetime: both are time.Time, but "2024-01-02" fails a datetime.
+    - name: day
+      identifiers: [--day]
+      schema: { type: date, variable: DAY }
+    - name: at
+      identifiers: [--at]
+      schema: { type: datetime, variable: DAY }
+    # STAMP under two layouts.
+    - name: since
+      identifiers: [--since]
+      schema: { type: datetime, layout: "2006-01-02 15:04", variable: STAMP }
+    - name: until
+      identifiers: [--until]
+      schema: { type: datetime, variable: STAMP }
+    # TAGS split on different separators.
+    - name: tags
+      identifiers: [--tags]
+      schema: { type: "[]string", variable: TAGS }
+    - name: labels
+      identifiers: [--labels]
+      schema: { type: "[]string", separator: ";", variable: TAGS }
+    # SRC as an existingfile, directly and through a named schema: they read alike.
+    - name: src
+      identifiers: [--src]
+      schema: { type: existingfile, variable: SRC }
+    - name: source
+      identifiers: [--source]
+      schema: { $ref: InFile, variable: SRC }
+    # N as int and as integer: one type.
+    - name: n
+      identifiers: [--n]
+      schema: { type: int, variable: N }
+    - name: count
+      identifiers: [--count]
+      schema: { type: integer, variable: N }
+  schemas:
+    InFile: { type: existingfile }
+  env:
+    # APP_REGION, derived from the prefix and name, as an int.
+    - name: region
+      schema: { type: int }
+  commands:
+    - name: run
+      flags:
+        # APP_REGION again, as a string, below the root's env input.
+        - name: region
+          identifiers: [--region]
+          schema: { type: string, variable: APP_REGION }
+        # LEVEL, the root's cascading int flag's variable, read here as a string.
+        - name: depth
+          identifiers: [--depth]
+          schema: { type: string, variable: LEVEL }

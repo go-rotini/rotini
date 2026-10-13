@@ -2,7 +2,9 @@ package cfgedit
 
 import (
 	"bytes"
+	"errors"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -10,9 +12,10 @@ import (
 )
 
 // FuzzEdit makes a random edit to a random document in each format. The edit may fail, but
-// it must never panic, and a successful edit must hold: the edited file decodes with the key set
-// (or gone), and making the same edit again changes nothing. A verification failure is an
-// allowed outcome: it is the safety net refusing an edit whose result would read back wrong.
+// it must never panic or fail verification (that is a bug in cfgedit), and a successful edit
+// must hold: the edited file decodes with the key set (or gone), and making the same edit again
+// changes nothing. A key inserted into an existing, non-empty mapping and removed again gives
+// back the original values.
 func FuzzEdit(f *testing.F) {
 	formats := []Format{YAML, JSON, JSONC, Dotenv, TOML}
 	files, _ := filepath.Glob(filepath.Join("testdata", "edit", "*", "*.txtar"))
@@ -33,13 +36,16 @@ func FuzzEdit(f *testing.F) {
 			}
 		}
 	}
+	f.Add(uint8(4), "[deploy]\n# timeout = 5\n", "deploy.timeout", "", true)
+	f.Add(uint8(0), "deploy: {}\n", "deploy.timeout", "", true)
+	f.Add(uint8(1), "", "deploy.timeout", "", true)
 	f.Fuzz(func(t *testing.T, which uint8, src, key, value string, remove bool) {
 		format := formats[int(which)%len(formats)]
 		path := strings.Split(key, ".")
 		if format == Dotenv {
 			path = []string{key}
 		}
-		if loneCR([]byte(src)) {
+		if loneCR([]byte(src)) || format == YAML && emptyAnchor.MatchString(src) {
 			return
 		}
 		var err error
@@ -48,6 +54,9 @@ func FuzzEdit(f *testing.F) {
 			out, err = Unset([]byte(src), format, path, KeepParents(int(which)%3))
 		} else {
 			out, err = Set([]byte(src), format, path, value)
+		}
+		if errors.Is(err, ErrVerify) {
+			t.Fatalf("%s %q on %q (remove %v): %v", format, key, src, remove, err)
 		}
 		if err != nil {
 			return
@@ -69,7 +78,44 @@ func FuzzEdit(f *testing.F) {
 		if err != nil || !bytes.Equal(again, out) {
 			t.Fatalf("%s %q on %q: the same edit again changed the file (%v)\n%q\n%q", format, key, src, err, out, again)
 		}
+		if !remove && insertedIntoMapping(format, src, path) {
+			back, err := Unset(out, format, path)
+			if err != nil {
+				t.Fatalf("%s %q on %q: unset after set: %v", format, key, src, err)
+			}
+			want, _ := decode(format, []byte(src))
+			if got, err := decode(format, back); err != nil || !equalValue(want, got) {
+				t.Fatalf("%s %q on %q: set then unset gave %q (%v)", format, key, src, back, err)
+			}
+		}
 	})
+}
+
+// emptyAnchor matches a YAML anchor with no name, which the yaml parser accepts as an empty
+// anchor on a plain scalar; verification then refuses the edit.
+var emptyAnchor = regexp.MustCompile(`&([,\[\]{}\s]|$)`)
+
+// insertedIntoMapping reports whether setting path in src inserts a new key into a mapping
+// that already holds others.
+func insertedIntoMapping(format Format, src string, path []string) bool {
+	m, err := decode(format, []byte(src))
+	if err != nil {
+		return false
+	}
+	parent := any(m)
+	for _, seg := range path[:len(path)-1] {
+		pm, ok := parent.(map[string]any)
+		if !ok {
+			return false
+		}
+		parent = pm[seg]
+	}
+	pm, ok := parent.(map[string]any)
+	if !ok || len(pm) == 0 {
+		return false
+	}
+	_, exists := pm[path[len(path)-1]]
+	return !exists
 }
 
 func lookup(m map[string]any, path []string) (any, bool) {

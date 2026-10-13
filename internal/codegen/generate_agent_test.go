@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -109,6 +110,9 @@ func TestExplainKey(t *testing.T) {
 	}
 	if _, err := ExplainKey("generate.featurs"); err == nil || err.Error() != `no key "featurs" under generate; did you mean "generate.features"?` {
 		t.Errorf("err = %v", err)
+	}
+	if _, err := ExplainKey("command.commands[0].nope"); err == nil || !strings.Contains(err.Error(), "names a list position") || !strings.Contains(err.Error(), ": command.commands.nope") {
+		t.Errorf("list position err = %v", err)
 	}
 	if got := ExplainCandidates("command.effects.k"); !reflect.DeepEqual(got, []string{"command.effects.kind"}) {
 		t.Errorf("candidates = %q", got)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/go-rotini/jsonschema"
 	"github.com/go-rotini/recon"
@@ -29,7 +28,7 @@ func jsonDecodeMessage(err error) string { return decodeMessageWith(err, jsonMes
 // decodeMessageWith is [decodeMessage], reading a decoder's own error types through more.
 func decodeMessageWith(err error, more func(error) (string, bool)) string {
 	if errors.Is(err, recon.ErrUnsupportedFormat) {
-		return "the top level must be a mapping"
+		return "the top level must be " + topLevelKind(err.Error())
 	}
 	if msg := parseMessage(err, more); msg != err.Error() {
 		return msg
@@ -38,6 +37,21 @@ func decodeMessageWith(err error, more func(error) (string, bool)) string {
 		err = next
 	}
 	return err.Error()
+}
+
+// topLevelKind is what a format's codec says its top level must be, in the format's own word
+// ("an object" for JSON, "a table" for TOML), read from the codec's "<format> root must be
+// <kind>, got <type>" message; "a mapping" when the message has no such phrase.
+func topLevelKind(msg string) string {
+	_, kind, ok := strings.Cut(msg, " root must be ")
+	if !ok {
+		return "a mapping"
+	}
+	kind, _, _ = strings.Cut(kind, ",")
+	if kind = strings.TrimSpace(kind); kind == "" {
+		return "a mapping"
+	}
+	return kind
 }
 
 // fileParseError reports a configuration file rotini decoded itself the way recon reports one
@@ -55,7 +69,7 @@ func fileParseError(path string, err error) *recon.ParseError {
 // dotenv documents are always tables, so they cannot hold one; nor can a format with no codec.
 func decodeDocumentJSON(format string, c *codecEntry, data []byte) ([]byte, error) {
 	if c == nil || c.decodeAny == nil {
-		return nil, fmt.Errorf("%w: a %s document is a table at the top level, not a list", recon.ErrUnsupportedFormat, format)
+		return nil, fmt.Errorf("%w: a %s document's root must be a table, got a list", recon.ErrUnsupportedFormat, format)
 	}
 	v, err := c.decodeAny(data)
 	if err != nil {
@@ -95,9 +109,6 @@ func jsonCompatible(v any) any {
 	return v
 }
 
-// documentSchemas caches each stdin document schema, compiled, by its text.
-var documentSchemas sync.Map // string → *jsonschema.Schema
-
 // validateDocumentJSON checks a JSON document of any shape against a stdin schema, reporting
 // failures as recon validation errors so they read like every other stdin field error.
 func validateDocumentJSON(schema string, raw []byte) error {
@@ -114,17 +125,9 @@ func validateDocumentJSON(schema string, raw []byte) error {
 
 // documentSchema returns a stdin schema, compiled once per process.
 func documentSchema(schema string) (*jsonschema.Schema, error) {
-	cached, ok := documentSchemas.Load(schema)
-	if !ok {
-		s, err := jsonschema.Compile([]byte(schema))
-		if err != nil {
-			return nil, internalBind(channelStdin, "", "invalid stdin schema", err)
-		}
-		cached, _ = documentSchemas.LoadOrStore(schema, s)
-	}
-	compiled, ok := cached.(*jsonschema.Schema)
-	if !ok {
-		return nil, internalBind(channelStdin, "", "invalid stdin schema", nil)
+	compiled, err := compileSchema(schema)
+	if err != nil {
+		return nil, internalBind(channelStdin, "", "invalid stdin schema", err)
 	}
 	return compiled, nil
 }
@@ -135,18 +138,7 @@ func documentResult(schema string, result *jsonschema.Result) error {
 	if result.Valid {
 		return nil
 	}
-	multi := &recon.MultiError{}
-	var walk func(errs []jsonschema.ValidationError)
-	walk = func(errs []jsonschema.ValidationError) {
-		for _, e := range errs {
-			if len(e.Causes) > 0 {
-				walk(e.Causes)
-				continue
-			}
-			multi.Append(&recon.ValidationError{Path: pointerPath(e.InstanceLocation), Rule: e.Keyword, Msg: e.Message})
-		}
-	}
-	walk(result.Errors)
+	multi := schemaFailures(result.Errors)
 	applyPatternMessages(schema, multi)
 	return reconBind(channelStdin, multi)
 }

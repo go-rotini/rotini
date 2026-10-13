@@ -386,7 +386,7 @@ func stdinPayload(in any) ([]byte, error) {
 	}
 	switch format {
 	case "text":
-		return []byte(f.String()), nil
+		return textPayload(f.String())
 	case "bytes":
 		return f.Bytes(), nil
 	case "lines", "jsonl":
@@ -416,6 +416,21 @@ func stdinPayload(in any) ([]byte, error) {
 		return nil, fmt.Errorf("encode the stdin payload as %s: %w", format, err)
 	}
 	return b, nil
+}
+
+// textPayload writes a text payload so the program reads it back unchanged: reading drops one
+// trailing line ending and a leading byte-order mark, so text ending in "\n" gets one more. Text
+// ending in a lone carriage return, or starting with a byte-order mark, can't be written.
+func textPayload(text string) ([]byte, error) {
+	switch {
+	case strings.HasPrefix(text, "\ufeff"):
+		return nil, fmt.Errorf("the stdin text %q starts with a byte-order mark, which reading drops, so it can't be written", text)
+	case strings.HasSuffix(text, "\r"):
+		return nil, fmt.Errorf("the stdin text %q ends in a carriage return, which reading drops, so it can't be written", text)
+	case strings.HasSuffix(text, "\n"):
+		text += "\n"
+	}
+	return []byte(text), nil
 }
 
 // joinItems writes a lines or jsonl payload's items, one per line (lines with the nul option

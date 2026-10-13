@@ -23,6 +23,7 @@ type osView struct {
 	foldCase bool              // names match case-insensitively (Windows)
 	clock    *runClock         // the run's clock (see Program.WithClock); nil reads time.Now
 	input    *inputEnv         // what inputs read beyond env: .env files and variable_file values
+	files    *fileCache        // the configuration files one read of the inputs has opened; nil opens each time
 }
 
 // newOSView indexes env (exec.Cmd.Env's KEY=value form; later duplicates win). A nil env reads
@@ -287,7 +288,7 @@ func (v *osView) expandTilde(p string) (string, error) {
 	}
 	home, err := expand.lookupUser(name)
 	if err != nil {
-		return "", fmt.Errorf("expand ~%s: %w", name, err)
+		return "", fmt.Errorf("cannot expand %s: no such user", quotePath("~"+name))
 	}
 	return home + p[end:], nil
 }
@@ -330,19 +331,31 @@ func (v *osView) expandVars(s string) (string, error) {
 	return b.String(), nil
 }
 
-// evalBraced evaluates the inside of one ${...} reference.
+// evalBraced evaluates the inside of one ${...} reference: a name, then optionally one
+// operator right after it and the word it applies.
 func (v *osView) evalBraced(expr string) (string, error) {
-	idx, op := -1, ""
+	n := 0
+	if n < len(expr) && isVarFirstByte(expr[n]) {
+		for n++; n < len(expr) && (isVarFirstByte(expr[n]) || (expr[n] >= '0' && expr[n] <= '9')); n++ {
+		}
+	}
+	if n == 0 {
+		return "", fmt.Errorf("${%s} is not a valid variable reference", expr)
+	}
+	if n == len(expr) {
+		return v.getenv(expr), nil
+	}
+	op := ""
 	for _, o := range []string{":-", ":+", ":?", "-", "+"} {
-		if i := strings.Index(expr, o); i >= 0 {
-			idx, op = i, o
+		if strings.HasPrefix(expr[n:], o) {
+			op = o
 			break
 		}
 	}
-	if idx < 0 {
-		return v.getenv(expr), nil
+	if op == "" {
+		return "", fmt.Errorf("${%s} is not a valid variable reference", expr)
 	}
-	name, rhs := expr[:idx], expr[idx+len(op):]
+	name, rhs := expr[:n], expr[n+len(op):]
 	val, set := v.lookup(name)
 	switch op {
 	case ":-":

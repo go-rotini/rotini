@@ -12,9 +12,11 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-rotini/recon"
+	"github.com/go-rotini/toml"
 )
 
 // InputReader is the default multi-source input reader. It fills a command's typed inputs from
@@ -102,7 +104,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	// is still read, so an env value or a command line that cannot be read is still an error;
 	// a configuration file that cannot be read or holds a value of the wrong type is skipped.
 	waived := shortCircuited(chain, store)
-	view := rtx.osView()
+	view := rtx.osView().withFileCache()
 	fs := rtx.features()
 
 	// 1b. Two-phase bootstrap: a config_source flag or env names the file step 4 reads, and a
@@ -370,6 +372,7 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 	if err != nil {
 		return nil, "", reconBind(channelFlag, err)
 	}
+	found = found && val.Kind() != recon.NullKind // a null (`mode:`) leaves the default in place
 	source := val.Source()
 	switch {
 	case found:
@@ -379,6 +382,9 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 			}
 			return nil, "", fallbackCoerceError(chain, idx, name, fallbackOrigin(rd, source, tag.Get("env"), key), err)
 		}
+		if val.Kind() == recon.MapKind && isObjectFlag(def) {
+			quoteObjectPairs(vals) // an object's config block read as one map value
+		}
 	case field.Kind() == reflect.Map || (isObjectFlag(def) && field.Kind() != reflect.Slice):
 		// recon keeps a config map — or an object flag's config block — as its leaves
 		// (labels.k, labels.x), not at the map's key. For an object each leaf is one
@@ -387,10 +393,7 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 			return nil, "", reconBind(channelFlag, err)
 		}
 		if isObjectFlag(def) {
-			for i, leaf := range vals {
-				k, v, _ := strings.Cut(leaf, "=")
-				vals[i] = quotePair(k, v) // an object occurrence is CSV-split; keep a comma in a value
-			}
+			quoteObjectPairs(vals)
 		}
 		if len(vals) == 0 {
 			return nil, "", nil
@@ -410,6 +413,7 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 		}
 		return nil, "", usageBind(channelFlag, name, err.Error()+fromSource(origin), err)
 	}
+	vals = fallbackTimes(field.Type(), def, vals)
 	var prev reflect.Value
 	if waivable {
 		prev = reflect.New(field.Type()).Elem()
@@ -430,6 +434,45 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 		vals = []string{} // supplied, and empty: still present
 	}
 	return vals, origin, nil
+}
+
+// fallbackTimes reads the fallback values of a time flag that declares no layout or relative
+// form as an env or config input of type time reads them, so the two agree on a value from the
+// same variable or file: a value the config library binds to a time is rewritten in RFC 3339,
+// and any other is kept for the flag's own check to report.
+func fallbackTimes(t reflect.Type, def FlagDef, vals []string) []string {
+	if t = derefType(t); t.Kind() == reflect.Slice {
+		t = derefType(t.Elem())
+	}
+	if t != timeType || def.Layout != "" || len(def.Layouts) > 0 || def.Relative != "" {
+		return vals
+	}
+	vals = slices.Clone(vals)
+	for i, v := range vals {
+		if _, err := time.Parse(time.RFC3339, strings.TrimSpace(v)); err == nil {
+			continue
+		}
+		if tv, ok := reconTime(v); ok {
+			vals[i] = tv.Format(time.RFC3339Nano)
+		}
+	}
+	return vals
+}
+
+// reconTime binds text to a time as the config library binds an env or config input's value.
+func reconTime(s string) (time.Time, bool) {
+	reg, err := recon.New(recon.WithoutWatch(), recon.WithSources(recon.NewMapSource("time", map[string]any{"t": s})))
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer func() { _ = reg.Close() }()
+	var dst struct {
+		T time.Time `recon:"t"`
+	}
+	if err := reg.Bind(&dst); err != nil {
+		return time.Time{}, false
+	}
+	return dst.T, true
 }
 
 // mapLeaves collects the registry's leaf keys under key as sorted key=value entries relative
@@ -454,18 +497,31 @@ func mapLeaves(reg *recon.Registry, key string) (entries []string, source string
 	return entries, source, nil
 }
 
+// quoteObjectPairs quotes the value of each key=value leaf in place: an object occurrence is
+// CSV-split, so a comma in a value must stay inside it.
+func quoteObjectPairs(leaves []string) {
+	for i, leaf := range leaves {
+		k, v, _ := strings.Cut(leaf, "=")
+		leaves[i] = quotePair(k, v)
+	}
+}
+
 // fallbackValues renders a flag's reconciled fallback as the argv-shaped strings the Parser
 // would have produced: a list's items one by one, a map's entries as key=value (nested maps as
 // dotted keys), and anything else as one string, split on the flag's separator when it has
 // one.
 func fallbackValues(val recon.Value, sep string) ([]string, error) {
-	if items, err := val.AsSlice(); err == nil {
+	if val.Kind() == recon.SliceKind {
+		items, _ := val.AsSlice()
 		out := make([]string, len(items))
 		for i, it := range items {
+			if it.Kind() == recon.NullKind {
+				return nil, nullItem(i)
+			}
 			out[i] = it.String()
 			// A list of objects (a config file's list of mounts) goes through as JSON, one
 			// occurrence per element — the form an object flag decodes.
-			if _, err := it.AsMap(); err == nil {
+			if it.Kind() == recon.MapKind {
 				if raw, err := json.Marshal(plainValue(it)); err == nil {
 					out[i] = string(raw)
 				}
@@ -473,7 +529,8 @@ func fallbackValues(val recon.Value, sep string) ([]string, error) {
 		}
 		return out, nil
 	}
-	if m, err := val.AsMap(); err == nil {
+	if val.Kind() == recon.MapKind {
+		m, _ := val.AsMap()
 		var out []string
 		flattenMap("", m, &out)
 		sort.Strings(out)
@@ -483,17 +540,58 @@ func fallbackValues(val recon.Value, sep string) ([]string, error) {
 	return splitValue(val.String(), sep)
 }
 
+// nullItem is the error for a configuration list whose item i (from 0) is null, which no
+// input type holds.
+func nullItem(i int) error {
+	return fmt.Errorf("list item %d is null", i+1)
+}
+
+// checkNullItems refuses a configuration list, read by a list field of the Config struct s,
+// that holds a null item. A field pinned to one file is read from that file's registry.
+func checkNullItems(s reflect.Value, cfg *cfgRegs) error {
+	if s.Kind() != reflect.Struct {
+		return nil
+	}
+	for f := range s.Type().Fields() {
+		key := reconKey(f.Tag.Get("recon"))
+		if key == "" || derefType(f.Type).Kind() != reflect.Slice {
+			continue
+		}
+		reg := cfg.merged
+		if pin := f.Tag.Get("cfgfile"); pin != "" {
+			var err error
+			if reg, err = cfg.For(pin); err != nil {
+				return err
+			}
+		}
+		val, found, err := reg.Get(key)
+		if err != nil || !found || val.Kind() != recon.SliceKind {
+			continue
+		}
+		items, _ := val.AsSlice()
+		for i, it := range items {
+			if it.Kind() == recon.NullKind {
+				l := cfg.labels()
+				return usageBind(channelConfig, key, l.name(channelConfig, key)+": "+nullItem(i).Error()+l.origin(val.Source()), nil)
+			}
+		}
+	}
+	return nil
+}
+
 // plainValue converts a recon value to plain JSON-shaped Go data — maps and slices of plain
 // values all the way down — since a recon map holds recon values, which encode as nothing.
 func plainValue(v recon.Value) any {
-	if m, err := v.AsMap(); err == nil {
+	switch v.Kind() {
+	case recon.MapKind:
+		m, _ := v.AsMap()
 		out := make(map[string]any, len(m))
 		for k, e := range m {
 			out[k] = plainValue(e)
 		}
 		return out
-	}
-	if items, err := v.AsSlice(); err == nil {
+	case recon.SliceKind:
+		items, _ := v.AsSlice()
 		out := make([]any, len(items))
 		for i, e := range items {
 			out[i] = plainValue(e)
@@ -510,7 +608,8 @@ func flattenMap(prefix string, m map[string]recon.Value, out *[]string) {
 		if prefix != "" {
 			key = prefix + "." + k
 		}
-		if sub, err := v.AsMap(); err == nil {
+		if v.Kind() == recon.MapKind {
+			sub, _ := v.AsMap()
 			flattenMap(key, sub, out)
 			continue
 		}
@@ -609,7 +708,11 @@ func recordFlag(store *parsedInputs, idx int, name string, values []string) {
 
 // hasReconFlags reports whether any command has a flag or argument with an env/config fallback
 // to reconcile. When false, the input reader skips building a registry entirely.
-func hasReconFlags(v reflect.Value) bool {
+func hasReconFlags(v reflect.Value) bool { return typeFact(&reconFlagsFacts, v, reconFlagsOf) }
+
+var reconFlagsFacts sync.Map // reflect.Type → bool
+
+func reconFlagsOf(v reflect.Value) bool {
 	for _, field := range v.Fields() {
 		for _, s := range [2]reflect.Value{commandFlags(field), commandArgs(field)} {
 			if !s.IsValid() {
@@ -719,7 +822,11 @@ func (b *InputReader) checkDescribed(v reflect.Value) error {
 
 // hasConfigChannel reports whether any command frame in the inputs struct declares a
 // non-empty Config sub-struct.
-func hasConfigChannel(v reflect.Value) bool {
+func hasConfigChannel(v reflect.Value) bool { return typeFact(&configChannelFacts, v, configChannelOf) }
+
+var configChannelFacts sync.Map // reflect.Type → bool
+
+func configChannelOf(v reflect.Value) bool {
 	if v.Kind() != reflect.Struct {
 		return false
 	}
@@ -785,6 +892,9 @@ func (b *InputReader) configRegs(chain []Command, boot fileBootstrap, v reflect.
 // command's own declared order preserved. Off-branch sources are excluded; an unscoped source
 // is always in scope and appended last.
 func (b *InputReader) chainConfigFiles(chain []Command) []ConfigFile {
+	if len(b.configFiles) == 0 {
+		return nil
+	}
 	paths := make([]string, len(chain))
 	for i := range chain {
 		if i == 0 {
@@ -928,7 +1038,7 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 		}
 		tmp := reflect.New(reflect.StructOf(fields))
 		if err := bindConfigWaived(reg, tmp.Interface(), regs.waived); err != nil {
-			return regs.labels().bind(channelConfig, err)
+			return regs.labels().bindStruct(channelConfig, err, reg, tmp.Elem())
 		}
 		for i, j := range idxs {
 			cs.Field(j).Set(tmp.Elem().Field(i))
@@ -957,6 +1067,8 @@ func (b *InputReader) fileSources(files []ConfigFile, boot fileBootstrap, waived
 // namedSource renames a recon source to its config_files logical name, since recon source
 // names must be unique and two entries may share a basename. The wrapper drops live-watch
 // support, which the input reader does not use. path is the file it read, for messages.
+// A key set to null (`mode:` or `mode: null`) reads as absent, so it supplies nothing and the
+// next source or the declared default applies.
 type namedSource struct {
 	recon.Source
 
@@ -965,6 +1077,14 @@ type namedSource struct {
 }
 
 func (s namedSource) Name() string { return s.name }
+
+func (s namedSource) Get(p recon.Path) (recon.Value, bool, error) {
+	v, ok, err := s.Source.Get(p)
+	if ok && err == nil && v.Kind() == recon.NullKind {
+		return recon.Value{}, false, nil
+	}
+	return v, ok, err
+}
 
 // sourcePaths maps each configuration file source's logical name to the file it read.
 func sourcePaths(srcs []recon.Source) map[string]string {
@@ -1026,7 +1146,8 @@ func (b *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot file
 		}
 	}
 	if !waived {
-		if err := validateConfigFileAs(fs, f, src, choice.name); err != nil {
+		check := func() error { return validateConfigFileAs(fs, f, src, choice.name) }
+		if err := view.files.check(checkedKey{name: f.Name, path: path, profile: choice.name}, check); err != nil {
 			return nil, err
 		}
 	}
@@ -1051,15 +1172,20 @@ func isWiringError(err error) bool {
 // openFileSource locates and parses one config_files entry, returning the source and the file
 // it resolved to. Rotini expands the path and runs the discover search itself, from the run's
 // view, so recon reads exactly the absolute path it is given.
-func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]string, view *osView) (recon.Source, string, error) {
+func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOverride, view *osView) (recon.Source, string, error) {
 	opts := []recon.FileOption{recon.WithPathExpansion(false)}
 	if f.Format != "" {
 		opts = append(opts, recon.WithFileFormat(f.Format))
 	}
-	path, overridden := overrides[f.Name]
+	override, overridden := overrides[f.Name]
+	var path string
 	var dirs []string
 	switch {
 	case overridden:
+		if override.emptyFlag != "" {
+			return nil, "", usageBind(channelConfig, f.Name, override.emptyFlag+" was given an empty path; name a configuration file", nil)
+		}
+		path = override.path
 		opts = append(opts, recon.WithOptional(false))
 	case f.Discover != nil:
 		var err error
@@ -1078,10 +1204,10 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]string, 
 		path = f.Path
 		opts = append(opts, recon.WithOptional(true))
 	}
-	resolved, err := view.expandPath(path)
-	if err == nil {
-		resolved, err = absPath(view, resolved)
+	if !overridden {
+		override = pathOverride{path: path, declared: true}
 	}
+	resolved, err := override.resolve(view)
 	if err != nil {
 		if isWiringError(err) {
 			return nil, "", err
@@ -1096,12 +1222,81 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]string, 
 	if err != nil {
 		return nil, "", err
 	}
+	key := openedKey{name: f.Name, path: resolved, format: f.Format, optional: !overridden}
+	if o, ok := view.files.opened(key); ok {
+		return o.src, resolved, o.err
+	}
 	src, err := newFileSource(fs, resolved, c, opts...)
 	if err != nil {
 		// The file's content or path is the user's to fix.
-		return nil, "", usageBind(channelConfig, f.Name, configFileProblem(resolved, err), err)
+		err = usageBind(channelConfig, f.Name, configFileProblem(resolved, err), err)
+		view.files.keep(key, openedFile{err: err})
+		return nil, "", err
 	}
+	view.files.keep(key, openedFile{src: src})
 	return src, resolved, nil
+}
+
+// fileCache holds the configuration files one read of the inputs has opened, so each is read,
+// decoded and checked against its schema once however many registries the read builds. A
+// file source is read only after it is opened, so one can serve every registry. A nil cache
+// keeps nothing.
+type fileCache struct {
+	files   map[openedKey]openedFile
+	checked map[checkedKey]error
+}
+
+// openedKey identifies one opening of a configuration file: the entry, the file it resolved to,
+// and how it was opened.
+type openedKey struct {
+	name, path, format string
+	optional           bool
+}
+
+// openedFile is the result of opening one: its source, or why it could not be opened.
+type openedFile struct {
+	src recon.Source
+	err error
+}
+
+// checkedKey identifies one schema check of a configuration file, as read under a profile.
+type checkedKey struct{ name, path, profile string }
+
+// withFileCache returns a copy of v that keeps the configuration files it opens, for one read.
+func (v *osView) withFileCache() *osView {
+	out := &osView{foldCase: foldCaseDefault()}
+	if v != nil {
+		*out = *v
+	}
+	out.files = &fileCache{files: map[openedKey]openedFile{}, checked: map[checkedKey]error{}}
+	return out
+}
+
+func (c *fileCache) opened(k openedKey) (openedFile, bool) {
+	if c == nil {
+		return openedFile{}, false
+	}
+	o, ok := c.files[k]
+	return o, ok
+}
+
+func (c *fileCache) keep(k openedKey, o openedFile) {
+	if c != nil {
+		c.files[k] = o
+	}
+}
+
+// check runs a schema check once per key, returning its first result after.
+func (c *fileCache) check(k checkedKey, run func() error) error {
+	if c == nil {
+		return run()
+	}
+	if err, ok := c.checked[k]; ok {
+		return err
+	}
+	err := run()
+	c.checked[k] = err
+	return err
 }
 
 // searchFile returns the first of dirs holding name, else name in the first directory, as a
@@ -1122,6 +1317,9 @@ func searchFile(dirs []string, name string) string {
 // configFileProblem says why a configuration file could not be used: where a syntax error is
 // and what it is, or why the file could not be read.
 func configFileProblem(path string, err error) string {
+	if de, ok := errors.AsType[*toml.DuplicateKeyError](err); ok {
+		return fmt.Sprintf("could not parse configuration file %s:%d: duplicate key %q", path, de.Pos.Line, de.Key)
+	}
 	if pe, ok := errors.AsType[*recon.ParseError](err); ok {
 		loc := path
 		if at := pe.Position.String(); at != "" {
@@ -1130,17 +1328,16 @@ func configFileProblem(path string, err error) string {
 		return fmt.Sprintf("could not parse configuration file %s: %s", loc, decodeMessage(pe))
 	}
 	reason := "cannot be read"
+	info, statErr := os.Stat(path)
 	switch {
+	case statErr == nil && info.IsDir():
+		reason = "is a directory"
 	case errors.Is(err, fs.ErrNotExist):
 		reason = "no such file"
 	case errors.Is(err, fs.ErrPermission):
 		reason = "permission denied"
 	case errors.Is(err, recon.ErrUnsupportedFormat):
 		reason = "unsupported format"
-	default:
-		if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
-			reason = "is a directory"
-		}
 	}
 	return fmt.Sprintf("could not open configuration file %s: %s", path, reason)
 }
@@ -1219,8 +1416,8 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 // pathOverrides resolves each ConfigFile's config_source inputs to the path they supply: the
 // flag explicitly set on argv, then the env variable, then the flag's default. An entry none
 // of them supplies keeps its own path or discover strategy.
-func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *osView) map[string]string {
-	out := map[string]string{}
+func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *osView) map[string]pathOverride {
+	out := map[string]pathOverride{}
 	for _, f := range b.chainConfigFiles(chain) {
 		pf := f.PathFrom
 		if pf == nil {
@@ -1228,15 +1425,85 @@ func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *
 		}
 		explicit, defaulted := storeFlagValue(store, pf.Flag)
 		switch {
+		case explicit == "" && storeFlagSet(store, pf.Flag):
+			out[f.Name] = pathOverride{emptyFlag: chainFlagLabel(chain, pf.Flag)}
 		case explicit != "":
-			out[f.Name] = explicit
+			out[f.Name] = pathOverride{path: explicit}
 		case firstSetEnv(view, pf.Env) != "":
-			out[f.Name] = view.inputGetenv(firstSetEnv(view, pf.Env))
+			out[f.Name] = pathOverride{path: view.inputGetenv(firstSetEnv(view, pf.Env))}
 		case defaulted != "":
-			out[f.Name] = defaulted
+			out[f.Name] = pathOverride{path: defaulted, declared: true}
 		}
 	}
 	return out
+}
+
+// pathOverride is the path a config_source input supplies. A path the user gave, on the
+// command line or in a variable, has only a leading ~ expanded (a shell leaves ~ alone in
+// --config=~/app.yaml and in a variable set outside a shell), and ~user only when the program
+// has path expansion; any $ is kept as written. The flag's declared default is expanded like a
+// declared path.
+type pathOverride struct {
+	path     string
+	declared bool
+
+	// emptyFlag is the flag given an empty path on the command line, which names no file: a
+	// usage error, not a fall back to the variable or the default.
+	emptyFlag string
+}
+
+// resolve makes the path absolute against the run's directory, expanding it first.
+func (o pathOverride) resolve(view *osView) (string, error) {
+	p := o.path
+	if p != "" {
+		var err error
+		if o.declared {
+			p, err = view.expandPath(p)
+		} else {
+			p, err = view.expandGivenTilde(p)
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return absPath(view, p)
+}
+
+// expandGivenTilde expands a leading ~ of a path the user gave. ~user is expanded only when
+// the program has path expansion, and is otherwise kept as written.
+func (v *osView) expandGivenTilde(p string) (string, error) {
+	if !strings.HasPrefix(p, "~") {
+		return p, nil
+	}
+	if end := strings.IndexAny(p, `/\`); end != 1 && len(p) > 1 {
+		if x := v.clockRef().features().expand; x == nil || x.lookupUser == nil {
+			return p, nil
+		}
+	}
+	return v.expandTilde(p)
+}
+
+// storeFlagSet reports whether flag name was set on argv anywhere on the chain.
+func storeFlagSet(store *parsedInputs, name string) bool {
+	if name == "" || store == nil {
+		return false
+	}
+	for i := range store.scopes {
+		if len(store.scopes[i].flags[name]) > 0 && store.setOnArgv(i, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// chainFlagLabel is flag name as messages name it, from the nearest command that declares it.
+func chainFlagLabel(chain []Command, name string) string {
+	for _, c := range slices.Backward(chain) {
+		if _, ok := findFlagDef(c.Flags, name); ok {
+			return labelForFlag(c.Flags, name)
+		}
+	}
+	return "--" + name
 }
 
 // storeFlagValue finds a flag's parsed value across the chain, split by whether it was set on
@@ -1311,8 +1578,8 @@ func envRegistry(v reflect.Value, envPrefix string, view *osView) (*recon.Regist
 }
 
 // spellings gives env and config inputs the value spellings flags accept and recon's decode
-// does not: days and weeks in a duration (7d), yes/no, on/off and y/n for a bool (see
-// parseBool), a declared layout or relative form for a time field instead of RFC 3339, and
+// does not: days and weeks in a duration (7d), yes/no, on/off and y/n for a bool, and the
+// numbers 1 and 0 a typed configuration format holds for one (see parseBool), a declared layout or relative form for a time field instead of RFC 3339, and
 // decimal integers, where a leading zero does not mean octal, plus the 0x, 0o and 0b literals
 // of an integer field that declares base: prefixed. Only the keys of those typed fields are
 // rewritten; a string input whose value is "yes" keeps it.
@@ -1339,6 +1606,7 @@ type valueKeys struct {
 // holds split on sep. prefixed is the field's base: prefixed; without it the text is decimal.
 type prefixedKey struct {
 	list     bool
+	bytes    bool // a []uint8, which a string would otherwise bind as its bytes
 	sep      string
 	prefixed bool
 }
@@ -1370,6 +1638,13 @@ func (k prefixedKey) decimal(v recon.Value) recon.Value {
 			sep = "," // recon's default
 		}
 		parts := strings.Split(s, sep)
+		if k.bytes {
+			items := make([]recon.Value, len(parts))
+			for i, p := range parts {
+				items[i] = recon.NewValue(k.text(strings.TrimSpace(p)))
+			}
+			return recon.NewValue(items)
+		}
 		for i, p := range parts {
 			parts[i] = k.text(strings.TrimSpace(p))
 		}
@@ -1402,10 +1677,16 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 	if k, ok := s.keys.prefixed[path.String()]; ok {
 		return k.decimal(v), true, nil
 	}
+	key := path.String()
+	if v.Kind() == recon.IntKind && s.keys.bools[key] {
+		// A number reads as the command line reads its text: 1 and 0 are true and false.
+		if b, perr := parseBool(v.String()); perr == nil {
+			return recon.NewValue(b), true, nil
+		}
+	}
 	if v.Kind() != recon.StringKind {
 		return v, found, err
 	}
-	key := path.String()
 	if s.keys.bools[key] {
 		if b, perr := parseBool(v.String()); perr == nil {
 			return recon.NewValue(b), true, nil
@@ -1449,7 +1730,9 @@ func channelValueKeys(v reflect.Value, structName string) valueKeys {
 				continue
 			}
 			if plainIntegerField(sf.Type) {
-				keys.prefixed[key] = prefixedKey{list: derefType(sf.Type).Kind() == reflect.Slice, sep: recon.ParseTag(sf.Tag.Get("recon")).Separator, prefixed: sf.Tag.Get("base") == basePrefixed}
+				ft := derefType(sf.Type)
+				list := ft.Kind() == reflect.Slice
+				keys.prefixed[key] = prefixedKey{list: list, bytes: list && ft.Elem().Kind() == reflect.Uint8, sep: recon.ParseTag(sf.Tag.Get("recon")).Separator, prefixed: sf.Tag.Get("base") == basePrefixed}
 				continue
 			}
 			switch ft := derefType(sf.Type); {
@@ -1499,10 +1782,13 @@ func fillEnvNested(env reflect.Value, view *osView) (map[string]bool, error) {
 			continue
 		}
 		sep, opt, _ := strings.Cut(rest, ",")
-		fam := envFamily(view, base, sep)
+		name := et.Field(j).Tag.Get("rotini")
+		fam, err := envFamily(view, base, sep)
+		if err != nil {
+			return filled, usageBind(channelEnv, name, err.Error(), nil)
+		}
 		if len(fam) == 0 {
 			if opt == "required" {
-				name := et.Field(j).Tag.Get("rotini")
 				return filled, usageBind(channelEnv, name,
 					fmt.Sprintf("environment variables %s%s* are required for %s", base, sep, name), nil)
 			}
@@ -1517,22 +1803,50 @@ func fillEnvNested(env reflect.Value, view *osView) (map[string]bool, error) {
 	return filled, nil
 }
 
-// envFamily collects the BASE<sep>… variables of the run's environment into a nested map.
-func envFamily(view *osView, base, sep string) map[string]any {
+// envFamily collects the BASE<sep>… variables of the run's environment into a nested map. The
+// prefix matches as the environment compares names (ignoring case on Windows). An empty
+// segment (a doubled separator), or a variable that sets a key another one nests under, is an
+// error naming the variables.
+func envFamily(view *osView, base, sep string) (map[string]any, error) {
 	out := map[string]any{}
 	if sep == "" {
-		return out
+		return out, nil
 	}
-	prefix := base + sep
+	prefix := view.key(base + sep)
+	type member struct{ name, val string }
+	var fam []member
 	for _, kv := range view.inputEnviron() {
 		name, val, ok := strings.Cut(kv, "=")
-		if !ok || !strings.HasPrefix(name, prefix) || len(name) == len(prefix) {
+		if !ok || len(name) <= len(prefix) || view.key(name[:len(prefix)]) != prefix {
 			continue
 		}
-		segs := strings.Split(strings.ToLower(name[len(prefix):]), strings.ToLower(sep))
-		setNested(out, strings.Join(segs, "."), val)
+		fam = append(fam, member{name, val})
 	}
-	return out
+	slices.SortFunc(fam, func(a, b member) int { return strings.Compare(a.name, b.name) })
+	type use struct {
+		name  string // the first variable that set the key or a key under it
+		value bool   // that variable set the key itself
+	}
+	owner := map[string]use{}
+	for _, m := range fam {
+		segs := strings.Split(strings.ToLower(m.name[len(prefix):]), strings.ToLower(sep))
+		if slices.Contains(segs, "") {
+			return nil, fmt.Errorf("environment variable %s has an empty key segment (a doubled %s)", m.name, sep)
+		}
+		for k := range segs {
+			path := strings.Join(segs[:k+1], ".")
+			value := k == len(segs)-1
+			other, seen := owner[path]
+			switch {
+			case !seen:
+				owner[path] = use{name: m.name, value: value}
+			case value || other.value:
+				return nil, fmt.Errorf("environment variables %s and %s both set %s", other.name, m.name, strings.Join(segs[:k+1], sep))
+			}
+		}
+		setNested(out, strings.Join(segs, "."), m.val)
+	}
+	return out, nil
 }
 
 // fillChannels walks a <Cmd>Inputs struct and recon-binds each command's Env struct from
@@ -1559,7 +1873,7 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 					return err
 				}
 				if err := bindReconWaived(envReg, ci.Field(j).Addr().Interface(), waived); err != nil {
-					return labels.bind(channelEnv, err)
+					return labels.bindStruct(channelEnv, err, envReg, ci.Field(j))
 				}
 				if _, err := fillEnvNested(ci.Field(j), labels.view); err != nil {
 					return err
@@ -1568,16 +1882,26 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 				if cfg == nil {
 					continue
 				}
-				if err := bindConfigWaived(cfg.merged, ci.Field(j).Addr().Interface(), waived); err != nil {
-					return cfg.labels().bind(channelConfig, err)
-				}
-				if err := bindPinnedConfig(ci.Field(j), cfg); err != nil {
+				if err := fillConfig(ci.Field(j), cfg, waived); err != nil {
 					return err
 				}
 			}
 		}
 	}
 	return nil
+}
+
+// fillConfig recon-binds one Config struct from cfg (see fillChannels).
+func fillConfig(s reflect.Value, cfg *cfgRegs, waived bool) error {
+	if !waived {
+		if err := checkNullItems(s, cfg); err != nil {
+			return err
+		}
+	}
+	if err := bindConfigWaived(cfg.merged, s.Addr().Interface(), waived); err != nil {
+		return cfg.labels().bindStruct(channelConfig, err, cfg.merged, s)
+	}
+	return bindPinnedConfig(s, cfg)
 }
 
 // validateChannels enforces the declared constraints on each command's Env and Config fields,
@@ -1660,8 +1984,8 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 			label = "config key " + key
 			origin = cfg.labels().origin(val.Source())
 		case v != "":
-			label = chosenEnv(view, v)
-			label += view.inputOrigin(label)
+			name := chosenEnv(view, v)
+			label = "environment variable " + name + view.inputOrigin(name)
 		}
 		secret := reconHasSecret(f.Tag.Get("recon"))
 		vals := channelValues(val, typ)
@@ -1671,7 +1995,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		if len(vals) == 1 && vals[0] == "" && isPathType(typ) {
 			typ = channelGoType(s.Field(j).Type()) // an empty path is no path: nothing to check
 		}
-		if err := checkDecimal(decimal, f.Tag, typ, label, vals, secret); err != nil {
+		if err := checkDecimal(decimal, f, label, vals, secret); err != nil {
 			return withOrigin(err, origin)
 		}
 		if err := checkChannelEnum(channelOf(cfg), label, enum, boundStrings(s.Field(j), vals), secret); err != nil {
@@ -1707,14 +2031,22 @@ func decimalOnly(f reflect.StructField) bool {
 	return f.Tag.Get("base") != basePrefixed && plainIntegerField(f.Type)
 }
 
-// checkDecimal refuses a value of an integer field that isn't decimal, when decimal says the
-// field doesn't declare base: prefixed: without it an integer is decimal on every channel, as
-// on the command line.
-func checkDecimal(decimal bool, tag reflect.StructTag, typ, label string, vals []string, secret bool) error {
+// checkDecimal refuses a value of integer field f that isn't decimal, or doesn't fit the field's
+// type, when decimal says the field doesn't declare base: prefixed: without it an integer is
+// decimal on every channel, as on the command line.
+func checkDecimal(decimal bool, f reflect.StructField, label string, vals []string, secret bool) error {
 	if !decimal {
 		return nil
 	}
-	return checkValueShape(typ, "", label, "", listItems(tag, typ, vals), secret)
+	typ := derefType(f.Type)
+	if typ.Kind() == reflect.Slice {
+		typ = derefType(typ.Elem())
+	}
+	shape := typ.Kind().String()
+	if derefType(f.Type).Kind() == reflect.Slice {
+		shape = "[]" + shape
+	}
+	return checkValueShape(shape, "", label, "", listItems(f.Tag, shape, vals), secret)
 }
 
 // listItems splits each of vals on the recon separator of a list field, since an environment
@@ -1785,8 +2117,8 @@ func channelGoType(t reflect.Type) string {
 	case reflect.Float32, reflect.Float64:
 		return "float64"
 	case reflect.Slice:
-		// The element type, so per-element bounds apply; a byte-backed type is one value.
-		if t.Elem().Kind() == reflect.Uint8 {
+		// The element type, so per-element bounds apply; a named byte type is one value.
+		if t.Elem().Kind() == reflect.Uint8 && t.Name() != "" {
 			return "[]string"
 		}
 		return "[]" + channelGoType(t.Elem())
@@ -1798,14 +2130,13 @@ func channelGoType(t reflect.Type) string {
 // channelValues renders a reconciled value as the strings checkConstraints consumes: the
 // elements of an array type, else the single canonical string.
 func channelValues(val recon.Value, typ string) []string {
-	if isArrayType(typ) {
-		if items, err := val.AsSlice(); err == nil {
-			out := make([]string, len(items))
-			for i, it := range items {
-				out[i] = channelString(it)
-			}
-			return out
+	if isArrayType(typ) && val.Kind() == recon.SliceKind {
+		items, _ := val.AsSlice()
+		out := make([]string, len(items))
+		for i, it := range items {
+			out[i] = channelString(it)
 		}
+		return out
 	}
 	return []string{channelString(val)}
 }

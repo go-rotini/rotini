@@ -67,3 +67,26 @@ func TestExpandGlob_relativeToTheRunDirectory(t *testing.T) {
 		t.Errorf("an absolute pattern = %q, want %q", got, want)
 	}
 }
+
+// Patterns match names regardless of case, as on Windows, in every path segment.
+func TestExpandGlob_ignoresCase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "Src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.txt", "B.TXT", "c.log"} {
+		if err := os.WriteFile(filepath.Join(dir, "Src", name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for word, want := range map[string][]string{
+		filepath.Join("Src", "*.TXT"): {filepath.Join("Src", "B.TXT"), filepath.Join("Src", "a.txt")},
+		filepath.Join("s?c", "*.txt"): {filepath.Join("Src", "B.TXT"), filepath.Join("Src", "a.txt")},
+		filepath.Join("Src", "*.md"):  {filepath.Join("Src", "*.md")},
+	} {
+		if got := expandGlob(dir, word); !slices.Equal(got, want) {
+			t.Errorf("expandGlob(%q) = %q, want %q", word, got, want)
+		}
+	}
+}

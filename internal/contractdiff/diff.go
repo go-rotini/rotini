@@ -5,10 +5,11 @@
 // experimental item every change is safe, and on a beta item a breaking one is possibly
 // breaking.
 //
-// Commands match by path, flags by identifier, arguments by position, environment variables
-// by variable and config entries by key. Input and output schemas are compared in opposite
-// directions: narrowing what a caller may pass breaks callers, widening what the program
-// writes breaks readers. A shared definition is compared once, where it is defined.
+// Commands match by path, flags by identifier, arguments by name (by position when renamed in
+// place), environment variables by variable and config entries by key. Input and output
+// schemas are compared in opposite directions: narrowing what a caller may pass breaks
+// callers, widening what the program writes breaks readers. A shared definition is compared
+// once, where it is defined, at the most settled stability of the commands that use it.
 package contractdiff
 
 import (
@@ -196,18 +197,21 @@ func (d *differ) removal(st stability, rule, where, msg, removedIn string, hidde
 
 // removalWith is removal with a note of the caller's added.
 func (d *differ) removalWith(st stability, rule, where, msg, removedIn string, hidden bool, note string) {
-	switch {
-	case removedIn != "" && d.release != "" && compareVersions(removedIn, d.release) <= 0:
+	if removedIn != "" && d.release != "" && compareVersions(removedIn, d.release) <= 0 {
 		d.add(st, Expected, rule, where, msg, joinNote(note, "planned for removal in "+removedIn))
-	case removedIn != "" && d.release == "":
-		d.add(st, Breaking, rule, where, msg, joinNote(note, "planned for removal in "+removedIn+"; pass --release"))
-	case removedIn != "":
-		d.add(st, Breaking, rule, where, msg, joinNote(note, "planned for removal in "+removedIn))
-	case hidden:
-		d.add(st, PossiblyBreaking, rule, where, msg, joinNote(note, "was hidden"))
-	default:
-		d.add(st, Breaking, rule, where, msg, note)
+		return
 	}
+	switch {
+	case removedIn != "" && d.release == "":
+		note = joinNote(note, "planned for removal in "+removedIn+"; pass --release")
+	case removedIn != "":
+		note = joinNote(note, "planned for removal in "+removedIn)
+	}
+	if hidden {
+		d.add(st, PossiblyBreaking, rule, where, msg, joinNote(note, "was hidden"))
+		return
+	}
+	d.add(st, Breaking, rule, where, msg, note)
 }
 
 // report sorts the findings, applies the acknowledgements and counts.

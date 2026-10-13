@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"reflect"
+	"sync"
 
 	"github.com/go-rotini/recon"
 )
@@ -100,7 +101,11 @@ func (s *declaredEnv) addFields(t reflect.Type, project recon.KeyTransform, view
 
 // hasEnvChannel reports whether any command frame of the inputs struct v declares a non-empty
 // Env sub-struct. A struct that describes no env input never builds the env registry.
-func hasEnvChannel(v reflect.Value) bool {
+func hasEnvChannel(v reflect.Value) bool { return typeFact(&envChannelFacts, v, envChannelOf) }
+
+var envChannelFacts sync.Map // reflect.Type → bool
+
+func envChannelOf(v reflect.Value) bool {
 	if v.Kind() != reflect.Struct {
 		return false
 	}

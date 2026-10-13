@@ -2,7 +2,9 @@ package rotini
 
 import (
 	"fmt"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -146,13 +148,23 @@ func descend(chain []Command, def Definition, argv []string) ([]Command, *Plugin
 		}
 		// At a discovery-enabled command, an unmatched token dispatches to the executable
 		// <prefix><token>; the binary is located (and any error reported) at exec time.
-		if d := cur.PluginDiscovery; d != nil {
+		if d := cur.PluginDiscovery; d != nil && pluginToken(tok) {
 			rd := PluginDef{Name: tok, Binary: d.Prefix + tok}
 			return chain, &PluginDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: cur.PluginPath, Discovered: true}
 		}
 		break // first positional argument; stop descending
 	}
 	return chain, nil
+}
+
+// pluginToken reports whether tok can name a discovered plugin: a plain file name, so the
+// binary <prefix><tok> stays inside the directories searched. A token holding a path separator
+// (or, on Windows, a drive colon), NUL, or one that is "." or "..", is not a plugin.
+func pluginToken(tok string) bool {
+	if tok == "." || tok == ".." || strings.ContainsAny(tok, "/\\\x00") {
+		return false
+	}
+	return runtime.GOOS != "windows" || !strings.Contains(tok, ":")
 }
 
 // findPlugin returns the declared plugin of f matching tok by name or alias.
@@ -281,9 +293,16 @@ func pluginHostFlags(chain []Command, before []string, plugin string) (answer bo
 		return true, nil
 	}
 	name, _, _ := splitFlag(before[first])
+	// The plugin's name may be the detached value of a secret optional-value flag before it.
+	shown := strconv.Quote(plugin)
+	last := &parsedInputs{}
+	noteDetached(last, chain, before[len(before)-1], append(slices.Clone(before), plugin), len(before)-1)
+	if last.secretWord(plugin) {
+		shown = redactValue(plugin, true)
+	}
 	return false, &ParseError{
 		Kind:    ParseKindMisplacedFlag,
-		Msg:     fmt.Sprintf("%s can't come before plugin %q: a plugin receives only the words after its name", name, plugin),
+		Msg:     fmt.Sprintf("%s can't come before plugin %s: a plugin receives only the words after its name", name, shown),
 		Command: chain[len(chain)-1].Name,
 		Flag:    name,
 		Token:   name,

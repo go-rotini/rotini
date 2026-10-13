@@ -1,11 +1,12 @@
-# Completes every case in cases.txt by calling the generated _app with the words and CURRENT zsh
-# sets. zsh's helpers only work inside a live completion widget, so _describe, _message and the
+# Completes every case in cases.txt by calling the generated _<program> (the program being each
+# case's first word) with the words and CURRENT zsh sets. zsh's helpers only work inside a live completion widget, so _describe, _message and the
 # path and name helpers are stand-ins that print what the script handed them: _describe's pairs
 # (with "# keep-order" for -V and "# nospace" for -S ''), and the helper called for a directive,
 # as "<_files -g *.(yaml|yml)>".
 # Prints "== <case>", then "<value><TAB><description>" per candidate, then "! <message>" per message.
 # Usage: zsh -f zsh.zsh <completion script> <cases file>
 compdef() { :; }
+typeset -A compstate
 source $1
 
 _describe() {
@@ -43,6 +44,12 @@ while IFS=$'\t' read -r name line _; do
     words=(${(s: :)line})
     [[ $line == *' ' ]] && words+=('')
     CURRENT=${#words}
+    # Inside a quote, zsh gives the word after the quote in PREFIX and the quote in compstate.
+    compstate=() PREFIX= SUFFIX=
+    if [[ ${words[CURRENT]} == [\'\"]* ]]; then
+        compstate[quote]=${words[CURRENT][1]}
+        PREFIX=${words[CURRENT][2,-1]}
+    fi
     print -r -- "== $name"
-    _app
+    "_${words[1]}"
 done < $2

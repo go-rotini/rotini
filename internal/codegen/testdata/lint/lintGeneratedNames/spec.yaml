@@ -1,0 +1,25 @@
+# A command's suffixed types, a named schema, an exit constant and the cmd file's fixed names
+# share one Go namespace, so two of them making the same name wouldn't compile.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    # The help feature's Help function.
+    Help: { type: string }
+    # The completion feature's CompletionBash variable.
+    CompletionBash: { type: string }
+    # The man feature is off, so nothing declares Man.
+    Man: { type: string }
+    # Command run's flags type.
+    DemoRunFlags: { type: string }
+  commands:
+    - name: run
+      exit_status:
+        - { code: 3, name: busy, summary: locked }
+    # DemoRunCommandInputs, which run's CommandInputs type also is.
+    - name: run-command
+    - name: build
+      exit_status:
+        - { code: 4, name: inputs, summary: bad input }
+    # Its inputs type DemoBuildExitInputs is build's exit constant.
+    - name: build-exit

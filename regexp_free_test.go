@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"fmt"
-	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -10,10 +9,10 @@ import (
 	"time"
 )
 
-// The regular expressions StripANSI, day/week durations and byte sizes were once written
-// with. The hand-written parsers must accept and produce exactly what these did.
+// Reference regular expressions for StripANSI, day/week durations and byte sizes. The
+// hand-written parsers must accept and produce exactly what these do.
 var (
-	regexpANSI      = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+	regexpANSI      = regexp.MustCompile(`\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b[\]PX^_][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b(?:[\x20-\x2f]+[\x30-\x7e]|[\x30-\x4f\x51-\x57\x59\x5a\x5c\x60-\x7e])`)
 	regexpDays      = regexp.MustCompile(`(\d*\.?\d+)([dw])`)
 	regexpByteSize  = regexp.MustCompile(`^\s*(\d*\.?\d+)\s*([a-zA-Z]*)\s*$`)
 	regexpSizeUnits = map[string]float64{
@@ -74,15 +73,7 @@ func regexpParseByteSize(s string) (int64, error) {
 	if !ok {
 		return 0, fmt.Errorf("%q has an unknown unit %q; use B, K/KB, M/MB, G/GB, T/TB, P/PB, E/EB (decimal) or Ki, Mi, Gi, Ti, Pi, Ei (binary)", s, m[2])
 	}
-	n, err := strconv.ParseFloat(m[1], 64)
-	if err != nil {
-		return 0, fmt.Errorf("%q is not a size: %w", s, err)
-	}
-	bytes := math.Round(n * mult)
-	if bytes > math.MaxInt64 {
-		return 0, fmt.Errorf("%q is too large to count in bytes", s)
-	}
-	return int64(bytes), nil
+	return byteCount(s, m[1], mult) // the number's conversion is shared; this pins the grammar
 }
 
 // errText is err's message, "" for nil.
@@ -98,6 +89,8 @@ var ansiSeeds = []string{
 	"\x1b]8;;u\x1b\\t\x1b]8;;\x1b\\", "\x1b", "a\x1b", "\x1b[", "\x1b[1", "\x1b[1;2 ", "\x1b[?25h", "\x1b[ !\"/@",
 	"\x1b]", "\x1b]no end", "\x1b]a\x1bb", "\x1b]a\x1b", "\x1b\x1b[1m", "\x1b[\x1b[1mx", "\x1b]\xff\xfe\x07",
 	"\x1b[1\xffm", "é\x1b[1mé", "\x1b[:;?0~", "\x1b[0\x7f", "\x1b]\x1b\\", "\x1bX", "\x1b[1;2\x1b]x\x07",
+	"\x1b(Bplain\x1b[m", "\x1b[>4;2mx", "\x1b[=5hx", "\x1b[<1;2Mx", "\x1bcx", "\x1b7x\x1b8", "\x1b(", "\x1b([x",
+	"\x1bPq#0\x1b\\x", "\x1b_app\x07x", "\x1b^pm\x1b\\x", "\x1bXsos\x07x", "\x1b\x1f", "\x1b\x7f", "\x1b\\x",
 }
 
 func TestStripANSI_matchesRegexp(t *testing.T) {

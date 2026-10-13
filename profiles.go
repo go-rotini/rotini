@@ -28,7 +28,7 @@ type profileChoice struct {
 // before any of them is read: the paths config_source inputs supply and the selected profiles,
 // each by the file's logical name.
 type fileBootstrap struct {
-	paths    map[string]string
+	paths    map[string]pathOverride
 	profiles map[string]profileChoice
 }
 
@@ -176,6 +176,9 @@ func (s profileSource) Get(p recon.Path) (recon.Value, bool, error) {
 
 // mergeValues overlays over onto base: maps merge entry by entry, anything else is replaced.
 func mergeValues(base, over recon.Value) recon.Value {
+	if base.Kind() != recon.MapKind || over.Kind() != recon.MapKind {
+		return over
+	}
 	bm, berr := base.AsMap()
 	om, oerr := over.AsMap()
 	if berr != nil || oerr != nil {
@@ -263,7 +266,7 @@ func profileNames(f ConfigFile, src recon.Source, path string) ([]string, error)
 		if section.Kind() == recon.NullKind {
 			continue // an empty profile
 		}
-		if _, err := section.AsMap(); err != nil {
+		if section.Kind() != recon.MapKind {
 			return nil, bad
 		}
 	}
@@ -356,7 +359,7 @@ func (b *InputReader) checkProfiles(v reflect.Value, chain []Command, boot fileB
 
 // definedProfiles opens one profiled file and lists the profiles it defines, reporting whether
 // the file exists at all.
-func (b *InputReader) definedProfiles(f ConfigFile, paths map[string]string, view *osView) (path string, present bool, names []string, err error) {
+func (b *InputReader) definedProfiles(f ConfigFile, paths map[string]pathOverride, view *osView) (path string, present bool, names []string, err error) {
 	src, path, err := b.openFileSource(f, paths, view)
 	if err != nil {
 		return "", false, nil, err
@@ -429,7 +432,7 @@ type locatedConfigFile struct {
 	file    ConfigFile
 	profile profileChoice
 	reader  *InputReader
-	paths   map[string]string // the config_source paths, by logical name
+	paths   map[string]pathOverride // the config_source paths, by logical name
 	view    *osView
 }
 

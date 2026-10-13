@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -14,6 +15,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/go-rotini/toml"
 )
 
 // The spec lint stage: rotini-specific rules the JSON Schema cannot express. Each
@@ -48,6 +51,7 @@ var specLints = []func(*Spec) []error{
 	lintDuplicateFlagIdentifiers,
 	lintShadowedIdentifiers,
 	lintShortCircuitScope,
+	lintRequiredFlagScope,
 	lintSingleDashIdentifiers,
 	lintShortOnlyFlags,
 	lintDigitIdentifiers,
@@ -55,6 +59,7 @@ var specLints = []func(*Spec) []error{
 	lintHandlerFilenames,
 	lintSiblingCollisions,
 	lintDuplicateInputNames,
+	lintGoNames,
 	lintVariadicArguments,
 	lintDeprecatedIdentifiers,
 	lintPluginTimeouts,
@@ -67,6 +72,7 @@ var specLints = []func(*Spec) []error{
 	lintEnvNesting,
 	lintConfigInputFiles,
 	lintConfigKeyCollisions,
+	lintEnvVariableTypes,
 	lintConstraintApplicability,
 	lintCountFlags,
 	lintPassthrough,
@@ -82,6 +88,7 @@ var specLints = []func(*Spec) []error{
 	lintBoundsSatisfiable,
 	lintEnumValues,
 	lintEnumSummaries,
+	lintSummaryLines,
 	lintRequiredDefault,
 	lintDefaultScalar,
 	lintDefaultConstraints,
@@ -1139,9 +1146,10 @@ func lintDefaultScalar(spec *Spec) []error {
 			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.Default == nil {
 				return // an object input: lintObjectFlags
 			}
-			switch v := schema.Default.(type) {
-			case string, bool, float64, int, int64, nil:
+			if scalarDefault(schema.Default) {
 				return
+			}
+			switch v := schema.Default.(type) {
 			case []any, map[string]any:
 				if repeatableSchema(schema) {
 					if bad := nonScalarElement(v); bad != "" {
@@ -1464,7 +1472,10 @@ func lintSchemaRefs(spec *Spec) []error {
 func lintHandlerFilenames(spec *Spec) []error {
 	rootName := spec.Command.Name
 	var problems []error
-	byFile := map[string]string{} // stub file name -> the command path that first produced it
+	// Keyed case-folded: on a case-insensitive file system (macOS, Windows) files that differ
+	// only in case are one file, so only the first would be written.
+	type stub struct{ file, display string }
+	byFile := map[string]stub{} // lowercased stub file name -> the command that first produced it
 	var walk func(c *Command, path, display, ptr string)
 	walk = func(c *Command, path, display, ptr string) {
 		if ov := c.Filename; ov != "" {
@@ -1478,14 +1489,18 @@ func lintHandlerFilenames(spec *Spec) []error {
 			}
 		}
 		fn := commandStubFilename(rootName, path, c.Filename)
-		if prev, dup := byFile[fn]; dup {
-			if prev == display {
+		if prev, dup := byFile[strings.ToLower(fn)]; dup {
+			if prev.display == display {
 				// Two siblings share this name; lintSiblingCollisions already reports it.
 				return
 			}
-			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + display, msg: fmt.Sprintf("generates handler file %q, already used by command %q", fn, prev)})
+			msg := fmt.Sprintf("generates handler file %q, already used by command %q", fn, prev.display)
+			if prev.file != fn {
+				msg = fmt.Sprintf("generates handler file %q, and command %q generates %q: on a case-insensitive file system (macOS, Windows) they are one file; rename one command or set its `filename`", fn, prev.display, prev.file)
+			}
+			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + display, msg: msg})
 		} else {
-			byFile[fn] = display
+			byFile[strings.ToLower(fn)] = stub{fn, display}
 		}
 		for i := range c.Commands {
 			child := &c.Commands[i]
@@ -1653,13 +1668,22 @@ func nonScalarElement(v any) string {
 		}
 	}
 	for _, it := range items {
-		switch it.(type) {
-		case string, bool, float64, int, int64, nil:
-			continue
+		if !scalarDefault(it) {
+			return defaultKindName(it)
 		}
-		return defaultKindName(it)
 	}
 	return ""
+}
+
+// scalarDefault reports whether v is a scalar as any spec format decodes one: a string, bool,
+// number of any kind, or a TOML date or time.
+func scalarDefault(v any) bool {
+	switch v.(type) {
+	case string, bool, float64, int, int64, uint64, json.Number, nil,
+		time.Time, toml.LocalDate, toml.LocalTime, toml.LocalDateTime:
+		return true
+	}
+	return false
 }
 
 // lintDefaultConstraints rejects a `default` that the input's own enum, bounds, length,

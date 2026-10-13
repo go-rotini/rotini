@@ -280,6 +280,30 @@ func TestCreateOutput_symlinkKeepsTheLink(t *testing.T) {
 	}
 }
 
+// A link to a file that doesn't exist is refused, with or without Overwrite: it is never
+// replaced by a regular file that takes the link's own permissions.
+func TestCreateOutput_danglingLinkIsRefused(t *testing.T) {
+	t.Parallel()
+	rtx, dir := outputDir(t)
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(filepath.Join(dir, "missing.txt"), link); err != nil {
+		t.Skipf("no symlinks: %v", err)
+	}
+	for _, overwrite := range []bool{false, true} {
+		f, err := CreateOutput(rtx, "link.txt", Overwrite(overwrite))
+		if err == nil {
+			_ = f.Abort()
+			t.Fatalf("Overwrite(%v): a dangling link was accepted", overwrite)
+		}
+		if CategoryOf(err) != CategoryUsage || !strings.Contains(err.Error(), `output file "link.txt" is a symbolic link to a file that doesn't exist`) {
+			t.Errorf("Overwrite(%v): %v (category %v)", overwrite, err, CategoryOf(err))
+		}
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("the link was replaced: %v", err)
+	}
+}
+
 func TestCreateOutput_deviceIsWrittenDirectly(t *testing.T) {
 	t.Parallel()
 	rtx, _ := outputDir(t)

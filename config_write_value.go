@@ -184,7 +184,7 @@ func nativeValue(v reflect.Value) any {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return v.Uint()
 	case reflect.Float32, reflect.Float64:
-		return v.Float()
+		return typedFloat(v) // a float32 0.1 writes as 0.1, not 0.10000000149011612
 	}
 	return v.Interface()
 }

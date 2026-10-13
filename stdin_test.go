@@ -446,7 +446,9 @@ func TestInputErrorTexts_configParse(t *testing.T) {
 		{"yaml", "defaults: [\n", ":1:11: "},
 		{"json", "{\"a\":\n", ":2:1: "},
 		{"json", "{\"a\": 1 \"b\": 2}\n", ":1:9: invalid character '\"' after object key:value pair"},
-		{"json", "[1]\n", ": the top level must be a mapping"},
+		{"json", "[1]\n", ": the top level must be an object"},
+		{"yaml", "- 1\n", ": the top level must be a mapping"},
+		{"jsonc", "[1]\n", ": the top level must be an object"},
 		{"toml", "a = \n", ":1:"},
 		{"jsonc", "{\"a\": // c\n", ":"},
 		{"env", "A=\"unterminated\n", ":"},
@@ -473,7 +475,7 @@ func TestInputErrorTexts_configParse(t *testing.T) {
 
 func TestInputErrorTexts_configMissingOverride(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "none.yaml")
-	src, _, err := (&InputReader{}).openFileSource(ConfigFile{Name: "app"}, map[string]string{"app": missing}, everyFeatureView())
+	src, _, err := (&InputReader{}).openFileSource(ConfigFile{Name: "app"}, map[string]pathOverride{"app": {path: missing}}, everyFeatureView())
 	if err == nil || src != nil || err.Error() != "could not open configuration file "+missing+": no such file" {
 		t.Errorf("err = %v, want the path and the reason", err)
 	}
@@ -494,7 +496,7 @@ func TestInputErrorTexts_configValue(t *testing.T) {
 	var in stCfgInputs
 	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path}}}).
 		Read(stRTX(nil), &in)
-	want := "config key api.port: expected int (from configuration file " + path + ")"
+	want := `config key api.port: "abc" is not a valid integer (from configuration file ` + path + ")"
 	if err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %q", err, want)
 	}
@@ -528,7 +530,7 @@ func TestInputErrorTexts_env(t *testing.T) {
 		want string
 	}{
 		{"required names every spelling", nil, "environment variable APP_REGION (or REGION) is required"},
-		{"coercion names the variable set", []string{"REGION=us", "APP_PORT=abc"}, "environment variable APP_PORT: expected int"},
+		{"coercion names the variable set", []string{"REGION=us", "APP_PORT=abc"}, `environment variable APP_PORT: "abc" is not a valid integer`},
 		{"a map entry needs key=value", []string{"APP_REGION=us", "APP_LABELS=a=1,bad"}, `environment variable APP_LABELS expects key=value pairs (got "bad")`},
 		{"a map entry needs a key", []string{"APP_REGION=us", "APP_LABELS==v"}, `environment variable APP_LABELS needs a key before "=" (got "=v")`},
 	}

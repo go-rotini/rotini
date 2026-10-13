@@ -1,6 +1,7 @@
 == commands
 deploy	deploy a service
 help	print help
+quote	values a shell must insert as one literal word
 remote	manage remotes
 status	show status
 == command-prefix
@@ -41,9 +42,9 @@ json
 text	
 yaml	
 == enum-inline
---format=json	
---format=text	
---format=yaml	
+json	
+text	
+yaml	
 == file-extensions
 a.yaml	
 b.yml	
@@ -72,6 +73,7 @@ replicas=
 == help-command
 deploy	deploy a service
 help	print help
+quote	values a shell must insert as one literal word
 remote	manage remotes
 status	show status
 == help-command-deep
@@ -136,3 +138,35 @@ completion_fish.fish
 completion_nushell.nu	
 completion_powershell.ps1	
 completion_zsh.zsh	
+== quote-all
+a\ b	
+it\'s\ \$HOME	
+say\ \"hi\"	
+\`touch\ pwned\`	
+\$\(touch\ pwned\)	
+x\;touch\ pwned	
+star\*	
+\~root	
+o’neil\;touch\ pwned	
+“q”	
+back\\slash	
+a\!b	
+ends\'	
+\{a\,b\}	
+a\&b\|c\<d\>e	
+\#hash	
+== quote-shared
+x';'touch\ pwned	
+x\;touch\ pwnedz	
+x\ y	
+x\,y	
+== quote-typed-quote
+it'\''s $HOME	
+== quote-typed-backslash
+it\'s\ \$HOME	
+== quote-colon
+8080	
+9090	
+== quote-inline
+x\;touch\ pwned	
+== plain-value

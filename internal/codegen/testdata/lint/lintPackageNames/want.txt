@@ -1,0 +1,4 @@
+conf: .rotini.conf.yaml:6:13: generate.packages.models: file "internal/con/models.go" has the path element "con", a Windows device name the go tool refuses in an import path on every system; choose another directory
+conf: .rotini.conf.yaml:7:16: generate.packages.models: package "type" is a Go keyword, which can't name a package; choose another name (e.g. "typecli")
+conf: .rotini.conf.yaml:10:13: generate.packages.main: file "cmd/com0/aux.go" is named after the Windows device AUX: Windows can't create it, and the go tool refuses it in a module zip, so the module can't be published; choose another file name
+conf: .rotini.conf.yaml:15:16: generate.packages.cmd: package "main" is a program, which the cmd package can't be, since other packages import it; choose another name (e.g. "maincli")

@@ -74,11 +74,15 @@ Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sum
 Beyond the schemas, `validate` catches specs that can never work: bounds or lengths that leave no
 value, enum values that aren't the declared type, `required` with a `default`, contradictory flag
 groups, config keys read with two types, an identifier that hides every identifier of a parent's
-cascading flag, and `-ab` beside `-a` and `-b`. It warns, without failing,
-about an identifier that hides only some of them, one-dash multi-letter identifiers, flags with
-no long form, a literal default on a secret input, and a `--help` or other short-circuit flag
-that isn't cascading on a command whose sub-commands don't declare their own. Two opt-in conf
-keys add warnings:
+cascading flag, `-ab` beside `-a` and `-b`, names that make the same Go identifier (two commands,
+inputs or schema properties, or a schema and a generated type), a Windows device name (`aux`,
+`con`, `com1`) in a generated package's path, and a Go keyword or `main` as a package name. It
+warns, without failing, about an identifier that hides only some of them, one-dash multi-letter
+identifiers, flags with no long form, a literal default on a secret input, an environment
+variable two inputs read differently, a summary of more than one line, a required flag that
+isn't cascading on a command with sub-commands, a completion value the carapace spec leaves out,
+and a `--help` or other short-circuit flag that isn't cascading on a command whose sub-commands
+don't declare their own. Two opt-in conf keys add warnings:
 `validate.flags_first` for env and config inputs no flag or argument can set, and
 `validate.posix_names` for a program name that isn't a POSIX utility name.
 
@@ -477,6 +481,11 @@ for _, d := range rotini.Deprecations(rtx) {
 - **`base: prefixed`** on an integer also accepts `0x1F`, `0o17` and `0b101`, with a sign and `_`
   between digits, wherever the value comes from; a value without a prefix is still decimal, so
   `010` is ten. Without `base`, every source is decimal-only: `PORT=0x10` is an invalid value.
+- **Numbers from a config file.** YAML, TOML, JSON and JSONC hold numbers, not text, so a whole
+  number written as a float (`450.0`, `1e3`) fills an integer input, and `1` or `0` fills a
+  bool. The command line, the environment and `.env` files spell an integer as one. A null list
+  item is refused, and a list of `uint8` (or `byte`) is a list of integers wherever it comes
+  from, not raw bytes.
 - **`type: regexp`** is compiled when parsed into a `*regexp.Regexp`, so a bad expression is a
   usage error naming the flag. The syntax is Go's RE2, which has no backreferences or lookaround.
 - **`type: glob`** is a `rotini.Glob`, a `path.Match` pattern checked when parsed, with a `Match`
@@ -666,6 +675,9 @@ Flags:
                            also set by TODO_DEFAULTS_PRIORITY or config key defaults.priority
       --tag []string       a label (repeatable)
 {{< /code >}}
+
+A key set to null in a config file (`priority:` or `priority: null`) counts as not set, so the
+next file or the default applies.
 
 Use `variable:` to name the environment variable exactly instead of deriving it. Config files can
 also be found by walking up from the working directory (`strategy: walk-up`) or read from a fixed
@@ -922,7 +934,8 @@ which file a write goes to and whether it exists yet. The
   permissions. Two commands writing one file at once can lose one of the changes.
 - **Secrets:** a key declared `secret: true` is refused unless the call passes
   `rotini.AllowSecretWrite()`. A new file holding any secret key gets mode `0600`, and an existing
-  file that others can read is refused rather than changed.
+  file that others can read is refused rather than changed. On Windows, file modes don't control
+  who can read a file, so the file gets its directory's access rules and nothing is refused.
 - **Profiles:** in a file with [profiles](#profiles), the value goes into the chosen profile,
   which is created if the file doesn't define it yet. `rotini.ToProfile(name)` and
   `rotini.ToSharedKeys()` pick another target. A shared key that the chosen profile overrides is
@@ -936,7 +949,7 @@ Each config file's keys, with their types and rules, are in the generated
 ### Paths
 
 A value is taken as written unless its input declares `expand`. `home` expands a leading `~`
-(or `~name`) and `env` expands `$NAME` and `${NAME}`, in values from every source: the command
+(or `~name`) and `env` expands `$NAME` and `${NAME}` (`$$` is a literal `$`), in values from every source: the command
 line, environment variables, `.env` files, configuration files and the default. The expanded
 path is what gets checked and bound. An `existingfile` or `existingdir` input is checked on
 every channel, environment and configuration included:
@@ -963,7 +976,6 @@ Error: --file: $NOTES is not set (in "$NOTES/today.txt")
   `--file: no such file: "/home/ada/x" (written as "~/x")`.
 - `~name` reads the system's user database, so an injected environment can't change it.
 - `%VAR%` is not expanded on Windows; `$NAME` and `~\` are.
-- There is no escape for a literal `$NAME`. Leave `env` out for inputs that need one.
 - `relative_to: config` resolves a relative value read from a configuration file against that
   file's directory. Values from anywhere else stay relative to the run's directory.
 - A project file found by `walk-up` can set inputs it reads, so prefer `expand: [home]` there:
@@ -3059,8 +3071,10 @@ different rotini versions still work together.
 ### Completers
 
 A `CompleteFlagValue` or `CompleteArgValue` method on a handler supplies candidates at run time.
-Its candidates are offered in the order it returns them (bash before 4.4 sorts them). It runs as
-the command that declares the flag, and `rtx` gives it:
+Its candidates are offered in the order it returns them (bash before 4.4 sorts them). Each shell
+inserts a candidate as one literal word, quoting spaces and shell characters, except that fish
+leaves a leading `~` bare and then expands it. It runs as the command that declares the flag,
+and `rtx` gives it:
 
 - `rtx.PartialInputs[T]()`: what has been typed so far, over the environment and the defaults.
   Nothing is validated or required, an unknown or half-typed flag is skipped, and stdin and
@@ -3392,8 +3406,12 @@ command:
 
 - **The plugin runs with** every argument after its name, and with the program's stdin, stdout
   and stderr. Its exit code passes through unchanged, and a plugin ended by a signal exits
-  128+n, as a shell reports it. A plugin that runs past its `timeout:` is killed, and so is one
-  still running when the run is canceled, for example by Ctrl+C, which exits 130.
+  128+n, as a shell reports it. A plugin that runs past its `timeout:`, or is still running when
+  the run is canceled (for example by Ctrl+C, which exits 130), is asked to stop: it is sent the
+  signal that canceled the run, or SIGTERM, and killed if it is still running 5 seconds later
+  (or after `WithTerminationTimeout`'s duration). On Windows, a plugin is killed at once, except
+  after Ctrl+C, which the console has already delivered to it. A plugin token holding a path
+  separator, or one that is `.` or `..`, is never a discovered plugin.
 
 Rotini prints nothing about discovered plugins itself. To list them, in your own help or a
 `plugins` command, call `DiscoveredPlugins()` on the command that has discovery:
@@ -3780,7 +3798,8 @@ diff:
 {{< /code >}}
 
 The finding is then reported as accepted, with its reason, and doesn't fail the run. An entry
-that matches no finding fails the run, naming the entry, so the list doesn't outlive its release:
+that matches no finding fails the run (unless `--fail-on never`), naming the entry, so the list
+doesn't outlive its release:
 clear it when you release. There is no way to ignore a rule everywhere.
 
 A removal you planned needs no entry. Give the item `removed_in` (see
@@ -3788,22 +3807,30 @@ A removal you planned needs no entry. Give the item `removed_in` (see
 preparing with `--release 2.0.0`, or name a variable holding it with the conf's
 `validate.release_env`: an item whose `removed_in` is at or below that release is reported as
 expected. Without a release it stays breaking, with a note to pass one. A command, flag or enum
-value removed with a `replaced_by` that names something still there is an expected rename.
+value removed with a `replaced_by` that names something still there is an expected rename; when
+it also has `removed_in`, that release check applies.
 
 ### How changes are matched and rated
 
 Commands match by path, flags by identifier (so a lost short form is caught and a renamed
-logical name isn't a removal), arguments by position, environment variables by variable, and
-config entries by key. What a caller passes and what the program writes are rated in opposite
-directions: narrowing an input (a new enum, a tighter bound, a new required property) breaks
-callers, and widening an output (a new enum value, a property that may be absent) may break
-readers. A changed default is possibly breaking, since the same command line now behaves
-differently. A schema in `definitions` is compared once, where it's defined, with a note naming
-the commands that use it.
+logical name isn't a removal), arguments by name (by position when one is renamed in place),
+environment variables by variable, and config entries by key. A flag a command inherits is
+compared where it is declared, and on the command itself when the flag that takes an identifier
+there moves between the command's own flag and an ancestor's cascading flag. A command renamed
+with its old name kept as an alias is compared with the command that now runs it.
+
+What a caller passes and what the program writes are rated in opposite directions: narrowing an
+input (a new enum, a tighter bound, a new required property) breaks callers, and widening an
+output (a new enum value, a property that may be absent) may break readers. A changed default is
+possibly breaking, since the same command line now behaves differently. A schema in
+`definitions` is compared once, where it's defined, with a note naming the commands that use
+it; it is rated by the most settled of its uses, each taken at the least settled of the command and
+the input that uses it.
 
 Stability lowers the rating: on an item that is `experimental` in the old contract (or under an
 experimental command) every finding is safe, and on a `beta` one a breaking finding is possibly
-breaking. Removing a hidden item is possibly breaking, and adding a hidden one is not reported.
+breaking. Removing a hidden item is possibly breaking, and adding a hidden one is not reported
+unless it is required, or is a command that takes over an argument.
 
 A finding's `where` names the item in the old contract, written as on the command line:
 
@@ -3838,22 +3865,22 @@ or on what the old contract planned.
 | `COMPLETION_ENV_REMOVED`, `COMPLETION_ENV_CHANGED`, `COMPLETION_ENV_ADDED` | a completion switch variable | possibly breaking, possibly breaking, safe |
 | `RESPONSE_FILES_ADDED`, `RESPONSE_FILES_PREFIX_CHANGED`, `RESPONSE_FILES_REMOVED` | response files | breaking, breaking, possibly breaking |
 | `COMMAND_NO_DELETE` | a command removed | breaking; expected when planned; possibly breaking when it was hidden |
-| `COMMAND_REPLACED` | a command removed for the `replaced_by` it named | expected |
-| `COMMAND_RENAMED_ALIAS_KEPT` | renamed, the old name kept as an alias | safe |
-| `COMMAND_ADDED`, `PLUGIN_ADDED` | a command or plugin added | safe |
+| `COMMAND_REPLACED` | a command removed for the `replaced_by` it named | expected; breaking when its `removed_in` is later than the release (possibly breaking when it was hidden) |
+| `COMMAND_RENAMED_ALIAS_KEPT` | renamed, the old name kept as an alias | safe; possibly breaking under a command that takes arguments, where the new name used to be read as one |
+| `COMMAND_ADDED`, `PLUGIN_ADDED` | a command or plugin added | safe; possibly breaking under a command with arguments, since an argument spelling its name now runs it |
 | `PLUGIN_NO_DELETE` | a declared plugin removed | breaking |
 | `COMMAND_HIDDEN`, `COMMAND_UNHIDDEN` | a command hidden or shown | possibly breaking, safe |
 | `ALIAS_NO_DELETE`, `HIDDEN_ALIAS_NO_DELETE` | an alias removed | breaking; expected when planned |
-| `ALIAS_ADDED`, `HIDDEN_ALIAS_ADDED`, `ALIAS_MOVED` | an alias added, or moved between listed and hidden | safe |
+| `ALIAS_ADDED`, `HIDDEN_ALIAS_ADDED`, `ALIAS_MOVED` | an alias added, or moved between listed and hidden | safe; an alias added under a command with arguments is possibly breaking |
 | `OPTIONS_FIRST_CHANGED`, `COMMAND_PASSTHROUGH_CHANGED` | how the command line is read | breaking |
 | `DIGIT_FLAG_ADDED` | a flag like `-4` on a command with arguments | possibly breaking |
-| `FLAG_GROUP_ADDED`, `FLAG_GROUP_TIGHTENED` | a flag group added, or accepting fewer command lines | breaking |
+| `FLAG_GROUP_ADDED`, `FLAG_GROUP_TIGHTENED` | a flag group added, or accepting fewer command lines | breaking; a new group that can't reject an old command line (it involves only new flags) is safe |
 | `FLAG_GROUP_REMOVED`, `FLAG_GROUP_LOOSENED` | a flag group removed, or accepting more | safe |
-| `FLAG_DEPENDENCY_ADDED`, `FLAG_DEPENDENCY_TIGHTENED` | a dependency added; `requires` or `forbids` grown, `equals` widened | breaking |
+| `FLAG_DEPENDENCY_ADDED`, `FLAG_DEPENDENCY_TIGHTENED` | a dependency added; `requires` or `forbids` grown, `equals` widened | breaking; a new dependency whose `when` flag is new is safe |
 | `FLAG_DEPENDENCY_REMOVED`, `FLAG_DEPENDENCY_LOOSENED` | a dependency removed; `requires` or `forbids` shrunk, `equals` narrowed | safe |
 | `CONFIG_FILE_NO_DELETE`, `CONFIG_FILE_MOVED`, `CONFIG_FILE_AS_CHANGED` | a config file removed, moved (path, discovery, format), or read as variables | breaking |
 | `CONFIG_FILE_ADDED` | a config file added | safe |
-| `PLUGIN_DISCOVERY_NO_DELETE`, `PLUGIN_DISCOVERY_PREFIX_CHANGED`, `PLUGIN_DISCOVERY_ADDED` | plugin discovery | breaking, breaking, safe |
+| `PLUGIN_DISCOVERY_NO_DELETE`, `PLUGIN_DISCOVERY_PREFIX_CHANGED`, `PLUGIN_DISCOVERY_ADDED` | plugin discovery | breaking, breaking, safe (breaking on a command with arguments) |
 | `STDIN_ADDED` | starts reading stdin | possibly breaking |
 | `STDIN_NO_DELETE`, `STDIN_FORMAT_CHANGED`, `STDIN_REQUIRED_ADDED`, `STDIN_TYPE_CHANGED`, `STDIN_SEPARATOR_CHANGED` | stdin removed, or read differently | breaking |
 | `STDIN_REQUIRED_REMOVED` | stdin no longer required | safe |
@@ -3866,7 +3893,7 @@ or on what the old contract planned.
 | `STABILITY_PROMOTED`, `STABILITY_DEMOTED` | stability | safe, possibly breaking |
 | `METADATA_ADDED`, `METADATA_REMOVED`, `METADATA_CHANGED` | a `metadata` key of a command or input added, removed, or given another value | safe |
 | `FLAG_NO_DELETE` | a flag removed | breaking; expected when planned; possibly breaking when it was hidden |
-| `FLAG_REPLACED` | a flag removed for the `replaced_by` it named | expected |
+| `FLAG_REPLACED` | a flag removed for the `replaced_by` it named | expected; breaking when its `removed_in` is later than the release (possibly breaking when it was hidden) |
 | `FLAG_ADDED`, `FLAG_REQUIRED_ADDED` | a flag added, optional or required (a short-circuit flag is never required) | safe, breaking |
 | `FLAG_REQUIRED_REMOVED` | no longer required | safe |
 | `FLAG_NAME_CHANGED` | the logical name, same identifiers | possibly breaking |
@@ -3878,14 +3905,15 @@ or on what the old contract planned.
 | `FLAG_ROLE_ADDED`, `FLAG_ROLE_CHANGED` | a `role` declared, or changed or removed (declaring `chdir` counts as a change) | safe, possibly breaking |
 | `FLAG_ROLE_VALUE_CHANGED` | the `role_value` that selects JSON | safe when added, possibly breaking when changed or removed |
 | `ARGUMENT_NO_DELETE` | an argument removed | breaking; expected when planned |
-| `ARGUMENT_ADDED`, `ARGUMENT_REQUIRED_ADDED`, `ARGUMENT_REQUIRED_REMOVED` | an optional one added at the end; a required one added, or now required; no longer required | safe, breaking, safe |
+| `ARGUMENT_ADDED`, `ARGUMENT_REQUIRED_ADDED`, `ARGUMENT_REQUIRED_REMOVED` | an optional one added; a required one added, or now required; no longer required | safe, breaking, safe |
+| `ARGUMENT_MOVED` | an argument now at another position, so a word binds to another argument | breaking |
 | `ARGUMENT_NAME_CHANGED`, `ARGUMENT_VARIADIC_ADDED`, `ARGUMENT_GLOB_CHANGED` | renamed, now variadic, or patterns expanded on Windows | possibly breaking |
 | `ARGUMENT_VARIADIC_REMOVED`, `ARGUMENT_PASSTHROUGH_CHANGED` | no longer variadic, or raw words start elsewhere | breaking |
 | `ENV_NO_DELETE`, `ENV_VARIABLE_NO_DELETE`, `ENV_REQUIRED_ADDED`, `ENV_NESTING_CHANGED` | a variable removed or renamed, now required, or nested differently | breaking |
 | `ENV_ADDED`, `ENV_VARIABLE_ADDED`, `ENV_REQUIRED_REMOVED` | a variable added, or no longer required | safe |
 | `CONFIG_NO_DELETE`, `CONFIG_MOVED`, `CONFIG_REQUIRED_ADDED` | a config key removed, moved to another file, or now required | breaking |
 | `CONFIG_ADDED`, `CONFIG_REQUIRED_REMOVED` | a config key added, or no longer required | safe |
-| `INPUT_TYPE_CHANGED`, `INPUT_TYPE_WIDENED`, `INPUT_TYPE_NOW_DESCRIBED` | an input's type narrowed or changed (`int` → `int8`, `[]int` → `int`), widened, or newly stated where it was open | breaking, safe, safe |
+| `INPUT_TYPE_CHANGED`, `INPUT_TYPE_WIDENED`, `INPUT_TYPE_NOW_DESCRIBED` | an input's type narrowed or changed (`int` → `int8`, `[]int` → `int`), widened, or newly stated where it was open | breaking (possibly breaking for a 64-bit integer → `float64`, which rounds beyond 2^53), safe, safe |
 | `INPUT_KIND_CHANGED`, `INPUT_SEPARATOR_CHANGED` | how the value is supplied or split | breaking |
 | `INPUT_FROM_NO_DELETE`, `INPUT_FROM_ADDED` | where a typed value may come from (`@file`, `-`) | breaking, possibly breaking |
 | `INPUT_IMPLICIT_VALUE_ADDED`, `INPUT_IMPLICIT_VALUE_REMOVED`, `INPUT_IMPLICIT_VALUE_CHANGED` | an optional value | breaking, breaking, possibly breaking |
@@ -3901,7 +3929,7 @@ or on what the old contract planned.
 | `INPUT_HIDDEN`, `INPUT_UNHIDDEN` | an input hidden or shown | possibly breaking, safe |
 | `INPUT_DEFAULT_CHANGED`, `INPUT_DEFAULT_REMOVED`, `INPUT_DEFAULT_ADDED` | a default | possibly breaking, possibly breaking, safe |
 | `INPUT_ENUM_ADDED`, `INPUT_ENUM_REMOVED` | an input limited to a set of values, or no longer | breaking, safe |
-| `ENUM_VALUE_NO_DELETE`, `ENUM_VALUE_REPLACED`, `ENUM_VALUE_ADDED` | an input enum value removed, removed for its `replaced_by`, or added | breaking (expected when planned), expected, safe |
+| `ENUM_VALUE_NO_DELETE`, `ENUM_VALUE_REPLACED`, `ENUM_VALUE_ADDED` | an input enum value removed, removed for its `replaced_by`, or added | breaking (expected when planned), expected (breaking when its `removed_in` is later than the release, possibly breaking when it was hidden), safe |
 | `ENUM_ALIAS_NO_DELETE`, `ENUM_ALIAS_ADDED` | an enum value's alias | breaking, safe |
 | `ENUM_VALUE_HIDDEN`, `ENUM_VALUE_UNHIDDEN` | an enum value hidden or shown | possibly breaking, safe |
 | `INPUT_BOUND_ADDED`, `INPUT_BOUND_NARROWED`, `INPUT_BOUND_WIDENED`, `INPUT_BOUND_REMOVED` | bounds, lengths, item counts, `multipleOf`, `uniqueItems` | breaking, breaking, safe, safe |

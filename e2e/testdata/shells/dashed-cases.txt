@@ -1,0 +1,7 @@
+# The cases for a program whose name has a dash (testdata/shells/dashed), in the same form as
+# cases.txt; want/dashed-<shell>.txt holds what each shell offered.
+commands	my-app |
+flags	my-app -|
+enum	my-app --format |
+sub-command-flags	my-app deploy --|
+sub-command-enum	my-app deploy --env |

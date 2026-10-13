@@ -173,6 +173,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		configFiles:     allScopedConfigFiles(spec),
 		envPrefix:       envPrefix,
 		adoptedPrefixes: map[string]string{},
+		pathSegments:    map[string][]string{},
 		flagSets:        spec.Command.FlagSets,
 	}
 	gp.root = genCommand{
@@ -237,10 +238,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			return nil, errors.New("command entry has neither a name nor a $ref")
 		}
 
-		path := c.Name
-		if parentPath != "" {
-			path = parentPath + "_" + c.Name
-		}
+		path := gp.childPath(parentPath, c.Name)
 		prefix := gp.rootPascal + toPascalCase(path)
 		inputsType, outputType := prefix+"Inputs", ""
 
@@ -258,14 +256,14 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 		} else {
 			gc := genCommand{
 				prefix:          prefix,
-				invocation:      gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
+				invocation:      strings.Join(append([]string{gp.rootName}, gp.pathSegments[path]...), " "),
 				handler:         lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handler",
 				filename:        commandStubFilename(gp.rootName, path, c.Filename),
 				dashedFilename:  dashedStubFilename(gp.rootName, path, c.Filename),
 				inputFields:     gp.inputFieldsOf(c.inputs()),
 				stdinType:       stdinTypeExpr(prefix, c.inputs()),
 				stdinFormat:     stdinFormatExpr(c.inputs()),
-				inputs:          inputsFields(gp.rootPascal, path),
+				inputs:          inputsFields(gp.rootPascal, gp.pathSegments[path]),
 				exitCodes:       exitCodesOf(c.ExitStatus),
 				hasChildren:     len(c.Commands) > 0 || len(c.Plugins) > 0 || c.PluginDiscovery != nil,
 				secret:          hasSecretInput(c.inputs()),
@@ -442,6 +440,17 @@ func loadComposedSpec(base, ref, moduleName string, seen map[string]bool) (rr re
 	return rr, release, nil
 }
 
+// childPath returns the underscore-joined path of the command name beneath parentPath and
+// records its segments in gp.pathSegments.
+func (gp *program) childPath(parentPath, name string) string {
+	path := name
+	if parentPath != "" {
+		path = parentPath + "_" + name
+	}
+	gp.pathSegments[path] = append(slices.Clone(gp.pathSegments[parentPath]), name)
+	return path
+}
+
 // composeRef loads a `$ref`'d child spec and grafts its command tree as a composed subtree,
 // applying the overlay model and merging any `commands:` authored beside the `$ref`.
 // Delegation targets the child's own handler methods regardless of overlay renames.
@@ -476,10 +485,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	// A name override changes only the parent-side name and path, never the delegation target.
 	merged := overlayCommand(childRoot, c)
 	graftName := merged.Name
-	composeRootPath := graftName
-	if parentPath != "" {
-		composeRootPath = parentPath + "_" + graftName
-	}
+	composeRootPath := gp.childPath(parentPath, graftName)
 	prefix := gp.rootPascal + toPascalCase(composeRootPath)
 
 	// Carry the child's config_files and env_prefix into the parent's InputSettings, so
@@ -538,7 +544,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 // graft occupies in the parent, which may differ after an overlay rename. The child's
 // env_prefix is recorded for resolveEnvPrefix.
 func (gp *program) adoptComposedMeta(child *Spec, childRootName, composeRootPath string) {
-	scope := gp.rootName + "/" + strings.ReplaceAll(composeRootPath, "_", "/")
+	scope := strings.Join(append([]string{gp.rootName}, gp.pathSegments[composeRootPath]...), "/")
 	for _, cf := range allScopedConfigFiles(child) {
 		// "musak-songs" → "musak/songs"; "musak-songs/search" → "musak/songs/search".
 		cf.Scope = scope + strings.TrimPrefix(cf.Scope, childRootName)
@@ -593,10 +599,7 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	gcCtx.pluginHost = gc.Name
 	gcCtx.scope = &schemaScope{name: gc.Name, schemas: gc.Schemas}
 	gcCtx.flagSets = gc.FlagSets
-	gcCtx.specRoot = synth.Name
-	if parentPath != "" {
-		gcCtx.specRoot = parentPath + "_" + synth.Name
-	}
+	gcCtx.specRoot = gp.childPath(parentPath, synth.Name)
 	gcCtx.typeAlias = gp.nestedTypeAlias(rr, c, ctx, moduleName)
 	gcCtx.typeRoot, gcCtx.typePascal = gcCtx.specRoot, toPascalCase(gc.Name)
 	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleName, seen, gcCtx)
@@ -610,10 +613,7 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	// `commands:` beside the nested `$ref` resolve against this spec's base, delegate to the
 	// direct child, and are grafted as children of the grandchild.
 	if len(c.Commands) > 0 && len(nodes) == 1 {
-		siblingParent := synth.Name
-		if parentPath != "" {
-			siblingParent = parentPath + "_" + synth.Name
-		}
+		siblingParent := gp.childPath(parentPath, synth.Name)
 		authored, err := gp.walk(c.Commands, siblingParent, base, moduleName, seen, ctx)
 		if err != nil {
 			return nil, err

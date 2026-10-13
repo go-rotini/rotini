@@ -568,3 +568,42 @@ func TestSetConfigValue_everyReaderOfTheKey(t *testing.T) {
 		t.Errorf("file:\n%s", got)
 	}
 }
+
+// A float32 key is written in its own shortest spelling, not widened to float64's.
+func TestSetConfigValue_float32(t *testing.T) {
+	for _, name := range []string{"app.yaml", "app.toml", "app.json"} {
+		dir := t.TempDir()
+		path := pfWrite(t, dir, name, "")
+		rtx := cwContext(dir, nil, ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{{Key: "ratio", Type: "float32"}}})
+		if err := SetConfigValue(rtx, "app", "ratio", "0.1"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := cwRead(t, path); !strings.Contains(got, "0.1") || strings.Contains(got, "0.100000") {
+			t.Errorf("%s:\n%s\nwant ratio written as 0.1", name, got)
+		}
+	}
+}
+
+// A float32 value is judged and spelled as the number it was written as: CheckInputs takes
+// 0.1 against a maximum of 0.1, and ArgvOf writes --ratio=0.1.
+func TestFloat32_typedChecks(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "ratio", Identifiers: []string{"--ratio"}, Type: "float32", Maximum: new(0.1)},
+	}}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Ratio float32 `rotini:"ratio"`
+			}
+		}
+	}
+	var in inputs
+	in.App.Flags.Ratio = 0.1
+	if err := NewContextFor(def, nil).CheckInputs(in, PresenceOf(in)); err != nil {
+		t.Errorf("CheckInputs(0.1 <= 0.1): %v", err)
+	}
+	argv, _, err := ArgvOf(def, in, PresenceOf(in), ArgvPath())
+	if err != nil || len(argv) != 1 || argv[0] != "--ratio=0.1" {
+		t.Errorf("ArgvOf = %q, %v; want --ratio=0.1", argv, err)
+	}
+}

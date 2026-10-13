@@ -117,6 +117,7 @@ const (
 	RuleArgumentRequiredAdded      = "ARGUMENT_REQUIRED_ADDED"
 	RuleArgumentRequiredRemoved    = "ARGUMENT_REQUIRED_REMOVED"
 	RuleArgumentNameChanged        = "ARGUMENT_NAME_CHANGED"
+	RuleArgumentMoved              = "ARGUMENT_MOVED"
 	RuleArgumentVariadicRemoved    = "ARGUMENT_VARIADIC_REMOVED"
 	RuleArgumentVariadicAdded      = "ARGUMENT_VARIADIC_ADDED"
 	RuleArgumentPassthroughChanged = "ARGUMENT_PASSTHROUGH_CHANGED"
@@ -274,7 +275,7 @@ var catalog = []string{
 	RuleFlagRepeatForbidden, RuleFlagRepeatAllowed, RuleFlagRoleChanged,
 
 	RuleArgumentNoDelete, RuleArgumentAdded, RuleArgumentRequiredAdded, RuleArgumentRequiredRemoved,
-	RuleArgumentNameChanged, RuleArgumentVariadicRemoved, RuleArgumentVariadicAdded,
+	RuleArgumentNameChanged, RuleArgumentMoved, RuleArgumentVariadicRemoved, RuleArgumentVariadicAdded,
 	RuleArgumentPassthroughChanged, RuleArgumentGlobChanged,
 
 	RuleEnvNoDelete, RuleEnvAdded, RuleEnvRequiredAdded, RuleEnvRequiredRemoved, RuleEnvVariableNoDelete,

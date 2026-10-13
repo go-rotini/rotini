@@ -3,6 +3,7 @@ package rotini
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -123,7 +124,8 @@ func homeReason(err error) string {
 
 // expandEnv replaces $NAME and ${NAME} in s, where written is the value as the user wrote it,
 // for messages. An unset or empty variable is an error naming it, and so is a braced
-// reference with an operator (${A:-x}). A $ not followed by a name character or { is kept.
+// reference with an operator (${A:-x}). $$ is one literal $, and a $ not followed by a name
+// character, { or $ is kept.
 func expandEnv(written, s string, view *osView) (string, error) {
 	if !strings.Contains(s, "$") {
 		return s, nil
@@ -138,6 +140,10 @@ func expandEnv(written, s string, view *osView) (string, error) {
 		var name string
 		next := i + 1
 		switch {
+		case next < len(s) && s[next] == '$':
+			b.WriteByte('$')
+			i += 2
+			continue
 		case next < len(s) && s[next] == '{':
 			end := strings.IndexByte(s[next:], '}')
 			if end < 0 {
@@ -212,7 +218,8 @@ func expandValues(vals []string, r expandRule, view *osView, label string) ([]st
 }
 
 // relativeToFile joins each relative value onto the directory of file, the configuration file
-// that supplied them; with no file the values are returned as they are.
+// that supplied them; with no file the values are returned as they are. A value starting with
+// a separator or a volume name (Windows' \data and D:data) is not relative to the file.
 func relativeToFile(vals []string, file string) []string {
 	if file == "" {
 		return vals
@@ -220,7 +227,7 @@ func relativeToFile(vals []string, file string) []string {
 	dir := filepath.Dir(file)
 	var out []string
 	for i, v := range vals {
-		if v == "" || filepath.IsAbs(v) || v == "-" {
+		if v == "" || v == "-" || filepath.IsAbs(v) || filepath.VolumeName(v) != "" || os.IsPathSeparator(v[0]) {
 			continue
 		}
 		if out == nil {

@@ -84,6 +84,47 @@ command:
       identifiers: [--color]
       schema: { type: bool, negatable: true }
   commands:
+    - name: quote
+      summary: values a shell must insert as one literal word
+      flags:
+        - name: odd
+          summary: values holding shell syntax
+          identifiers: [--odd]
+          schema:
+            type: string
+            enum:
+              - "a b"
+              - "it's $HOME"
+              - 'say "hi"'
+              - "`touch pwned`"
+              - "$(touch pwned)"
+              - "x;touch pwned"
+              - "star*"
+              - "~root"
+              - "o’neil;touch pwned"
+              - "“q”"
+              - 'back\slash'
+              - "a!b"
+              - "ends'"
+              - "{a,b}"
+              - "a&b|c<d>e"
+              - "#hash"
+        - name: pair
+          summary: values sharing a prefix up to a shell character
+          identifiers: [--pair]
+          schema:
+            type: string
+            enum: ["x;touch pwned", "x;touch pwnedz", "x y", "x,y"]
+        - name: addr
+          summary: values with a colon, a word break in bash
+          identifiers: [--addr]
+          schema:
+            type: string
+            enum: ["host:8080", "host:9090"]
+        - name: note
+          summary: a value with no completion hint
+          identifiers: [--note]
+          schema: { type: string }
     - name: deploy
       summary: deploy a service
       flag_groups:

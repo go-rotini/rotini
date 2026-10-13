@@ -348,8 +348,8 @@ created: internal/cmd/mycli/mycli_greet.go
 [14:05:37] 6.12ms
 {{< /code >}}
 
-`--watch` keeps running and regenerates whenever the spec or conf changes. Leave it open in a
-terminal while you edit.
+`--watch` keeps running and regenerates whenever the spec, the conf or a file they pull in (a
+composed spec, a seeded template) changes. Leave it open in a terminal while you edit.
 
 `--dry-run` (`-n`) works out everything `generate` would write, create or remove, and changes
 nothing. The exit code says what it found:
@@ -386,7 +386,7 @@ Arguments:
 
 Flags:
   -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)
-  -w, --watch            watch the spec and conf for changes and re-generate
+  -w, --watch            watch the spec, conf and the files they use for changes and re-generate
   -n, --[no-]dry-run     show what would be written, created or removed, and change nothing; exits 2 when something would change
 
 Global Flags:
@@ -409,7 +409,7 @@ reports each problem with a `file:line:col`.
 
 It finds the spec and conf the same way `generate` does. `--fail fast` stops at the first
 problem; `--fail collect` reports every problem at once, and is the default unless the conf's
-`validate.fail` says otherwise. `--watch` validates again whenever the spec or conf changes.
+`validate.fail` says otherwise. `--watch` validates again whenever the spec, the conf or a composed spec changes.
 
 `--release 2.0.0` also fails for each command, input or deprecated identifier still declared
 whose `removed_in` is at or below that release, so a planned removal can't ship by accident.
@@ -434,7 +434,7 @@ Arguments:
 Flags:
   -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)
       --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]
-  -w, --watch            watch the spec and conf for changes and re-validate
+  -w, --watch            watch the spec, conf and the files they use for changes and re-validate
       --release X.Y.Z    fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names
       --format string    how to report problems — text, or json (one object listing every problem, on stdout) (default text) [text|json]
 
@@ -548,7 +548,7 @@ to the contract built from the current spec and conf. Because both arguments are
 contracts, the spec is given with --spec.
 
 The conf's diff.accept entries acknowledge intended changes, one finding each; an entry
-that matches no finding fails the run.
+that matches no finding fails the run, unless --fail-on is never.
 
 Usage:
   rotini diff [flags] <old> [new]

@@ -1,0 +1,31 @@
+version: 0.0.0
+command:
+  name: my-app
+  summary: a CLI whose name has a dash, which no shell variable name may hold
+  flags:
+    - name: format
+      cascading: true
+      summary: output format
+      identifiers: [--format]
+      schema:
+        type: string
+        enum: [json, text]
+    - name: quiet
+      cascading: true
+      summary: say less
+      identifiers: [-q, --quiet]
+      schema: { type: bool }
+  commands:
+    - name: deploy
+      summary: deploy a service
+      flags:
+        - name: env
+          summary: target environment
+          identifiers: [--env]
+          schema:
+            type: string
+            enum:
+              - { value: prod, summary: production }
+              - { value: staging, summary: pre-production }
+    - name: status
+      summary: show status

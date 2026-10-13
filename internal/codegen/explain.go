@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -40,6 +41,10 @@ func ExplainKey(path string) ([]KeyInfo, error) {
 	if path == "" || slices.Contains(segs, "") {
 		return nil, fmt.Errorf("%q is not a key path; write the keys from the document's top, separated by dots (command.flags.schema.from)", path)
 	}
+	if strings.ContainsAny(path, "[]") {
+		plain := listIndex.ReplaceAllString(path, "")
+		return nil, fmt.Errorf("%q names a list position; key paths name keys only, so a list's items are under its own key: %s", path, plain)
+	}
 	var out []KeyInfo
 	var nearest []string
 	for i, doc := range schemaDocuments() {
@@ -63,6 +68,9 @@ func ExplainKey(path string) ([]KeyInfo, error) {
 	}
 	return out, nil
 }
+
+// listIndex matches a list position in a key path, such as the [0] of commands[0].
+var listIndex = regexp.MustCompile(`\[[^\]]*\]`)
 
 // explainMiss says which segment of a key path is unknown, with the nearest key there.
 func explainMiss(segs []string, at int, known []string) string {

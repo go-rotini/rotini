@@ -1,8 +1,11 @@
 package rotini
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A flag's env or config fallback supplies a value the user never typed, so an error about
@@ -170,4 +173,76 @@ func TestFallbackSource_everyValueRule(t *testing.T) {
 			t.Fatalf("Read = %v, want a missing --token without a source", err)
 		}
 	})
+}
+
+type fsListInputs struct {
+	App struct {
+		Flags struct {
+			Tags []string `rotini:"tags" recon:"tags"`
+		}
+		Arguments struct{}
+		Config    struct {
+			Nums []int `rotini:"nums" recon:"nums"`
+		}
+	}
+}
+
+type fsTimeFlagInputs struct {
+	App struct {
+		Flags struct {
+			At time.Time `rotini:"at" recon:"at"`
+		}
+		Arguments struct{}
+	}
+}
+
+type fsTimeConfigInputs struct {
+	App struct {
+		Arguments struct{}
+		Config    struct {
+			At time.Time `rotini:"at" recon:"at"`
+		}
+	}
+}
+
+func fsListDef() Definition {
+	return Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string"},
+		{Name: "at", Identifiers: []string{"--at"}, Type: "time"},
+	}}
+}
+
+func fsConfigRead(t *testing.T, cfg string, in any) error {
+	t.Helper()
+	return NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(NewContextFor(fsListDef(), nil), in)
+}
+
+// A null item in a configuration list is refused, by a flag's fallback and by a config input,
+// with a message that says so; it is never read as empty text.
+func TestFallbackSource_nullListItem(t *testing.T) {
+	for body, want := range map[string]string{
+		"tags: [a, null]\n": "--tags: list item 2 is null (from configuration file %s, key tags)",
+		"nums: [1, ~]\n":    "config key nums: list item 2 is null (from configuration file %s)",
+	} {
+		cfg := writeConfig(t, body)
+		var in fsListInputs
+		err := fsConfigRead(t, cfg, &in)
+		if want = fmt.Sprintf(want, cfg); err == nil || err.Error() != want || !errors.Is(err, ErrUsage) {
+			t.Errorf("%q: %v, want %q", body, err, want)
+		}
+	}
+}
+
+// A time flag's fallback reads a configuration value as a config input of type time reads the
+// same key: both take it, as the same instant, or both refuse it.
+func TestFallbackSource_timeAgreesWithConfigInput(t *testing.T) {
+	for _, v := range []string{"2024-01-02T03:04:05Z", `"2024-01-02T03:04:05"`, `"2024-01-02 03:04"`, `"2024-01-02"`, `"03:04:05"`, `"junk"`} {
+		cfg := writeConfig(t, "at: "+v+"\n")
+		var fl fsTimeFlagInputs
+		var ci fsTimeConfigInputs
+		ferr, cerr := fsConfigRead(t, cfg, &fl), fsConfigRead(t, cfg, &ci)
+		if (ferr == nil) != (cerr == nil) || !fl.App.Flags.At.Equal(ci.App.Config.At) {
+			t.Errorf("at: %s: flag %v (%v), config input %v (%v)", v, fl.App.Flags.At, ferr, ci.App.Config.At, cerr)
+		}
+	}
 }

@@ -357,7 +357,11 @@ func (ix *yamlIndexer) scalarEnd(n *yaml.Node, parentCol int, flow bool) (int, e
 		return 0, ix.layout(off, "an empty value with an anchor or tag")
 	}
 	if flow {
-		return ix.flowPlainEnd(off), nil
+		end := ix.flowPlainEnd(off)
+		if string(ix.src[off:end]) != n.Value {
+			return 0, ix.layout(off, "a plain value inside {…} or […] written over several lines")
+		}
+		return end, nil
 	}
 	return ix.plainEnd(off, parentCol, n.Value), nil
 }
@@ -401,7 +405,8 @@ func (ix *yamlIndexer) plainEnd(off, parentCol int, value string) int {
 		if blankLine(ix.src, ls) {
 			continue
 		}
-		ind := indentAt(ix.src, ls)
+		// A tab after the indentation separates, so it counts here as the parser counts it.
+		ind := len(ix.src[ls:lineEnd(ix.src, ls)]) - len(bytes.TrimLeft(ix.src[ls:lineEnd(ix.src, ls)], " \t"))
 		if ind <= parentCol || ix.src[ls+ind] == '#' || docMarker(ix.src, ls) {
 			break
 		}

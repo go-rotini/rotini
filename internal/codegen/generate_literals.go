@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -797,12 +798,22 @@ func defaultString(v any) string {
 		return x
 	case bool:
 		return strconv.FormatBool(x)
+	case json.Number:
+		return x.String()
 	case float64:
+		// Whole numbers print in full, so 1000000 stays an integer rather than 1e+06.
+		if x == math.Trunc(x) && math.Abs(x) < 1<<53 {
+			return strconv.FormatFloat(x, 'f', -1, 64)
+		}
 		return strconv.FormatFloat(x, 'g', -1, 64)
 	case int:
 		return strconv.Itoa(x)
 	case int64:
 		return strconv.FormatInt(x, 10)
+	case uint64:
+		return strconv.FormatUint(x, 10)
+	case time.Time:
+		return x.Format(time.RFC3339Nano)
 	default:
 		return fmt.Sprintf("%v", x)
 	}

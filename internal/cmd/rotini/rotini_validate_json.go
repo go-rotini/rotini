@@ -14,6 +14,10 @@ func validateJSON(rtx *rotini.Context, specPath string, flags RotiniValidateFlag
 		rtx.HaltWith(rotini.UsageError(errors.New("--format json can't be combined with --watch; a watch reports each pass as it happens")))
 		return
 	}
+	if err := notDirectories(specPath, flags.ConfFilePath); err != nil {
+		rtx.HaltWith(rotini.UsageError(err))
+		return
+	}
 	spec, conf, err := codegen.ResolvePaths(specPath, flags.ConfFilePath)
 	if err != nil {
 		rtx.HaltWith(rotini.UsageError(err))

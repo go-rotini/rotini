@@ -206,11 +206,17 @@ func FuzzParse(f *testing.F) {
 		"--label a.b=c --label = --label =x",
 		"cp a b c dst",
 		"cp -v -- -a dst",
+		"run\x1f\x1f --count\x1f3",
+		"--mi\x1fa=b\nc\x1frun",
 	} {
-		f.Add(seed)
+		f.Add(strings.ReplaceAll(seed, " ", "\x1f"))
 	}
+	// Words are split on \x1f, so a word can be empty or hold spaces, tabs and line breaks.
 	f.Fuzz(func(t *testing.T, argline string) {
-		argv := strings.Fields(argline)
+		var argv []string
+		if argline != "" {
+			argv = strings.Split(argline, "\x1f")
+		}
 		parseBoth[runInputs](t, parserTestDef(), argv)
 		parseBoth[matrixInputs](t, matrixDef(), argv)
 		parseBoth[cpListInputs](t, cpListDef(), argv) // a flag set embedded in the flags struct
@@ -1684,8 +1690,8 @@ func TestParse_dottedKeys(t *testing.T) {
 	}
 	// A dotted_keys map says nothing about its values, so each is read as the JSON spelling of
 	// it would be: 3 is the number JSON gives, not the text "3".
-	if in.App.Flags.Set["replicas"] != float64(3) {
-		t.Errorf("Set[replicas] = %#v, want float64(3)", in.App.Flags.Set["replicas"])
+	if in.App.Flags.Set["replicas"] != int64(3) {
+		t.Errorf("Set[replicas] = %#v, want int64(3)", in.App.Flags.Set["replicas"])
 	}
 	if in.App.Flags.Labels["team.name"] != "core" {
 		t.Errorf("plain map = %v, want the literal key team.name (dotted_keys is opt-in)", in.App.Flags.Labels)
@@ -1695,12 +1701,12 @@ func TestParse_dottedKeys(t *testing.T) {
 	// replaced by a subtree and a subtree replaced by a scalar.
 	if in, err := parse(t, "--set", "a=1", "--set", "a.b=2"); err != nil {
 		t.Errorf("Parse: %v", err)
-	} else if sub, ok := in.App.Flags.Set["a"].(map[string]any); !ok || sub["b"] != float64(2) {
+	} else if sub, ok := in.App.Flags.Set["a"].(map[string]any); !ok || sub["b"] != int64(2) {
 		t.Errorf("scalar→subtree: Set[a] = %#v, want map[b:2]", in.App.Flags.Set["a"])
 	}
 	if in, err := parse(t, "--set", "a.b=2", "--set", "a=1"); err != nil {
 		t.Errorf("Parse: %v", err)
-	} else if in.App.Flags.Set["a"] != float64(1) {
+	} else if in.App.Flags.Set["a"] != int64(1) {
 		t.Errorf("subtree→scalar: Set[a] = %#v, want 1", in.App.Flags.Set["a"])
 	}
 

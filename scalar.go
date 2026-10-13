@@ -7,9 +7,10 @@ import (
 
 // inferScalar types key=value text the schema says nothing about (inside a free-form object or
 // a dotted_keys map) as its JSON spelling would decode: true and false are booleans, null is
-// nil, a JSON number is a float64, and anything else is the text itself. This keeps
-// `replicas=5` and `{"replicas":5}` equivalent. Only JSON scalar forms are inferred; "007",
-// "1_000", "yes" and "0x10" stay text, and so does a number too large for a float64.
+// nil, a JSON integer that fits is an int64, any other JSON number is a float64, and anything
+// else is the text itself. This keeps `replicas=5` and `{"replicas":5}` equivalent. Only JSON
+// scalar forms are inferred; "007", "1_000", "yes" and "0x10" stay text, and so does a number
+// too large for a float64.
 func inferScalar(text string) any {
 	switch text {
 	case "true":
@@ -25,6 +26,11 @@ func inferScalar(text string) any {
 	r := jsonReader{s: text}
 	if !r.number() || r.i != len(text) {
 		return text
+	}
+	if !strings.ContainsAny(text, ".eE") {
+		if n, err := strconv.ParseInt(text, 10, 64); err == nil {
+			return n
+		}
 	}
 	if n, err := strconv.ParseFloat(text, 64); err == nil {
 		return n

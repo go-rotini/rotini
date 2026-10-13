@@ -2,6 +2,7 @@ package contractdiff
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -99,31 +100,75 @@ func (d *differ) responseFiles() {
 	}
 }
 
-// commands compares every command, matched by path, then lists the commands added.
+// commands compares every command, matched by path, then lists the commands added. An old
+// command renamed with its old name kept as an alias is compared with the command that now
+// runs it, and so is every command below it.
 func (d *differ) commands() {
-	renamed := map[string]bool{} // new commands that keep a removed command's name as an alias
-	for _, oc := range d.old.Commands {
-		nc := d.new.byPath[pathKey(oc.Path)]
-		st := d.commandStability(&oc)
-		if nc == nil {
-			if owner := d.commandRemoved(st, &oc); owner != "" {
-				renamed[owner] = true
-			}
-			continue
-		}
-		d.command(st, &oc, nc)
+	order := make([]*command, 0, len(d.old.Commands))
+	for i := range d.old.Commands {
+		order = append(order, &d.old.Commands[i])
 	}
-	for _, nc := range d.new.Commands {
-		if d.old.byPath[pathKey(nc.Path)] != nil || nc.Hidden || renamed[nc.Name] {
+	slices.SortStableFunc(order, func(a, b *command) int { return cmp.Compare(len(a.Path), len(b.Path)) })
+	moved := map[string]*command{} // old path → the new command that runs it through a kept alias
+	was := map[*command][]string{} // a new command in moved → the old path it runs
+	compared := map[*command]bool{}
+	for _, oc := range order {
+		st := d.commandStability(oc)
+		nc := d.new.byPath[pathKey(oc.Path)]
+		if nc == nil {
+			if nc = d.commandRemoved(st, oc, moved); nc == nil {
+				continue
+			}
+			moved[pathKey(oc.Path)] = nc
+			was[nc] = oc.Path
+		}
+		compared[nc] = true
+		d.command(st, oc, nc)
+	}
+	for i := range d.new.Commands {
+		nc := &d.new.Commands[i]
+		if compared[nc] || d.old.byPath[pathKey(nc.Path)] != nil {
 			continue
 		}
 		st := d.parentStability(nc.Path)
+		rule, what := RuleCommandAdded, "command"
 		if nc.Plugin {
-			d.add(st, Safe, RulePluginAdded, nc.Name, "plugin added", "")
-			continue
+			rule, what = RulePluginAdded, "plugin"
 		}
-		d.add(st, Safe, RuleCommandAdded, nc.Name, "command added", "")
+		switch {
+		case nc.Hidden && d.old.legacy:
+			// An older contract left hidden commands out, so this one may not be new.
+		case len(nc.Path) > 0 && d.takesArguments(d.oldParent(nc.Path, was)):
+			// Even hidden, it takes over an argument that spells its name.
+			d.add(st, PossiblyBreaking, rule, nc.Name, what+" added under a command with arguments",
+				"an argument "+strconv.Quote(nc.Path[len(nc.Path)-1])+" now runs the "+what)
+		case !nc.Hidden:
+			d.add(st, Safe, rule, nc.Name, what+" added", "")
+		}
 	}
+}
+
+// oldSibling reports whether the old contract has a command name beside the command at path,
+// so name was never an argument to the command above it.
+func (d *differ) oldSibling(path []string, name string) bool {
+	return d.old.byPath[pathKey(append(slices.Clone(path[:len(path)-1]), name))] != nil
+}
+
+// oldParent returns the old path of the command above the new command at path: the old path
+// of a parent that was renamed with its old name kept as an alias, or the same path.
+func (d *differ) oldParent(path []string, was map[*command][]string) []string {
+	parent := path[:len(path)-1]
+	if p := d.new.byPath[pathKey(parent)]; p != nil && was[p] != nil {
+		return was[p]
+	}
+	return parent
+}
+
+// takesArguments reports whether the old command at path takes arguments, which a sub-command,
+// alias or plugin added under it would take over.
+func (d *differ) takesArguments(path []string) bool {
+	c := d.old.byPath[pathKey(path)]
+	return c != nil && len(c.Arguments) > 0 && !c.Plugin
 }
 
 // commandStability is a command's effective stability in the old contract: its own, or its
@@ -143,42 +188,63 @@ func (d *differ) parentStability(path []string) stability {
 	return st
 }
 
-// commandRemoved reports an old command the new contract lacks: replaced, renamed with its
-// old name kept as an alias, or removed. It returns the name of the command that kept the old name
-// as an alias, or "".
-func (d *differ) commandRemoved(st stability, oc *command) string {
+// commandRemoved reports an old command the new contract lacks at its path: replaced, renamed
+// with its old name kept as an alias, below such a command, or removed. It returns the new
+// command that still runs it, or nil. moved maps the old paths already found renamed.
+func (d *differ) commandRemoved(st stability, oc *command, moved map[string]*command) *command {
 	if oc.Plugin {
 		d.removal(st, RulePluginNoDelete, oc.Name, "plugin removed", "", oc.Hidden)
-		return ""
+		return nil
 	}
 	if oc.ReplacedBy != "" {
 		if rc := d.new.byPath[oc.ReplacedBy]; rc != nil {
-			d.add(st, Expected, RuleCommandReplaced, oc.Name, "command removed; replaced by "+rc.Name, "")
-			return ""
+			d.replaced(st, RuleCommandReplaced, oc.Name, "command removed; replaced by "+rc.Name, oc.RemovedIn, oc.Hidden, "")
+			return nil
 		}
 	}
-	if owner := d.aliasOwner(oc); owner != "" {
-		d.add(st, Safe, RuleCommandRenamedAliasKept, oc.Name, "renamed "+owner+"; the old name still runs it as an alias", "")
-		return owner
+	if len(oc.Path) > 0 {
+		parent, last := oc.Path[:len(oc.Path)-1], oc.Path[len(oc.Path)-1]
+		if p := moved[pathKey(parent)]; p != nil {
+			if nc := d.new.byPath[pathKey(append(slices.Clone(p.Path), last))]; nc != nil {
+				return nc // its parent was renamed; it still runs through the parent's alias
+			}
+			parent = p.Path
+		}
+		if owner := d.aliasOwner(parent, last); owner != nil {
+			msg := "renamed " + owner.Name + "; the old name still runs it as an alias"
+			if name := owner.Path[len(owner.Path)-1]; d.takesArguments(oc.Path[:len(oc.Path)-1]) && !d.oldSibling(oc.Path, name) {
+				// The new name was an argument to the command above it.
+				d.add(st, PossiblyBreaking, RuleCommandRenamedAliasKept, oc.Name, msg, "an argument "+strconv.Quote(name)+" now runs the command")
+			} else {
+				d.add(st, Safe, RuleCommandRenamedAliasKept, oc.Name, msg, "")
+			}
+			return owner
+		}
 	}
 	d.removal(st, RuleCommandNoDelete, oc.Name, "command removed", oc.RemovedIn, oc.Hidden)
-	return ""
+	return nil
 }
 
-// aliasOwner returns the name of the new command that is oc's sibling and accepts oc's name as
-// an alias, or "".
-func (d *differ) aliasOwner(oc *command) string {
-	if len(oc.Path) == 0 {
-		return ""
+// replaced records the removal of an item for the replacement it named: expected, unless
+// removed_in plans the removal for a later release than the one being prepared.
+func (d *differ) replaced(st stability, rule, where, msg, removedIn string, hidden bool, note string) {
+	if removedIn == "" {
+		d.add(st, Expected, rule, where, msg, note)
+		return
 	}
-	parent, last := oc.Path[:len(oc.Path)-1], oc.Path[len(oc.Path)-1]
-	for _, nc := range d.new.Commands {
-		if len(nc.Path) == len(oc.Path) && slices.Equal(nc.Path[:len(parent)], parent) &&
-			(slices.Contains(nc.Aliases, last) || slices.Contains(nc.HiddenAliases, last)) {
-			return nc.Name
+	d.removalWith(st, rule, where, msg, removedIn, hidden, note)
+}
+
+// aliasOwner returns the new command below parent that accepts name as an alias, or nil.
+func (d *differ) aliasOwner(parent []string, name string) *command {
+	for i := range d.new.Commands {
+		nc := &d.new.Commands[i]
+		if len(nc.Path) == len(parent)+1 && slices.Equal(nc.Path[:len(parent)], parent) &&
+			(slices.Contains(nc.Aliases, name) || slices.Contains(nc.HiddenAliases, name)) {
+			return nc
 		}
 	}
-	return ""
+	return nil
 }
 
 // command compares a command present in both contracts.
@@ -244,7 +310,14 @@ func (d *differ) aliases(st stability, oc, nc *command) {
 			}
 		}
 		for _, a := range l.new {
-			if !slices.Contains(l.old, a) && !slices.Contains(oldOther(oc, l.what), a) {
+			switch {
+			case slices.Contains(l.old, a) || slices.Contains(oldOther(oc, l.what), a):
+			case len(oc.Path) > 0 && a == oc.Path[len(oc.Path)-1]:
+				// The command's old name, kept as an alias when it was renamed.
+			case len(oc.Path) > 0 && d.takesArguments(oc.Path[:len(oc.Path)-1]) && !d.oldSibling(oc.Path, a):
+				d.add(st, PossiblyBreaking, l.added, oc.Name+" alias "+a, l.what+" "+strconv.Quote(a)+" added under a command with arguments",
+					"an argument "+strconv.Quote(a)+" now runs the command")
+			default:
 				d.add(st, Safe, l.added, oc.Name+" alias "+a, l.what+" "+strconv.Quote(a)+" added", "")
 			}
 		}
@@ -343,6 +416,9 @@ func (d *differ) pluginDiscovery(st stability, oc, nc *command) {
 	switch {
 	case o != nil && n == nil:
 		d.add(st, Breaking, RulePluginDiscoveryNoDelete, w, fmt.Sprintf("programs named %s<word> no longer run as sub-commands", o.Prefix), "")
+	case o == nil && n != nil && len(oc.Arguments) > 0:
+		d.add(st, Breaking, RulePluginDiscoveryAdded, w, fmt.Sprintf("programs named %s<word> run as sub-commands", n.Prefix),
+			"an argument now runs the program it names, when one is installed")
 	case o == nil && n != nil:
 		d.add(st, Safe, RulePluginDiscoveryAdded, w, fmt.Sprintf("programs named %s<word> run as sub-commands", n.Prefix), "")
 	case o != nil && o.Prefix != n.Prefix:

@@ -148,7 +148,7 @@ func TestPrefixedBase_rejects(t *testing.T) {
 		{[]string{"--n", "0x"}, `--n: "0x" is not a valid integer`},
 		{[]string{"--n", "0b2"}, `--n: "0b2" is not a valid integer`},
 		{[]string{"--u8", "0x100"}, `--u8: "0x100" is not a valid uint8 (out of range: 0 to 255)`},
-		{[]string{"--u8=-0x1"}, `--u8: "-0x1" is not a valid non-negative integer`},
+		{[]string{"--u8=-0x1"}, `--u8: "-0x1" is not a valid uint8 (out of range: 0 to 255)`},
 		{[]string{"--n", "0x10000000000000000"}, `--n: "0x10000000000000000" is not a valid integer`},
 		{[]string{"--ids", "0x1,0x1FF"}, `--ids: "0x1FF" is not a valid uint8 (out of range: 0 to 255)`},
 		{[]string{"--", "0xZ"}, `<nums>: "0xZ" is not a valid integer`},

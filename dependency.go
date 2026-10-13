@@ -118,8 +118,14 @@ func (e *DependencyError) Unwrap() []error { return []error{ErrDependencyNotFoun
 //
 //	client, ok := rtx.GetDependency(tasks.Client)
 func (rtx *Context) GetDependency[T any](dep Dependency[T]) (T, bool) {
-	v, ok := rtx.dependency(dep.name).(T)
-	return v, ok
+	stored, registered := rtx.dependency(dep.name)
+	if v, ok := stored.(T); ok {
+		return v, true
+	}
+	// A nil registered under an interface type is stored as a nil any, which no assertion
+	// matches.
+	var zero T
+	return zero, registered && stored == nil && reflect.TypeFor[T]().Kind() == reflect.Interface
 }
 
 // MustGetDependency returns the value registered under dep, or panics with a
@@ -131,7 +137,7 @@ func (rtx *Context) MustGetDependency[T any](dep Dependency[T]) T {
 	v, ok := rtx.GetDependency(dep)
 	if !ok {
 		de := &DependencyError{Name: dep.name}
-		if registered := rtx.dependency(dep.name); registered != nil {
+		if registered, _ := rtx.dependency(dep.name); registered != nil {
 			de.got, de.want = fmt.Sprintf("%T", registered), reflect.TypeFor[T]().String()
 		}
 		panic(de)
@@ -174,9 +180,10 @@ func (rtx *Context) setDependency(name string, value any) {
 	rtx.services[name] = value
 }
 
-// dependency returns the value stored under name, or nil when there is none.
-func (rtx *Context) dependency(name string) any {
+// dependency returns the value stored under name and whether anything is stored there.
+func (rtx *Context) dependency(name string) (any, bool) {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
-	return rtx.services[name]
+	v, ok := rtx.services[name]
+	return v, ok
 }

@@ -1,0 +1,5 @@
+# The go tool refuses a Windows device name (CON, AUX, NUL, LPT1, ...) as an import path
+# element on every system, so the cmd package can't default to internal/cmd/aux.
+version: 0.0.0
+command:
+  name: aux

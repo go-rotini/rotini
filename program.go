@@ -23,8 +23,8 @@ const forceExitCode = 130
 // signalExitCode maps a trapped signal to 128 + signum, falling back to forceExitCode for
 // a signal carrying no numeric value.
 func signalExitCode(s os.Signal) int {
-	if sig, ok := s.(syscall.Signal); ok {
-		return 128 + int(sig)
+	if n, ok := signalNumber(s); ok {
+		return 128 + n
 	}
 	return forceExitCode
 }

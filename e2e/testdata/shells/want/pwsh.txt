@@ -1,6 +1,7 @@
 == commands
 deploy	deploy a service
 help	print help
+quote	values a shell must insert as one literal word
 remote	manage remotes
 status	show status
 == command-prefix
@@ -45,17 +46,17 @@ yaml
 --format=text	
 --format=yaml	
 == file-extensions
-a.yaml	/w/a.yaml
-b.yml	/w/b.yml
-bin	/w/bin
-drivers	/w/drivers
-src	/w/src
-sub	/w/sub
+./a.yaml	/w/a.yaml
+./b.yml	/w/b.yml
+./bin	/w/bin
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub
 == directory
-bin	/w/bin
-drivers	/w/drivers
-src	/w/src
-sub	/w/sub
+./bin	/w/bin
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub
 == none-with-message
 <nothing: the file fallback stopped>
 == executable
@@ -72,6 +73,7 @@ replicas=
 == help-command
 deploy	deploy a service
 help	print help
+quote	values a shell must insert as one literal word
 remote	manage remotes
 status	show status
 == help-command-deep
@@ -115,25 +117,69 @@ db	the database
 dev	
 prod	
 == fallback-extensions
-a.yaml	/w/a.yaml
-b.yml	/w/b.yml
-bin	/w/bin
-drivers	/w/drivers
-src	/w/src
-sub	/w/sub
+./a.yaml	/w/a.yaml
+./b.yml	/w/b.yml
+./bin	/w/bin
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub
 == fallback-directory
-src	/w/src
-sub	/w/sub
+./src	/w/src
+./sub	/w/sub
 == fallback-with-candidates
+./drivers	/w/drivers
 db	the database
-drivers	/w/drivers
 == fallback-none
 <nothing: the file fallback stopped>
 == fallback-file
-c.txt	/w/c.txt
-cases.txt	/w/cases.txt
-completion_bash.sh	/w/completion_bash.sh
-completion_fish.fish	/w/completion_fish.fish
-completion_nushell.nu	/w/completion_nushell.nu
-completion_powershell.ps1	/w/completion_powershell.ps1
-completion_zsh.zsh	/w/completion_zsh.zsh
+./c.txt	/w/c.txt
+./cases.txt	/w/cases.txt
+./completion_bash.sh	/w/completion_bash.sh
+./completion_fish.fish	/w/completion_fish.fish
+./completion_nushell.nu	/w/completion_nushell.nu
+./completion_powershell.ps1	/w/completion_powershell.ps1
+./completion_zsh.zsh	/w/completion_zsh.zsh
+== quote-all
+'a b'	a b
+'it''s $HOME'	it's $HOME
+'say "hi"'	say "hi"
+'`touch pwned`'	`touch pwned`
+'$(touch pwned)'	$(touch pwned)
+'x;touch pwned'	x;touch pwned
+'star*'	star*
+'~root'	~root
+'o’’neil;touch pwned'	o’neil;touch pwned
+'“q”'	“q”
+back\slash	
+a!b	
+'ends'''	ends'
+'{a,b}'	{a,b}
+'a&b|c<d>e'	a&b|c<d>e
+'#hash'	#hash
+== quote-shared
+'x;touch pwned'	x;touch pwned
+'x;touch pwnedz'	x;touch pwnedz
+'x y'	x y
+'x,y'	x,y
+== quote-typed-quote
+'it''s $HOME'	it's $HOME
+== quote-typed-backslash
+== quote-colon
+host:8080	
+host:9090	
+== quote-inline
+'--odd=x;touch pwned'	--odd=x;touch pwned
+== plain-value
+./a.yaml	/w/a.yaml
+./b.yml	/w/b.yml
+./bin	/w/bin
+./c.txt	/w/c.txt
+./cases.txt	/w/cases.txt
+./completion_bash.sh	/w/completion_bash.sh
+./completion_fish.fish	/w/completion_fish.fish
+./completion_nushell.nu	/w/completion_nushell.nu
+./completion_powershell.ps1	/w/completion_powershell.ps1
+./completion_zsh.zsh	/w/completion_zsh.zsh
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub

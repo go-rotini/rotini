@@ -22,13 +22,13 @@ func TestCompletionScripts_preserveEveryToken(t *testing.T) {
 	}{
 		{
 			shell: "bash",
-			want:  `args=("${COMP_WORDS[@]:1:$COMP_CWORD}")`,
-			why:   "the slice must happen before IFS is narrowed (see the reject below)",
+			want:  `args+=("$REPLY")`,
+			why:   "each word, the empty current one included, is passed as one argument once unquoted",
 		},
 		{
 			shell: "zsh",
-			want:  `"${(@)words[2,$CURRENT]}"`,
-			why:   "an unquoted zsh slice drops the empty current word",
+			want:  `args+=("${(Q)words[CURRENT]}")`,
+			why:   "the current word, even empty, must be passed as one argument",
 		},
 		{
 			shell: "fish",
@@ -60,7 +60,7 @@ func TestCompletionScripts_preserveEveryToken(t *testing.T) {
 	}
 }
 
-// TestCompletionScript_bashSlicesBeforeNarrowingIFS pins that the bash script slices COMP_WORDS
+// TestCompletionScript_bashSlicesBeforeNarrowingIFS pins that the bash script gathers the words
 // before narrowing IFS: bash 3.2 (macOS /bin/bash) joins "${array[@]:offset:length}" into one
 // element when IFS lacks a space, so every word after the first would be lost.
 func TestCompletionScript_bashSlicesBeforeNarrowingIFS(t *testing.T) {
@@ -69,15 +69,15 @@ func TestCompletionScript_bashSlicesBeforeNarrowingIFS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	slice := strings.Index(script, `args=("${COMP_WORDS[@]:1:$COMP_CWORD}")`)
+	slice := strings.Index(script, "\n    _prog_words\n")
 	ifs := strings.Index(script, `local IFS=$'\n'`)
 	switch {
 	case slice < 0:
-		t.Fatal("the COMP_WORDS slice is gone")
+		t.Fatal("the words are no longer gathered in _prog_words")
 	case ifs < 0:
 		t.Fatal("IFS is no longer narrowed at all — candidates containing spaces will split")
 	case ifs < slice:
-		t.Error("IFS is narrowed BEFORE the COMP_WORDS slice; bash 3.2 collapses the slice to one element")
+		t.Error("IFS is narrowed BEFORE the words are gathered; bash 3.2 collapses an array slice to one element")
 	}
 }
 
@@ -102,17 +102,20 @@ func TestCompletionScripts_parseInTheirOwnShell(t *testing.T) {
 			if err != nil {
 				t.Skipf("%s is not installed", c.bin)
 			}
-			script, err := completionScript("prog", c.shell, completionEnvs{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			path := filepath.Join(t.TempDir(), "completion."+c.shell)
-			if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			out, err := exec.Command(bin, append(c.args, path)...).CombinedOutput()
-			if err != nil {
-				t.Errorf("the generated %s script does not parse: %v\n%s", c.shell, err, out)
+			// A name with "-" can't appear in shell variable names.
+			for _, prog := range []string{"prog", "kubectl-prog"} {
+				script, err := completionScript(prog, c.shell, completionEnvs{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(t.TempDir(), "completion."+c.shell)
+				if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				out, err := exec.Command(bin, append(c.args, path)...).CombinedOutput()
+				if err != nil {
+					t.Errorf("the generated %s script for %s does not parse: %v\n%s", c.shell, prog, err, out)
+				}
 			}
 		})
 	}
@@ -130,10 +133,10 @@ func TestCompletionScripts_readTheProtocol(t *testing.T) {
 		},
 		"zsh": {
 			`':rotini:option '*`, `opts+=(-S '')`, `_describe -V 'PROG' pairs`,
-			`_command_names -e`, `_users`, `_groups`, `_hosts`,
+			`_command_names -e`, `_users`, `_groups`, `_hosts`, `"") (( $#pairs )) || _files ;;`,
 		},
 		"fish": {
-			`':rotini:option *'`, `complete -c PROG -f -k -n '__PROG_has_results'`,
+			`':rotini:option *'`, `complete -c PROG -f -k -a '(__PROG_complete)'`,
 			`__fish_complete_command`, `__fish_complete_users`, `__fish_complete_groups`, `__fish_print_hostnames`,
 		},
 		"powershell": {
@@ -159,6 +162,92 @@ func TestCompletionScripts_readTheProtocol(t *testing.T) {
 		if o, d := strings.Index(script, "rotini:option "), strings.LastIndex(script, `':rotini:'*`+"\n"); shell == "zsh" && (o < 0 || d >= 0 && d < o) {
 			t.Errorf("zsh reads the option line after the directive")
 		}
+	}
+}
+
+// completionDriveDir returns a directory holding a fake "my-prog" that answers __complete with
+// lines, and the files ab, aZ and secret.txt for a glob to match.
+func completionDriveDir(t *testing.T, lines string) string {
+	t.Helper()
+	dir := t.TempDir()
+	fake := "#!/bin/sh\nprintf -- '" + lines + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, "my-prog"), []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ab", "aZ", "secret.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// TestCompletionScript_bashDrivesDashedNameAndKeepsCandidatesLiteral runs the bash script for a
+// program named with "-" against a fake binary: candidates are neither glob-expanded against the
+// working directory nor split, and a lone candidate is quoted for insertion.
+func TestCompletionScript_bashDrivesDashedNameAndKeepsCandidatesLiteral(t *testing.T) {
+	t.Parallel()
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not installed")
+	}
+	script, err := completionScript("my-prog", "bash", completionEnvs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		lines string
+		kind  string // COMP_TYPE: 63 lists the candidates as they are, 9 inserts them
+		want  string
+	}{
+		{lines: "*\\na?\\n[ab]\\nsp ace\\n:rotini:none\\n", kind: "63", want: "<*>\n<a?>\n<[ab]>\n<sp ace>\n"},
+		{lines: "sp ace\\n:rotini:none\\n", kind: "9", want: "<sp\\ ace>\n"},
+	} {
+		dir := completionDriveDir(t, tt.lines)
+		path := filepath.Join(dir, "completion.bash")
+		if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		drive := `source "$1"; COMP_WORDS=(my-prog --scope ""); COMP_LINE="my-prog --scope "; COMP_CWORD=2; COMP_TYPE=$2; _my_2dprog_complete; printf '<%s>\n' "${COMPREPLY[@]}"`
+		cmd := exec.Command(bash, "-c", drive, "bash", path, tt.kind)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("bash: %v\n%s", err, out)
+		}
+		if string(out) != tt.want {
+			t.Errorf("COMPREPLY for %q =\n%s\nwant\n%s", tt.lines, out, tt.want)
+		}
+	}
+}
+
+// TestCompletionScript_fishDrivesDashedName runs fish's own completion for a program named with
+// "-" against a fake binary.
+func TestCompletionScript_fishDrivesDashedName(t *testing.T) {
+	t.Parallel()
+	fish, err := exec.LookPath("fish")
+	if err != nil {
+		t.Skip("fish is not installed")
+	}
+	script, err := completionScript("my-prog", "fish", completionEnvs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := completionDriveDir(t, "--alpha\\tfirst\\n--beta\\n:rotini:none\\n")
+	path := filepath.Join(dir, "completion.fish")
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(fish, "--no-config", "-c", "source $argv[1]; complete -C 'my-prog -'", path)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish: %v\n%s", err, out)
+	}
+	if want := "--alpha\tfirst\n--beta\n"; string(out) != want {
+		t.Errorf("fish completions = %q, want %q", out, want)
 	}
 }
 

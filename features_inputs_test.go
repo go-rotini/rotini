@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/go-rotini/recon"
+	"github.com/go-rotini/yaml"
 )
 
 // everyFeatureContext is a bare Context, outside any program, with every feature.
@@ -216,7 +217,7 @@ func TestWiring_runtimeConfigPath(t *testing.T) {
 // recon.PositionError.
 func oldDecodeMessage(err error) string {
 	if errors.Is(err, recon.ErrUnsupportedFormat) {
-		return "the top level must be a mapping"
+		return "the top level must be " + topLevelKind(err.Error())
 	}
 	if msg := recon.ParseMessage(err); msg != err.Error() {
 		return msg
@@ -281,6 +282,32 @@ func TestJSONDecodeMessage_matchesRecon(t *testing.T) {
 		}
 		if got, want := jsonDecodeMessage(err), oldDecodeMessage(err); got != want {
 			t.Errorf("%q: message = %q, want %q", body, got, want)
+		}
+	}
+}
+
+// A stdin document of any shape that gives a key twice is an error at the second occurrence,
+// in every format rotini decodes itself.
+func TestDecodeAny_duplicateKey(t *testing.T) {
+	docs := map[string]string{
+		"json":  "[{\"a\": 1,\n  \"a\": 2}]",
+		"jsonc": "[{\"a\": 1,\n  \"a\": 2}]",
+		"yaml":  "- a: 1\n  a: 2\n",
+	}
+	fs := allFeatures()
+	var probe any
+	if yaml.UnmarshalWithOptions([]byte("- a: 1\n  a: 2\n"), &probe, yaml.WithDisallowDuplicateKey()) == nil {
+		delete(docs, "yaml") // this yaml release checks only typed maps
+	}
+	for format, body := range docs {
+		_, err := fs.codec(format).decodeAny([]byte(body))
+		if err == nil {
+			t.Errorf("%s: no error, want a duplicate-key error", format)
+			continue
+		}
+		line, _, ok := parsePosition(err)
+		if !ok || line != 2 || decodeMessage(err) != `duplicate key "a"` {
+			t.Errorf("%s: line %d (%v), message %q; want line 2, duplicate key \"a\"", format, line, ok, decodeMessage(err))
 		}
 	}
 }

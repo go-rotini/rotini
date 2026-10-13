@@ -1,0 +1,75 @@
+# R0 — the README quick start, executed: init, the spec fragment added under commands:, the
+# handler, and the two runs it shows. As in r0_tutorial, the tool comes from the working tree
+# rather than `go get -tool`. TestReadmeQuickStartMatchesScript pins the fixtures to the README.
+
+gomodinit github.com/me/helloworld
+exec rotini init helloworld
+exec go mod tidy
+
+# The README's table of files init writes.
+exists cmd/helloworld/.rotini.spec.yaml
+exists cmd/helloworld/.rotini.conf.yaml
+exists cmd/helloworld/main.go
+exists internal/cmd/helloworld/zz_rotini.go
+
+# Step 3: the hello command, added under commands:, which ends the seeded spec.
+cp cmd/helloworld/.rotini.spec.yaml seed.yaml
+concat cmd/helloworld/.rotini.spec.yaml seed.yaml hello.spec.yaml.txt
+
+# Step 4: generate writes the stub the README names; the README's handler replaces it.
+exec go generate ./...
+exists internal/cmd/helloworld/helloworld_hello.go
+cp hello.go.txt internal/cmd/helloworld/helloworld_hello.go
+
+# Step 5.
+exec go build ./cmd/helloworld
+exec ./helloworld$exe hello
+stdout '^Hello, world!$'
+exec ./helloworld$exe hello rotini --shout
+stdout '^HELLO, ROTINI!$'
+
+-- hello.spec.yaml.txt --
+    - name: hello
+      summary: say hello
+      arguments:
+        - name: name
+          summary: who to greet
+          schema: { type: string, default: world }
+      flags:
+        - name: shout
+          summary: greet in capitals
+          identifiers: [-s, --shout]
+          schema: { type: bool }
+-- hello.go.txt --
+package helloworld
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*helloworldHelloHandler)(nil)
+
+type helloworldHelloHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
+	greeting := "Hello, " + inputs.HelloworldHello.Arguments.Name + "!"
+	if inputs.HelloworldHello.Flags.Shout {
+		greeting = strings.ToUpper(greeting)
+	}
+	fmt.Fprintln(rtx.Stdout, greeting)
+}

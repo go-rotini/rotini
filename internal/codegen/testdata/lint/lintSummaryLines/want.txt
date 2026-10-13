@@ -1,0 +1,6 @@
+warning: spec: .rotini.spec.yaml:5:12: command demo: has a summary of more than one line; help, completion and the examples show it on one line, so keep the summary to one and put the rest in `description`
+warning: spec: .rotini.spec.yaml:11:16: command demo: flag "level": has a summary of more than one line; help, completion and the examples show it on one line, so keep the summary to one and put the rest in `description`
+warning: spec: .rotini.spec.yaml:25:16: command demo: env "region": has a summary of more than one line; help, completion and the examples show it on one line, so keep the summary to one and put the rest in `description`
+warning: spec: .rotini.spec.yaml:29:16: command demo: plugin "extra": has a summary of more than one line; help, completion and the examples show it on one line, so keep the summary to one and put the rest in `description`
+warning: spec: .rotini.spec.yaml:32:16: command demo: topic "filters": has a summary of more than one line; help, completion and the examples show it on one line, so keep the summary to one and put the rest in `description`
+warning: spec: .rotini.spec.yaml:37:16: command demo: exit status 3: has a summary of more than one line; help, completion and the examples show it on one line, so keep the summary to one and put the rest in `description`

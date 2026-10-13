@@ -5,6 +5,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -247,7 +248,7 @@ func (sb *importSpecBuilder) examples(c *importCommand, path string) []string {
 		line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ex), "$ "))
 		if !runsProgram(line, words) {
 			sb.dropped = append(sb.dropped, importNote{Path: path, Level: "lossy",
-				Msg: fmt.Sprintf("example %q dropped: it doesn't run %s", ex, program)})
+				Msg: fmt.Sprintf("example %q dropped: it doesn't run %s", ex, program), example: ex, why: "they don't run " + program})
 			continue
 		}
 		if first, rest, _ := strings.Cut(line, " "); first == program {
@@ -255,7 +256,7 @@ func (sb *importSpecBuilder) examples(c *importCommand, path string) []string {
 		}
 		if msg, bad := sb.unparsed[line]; bad {
 			sb.dropped = append(sb.dropped, importNote{Path: path, Level: "lossy",
-				Msg: fmt.Sprintf("example %q dropped: it doesn't parse: %s", ex, msg)})
+				Msg: fmt.Sprintf("example %q dropped: it doesn't parse: %s", ex, msg), example: ex, why: "they don't parse"})
 			continue
 		}
 		kept = append(kept, line)
@@ -313,7 +314,14 @@ func (sb *importSpecBuilder) commentsFor(path string) []string {
 		if h.Line > 0 {
 			where = fmt.Sprintf("%s:%d", where, h.Line)
 		}
-		lines = append(lines, fmt.Sprintf("%s %s -> rotini %s: %s", sb.res.Source.Framework, h.Framework, h.Rotini, where))
+		if where == "" {
+			where = h.Func
+		}
+		line := fmt.Sprintf("%s %s -> rotini %s", sb.res.Source.Framework, h.Framework, h.Rotini)
+		if where != "" {
+			line += ": " + where
+		}
+		lines = append(lines, line)
 	}
 	for _, n := range append(sb.res.Notes, sb.dropped...) {
 		if n.Path == path && (n.Level == "lossy" || n.Level == "unsupported") {
@@ -321,4 +329,38 @@ func (sb *importSpecBuilder) commentsFor(path string) []string {
 		}
 	}
 	return lines
+}
+
+// groupDropped folds a command's dropped-example notes that share a reason into one note
+// listing the examples, so a program with many stale examples reports a line per command
+// rather than per example. Other notes, and a lone drop, pass through unchanged.
+func groupDropped(notes []importNote) []importNote {
+	type key struct{ path, why string }
+	groups := map[key][]string{}
+	for _, n := range notes {
+		if n.why != "" {
+			k := key{n.Path, n.why}
+			groups[k] = append(groups[k], n.example)
+		}
+	}
+	var out []importNote
+	done := map[key]bool{}
+	for _, n := range notes {
+		k := key{n.Path, n.why}
+		if n.why == "" || len(groups[k]) < 2 {
+			out = append(out, n)
+			continue
+		}
+		if done[k] {
+			continue
+		}
+		done[k] = true
+		quoted := make([]string, len(groups[k]))
+		for i, ex := range groups[k] {
+			quoted[i] = strconv.Quote(ex)
+		}
+		out = append(out, importNote{Path: n.Path, Level: n.Level,
+			Msg: fmt.Sprintf("%d examples dropped, as %s: %s", len(quoted), k.why, strings.Join(quoted, ", "))})
+	}
+	return out
 }

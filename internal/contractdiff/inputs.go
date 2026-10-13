@@ -36,23 +36,17 @@ func accepted(f *input) []string { return slices.Concat(f.Identifiers, f.HiddenI
 // argument starting with a digit can no longer be.
 var digitIdentifier = regexp.MustCompile(`^-\d+$`)
 
-// flags compares a command's own flags, matched by identifier. Inherited flags are compared
-// where they are declared, so a cascading flag's change is reported once; on the inheriting
-// command only a new digit identifier is reported, since it changes how its arguments parse.
+// flags compares the flags a command accepts, matched by identifier. An inherited flag is
+// compared where it is declared, so a cascading flag's change is reported once. On the
+// inheriting command it is compared only where an identifier moves between the command's own
+// flag and an inherited one: the flag that takes the identifier now is compared with the one
+// that took it before. A new digit identifier is also reported there, since it changes how the
+// command's arguments parse.
 func (d *differ) flags(st stability, oc, nc *command) {
-	newAccepts := map[string]*input{}
-	for i := range nc.Flags {
-		for _, id := range accepted(&nc.Flags[i]) {
-			if newAccepts[id] == nil {
-				newAccepts[id] = &nc.Flags[i]
-			}
-		}
-	}
+	newAccepts, oldTakers := takers(nc), takers(oc)
 	oldAccepts := map[string]bool{}
-	for i := range oc.Flags {
-		for _, id := range accepted(&oc.Flags[i]) {
-			oldAccepts[id] = true
-		}
+	for id := range oldTakers {
+		oldAccepts[id] = true
 	}
 	matched := map[*input]bool{}
 	for i := range oc.Flags {
@@ -62,19 +56,10 @@ func (d *differ) flags(st stability, oc, nc *command) {
 		}
 		fst := leastStable(st, of.Stability)
 		w := flagWhere(oc.Name, of)
-		var nf *input
-		for _, id := range accepted(of) {
-			if f := newAccepts[id]; f != nil && !f.Inherited {
-				nf = f
-				break
-			}
-		}
+		nf := takerOf(of, newAccepts)
 		if nf == nil {
-			if slices.ContainsFunc(accepted(of), func(id string) bool { return newAccepts[id] != nil }) {
-				continue // still accepted, now through an ancestor's cascading flag
-			}
 			if of.ReplacedBy != "" && newAccepts[of.ReplacedBy] != nil {
-				d.add(fst, Expected, RuleFlagReplaced, w, "flag removed; replaced by "+of.ReplacedBy, "")
+				d.replaced(fst, RuleFlagReplaced, w, "flag removed; replaced by "+of.ReplacedBy, of.RemovedIn, of.Hidden, "")
 				continue
 			}
 			d.removal(fst, RuleFlagNoDelete, w, "flag removed", of.RemovedIn, of.Hidden)
@@ -83,7 +68,57 @@ func (d *differ) flags(st stability, oc, nc *command) {
 		matched[nf] = true
 		d.flag(fst, oc, of, nf, newAccepts, oldAccepts)
 	}
+	for i := range oc.Flags {
+		of := &oc.Flags[i]
+		if !of.Inherited {
+			continue
+		}
+		for _, id := range accepted(of) {
+			if nf := newAccepts[id]; oldTakers[id] == of && nf != nil && !nf.Inherited && !matched[nf] {
+				matched[nf] = true
+				d.flag(leastStable(st, of.Stability), oc, of, nf, newAccepts, oldAccepts)
+				break
+			}
+		}
+	}
 	d.addedFlags(st, oc, nc, matched, oldAccepts)
+}
+
+// takers maps each identifier a command accepts to the flag that takes it: the command's own
+// flag before an inherited one, which it shadows.
+func takers(c *command) map[string]*input {
+	m := map[string]*input{}
+	for _, inherited := range []bool{false, true} {
+		for i := range c.Flags {
+			f := &c.Flags[i]
+			if f.Inherited != inherited {
+				continue
+			}
+			for _, id := range accepted(f) {
+				if m[id] == nil {
+					m[id] = f
+				}
+			}
+		}
+	}
+	return m
+}
+
+// takerOf returns the new flag that takes one of of's identifiers: a flag of the command's own
+// first, else an inherited one, else nil.
+func takerOf(of *input, newAccepts map[string]*input) *input {
+	var inherited *input
+	for _, id := range accepted(of) {
+		f := newAccepts[id]
+		switch {
+		case f == nil:
+		case !f.Inherited:
+			return f
+		case inherited == nil:
+			inherited = f
+		}
+	}
+	return inherited
 }
 
 // addedFlags reports the flags the new contract adds, and a digit identifier any flag gains on a
@@ -100,13 +135,14 @@ func (d *differ) addedFlags(st stability, oc, nc *command, matched map[*input]bo
 				}
 			}
 		}
-		if nf.Inherited || matched[nf] || nf.Hidden || slices.ContainsFunc(accepted(nf), func(id string) bool { return oldAccepts[id] }) {
+		if nf.Inherited || matched[nf] || slices.ContainsFunc(accepted(nf), func(id string) bool { return oldAccepts[id] }) {
 			continue
 		}
 		w := flagWhere(oc.Name, nf)
-		if nf.Required && !nf.ShortCircuit {
+		switch {
+		case nf.Required && !nf.ShortCircuit:
 			d.add(st, Breaking, RuleFlagRequiredAdded, w, "required flag added", "")
-		} else {
+		case !nf.Hidden:
 			d.add(st, Safe, RuleFlagAdded, w, "flag added", "")
 		}
 	}
@@ -121,7 +157,10 @@ func (d *differ) flag(st stability, oc *command, of, nf *input, newAccepts map[s
 			"the command line is unchanged; the parameters key a program calls it with changes")
 	}
 	d.flipped(st, w, of.Required, nf.Required, flip{Breaking, RuleFlagRequiredAdded, "now required"}, flip{Safe, RuleFlagRequiredRemoved, "no longer required"})
-	d.flipped(st, w, of.Cascading, nf.Cascading, flip{Safe, RuleFlagCascades, "sub-commands now accept it"}, flip{Breaking, RuleFlagNoLongerCascades, "sub-commands no longer accept it"})
+	if !of.Inherited && !nf.Inherited {
+		// Where one side is inherited, the ancestor's flag still reaches the sub-commands.
+		d.flipped(st, w, of.Cascading, nf.Cascading, flip{Safe, RuleFlagCascades, "sub-commands now accept it"}, flip{Breaking, RuleFlagNoLongerCascades, "sub-commands no longer accept it"})
+	}
 	d.flipped(st, w, of.ShortCircuit, nf.ShortCircuit, flip{Safe, RuleFlagShortCircuitAdded, "now waives the command's requirements"}, flip{PossiblyBreaking, RuleFlagShortCircuitRemoved, "no longer waives the command's requirements"})
 	d.flipped(st, w, forbidsRepeat(of), forbidsRepeat(nf), flip{Breaking, RuleFlagRepeatForbidden, "giving it twice is now an error"}, flip{Safe, RuleFlagRepeatAllowed, "may now be given more than once"})
 	switch {
@@ -185,17 +224,30 @@ func (d *differ) flagIdentifiers(st stability, oc *command, of, nf *input, newAc
 	}
 }
 
-// arguments compares a command's arguments by position.
+// arguments compares a command's arguments, matched by name, else by position for one renamed
+// in place. An argument now at another position binds a different word.
 func (d *differ) arguments(st stability, oc, nc *command) {
+	named := func(list []input, name string) int {
+		return slices.IndexFunc(list, func(a input) bool { return a.Name == name })
+	}
+	matched := map[int]bool{}
 	for i := range oc.Arguments {
 		oa := &oc.Arguments[i]
 		ast := leastStable(st, oa.Stability)
 		w := oc.Name + " <" + oa.Name + ">"
-		if i >= len(nc.Arguments) {
+		j := named(nc.Arguments, oa.Name)
+		if j < 0 && i < len(nc.Arguments) && named(oc.Arguments, nc.Arguments[i].Name) < 0 {
+			j = i
+		}
+		if j < 0 {
 			d.removal(ast, RuleArgumentNoDelete, w, "argument removed", oa.RemovedIn, oa.Hidden)
 			continue
 		}
-		na := &nc.Arguments[i]
+		matched[j] = true
+		na := &nc.Arguments[j]
+		if j != i {
+			d.add(ast, Breaking, RuleArgumentMoved, w, fmt.Sprintf("position %d → %d", i+1, j+1), "the word given at its old position binds to another argument")
+		}
 		if oa.Name != na.Name {
 			d.add(ast, PossiblyBreaking, RuleArgumentNameChanged, w, "renamed "+strconv.Quote(na.Name), "the parameters key a program calls it with changes")
 		}
@@ -209,14 +261,20 @@ func (d *differ) arguments(st stability, oc, nc *command) {
 		}
 		d.input(ast, kindArgument, w, oa, na)
 	}
-	for i := len(oc.Arguments); i < len(nc.Arguments); i++ {
-		na := &nc.Arguments[i]
+	for j := range nc.Arguments {
+		if matched[j] {
+			continue
+		}
+		na := &nc.Arguments[j]
 		w := oc.Name + " <" + na.Name + ">"
 		switch {
 		case na.Required:
 			d.add(st, Breaking, RuleArgumentRequiredAdded, w, "required argument added", "")
-		case !na.Hidden:
+		case na.Hidden:
+		case j >= len(oc.Arguments):
 			d.add(st, Safe, RuleArgumentAdded, w, "optional argument added at the end", "")
+		default:
+			d.add(st, Safe, RuleArgumentAdded, w, "optional argument added", "")
 		}
 	}
 }
@@ -511,11 +569,16 @@ func (d *differ) inputType(st stability, w string, o, n *input) {
 		return
 	}
 	msg := "type " + o.Type + " → " + n.Type
-	if typeWidened(o.Type, n.Type) {
-		d.add(st, Safe, RuleInputTypeWidened, w, msg, "")
-		return
+	switch {
+	case typeWidened(o.Type, n.Type):
+		if o.Kind == "" || n.Kind == "" || o.Kind == n.Kind {
+			d.add(st, Safe, RuleInputTypeWidened, w, msg, "")
+		} // else the kind change is reported, and breaks
+	case n.Type == "float64" && (intBits[o.Type] == 64 || uintBits[o.Type] == 64):
+		d.add(st, PossiblyBreaking, RuleInputTypeChanged, w, msg, "an integer beyond 2^53 is rounded")
+	default:
+		d.add(st, Breaking, RuleInputTypeChanged, w, msg, "")
 	}
-	d.add(st, Breaking, RuleInputTypeChanged, w, msg, "")
 }
 
 // intBits is the width of each integer type; int is taken as 64 bits.
@@ -539,8 +602,8 @@ func typeWidened(o, n string) bool {
 		return uintBits[n] >= uintBits[o]
 	case uintBits[o] > 0 && intBits[n] > 0:
 		return intBits[n] > uintBits[o]
-	case (intBits[o] > 0 || uintBits[o] > 0 || o == "float32") && n == "float64":
-		return true
+	case (intBits[o] > 0 && intBits[o] <= 32 || uintBits[o] > 0 && uintBits[o] <= 32 || o == "float32") && n == "float64":
+		return true // float64 holds every such value exactly
 	case o == "existingfile" && n == "inputfile":
 		return true
 	}

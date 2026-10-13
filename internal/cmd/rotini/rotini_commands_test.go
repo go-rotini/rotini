@@ -185,3 +185,38 @@ func TestImporterVersionInHelp(t *testing.T) {
 		t.Errorf("rotini help import cobra doesn't name the default importer version %s", codegen.ImporterVersion)
 	}
 }
+
+// flushRecorder is a buffered stdout that records each flush.
+type flushRecorder struct {
+	strings.Builder
+	flushed []string
+}
+
+func (f *flushRecorder) Flush() error {
+	f.flushed = append(f.flushed, f.String())
+	return nil
+}
+
+// Each pass's result line reaches a buffered stdout at once, so a watch run piped to a file or
+// a log shows every pass as it happens, not at exit.
+func TestPrintResult_flushesEachLine(t *testing.T) {
+	out := &flushRecorder{}
+	report := printResult(&rotini.Context{Stdout: out, Stderr: &strings.Builder{}})
+	report("generated 3 files", nil)
+	report("generated 4 files", nil)
+	want := []string{"generated 3 files\n", "generated 3 files\ngenerated 4 files\n"}
+	if !reflect.DeepEqual(out.flushed, want) {
+		t.Errorf("flushed %q, want %q", out.flushed, want)
+	}
+}
+
+// A directory given where the spec or conf file belongs is named as one.
+func TestCLI_directoryForAFile(t *testing.T) {
+	dir := t.TempDir()
+	for _, argv := range [][]string{{"generate", dir}, {"validate", dir}, {"validate", "--config", dir, dir}} {
+		p, _, errb := newTestCLI(t)
+		if code, _ := p.Run(argv); code != 1 || !strings.Contains(errb.String(), dir+" is a directory; name the file in it") {
+			t.Errorf("%v: exit %d, stderr %q", argv, code, errb.String())
+		}
+	}
+}

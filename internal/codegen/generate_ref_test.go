@@ -18,9 +18,14 @@ func TestParseModLocator(t *testing.T) {
 		{loc: "mod://example.com/m@v1.2.3/cli/.rotini.spec.yaml", module: "example.com/m", version: "v1.2.3", sub: "cli/.rotini.spec.yaml"},
 		{loc: "mod://example.com/m@v1.2.3", module: "example.com/m", version: "v1.2.3", sub: "."}, // no subpath = module root
 		{loc: "mod://example.com/m@v1.2.3/a/../b", module: "example.com/m", version: "v1.2.3", sub: "b"},
-		{loc: "mod://example.com/m", wantErr: true},  // no version
-		{loc: "mod://example.com/m@", wantErr: true}, // empty version
-		{loc: "mod://@v1.0.0", wantErr: true},        // empty module
+		{loc: "mod://example.com/m", wantErr: true},                                // no version
+		{loc: "mod://example.com/m@", wantErr: true},                               // empty version
+		{loc: "mod://@v1.0.0", wantErr: true},                                      // empty module
+		{loc: "mod://example.com/m@v1.2.3/../../outside/evil.yaml", wantErr: true}, // leaves the module
+		{loc: "mod://example.com/m@v1.2.3/a/../../evil.yaml", wantErr: true},
+		{loc: "mod://example.com/m@v1.2.3//etc/evil.yaml", wantErr: true},  // absolute
+		{loc: `mod://example.com/m@v1.2.3/..\..\evil.yaml`, wantErr: true}, // backslashes
+		{loc: "mod://-modfile=x@v1.0.0/a.yaml", wantErr: true},             // read as a go flag
 	}
 	for _, tc := range cases {
 		module, version, sub, err := parseModLocator(tc.loc)

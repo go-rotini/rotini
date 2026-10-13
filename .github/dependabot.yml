@@ -1,11 +1,19 @@
 version: 2
 updates:
+  # fix(deps) so semantic-release ships each dependency bump as a patch release.
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: fix
+      include: scope
 
+  # ci(deps) so an Actions bump, which changes nothing users get, cuts no release.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope

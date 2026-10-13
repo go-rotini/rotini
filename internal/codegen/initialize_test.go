@@ -190,3 +190,53 @@ func TestInitialize_templateRefusals(t *testing.T) {
 		}
 	}
 }
+
+// TestInitialize_keywordAndDeviceNames pins that a CLI named with a Go keyword gets a usable
+// package name, and that a Windows device name is refused before anything is written.
+func TestInitialize_keywordAndDeviceNames(t *testing.T) {
+	skipUnlessCompiling(t)
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
+	t.Chdir(dir)
+	if _, err := NewProcessor("0.0.0").Initialize("type", InitOptions{}); err != nil {
+		t.Fatalf("Initialize type: %v", err)
+	}
+	if src := readEmitted(t, dir, "internal/cmd/type/zz_rotini.go"); !strings.Contains(src, "package typecli\n") {
+		t.Errorf("the cmd package clause isn't typecli:\n%.200s", src)
+	}
+	if _, err := NewProcessor("0.0.0").Initialize("main", InitOptions{}); err != nil {
+		t.Fatalf("Initialize main: %v", err)
+	}
+	if src := readEmitted(t, dir, "internal/cmd/main/zz_rotini.go"); !strings.Contains(src, "package maincli\n") {
+		t.Errorf("the cmd package clause isn't maincli:\n%.200s", src)
+	}
+	buildEmitted(t, dir)
+
+	for _, name := range []string{"CON", "aux", "lpt1"} {
+		if _, err := NewProcessor("0.0.0").Initialize(name, InitOptions{}); err == nil || !strings.Contains(err.Error(), "Windows device name") {
+			t.Errorf("Initialize %s: %v, want a refusal", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "cmd", name)); !os.IsNotExist(err) {
+			t.Errorf("Initialize %s wrote cmd/%s", name, name)
+		}
+	}
+}
+
+// TestInitialize_failureWritesNothing pins that an init failing partway, here because its
+// package directory is a file, leaves no seed spec or conf behind.
+func TestInitialize_failureWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
+	writeTestFile(t, dir, "internal/cmd/demo", "not a directory\n")
+	t.Chdir(dir)
+	if _, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{}); err == nil {
+		t.Fatal("Initialize succeeded, want the blocked package directory to fail it")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cmd")); !os.IsNotExist(err) {
+		t.Errorf("the failed init wrote cmd/: %v", err)
+	}
+}

@@ -41,7 +41,9 @@ type configWrite struct {
 
 // AllowSecretWrite lets [SetConfigValue] write a key declared secret. The file must not be
 // readable by other users: a new file is created with mode 0600, and an existing file readable
-// by its group or by others is refused, not changed.
+// by its group or by others is refused, not changed. On Windows, where file modes don't
+// control who can read a file, neither check applies: the file gets its directory's access
+// control list, so keep it in a directory only its user can read, such as the user's profile.
 func AllowSecretWrite() ConfigWriteOption {
 	return func(w *configWrite) { w.allowSecret = true }
 }

@@ -1,7 +1,7 @@
 # R12 — the SIGHUP recipe: a long-running serve command rereads its configuration on SIGHUP
 # and stops on SIGTERM through rotini's trap, exiting 143. The handler file is the one the
 # guide shows; selftest.go is test scaffolding, not on the page: it edits the config
-# file and signals its own process, as r5_signal_shutdown does.
+# file and signals its own process, as r5_signal_shutdown does, once the handler is ready.
 
 [!unix] skip 'sends real signals to its own process'
 
@@ -83,25 +83,45 @@ package reloaddemo
 
 import (
 	"os"
+	"os/signal"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 )
 
 // With RELOADDEMO_SELFTEST set, the process edits its configuration, sends itself SIGHUP, then
-// SIGTERM, so the test needs no outside signal sender.
+// SIGTERM, so the test needs no outside signal sender. It sends SIGHUP only once the serve
+// handler waits in its select, so the handler has registered for it, and SIGTERM only once
+// SIGHUP has been delivered, which hands it to the waiting handler first.
 func init() {
 	if os.Getenv("RELOADDEMO_SELFTEST") == "" {
 		return
 	}
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
 	go func() {
-		time.Sleep(time.Second)
+		for !serving() {
+			time.Sleep(10 * time.Millisecond)
+		}
 		if err := os.WriteFile("reloaddemo.yaml", []byte("greeting: hi\n"), 0o600); err != nil {
 			panic(err)
 		}
 		_ = syscall.Kill(os.Getpid(), syscall.SIGHUP)
-		time.Sleep(time.Second)
+		<-hup
 		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 	}()
+}
+
+// serving reports whether the serve handler is blocked in its select.
+func serving() bool {
+	buf := make([]byte, 1<<20)
+	for _, g := range strings.Split(string(buf[:runtime.Stack(buf, true)]), "\n\n") {
+		if strings.Contains(g, " [select") && strings.Contains(g, "(*reloaddemoServeHandler).Run(") {
+			return true
+		}
+	}
+	return false
 }
 -- cmd/reloaddemo/.rotini.spec.yaml --
 version: 0.0.0

@@ -109,6 +109,9 @@ type importNote struct {
 	Path  string `json:"path"`
 	Level string `json:"level"`
 	Msg   string `json:"msg"`
+
+	// example and why are set on a dropped example's note, for groupDropped.
+	example, why string
 }
 
 // String is the note's stderr line: "[lossy] acme deploy: …".

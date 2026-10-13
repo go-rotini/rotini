@@ -64,7 +64,11 @@ type ProfilesDef struct {
 // PathFromDef names the runtime inputs that supply a [ConfigFile]'s path — the declarative
 // two-phase parse, where argv and env are read first and the file channel then opens whatever
 // they pointed at. Precedence: the flag set on argv, then the env variable, then the flag's
-// default, then the entry's own path or discover. A path supplied this way must exist.
+// default, then the entry's own path or discover. A path supplied this way must exist. A path
+// given on argv or in the variable has a leading ~ expanded (~user too, with [PathExpansion])
+// and is otherwise used as written, so $VAR stays literal; the flag's default is expanded like
+// the entry's own path. The flag given an empty path is a usage error; the variable set to ""
+// counts as unset.
 type PathFromDef struct {
 	Flag string // logical flag name searched across the resolved chain
 	Env  string // environment variable read directly; comma-separated names: the first one set wins

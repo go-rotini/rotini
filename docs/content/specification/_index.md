@@ -860,7 +860,7 @@ Named sets of settings in this file, one chosen per run by a declared input (`--
 
 [`Schema`](#schema)
 
-Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/&lt;Name&gt;". No typed struct is generated from this — typed access to config values is the config: inputs channel.
+Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). Every value in a dotenv file is a string, so a schema for one uses string types; a TOML date or time is checked as its text (`2024-01-02T03:04:05Z`), as in YAML or JSON. The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/&lt;Name&gt;". No typed struct is generated from this — typed access to config values is the config: inputs channel.
 
 
 ## FlagGroup
@@ -1275,7 +1275,7 @@ Flags and arguments only. Each generated completion script turns the hint into t
 
 `string`
 
-Flag and env inputs only: names a config_files entry whose file path this input supplies, so a user can point the program at a config file (`--config ./other.yaml`). The command line and environment are read first, then the file they name is opened. The path comes from the flag if set on the command line, then the env input's variable, then the flag's default, then the entry's own path or discover. A path supplied this way must exist: unlike a declared path, a missing file is then an error, because the user asked for it. The input's type must be string. At most one flag and one env input may name the same entry.
+Flag and env inputs only: names a config_files entry whose file path this input supplies, so a user can point the program at a config file (`--config ./other.yaml`). The command line and environment are read first, then the file they name is opened. The path comes from the flag if set on the command line, then the env input's variable, then the flag's default, then the entry's own path or discover. A path supplied this way must exist: unlike a declared path, a missing file is then an error, because the user asked for it. A path given on the command line or in the variable has a leading `~` expanded to the home directory (`~user` too when the program wires path expansion, and kept as written otherwise) and is otherwise used as written, so `$VAR` stays literal; the flag's default is expanded like a declared path. An empty value on the command line is a usage error; an empty variable counts as unset. The input's type must be string. At most one flag and one env input may name the same entry.
 
 ### `default`
 
@@ -1302,7 +1302,7 @@ Path inputs (string, existingfile, existingdir, inputfile, outputfile, and lists
 - 'home' — a value that is exactly `~`, or starts with `~/`, becomes the home directory plus the rest; `~name/...` becomes that user's home directory, read from the system's user database. A `~` anywhere else is kept.
 - 'env' — `$NAME` and `${NAME}` become that variable's value, from the run's environment (including .env files). An unset or empty variable is a usage error naming it, and `${NAME:-x}` and the other shell operators are errors. A `$` not followed by a name is kept (`C$`, `$1`).
 
-`~` is expanded first, then variables, in one pass: text a variable supplies is never expanded again. Each item of a list is expanded after the value is split on its `separator`. `%VAR%` is not expanded on Windows (cmd and PowerShell expand their own syntax), but `~\` is. There is no escape for a literal `$NAME`, so leave 'env' out for inputs that need one. A project configuration file found by walk-up discovery can then read the user's environment into a path, so prefer `[home]` for inputs such a file sets. Not valid on secret inputs.
+`~` is expanded first, then variables, in one pass: text a variable supplies is never expanded again. Each item of a list is expanded after the value is split on its `separator`. `%VAR%` is not expanded on Windows (cmd and PowerShell expand their own syntax), but `~\` is. Write `$$` for a literal `$`. A project configuration file found by walk-up discovery can then read the user's environment into a path, so prefer `[home]` for inputs such a file sets. Not valid on secret inputs.
 
 ### `file`
 
@@ -1526,7 +1526,7 @@ array of `string` or `object`
 
 Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.
 
-Each member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.
+Members are strings, so quote a number (`enum: ["1", "2"]` on an int input). Each member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.
 
 The object form also takes `aliases` (other spellings accepted and bound as the value: `{value: yaml, aliases: [yml]}`), `hidden: true` (accepted, but left out of help's list, completion and error messages), and `deprecated` with a message, optionally `deprecated_since`, `removed_in` and `replaced_by` (another value). A deprecated value is still accepted and is left out of the same lists; `rotini.Deprecations` reports it when given on the command line, as it does `deprecated_aliases`, the aliases being retired. Help keeps its short list of the values to use; man and markdown pages list each value with its aliases and deprecation.
 
