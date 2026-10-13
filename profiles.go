@@ -124,7 +124,7 @@ func applySelector(field reflect.Value, name string, chain []Command, store *par
 		def, _ = findFlagDef(chain[idx].Flags, name)
 	}
 	origin := "environment variable " + choice.label
-	vals := flagEnum(def).canonical([]string{choice.name})
+	vals := flagEnum(&def).canonical([]string{choice.name})
 	if err := coerceFlagValues(field, def, vals, view.clockRef()); err != nil {
 		return fallbackCoerceError(chain, idx, name, origin, err)
 	}

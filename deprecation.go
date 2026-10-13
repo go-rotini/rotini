@@ -76,7 +76,7 @@ func Deprecations(rtx *Context) []Deprecation {
 		}
 		for _, fd := range frame.Flags {
 			out = append(out, flagDeprecations(fd, store.scopes[i].used[fd.Name])...)
-			out = append(out, valueDeprecations("flag", fd.Name, store.scopes[i].label(fd), flagEnum(fd), store.scopes[i].flags[fd.Name])...)
+			out = append(out, valueDeprecations("flag", fd.Name, store.scopes[i].label(&fd), flagEnum(&fd), store.scopes[i].flags[fd.Name])...)
 		}
 	}
 	// A deprecated argument reports when a value was supplied for it.
@@ -209,7 +209,7 @@ func argumentValueDeprecations(leaf Command, args []string) []Deprecation {
 	spans := argSpans(leaf.Arguments, len(args))
 	for i, ad := range leaf.Arguments {
 		if s := spans[i]; s[0] < s[1] {
-			out = append(out, valueDeprecations("argument", ad.Name, "<"+ad.Name+">", argEnum(ad), args[s[0]:s[1]])...)
+			out = append(out, valueDeprecations("argument", ad.Name, "<"+ad.Name+">", argEnum(&ad), args[s[0]:s[1]])...)
 		}
 	}
 	return out

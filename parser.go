@@ -59,6 +59,24 @@ type parsedInputs struct {
 
 	// clock is what relative time values are measured from; nil reads time.Now.
 	clock *runClock
+
+	// spanBuf backs span when the input reader sets it, saving it an allocation.
+	spanBuf [2]int
+
+	// pool backs the one-value slices [parsedInputs.one] hands out.
+	pool []string
+}
+
+// one returns a slice holding just s, with capacity one as a new slice has, carved from a
+// chunk shared with the store's other one-value slices. A capacity of one means an append
+// never writes into a neighbor, so it behaves exactly as []string{s}.
+func (p *parsedInputs) one(s string) []string {
+	if len(p.pool) == cap(p.pool) {
+		p.pool = make([]string, 0, 8)
+	}
+	p.pool = append(p.pool, s)
+	n := len(p.pool)
+	return p.pool[n-1 : n : n]
 }
 
 // argvAcq is what reading argv values may consult: stdin for a `from: [stdin]` flag's "-",
@@ -66,6 +84,9 @@ type parsedInputs struct {
 // directory).
 type argvAcq struct {
 	stdin io.Reader
+	// rtx, when stdin is nil, supplies the run's stdin replay on the first "-" value, so a parse
+	// with none builds no reader.
+	rtx   *Context
 	dir   string
 	clock *runClock // what relative time values are measured from; nil reads time.Now
 	// goos is the operating system whose rules glob arguments follow; "" is the running one.
@@ -171,11 +192,11 @@ func withSource(err error, origin string) error {
 }
 
 // label is how an error names flag fd: as the user typed it, else by its preferred identifier.
-func (si scopeInputs) label(fd FlagDef) string {
+func (si *scopeInputs) label(fd *FlagDef) string {
 	if t := si.typed[fd.Name]; t != "" {
 		return t
 	}
-	return flagLabel(fd)
+	return flagLabel(*fd)
 }
 
 // ParseKind classifies a [*ParseError] so a reporter can branch on the failure without matching
@@ -353,7 +374,7 @@ func parseInto(chain []Command, argv []string, acq argvAcq) (*parsedInputs, erro
 // A count flag takes no value (an inline one is an error); a bool defaults to "true" but honors
 // an inline value; any other flag uses an inline value if present, else its implicit value
 // without consuming the next token, else the next token (running out is an error).
-func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []string, i int) (value string, next int, err error) {
+func flagTokenValue(fdef *FlagDef, name, inline string, hasInline bool, argv []string, i int) (value string, next int, err error) {
 	switch {
 	case fdef.Type == "count":
 		if hasInline {
@@ -383,7 +404,7 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 // resolver and completion always agree with the parser about which word is a flag's value. An
 // unknown or malformed flag consumes none; the parse reports it.
 func flagTokenWidth(chain []Command, argv []string, i int) int {
-	extra, err := consumeFlagToken(chain, argv[i], argv, i, func(int, FlagDef, string, string) error { return nil })
+	extra, err := consumeFlagToken(chain, argv[i], argv, i, func(int, *FlagDef, string, string) error { return nil })
 	if err != nil {
 		return 0
 	}
@@ -396,19 +417,19 @@ func flagTokenWidth(chain []Command, argv []string, i int) int {
 // A token matching no declared identifier is retried as a POSIX short cluster (-vh → -v -h,
 // -n5 → -n 5). Long flags never cluster, so an unmatched one is an unknown-flag error carrying
 // the chain's vocabulary for a [Suggestor].
-func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag func(int, FlagDef, string, string) error) (int, error) {
+func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag func(int, *FlagDef, string, string) error) (int, error) {
 	name, inline, hasInline := splitFlag(tok)
 
-	fdef, idx, negated, ok := findFlagMatch(chain, name)
+	fdef, idx, negated, ok := findFlagRef(chain, name)
 	if !ok {
 		// --db.host=h sets one field of the object flag --db: it is the occurrence host=h.
 		if ofd, oidx, field, isField := objectFieldFlag(chain, name); isField {
-			value, next, err := flagTokenValue(FlagDef{Type: "string"}, name, inline, hasInline, argv, i)
+			value, next, err := flagTokenValue(&FlagDef{Type: "string"}, name, inline, hasInline, argv, i)
 			if err != nil {
 				return 0, err
 			}
 			// Errors label the object flag (--db); the message names the field.
-			return next - i, addFlag(oidx, ofd, quotePair(field, value), strings.TrimSuffix(name, "."+field))
+			return next - i, addFlag(oidx, &ofd, quotePair(field, value), strings.TrimSuffix(name, "."+field))
 		}
 		if isShortCluster(name) {
 			return parseCluster(chain, name[1:], inline, hasInline, argv, i, addFlag)
@@ -444,7 +465,7 @@ func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag
 // recordArgvFlag records one argv occurrence of flag fd at chain frame idx: the identifier the
 // user typed (for error labels), the value resolved through the flag's acquisition modes and
 // split on its separator, and the fact that argv set it.
-func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, acq argvAcq) error {
+func (p *parsedInputs) recordArgvFlag(idx int, fd *FlagDef, value, typed string, acq argvAcq) error {
 	si := &p.scopes[idx]
 	if si.typed == nil {
 		si.typed = map[string]string{}
@@ -453,29 +474,41 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, 
 	if si.used == nil {
 		si.used = map[string][]string{}
 	}
-	if !slices.Contains(si.used[fd.Name], typed) {
-		si.used[fd.Name] = append(si.used[fd.Name], typed)
+	if used := si.used[fd.Name]; used == nil {
+		si.used[fd.Name] = p.one(typed)
+	} else if !slices.Contains(used, typed) {
+		si.used[fd.Name] = append(used, typed)
 	}
 	if err := refuseSecretLiteral(fd.Secret, fd.From, typed, typed, value); err != nil {
 		return err
 	}
 	acquired := acquiresValue(fd, value)
-	value, err := resolveFlagValue(fd, typed, value, acq)
+	value, err := resolveAcquired(fd.From, typed, typed, value, acq) // resolveFlagValue, without copying fd
 	if err != nil {
 		return err
-	}
-	split := splitValue
-	if acquired && splitsAcquiredLines(fd) {
-		split = splitAcquired // a file's (or stdin's) lines are separate values
-	}
-	values, err := split(value, fd.Separator)
-	if err != nil {
-		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", typed, err), Flag: typed}
 	}
 	if si.flags == nil {
 		si.flags = map[string][]string{}
 	}
-	si.flags[fd.Name] = append(si.flags[fd.Name], values...)
+	lines := acquired && splitsAcquiredLines(fd)
+	if !lines && fd.Separator == "" {
+		// splitValue's one value, appended without its intermediate slice.
+		if have := si.flags[fd.Name]; have == nil {
+			si.flags[fd.Name] = p.one(value)
+		} else {
+			si.flags[fd.Name] = append(have, value)
+		}
+	} else {
+		split := splitValue
+		if lines {
+			split = splitAcquired // a file's (or stdin's) lines are separate values
+		}
+		values, err := split(value, fd.Separator)
+		if err != nil {
+			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", typed, err), Flag: typed}
+		}
+		si.flags[fd.Name] = append(si.flags[fd.Name], values...)
+	}
 	if p.argvSet[idx] == nil {
 		p.argvSet[idx] = map[string]bool{}
 	}
@@ -497,14 +530,19 @@ func (p *parsedInputs) recordArg(leaf Command, idx int, value string, acq argvAc
 		}
 		value = resolved
 	}
-	values := []string{value}
 	if def, ok := variadicAt(leaf.Arguments, len(p.scopes[idx].args)); ok && def.Separator != "" && !hasArgTail(leaf.Arguments) {
-		var err error
-		if values, err = splitValue(value, def.Separator); err != nil {
+		values, err := splitValue(value, def.Separator)
+		if err != nil {
 			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("<%s>: %v", def.Name, err)}
 		}
+		p.scopes[idx].args = append(p.scopes[idx].args, values...)
+		return nil
 	}
-	p.scopes[idx].args = append(p.scopes[idx].args, values...)
+	if p.scopes[idx].args == nil {
+		p.scopes[idx].args = p.one(value)
+	} else {
+		p.scopes[idx].args = append(p.scopes[idx].args, value)
+	}
 	return nil
 }
 
@@ -550,7 +588,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 	optionsDone := false // terminated by an options_first leaf's first argument, not by "--"
 	raw := false
 
-	addFlag := func(idx int, fd FlagDef, value, typed string) error {
+	addFlag := func(idx int, fd *FlagDef, value, typed string) error {
 		return store.recordScopedFlag(chain, idx, fd, value, typed, acq)
 	}
 	addArg := func(value string) error {
@@ -591,7 +629,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 		// A non-flag token: consume it as the next command in the chain if it is
 		// one, otherwise it (and everything after) is a positional of the leaf.
 		if !startedArgs && depth < len(chain) {
-			if c, ok := findChild(chain[depth-1], tok); ok && c.Name == chain[depth].Name {
+			if c, ok := findChild(&chain[depth-1], tok); ok && c.Name == chain[depth].Name {
 				depth++
 				continue
 			}
@@ -604,7 +642,8 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 		}
 		if optionsDone && store.lateFlag == nil && isFlag(chain[:depth], tok) {
 			if name, _, _ := splitFlag(tok); flagNamed(chain[:depth], name) {
-				store.lateFlag = &tok
+				late := tok // a copy, so tok itself stays off the heap
+				store.lateFlag = &late
 			}
 		}
 		if err := addArg(tok); err != nil {
@@ -633,7 +672,7 @@ func withRunCandidates(err error, reached []Command, leaf int) error {
 
 // recordScopedFlag is recordArgvFlag for a run of chain, refusing a [FlagDef.Local] flag of
 // any frame but the invoked command's.
-func (p *parsedInputs) recordScopedFlag(chain []Command, idx int, fd FlagDef, value, typed string, acq argvAcq) error {
+func (p *parsedInputs) recordScopedFlag(chain []Command, idx int, fd *FlagDef, value, typed string, acq argvAcq) error {
 	if fd.Local && idx != len(chain)-1 {
 		return localFlagError(chain, idx, typed)
 	}
@@ -682,7 +721,7 @@ func noteDetached(store *parsedInputs, chain []Command, tok string, argv []strin
 	if store.detached != nil || strings.Contains(tok, "=") || i+1 >= len(argv) {
 		return
 	}
-	fd, _, ok := findFlagIndex(chain, tok)
+	fd, _, _, ok := findFlagRef(chain, tok)
 	next := argv[i+1]
 	if !ok || fd.ImplicitValue == "" || isFlag(chain, next) || next == "--" {
 		return
@@ -705,11 +744,12 @@ func shortCircuited(chain []Command, store *parsedInputs) bool {
 	if store == nil {
 		return false
 	}
-	for i, f := range chain {
+	for i := range chain {
 		if i >= len(store.scopes) {
 			break
 		}
-		for _, fd := range f.Flags {
+		for j := range chain[i].Flags {
+			fd := &chain[i].Flags[j] // not a copy: a FlagDef is large
 			if !fd.ShortCircuit || !store.setOnArgv(i, fd.Name) {
 				continue
 			}
@@ -728,7 +768,7 @@ func shortCircuited(chain []Command, store *parsedInputs) bool {
 // checkFlagShape is the part of [checkFlagValues] a short-circuited run keeps: a map value
 // must be key=value pairs, which is a matter of reading the value, not of meeting a
 // requirement.
-func checkFlagShape(fd FlagDef, label string, vals []string) error {
+func checkFlagShape(fd *FlagDef, label string, vals []string) error {
 	if !isMapType(fd.Type) {
 		return checkValueShape(fd.Type, fd.Base, label, label, vals, fd.Secret)
 	}
@@ -818,7 +858,7 @@ func checkValueShape(typ, base, label, flag string, vals []string, secret bool) 
 
 // checkFlagValues checks one flag's argv values against its enum, its key=value shape when it
 // is a map, and its constraints. label is the flag as the user typed it.
-func checkFlagValues(fd FlagDef, label string, vals []string, dir string, clock *runClock) error {
+func checkFlagValues(fd *FlagDef, label string, vals []string, dir string, clock *runClock) error {
 	enum := flagEnum(fd)
 	for _, v := range vals {
 		if enum.declared() && !enum.has(v) {
@@ -862,7 +902,7 @@ func missingBounds(label string) *WiringError {
 // mistyped sub-command. The error carries the sibling vocabulary for a [Suggestor]. A command's
 // own name typed after "--" is not mistyped: "--" ended command lookup, which the message says,
 // and the name is left out of the vocabulary.
-func strayCommand(leaf Command, si scopeInputs, store *parsedInputs) error {
+func strayCommand(leaf *Command, si *scopeInputs, store *parsedInputs) error {
 	if len(leaf.Commands) == 0 || len(leaf.Arguments) > 0 || len(si.args) == 0 {
 		return nil
 	}
@@ -892,8 +932,8 @@ func strayCommand(leaf Command, si scopeInputs, store *parsedInputs) error {
 
 // extraPositionals reports positionals the leaf has no argument for, unless a variadic argument
 // absorbs them.
-func extraPositionals(chain []Command, si scopeInputs, store *parsedInputs) error {
-	leaf := chain[len(chain)-1]
+func extraPositionals(chain []Command, si *scopeInputs, store *parsedInputs) error {
+	leaf := &chain[len(chain)-1]
 	n := len(leaf.Arguments)
 	if hasVariadicArg(leaf.Arguments) || len(si.args) <= n {
 		return nil
@@ -910,8 +950,8 @@ func extraPositionals(chain []Command, si scopeInputs, store *parsedInputs) erro
 // required inputs must be present or defaulted, values must satisfy enums and constraints, and
 // extra positionals are rejected.
 func validate(chain []Command, store *parsedInputs) error {
-	leaf := chain[len(chain)-1]
-	si := store.scopes[len(chain)-1]
+	leaf := &chain[len(chain)-1]      // not a copy: a Command is large
+	si := &store.scopes[len(chain)-1] // nor is this
 	waived := shortCircuited(chain, store)
 	// A short circuit usually stops the run before the commands below the one reading its
 	// inputs check their own, so the input that can't be read is checked for the whole chain.
@@ -933,12 +973,13 @@ func validate(chain []Command, store *parsedInputs) error {
 		}
 	}
 
-	for i, f := range chain {
+	for i := range chain {
 		if !covered(i) {
 			continue
 		}
-		fsi := store.scopes[i]
-		for _, fd := range f.Flags {
+		f, fsi := &chain[i], &store.scopes[i] // not copies: both are large
+		for j := range f.Flags {
+			fd := &f.Flags[j]
 			if fsi.presenceOnly[fd.Name] {
 				continue
 			}
@@ -965,10 +1006,11 @@ func validate(chain []Command, store *parsedInputs) error {
 
 // validateArgs checks the leaf's positional values: every rule normally, and only whether each
 // value can be read at all under a short circuit.
-func validateArgs(leaf Command, si scopeInputs, waived bool, dir string, clock *runClock) error {
+func validateArgs(leaf *Command, si *scopeInputs, waived bool, dir string, clock *runClock) error {
 	args := si.args[:len(si.args)-si.placeholderArgs] // only values this store actually read
 	spans := argSpans(leaf.Arguments, len(si.args))
-	for i, ad := range leaf.Arguments {
+	for i := range leaf.Arguments {
+		ad := &leaf.Arguments[i]
 		s := spans[i]
 		if (s[0] < s[1] && s[1] > len(args)) || si.handBuiltArgs[i] {
 			continue // a hand-built positional: its value is checked with the typed rules
@@ -998,7 +1040,7 @@ func validateArgs(leaf Command, si scopeInputs, waived bool, dir string, clock *
 
 // checkArgValues checks one argument's values against its enum and its constraints; the
 // positional counterpart of [checkFlagValues].
-func checkArgValues(ad ArgDef, vals []string, dir string, clock *runClock) error {
+func checkArgValues(ad *ArgDef, vals []string, dir string, clock *runClock) error {
 	enum := argEnum(ad)
 	for _, v := range vals {
 		if enum.declared() && !enum.has(v) {
@@ -1285,7 +1327,7 @@ func redactValue(v string, secret bool) string {
 // checkGroups enforces the flag groups of the frames the store covers through the run's
 // features.
 func checkGroups(fs *featureSet, chain []Command, store *parsedInputs) error {
-	i := coveredFrame(chain, store, func(c Command) bool { return len(c.FlagGroups) > 0 })
+	i := coveredFrame(chain, store, func(c *Command) bool { return len(c.FlagGroups) > 0 })
 	if i < 0 {
 		return nil
 	}
@@ -1300,7 +1342,7 @@ func checkGroups(fs *featureSet, chain []Command, store *parsedInputs) error {
 // checkDependencies enforces the flag dependencies of the frames the store covers through the
 // run's features.
 func checkDependencies(fs *featureSet, chain []Command, store *parsedInputs) error {
-	i := coveredFrame(chain, store, func(c Command) bool { return len(c.FlagDependencies) > 0 })
+	i := coveredFrame(chain, store, func(c *Command) bool { return len(c.FlagDependencies) > 0 })
 	if i < 0 {
 		return nil
 	}
@@ -1314,9 +1356,9 @@ func checkDependencies(fs *featureSet, chain []Command, store *parsedInputs) err
 
 // coveredFrame is the index of the first frame of chain the store covers for which has is
 // true, -1 when there is none.
-func coveredFrame(chain []Command, store *parsedInputs, has func(Command) bool) int {
-	for i, c := range chain {
-		if store.covers(i) && has(c) {
+func coveredFrame(chain []Command, store *parsedInputs, has func(*Command) bool) int {
+	for i := range chain {
+		if store.covers(i) && has(&chain[i]) {
 			return i
 		}
 	}
@@ -1478,17 +1520,21 @@ func flagDefaults(fd FlagDef) []string {
 // applyDefaults fills in declared flag and trailing-argument defaults for inputs
 // the user did not provide, so handlers and required-checks see them.
 func applyDefaults(chain []Command, store *parsedInputs) {
-	for i, f := range chain {
-		for _, fd := range f.Flags {
-			seed := flagDefaults(fd)
-			if len(seed) == 0 {
-				continue
+	for i := range chain {
+		for j := range chain[i].Flags {
+			fd := &chain[i].Flags[j] // not a copy: a FlagDef is large
+			if fd.Default == "" && len(fd.Defaults) == 0 {
+				continue // flagDefaults is empty
 			}
 			if store.scopes[i].flags == nil {
 				store.scopes[i].flags = map[string][]string{}
 			}
 			if _, ok := store.scopes[i].flags[fd.Name]; !ok {
-				store.scopes[i].flags[fd.Name] = seed
+				if fd.Default != "" {
+					store.scopes[i].flags[fd.Name] = store.one(fd.Default) // flagDefaults, from the pool
+				} else {
+					store.scopes[i].flags[fd.Name] = flagDefaults(*fd)
+				}
 			}
 		}
 	}
@@ -1635,7 +1681,11 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 		}
 		return trimAcquiredPayload(string(data)), nil
 	case value == "-" && slices.Contains(from, "stdin"):
-		data, err := readStdin(acq.stdin)
+		src := acq.stdin
+		if src == nil && acq.rtx != nil {
+			src = acq.rtx.flagStdin()
+		}
+		data, err := readStdin(src)
 		if err != nil {
 			// An interrupted read keeps its own error, so the run's signal cause stays reachable.
 			if ie, ok := errors.AsType[*InputError](err); ok {
@@ -1710,13 +1760,13 @@ func isShortCluster(name string) bool {
 // body and inline arrive split at the token's first "=", so for a value-taking flag the rest of
 // the cluster is rejoined with it: -lapp=web is -l "app=web". An "=value" directly after the
 // last flag belongs to that flag, a bool included (-Aw=false sets -w false).
-func parseCluster(chain []Command, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value, typed string) error) (int, error) {
-	var prev FlagDef
+func parseCluster(chain []Command, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd *FlagDef, value, typed string) error) (int, error) {
+	var prev *FlagDef
 	var w int
 	for k := 0; k < len(body); k += w {
 		_, w = utf8.DecodeRuneInString(body[k:])
 		short := "-" + body[k:k+w]
-		fdef, idx, ok := findFlagIndex(chain, short)
+		fdef, idx, _, ok := findFlagRef(chain, short)
 		if !ok {
 			if err := digitsAfterSwitch(prev, body, k, hasInline); err != nil {
 				return 0, err
@@ -1764,8 +1814,8 @@ func parseCluster(chain []Command, body, inline string, hasInline bool, argv []s
 // digitsAfterSwitch reports a cluster whose undeclared rest, from position k, is all digits
 // right after a count or bool flag, as in -v3: a number given to a flag that takes none. It
 // carries no candidates, since the digits name no flag.
-func digitsAfterSwitch(prev FlagDef, body string, k int, hasInline bool) error {
-	if k == 0 || hasInline || (prev.Type != "count" && prev.Type != "bool") {
+func digitsAfterSwitch(prev *FlagDef, body string, k int, hasInline bool) error {
+	if k == 0 || hasInline || prev == nil || (prev.Type != "count" && prev.Type != "bool") {
 		return nil
 	}
 	digits := body[k:]
@@ -1801,21 +1851,32 @@ func findFlagIndex(chain []Command, name string) (FlagDef, int, bool) {
 // negatable "--color"). A declared identifier always wins over a negated one, so a declared
 // "--no-cache" keeps its own meaning.
 func findFlagMatch(chain []Command, name string) (def FlagDef, idx int, negated, ok bool) {
-	for i, v := range slices.Backward(chain) {
-		for _, f := range v.Flags {
-			if f.hasIdentifier(name) {
+	if f, i, neg, found := findFlagRef(chain, name); found {
+		return *f, i, neg, true
+	}
+	return FlagDef{}, -1, false, false
+}
+
+// findFlagRef is findFlagMatch returning the chain's own definition, not a copy: a FlagDef is
+// large, and the parser looks one up per flag word. Callers must not modify it.
+func findFlagRef(chain []Command, name string) (def *FlagDef, idx int, negated, ok bool) {
+	for i := range slices.Backward(chain) {
+		flags := chain[i].Flags
+		for j := range flags {
+			if f := &flags[j]; f.hasIdentifier(name) {
 				return f, i, false, true
 			}
 		}
 	}
-	for i, v := range slices.Backward(chain) {
-		for _, f := range v.Flags {
-			if f.Negatable && slices.Contains(negatedForms(f), name) {
+	for i := range slices.Backward(chain) {
+		flags := chain[i].Flags
+		for j := range flags {
+			if f := &flags[j]; f.Negatable && slices.Contains(negatedForms(*f), name) {
 				return f, i, true, true
 			}
 		}
 	}
-	return FlagDef{}, -1, false, false
+	return nil, -1, false, false
 }
 
 // negatedIdentifiers returns the negated forms of a negatable flag: its declared [FlagDef.Negation],
@@ -1838,7 +1899,7 @@ func negatedIdentifiers(f FlagDef) []string {
 
 // namesChild reports whether tok names a sub-command or declared plugin of cur, by name or
 // alias.
-func namesChild(cur Command, tok string) bool {
+func namesChild(cur *Command, tok string) bool {
 	_, isChild := findChild(cur, tok)
 	_, isPlugin := findPlugin(cur, tok)
 	return isChild || isPlugin
@@ -1846,7 +1907,7 @@ func namesChild(cur Command, tok string) bool {
 
 // childCommandNames is the dispatchable vocabulary of a command's visible children, for a
 // mistyped-command [*ParseError]'s Candidates.
-func childCommandNames(cur Command) []string {
+func childCommandNames(cur *Command) []string {
 	var names []string
 	for _, c := range cur.Commands {
 		if c.Hidden {
@@ -1901,7 +1962,7 @@ func bindInputs(v reflect.Value, p *parsedInputs, chain []Command, offset int) e
 		return err
 	}
 	for i := range v.NumField() {
-		if err := bindCommandInputs(v.Field(i), p.scopes[offset+i], chain[offset+i], p.clock); err != nil {
+		if err := bindCommandInputs(v.Field(i), &p.scopes[offset+i], &chain[offset+i], p.clock); err != nil {
 			return err
 		}
 	}
@@ -1980,7 +2041,7 @@ func checkChainAlignment(v reflect.Value, chain []Command, offset int) error {
 			if name == "" {
 				continue
 			}
-			if _, ok := findFlagDef(frame.Flags, name); ok {
+			if flagDefRef(frame.Flags, name) != nil {
 				continue
 			}
 			return &ParseError{
@@ -2008,14 +2069,14 @@ func displayTypeName(t reflect.Type) string {
 // pathOf renders a resolved chain as the command path the user typed.
 func pathOf(chain []Command) string {
 	names := make([]string, len(chain))
-	for i, f := range chain {
-		names[i] = f.Name
+	for i := range chain {
+		names[i] = chain[i].Name
 	}
 	return strings.Join(names, " ")
 }
 
 // bindCommandInputs fills a <Cmd>CommandInputs struct's Flags and Arguments.
-func bindCommandInputs(v reflect.Value, si scopeInputs, frame Command, clock *runClock) error {
+func bindCommandInputs(v reflect.Value, si *scopeInputs, frame *Command, clock *runClock) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -2037,7 +2098,7 @@ func bindCommandInputs(v reflect.Value, si scopeInputs, frame Command, clock *ru
 
 // bindFlags fills a <Cmd>Flags struct by matching each field's `rotini:"<name>"` tag against
 // the parsed values, surfacing a coercion failure as a usage error naming the flag.
-func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef, clock *runClock) error {
+func bindFlags(v reflect.Value, si *scopeInputs, defs []FlagDef, clock *runClock) error {
 	flags := si.flags
 	if v.Kind() != reflect.Struct {
 		return nil
@@ -2052,7 +2113,7 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef, clock *runClock)
 			continue
 		}
 		// An undeclared tag leaves def zero: plain coercion, not secret.
-		def, declared := findFlagDef(defs, name)
+		def, declared := flagDefOrZero(defs, name)
 		label := flagErrLabel(si, defs, name)
 		if declared {
 			switch {
@@ -2066,7 +2127,7 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef, clock *runClock)
 				if objects == nil {
 					return missingFeature("object-flags", "ObjectFlags()", "flag "+label+" takes an object")
 				}
-				if err := objects.bind(field, raw, def, clock.features()); err != nil {
+				if err := objects.bind(field, raw, *def, clock.features()); err != nil {
 					if we, ok := errors.AsType[*WiringError](err); ok {
 						return we
 					}
@@ -2100,7 +2161,7 @@ func argSecret(defs []ArgDef, i int) bool {
 
 // flagErrLabel names flag name in a binding error: as typed on argv, else as [labelForFlag]. It
 // is [scopeInputs.label] by logical name, for a tag whose definition may be missing.
-func flagErrLabel(si scopeInputs, defs []FlagDef, name string) string {
+func flagErrLabel(si *scopeInputs, defs []FlagDef, name string) string {
 	if t := si.typed[name]; t != "" {
 		return t
 	}
@@ -2110,9 +2171,9 @@ func flagErrLabel(si scopeInputs, defs []FlagDef, name string) string {
 // labelForFlag is a flag's CLI label (its identifiers) for error messages, falling back
 // to the logical name when the definition isn't found.
 func labelForFlag(defs []FlagDef, name string) string {
-	for _, d := range defs {
-		if d.Name == name {
-			return flagLabel(d)
+	for i := range defs {
+		if defs[i].Name == name {
+			return flagLabel(defs[i])
 		}
 	}
 	return name
@@ -2137,7 +2198,7 @@ func bindArgs(v reflect.Value, args []string, defs []ArgDef, clock *runClock) er
 		if f.Kind() != reflect.Slice && s[0] >= s[1] {
 			continue
 		}
-		if err := coerceTime(f, argEnum(def).canonical(args[s[0]:s[1]]), argTimeSpec(def, clock)); err != nil {
+		if err := coerceTime(f, argEnum(&def).canonical(args[s[0]:s[1]]), argTimeSpec(&def, clock)); err != nil {
 			return coerceFailure(label, "", err, argSecret(defs, i))
 		}
 	}
@@ -2528,5 +2589,28 @@ func coerceMap(f reflect.Value, raw []string, fs *featureSet) error {
 		m.SetMapIndex(reflect.ValueOf(k).Convert(kt), ev)
 	}
 	f.Set(m)
+	return nil
+}
+
+// zeroFlagDef is the definition bindFlags reads for an undeclared tag. Never modified.
+var zeroFlagDef FlagDef
+
+// flagDefOrZero is flagDefRef with zeroFlagDef for an undeclared name, and whether name is
+// declared.
+func flagDefOrZero(defs []FlagDef, name string) (*FlagDef, bool) {
+	if d := flagDefRef(defs, name); d != nil {
+		return d, true
+	}
+	return &zeroFlagDef, false
+}
+
+// flagDefRef is findFlagDef returning the definition itself, not a copy, or nil. Callers must
+// not modify it.
+func flagDefRef(defs []FlagDef, name string) *FlagDef {
+	for i := range defs {
+		if defs[i].Name == name {
+			return &defs[i]
+		}
+	}
 	return nil
 }

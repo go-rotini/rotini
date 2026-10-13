@@ -166,7 +166,7 @@ func (e duplicateObjectError) Error() string {
 // checkRepeat enforces [FlagDef.NoRepeat]: a flag that takes one value, given more than once
 // on the command line, is an error naming the first and last values. onArgv reports whether
 // the command line set the flag; a fallback value is never a repeat.
-func checkRepeat(fd FlagDef, label string, vals []string, onArgv bool) error {
+func checkRepeat(fd *FlagDef, label string, vals []string, onArgv bool) error {
 	if !fd.NoRepeat || !onArgv || len(vals) < 2 {
 		return nil
 	}

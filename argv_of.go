@@ -195,7 +195,7 @@ func argvChain(def Definition, path []string) ([]Command, error) {
 		if cur.Passthrough {
 			return nil, fmt.Errorf("rotini: ArgvOf: %q is a passthrough command, so it has no sub-command %q", pathOf(chain), name)
 		}
-		c, ok := findChild(cur, name)
+		c, ok := findChild(&cur, name)
 		if !ok {
 			return nil, fmt.Errorf("rotini: ArgvOf: %q has no sub-command %q", pathOf(chain), name)
 		}
@@ -314,7 +314,7 @@ func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
 			return &ArgvError{Field: p, Reason: err.Error()}
 		}
 		return w.occurrences(p, fd, id, pairs)
-	case isObjectFlag(fd):
+	case isObjectFlag(&fd):
 		return w.objectFlag(p, fd, id, f)
 	case f.Kind() == reflect.Bool:
 		w.boolFlag(fd, id, f.Bool())
@@ -477,7 +477,7 @@ func (w *argvWriter) arguments(top string, ci reflect.Value, frame Command, leaf
 		}
 		if defs[j].Glob && w.cfg.goos == "windows" {
 			for i, s := range vals {
-				vals[i] = globEscaper.Replace(s)
+				vals[i] = escapeGlob(s)
 			}
 		}
 		counts[j] = len(vals)

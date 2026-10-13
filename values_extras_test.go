@@ -103,7 +103,7 @@ func TestParse_enumAliasesHiddenDeprecated(t *testing.T) {
 	if !errors.As(err, &pe) || !slices.Equal(pe.Candidates, []string{"json", "yaml"}) || !strings.Contains(pe.Msg, "(one of: json, yaml)") {
 		t.Errorf("err = %v (%+v)", err, pe)
 	}
-	if cands := enumCandidates(flagEnum(def.Flags[0])); !slices.Equal(cands, []string{"json", "yaml"}) {
+	if cands := enumCandidates(flagEnum(&def.Flags[0])); !slices.Equal(cands, []string{"json", "yaml"}) {
 		t.Errorf("completion offers %q", cands)
 	}
 }

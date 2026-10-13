@@ -16,11 +16,11 @@ type enumSet struct {
 	prefixed   bool
 }
 
-func flagEnum(fd FlagDef) enumSet {
+func flagEnum(fd *FlagDef) enumSet {
 	return enumSet{values: fd.Enum, described: fd.EnumValues, ignoreCase: fd.IgnoreCase, prefixed: fd.Base == basePrefixed}
 }
 
-func argEnum(ad ArgDef) enumSet {
+func argEnum(ad *ArgDef) enumSet {
 	return enumSet{values: ad.Enum, described: ad.EnumValues, ignoreCase: ad.IgnoreCase, prefixed: ad.Base == basePrefixed}
 }
 

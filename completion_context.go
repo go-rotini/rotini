@@ -167,7 +167,7 @@ func lenientArgv(chain []Command, argv []string) []string {
 	depth, positionals := 1, 0
 	terminated := false
 	pt := passthroughArg(chain[leaf].Arguments)
-	noop := func(int, FlagDef, string, string) error { return nil }
+	noop := func(int, *FlagDef, string, string) error { return nil }
 	out := make([]string, 0, len(argv))
 	for i := 0; i < len(argv); i++ {
 		tok := argv[i]
@@ -197,7 +197,7 @@ func lenientArgv(chain []Command, argv []string) []string {
 
 // namesFrame reports whether tok names cur's child called name.
 func namesFrame(cur Command, tok, name string) bool {
-	c, ok := findChild(cur, tok)
+	c, ok := findChild(&cur, tok)
 	return ok && c.Name == name
 }
 

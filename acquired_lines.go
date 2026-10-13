@@ -34,7 +34,7 @@ func acquiredLines(text string, nul, comments bool) []string {
 
 // acquiresValue reports whether an argv value of fd is replaced by content rotini reads: an
 // `@file` with `from: [file]` (not the doubled `@@` escape), or "-" with `from: [stdin]`.
-func acquiresValue(fd FlagDef, value string) bool {
+func acquiresValue(fd *FlagDef, value string) bool {
 	switch {
 	case strings.HasPrefix(value, "@@"):
 		return false
@@ -48,7 +48,7 @@ func acquiresValue(fd FlagDef, value string) bool {
 
 // splitsAcquiredLines reports whether fd takes a file's or stdin's lines as separate values:
 // a list or map flag that is not object-valued (an object's file is one document).
-func splitsAcquiredLines(fd FlagDef) bool {
+func splitsAcquiredLines(fd *FlagDef) bool {
 	return fd.ObjectSchema == "" && (strings.HasPrefix(fd.Type, "[]") || strings.HasPrefix(fd.Type, "map["))
 }
 

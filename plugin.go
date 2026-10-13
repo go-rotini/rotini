@@ -127,7 +127,7 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 		if r.Discovered {
 			cat = CategoryUsage
 			if len(chain) > 0 {
-				candidates = childCommandNames(chain[len(chain)-1])
+				candidates = childCommandNames(&chain[len(chain)-1])
 			}
 		}
 		return p.pluginFailure(ctx, rtx, &PluginError{
@@ -226,7 +226,7 @@ func (p *Program) pluginFailure(ctx context.Context, rtx *Context, re *PluginErr
 func (cmd Command) PluginBinary(name string) (string, bool) {
 	dir := cmd.PluginPath
 	var binary string
-	switch rd, ok := findPlugin(cmd, name); {
+	switch rd, ok := findPlugin(&cmd, name); {
 	case ok:
 		binary = rd.Binary
 	case cmd.PluginDiscovery != nil && pluginToken(name):

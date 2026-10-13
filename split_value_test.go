@@ -131,8 +131,8 @@ func FuzzMulticallArgv(f *testing.F) {
 			t.Fatalf("%q: routed %q, want one token in front of argv", argv0, routed)
 		}
 		root := rootFrame(def)
-		_, child := findChild(root, routed[0])
-		_, plugin := findPlugin(root, routed[0])
+		_, child := findChild(&root, routed[0])
+		_, plugin := findPlugin(&root, routed[0])
 		if !child && !plugin {
 			t.Fatalf("%q: routed to %q, which names no command or plugin", argv0, routed[0])
 		}

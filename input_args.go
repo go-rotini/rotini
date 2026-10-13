@@ -115,7 +115,7 @@ func argFallback(reg *recon.Registry, field reflect.Value, sf reflect.StructFiel
 	if !ad.Variadic && len(vals) > 1 {
 		vals = vals[len(vals)-1:] // one value, the last, as a scalar flag's fallback reads
 	}
-	vals = argEnum(ad).canonical(vals)
+	vals = argEnum(&ad).canonical(vals)
 	if vals, err = expandFallbackWired(vals, sf.Tag, source, label, rd); err != nil {
 		if isWiringError(err) {
 			return nil, "", err
@@ -126,7 +126,7 @@ func argFallback(reg *recon.Registry, field reflect.Value, sf reflect.StructFiel
 		return nil, "", usageBind(channelArgument, ad.Name, err.Error()+fromSource(origin), err)
 	}
 	probe := reflect.New(field.Type()).Elem()
-	if err := coerceTime(probe, vals, argTimeSpec(ad, rd.view.clockRef())); err != nil {
+	if err := coerceTime(probe, vals, argTimeSpec(&ad, rd.view.clockRef())); err != nil {
 		if isWiringError(err) {
 			return nil, "", err
 		}
@@ -165,7 +165,7 @@ func recordArgFallbacks(set Presence, ci reflect.Value, frame Command, topName, 
 			pos++
 			continue
 		}
-		if err := coerceTime(args.Field(i), vals, argTimeSpec(ad, rd.view.clockRef())); err != nil {
+		if err := coerceTime(args.Field(i), vals, argTimeSpec(&ad, rd.view.clockRef())); err != nil {
 			return nil, nil, err
 		}
 		if origins == nil {

@@ -57,8 +57,8 @@ func checkConfigKey(k ConfigKey, raw string, view *osView, parse func(string) er
 			return checkedValue{}, usageBind(channelConfig, k.Key, fmt.Sprintf("%s: %v", label, err), err)
 		}
 	}
-	texts = flagEnum(fd).canonical(texts)
-	if err := checkFlagValues(fd, label, texts, view.base(), view.clockRef()); err != nil {
+	texts = flagEnum(&fd).canonical(texts)
+	if err := checkFlagValues(&fd, label, texts, view.base(), view.clockRef()); err != nil {
 		return checkedValue{}, configValueError(k.Key, err)
 	}
 	out := checkedValue{key: k, texts: texts}

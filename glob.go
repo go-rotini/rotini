@@ -138,11 +138,28 @@ func globDirFold(dir, pattern string, matches []string) []string {
 	return matches
 }
 
-// globEscaper writes each glob metacharacter as a one-character class, which matches it
+// escapeGlob writes each glob metacharacter as a one-character class, which matches it
 // literally on every system (a backslash is a separator on Windows, not an escape).
-var globEscaper = strings.NewReplacer("[", "[[]", "*", "[*]", "?", "[?]")
+func escapeGlob(s string) string {
+	if !strings.ContainsAny(s, "[*?") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for i := range len(s) {
+		switch c := s[i]; c {
+		case '[', '*', '?':
+			b.WriteByte('[')
+			b.WriteByte(c)
+			b.WriteByte(']')
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
 
-// unescapeGlob removes the escapes globEscaper writes, and reports whether word holds any
+// unescapeGlob removes the escapes escapeGlob writes, and reports whether word holds any
 // unescaped `*`, `?` or `[`.
 func unescapeGlob(word string) (literal string, isPattern bool) {
 	var b strings.Builder

@@ -25,12 +25,12 @@ var guardAllocBudgets = []struct {
 	budget   float64
 	legacy   float64
 }{
-	{"help", []string{"--help"}, 0, 88, 88},
-	{"help, large environment", []string{"--help"}, 200, 88, 88},
-	{"dispatch", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 0, 208, 208},
-	{"dispatch, large environment", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 200, 208, 208},
-	{"complete a sub-command", []string{"__complete", "bu"}, 0, 18, 18},
-	{"complete a flag value", []string{"__complete", "build", "--mode", ""}, 0, 31, 31},
+	{"help", []string{"--help"}, 0, 26, 26},
+	{"help, large environment", []string{"--help"}, 200, 26, 26},
+	{"dispatch", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 0, 51, 51},
+	{"dispatch, large environment", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 200, 51, 51},
+	{"complete a sub-command", []string{"__complete", "bu"}, 0, 16, 16},
+	{"complete a flag value", []string{"__complete", "build", "--mode", ""}, 0, 27, 27},
 }
 
 type guardRootFlags struct {

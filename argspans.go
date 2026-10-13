@@ -9,7 +9,11 @@ package rotini
 // leading arguments still fill first, the trailing ones then fill from the end, and whatever
 // is left empty is reported as missing by the required check.
 func argSpans(defs []ArgDef, n int) [][2]int {
-	spans := make([][2]int, len(defs))
+	return fillArgSpans(make([][2]int, len(defs)), defs, n) // inlined, so a caller that keeps no span can hold them on its stack
+}
+
+// fillArgSpans is argSpans into spans, which has one entry per def.
+func fillArgSpans(spans [][2]int, defs []ArgDef, n int) [][2]int {
 	v := variadicIndex(defs)
 	if v < 0 {
 		for i := range defs {

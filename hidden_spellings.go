@@ -15,7 +15,7 @@ func (c CommandDef) matches(tok string) bool {
 }
 
 // hasIdentifier reports whether id is one of f's identifiers, hidden ones included.
-func (f FlagDef) hasIdentifier(id string) bool {
+func (f *FlagDef) hasIdentifier(id string) bool {
 	return slices.Contains(f.Identifiers, id) || slices.Contains(f.HiddenIdentifiers, id)
 }
 

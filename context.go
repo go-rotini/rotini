@@ -169,7 +169,7 @@ func (rtx *Context) AddCompletionMessage(msg string) {
 // argvAcq is what parsing this run's argv reads values from: the replayed stdin and the
 // injected directory.
 func (rtx *Context) argvAcq() argvAcq {
-	return argvAcq{stdin: rtx.flagStdin(), dir: rtx.osView().base(), clock: &rtx.clock}
+	return argvAcq{rtx: rtx, dir: rtx.osView().base(), clock: &rtx.clock}
 }
 
 // cloneServices copies the dependency store. Each run is seeded from the Program's copy, so a
@@ -183,11 +183,10 @@ func (rtx *Context) cloneServices() map[string]any {
 // newContext returns an empty [Context] with the os streams and no resolved command.
 func newContext() *Context {
 	return &Context{
-		services: make(map[string]any),
-		frame:    frameUnset,
-		Stdin:    os.Stdin,
-		Stdout:   os.Stdout,
-		Stderr:   os.Stderr,
+		frame:  frameUnset,
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
 	}
 }
 

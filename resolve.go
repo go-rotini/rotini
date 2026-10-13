@@ -133,7 +133,7 @@ func descend(chain []Command, def Definition, argv []string) ([]Command, *Plugin
 		if strings.HasPrefix(tok, "-") {
 			break
 		}
-		cur := chain[len(chain)-1]
+		cur := &chain[len(chain)-1] // not a copy; unused once chain grows
 		if child, ok := findChild(cur, tok); ok {
 			frame := cmdFrame(child)
 			frame.Matched = tok // record the token used (name or alias) for deprecation detection
@@ -168,7 +168,7 @@ func pluginToken(tok string) bool {
 }
 
 // findPlugin returns the declared plugin of f matching tok by name or alias.
-func findPlugin(f Command, tok string) (PluginDef, bool) {
+func findPlugin(f *Command, tok string) (PluginDef, bool) {
 	for _, r := range f.Plugins {
 		if r.Name == tok {
 			return r, true
@@ -214,10 +214,10 @@ func splitFlag(tok string) (name, value string, hasValue bool) {
 }
 
 // findChild returns the sub-command of f matching tok by name, alias or hidden alias.
-func findChild(f Command, tok string) (CommandDef, bool) {
-	for _, c := range f.Commands {
-		if c.matches(tok) {
-			return c, true
+func findChild(f *Command, tok string) (CommandDef, bool) {
+	for i := range f.Commands {
+		if c := &f.Commands[i]; c.Name == tok || slices.Contains(c.Aliases, tok) || slices.Contains(c.HiddenAliases, tok) { // matches, without copying c
+			return *c, true
 		}
 	}
 	return CommandDef{}, false

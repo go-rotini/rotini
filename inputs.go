@@ -627,7 +627,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				if i < len(frame.Arguments) {
 					ad = frame.Arguments[i]
 				}
-				_ = coerceTime(f, []string{d}, argTimeSpec(ad, rtx.osView().clockRef()))
+				_ = coerceTime(f, []string{d}, argTimeSpec(&ad, rtx.osView().clockRef()))
 				secret := ad.Secret
 				set[fieldPath(topName, "Arguments", fieldName)] = InputSource{
 					Layer:  "defaults",

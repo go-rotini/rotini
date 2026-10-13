@@ -126,7 +126,7 @@ func (n *needs) command(flags []FlagDef, args []ArgDef, groups []FlagGroup, deps
 	n.groups = n.groups || len(groups) > 0
 	n.deps = n.deps || len(deps) > 0
 	for _, fd := range flags {
-		if isObjectFlag(fd) {
+		if isObjectFlag(&fd) {
 			n.objects, n.json, n.yaml, n.schemas = true, true, true, true
 		}
 		n.declared(fd.Type, fd.Constraints)

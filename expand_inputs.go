@@ -84,7 +84,7 @@ func expandStore(v reflect.Value, chain []Command, store *parsedInputs, anchor i
 			if err != nil || !r.expands() || !ok {
 				return
 			}
-			label := flagErrLabel(*si, chain[scope].Flags, logical)
+			label := flagErrLabel(si, chain[scope].Flags, logical)
 			out, xerr := expandValues(vals, r, view, label)
 			if xerr != nil {
 				err = argvExpandError(xerr, label)

@@ -27,21 +27,9 @@ import (
 // over it. A read of piped stdin ends when the run is canceled, or when the context the hook
 // holds ([Context.Context]) ends, with an [*InputError] whose cause is the cancellation's.
 func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argValues func(name string) ([]string, error)) error {
-	if v.Kind() != reflect.Struct || v.NumField() == 0 {
+	sf, raw, ok := stdinTarget(v, waived)
+	if !ok {
 		return nil
-	}
-	leaf := v.Field(v.NumField() - 1) // the running command's inputs
-	if leaf.Kind() != reflect.Struct {
-		return nil
-	}
-	sf := leaf.FieldByName("Stdin")
-	field, ok := leaf.Type().FieldByName("Stdin")
-	if !sf.IsValid() || !ok || (sf.Kind() != reflect.Pointer && sf.Kind() != reflect.Func) {
-		return nil
-	}
-	raw := field.Tag.Get("stdin")
-	if raw == "" || waived {
-		return nil // a short-circuited run never waits on stdin
 	}
 	tag := parseStdinTag(raw)
 	fs := rtx.features()
@@ -279,4 +267,27 @@ func readStdin(r io.Reader) ([]byte, error) {
 		}
 	}
 	return io.ReadAll(r) //nolint:wrapcheck // reported by the caller
+}
+
+// stdinTarget is the leaf's Stdin field fillStdin fills and its stdin tag, or false when there
+// is nothing to fill: no such field, no tag, or a short-circuited run, which never waits on
+// stdin.
+func stdinTarget(v reflect.Value, waived bool) (sf reflect.Value, raw string, ok bool) {
+	if v.Kind() != reflect.Struct || v.NumField() == 0 {
+		return reflect.Value{}, "", false
+	}
+	leaf := v.Field(v.NumField() - 1) // the running command's inputs
+	if leaf.Kind() != reflect.Struct {
+		return reflect.Value{}, "", false
+	}
+	sf = leaf.FieldByName("Stdin")
+	field, found := leaf.Type().FieldByName("Stdin")
+	if !sf.IsValid() || !found || (sf.Kind() != reflect.Pointer && sf.Kind() != reflect.Func) {
+		return reflect.Value{}, "", false
+	}
+	raw = field.Tag.Get("stdin")
+	if raw == "" || waived {
+		return reflect.Value{}, "", false
+	}
+	return sf, raw, true
 }

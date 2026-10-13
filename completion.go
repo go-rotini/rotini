@@ -404,7 +404,9 @@ func commandNames(cur Command) []string {
 // Flags stop where the parser stops them: at "--", at an options_first leaf's first argument,
 // and at the leaf's passthrough argument (see completionContext.operands).
 func walkContext(def Definition, before []string) completionContext {
-	cc := completionContext{chain: []Command{rootFrame(def)}, set: make([]map[string]bool, 1)}
+	chain := make([]Command, 1, 1+descentHint(def, before)) // a command is large: grow it once
+	chain[0] = rootFrame(def)
+	cc := completionContext{chain: chain, set: make([]map[string]bool, 1)}
 	for i := 0; i < len(before); i++ {
 		tok := before[i]
 		if cc.afterTerminator || cc.operands {
@@ -427,12 +429,12 @@ func walkContext(def Definition, before []string) completionContext {
 		// A non-flag word beginning with "-" (a negative number) is a positional, never a
 		// command or plugin name, as dispatch reads it.
 		if cc.positionals == 0 && !strings.HasPrefix(tok, "-") {
-			if child, ok := findChild(cur, tok); ok {
+			if child, ok := findChild(&cur, tok); ok {
 				cc.chain = append(cc.chain, cmdFrame(child))
 				cc.set = append(cc.set, nil)
 				continue
 			}
-			if _, ok := findPlugin(cur, tok); ok || (cur.PluginDiscovery != nil && pluginToken(tok)) {
+			if _, ok := findPlugin(&cur, tok); ok || (cur.PluginDiscovery != nil && pluginToken(tok)) {
 				cc.plugin = true
 				return cc
 			}
@@ -450,9 +452,9 @@ func walkContext(def Definition, before []string) completionContext {
 func (cc *completionContext) walkFlag(before []string, i int) int {
 	tok := before[i]
 	var last *pendingFlag
-	capture := func(idx int, fd FlagDef, value, _ string) error {
+	capture := func(idx int, fd *FlagDef, value, _ string) error {
 		cc.mark(idx, fd, value)
-		last = &pendingFlag{fd: fd, idx: idx}
+		last = &pendingFlag{fd: *fd, idx: idx}
 		return nil
 	}
 
@@ -503,7 +505,7 @@ func (cc *completionContext) walkMapValue(before []string, j int, last *pendingF
 
 // mark records that flag fd of chain frame idx is set to value, and whether that starts a
 // short-circuit run.
-func (cc *completionContext) mark(idx int, fd FlagDef, value string) {
+func (cc *completionContext) mark(idx int, fd *FlagDef, value string) {
 	for len(cc.set) <= idx {
 		cc.set = append(cc.set, nil)
 	}
@@ -544,7 +546,7 @@ func flagValueCandidates(lookup HandlerLookup, rtx *Context, chain []Command, wo
 		}
 		return valueCandidates{cands: keys, sorted: true}
 	}
-	return enumListCandidates(flagEnum(fd), fd.Separator, partial)
+	return enumListCandidates(flagEnum(&fd), fd.Separator, partial)
 }
 
 // argValueCandidates returns the candidates for the argument the completed word would bind to
@@ -571,7 +573,7 @@ func argValueCandidates(def Definition, lookup HandlerLookup, rtx *Context, cc c
 		}
 		return valueCandidates{cands: commandPathCandidates(def, path), sorted: true}
 	}
-	return enumListCandidates(argEnum(ad), ad.Separator, partial)
+	return enumListCandidates(argEnum(&ad), ad.Separator, partial)
 }
 
 // commandPathCandidates returns the visible sub-commands of the command path names below the
@@ -584,7 +586,7 @@ func commandPathCandidates(def Definition, path []string) []string {
 	}
 	cur := rootFrame(def)
 	for _, w := range path {
-		child, ok := findChild(cur, w)
+		child, ok := findChild(&cur, w)
 		if !ok {
 			return nil
 		}
@@ -1359,4 +1361,20 @@ func mapValueHint(fd FlagDef) Completion {
 		h.Kind = "none"
 	}
 	return h
+}
+
+// descentHint counts the words of before that name a sub-command in turn: walkContext's
+// capacity hint for its chain. It is only a hint, so a word that turns out to be a flag's value
+// costs nothing but a regrow.
+func descentHint(def Definition, before []string) int {
+	cmds, n := def.Commands, 0
+	for _, tok := range before {
+		for _, c := range cmds {
+			if c.matches(tok) {
+				cmds, n = c.Commands, n+1
+				break
+			}
+		}
+	}
+	return n
 }

@@ -1,7 +1,6 @@
 package rotini
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -148,7 +147,8 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	//    channel error. Only the commands out describes are judged, so a parent collecting its
 	//    own inputs is not held to the leaf's requirements.
 	if anchor >= 0 {
-		store.span = &[2]int{anchor, anchor + v.NumField()}
+		store.spanBuf = [2]int{anchor, anchor + v.NumField()}
+		store.span = &store.spanBuf
 	}
 	if err := validateStore(fs, chain, store); err != nil {
 		return err
@@ -169,6 +169,9 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	}
 
 	// 5. stdin → the leaf command's typed payload, its only consumer.
+	if _, _, ok := stdinTarget(v, waived); !ok {
+		return nil // before fillStdin, so no closure is built for a command without stdin
+	}
 	return b.fillStdin(rtx, v, waived, func(name string) ([]string, error) { return leafArgValues(chain, store, name), nil })
 }
 
@@ -383,17 +386,17 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 			}
 			return nil, "", fallbackCoerceError(chain, idx, name, fallbackOrigin(rd, source, tag.Get("env"), key), err)
 		}
-		if val.Kind() == recon.MapKind && isObjectFlag(def) {
+		if val.Kind() == recon.MapKind && isObjectFlag(&def) {
 			quoteObjectPairs(vals) // an object's config block read as one map value
 		}
-	case field.Kind() == reflect.Map || (isObjectFlag(def) && field.Kind() != reflect.Slice):
+	case field.Kind() == reflect.Map || (isObjectFlag(&def) && field.Kind() != reflect.Slice):
 		// recon keeps a config map — or an object flag's config block — as its leaves
 		// (labels.k, labels.x), not at the map's key. For an object each leaf is one
 		// key=value occurrence, and the occurrences merge.
 		if vals, source, err = mapLeaves(reg, key); err != nil {
 			return nil, "", reconBind(channelFlag, err)
 		}
-		if isObjectFlag(def) {
+		if isObjectFlag(&def) {
 			quoteObjectPairs(vals)
 		}
 		if len(vals) == 0 {
@@ -403,7 +406,7 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 		return nil, "", nil
 	}
 	origin = fallbackOrigin(rd, source, tag.Get("env"), key)
-	vals = flagEnum(def).canonical(vals)
+	vals = flagEnum(&def).canonical(vals)
 	waivable := rd.waiveFiles && source != osEnvSourceName
 	if vals, err = expandFallbackWired(vals, tag, source, fallbackLabel(chain, idx, name), rd); err != nil {
 		if we, ok := errors.AsType[*WiringError](err); ok {
@@ -523,7 +526,7 @@ func fallbackValues(val recon.Value, sep string) ([]string, error) {
 			// A list of objects (a config file's list of mounts) goes through as JSON, one
 			// occurrence per element — the form an object flag decodes.
 			if it.Kind() == recon.MapKind {
-				if raw, err := json.Marshal(plainValue(it)); err == nil {
+				if raw, err := marshalPlain(it); err == nil {
 					out[i] = string(raw)
 				}
 			}
@@ -589,28 +592,6 @@ func checkNullItems(s reflect.Value, cfg *cfgRegs) error {
 	return nil
 }
 
-// plainValue converts a recon value to plain JSON-shaped Go data — maps and slices of plain
-// values all the way down — since a recon map holds recon values, which encode as nothing.
-func plainValue(v recon.Value) any {
-	switch v.Kind() {
-	case recon.MapKind:
-		m, _ := v.AsMap()
-		out := make(map[string]any, len(m))
-		for k, e := range m {
-			out[k] = plainValue(e)
-		}
-		return out
-	case recon.SliceKind:
-		items, _ := v.AsSlice()
-		out := make([]any, len(items))
-		for i, e := range items {
-			out[i] = plainValue(e)
-		}
-		return out
-	}
-	return v.Any()
-}
-
 // flattenMap appends a reconciled map's leaves as dotted key=value pairs.
 func flattenMap(prefix string, m map[string]recon.Value, out *[]string) {
 	for k, v := range m {
@@ -630,7 +611,7 @@ func flattenMap(prefix string, m map[string]recon.Value, out *[]string) {
 // coerceFlagValues binds fallback values into a flag's field the way [bindFlags] binds argv
 // values, dotted-key maps included.
 func coerceFlagValues(f reflect.Value, def FlagDef, vals []string, clock *runClock) error {
-	if isObjectFlag(def) {
+	if isObjectFlag(&def) {
 		fs := clock.features()
 		if fs.objects == nil {
 			return missingFeature("object-flags", "ObjectFlags()", fmt.Sprintf("flag --%s takes an object", def.Name))
@@ -640,7 +621,7 @@ func coerceFlagValues(f reflect.Value, def FlagDef, vals []string, clock *runClo
 	if def.DottedKeys {
 		return coerceMapDotted(f, vals)
 	}
-	return coerceTime(f, vals, flagTimeSpec(def, clock))
+	return coerceTime(f, vals, flagTimeSpec(&def, clock))
 }
 
 // fallbackOrigin names where a flag's fallback value came from in the user's terms: the
@@ -809,10 +790,8 @@ func reconHasSecret(tag string) bool {
 
 // findFlagDef finds a flag definition by its logical name.
 func findFlagDef(defs []FlagDef, name string) (FlagDef, bool) {
-	for _, d := range defs {
-		if d.Name == name {
-			return d, true
-		}
+	if d := flagDefRef(defs, name); d != nil {
+		return *d, true
 	}
 	return FlagDef{}, false
 }
@@ -1411,12 +1390,18 @@ type checkedKey struct{ name, path, profile string }
 
 // withFileCache returns a copy of v that keeps the configuration files it opens, for one read.
 func (v *osView) withFileCache() *osView {
-	out := &osView{foldCase: foldCaseDefault()}
+	c := &cachedView{view: osView{foldCase: foldCaseDefault()}} // one allocation for both
 	if v != nil {
-		*out = *v
+		c.view = *v
 	}
-	out.files = &fileCache{files: map[openedKey]openedFile{}, checked: map[checkedKey]error{}}
-	return out
+	c.view.files = &c.cache // its maps are made on first use
+	return &c.view
+}
+
+// cachedView is a view and its file cache, allocated together.
+type cachedView struct {
+	view  osView
+	cache fileCache
 }
 
 func (c *fileCache) opened(k openedKey) (openedFile, bool) {
@@ -1429,6 +1414,9 @@ func (c *fileCache) opened(k openedKey) (openedFile, bool) {
 
 func (c *fileCache) keep(k openedKey, o openedFile) {
 	if c != nil {
+		if c.files == nil {
+			c.files = map[openedKey]openedFile{}
+		}
 		c.files[k] = o
 	}
 }
@@ -1442,6 +1430,9 @@ func (c *fileCache) check(k checkedKey, run func() error) error {
 		return err
 	}
 	err := run()
+	if c.checked == nil {
+		c.checked = map[checkedKey]error{}
+	}
 	c.checked[k] = err
 	return err
 }
@@ -1590,11 +1581,14 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 // flag explicitly set on argv, then the env variable, then the flag's default. An entry none
 // of them supplies keeps its own path or discover strategy.
 func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *osView) map[string]pathOverride {
-	out := map[string]pathOverride{}
+	var out map[string]pathOverride // made by the first override: read-only, so nil serves none
 	for _, f := range b.chainConfigFiles(chain) {
 		pf := f.PathFrom
 		if pf == nil {
 			continue
+		}
+		if out == nil {
+			out = map[string]pathOverride{}
 		}
 		explicit, defaulted := storeFlagValue(store, pf.Flag)
 		switch {
@@ -1672,7 +1666,7 @@ func storeFlagSet(store *parsedInputs, name string) bool {
 // chainFlagLabel is flag name as messages name it, from the nearest command that declares it.
 func chainFlagLabel(chain []Command, name string) string {
 	for _, c := range slices.Backward(chain) {
-		if _, ok := findFlagDef(c.Flags, name); ok {
+		if flagDefRef(c.Flags, name) != nil {
 			return labelForFlag(c.Flags, name)
 		}
 	}

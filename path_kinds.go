@@ -108,7 +108,7 @@ func stdinDashOnce(chain []Command, store *parsedInputs) error {
 			if constraintElemType(fd.Type) != typeInputFile || !store.setOnArgv(i, fd.Name) {
 				continue
 			}
-			if err := seen(si.label(fd), si.label(fd), si.flags[fd.Name]); err != nil {
+			if err := seen(si.label(&fd), si.label(&fd), si.flags[fd.Name]); err != nil {
 				return err
 			}
 		}

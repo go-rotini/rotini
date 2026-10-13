@@ -63,10 +63,10 @@ func multicallArgv(def Definition, argv0 string, argv []string, goos string) (ro
 // multicallToken returns the spelling of root's command or declared plugin that name
 // invokes: a name, alias or hidden alias, matched without regard to case on Windows.
 func multicallToken(root Command, name string, windows bool) (string, bool) {
-	if _, ok := findChild(root, name); ok {
+	if _, ok := findChild(&root, name); ok {
 		return name, true
 	}
-	if _, ok := findPlugin(root, name); ok {
+	if _, ok := findPlugin(&root, name); ok {
 		return name, true
 	}
 	if !windows {

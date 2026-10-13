@@ -108,12 +108,12 @@ type timeSpec struct {
 }
 
 // flagTimeSpec is the time spec of flag fd, measured from clock.
-func flagTimeSpec(fd FlagDef, clock *runClock) timeSpec {
+func flagTimeSpec(fd *FlagDef, clock *runClock) timeSpec {
 	return timeSpec{layout: fd.Layout, layouts: fd.Layouts, relative: fd.Relative, base: fd.Base, clock: clock}
 }
 
 // argTimeSpec is the time spec of argument ad, measured from clock.
-func argTimeSpec(ad ArgDef, clock *runClock) timeSpec {
+func argTimeSpec(ad *ArgDef, clock *runClock) timeSpec {
 	return timeSpec{layout: ad.Layout, layouts: ad.Layouts, relative: ad.Relative, base: ad.Base, clock: clock}
 }
 

@@ -134,7 +134,7 @@ func dependencyCanonical(fd FlagDef, v string) string {
 			return formatNum(n)
 		}
 	}
-	return flagEnum(fd).canonical([]string{v})[0]
+	return flagEnum(&fd).canonical([]string{v})[0]
 }
 
 // noteDependencyValue records a typed flag's value for the dependencies that compare it, in a

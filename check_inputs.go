@@ -370,7 +370,7 @@ func checkTypedFlag(fs *featureSet, fd FlagDef, f reflect.Value, dir string) err
 		}
 		return checkTypedObject(fs, label, fd.ObjectSchema, elems)
 	}
-	enum := flagEnum(fd)
+	enum := flagEnum(&fd)
 	for _, s := range typedTexts(elems) {
 		if enum.declared() && !enum.has(s) {
 			return enum.violation(label, label, s, fd.Secret)
@@ -386,7 +386,7 @@ func checkTypedArg(ad ArgDef, f reflect.Value, dir string) error {
 	if !ok {
 		return nil
 	}
-	enum := argEnum(ad)
+	enum := argEnum(&ad)
 	for _, s := range typedTexts(elems) {
 		if enum.declared() && !enum.has(s) {
 			return enum.violation(label, "", s, ad.Secret)

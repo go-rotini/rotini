@@ -787,11 +787,17 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 		return p.settle(ctx, rtx)
 	}
 
-	plan := p.lifecycle
-	if plan == nil {
-		plan = DefaultLifecycle
+	// The default plan runs straight from handlers (see defaultStep); a custom one is built.
+	var steps []LifecycleStep
+	nSteps := len(handlers) + 2
+	if p.lifecycle != nil {
+		steps = p.lifecycle(chain, handlers)
+		nSteps = len(steps)
 	}
-	steps := plan(chain, handlers)
+	// call runs step k's Do, or its Undo when undo is set.
+	call := func(hookCtx context.Context, k int, undo bool) {
+		p.callStep(hookCtx, rtx, steps, handlers, k, undo)
+	}
 
 	// run wraps every hook so a panic leaves the lifecycle in control, except with
 	// panicRecover=false and teardownOnPanic=false, where the hook runs unguarded and the panic
@@ -799,9 +805,9 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	// after teardown rather than reported.
 	panicked := false
 	var panicValue any
-	run := func(hookCtx context.Context, hook func(context.Context, *Context)) {
+	run := func(hookCtx context.Context, k int, undo bool) {
 		if !p.panicRecover && !p.teardownOnPanic {
-			hook(hookCtx, rtx) // unguarded: original stack, no teardown
+			call(hookCtx, k, undo) // unguarded: original stack, no teardown
 			return
 		}
 		defer func() {
@@ -814,7 +820,7 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 				}
 			}
 		}()
-		hook(hookCtx, rtx)
+		call(hookCtx, k, undo)
 	}
 
 	// halt reports whether forward progress should stop, converting a cancellation into
@@ -840,14 +846,19 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	// rtx holds the context the next hook receives, moved on by SetContext; received keeps
 	// what each step's Do received, for its teardown. halt and the reporter keep the run's ctx.
 	began := 0
-	received := make([]context.Context, len(steps))
+	var buf [8]context.Context // a typical plan fits, so its record stays on the stack
+	received := buf[:0]
+	if nSteps > len(buf) {
+		received = make([]context.Context, 0, nSteps)
+	}
+	received = received[:nSteps]
 	rtx.enterHook(ctx, false)
-	for i, s := range steps {
+	for i := range nSteps {
 		began++
 		received[i] = rtx.Context() //nolint:fatcontext // one context per step, recorded, not nested
 		// A nil Do is a step with only a teardown.
-		if s.Do != nil {
-			run(received[i], s.Do) //nolint:contextcheck // the context SetContext handed on
+		if p.lifecycle == nil || steps[i].Do != nil {
+			run(received[i], i, false) //nolint:contextcheck // the context SetContext handed on
 		}
 		if halt() {
 			break
@@ -857,9 +868,9 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	// Unwind. Both guards are re-checked per step, so an Exit or panic from within a teardown
 	// hook stops the rest too.
 	for i := began - 1; i >= 0 && !exitNow() && (p.teardownOnPanic || !panicked); i-- {
-		if steps[i].Undo != nil {
+		if hasUndo(p.lifecycle != nil, steps, handlers, i) {
 			rtx.enterHook(received[i], true) //nolint:contextcheck // what this step's Do received
-			run(received[i], steps[i].Undo)  //nolint:contextcheck // what this step's Do received
+			run(received[i], i, true)        //nolint:contextcheck // what this step's Do received
 		}
 	}
 	rtx.enterHook(ctx, true)
@@ -871,4 +882,22 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	}
 
 	return p.settle(ctx, rtx)
+}
+
+// callStep runs step k's Do, or its Undo when undo is set: one of steps when the program has
+// a custom lifecycle, else of the default plan for handlers.
+func (p *Program) callStep(ctx context.Context, rtx *Context, steps []LifecycleStep, handlers []Handler, k int, undo bool) {
+	if p.lifecycle != nil {
+		if undo {
+			steps[k].Undo(ctx, rtx)
+		} else {
+			steps[k].Do(ctx, rtx)
+		}
+		return
+	}
+	frame, h, do, un, _ := defaultStep(handlers, k)
+	if undo {
+		do = un
+	}
+	callHook(ctx, rtx, frame, h, do)
 }

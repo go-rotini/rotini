@@ -28,7 +28,7 @@ import (
 // (`type: array, items: {$ref: …}`) each occurrence is one element.
 
 // isObjectFlag reports whether a flag takes a structured value.
-func isObjectFlag(fd FlagDef) bool { return fd.ObjectSchema != "" }
+func isObjectFlag(fd *FlagDef) bool { return fd.ObjectSchema != "" }
 
 // bindObjectFlag decodes, validates and binds an object flag's raw occurrences into f, which is
 // a struct, a pointer to one, or a slice of either, with the program's features fs.
@@ -426,7 +426,7 @@ func objectFieldFlag(chain []Command, name string) (fd FlagDef, idx int, field s
 		return FlagDef{}, 0, "", false
 	}
 	fd, idx, ok = findFlagIndex(chain, base)
-	if !ok || !isObjectFlag(fd) || isArrayType(fd.Type) {
+	if !ok || !isObjectFlag(&fd) || isArrayType(fd.Type) {
 		return FlagDef{}, 0, "", false
 	}
 	return fd, idx, field, true
