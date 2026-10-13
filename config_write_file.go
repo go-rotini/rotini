@@ -181,7 +181,7 @@ func (t configFileTarget) checkSchema(key string, edited []byte, profile string)
 	}
 	if err := validator.Validate(m); err != nil {
 		t.feats.schemas.patternMessages(f.Schema, err)
-		return usageBind(channelConfig, key, fmt.Sprintf("config key %s: configuration file %s would be invalid: %s", key, where, schemaDetail(err)), err)
+		return usageBind(channelConfig, key, fmt.Sprintf("config key %s: configuration file %s %s", key, where, schemaVerdict(err, "would be invalid")), err)
 	}
 	return nil
 }

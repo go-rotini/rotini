@@ -2,9 +2,12 @@ package codegen
 
 import (
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -61,7 +64,7 @@ func TestPropertyLintFollowsGenerator(t *testing.T) {
 		}
 		props := map[string]Schema{}
 		for _, k := range keys {
-			props[k] = Schema{BaseSchema: BaseSchema{Type: "string"}}
+			props[k] = Schema{Type: "string"}
 		}
 		spec := &Spec{Command: Command{Name: "app", Schemas: map[string]Schema{
 			"Item": {BaseSchema: BaseSchema{Type: "object", Properties: props}},
@@ -86,4 +89,57 @@ func TestPropertyLintRejectsUntaggable(t *testing.T) {
 			t.Errorf("property %q: lint problems %q, want one about its json tag", k, got)
 		}
 	}
+}
+
+// TestGeneratedFieldNamesAllMatchesOneByOne pins that asking the generator for many objects in
+// one document names every object's fields as asking for each object alone does, including
+// objects it refuses, repeated key sets and objects without keys.
+func TestGeneratedFieldNamesAllMatchesOneByOne(t *testing.T) {
+	t.Parallel()
+	sets := [][]string{
+		{"foo"}, {"Foo", "foo"}, {"1", "field1"}, {"-", "_", "a-b", "a_b"}, {"ID", "id"},
+		{"httpURL", "httpUrl"}, {"é", "日本"}, {"", "x"}, {"a\\b", "c"}, {"a\tb", "a\nb", "ok"},
+		{"$schema", "gen_file"}, {}, {"foo"}, {"9lives", "v2"}, {"Probe0", "Root"},
+	}
+	all := generatedFieldNamesAll(sets)
+	for i, keys := range sets {
+		want := generatedFieldNames(keys)
+		if !maps.Equal(all[i], want) {
+			t.Errorf("keys %q: together %q, alone %q", keys, all[i], want)
+		}
+	}
+}
+
+// benchKeySets returns n objects of ten properties, a quarter of them repeating a shape.
+func benchKeySets(n int) [][]string {
+	sets := make([][]string, n)
+	for i := range sets {
+		shape := i
+		if i%4 == 3 {
+			shape = i - 1
+		}
+		keys := make([]string, 10)
+		for k := range keys {
+			keys[k] = fmt.Sprintf("field_%d_%d", shape, k)
+		}
+		slices.Sort(keys)
+		sets[i] = keys
+	}
+	return sets
+}
+
+func BenchmarkGeneratedFieldNames(b *testing.B) {
+	sets := benchKeySets(1000)
+	b.Run("together", func(b *testing.B) {
+		for b.Loop() {
+			generatedFieldNamesAll(sets)
+		}
+	})
+	b.Run("one-by-one", func(b *testing.B) {
+		for b.Loop() {
+			for _, keys := range sets {
+				generatedFieldNames(keys)
+			}
+		}
+	})
 }

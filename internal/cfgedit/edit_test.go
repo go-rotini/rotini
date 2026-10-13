@@ -297,28 +297,76 @@ func TestUnsetBlankJSON(t *testing.T) {
 	}
 }
 
-// An integer a format can't hold exactly is refused before the edit, as the caller's problem
-// rather than a verification failure.
+// An integer a format, or the reader rotini uses for it, can't hold exactly is refused before
+// the edit as a value error, not a verification failure. One the reader holds exactly is
+// written and reads back as the same number.
 func TestSetIntegerBeyondFormat(t *testing.T) {
 	for _, tc := range []struct {
 		format Format
 		value  any
-		want   string
+		want   string // the refusal when the reader can't hold the value
 	}{
 		{JSON, int64(9007199254740993), "JSON can't hold 9007199254740993 exactly"},
 		{JSONC, int64(math.MinInt64), "JSON can't hold"},
 		{JSON, []any{uint64(1 << 60)}, "JSON can't hold"},
-		{YAML, uint64(math.MaxUint64), "YAML integers are 64-bit signed"},
+		{JSON, uint64(math.MaxUint64), "JSON can't hold"},
+		{YAML, uint64(math.MaxUint64), "the YAML reader can't hold 18446744073709551615 exactly"},
+		{YAML, uint64(math.MaxInt64 + 1), "the YAML reader can't hold"},
 		{TOML, map[string]any{"a": uint64(math.MaxUint64)}, "TOML integers are 64-bit signed"},
 	} {
-		_, err := Set(nil, tc.format, []string{"big"}, tc.value)
-		if err == nil || !strings.Contains(err.Error(), tc.want) || errors.Is(err, ErrVerify) {
-			t.Errorf("%s %v: err = %v, want %q", tc.format, tc.value, err, tc.want)
+		out, err := Set(nil, tc.format, []string{"big"}, tc.value)
+		if tc.format == TOML || !readsIntegersExactly(tc.format) {
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !errors.Is(err, ErrValue) || errors.Is(err, ErrVerify) {
+				t.Errorf("%s %v: err = %v, want a value error %q", tc.format, tc.value, err, tc.want)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s %v: %v", tc.format, tc.value, err)
+			continue
+		}
+		got, err := decode(tc.format, out)
+		if err != nil || !equalValue(got["big"], tc.value) {
+			t.Errorf("%s %v: wrote %q, which reads back as %v (%v)", tc.format, tc.value, out, got["big"], err)
 		}
 	}
 	for format, v := range map[Format]any{JSON: int64(1 << 53), YAML: uint64(math.MaxInt64), TOML: int64(math.MinInt64)} {
 		if _, err := Set(nil, format, []string{"big"}, v); err != nil {
 			t.Errorf("%s %v: %v", format, v, err)
 		}
+	}
+}
+
+// A key holding U+2028 or U+2029, or a value holding them or U+0085, is written escaped, so
+// the next edit of the file finds no line break it refuses.
+func TestSetYAMLUnicodeLineBreaks(t *testing.T) {
+	out, err := Set([]byte("z: 1\n"), YAML, []string{"a b"}, "x y\u0085z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(string(out), "  \u0085") {
+		t.Errorf("wrote %q, which holds a raw Unicode line break", out)
+	}
+	if _, err := Set(out, YAML, []string{"z"}, "2"); err != nil {
+		t.Errorf("editing %q again: %v", out, err)
+	}
+}
+
+// A TOML key holding U+0000 is written when the TOML reader reads it back, and refused as a
+// value error otherwise; it never fails verification.
+func TestSetTOMLKeyWithNUL(t *testing.T) {
+	out, err := Set([]byte("[deploy]\ntimeout = \"\"\n"), TOML, []string{"deploy\x00timeout"}, "0")
+	if !tomlReadsNUL() {
+		if !errors.Is(err, ErrValue) {
+			t.Errorf("err = %v, want a value error", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decode(TOML, out)
+	if v, ok := lookup(got, []string{"deploy\x00timeout"}); err != nil || !ok || v != "0" {
+		t.Errorf("wrote %q, which reads back as %v (%v)", out, got, err)
 	}
 }

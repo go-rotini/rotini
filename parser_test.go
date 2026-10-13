@@ -2820,6 +2820,8 @@ func TestCoerce_narrowNumbersRejectOutOfRange(t *testing.T) {
 		{[]string{"--i32", "2147483648"}, "out of range: -2147483648 to 2147483647"},
 		{[]string{"--u8", "255"}, ""},
 		{[]string{"--u8", "256"}, `"256" is not a valid uint8 (out of range: 0 to 255)`},
+		{[]string{"--u8=-0"}, `"-0" is not a valid non-negative integer`},
+		{[]string{"--u8=-00"}, `"-00" is not a valid non-negative integer`},
 		{[]string{"--u16", "65536"}, "out of range: 0 to 65535"},
 		{[]string{"--u32", "4294967296"}, "out of range: 0 to 4294967295"},
 		{[]string{"--f32", "3.4e38"}, ""},

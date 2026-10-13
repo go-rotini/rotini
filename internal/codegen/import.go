@@ -124,8 +124,9 @@ func (p *Processor) importWith(ctx context.Context, opts ImportOptions, pl *plan
 		sb.dropped, sb.completion = nil, false
 		specYAML = sb.build(version)
 	}
-	out := Imported{Summary: res.stats(slices.Concat(runNotes, sb.dropped))}
-	for _, n := range slices.Concat(runNotes, res.Notes, groupDropped(sb.dropped)) {
+	dropped := groupDropped(sb.dropped)
+	out := Imported{Summary: res.stats(slices.Concat(runNotes, dropped))}
+	for _, n := range slices.Concat(runNotes, res.Notes, dropped) {
 		out.Notes = append(out.Notes, n.String())
 	}
 

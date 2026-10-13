@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1000,10 +1001,86 @@ func bindReconWaived(reg *recon.Registry, target any, waived bool) error {
 // failure, a value of the wrong type included: a configuration file never blocks --help.
 // recon collects every field's error, so the fields that did resolve are still bound.
 func bindConfigWaived(reg *recon.Registry, target any, waived bool) error {
-	if err := reg.Bind(target); err != nil && !waived {
+	err := reg.Bind(target)
+	anyAsJSONShape(reflect.ValueOf(target))
+	if err != nil && !waived {
 		return err
 	}
 	return nil
+}
+
+// anyAsJSONShape gives the values a configuration file binds into an untyped field (any, or a
+// map or list of any) the shape a JSON or YAML file gives them, whatever the format: a time,
+// such as a TOML date-time, as RFC 3339 text. v is the bound struct, or a pointer to it.
+func anyAsJSONShape(v reflect.Value) {
+	for v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	for _, f := range v.Fields() {
+		if !f.CanSet() || f.IsZero() {
+			continue
+		}
+		switch x := f.Interface().(type) {
+		case map[string]any:
+			if out, changed := jsonShape(x); changed {
+				f.Set(reflect.ValueOf(out))
+			}
+		case []any:
+			if out, changed := jsonShape(x); changed {
+				f.Set(reflect.ValueOf(out))
+			}
+		default:
+			if f.Kind() == reflect.Interface {
+				if out, changed := jsonShape(x); changed {
+					f.Set(reflect.ValueOf(&out).Elem())
+				}
+			}
+		}
+	}
+}
+
+// jsonShape is v with each time.Time as its RFC 3339 text. A map or list holding one is
+// copied, never changed; changed reports whether v held one.
+func jsonShape(v any) (out any, changed bool) {
+	switch t := v.(type) {
+	case time.Time:
+		return t.Format(time.RFC3339Nano), true
+	case map[string]any:
+		var m map[string]any
+		for k, e := range t {
+			if o, ok := jsonShape(e); ok {
+				if m == nil {
+					m = maps.Clone(t)
+				}
+				m[k] = o
+			}
+		}
+		if m == nil {
+			return v, false
+		}
+		return m, true
+	case []any:
+		var s []any
+		for i, e := range t {
+			if o, ok := jsonShape(e); ok {
+				if s == nil {
+					s = slices.Clone(t)
+				}
+				s[i] = o
+			}
+		}
+		if s == nil {
+			return v, false
+		}
+		return s, true
+	}
+	return v, false
 }
 
 // isRequirementError reports whether a recon error is about a requirement rather than reading
@@ -1318,7 +1395,11 @@ func searchFile(dirs []string, name string) string {
 // and what it is, or why the file could not be read.
 func configFileProblem(path string, err error) string {
 	if de, ok := errors.AsType[*toml.DuplicateKeyError](err); ok {
-		return fmt.Sprintf("could not parse configuration file %s:%d: duplicate key %q", path, de.Pos.Line, de.Key)
+		at := strconv.Itoa(de.Pos.Line)
+		if de.Pos.Column > 0 {
+			at += ":" + strconv.Itoa(de.Pos.Column)
+		}
+		return fmt.Sprintf("could not parse configuration file %s:%s: duplicate key %q", path, at, de.Key)
 	}
 	if pe, ok := errors.AsType[*recon.ParseError](err); ok {
 		loc := path
@@ -1327,7 +1408,7 @@ func configFileProblem(path string, err error) string {
 		}
 		return fmt.Sprintf("could not parse configuration file %s: %s", loc, decodeMessage(pe))
 	}
-	reason := "cannot be read"
+	reason := "cannot be read: " + err.Error()
 	info, statErr := os.Stat(path)
 	switch {
 	case statErr == nil && info.IsDir():
@@ -1408,7 +1489,7 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 			where += " (profile " + profile + ")"
 		}
 		return usageBind(channelConfig, f.Name,
-			fmt.Sprintf("configuration file %s is invalid: %s", where, schemaDetail(err)), err)
+			fmt.Sprintf("configuration file %s %s", where, schemaVerdict(err, "is invalid")), err)
 	}
 	return nil
 }
@@ -1579,7 +1660,8 @@ func envRegistry(v reflect.Value, envPrefix string, view *osView) (*recon.Regist
 
 // spellings gives env and config inputs the value spellings flags accept and recon's decode
 // does not: days and weeks in a duration (7d), yes/no, on/off and y/n for a bool, and the
-// numbers 1 and 0 a typed configuration format holds for one (see parseBool), a declared layout or relative form for a time field instead of RFC 3339, and
+// numbers 1 and 0 a typed configuration format holds for one (see parseBool), a declared
+// layout or relative form for a time field instead of RFC 3339, and
 // decimal integers, where a leading zero does not mean octal, plus the 0x, 0o and 0b literals
 // of an integer field that declares base: prefixed. Only the keys of those typed fields are
 // rewritten; a string input whose value is "yes" keeps it.
@@ -2248,6 +2330,19 @@ func channelDesc(channel string) string {
 	default:
 		return "flag"
 	}
+}
+
+// errSchemaUnfinished marks a schema check that stopped before it finished, so the document
+// is reported as not fully checked rather than invalid.
+var errSchemaUnfinished = errors.New("the schema check did not finish")
+
+// schemaVerdict is what a failed schema check says of a document: "is invalid: <detail>", or
+// "could not be fully checked against its schema" when the check stopped before it finished.
+func schemaVerdict(err error, invalid string) string {
+	if errors.Is(err, errSchemaUnfinished) {
+		return "could not be fully checked against its schema"
+	}
+	return invalid + ": " + schemaDetail(err)
 }
 
 // schemaDetail extracts a non-leaky detail from a [recon.ValidationError] — the property and

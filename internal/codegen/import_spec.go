@@ -3,6 +3,7 @@ package codegen
 import (
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -307,10 +308,7 @@ func (sb *importSpecBuilder) commentsFor(path string) []string {
 		if h.Path != path {
 			continue
 		}
-		where := h.File
-		if rel, err := filepath.Rel(sb.moduleRoot, h.File); err == nil && filepath.IsAbs(h.File) && !strings.HasPrefix(rel, "..") {
-			where = filepath.ToSlash(rel)
-		}
+		where := hookLocation(sb.moduleRoot, h.File)
 		if h.Line > 0 {
 			where = fmt.Sprintf("%s:%d", where, h.Line)
 		}
@@ -363,4 +361,23 @@ func groupDropped(notes []importNote) []importNote {
 			Msg: fmt.Sprintf("%d examples dropped, as %s: %s", len(quoted), k.why, strings.Join(quoted, ", "))})
 	}
 	return out
+}
+
+// hookLocation writes a hook's file for a spec comment without a machine's own directories:
+// relative to the module root, with "../" for a file outside it, such as in a local replace
+// target, or else under "~/" for one in the home directory. A file on another volume keeps only
+// its name.
+func hookLocation(moduleRoot, file string) string {
+	if !filepath.IsAbs(file) {
+		return file
+	}
+	if rel, err := filepath.Rel(moduleRoot, file); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if rel, err := filepath.Rel(home, file); err == nil && !strings.HasPrefix(rel, "..") {
+			return "~/" + filepath.ToSlash(rel)
+		}
+	}
+	return filepath.Base(file)
 }

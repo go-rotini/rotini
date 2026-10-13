@@ -1,0 +1,62 @@
+== commands
+deploy
+help
+quote
+remote
+status
+== command-prefix
+remote
+== flags
+--color
+--config
+--dir
+--exec
+--format
+--group
+--host
+--level
+--set
+--speed
+--token
+--user
+--no-color
+== enum
+json
+text
+yaml
+== enum-inline
+--format=json
+--format=text
+--format=yaml
+== enum-ignore-case
+slow
+Safe
+== enum-ignore-case-inline
+--speed=slow
+--speed=Safe
+== sub-command-enum
+dev
+prod
+== quote-all
+a b
+it's $HOME
+say "hi"
+`touch pwned`
+$(touch pwned)
+x;touch pwned
+star*
+~root
+o’neil;touch pwned
+“q”
+back\slash
+a\:b
+C:\Users\me
+a!b
+ends'
+{a,b}
+a&b|c<d>e
+#hash
+true
+null
+-foo.bar
+--%

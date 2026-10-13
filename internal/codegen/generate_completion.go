@@ -129,9 +129,9 @@ _PROG_show_messages() {
 
 # Appends each line of standard input to COMPREPLY as one candidate, unexpanded.
 _PROG_add_lines() {
-    local line
+    local line k=${#COMPREPLY[@]}
     while IFS= read -r line; do
-        COMPREPLY+=("$line")
+        COMPREPLY[k++]=$line
     done
     return 0
 }
@@ -152,18 +152,25 @@ _PROG_print_messages() {
 _PROG_describe() {
     [[ $COMP_TYPE == 63 ]] || return 0
     (( __PROG_described && ${#COMPREPLY[@]} > 1 && ${#COMPREPLY[@]} == ${#__PROG_descs[@]} )) || return 0
-    local i width=0 cols=${COLUMNS:-80} line
-    for i in "${!COMPREPLY[@]}"; do
-        (( ${#COMPREPLY[i]} > width )) && width=${#COMPREPLY[i]}
+    local v width=0 cols=${COLUMNS:-80} line k=0
+    local -a out=()
+    for v in "${COMPREPLY[@]}"; do
+        (( ${#v} > width )) && width=${#v}
     done
-    for i in "${!COMPREPLY[@]}"; do
-        [[ -n ${__PROG_descs[i]} ]] || continue
-        line=$(printf '%-*s  (%s)' "$width" "${COMPREPLY[i]}" "${__PROG_descs[i]}")
-        if (( ${#line} > cols - 1 )); then
-            line="${line:0:cols-5}...)"
+    # The descriptions are walked as positional parameters, in step with the candidates.
+    set -- "${__PROG_descs[@]}"
+    for v in "${COMPREPLY[@]}"; do
+        line=$v
+        if [[ -n $1 ]]; then
+            printf -v line '%-*s  (%s)' "$width" "$v" "$1"
+            if (( ${#line} > cols - 1 )); then
+                line="${line:0:cols-5}...)"
+            fi
         fi
-        COMPREPLY[i]=$line
+        out[k++]=$line
+        shift
     done
+    COMPREPLY=("${out[@]}")
     return 0
 }
 
@@ -271,24 +278,25 @@ _PROG_quote() {
 # Quotes each candidate in COMPREPLY as one literal word for readline to insert. Readline
 # inserts the text several candidates share, so the first candidate quotes the character where
 # they part in another way, and the shared text never ends inside one character's quoting.
+# Candidates are read by value: bash 3.2 finds an array element by walking the array.
 _PROG_quote_all() {
-    local i p=0 c first pre head
-    first=${COMPREPLY[0]}
-    if (( ${#COMPREPLY[@]} > 1 )); then
-        while (( p < ${#first} )); do
-            c=${first:p:1}
-            for i in "${!COMPREPLY[@]}"; do
-                [[ ${COMPREPLY[i]:p:1} == "$c" ]] || break 2
+    local v c p rest pre="" qpre head n=${#COMPREPLY[@]} first=1 k=0
+    local -a out=()
+    if (( n > 1 )); then
+        pre=${COMPREPLY[0]}
+        for v in "${COMPREPLY[@]}"; do
+            while [[ $v != "$pre"* ]]; do
+                pre=${pre%?}
             done
-            (( p++ ))
         done
     fi
-    _PROG_quote "${first:0:p}"
-    pre=$REPLY
-    for i in "${!COMPREPLY[@]}"; do
-        c=${COMPREPLY[i]:p:1}
+    p=${#pre}
+    _PROG_quote "$pre"
+    qpre=$REPLY
+    for v in "${COMPREPLY[@]}"; do
+        c=${v:p:1}
         head=""
-        if (( i == 0 && ${#COMPREPLY[@]} > 1 )) && [[ -z $open && -n $c ]]; then
+        if (( first && n > 1 )) && [[ -z $open && -n $c ]]; then
             printf -v head '%q' "$c"
             if [[ $head == "$c" ]]; then
                 head=""
@@ -298,12 +306,21 @@ _PROG_quote_all() {
                 head="'$c'"
             fi
         fi
+        first=0
         if [[ -n $head ]]; then
-            _PROG_quote "${COMPREPLY[i]:p+1}"
+            rest=${v:p+1}
         else
-            _PROG_quote "${COMPREPLY[i]:p}"
+            rest=${v:p}
         fi
-        REPLY=$pre$head$REPLY
+        # The common case of _PROG_quote, without the cost of a call per candidate.
+        if [[ -z $rest ]]; then
+            REPLY=""
+        elif [[ -z $open ]]; then
+            printf -v REPLY '%q' "$rest"
+        else
+            _PROG_quote "$rest"
+        fi
+        REPLY=$qpre$head$REPLY
         # Readline closes the quote left open, unless the text already ends with that quote.
         case $open in
             "")
@@ -311,20 +328,21 @@ _PROG_quote_all() {
                 [[ $REPLY == "~"* ]] && REPLY="\\$REPLY"
                 ;;
             "'")
-                [[ ${COMPREPLY[i]} == *"'" ]] && REPLY=${REPLY%"'\\''"}"'\\'"
+                [[ $v == *"'" ]] && REPLY=${REPLY%"'\\''"}"'\\'"
                 ;;
             '"')
-                [[ ${COMPREPLY[i]} == *'"' ]] && REPLY=${REPLY%'\"'}'"\"'
-                [[ ${COMPREPLY[i]} == *'!' ]] && REPLY+='"'
+                [[ $v == *'"' ]] && REPLY=${REPLY%'\"'}'"\"'
+                [[ $v == *'!' ]] && REPLY+='"'
                 ;;
         esac
-        COMPREPLY[i]=$REPLY
+        out[k++]=$REPLY
     done
+    COMPREPLY=("${out[@]}")
     return 0
 }
 
 _PROG_complete() {
-    local line value cur="" lead="" open="" directive="" options="" ext exts i REPLY joins
+    local line value cur="" lead="" open="" directive="" options="" ext exts i=0 REPLY joins
     local -a args=()
     __PROG_messages=()
     __PROG_descs=()
@@ -348,13 +366,13 @@ _PROG_complete() {
                 # Readline replaces only the text after lead.
                 value=${line%%$'\t'*}
                 [[ $value == "$lead"* ]] && value=${value:${#lead}}
-                COMPREPLY+=("$value")
+                COMPREPLY[i]=$value
+                __PROG_descs[i]=""
                 if [[ $line == *$'\t'* ]]; then
-                    __PROG_descs+=("${line#*$'\t'}")
+                    __PROG_descs[i]=${line#*$'\t'}
                     __PROG_described=1
-                else
-                    __PROG_descs+=("")
                 fi
+                i=$(( i + 1 ))
                 ;;
         esac
     done < <(PROG __complete "${args[@]}" 2>/dev/null)
@@ -429,8 +447,9 @@ _PROG() {
     fi
     lines=(${(f)"$(PROG __complete "${args[@]}" 2>/dev/null)"})
     # Output: candidates as "name<TAB>description", then ":rotini:message <text>" lines, then
-    # a ":rotini:option <word>..." line (nospace, keep-order), then a ":rotini:<directive>"
-    # line (none, file, file <exts>, directory, executable, user, group, host).
+    # a ":rotini:option <word>..." line (nospace, keep-order, ignore-case), then a
+    # ":rotini:<directive>" line (none, file, file <exts>, directory, executable, user, group,
+    # host).
     for line in $lines; do
         if [[ $line == ':rotini:message '* ]]; then
             msgs+=("${line#:rotini:message }")
@@ -444,18 +463,22 @@ _PROG() {
             directive=${line#:rotini:}
             continue
         fi
+        # _describe reads a backslash in a name as an escape, and a colon as the end of it.
         if [[ $line == *$'\t'* ]]; then
             name=${line%%$'\t'*}
             desc=${line#*$'\t'}
-            pairs+=("${name//:/\\:}:${desc//:/\\:}")
+            pairs+=("${${name//\\/\\\\}//:/\\:}:${desc//:/\\:}")
         else
-            pairs+=("${line//:/\\:}")
+            pairs+=("${${line//\\/\\\\}//:/\\:}")
         fi
     done
     for msg in $msgs; do
         _message -r "$msg"
     done
     [[ $options == *" nospace "* ]] && opts+=(-S '')
+    # The candidates match the typed word in any case: so must zsh, which otherwise keeps only
+    # those that match it exactly.
+    [[ $options == *" ignore-case "* ]] && opts+=(-M 'm:{[:lower:][:upper:]}={[:upper:][:lower:]}')
     if (( $#pairs )); then
         if [[ $options == *" keep-order "* ]]; then
             _describe -V 'PROG' pairs "${opts[@]}"
@@ -575,10 +598,11 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
         $text = $parts[0]
         $tip = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { $text }
         # PowerShell inserts the text as typed, so quote one with spaces, wildcards, shell
-        # characters or a leading ~ (a home directory to native commands). PowerShell reads the
-        # typographic quotes U+2018 to U+201E as quotes too, and inside single quotes doubles
-        # each form of single quote.
-        $insert = if ($text -match '^~|[\s''"$&|;<>(){}@#,*?\[\]` + "`" + `\u2018-\u201E]') { "'" + ($text -replace '[''\u2018-\u201B]', '$0$0') + "'" } else { $text }
+        # characters or a leading ~ (a home directory to native commands). PowerShell splits a
+        # bare argument that starts with - at its first ., and reads --% as the end of parsing.
+        # It reads the typographic quotes U+2018 to U+201E as quotes too, and inside single
+        # quotes doubles each form of single quote.
+        $insert = if ($text -match '^~|^-.*\.|^--%$|[\s''"$&|;<>(){}@#,*?\[\]` + "`" + `\u2018-\u201E]') { "'" + ($text -replace '[''\u2018-\u201B]', '$0$0') + "'" } else { $text }
         [System.Management.Automation.CompletionResult]::new($insert, $text, 'ParameterValue', $tip)
     }
 
@@ -640,16 +664,32 @@ const nushellCompletionTemplate = `# Nushell completion for PROG
 # host). Nushell has no completer for program, user, group or host names, so those offer
 # nothing.
 def "nu-complete PROG" [place: record] {
-    let words = ($place.command | skip 1)
-    let partial = ($words | last)
+    let typed = ($place.command | skip 1)
+    let partial = ($typed | last)
+    # Nushell gives each word as typed. The program gets it without the quotes it was typed in,
+    # including a quote the last word leaves open.
+    let unquote = {|w|
+        if ($w =~ "^r#+'") {
+            let closed = ($w | parse --regex "^r(?<h>#+)'(?<v>.*)'(?P=h)$")
+            if ($closed | is-not-empty) { $closed.0.v } else { $w | str replace --regex "^r#+'" '' }
+        } else if ($w =~ "^['` + "`" + `]") {
+            $w | str replace --regex "^(['` + "`" + `])(.*?)(?:\\1)?$" '$2'
+        } else if ($w | str starts-with '"') {
+            $w | str replace --regex '^"((?:[^"\\]|\\.)*)"?$' '$1' | str replace --all --regex '\\(["\\])' '$1'
+        } else {
+            $w
+        }
+    }
+    let words = ($typed | each {|w| do $unquote $w })
     let lines = (^PROG __complete ...$words | complete | get stdout | lines)
     let options = ($lines | where ($it | str starts-with ':rotini:option ') | each { str substring 15.. | split row ' ' } | flatten)
     let directive = ($lines | where ($it | str starts-with ':rotini:') and not ($it | str starts-with ':rotini:message ') and not ($it | str starts-with ':rotini:option ') | each { str substring 8.. } | append '' | first)
     let space = not ('nospace' in $options)
     # Nushell inserts a value as given: one that isn't a plain word goes in single quotes, or
-    # in a raw string when it holds a single quote, so it stays one literal argument.
+    # in a raw string when it holds a single quote, so it stays one literal argument. Nushell
+    # reads a bare null as no value, and a bare =, += and the like as an assignment.
     let quote = {|v|
-        if ($v =~ '^[\w.:/=+-]+$') and not ($v | str starts-with '~') {
+        if ($v =~ '^[\w.:/=+-]+$') and not ($v | str starts-with '~') and $v != 'null' and not ($v =~ '^(\+\+|[+\-/*])?=$') {
             $v
         } else if not ($v | str contains "'") {
             $"'($v)'"
@@ -691,6 +731,7 @@ def "nu-complete PROG" [place: record] {
     {completions: $found, options: {sort: (not ('keep-order' in $options))}}
 }
 
+# Bare true and false are read as booleans, which reach the program as the same words.
 @complete "nu-complete PROG"
-extern PROG [...args: string]
+extern PROG [...args: oneof<string, bool>]
 `

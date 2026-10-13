@@ -4290,8 +4290,8 @@ of guidance to show (see [completion messages](#completion-messages)), and
 {{< /code >}}
 
 The lines come in a fixed order: candidates, then one `:rotini:message` line per message, then
-a `:rotini:option` line (`nospace`, `keep-order`) when the answer has options, then the kind
-line (`:rotini:file`, `:rotini:directory`, `:rotini:none` or another
+a `:rotini:option` line (`nospace`, `keep-order`, `ignore-case`) when the answer has options,
+then the kind line (`:rotini:file`, `:rotini:directory`, `:rotini:none` or another
 [completion kind](#what-completion-offers)) when the input declares one. A script skips
 `:rotini:` lines it doesn't know and the kind line is always last, so a script and a binary
 from different rotini releases work together.

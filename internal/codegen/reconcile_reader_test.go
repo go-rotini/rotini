@@ -274,3 +274,25 @@ func TestSourceLocators_degradeCleanly(t *testing.T) {
 		}
 	}
 }
+
+// TestFindModuleFile_vendorModInsideGoModTree pins that a vendor.mod module inside a tree with
+// its own go.mod further up is found by its vendor.mod, the nearer module file.
+func TestFindModuleFile_vendorModInsideGoModTree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/outer\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vm := filepath.Join(root, "vm")
+	nested := filepath.Join(vm, "cmd")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vm, "vendor.mod"), []byte("module example.com/vm\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(nested)
+	_, name, file, err := findModuleFile()
+	if err != nil || name != "example.com/vm" || filepath.Base(file) != "vendor.mod" {
+		t.Errorf("findModuleFile = (%q, %q, %v), want example.com/vm from vendor.mod", name, file, err)
+	}
+}

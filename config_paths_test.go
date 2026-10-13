@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -92,7 +93,7 @@ func TestConfigSource_userPathIsLiteral(t *testing.T) {
 }
 
 // A path naming a user that doesn't exist, and a TOML key given twice, are reported in
-// rotini's words, with the line of the repeated key.
+// rotini's words, with the line and column of the repeated key.
 func TestConfigFile_problemWording(t *testing.T) {
 	dir := t.TempDir()
 	set := InputSettings{ConfigFiles: []ConfigFile{{Name: "c", Path: "~nosuchuser/x.yaml"}}}
@@ -105,9 +106,10 @@ func TestConfigFile_problemWording(t *testing.T) {
 	writeTestFile(t, p, "name = 'a'\nname = 'b'\n")
 	set = InputSettings{ConfigFiles: []ConfigFile{{Name: "c", Path: p}}}
 	_, err = NewContextFor(configPathDef(""), nil).WithInputSettings(set).Inputs[configPathInputs]()
-	want := "could not parse configuration file " + p + `:2: duplicate key "name"`
-	if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "recon:") {
-		t.Errorf("duplicate key: %v; want %q", err, want)
+	// The column is the TOML reader's: where it places the repeated key.
+	want := regexp.MustCompile(`could not parse configuration file ` + regexp.QuoteMeta(p) + `:2:[1-9][0-9]*: duplicate key "name"`)
+	if err == nil || !want.MatchString(err.Error()) || strings.Contains(err.Error(), "recon:") {
+		t.Errorf("duplicate key: %v; want a match for %s", err, want)
 	}
 }
 

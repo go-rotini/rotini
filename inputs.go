@@ -837,19 +837,17 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 	if !cs.IsValid() || cs.Kind() != reflect.Struct {
 		return nil
 	}
-	bind := bindReconWaived
-	if cfg != nil {
-		bind = bindConfigWaived
-	} else if err := checkEnvMaps(cs, reg, labels); err != nil {
-		return err
-	}
-	if err := bind(reg, cs.Addr().Interface(), waived); err != nil {
-		return labels.bind(channelOf(cfg), err)
-	}
 	if cfg != nil {
 		// A pinned field reads only its own file, before it is expanded and checked.
-		if err := bindPinnedConfig(cs, cfg); err != nil {
+		if err := fillConfig(cs, cfg, waived); err != nil {
 			return err
+		}
+	} else {
+		if err := checkEnvMaps(cs, reg, labels); err != nil {
+			return err
+		}
+		if err := bindReconWaived(reg, cs.Addr().Interface(), waived); err != nil {
+			return labels.bindStruct(channelEnv, err, reg, cs)
 		}
 	}
 	expanded, err := expandChannelStruct(cs, reg, cfg, waived, labels)

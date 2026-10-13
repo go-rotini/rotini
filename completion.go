@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // completeCommand is the hidden sub-command the generated shell scripts call to
@@ -110,6 +111,8 @@ type completionAnswer struct {
 	// noSpace asks the shell to add no space after the inserted candidate: an item of a
 	// separated list, which more items may follow.
 	noSpace bool
+	// ignoreCase reports that the candidates matched the typed word without regard to case.
+	ignoreCase bool
 }
 
 // complete returns the candidates for the word currently being typed — the last element of
@@ -169,8 +172,8 @@ func merged(names []string, vals valueCandidates, partial string) completionAnsw
 	if len(names) == 0 {
 		return ans
 	}
-	out := filterPrefix(append(names, ans.cands...), partial)
-	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (ans.keepOrder || !slices.IsSorted(out))}
+	out := filterPrefixCase(append(names, ans.cands...), partial, ans.ignoreCase)
+	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (ans.keepOrder || !slices.IsSorted(out)), ignoreCase: ans.ignoreCase}
 }
 
 // valueCandidates are the candidates for a value, with where they came from, which decides
@@ -191,11 +194,12 @@ type valueCandidates struct {
 // answer filters the candidates by prefix and orders them: sorted, or kept as given.
 func (v valueCandidates) answer(prefix string) completionAnswer {
 	out := filterPrefixCase(v.cands, prefix, v.foldCase)
+	ignoreCase := v.foldCase && len(out) > 0
 	if v.sorted {
 		sort.Strings(out)
-		return completionAnswer{cands: out}
+		return completionAnswer{cands: out, ignoreCase: ignoreCase}
 	}
-	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (v.dynamic || !slices.IsSorted(out)), noSpace: v.noSpace && len(out) > 0}
+	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (v.dynamic || !slices.IsSorted(out)), noSpace: v.noSpace && len(out) > 0, ignoreCase: ignoreCase}
 }
 
 // completePendingFlagValue completes the separate-word form — "--flag <TAB>", and bash's
@@ -778,13 +782,30 @@ func filterPrefixCase(candidates []string, prefix string, fold bool) []string {
 		if before, _, ok := strings.Cut(c, "\t"); ok {
 			name = before
 		}
-		has := strings.HasPrefix(name, prefix) || (fold && len(name) >= len(prefix) && strings.EqualFold(name[:len(prefix)], prefix))
+		has := strings.HasPrefix(name, prefix) || (fold && foldedPrefix(name, prefix))
 		if name != "" && has && !seen[name] {
 			seen[name] = true
 			out = append(out, c)
 		}
 	}
 	return out
+}
+
+// foldedPrefix reports whether s begins with prefix under Unicode case folding, as
+// [strings.EqualFold] compares, rune by rune: a rune and its other case may differ in length.
+func foldedPrefix(s, prefix string) bool {
+	for prefix != "" {
+		if s == "" {
+			return false
+		}
+		_, n := utf8.DecodeRuneInString(s)
+		_, m := utf8.DecodeRuneInString(prefix)
+		if !strings.EqualFold(s[:n], prefix[:m]) {
+			return false
+		}
+		s, prefix = s[n:], prefix[m:]
+	}
+	return true
 }
 
 // withDescription suffixes a candidate with its one-line description as "name\tdescription",
@@ -981,6 +1002,10 @@ type CompletionResult struct {
 	// KeepOrder asks the shell to show the candidates in the order given, not sorted: a
 	// completer's own order, an enum's declared order, or unset required flags first.
 	KeepOrder bool
+	// IgnoreCase reports that the candidates match the typed word without regard to case (an
+	// enum that ignores case), so a shell that filters candidates by the typed word should
+	// match them that way too.
+	IgnoreCase bool
 }
 
 // CompletionCandidate is one offered value and its optional one-line description.
@@ -1077,6 +1102,7 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 	rtx.mu.RLock()
 	result.NoSpace = asked.NoSpace || (allKeys && len(result.Candidates) > 0) || answer.noSpace
 	result.KeepOrder = asked.KeepOrder || answer.keepOrder
+	result.IgnoreCase = answer.ignoreCase
 	if fb := rtx.completionFallback; fb != nil {
 		result.Hint.Kind, result.Hint.Extensions = fb.Kind, fb.Extensions
 	}
@@ -1187,7 +1213,7 @@ const completionOptionPrefix = completionDirectivePrefix + "option "
 // rotiniCompletion is rotini's own format: what the hidden __complete prints by default, and
 // what the generated shell scripts read. One candidate per line ("value\tdescription"), then a
 // ":rotini:message <text>" line per message, then a ":rotini:option <word>…" line when the
-// answer has options (nospace, keep-order), then the hint's ":rotini:" kind line when the input
+// answer has options (nospace, keep-order, ignore-case), then the hint's ":rotini:" kind line when the input
 // declares one. The kind line is always last, so a script that doesn't know an option line
 // still reads the kind.
 func rotiniCompletion(w io.Writer, result CompletionResult) error {
@@ -1201,6 +1227,9 @@ func rotiniCompletion(w io.Writer, result CompletionResult) error {
 	}
 	if result.KeepOrder {
 		opts = append(opts, "keep-order")
+	}
+	if result.IgnoreCase {
+		opts = append(opts, "ignore-case")
 	}
 	if len(opts) > 0 {
 		lines = append(lines, completionOptionPrefix+strings.Join(opts, " "))

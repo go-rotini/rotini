@@ -89,7 +89,8 @@ func TestImport(t *testing.T) {
 	if got.Spec != filepath.Join("cmd", "acme", ".rotini.spec.yaml") || got.Conf != filepath.Join("cmd", "acme", ".rotini.conf.yaml") || got.Result == "" {
 		t.Errorf("report = %+v", got)
 	}
-	if want := "imported 7 commands, 8 flags: 4 lossy, 1 unsupported, 2 info"; got.Summary != want {
+	// The summary counts the notes as reported: two examples dropped for one reason are one note.
+	if want := "imported 7 commands, 8 flags: 3 lossy, 1 unsupported, 2 info"; got.Summary != want {
 		t.Errorf("summary = %q, want %q", got.Summary, want)
 	}
 	notes := strings.Join(got.Notes, "\n")

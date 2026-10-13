@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/rotini/internal/testmod"
 )
 
 // TestInitialize_endToEnd runs a real initialize into a fresh module and pins that the
@@ -20,7 +22,7 @@ func TestInitialize_endToEnd(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n"+testmod.Directives(repoRoot))
 	t.Chdir(dir)
 
 	if _, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{}); err != nil {
@@ -200,7 +202,7 @@ func TestInitialize_keywordAndDeviceNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n"+testmod.Directives(repoRoot))
 	t.Chdir(dir)
 	if _, err := NewProcessor("0.0.0").Initialize("type", InitOptions{}); err != nil {
 		t.Fatalf("Initialize type: %v", err)

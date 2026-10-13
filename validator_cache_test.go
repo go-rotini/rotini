@@ -1,9 +1,12 @@
 package rotini
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,5 +120,50 @@ func TestSchemaCheck_timesAreText(t *testing.T) {
 	}
 	if _, ok := m["dt"].(time.Time); !ok {
 		t.Errorf("the document was changed: %#v", m["dt"])
+	}
+}
+
+// A schema check that stops before it finishes, such as at jsonschema's evaluation limit, reports
+// the configuration file as not fully checked, never as invalid.
+func TestSchemaCheck_unfinishedIsNotInvalid(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`{"$ref":"#/$defs/d0","$defs":{`)
+	for i := range 21 {
+		fmt.Fprintf(&b, `"d%d":{"allOf":[{"$ref":"#/$defs/d%d"},{"$ref":"#/$defs/d%d"}]},`, i, i+1, i+1)
+	}
+	b.WriteString(`"d21":{"type":"object"}}}`)
+	schema := b.String()
+	v, err := schemaValidator(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Validate(map[string]any{}); err == nil {
+		t.Skip("this jsonschema finishes the check: it has no evaluation limit")
+	}
+	cfg := filepath.Join(t.TempDir(), "app.json")
+	if err := os.WriteFile(cfg, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var in struct {
+		App struct {
+			Flags, Arguments struct{}
+			Config           struct {
+				X string `rotini:"x" recon:"x"`
+			}
+		}
+	}
+	err = NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Schema: schema}}}).
+		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	if err == nil || !strings.Contains(err.Error(), "could not be fully checked against its schema") || strings.Contains(err.Error(), "invalid") {
+		t.Errorf("err = %v, want the file reported as not fully checked", err)
+	}
+}
+
+func TestSchemaVerdict(t *testing.T) {
+	if got := schemaVerdict(fmt.Errorf("x: %w", errSchemaUnfinished), "is invalid"); got != "could not be fully checked against its schema" {
+		t.Errorf("unfinished: %q", got)
+	}
+	if got := schemaVerdict(errors.New("x"), "is invalid"); got != "is invalid: does not match its schema" {
+		t.Errorf("failed: %q", got)
 	}
 }

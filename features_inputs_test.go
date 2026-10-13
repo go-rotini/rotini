@@ -311,3 +311,20 @@ func TestDecodeAny_duplicateKey(t *testing.T) {
 		}
 	}
 }
+
+// A stdin document of any shape that is not valid UTF-8 is an error at the first bad byte, as
+// an object document is, never a value with the bytes replaced.
+func TestDecodeAny_invalidUTF8(t *testing.T) {
+	fs := allFeatures()
+	for _, format := range []string{"json", "jsonc", "yaml"} {
+		v, err := fs.codec(format).decodeAny([]byte("[\"a\",\n \"b\xffc\"]"))
+		if err == nil {
+			t.Errorf("%s: %v, want an invalid UTF-8 error", format, v)
+			continue
+		}
+		line, col, ok := parsePosition(err)
+		if !ok || line != 2 || col != 4 || decodeMessage(err) != "invalid UTF-8 in input" {
+			t.Errorf("%s: line %d, column %d (%v), message %q; want line 2, column 4, invalid UTF-8 in input", format, line, col, ok, decodeMessage(err))
+		}
+	}
+}

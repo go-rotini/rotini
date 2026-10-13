@@ -255,11 +255,11 @@ func configKeyPath(format cfgedit.Format, f ConfigFile, profile, key string) []s
 	return path
 }
 
-// editError reports a failed edit: a layout the user edits by hand, a file that can't be
-// parsed, or a bug that left the file untouched.
+// editError reports a failed edit: a layout the user edits by hand, a value the file's format
+// can't hold, a file that can't be parsed, or a bug that left the file untouched.
 func (t configFileTarget) editError(key string, err error) error {
 	switch {
-	case errors.Is(err, cfgedit.ErrRefused):
+	case errors.Is(err, cfgedit.ErrRefused), errors.Is(err, cfgedit.ErrValue):
 		return usageBind(channelConfig, key, fmt.Sprintf("configuration file %s: %v", t.path, err), err)
 	case errors.Is(err, cfgedit.ErrVerify), errors.Is(err, cfgedit.ErrUnsupported):
 		return internalBind(channelConfig, key, fmt.Sprintf("could not write config key %s to configuration file %s: %v", key, t.path, err), err)

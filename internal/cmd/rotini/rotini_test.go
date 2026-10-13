@@ -550,6 +550,41 @@ func TestRequiresRuntime(t *testing.T) {
 	}
 }
 
+// TestMissingRuntime_vendorMod pins that a module kept in vendor.mod is read for the runtime
+// requirement, ahead of a go.mod further up, and that the warning names vendor.mod and the go get
+// that edits it.
+func TestMissingRuntime_vendorMod(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/outer\n\nrequire github.com/go-rotini/rotini v1.0.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vm := filepath.Join(root, "vm")
+	sub := filepath.Join(vm, "cmd", "app")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vm, "vendor.mod"), []byte("module example.com/vm\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if requiresRuntime(sub) {
+		t.Error("requiresRuntime read the outer go.mod, not the vendor.mod of the module")
+	}
+	if got := moduleFile(sub); got != filepath.Join(vm, "vendor.mod") {
+		t.Errorf("moduleFile = %s, want the vendor.mod", got)
+	}
+	for dir, want := range map[string]string{
+		vm:  "vendor.mod does not require github.com/go-rotini/rotini yet; run `go get -modfile=vendor.mod github.com/go-rotini/rotini` before building",
+		sub: "run `go get -modfile=../../vendor.mod github.com/go-rotini/rotini`",
+	} {
+		if got := missingRuntime(dir, "building").Error(); !strings.Contains(got, want) {
+			t.Errorf("missingRuntime(%s) = %q, want it to hold %q", dir, got, want)
+		}
+	}
+	if got := missingRuntime(t.TempDir(), "building").Error(); !strings.HasPrefix(got, "go.mod does not require") || !strings.Contains(got, "run `go get github.com/go-rotini/rotini`") {
+		t.Errorf("with no module file: %q", got)
+	}
+}
+
 // Every command reports bad input the same way: one "Error:" line on stderr and a non-zero
 // exit, with no help page dumped after it.
 func TestCLI_inputErrorsAreReportedAlike(t *testing.T) {

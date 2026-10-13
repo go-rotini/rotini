@@ -2091,11 +2091,26 @@ func TestInputReader_envIntegerWording(t *testing.T) {
 		"APP_PORTS=1,x":              `environment variable APP_PORTS: "x" is not a valid integer`,
 		"APP_PINS=1,300":             `environment variable APP_PINS: "300" is not a valid uint8 (out of range: 0 to 255)`,
 	} {
-		_, err := NewContextFor(tbAppDef(), nil).WithEnviron([]string{env}).Inputs[in]()
-		if err == nil || err.Error() != want {
-			t.Errorf("%s: %v, want %q", env, err, want)
+		for reader, err := range readerErrors[in](NewContextFor(tbAppDef(), nil).WithEnviron([]string{env}), "env") {
+			if err == nil || err.Error() != want {
+				t.Errorf("%s: %s: %v, want %q", env, reader, err, want)
+			}
 		}
 	}
+}
+
+// readerErrors reads T through Inputs, InputsWithReport and the reader of the one layer
+// ("env" or "files"), returning each reader's error by its name.
+func readerErrors[T any](rtx *Context, layer string) map[string]error {
+	errs := map[string]error{}
+	_, errs["Inputs"] = rtx.Inputs[T]()
+	_, _, errs["InputsWithReport"] = rtx.InputsWithReport[T]()
+	if layer == "env" {
+		_, errs["EnvInputs"] = rtx.EnvInputs[T]()
+	} else {
+		_, errs["FileInputs"] = rtx.FileInputs[T]()
+	}
+	return errs
 }
 
 // A config input reads a value as a flag's fallback does: a number 1 or 0 fills a bool, a plain
@@ -2124,16 +2139,16 @@ func TestInputReader_configValueWording(t *testing.T) {
 		"pins: \"1,300\"\n": `config key pins: "300" is not a valid uint8 (out of range: 0 to 255)`,
 	} {
 		cfg := writeConfig(t, body)
-		var v in
-		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(NewContextFor(tbAppDef(), nil), &v)
-		if want == "" {
-			if err != nil {
-				t.Errorf("%q: %v", body, err)
-			}
-			continue
+		if want != "" {
+			want += " (from configuration file " + cfg + ")"
 		}
-		if want += " (from configuration file " + cfg + ")"; err == nil || err.Error() != want {
-			t.Errorf("%q: %v, want %q", body, err, want)
+		set := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+		for reader, err := range readerErrors[in](NewContextFor(tbAppDef(), nil).WithInputSettings(set), "files") {
+			if want == "" && err != nil {
+				t.Errorf("%q: %s: %v", body, reader, err)
+			} else if want != "" && (err == nil || err.Error() != want) {
+				t.Errorf("%q: %s: %v, want %q", body, reader, err, want)
+			}
 		}
 	}
 	read := func(body string) (b bool, pins []uint8) {
@@ -2216,5 +2231,35 @@ func BenchmarkFallbackValues(b *testing.B) {
 		if _, err := fallbackValues(scalar, ","); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// A configuration file's values bound into an untyped map or list take the shape a JSON or YAML
+// file gives them, whatever the format: a TOML date-time arrives as RFC 3339 text.
+func TestConfigMap_takesJSONShape(t *testing.T) {
+	doc := "[m]\nwhen = 2024-01-02T03:04:05Z\nd = 2024-01-02\nn = 5\nl = [2024-01-02T03:04:05.5+01:00]\n[m.sub]\nw = 2024-01-02T03:04:05Z\n"
+	cfg := filepath.Join(t.TempDir(), "m.toml")
+	if err := os.WriteFile(cfg, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var in struct {
+		App struct {
+			Flags, Arguments struct{}
+			Config           struct {
+				M map[string]any `rotini:"m" recon:"m"`
+			}
+		}
+	}
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg}}}).
+		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"when": "2024-01-02T03:04:05Z", "d": "2024-01-02", "n": int64(5),
+		"l": []any{"2024-01-02T03:04:05.5+01:00"}, "sub": map[string]any{"w": "2024-01-02T03:04:05Z"},
+	}
+	if !reflect.DeepEqual(in.App.Config.M, want) {
+		t.Errorf("m = %#v\nwant %#v", in.App.Config.M, want)
 	}
 }

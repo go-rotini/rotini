@@ -214,31 +214,21 @@ func inputFieldClashes(spec *Spec, c *Command, path, ptr string) []error {
 // payloads, that clash on one generated field or can't make a field and json tag at all. The
 // fields are the ones the schema generator really makes.
 func propertyNameProblems(spec *Spec) []error {
-	var problems []error
+	type object struct {
+		loc, ptr, path string
+		keys           []string // every property, sorted
+		set            int      // the index of its taggable keys in sets
+	}
+	var objects []object
+	var sets [][]string
 	tree := func(loc, ptr string, root BaseSchema) {
 		walkSchemaTreeAt(root, ptr, "", func(b BaseSchema, ptr, path string) {
 			if len(b.Properties) == 0 {
 				return
 			}
 			keys := slices.Sorted(maps.Keys(b.Properties))
-			fields := generatedFieldNames(slices.DeleteFunc(slices.Clone(keys), untaggable))
-			first := map[string]string{} // field -> the property that made it first
-			for _, k := range keys {
-				subject := "property " + quoteName(path, k)
-				at := ptr + "/properties/" + k
-				field := fields[k]
-				switch {
-				case field == "" || untaggable(k):
-					problems = append(problems, &problem{kind: "spec", ptr: at, loc: loc, msg: subject +
-						": can't become a Go field and json tag; start it with a letter, and leave out backticks, '\"' and ','"})
-				case first[field] != "":
-					problems = append(problems, &problem{kind: "spec", ptr: at, loc: loc, msg: fmt.Sprintf(
-						"%s: generates the struct field %s, which property %q also generates (names that differ only in case or punctuation make the same Go name); rename one",
-						subject, field, first[field])})
-				default:
-					first[field] = k
-				}
-			}
+			sets = append(sets, slices.DeleteFunc(slices.Clone(keys), untaggable))
+			objects = append(objects, object{loc, ptr, path, keys, len(sets) - 1})
 		})
 	}
 	schemas := spec.Command.Schemas
@@ -253,6 +243,31 @@ func propertyNameProblems(spec *Spec) []error {
 			tree("command "+path+" stdin", ptr+"/stdin/schema", c.Stdin.Schema.BaseSchema)
 		}
 	})
+	fields := generatedFieldNamesAll(sets)
+	var problems []error
+	for _, o := range objects {
+		names := fields[o.set]
+		first := map[string]string{} // field -> the property that made it first
+		for _, k := range o.keys {
+			subject := "property " + quoteName(o.path, k)
+			at := o.ptr + "/properties/" + k
+			field := names[k]
+			switch {
+			case untaggable(k):
+				problems = append(problems, &problem{kind: "spec", ptr: at, loc: o.loc, msg: subject +
+					": can't become a json tag; leave out backticks, '\"' and ','"})
+			case field == "":
+				problems = append(problems, &problem{kind: "spec", ptr: at, loc: o.loc, msg: subject +
+					": the schema generator can't make a Go field for it; rename it (a name of letters, digits, '-' and '_' that starts with a letter always works)"})
+			case first[field] != "":
+				problems = append(problems, &problem{kind: "spec", ptr: at, loc: o.loc, msg: fmt.Sprintf(
+					"%s: generates the struct field %s, which property %q also generates (names that differ only in case or punctuation make the same Go name); rename one",
+					subject, field, first[field])})
+			default:
+				first[field] = k
+			}
+		}
+	}
 	return problems
 }
 
@@ -269,38 +284,150 @@ func untaggable(key string) bool {
 	return strings.ContainsAny(key, "`\",")
 }
 
+// generatedFieldNamesAll returns generatedFieldNames for each key set. A key set that repeats is
+// asked once, and the rest are asked together, as the definitions of one document: the
+// generator names each struct's fields on their own, so the answer is the same. A document the
+// generator refuses is split in two until each object is asked alone.
+func generatedFieldNamesAll(sets [][]string) []map[string]string {
+	index := map[string]int{} // key set -> position in uniq
+	var uniq [][]string
+	at := make([]int, len(sets))
+	for i, keys := range sets {
+		var id strings.Builder
+		for _, k := range keys {
+			id.WriteString(strconv.Itoa(len(k)))
+			id.WriteByte(':')
+			id.WriteString(k)
+		}
+		j, ok := index[id.String()]
+		if !ok {
+			j = len(uniq)
+			index[id.String()] = j
+			uniq = append(uniq, keys)
+		}
+		at[i] = j
+	}
+	answers := make([]map[string]string, len(uniq))
+	var ask []int // the positions in uniq with keys
+	for j, keys := range uniq {
+		if len(keys) == 0 {
+			answers[j] = map[string]string{}
+		} else {
+			ask = append(ask, j)
+		}
+	}
+	var probe func(part []int)
+	probe = func(part []int) {
+		if len(part) == 1 {
+			answers[part[0]] = generatedFieldNames(uniq[part[0]])
+			return
+		}
+		objects := make([][]string, len(part))
+		for i, j := range part {
+			objects[i] = uniq[j]
+		}
+		if fields, ok := probeObjectFieldNames(objects); ok {
+			for i, j := range part {
+				answers[j] = fields[i]
+			}
+			return
+		}
+		probe(part[:len(part)/2])
+		probe(part[len(part)/2:])
+	}
+	if len(ask) > 0 {
+		probe(ask)
+	}
+	out := make([]map[string]string, len(sets))
+	for i, j := range at {
+		out[i] = answers[j]
+	}
+	return out
+}
+
 // generatedFieldNames returns the struct field the schema generator makes for each key when
 // the keys are one object's properties, or "" for a key it makes no named field for. It asks
 // the generator rotini is built with, so it reflects that version's naming: whether two keys
-// share a field, and which keys make none.
+// share a field, and which keys make none. When the generator refuses the object, the keys it
+// refuses alone make no field, and the others are named together or, failing that, alone.
 func generatedFieldNames(keys []string) map[string]string {
 	if fields, ok := probeFieldNames(keys); ok {
 		return fields
 	}
-	var usable []string // the generator refused the object: keep the keys it accepts alone
+	var usable []string // the keys the generator accepts alone
+	alone := map[string]string{}
 	for _, k := range keys {
-		if _, ok := probeFieldNames([]string{k}); ok {
+		if fields, ok := probeFieldNames([]string{k}); ok {
 			usable = append(usable, k)
+			alone[k] = fields[k]
 		}
 	}
-	fields, _ := probeFieldNames(usable)
-	return fields
+	if fields, ok := probeFieldNames(usable); ok {
+		return fields
+	}
+	return alone
 }
 
 // probeFieldNames generates an object whose properties are keys and reads each key's field
 // name back by its json tag. It reports false when the generator refuses the object or emits
 // source that doesn't parse.
 func probeFieldNames(keys []string) (map[string]string, bool) {
-	props := make(map[string]any, len(keys))
-	for _, k := range keys {
-		props[k] = map[string]any{"type": "string"}
-	}
 	doc, err := json.Marshal(map[string]any{
-		"$schema": "http://json-schema.org/draft-07/schema#", "type": "object", "properties": props,
+		"$schema": "http://json-schema.org/draft-07/schema#", "type": "object", "properties": probeProperties(keys),
 	})
 	if err != nil {
 		return nil, false
 	}
+	structs, ok := probeStructs(doc)
+	if !ok {
+		return nil, false
+	}
+	fields, ok := structs["Root"]
+	return fields, ok
+}
+
+// probeObjectFieldNames is probeFieldNames for several objects at once, each a definition of
+// one document. It reports false when the generator refuses the document, or makes no struct
+// for one of the objects.
+func probeObjectFieldNames(objects [][]string) ([]map[string]string, bool) {
+	defs := make(map[string]any, len(objects))
+	for i, keys := range objects {
+		defs[probeTypeName(i)] = map[string]any{"type": "object", "properties": probeProperties(keys)}
+	}
+	doc, err := json.Marshal(map[string]any{
+		"$schema": "http://json-schema.org/draft-07/schema#", "definitions": defs,
+	})
+	if err != nil {
+		return nil, false
+	}
+	structs, ok := probeStructs(doc)
+	if !ok {
+		return nil, false
+	}
+	out := make([]map[string]string, len(objects))
+	for i := range objects {
+		fields, ok := structs[probeTypeName(i)]
+		if !ok {
+			return nil, false
+		}
+		out[i] = fields
+	}
+	return out, true
+}
+
+func probeTypeName(i int) string { return "Probe" + strconv.Itoa(i) }
+
+func probeProperties(keys []string) map[string]any {
+	props := make(map[string]any, len(keys))
+	for _, k := range keys {
+		props[k] = map[string]any{"type": "string"}
+	}
+	return props
+}
+
+// probeStructs generates Go from a schema document and returns, for each struct type it
+// declares, the field each json tag's key names ("" for a field without a name).
+func probeStructs(doc []byte) (map[string]map[string]string, bool) {
 	src, err := gogen.Generate(doc, gogen.WithPackage("p"), gogen.WithRootType("Root"))
 	if err != nil {
 		return nil, false
@@ -309,23 +436,34 @@ func probeFieldNames(keys []string) (map[string]string, bool) {
 	if err != nil {
 		return nil, false
 	}
-	fields := make(map[string]string, len(keys))
+	structs := map[string]map[string]string{}
 	ast.Inspect(file, func(n ast.Node) bool {
-		f, ok := n.(*ast.Field)
-		if !ok || f.Tag == nil {
+		spec, ok := n.(*ast.TypeSpec)
+		if !ok {
 			return true
 		}
-		tag, err := strconv.Unquote(f.Tag.Value)
-		if err != nil {
-			return true
+		st, ok := spec.Type.(*ast.StructType)
+		if !ok {
+			return false
 		}
-		key, _, _ := strings.Cut(reflect.StructTag(tag).Get("json"), ",")
-		if len(f.Names) == 1 {
-			fields[key] = f.Names[0].Name
-		} else {
-			fields[key] = ""
+		fields := map[string]string{}
+		for _, f := range st.Fields.List {
+			if f.Tag == nil {
+				continue
+			}
+			tag, err := strconv.Unquote(f.Tag.Value)
+			if err != nil {
+				continue
+			}
+			key, _, _ := strings.Cut(reflect.StructTag(tag).Get("json"), ",")
+			if len(f.Names) == 1 {
+				fields[key] = f.Names[0].Name
+			} else {
+				fields[key] = ""
+			}
 		}
-		return true
+		structs[spec.Name.Name] = fields
+		return false
 	})
-	return fields, true
+	return structs, true
 }

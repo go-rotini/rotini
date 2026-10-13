@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -66,7 +67,7 @@ func watchLoop(ctx context.Context, specPath, confPath string, pass func() (stri
 		var err error
 		stale := false
 		for p, read := range recordReads(func() { result, err = pass() }) {
-			added, werr := ws.addNew(p)
+			added, werr := ws.addNew(p, true)
 			if werr != nil || !added {
 				continue // best effort: a file that can't be watched just isn't
 			}
@@ -111,19 +112,29 @@ type watchSet struct {
 
 // add starts watching path, once.
 func (ws *watchSet) add(path string) error {
-	_, err := ws.addNew(path)
+	_, err := ws.addNew(path, false)
 	return err
 }
 
 // addNew starts watching path unless it already is, reporting whether it started a watcher.
-func (ws *watchSet) addNew(path string) (bool, error) {
+// With missing, a path that doesn't exist is watched for its creation: the path itself, or the
+// first of its directories that doesn't exist yet.
+func (ws *watchSet) addNew(path string, missing bool) (bool, error) {
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
+	}
+	lazy := false
+	if _, err := os.Stat(path); missing && errors.Is(err, os.ErrNotExist) {
+		path, lazy = firstMissing(path), true
 	}
 	if _, ok := ws.watchers[path]; ok {
 		return false, nil
 	}
-	w, err := fs.NewWatcher(path, fs.WithDebounce(watchDebounce))
+	newWatcher := fs.NewWatcher
+	if lazy {
+		newWatcher = fs.NewLazyWatcher
+	}
+	w, err := newWatcher(path, fs.WithDebounce(watchDebounce))
 	if err != nil {
 		return false, fmt.Errorf("watch %s: %w", path, err)
 	}
@@ -135,6 +146,21 @@ func (ws *watchSet) addNew(path string) (bool, error) {
 	ws.watchers[path] = w
 	go forwardChanges(ws.ctx, events, ws.changed)
 	return true, nil
+}
+
+// firstMissing returns path, or the first of its directories that doesn't exist: the one whose
+// parent does.
+func firstMissing(path string) string {
+	for {
+		parent := filepath.Dir(path)
+		if parent == path {
+			return path
+		}
+		if _, err := os.Stat(parent); err == nil {
+			return path
+		}
+		path = parent
+	}
 }
 
 // signal asks for another pass, unless one is already pending.

@@ -26,7 +26,8 @@ func TestRun_pluginKilledBySignalExits128PlusN(t *testing.T) {
 // A trapped signal while a plugin runs kills the plugin and exits with the signal's code.
 func TestRun_hostSignalDuringPluginExitsWithSignalCode(t *testing.T) {
 	defer swapTrapSignals(syscall.SIGUSR1)()
-	writeFakeBinary(t, "app-wait", "#!/bin/sh\nexec sleep 5\n")
+	ready := filepath.Join(t.TempDir(), "ready")
+	writeFakeBinary(t, "app-wait", "#!/bin/sh\ntouch "+ready+"\nexec sleep 30\n")
 	def := Definition{Name: "app", Handler: "App", Plugins: []PluginDef{{Name: "wait", Binary: "app-wait"}}}
 
 	p, _, _ := pluginProgram(def, []string{"wait"})
@@ -35,7 +36,7 @@ func TestRun_hostSignalDuringPluginExitsWithSignalCode(t *testing.T) {
 		code, _ := p.Run(p.args)
 		done <- code
 	}()
-	time.Sleep(200 * time.Millisecond)
+	waitForFile(t, ready, "the plugin to start")
 	_ = syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
 
 	select {
@@ -49,14 +50,16 @@ func TestRun_hostSignalDuringPluginExitsWithSignalCode(t *testing.T) {
 }
 
 // A trapped signal asks the plugin to stop with the same signal, so its handler can clean up
-// before the host exits with the signal's code.
+// before the host exits with the signal's code. The handler holds until the test lets it go,
+// so the host is seen waiting for it without relying on how long anything takes.
 func TestRun_hostSignalLetsPluginCleanUp(t *testing.T) {
 	defer swapTrapSignals(syscall.SIGUSR1)()
 	dir := t.TempDir()
-	marker, ready := filepath.Join(dir, "cleaned"), filepath.Join(dir, "ready")
+	ready, stopping := filepath.Join(dir, "ready"), filepath.Join(dir, "stopping")
+	proceed, marker := filepath.Join(dir, "proceed"), filepath.Join(dir, "cleaned")
 	writeFakeBinary(t, "app-wait", "#!/bin/sh\n"+
-		"trap 'sleep 0.2; touch "+marker+"; exit 0' USR1\n"+
-		"touch "+ready+"\nsleep 5 >/dev/null 2>&1 &\nwait\n")
+		"trap 'touch "+stopping+"; while [ ! -e "+proceed+" ]; do sleep 0.01; done; touch "+marker+"; exit 0' USR1\n"+
+		"touch "+ready+"\nsleep 30 >/dev/null 2>&1 &\nwait\n")
 	def := Definition{Name: "app", Handler: "App", Plugins: []PluginDef{{Name: "wait", Binary: "app-wait"}}}
 
 	p, _, _ := pluginProgram(def, []string{"wait"})
@@ -65,24 +68,40 @@ func TestRun_hostSignalLetsPluginCleanUp(t *testing.T) {
 		code, _ := p.Run(p.args)
 		done <- code
 	}()
-	for start := time.Now(); time.Since(start) < 4*time.Second; time.Sleep(10 * time.Millisecond) {
-		if _, err := os.Stat(ready); err == nil {
-			break
-		}
-	}
+	waitForFile(t, ready, "the plugin to start")
 	_ = syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
+	waitForFile(t, stopping, "the plugin's signal handler to run")
 
+	select {
+	case code := <-done:
+		t.Fatalf("the host exited (%d) while the plugin's signal handler was still running", code)
+	default:
+	}
+	if err := os.WriteFile(proceed, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case code := <-done:
 		if want := 128 + int(syscall.SIGUSR1); code != want {
 			t.Errorf("exit code = %d, want %d", code, want)
 		}
-	case <-time.After(4 * time.Second):
-		t.Fatal("the signal did not end the plugin")
+	case <-time.After(20 * time.Second):
+		t.Fatal("the plugin did not end after its signal handler was let go")
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Error("the plugin was killed before its signal handler finished")
 	}
+}
+
+// waitForFile waits for path to exist, failing the test after 20 seconds.
+func waitForFile(t *testing.T, path, what string) {
+	t.Helper()
+	for start := time.Now(); time.Since(start) < 20*time.Second; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
 }
 
 // A plugin past its timeout gets SIGTERM and a grace period, not an immediate kill.

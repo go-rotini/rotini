@@ -368,29 +368,33 @@ func discoverConf(dir string) (string, error) {
 }
 
 // findModule walks up from the working directory to the nearest go.mod and returns the
-// module root directory and module path. A repository that keeps its module in vendor.mod,
-// with no go.mod above the working directory, is found by its vendor.mod.
+// module root directory and module path. A directory that keeps its module in vendor.mod, and
+// holds no go.mod, is found by its vendor.mod.
 func findModule() (root, name string, err error) {
 	root, name, _, err = findModuleFile()
 	return root, name, err
 }
 
 // findModuleFile is findModule that also returns the file the module was read from: go.mod,
-// or vendor.mod when no go.mod is found.
+// or vendor.mod in a directory with no go.mod.
 func findModuleFile() (root, name, file string, err error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", "", "", fmt.Errorf("get working directory: %w", err)
 	}
-	// Raise fs's default ancestor bound (32) to effectively reach the filesystem root.
-	goMod, ok, err := fs.FindUp("go.mod", dir, fs.WithMaxAncestors(256))
-	if err != nil {
-		return "", "", "", fmt.Errorf("find go.mod: %w", err)
-	}
-	if !ok {
-		if goMod, ok, err = fs.FindUp("vendor.mod", dir, fs.WithMaxAncestors(256)); err != nil || !ok {
+	goMod := ""
+	for d := dir; goMod == ""; {
+		for _, name := range []string{"go.mod", "vendor.mod"} {
+			if info, err := os.Stat(filepath.Join(d, name)); err == nil && !info.IsDir() {
+				goMod = filepath.Join(d, name)
+				break
+			}
+		}
+		parent := filepath.Dir(d)
+		if goMod == "" && parent == d {
 			return "", "", "", errors.New("go.mod not found in any parent of working directory")
 		}
+		d = parent
 	}
 	data, err := os.ReadFile(goMod)
 	if err != nil {

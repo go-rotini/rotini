@@ -525,6 +525,43 @@ func TestSetConfigValue_refusedLayout(t *testing.T) {
 	}
 }
 
+// An integer the file's format, or the reader rotini uses for it, can't hold exactly is a usage
+// error that says why, and the file is left as it was. One the reader holds exactly is written.
+func TestSetConfigValue_bigIntegers(t *testing.T) {
+	tests := []struct {
+		file, typ, raw, why string
+		always              bool // refused whatever the reader holds
+	}{
+		{"c.yaml", "uint64", "18446744073709551615", "YAML reader can't hold", false},
+		{"c.yaml", "uint64", "9223372036854775808", "YAML reader can't hold", false},
+		{"c.json", "int64", "9007199254740993", "JSON can't hold", false},
+		{"c.toml", "uint64", "18446744073709551615", "TOML integers are 64-bit signed", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file+" "+tt.raw, func(t *testing.T) {
+			dir := t.TempDir()
+			path := pfWrite(t, dir, tt.file, "")
+			f := ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{{Key: "big", Type: tt.typ}}}
+			err := SetConfigValue(cwContext(dir, nil, f), "app", "big", tt.raw)
+			if err == nil {
+				if tt.always {
+					t.Fatal("written, want a usage error")
+				}
+				if got := cwRead(t, path); !strings.Contains(got, tt.raw) {
+					t.Errorf("file:\n%s\nwant it to hold %s", got, tt.raw)
+				}
+				return
+			}
+			if !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), tt.why) || strings.Contains(err.Error(), "cannot be read") {
+				t.Errorf("err = %v, want a usage error saying %q", err, tt.why)
+			}
+			if got := cwRead(t, path); got != "" {
+				t.Errorf("the refused edit changed the file:\n%s", got)
+			}
+		})
+	}
+}
+
 func TestSetConfigValue_unknownFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := SetConfigValue(cwContext(dir, nil, cwFile(filepath.Join(dir, "a.yaml"))), "nosuch", "region", "x"); !errors.Is(err, ErrInternal) {

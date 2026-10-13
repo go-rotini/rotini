@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/rotini/internal/testmod"
 )
 
 var updateShells = flag.Bool("update-shells", false, "rewrite testdata/shells/want from the shells' answers")
@@ -32,6 +34,13 @@ var shells = []shell{
 	{"nu", []string{"nu", "--no-config-file", "drivers/nu.nu", "cases.txt"}},
 }
 
+// zshWidget completes the cases in widgetCases in a live zsh completion widget, in the zsh image,
+// so zsh's own matching decides which candidates it keeps.
+var zshWidget = shell{"zsh-widget", []string{"zsh", "-f", "drivers/zsh_widget.zsh", "completion_zsh.zsh", "drivers/widget-cases.txt"}}
+
+// widgetCases are the cases zshWidget completes: those whose candidates zsh's matching filters.
+var widgetCases = []string{"commands", "command-prefix", "flags", "enum", "enum-inline", "enum-ignore-case", "enum-ignore-case-inline", "sub-command-enum", "quote-all"}
+
 // TestCompletionShells runs the same generated CLI and the same cases (testdata/shells/cases.txt)
 // in one pinned Docker image per shell. Each driver sources the completion script rotini
 // generated and calls the shell's completion the way TAB does, and the candidates, descriptions
@@ -39,8 +48,9 @@ var shells = []shell{
 // account rotiniuser, the group rotinigroup and the host rotini-host, so the user, group and host
 // kinds have a known answer. A subset of the cases also runs the same scripts against a binary
 // built with the previous release, matching want/skew-<shell>.txt: a user who updates one side
-// and not the other still gets completions. Run it with `make test-completion-shells`; -update-shells rewrites
-// the want files.
+// and not the other still gets completions. zsh also completes a few cases in a live completion
+// widget (want/zsh-widget.txt), where its own matching filters the candidates. Run it with
+// `make test-completion-shells`; -update-shells rewrites the want files.
 func TestCompletionShells(t *testing.T) {
 	if os.Getenv("ROTINI_COMPLETION_SHELLS") == "" {
 		t.Skip("set ROTINI_COMPLETION_SHELLS=1 (make test-completion-shells) to run the Docker shell matrix")
@@ -63,6 +73,8 @@ func TestCompletionShells(t *testing.T) {
 		t.Fatal(err)
 	}
 	stageShells(t, work, src, scripts, string(cases))
+	widget := keepCases(string(cases), widgetCases...)
+	mustWrite(t, filepath.Join(work, "drivers", "widget-cases.txt"), widget, 0o644)
 
 	// The same scripts against a binary built entirely with the previous release: its own code
 	// generation, its own runtime, and a fixture (testdata/shells/skew) written for it.
@@ -94,6 +106,9 @@ func TestCompletionShells(t *testing.T) {
 			runShell(t, sh, image, work, string(cases), filepath.Join(src, "want", sh.name+".txt"))
 			runShell(t, sh, image, skew, skewCases, filepath.Join(src, "want", "skew-"+sh.name+".txt"))
 			runShell(t, sh, image, dashed, string(dashedCases), filepath.Join(src, "want", "dashed-"+sh.name+".txt"))
+			if sh.name == "zsh" {
+				runShell(t, zshWidget, image, work, widget, filepath.Join(src, "want", zshWidget.name+".txt"))
+			}
 		})
 	}
 }
@@ -108,7 +123,7 @@ func buildShellsFixture(t *testing.T, src, fixture, name, dir string, goenv, lin
 		t.Fatal(err)
 	}
 	gomod := "module example.com/shells\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\n" +
-		"replace github.com/go-rotini/rotini => " + repoRoot(t) + "\n"
+		"replace github.com/go-rotini/rotini => " + repoRoot(t) + "\n" + testmod.Directives(repoRoot(t))
 	if err := os.WriteFile(filepath.Join(app, "go.mod"), []byte(gomod), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -267,6 +267,65 @@ func TestWatchLoop_watchesFilesThePassReads(t *testing.T) {
 	}
 }
 
+// TestWatchLoop_watchesFilesThePassFoundMissing pins that a file a pass tried to read before it
+// existed, in a directory that exists or not, starts a pass when it is created, and that later
+// edits to it do too.
+func TestWatchLoop_watchesFilesThePassFoundMissing(t *testing.T) {
+	for _, sub := range []string{"", filepath.Join("status", "deeper")} {
+		t.Run("dir="+sub, func(t *testing.T) {
+			specPath, _ := watchFixture(t, false)
+			child := filepath.Join(filepath.Dir(specPath), sub, "child.yaml")
+			counter := newPassCounter()
+			pass := func() (string, error) {
+				_, _, err := readRaw(child)
+				counter.pass()
+				return "", err
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- watchLoop(ctx, specPath, "", pass, func(string, error) {}) }()
+			counter.await(t, 1, 5*time.Second)
+			// Let the first pass start its watchers, as a person editing the file would.
+			time.Sleep(3 * watchDebounce)
+
+			// Each directory that appears starts a pass too, which watches the next one.
+			if err := os.MkdirAll(filepath.Dir(child), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(child, []byte("version: 0.0.0\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(15 * time.Second)
+			for {
+				n := counter.count()
+				if _, _, err := readRaw(child); err == nil && n >= 2 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("creating the missing file started no pass (%d passes)", n)
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			// Wait for the passes the creation started, then edit the file.
+			time.Sleep(3 * watchDebounce)
+			n := counter.count()
+			if err := os.WriteFile(child, []byte("version: 0.0.0\n# edited\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			counter.await(t, n+1, 10*time.Second)
+
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("watchLoop did not return after cancel")
+			}
+		})
+	}
+}
+
 // TestWatchLoop_editDuringFirstReadReruns pins that a file changed after a pass first read it,
 // but before its watcher started, gets another pass: the pass itself saves the file right
 // after reading it, so the watcher's baseline already holds the edit.

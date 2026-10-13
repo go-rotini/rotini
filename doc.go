@@ -121,6 +121,9 @@
 //     number written as a float (450.0, 1e3) fills an integer input, and 1 or 0 fills a bool.
 //     A null list item is refused. Text (the command line, the environment, .env files) spells
 //     an integer as one.
+//   - A value a configuration file puts in an untyped input (any, or a map or list of any)
+//     takes the shape JSON and YAML give it, whatever the format: a time, such as a TOML
+//     date-time, is its RFC 3339 text.
 //   - Value types: duration with Go's units plus d and w (7d, 2w3d); time and datetime
 //     (RFC 3339) and date (2026-09-29), each taking `layout:` for another format, or a list of
 //     formats tried in order, and `relative:` for a time measured from the run's clock (2h ago,

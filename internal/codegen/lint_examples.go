@@ -215,14 +215,17 @@ func exampleCommandDefs(cmds []Command, prefix string, schemas map[string]Schema
 	return out
 }
 
-// exampleFlagDefs builds a command's FlagDefs.
+// exampleFlagDefs builds a command's FlagDefs. As in generated code, a non-cascading flag of a
+// command with sub-commands is Local: a sub-command neither accepts it nor checks its rules.
 func exampleFlagDefs(c *Command, prefix string, schemas map[string]Schema) []rotini.FlagDef {
 	out := make([]rotini.FlagDef, 0, len(c.Flags))
+	branch := len(c.Commands) > 0
 	for _, f := range c.Flags {
 		fd := rotini.FlagDef{
 			Name: f.Name, Identifiers: flagIdentifiers(f), HiddenIdentifiers: f.HiddenIdentifiers,
 			DeprecatedIdentifiers: f.DeprecatedIdentifiers, Type: exampleType(definitionType(f.Schema, schemas)),
 			Hidden: f.Hidden, Deprecated: f.Deprecated, ShortCircuit: f.ShortCircuit,
+			Local: branch && !f.Cascading,
 		}
 		if s := f.Schema; s != nil {
 			fd.Required = s.Required && flagEnvVar(s, flagReconKey(f.Name, s), prefix) == ""

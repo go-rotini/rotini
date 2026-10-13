@@ -42,7 +42,7 @@ func TestCompletionScripts_preserveEveryToken(t *testing.T) {
 		},
 		{
 			shell: "nushell",
-			want:  `let words = ($place.command | skip 1)`,
+			want:  `let typed = ($place.command | skip 1)`,
 			why:   "Nushell 0.116 passes the words with the partial one last (an empty string after a space) in place.command",
 		},
 	}
@@ -145,7 +145,7 @@ func TestCompletionScripts_readTheProtocol(t *testing.T) {
 		"nushell": {
 			`str starts-with ':rotini:option '`, `append_whitespace: $space`, `options: {sort: (not ('keep-order' in $options))}`,
 			`commandline complete --type directory`, `commandline complete --type path`, `@complete "nu-complete PROG"`,
-			`extern PROG [...args: string]`,
+			`extern PROG [...args: oneof<string, bool>]`,
 		},
 	}
 	for shell, idioms := range want {

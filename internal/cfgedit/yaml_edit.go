@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/go-rotini/yaml"
 )
@@ -362,7 +361,7 @@ func keepQuoting(style yaml.ScalarStyle, s, text string) string {
 	switch {
 	case style == yaml.DoubleQuotedStyle:
 		return strconv.Quote(s)
-	case style == yaml.SingleQuotedStyle && !strings.ContainsAny(s, "\n\r") && !strings.ContainsFunc(s, unicode.IsControl):
+	case style == yaml.SingleQuotedStyle && !strings.ContainsAny(s, "\n\r") && !strings.ContainsFunc(s, yamlEscapeOnly):
 		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 	}
 	return text

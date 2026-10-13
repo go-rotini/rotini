@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-rotini/recon"
@@ -173,3 +174,57 @@ func number(v any) (string, bool) {
 	}
 	return "", false
 }
+
+// readsIntegersExactly reports whether the reader rotini uses for format, JSON, JSONC or YAML,
+// reads back every 64-bit integer exactly, beyond ±2^53 and above the largest int64.
+func readsIntegersExactly(format Format) bool {
+	switch format {
+	case JSON:
+		return jsonExact()
+	case JSONC:
+		return jsoncExact()
+	case YAML:
+		return yamlExact()
+	}
+	return false
+}
+
+var (
+	jsonExact = sync.OnceValue(func() bool {
+		return readsBack(JSON, `{"a": 18446744073709551615, "b": -9223372036854775808, "c": 9007199254740993}`)
+	})
+	jsoncExact = sync.OnceValue(func() bool {
+		return readsBack(JSONC, `{"a": 18446744073709551615, "b": -9223372036854775808, "c": 9007199254740993}`)
+	})
+	yamlExact = sync.OnceValue(func() bool {
+		return readsBack(YAML, "a: 18446744073709551615\nb: -9223372036854775808\nc: 9007199254740993\n")
+	})
+)
+
+// readsBack reports whether src, a document with the keys a, b and c, decodes to the
+// integers its text holds.
+func readsBack(format Format, src string) bool {
+	m, err := decode(format, []byte(src))
+	if err != nil {
+		return false
+	}
+	for k, want := range map[string]string{"a": "18446744073709551615", "b": "-9223372036854775808", "c": "9007199254740993"} {
+		if got, ok := number(m[k]); !ok || got != want {
+			return false
+		}
+	}
+	return true
+}
+
+// tomlReadsNUL reports whether the TOML reader rotini uses reads back a key holding U+0000 as
+// one key, apart from the dotted path its pieces would make.
+var tomlReadsNUL = sync.OnceValue(func() bool {
+	m, err := decode(TOML, []byte(`"a\u0000b" = 1`+"\n[a]\nb = 2\n"))
+	if err != nil {
+		return false
+	}
+	nul, _ := number(m["a\x00b"])
+	sub, _ := m["a"].(map[string]any)
+	dotted, _ := number(sub["b"])
+	return nul == "1" && dotted == "2" && len(m) == 2
+})

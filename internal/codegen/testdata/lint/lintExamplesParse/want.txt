@@ -1,8 +1,10 @@
-spec: .rotini.spec.yaml:20:7: command taskr: example "taskr lst" does not parse: unknown command "lst" for "taskr"
-spec: .rotini.spec.yaml:21:7: command taskr: example "taskr list --colour" does not parse: unknown flag "--colour"
-spec: .rotini.spec.yaml:22:7: command taskr: example "taskr list --status closed" does not parse: invalid value "closed" for --status (one of: open, done)
-spec: .rotini.spec.yaml:23:7: command taskr: example "taskr add" does not parse: missing required input: <title>
-spec: .rotini.spec.yaml:24:7: command taskr: example "taskr list --json --status open" does not parse: flags --json and --status are mutually exclusive
-spec: .rotini.spec.yaml:25:7: command taskr: example "echo x | taskr add one two" does not parse: taskr add accepts at most 1 argument (got 2)
-warning: spec: .rotini.spec.yaml:30:7: command taskr: flag "help": is short_circuit but not cascading, so it applies only to "taskr": `taskr list --help` is a usage error; set `cascading: true` so every sub-command answers it
-warning: spec: .rotini.spec.yaml:26:7: command taskr: example "taskr add \"unclosed" has an unclosed quote
+spec: .rotini.spec.yaml:21:7: command taskr: example "taskr lst" does not parse: unknown command "lst" for "taskr"
+spec: .rotini.spec.yaml:22:7: command taskr: example "taskr list --colour" does not parse: unknown flag "--colour"
+spec: .rotini.spec.yaml:23:7: command taskr: example "taskr list --status closed" does not parse: invalid value "closed" for --status (one of: open, done)
+spec: .rotini.spec.yaml:24:7: command taskr: example "taskr add" does not parse: missing required input: <title>
+spec: .rotini.spec.yaml:25:7: command taskr: example "taskr list --json --status open" does not parse: flags --json and --status are mutually exclusive
+spec: .rotini.spec.yaml:26:7: command taskr: example "echo x | taskr add one two" does not parse: taskr add accepts at most 1 argument (got 2)
+spec: .rotini.spec.yaml:27:7: command taskr: example "taskr --state s list" does not parse: --state belongs to "taskr", not "taskr list"
+warning: spec: .rotini.spec.yaml:32:7: command taskr: flag "help": is short_circuit but not cascading, so it applies only to "taskr": `taskr list --help` is a usage error; set `cascading: true` so every sub-command answers it
+warning: spec: .rotini.spec.yaml:38:7: command taskr: flag "state": is required but isn't cascading, so it applies only when `taskr` itself runs, not to its sub-commands (`taskr list` neither takes it nor requires it); set `cascading: true` if the sub-commands need it too
+warning: spec: .rotini.spec.yaml:28:7: command taskr: example "taskr add \"unclosed" has an unclosed quote

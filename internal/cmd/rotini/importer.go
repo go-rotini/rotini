@@ -53,6 +53,6 @@ func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOpti
 		return
 	}
 	if !requiresRuntime(".") {
-		rtx.RecordWarning(fmt.Errorf("go.mod does not require %s yet; run `go get %s` before building the imported CLI", runtimeModule, runtimeModule))
+		rtx.RecordWarning(missingRuntime(".", "building the imported CLI"))
 	}
 }

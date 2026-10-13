@@ -2417,7 +2417,8 @@ func coerceNumber(f reflect.Value, last string) error {
 			if errors.Is(err, strconv.ErrRange) {
 				return outOfRange(last, f.Type())
 			}
-			if _, ierr := strconv.ParseInt(last, 10, 64); strings.HasPrefix(last, "-") && (ierr == nil || errors.Is(ierr, strconv.ErrRange)) {
+			// A negative zero is in range but still not a non-negative integer.
+			if i, ierr := strconv.ParseInt(last, 10, 64); strings.HasPrefix(last, "-") && ((ierr == nil && i != 0) || errors.Is(ierr, strconv.ErrRange)) {
 				return outOfRange(last, f.Type())
 			}
 			return notValid(last, "non-negative integer")

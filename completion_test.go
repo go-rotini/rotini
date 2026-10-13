@@ -1031,6 +1031,7 @@ func TestComplete_enumIgnoreCase(t *testing.T) {
 		{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Enum: []string{"fast", "slow", "Safe"}, IgnoreCase: true},
 		{Name: "list", Identifiers: []string{"--list"}, Type: "[]string", Separator: ",", Enum: []string{"fast", "slow"}, IgnoreCase: true},
 		{Name: "strict", Identifiers: []string{"--strict"}, Type: "string", Enum: []string{"fast", "slow"}},
+		{Name: "unit", Identifiers: []string{"--unit"}, Type: "string", Enum: []string{"kelvin", "\u017Ftep"}, IgnoreCase: true},
 	}}
 	for _, c := range []struct {
 		words []string
@@ -1041,6 +1042,8 @@ func TestComplete_enumIgnoreCase(t *testing.T) {
 		{[]string{"--mode", "s"}, []string{"slow", "Safe"}},
 		{[]string{"--list", "FAST,S"}, []string{"FAST,slow"}},
 		{[]string{"--strict", "S"}, nil},
+		{[]string{"--unit", "\u212A"}, []string{"kelvin"}}, // KELVIN SIGN folds to k
+		{[]string{"--unit", "ST"}, []string{"\u017Ftep"}},  // LATIN SMALL LETTER LONG S folds to s
 	} {
 		if got := complete(def, c.words, nil, nil); !reflect.DeepEqual(got, c.want) && (len(got) > 0 || len(c.want) > 0) {
 			t.Errorf("complete(%q) = %q, want %q", c.words, got, c.want)

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-rotini/jsonc"
 	"github.com/go-rotini/recon"
@@ -22,6 +23,9 @@ func JSON() Feature {
 			name:  "json",
 			codec: func() recon.Codec { return recon.JSON },
 			decodeAny: func(data []byte) (any, error) {
+				if err := invalidUTF8("json", data); err != nil {
+					return nil, err
+				}
 				if !json.Valid(data) {
 					var probe any
 					err := fmt.Errorf("decode json: %w", json.Unmarshal(data, &probe))
@@ -45,6 +49,9 @@ func YAML() Feature {
 			name:  "yaml",
 			codec: func() recon.Codec { return recon.YAML },
 			decodeAny: func(data []byte) (any, error) {
+				if err := invalidUTF8("yaml", data); err != nil {
+					return nil, err
+				}
 				var v any
 				if err := yaml.UnmarshalWithOptions(data, &v, yaml.WithDisallowDuplicateKey()); err != nil {
 					wrapped := fmt.Errorf("decode yaml: %w", err)
@@ -77,6 +84,9 @@ func JSONC() Feature {
 			name:  "jsonc",
 			codec: func() recon.Codec { return recon.JSONC },
 			decodeAny: func(data []byte) (any, error) {
+				if err := invalidUTF8("jsonc", data); err != nil {
+					return nil, err
+				}
 				var v any
 				if err := jsonc.Unmarshal(data, &v); err != nil {
 					wrapped := fmt.Errorf("decode jsonc: %w", err)
@@ -235,6 +245,30 @@ func jsonPositionError(err error, data []byte) error {
 	}
 	line, col, _ := recon.ParsePosition(err, data)
 	return &docError{err: err, line: line, col: col, msg: msg}
+}
+
+// errInvalidUTF8 is the reason a document that is not valid UTF-8 does not decode.
+var errInvalidUTF8 = errors.New("invalid UTF-8 in input")
+
+// invalidUTF8 reports the first byte of a format document that is not valid UTF-8, with its
+// line and column, or returns nil when data is valid UTF-8.
+func invalidUTF8(format string, data []byte) error {
+	if utf8.Valid(data) {
+		return nil
+	}
+	off := 0
+	for off < len(data) {
+		r, size := utf8.DecodeRune(data[off:])
+		if r == utf8.RuneError && size <= 1 {
+			break
+		}
+		off += size
+	}
+	head := data[:off]
+	line := bytes.Count(head, []byte("\n")) + 1
+	col := off - bytes.LastIndexByte(head, '\n')
+	err := fmt.Errorf("decode %s: line %d, column %d: %w", format, line, col, errInvalidUTF8)
+	return &docError{err: err, line: line, col: col, msg: errInvalidUTF8.Error()}
 }
 
 // duplicateKeyError reports a key given twice in a document, at its second occurrence.

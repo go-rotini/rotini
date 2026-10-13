@@ -1,14 +1,17 @@
 package codegen
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // hostileCandidates are values a dynamic completer could list from outside data. Each must
@@ -17,7 +20,7 @@ var hostileCandidates = []string{
 	"a b", "a,b", "it's $HOME", `say "hi"`, "`touch pwned`", "$(touch pwned)", "x;touch pwned",
 	"star*", "[ab]", "~root", "-dash", "x:y", "café", "o’neil;touch pwned", "‘q’", "“q”",
 	`back\slash`, "a!b", "ends'", `ends"`, "ends!", "{a,b}", "a&b|c<d>e", "#hash", "tab?",
-	"x’;touch pwned;’", "x‘;touch pwned;‘", "u@host",
+	"x’;touch pwned;’", "x‘;touch pwned;‘", "u@host", "-foo.bar", "-Dkey=a.b", "--%",
 }
 
 // completionQuotingDir returns a directory holding a fake "my-prog" that answers __complete
@@ -253,6 +256,64 @@ func checkInserted(t *testing.T, tc quotingCase, words, cands []string, run quot
 		if !strings.HasPrefix(c, shared[len(shared)-1]) {
 			t.Errorf("%s %q: the shared text gives %q, which %q doesn't start with", tc.name, words, shared[len(shared)-1], c)
 		}
+	}
+}
+
+// TestCompletionScript_bashQuotesManyCandidatesInLinearTime completes 5,000 candidates that
+// share a prefix and bounds the CPU time bash spends. bash 3.2 finds an array element by
+// walking the array, so indexing or appending per candidate makes TAB take seconds.
+func TestCompletionScript_bashQuotesManyCandidatesInLinearTime(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("times bash")
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not installed")
+	}
+	script, err := completionScript("my-prog", "bash", completionEnvs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := completionQuotingDir(t)
+	scriptPath := filepath.Join(dir, "completion.bash")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const n = 5000
+	cands := make([]string, n)
+	for i := range cands {
+		cands[i] = fmt.Sprintf("pppppppppppppppppppp-item %d", i)
+	}
+	driver := `source "$1"
+COMP_LINE="my-prog --v p" COMP_WORDS=(my-prog --v p) COMP_CWORD=2 COMP_TYPE=9 COMPREPLY=()
+COMP_POINT=${#COMP_LINE}
+fn=$(complete -p my-prog | sed -n 's/.* -F \([^ ]*\) .*/\1/p')
+"$fn"
+printf '%s\n' "${#COMPREPLY[@]}" "${COMPREPLY[0]}" "${COMPREPLY[n-1]}"
+`
+	driverPath := filepath.Join(dir, "many.sh")
+	if err := os.WriteFile(driverPath, []byte(strings.Replace(driver, "n-1", strconv.Itoa(n-1), 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cands.txt"), []byte(strings.Join(cands, "\n")+"\n:rotini:none\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bash, driverPath, scriptPath)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "CANDS=cands.txt", "ARGS_OUT=args.txt", "LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	want := fmt.Sprintf("%d\npppppppppppppppppppp-item\\ 0\npppppppppppppppppppp-item\\ %d\n", n, n-1)
+	if string(out) != want {
+		t.Fatalf("completing %d candidates printed\n%s\nwant\n%s", n, out, want)
+	}
+	// About 0.4 s of CPU on bash 3.2 when each candidate costs the same; 3.5 s or more when
+	// the cost grows with the number of candidates.
+	if cpu := cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime(); cpu > 2*time.Second {
+		t.Errorf("completing %d candidates took %v of CPU, want under 2s", n, cpu)
 	}
 }
 

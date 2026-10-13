@@ -46,7 +46,7 @@ func yamlScalar(v any, flow bool) string {
 
 // yamlPlainOK reports whether s can be written unquoted and read back as the same string.
 func yamlPlainOK(s string, flow bool) bool {
-	if s == "" || strings.TrimSpace(s) != s || strings.ContainsAny(s, "\"'") || strings.ContainsFunc(s, unicode.IsControl) {
+	if s == "" || strings.TrimSpace(s) != s || strings.ContainsAny(s, "\"'") || strings.ContainsFunc(s, yamlEscapeOnly) {
 		return false
 	}
 	doc := "k: " + s
@@ -63,7 +63,7 @@ func yamlPlainOK(s string, flow bool) bool {
 
 // yamlKey renders a mapping key, quoting it when it wouldn't read back as itself.
 func yamlKey(k string) string {
-	if k != "" && strings.TrimSpace(k) == k && !strings.ContainsAny(k, "\"'") && !strings.ContainsFunc(k, unicode.IsControl) {
+	if k != "" && strings.TrimSpace(k) == k && !strings.ContainsAny(k, "\"'") && !strings.ContainsFunc(k, yamlEscapeOnly) {
 		var got map[string]any
 		if yaml.Unmarshal([]byte(k+": 1"), &got) == nil && len(got) == 1 {
 			if _, ok := got[k]; ok {
@@ -170,4 +170,11 @@ func scalarText(v any) (string, error) {
 		return s, nil
 	}
 	return "", fmt.Errorf("a dotenv value must be a scalar, not %T", v)
+}
+
+// yamlEscapeOnly reports whether r must be written as an escape in a double-quoted YAML
+// string: a control character, or one of the line breaks U+2028 and U+2029, which editing
+// refuses to find in a file as written.
+func yamlEscapeOnly(r rune) bool {
+	return unicode.IsControl(r) || r == ' ' || r == ' '
 }

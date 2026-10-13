@@ -1,6 +1,9 @@
 package codegen
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -9,8 +12,8 @@ import (
 // what emerges only once refs are followed: collisions across composition boundaries and
 // cyclic or missing refs. Reusing the composer keeps validate and generate in agreement. Each
 // child spec's own checks run in Processor.validateComposedSpecs. It is best-effort: it skips
-// a spec with no refs, an invalid root (lintRootCommand reports it), and a spec outside the
-// current module.
+// a spec with no refs and an invalid root (lintRootCommand reports it). For a spec outside the
+// current module, or with no module, it checks only that each local ref names a spec file.
 func lintComposedTree(spec *Spec, specPath string) []error {
 	if !specHasRefs(spec) {
 		return nil
@@ -20,7 +23,7 @@ func lintComposedTree(spec *Spec, specPath string) []error {
 	}
 	root, name, err := findModule()
 	if err != nil {
-		return nil
+		return missingLocalRefs(spec, specPath)
 	}
 	// The composer resolves refs and import paths relative to the current module, so run it
 	// only when the spec lives inside that module.
@@ -28,7 +31,7 @@ func lintComposedTree(spec *Spec, specPath string) []error {
 	absRoot, err2 := filepath.Abs(root)
 	if err1 != nil || err2 != nil ||
 		(absSpec != absRoot && !strings.HasPrefix(absSpec, absRoot+string(filepath.Separator))) {
-		return nil
+		return missingLocalRefs(spec, specPath)
 	}
 	if _, err := resolveTree(spec, specPath, name); err != nil {
 		// The composer reports on the tree as a whole, so the problem is placed on the root.
@@ -46,4 +49,22 @@ func specHasRefs(spec *Spec) bool {
 		}
 	})
 	return found
+}
+
+// missingLocalRefs reports each local $ref of spec that names no file, as the composer would.
+// It is the check that runs when the composer can't, for want of the module.
+func missingLocalRefs(spec *Spec, specPath string) []error {
+	var problems []error
+	base := filepath.Dir(specPath)
+	for _, ref := range localSpecRefs(&spec.Command) {
+		locator, err := locateRef(base, ref)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(locator); errors.Is(err, os.ErrNotExist) {
+			problems = append(problems, &problem{kind: "spec", ptr: rootPointer, loc: "command " + spec.Command.Name,
+				msg: fmt.Sprintf("composition: compose %q: %s: %v", ref, locator, os.ErrNotExist)})
+		}
+	}
+	return problems
 }

@@ -69,6 +69,14 @@ command:
       schema:
         type: string
         enum: [json, text, yaml]
+    - name: speed
+      cascading: true
+      summary: how fast to go
+      identifiers: [--speed]
+      schema:
+        type: string
+        enum: [fast, slow, Safe]
+        ignore_case: true
     - name: set
       cascading: true
       summary: override a setting
@@ -104,11 +112,17 @@ command:
               - "o’neil;touch pwned"
               - "“q”"
               - 'back\slash'
+              - 'a\:b'
+              - 'C:\Users\me'
               - "a!b"
               - "ends'"
               - "{a,b}"
               - "a&b|c<d>e"
               - "#hash"
+              - "true"
+              - "null"
+              - "-foo.bar"
+              - "--%"
         - name: pair
           summary: values sharing a prefix up to a shell character
           identifiers: [--pair]

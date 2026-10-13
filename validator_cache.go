@@ -55,7 +55,9 @@ func (c schemaCheck) Validate(m map[string]any) error {
 	input, _ = schemaValue(input)
 	result, err := c.schema.ValidateValue(input)
 	if err != nil {
-		return fmt.Errorf("%w: %w", recon.ErrValidation, err)
+		// The check stopped before it finished, such as at the schema's evaluation limit: the
+		// document wasn't found invalid.
+		return fmt.Errorf("%w: %w: %w", recon.ErrValidation, errSchemaUnfinished, err)
 	}
 	if result.Valid {
 		return nil

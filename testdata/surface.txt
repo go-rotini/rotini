@@ -112,6 +112,7 @@ field CompletionOptions.KeepOrder
 field CompletionOptions.NoSpace
 field CompletionResult.Candidates
 field CompletionResult.Hint
+field CompletionResult.IgnoreCase
 field CompletionResult.KeepOrder
 field CompletionResult.Messages
 field CompletionResult.NoSpace

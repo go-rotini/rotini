@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 )
 
@@ -51,15 +50,15 @@ func TestBufferedOutput_failedFlushIsAnError(t *testing.T) {
 	t.Parallel()
 	p, errb := bufferedProgram(func(rtx *Context) {
 		fmt.Fprintln(rtx.Stdout, "lost")
-	}, failingWriter{syscall.ENOSPC})
+	}, failingWriter{errNoSpace})
 	code, err := p.Run(nil)
 	if code != 1 {
 		t.Errorf("exit = %d, want 1", code)
 	}
-	if !errors.Is(err, syscall.ENOSPC) {
+	if !errors.Is(err, errNoSpace) {
 		t.Errorf("Run error = %v, want it to match ENOSPC", err)
 	}
-	if got := errb.String(); got != "Error: write output: "+syscall.ENOSPC.Error()+"\n" {
+	if got := errb.String(); got != "Error: write output: "+errNoSpace.Error()+"\n" {
 		t.Errorf("stderr = %q", got)
 	}
 }
@@ -71,7 +70,7 @@ func TestBufferedOutput_failedWriteRecordedOnce(t *testing.T) {
 		if _, err := rtx.Stdout.Write(make([]byte, 2*bufferedStdoutSize)); err != nil {
 			rtx.RecordError(fmt.Errorf("write the report: %w", err))
 		}
-	}, failingWriter{syscall.ENOSPC})
+	}, failingWriter{errNoSpace})
 	if code, _ := p.Run(nil); code != 1 {
 		t.Errorf("exit = %d, want 1", code)
 	}

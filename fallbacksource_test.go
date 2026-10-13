@@ -225,10 +225,12 @@ func TestFallbackSource_nullListItem(t *testing.T) {
 		"nums: [1, ~]\n":    "config key nums: list item 2 is null (from configuration file %s)",
 	} {
 		cfg := writeConfig(t, body)
-		var in fsListInputs
-		err := fsConfigRead(t, cfg, &in)
-		if want = fmt.Sprintf(want, cfg); err == nil || err.Error() != want || !errors.Is(err, ErrUsage) {
-			t.Errorf("%q: %v, want %q", body, err, want)
+		want = fmt.Sprintf(want, cfg)
+		set := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+		for reader, err := range readerErrors[fsListInputs](NewContextFor(fsListDef(), nil).WithInputSettings(set), "files") {
+			if err == nil || err.Error() != want || !errors.Is(err, ErrUsage) {
+				t.Errorf("%q: %s: %v, want %q", body, reader, err, want)
+			}
 		}
 	}
 }

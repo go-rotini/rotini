@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-rotini/rotini/internal/testmod"
 )
 
 // importCmd returns the `rotini import cobra` command line, ending with args.
@@ -138,8 +140,8 @@ func roundTrip(t *testing.T, cases []importCase) {
 				t.Errorf("a generate right after the import created files:\n%s", got)
 			}
 
-			run("go", "mod", "edit", "-require=github.com/go-rotini/rotini@v0.0.0",
-				"-replace=github.com/go-rotini/rotini="+strings.ReplaceAll(root, `\`, `/`))
+			run("go", append([]string{"mod", "edit", "-require=github.com/go-rotini/rotini@v0.0.0",
+				"-replace=github.com/go-rotini/rotini=" + strings.ReplaceAll(root, `\`, `/`)}, testmod.EditFlags(root)...)...)
 			run("go", "mod", "tidy")
 			exe := dir
 			if runtime.GOOS == "windows" {
@@ -236,8 +238,8 @@ func TestImportCobraNetwork(t *testing.T) {
 				exe += ".exe"
 			}
 			step("build", func() {
-				run("go", "mod", "edit", "-require=github.com/go-rotini/rotini@v0.0.0",
-					"-replace=github.com/go-rotini/rotini="+strings.ReplaceAll(root, `\`, `/`))
+				run("go", append([]string{"mod", "edit", "-require=github.com/go-rotini/rotini@v0.0.0",
+					"-replace=github.com/go-rotini/rotini=" + strings.ReplaceAll(root, `\`, `/`)}, testmod.EditFlags(root)...)...)
 				run("go", "mod", "tidy")
 				run("go", "build", "-o", exe, "./cmd/"+tc.cli)
 			})

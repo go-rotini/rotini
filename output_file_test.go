@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -217,15 +216,15 @@ func TestCreateOutput_writeErrorFailsClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.w = failingWriter{syscall.ENOSPC}
-	if _, err := f.Write([]byte("data")); !errors.Is(err, syscall.ENOSPC) {
+	f.w = failingWriter{errNoSpace}
+	if _, err := f.Write([]byte("data")); !errors.Is(err, errNoSpace) {
 		t.Fatalf("Write = %v", err)
 	}
 	err = f.Close()
-	if !errors.Is(err, syscall.ENOSPC) {
+	if !errors.Is(err, errNoSpace) {
 		t.Fatalf("Close = %v, want ENOSPC", err)
 	}
-	if want := `could not write output file "out.txt": ` + syscall.ENOSPC.Error(); err.Error() != want {
+	if want := `could not write output file "out.txt": ` + errNoSpace.Error(); err.Error() != want {
 		t.Errorf("message = %q, want %q", err, want)
 	}
 	if data, _ := os.ReadFile(path); string(data) != "old" {

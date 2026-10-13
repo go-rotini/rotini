@@ -17,6 +17,7 @@ remote	manage remotes
 --level	how much to say
 --no-color	
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 == flag-set-left-out
@@ -29,6 +30,7 @@ remote	manage remotes
 --level	how much to say
 --no-color	
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 == negated
@@ -45,6 +47,12 @@ yaml
 --format=json	
 --format=text	
 --format=yaml	
+== enum-ignore-case
+slow	
+Safe	
+== enum-ignore-case-inline
+--speed=slow	
+--speed=Safe	
 == file-extensions
 ./a.yaml	/w/a.yaml
 ./b.yml	/w/b.yml
@@ -96,6 +104,7 @@ db	the database
 --no-color	
 --quiet	say nothing
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 --verbose	say everything
@@ -111,6 +120,7 @@ db	the database
 --level	how much to say
 --no-color	
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 == sub-command-enum
@@ -151,11 +161,17 @@ db	the database
 'o’’neil;touch pwned'	o’neil;touch pwned
 '“q”'	“q”
 back\slash	
+a\:b	
+C:\Users\me	
 a!b	
 'ends'''	ends'
 '{a,b}'	{a,b}
 'a&b|c<d>e'	a&b|c<d>e
 '#hash'	#hash
+true	
+null	
+'-foo.bar'	-foo.bar
+'--%'	--%
 == quote-shared
 'x;touch pwned'	x;touch pwned
 'x;touch pwnedz'	x;touch pwnedz
@@ -163,6 +179,11 @@ a!b
 'x,y'	x,y
 == quote-typed-quote
 'it''s $HOME'	it's $HOME
+== quote-typed-quote-shared
+'x;touch pwned'	x;touch pwned
+'x;touch pwnedz'	x;touch pwnedz
+'x y'	x y
+'x,y'	x,y
 == quote-typed-backslash
 == quote-colon
 host:8080	

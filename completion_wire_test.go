@@ -85,3 +85,31 @@ func TestComplete_discoveryDashWordIsPositional(t *testing.T) {
 		t.Errorf("5 <TAB> = %q, want nothing after a plugin token", got)
 	}
 }
+
+// An answer matched without regard to case says so on its option line, so a shell that filters
+// by the typed word keeps the candidates whose case differs; a case-sensitive one doesn't.
+func TestComplete_ignoreCaseOption(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Enum: []string{"fast", "slow", "Safe"}, IgnoreCase: true},
+			{Name: "strict", Identifiers: []string{"--strict"}, Type: "string", Enum: []string{"slow", "Safe"}},
+		},
+		Arguments: []ArgDef{{Name: "speed", Type: "string", Enum: []string{"slow", "Safe"}, IgnoreCase: true}},
+		Commands:  []CommandDef{{Name: "sync", Handler: "Sync"}},
+	}
+	for _, tc := range []struct {
+		words []string
+		want  string
+	}{
+		{[]string{"--mode", "S"}, "slow\nSafe\n:rotini:option keep-order ignore-case\n"},
+		{[]string{"--mode=s"}, "--mode=slow\n--mode=Safe\n:rotini:option keep-order ignore-case\n"},
+		{[]string{"--mode", "x"}, ""},
+		{[]string{"--strict", "s"}, "slow\n"},
+		{[]string{"S"}, "slow\nSafe\n:rotini:option keep-order ignore-case\n"},
+	} {
+		if got := completeWire(t, def, nil, nil, tc.words...); got != tc.want {
+			t.Errorf("%q = %q, want %q", tc.words, got, tc.want)
+		}
+	}
+}

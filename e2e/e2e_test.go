@@ -54,6 +54,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-rotini/rotini/internal/testmod"
 	"github.com/rogpeppe/go-internal/testscript"
 )
 
@@ -370,7 +371,7 @@ require github.com/go-rotini/rotini %s
 tool github.com/go-rotini/rotini/cmd/rotini
 
 replace github.com/go-rotini/rotini %s => %s
-`, module, version, version, strings.ReplaceAll(root, `\`, `/`))
+%s`, module, version, version, strings.ReplaceAll(root, `\`, `/`), testmod.Directives(root))
 }
 
 // goEnv returns one `go env` value, preferring an already-set environment variable. Results are
