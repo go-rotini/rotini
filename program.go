@@ -88,10 +88,10 @@ type Program struct {
 	ctx        context.Context
 	args       []string
 	def        Definition
-	rtx        *Context  // seed dependencies: Program.WithDependency lands here; each run's Context clones them
-	reporterFn Reporter  // nil → defaultReporter
-	resolver   Resolver  // nil → DefaultResolver
-	lifecycle  Lifecycle // nil → DefaultLifecycle
+	deps       dependencyStore // seed dependencies: Program.WithDependency lands here; each run clones them
+	reporterFn Reporter        // nil → defaultReporter
+	resolver   Resolver        // nil → DefaultResolver
+	lifecycle  Lifecycle       // nil → DefaultLifecycle
 	stdin      io.Reader
 	stdout     io.Writer
 	stderr     io.Writer
@@ -121,7 +121,7 @@ type Program struct {
 
 	// rotini's own settings, kept out of the dependency store so a program's dependency can
 	// never shadow them.
-	meta     *InputSettings                   // WithInputSettings: the generated descriptor; nil → none
+	meta     *boundSettings                   // WithInputSettings: the generated descriptor; nil → none
 	readerFn func(InputSettings) *InputReader // WithInputReader: nil → NewInputReader
 	version  string                           // WithVersion
 	help     HelpFunc                         // WithHelp: nil → no pages
@@ -172,7 +172,6 @@ func newProgram(def Definition, lookup HandlerLookup) *Program {
 		argv0:           invokedName(),
 		def:             def,
 		lookup:          lookup,
-		rtx:             newContext(),
 		stdin:           os.Stdin,
 		stdout:          os.Stdout,
 		stderr:          os.Stderr,
@@ -359,7 +358,7 @@ func (p *Program) With(opts ...Option) *Program {
 // env prefix and the stdin schemas [Context.Inputs] reads from. The generated NewProgram calls
 // it; a hand-built program calls it to enable those channels.
 func (p *Program) WithInputSettings(meta InputSettings) *Program {
-	p.meta = &meta
+	p.meta = bindSettings(meta)
 	return p
 }
 
@@ -418,10 +417,8 @@ func (p *Program) WithParser(parser *Parser) *Program {
 // dependencies, its streams and its settings.
 func (p *Program) newRunContext() *Context {
 	rtx := newContext()
-	if p.rtx != nil {
-		if svcs := p.rtx.cloneServices(); svcs != nil {
-			rtx.services = svcs
-		}
+	if svcs := p.deps.clone(); svcs != nil {
+		rtx.services = svcs
 	}
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
 	rtx.meta, rtx.readerFn = p.meta, p.readerFn
@@ -429,7 +426,7 @@ func (p *Program) newRunContext() *Context {
 	rtx.outputChecks = p.outputChecks
 	rtx.clock.fn = p.clock
 	rtx.clock.feats = p.feats
-	rtx.view = p.view.resolved().withClock(&rtx.clock)
+	rtx.view = p.view.resolved().withClockIn(&rtx.runView, &rtx.clock)
 	if p.bufferedOutput && !IsTerminal(p.stdout) {
 		rtx.bufOut = newBufferedStdout(p.stdout)
 		rtx.Stdout = rtx.bufOut
@@ -572,7 +569,8 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 	// where it writes out what the handlers wrote.
 	defer rtx.flushOutput()
 	if trap {
-		defer p.installTrap(cancel, rtx.flushOutput, oneShot)()
+		sigCh, done := p.installTrap(cancel, rtx)
+		defer removeTrap(sigCh, done, oneShot)
 	}
 
 	resolve := p.resolver
@@ -673,16 +671,16 @@ func (rtx *Context) adoptChain(chain []Command) []Command {
 	return chain
 }
 
-// installTrap starts rotini's signal trap for one run and returns the function that removes
-// it. The first signal cancels the run with the signal's exit code as the cause, so dispatch
-// halts and teardown runs; a second calls the exit action with forceExitCode, skipping the
-// remaining teardown after beforeExit, a best-effort flush of buffered stdout. With
+// installTrap starts rotini's signal trap for one run; [removeTrap] with what it returns
+// removes it. The first signal cancels the run with the signal's exit code as the cause, so
+// dispatch halts and teardown runs; a second calls the exit action with forceExitCode, skipping
+// the remaining teardown after a best-effort flush of rtx's buffered stdout. With
 // WithTerminationTimeout, a run still going that long after the first signal exits the same
 // way, with the first signal's code.
 //
-// With oneShot the process exits when the run returns, so stop ends the trap's goroutine but
-// leaves the handler registered: unregistering costs more than the rest of the trap.
-func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func(), oneShot bool) (stop func()) {
+// The trap's state travels as values rather than in a closure, so arming it allocates only the
+// channels and the goroutine.
+func (p *Program) installTrap(cancel context.CancelCauseFunc, rtx *Context) (chan os.Signal, chan struct{}) {
 	sigs := p.signalSet
 	if len(sigs) == 0 {
 		sigs = trapSignals
@@ -709,19 +707,24 @@ func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func(),
 		}
 		select {
 		case <-sigCh:
-			beforeExit()
+			rtx.flushOutput()
 			p.exit(forceExitCode)
 		case <-expired:
-			beforeExit()
+			rtx.flushOutput()
 			p.exit(code)
 		case <-done:
 		}
 	}()
-	return func() {
-		close(done)
-		if !oneShot {
-			stopSignals(sigCh)
-		}
+	return sigCh, done
+}
+
+// removeTrap removes the trap [Program.installTrap] armed. With oneShot the process exits when
+// the run returns, so it ends the trap's goroutine but leaves the handler registered:
+// unregistering costs more than the rest of the trap.
+func removeTrap(sigCh chan os.Signal, done chan struct{}, oneShot bool) {
+	close(done)
+	if !oneShot {
+		stopSignals(sigCh)
 	}
 }
 

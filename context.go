@@ -3,7 +3,6 @@ package rotini
 import (
 	"context"
 	"io"
-	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -105,7 +104,7 @@ type Context struct {
 
 	// rotini's own settings, seeded from the Program each run and kept out of services so a
 	// dependency can never shadow them.
-	meta     *InputSettings
+	meta     *boundSettings
 	readerFn func(InputSettings) *InputReader
 	version  string
 	help     HelpFunc
@@ -117,6 +116,9 @@ type Context struct {
 
 	// clock is the run's clock and its one reading; see [Program.WithClock]. view points at it.
 	clock runClock
+
+	// runView is where view points for a run: the run's view, allocated with its Context.
+	runView osView
 
 	// outputChecks makes WriteOutput and WriteOutputItem check each value against the declared
 	// output schema before writing it. See [Program.WithOutputChecks].
@@ -170,14 +172,6 @@ func (rtx *Context) AddCompletionMessage(msg string) {
 // injected directory.
 func (rtx *Context) argvAcq() argvAcq {
 	return argvAcq{rtx: rtx, dir: rtx.osView().base(), clock: &rtx.clock}
-}
-
-// cloneServices copies the dependency store. Each run is seeded from the Program's copy, so a
-// dependency set during a run stays local to it.
-func (rtx *Context) cloneServices() map[string]any {
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	return maps.Clone(rtx.services)
 }
 
 // newContext returns an empty [Context] with the os streams and no resolved command.
@@ -622,7 +616,7 @@ func (rtx *Context) recordFault(pe *PanicError) {
 func (rtx *Context) WithInputSettings(meta InputSettings) *Context {
 	if rtx != nil {
 		rtx.mu.Lock()
-		rtx.meta = &meta
+		rtx.meta = bindSettings(meta)
 		rtx.mu.Unlock()
 	}
 	return rtx
@@ -788,5 +782,5 @@ func (rtx *Context) settingsForRun() (InputSettings, bool) {
 	if rtx.meta == nil {
 		return InputSettings{}, false
 	}
-	return *rtx.meta, true
+	return rtx.meta.meta, true
 }

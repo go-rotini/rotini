@@ -10,14 +10,13 @@ import (
 
 // timeMapValue reads a map[string]time.Time input's value under its declared layouts or
 // relative form, which recon's own decoding (RFC 3339 only) does not know: an environment
-// variable's key=value pairs, a configuration file's map, or one of the map's leaves (path is
-// <key>.<name>). ok is false when path is no such input, or when a value does not parse, so
-// recon reports it as a usage error naming the input.
-func (s spellings) timeMapValue(path recon.Path, v recon.Value) (recon.Value, bool) {
+// variable's key=value pairs, a configuration file's map, or one of the map's leaves (key is
+// <key>.<name>), key being the path's string form. ok is false when key is no such input, or
+// when a value does not parse, so recon reports it as a usage error naming the input.
+func (s spellings) timeMapValue(key string, v recon.Value) (recon.Value, bool) {
 	if len(s.keys.timeMaps) == 0 {
 		return v, false
 	}
-	key := path.String()
 	if ts, ok := s.keys.timeMaps[key]; ok {
 		ts.clock = s.clock
 		return timeMapOf(v, ts)

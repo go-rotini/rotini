@@ -275,9 +275,13 @@ func (s *featureSet) addCodec(c *codecEntry) {
 	}
 }
 
-// reconCodecs is the wired codecs as a recon codec set, in wiring order.
+// reconCodecs is the wired codecs as a recon codec set, in wiring order, fixed at its first use.
 func (s *featureSet) reconCodecs() *recon.Codecs {
 	s.codecSet.once.Do(func() {
+		if len(s.codecs) == 0 {
+			s.codecSet.set = noCodecs() // rotini never adds a codec to a set it passes recon
+			return
+		}
 		cs := make([]recon.Codec, len(s.codecs))
 		for i, c := range s.codecs {
 			cs[i] = c.codec()
@@ -286,6 +290,17 @@ func (s *featureSet) reconCodecs() *recon.Codecs {
 	})
 	return s.codecSet.set
 }
+
+// noCodecs is the codec set of a program that wires none, shared by them all.
+func noCodecs() *recon.Codecs {
+	noCodecsOnce.Do(func() { noCodecsSet = recon.NewCodecs() })
+	return noCodecsSet
+}
+
+var (
+	noCodecsOnce sync.Once
+	noCodecsSet  *recon.Codecs
+)
 
 // hasStdinFormat reports whether stdin may be read as format.
 func (s *featureSet) hasStdinFormat(name string) bool {

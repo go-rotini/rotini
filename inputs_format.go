@@ -55,7 +55,7 @@ func fallbackValueOrigin(reg *recon.Registry, view *osView, tag reflect.StructTa
 	source := ""
 	if val, found, err := reg.Get(key); err == nil && found {
 		source = val.Source()
-	} else if _, leafSource, err := mapLeaves(reg, key); err == nil {
+	} else if _, leafSource, err := mapLeaves(fallbackLookup{reg: reg}, key); err == nil {
 		source = leafSource
 	}
 	return valueOrigin(view, source, tag.Get("env"), key)

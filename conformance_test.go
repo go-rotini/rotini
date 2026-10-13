@@ -274,8 +274,12 @@ func runInputCase(t *testing.T, c inputCase) {
 		t.Setenv(k, v)
 	}
 
-	rtx := NewContextFor(acmeDef(), c.args).WithStdin(strings.NewReader(c.stdin))
-	c.check(t, rtx, acmeMeta(dir))
+	mk := func() *Context { return NewContextFor(acmeDef(), c.args).WithStdin(strings.NewReader(c.stdin)) }
+	c.check(t, mk(), acmeMeta(dir))
+	if fallbackMode == "direct" {
+		checkProbesBothPaths(t, mk, acmeMeta(dir))
+		checkProbesBothPaths(t, mk, envOnlySettings(acmeMeta(dir)))
+	}
 }
 
 // ── the matrix, in-process tier ──────────────────────────────────────────────
@@ -1170,11 +1174,17 @@ func mustGetwd(t *testing.T) string {
 
 // TestConformance_InputMatrix runs the in-process tier of the matrix.
 func TestConformance_InputMatrix(t *testing.T) {
+	before := fallbackPathCounts.direct.Load()
 	wiringModes(t, func(t *testing.T) {
 		for _, c := range conformanceCases() {
 			t.Run(c.id, func(t *testing.T) { runInputCase(t, c) })
 		}
 	})
+	// The whole matrix takes the direct lookup in over 400 fallback passes. Far fewer means the
+	// comparison has quietly stopped reaching it.
+	if got := fallbackPathCounts.direct.Load() - before; got < 200 && !subtestsFiltered() {
+		t.Errorf("the direct lookup was taken in %d fallback passes; want at least 200", got)
+	}
 }
 
 // TestConformance_matrixComplete enforces the suite's shape: every matrix ID

@@ -244,8 +244,11 @@ func resolveFileVars(v reflect.Value, view *osView, waived bool) (map[string]env
 	var firstErr error
 	visit := func(channel string, f reflect.StructField) {
 		file := f.Tag.Get("envfile")
+		if firstErr != nil || file == "" {
+			return
+		}
 		names := strings.Split(f.Tag.Get("env"), ",")
-		if firstErr != nil || file == "" || names[0] == "" {
+		if names[0] == "" {
 			return
 		}
 		layer := pairLayer(view, names, file)

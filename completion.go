@@ -233,32 +233,26 @@ func completeFlagWord(cc completionContext, words []string, partial string, look
 		return vals.answer(partial)
 	}
 
-	var required, rest []string
-	claimed := map[string]bool{} // a spelling a nearer frame declares, which shadows an ancestor's
+	var required, rest, mine []string
+	var claimed map[string]bool // a spelling a nearer frame declares, which shadows an ancestor's
 	for i, v := range slices.Backward(cc.chain) {
 		hidden, needed := groupEffects(ruleFrame(cc.chain, i), cc.setAt(i))
-		var mine []string
+		mine = mine[:0]
 		for _, f := range v.Flags {
-			mine = append(mine, matchSpellings(f)...)
+			if i > 0 { // only a frame nearer the root reads what this one claims
+				mine = appendMatchSpellings(mine, f)
+			}
 			if !offerFlag(f, cc.setAt(i), hidden) || (f.Local && i != len(cc.chain)-1) {
 				continue
 			}
-			var ids []string
-			for _, id := range flagSpellings(f) {
-				switch {
-				case claimed[id]:
-				case slices.Contains(f.Identifiers, id):
-					ids = append(ids, withDescription(id, f.Summary))
-				default:
-					// The summary describes the flag, not its negated form, which sets it false.
-					ids = append(ids, id)
-				}
-			}
 			if !f.ShortCircuit && !cc.setAt(i)[f.Name] && (f.Required || needed[f.Name]) {
-				required = append(required, ids...)
+				required = appendFlagSpellings(required, f, claimed, partial)
 			} else {
-				rest = append(rest, ids...)
+				rest = appendFlagSpellings(rest, f, claimed, partial)
 			}
+		}
+		if len(mine) > 0 && claimed == nil {
+			claimed = make(map[string]bool, len(mine))
 		}
 		for _, id := range mine {
 			claimed[id] = true
@@ -270,6 +264,24 @@ func completeFlagWord(cc completionContext, words []string, partial string, look
 	sort.Strings(rest)
 	out := filterPrefix(append(required, rest...), partial)
 	return completionAnswer{cands: out, keepOrder: !slices.IsSorted(out)}
+}
+
+// appendFlagSpellings appends to dst the spellings of f completion offers for partial: each one
+// no nearer frame claims, an identifier with the flag's description. A spelling partial does
+// not start is left out here, as filterPrefix would leave it out, so its description is never
+// built.
+func appendFlagSpellings(dst []string, f FlagDef, claimed map[string]bool, partial string) []string {
+	for _, id := range flagSpellings(f) {
+		switch {
+		case claimed[id], !strings.HasPrefix(candidateName(id), partial):
+		case slices.Contains(f.Identifiers, id):
+			dst = append(dst, withDescription(id, f.Summary))
+		default:
+			// The summary describes the flag, not its negated form, which sets it false.
+			dst = append(dst, id)
+		}
+	}
+	return dst
 }
 
 // offerFlag reports whether flag f, of a frame whose set flags are set, is offered by name:
@@ -295,6 +307,9 @@ func repeatableFlag(f FlagDef) bool {
 // negated forms of a negatable flag, leaving out deprecated identifiers and their negated
 // forms. They are still accepted when typed.
 func flagSpellings(f FlagDef) []string {
+	if !f.Negatable && !slices.ContainsFunc(f.Identifiers, func(id string) bool { return slices.Contains(f.DeprecatedIdentifiers, id) }) {
+		return f.Identifiers // every identifier, as is; callers only read it
+	}
 	var ids []string
 	for _, id := range f.Identifiers {
 		if !slices.Contains(f.DeprecatedIdentifiers, id) {
@@ -313,6 +328,9 @@ func flagSpellings(f FlagDef) []string {
 // there: hidden are the other members of an exclusive group (mutually_exclusive or one_of) one
 // of whose members is set, and needed are the flags the groups and dependencies require now.
 func groupEffects(frame Command, set map[string]bool) (hidden, needed map[string]bool) {
+	if len(frame.FlagGroups) == 0 && len(frame.FlagDependencies) == 0 {
+		return nil, nil // callers only read them
+	}
 	hidden, needed = map[string]bool{}, map[string]bool{}
 	anySet := func(names []string) bool {
 		return slices.ContainsFunc(names, func(n string) bool { return set[n] })
@@ -406,7 +424,7 @@ func commandNames(cur Command) []string {
 func walkContext(def Definition, before []string) completionContext {
 	chain := make([]Command, 1, 1+descentHint(def, before)) // a command is large: grow it once
 	chain[0] = rootFrame(def)
-	cc := completionContext{chain: chain, set: make([]map[string]bool, 1)}
+	cc := completionContext{chain: chain, set: make([]map[string]bool, 1, cap(chain))}
 	for i := 0; i < len(before); i++ {
 		tok := before[i]
 		if cc.afterTerminator || cc.operands {
@@ -775,22 +793,41 @@ func filterPrefix(candidates []string, prefix string) []string {
 // filterPrefixCase is [filterPrefix], matching the prefix without regard to case when fold is
 // set.
 func filterPrefixCase(candidates []string, prefix string, fold bool) []string {
-	seen := map[string]bool{}
+	var seen map[string]bool // for more than dedupSmall candidates; fewer are checked against out
 	out := make([]string, 0, len(candidates))
 	for _, c := range candidates {
 		// A candidate may carry a "\t<description>" suffix (see withDescription);
 		// the prefix matches — and duplicates collapse — on the NAME part only.
-		name := c
-		if before, _, ok := strings.Cut(c, "\t"); ok {
-			name = before
-		}
+		name := candidateName(c)
 		has := strings.HasPrefix(name, prefix) || (fold && foldedPrefix(name, prefix))
-		if name != "" && has && !seen[name] {
-			seen[name] = true
-			out = append(out, c)
+		if name == "" || !has {
+			continue
 		}
+		if len(candidates) > dedupSmall {
+			if seen == nil {
+				seen = map[string]bool{}
+			}
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+		} else if slices.ContainsFunc(out, func(o string) bool { return candidateName(o) == name }) {
+			continue
+		}
+		out = append(out, c)
 	}
 	return out
+}
+
+// dedupSmall is how many candidates filterPrefixCase dedupes by scanning what it kept.
+const dedupSmall = 32
+
+// candidateName is a candidate's name: the text before its "\t<description>" suffix.
+func candidateName(c string) string {
+	if before, _, ok := strings.Cut(c, "\t"); ok {
+		return before
+	}
+	return c
 }
 
 // foldedPrefix reports whether s begins with prefix under Unicode case folding, as
@@ -1089,6 +1126,9 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 	result := CompletionResult{Hint: completionHintFor(p.def, words)}
 	describe := p.completionDescriptionsOn(rtx)
 	allKeys := true
+	if len(answer.cands) > 0 {
+		result.Candidates = make([]CompletionCandidate, 0, len(answer.cands))
+	}
 	for _, c := range answer.cands {
 		value, desc, _ := strings.Cut(c, "\t")
 		if !wireSafeValue(value) {
@@ -1100,6 +1140,9 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 		}
 		allKeys = allKeys && strings.HasSuffix(value, "=")
 		result.Candidates = append(result.Candidates, CompletionCandidate{Value: value, Description: desc})
+	}
+	if len(result.Candidates) == 0 {
+		result.Candidates = nil // none survived: as if none were offered
 	}
 	rtx.mu.RLock()
 	result.NoSpace = asked.NoSpace || (allKeys && len(result.Candidates) > 0) || answer.noSpace
@@ -1219,27 +1262,68 @@ const completionOptionPrefix = completionDirectivePrefix + "option "
 // declares one. The kind line is always last, so a script that doesn't know an option line
 // still reads the kind.
 func rotiniCompletion(w io.Writer, result CompletionResult) error {
-	lines := candidateLines(result.Candidates)
+	d := directiveFor(result.Hint)
+	n := candidateBytes(result.Candidates) + len(d) + 1
 	for _, m := range result.Messages {
-		lines = append(lines, completionMessagePrefix+m)
+		n += len(completionMessagePrefix) + len(m) + 1
 	}
-	var opts []string
-	if result.NoSpace {
-		opts = append(opts, "nospace")
+	opts := [...]struct {
+		on   bool
+		word string
+	}{{result.NoSpace, "nospace"}, {result.KeepOrder, "keep-order"}, {result.IgnoreCase, "ignore-case"}}
+	for _, o := range opts {
+		n += len(o.word) + 1
 	}
-	if result.KeepOrder {
-		opts = append(opts, "keep-order")
+	var b strings.Builder
+	b.Grow(n + len(completionOptionPrefix))
+	writeCandidateLines(&b, result.Candidates)
+	for _, m := range result.Messages {
+		b.WriteString(completionMessagePrefix)
+		b.WriteString(m)
+		b.WriteByte('\n')
 	}
-	if result.IgnoreCase {
-		opts = append(opts, "ignore-case")
+	if result.NoSpace || result.KeepOrder || result.IgnoreCase {
+		b.WriteString(completionOptionPrefix)
+		sep := ""
+		for _, o := range opts {
+			if o.on {
+				b.WriteString(sep)
+				b.WriteString(o.word)
+				sep = " "
+			}
+		}
+		b.WriteByte('\n')
 	}
-	if len(opts) > 0 {
-		lines = append(lines, completionOptionPrefix+strings.Join(opts, " "))
+	if d != "" {
+		b.WriteString(d)
+		b.WriteByte('\n')
 	}
-	if d := directiveFor(result.Hint); d != "" {
-		lines = append(lines, d)
+	return writeCompletion(w, b.String())
+}
+
+// candidateBytes is how many bytes [writeCandidateLines] writes for candidates.
+func candidateBytes(candidates []CompletionCandidate) int {
+	n := 0
+	for _, c := range candidates {
+		n += len(c.Value) + 1
+		if c.Description != "" {
+			n += 1 + len(c.Description)
+		}
 	}
-	return writeLines(w, lines)
+	return n
+}
+
+// writeCandidateLines writes the candidate lines [candidateLines] renders, each
+// newline-terminated.
+func writeCandidateLines(b *strings.Builder, candidates []CompletionCandidate) {
+	for _, c := range candidates {
+		b.WriteString(c.Value)
+		if c.Description != "" {
+			b.WriteByte('\t')
+			b.WriteString(c.Description)
+		}
+		b.WriteByte('\n')
+	}
 }
 
 // candidateLines renders candidates as "value" or "value\tdescription", the candidate line both
@@ -1258,12 +1342,22 @@ func candidateLines(candidates []CompletionCandidate) []string {
 
 // writeLines writes lines, each newline-terminated, in one write.
 func writeLines(w io.Writer, lines []string) error {
+	n := 0
+	for _, l := range lines {
+		n += len(l) + 1
+	}
 	var b strings.Builder
+	b.Grow(n)
 	for _, l := range lines {
 		b.WriteString(l)
 		b.WriteByte('\n')
 	}
-	if _, err := io.WriteString(w, b.String()); err != nil {
+	return writeCompletion(w, b.String())
+}
+
+// writeCompletion writes a completion's output in one write.
+func writeCompletion(w io.Writer, s string) error {
+	if _, err := io.WriteString(w, s); err != nil {
 		return fmt.Errorf("write completion: %w", err)
 	}
 	return nil

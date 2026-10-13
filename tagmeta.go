@@ -134,18 +134,31 @@ func canonicalizeField(f reflect.Value, enum enumSet) {
 func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 	var c Constraints
 	has := false
+	// An absent tag reads as "", which never parses: skip it rather than build a parse error.
 	floatTag := func(name string, dst **float64) {
-		if f, err := strconv.ParseFloat(tag.Get(name), 64); err == nil {
+		s := tag.Get(name)
+		if s == "" {
+			return
+		}
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
 			*dst, has = new(f), true
 		}
 	}
 	intTag := func(name string, dst *int) {
-		if n, err := strconv.Atoi(tag.Get(name)); err == nil {
+		s := tag.Get(name)
+		if s == "" {
+			return
+		}
+		if n, err := strconv.Atoi(s); err == nil {
 			*dst, has = n, true
 		}
 	}
 	intPtrTag := func(name string, dst **int) {
-		if n, err := strconv.Atoi(tag.Get(name)); err == nil {
+		s := tag.Get(name)
+		if s == "" {
+			return
+		}
+		if n, err := strconv.Atoi(s); err == nil {
 			*dst, has = new(n), true
 		}
 	}

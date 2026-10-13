@@ -34,8 +34,8 @@ func negatedForms(f FlagDef) []string {
 	return forms
 }
 
-// matchSpellings is every spelling the command line accepts for f, hidden ones included.
-func matchSpellings(f FlagDef) []string {
-	ids := slices.Concat(f.Identifiers, f.HiddenIdentifiers)
-	return append(ids, negatedForms(f)...)
+// appendMatchSpellings appends every spelling the command line accepts for f, hidden ones
+// included, to dst.
+func appendMatchSpellings(dst []string, f FlagDef) []string {
+	return append(append(append(dst, f.Identifiers...), f.HiddenIdentifiers...), negatedForms(f)...)
 }

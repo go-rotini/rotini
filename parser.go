@@ -65,6 +65,9 @@ type parsedInputs struct {
 
 	// pool backs the one-value slices [parsedInputs.one] hands out.
 	pool []string
+	// poolHint sizes pool.s first chunk: the number of argv words, which is about how many
+	// one-value slices a parse hands out.
+	poolHint int
 }
 
 // one returns a slice holding just s, with capacity one as a new slice has, carved from a
@@ -72,7 +75,8 @@ type parsedInputs struct {
 // never writes into a neighbor, so it behaves exactly as []string{s}.
 func (p *parsedInputs) one(s string) []string {
 	if len(p.pool) == cap(p.pool) {
-		p.pool = make([]string, 0, 8)
+		p.pool = make([]string, 0, max(8, p.poolHint))
+		p.poolHint = 0
 	}
 	p.pool = append(p.pool, s)
 	n := len(p.pool)
@@ -566,12 +570,9 @@ func acquiringArg(args []ArgDef, pos int) (ArgDef, bool) {
 // command line". acq.stdin backs the from:stdin sentinel and is read only when a "-" value
 // appears on an opted-in flag; acq.dir is where relative `@file` and existingfile paths resolve.
 func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs, error) {
-	store := &parsedInputs{
-		scopes:  make([]scopeInputs, len(chain)),
-		argvSet: make([]map[string]bool, len(chain)),
-		dir:     acq.dir,
-		clock:   acq.clock,
-	}
+	store := newParsedInputs(len(chain))
+	store.dir, store.clock = acq.dir, acq.clock
+	store.poolHint = len(argv)
 	leaf := len(chain) - 1 // chain index of the leaf command
 	depth := 1             // index of the next chain frame we might descend into
 	startedArgs := false   // a positional has been seen: command descent is over
@@ -2613,4 +2614,20 @@ func flagDefRef(defs []FlagDef, name string) *FlagDef {
 		}
 	}
 	return nil
+}
+
+// newParsedInputs returns an empty store for a chain of n commands. A chain of up to three
+// commands, the usual depth, gets the store and its per-frame slices in one allocation; the
+// slices have length and capacity n, as made separately.
+func newParsedInputs(n int) *parsedInputs {
+	if n > 3 {
+		return &parsedInputs{scopes: make([]scopeInputs, n), argvSet: make([]map[string]bool, n)}
+	}
+	b := &struct {
+		p parsedInputs
+		s [3]scopeInputs
+		a [3]map[string]bool
+	}{}
+	b.p.scopes, b.p.argvSet = b.s[:n:n], b.a[:n:n]
+	return &b.p
 }

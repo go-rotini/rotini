@@ -50,18 +50,36 @@ func readerFor(rtx *Context) *InputReader {
 	if rtx == nil {
 		return NewInputReader(InputSettings{}) // the channel layer reports the nil context as a ParseError
 	}
-	meta, described := rtx.settingsForRun()
 	// A [Program.WithInputReader] function wins. It receives the settings, so an override cannot
 	// discard the configuration sources the spec declared.
 	if fn := rtx.readerFn; fn != nil {
+		meta, described := rtx.settingsForRun()
 		if b := fn(meta); b != nil {
 			b.described = described
 			return b
 		}
 	}
-	b := NewInputReader(meta)
-	b.described = described
-	return b
+	rtx.mu.RLock()
+	bound := rtx.meta
+	rtx.mu.RUnlock()
+	if bound == nil {
+		b := NewInputReader(InputSettings{})
+		b.described = false
+		return b
+	}
+	return &bound.reader
+}
+
+// boundSettings is an [InputSettings] as a program or Context holds it, with the default
+// reader configured from it, built once since a read never changes its reader.
+type boundSettings struct {
+	meta   InputSettings
+	reader InputReader
+}
+
+// bindSettings holds meta and builds its default reader.
+func bindSettings(meta InputSettings) *boundSettings {
+	return &boundSettings{meta: meta, reader: *NewInputReader(meta)}
 }
 
 // NewInputReader returns the default input reader, configured from the generated
@@ -271,15 +289,27 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 	if err != nil {
 		return err
 	}
-	rd := fallbackRead{view: view, waiveFiles: waived, files: sourcePaths(files)}
-	srcs := make([]recon.Source, 0, 2+len(files))
-	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, b.envPrefix, view))
-	srcs = append(srcs, files...)
-	reg, err := newRegistry(fs, recon.WithoutWatch(), recon.WithSources(srcs...))
-	if err != nil {
-		return internalBind(channelFlag, "", "could not build the flag-fallback registry", err)
+	rd := fallbackRead{view: view, waiveFiles: waived}
+	if len(files) > 0 {
+		rd.files = sourcePaths(files)
 	}
-	defer reg.Close()
+	var reg fallbackLookup
+	if len(files) == 0 && plainFallbackKeys(v) {
+		// The environment is the only source, and no key is read but its own: the argv layer
+		// holds only keys of flags set on argv, which are never read again.
+		env := flagEnv(v, b.envPrefix, view)
+		reg = fallbackLookup{env: &env}
+	} else {
+		srcs := make([]recon.Source, 0, 2+len(files))
+		srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, b.envPrefix, view))
+		srcs = append(srcs, files...)
+		r, err := newRegistry(fs, recon.WithoutWatch(), recon.WithSources(srcs...))
+		if err != nil {
+			return internalBind(channelFlag, "", "could not build the flag-fallback registry", err)
+		}
+		defer r.Close()
+		reg = fallbackLookup{reg: r}
+	}
 
 	if anchor < 0 {
 		return nil // a struct that does not fit the chain; checkFrameFit reports it
@@ -340,7 +370,7 @@ type fallbackRead struct {
 
 // reconcileFlag binds one fallback flag, at chain frame idx, from the registry: argv > env >
 // config. A flag the user set on the command line is left as the Parser bound it.
-func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructField, chain []Command, store *parsedInputs, idx int, rd fallbackRead) error {
+func reconcileFlag(reg fallbackLookup, field reflect.Value, sf reflect.StructField, chain []Command, store *parsedInputs, idx int, rd fallbackRead) error {
 	key := reconKey(sf.Tag.Get("recon"))
 	if key == "" {
 		return nil
@@ -370,14 +400,13 @@ func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructFi
 // string splits on the flag's separator, a case-insensitive enum binds its declared spelling,
 // and a value the type cannot hold is an error naming where it came from. With rd.waiveFiles,
 // such a value from a configuration file is skipped instead, and the field keeps what it held.
-func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.StructTag, key string, def FlagDef, chain []Command, idx int, rd fallbackRead) (vals []string, origin string, err error) {
+func bindFlagFallback(reg fallbackLookup, field reflect.Value, tag reflect.StructTag, key string, def FlagDef, chain []Command, idx int, rd fallbackRead) (vals []string, origin string, err error) {
 	name := tag.Get("rotini")
-	val, found, err := reg.Get(key)
+	val, source, found, err := reg.lookup(key)
 	if err != nil {
 		return nil, "", reconBind(channelFlag, err)
 	}
 	found = found && val.Kind() != recon.NullKind // a null (`mode:`) leaves the default in place
-	source := val.Source()
 	switch {
 	case found:
 		if vals, err = fallbackValues(val, def.Separator); err != nil {
@@ -481,20 +510,20 @@ func reconTime(s string) (time.Time, bool) {
 
 // mapLeaves collects the registry's leaf keys under key as sorted key=value entries relative
 // to it (labels.k → k=v; deeper leaves keep their dots), with the source of the last one read.
-func mapLeaves(reg *recon.Registry, key string) (entries []string, source string, err error) {
+func mapLeaves(reg fallbackLookup, key string) (entries []string, source string, err error) {
 	prefix := key + "."
-	for _, k := range reg.AllKeys() {
+	for _, k := range reg.allKeys() {
 		rest, ok := strings.CutPrefix(k, prefix)
 		if !ok {
 			continue
 		}
-		v, found, err := reg.Get(k)
+		v, src, found, err := reg.lookup(k)
 		if err != nil {
 			return nil, "", err
 		}
 		if found {
 			entries = append(entries, rest+"="+valueText(v))
-			source = v.Source()
+			source = src
 		}
 	}
 	sort.Strings(entries)
@@ -780,7 +809,10 @@ func reconKey(tag string) string {
 // so the channel's value is redacted in constraint-violation errors (recon itself
 // redacts it in the errors it raises).
 func reconHasSecret(tag string) bool {
-	for _, opt := range strings.Split(tag, ",")[1:] {
+	_, opts, more := strings.Cut(tag, ",")
+	for more {
+		var opt string
+		opt, opts, more = strings.Cut(opts, ",")
 		if strings.TrimSpace(opt) == "secret" {
 			return true
 		}
@@ -884,18 +916,10 @@ func (b *InputReader) chainConfigFiles(chain []Command) []ConfigFile {
 	if len(b.configFiles) == 0 {
 		return nil
 	}
-	paths := make([]string, len(chain))
-	for i := range chain {
-		if i == 0 {
-			paths[i] = chain[i].Name
-		} else {
-			paths[i] = paths[i-1] + "/" + chain[i].Name
-		}
-	}
 	var out []ConfigFile
-	for _, p := range slices.Backward(paths) { // leaf → root
+	for n := len(chain); n > 0; n-- { // leaf → root
 		for _, f := range b.configFiles {
-			if f.Scope == p {
+			if scopeIs(f.Scope, chain[:n]) {
 				out = append(out, f)
 			}
 		}
@@ -906,6 +930,24 @@ func (b *InputReader) chainConfigFiles(chain []Command) []ConfigFile {
 		}
 	}
 	return out
+}
+
+// scopeIs reports whether scope is the names of chain joined by "/", as a config_files
+// entry's Scope names the command that declares it.
+func scopeIs(scope string, chain []Command) bool {
+	for i, c := range chain {
+		if i > 0 {
+			if scope == "" || scope[0] != '/' {
+				return false
+			}
+			scope = scope[1:]
+		}
+		if !strings.HasPrefix(scope, c.Name) {
+			return false
+		}
+		scope = scope[len(c.Name):]
+	}
+	return scope == ""
 }
 
 // For returns the registry over only the named config_files entry — what a pinned
@@ -1839,13 +1881,15 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 	if !found || err != nil {
 		return v, found, err
 	}
-	if tv, ok := s.timeMapValue(path, v); ok {
-		return tv, true, nil
+	key := path.String()
+	if len(s.keys.timeMaps) > 0 {
+		if tv, ok := s.timeMapValue(key, v); ok {
+			return tv, true, nil
+		}
 	}
-	if k, ok := s.keys.prefixed[path.String()]; ok {
+	if k, ok := s.keys.prefixed[key]; ok {
 		return k.decimal(v), true, nil
 	}
-	key := path.String()
 	if v.Kind() == recon.IntKind && s.keys.bools[key] {
 		// A number reads as the command line reads its text: 1 and 0 are true and false.
 		if b, perr := parseBool(v.String()); perr == nil {
@@ -1929,6 +1973,11 @@ func channelValueKeys(v reflect.Value, structName string) valueKeys {
 // variable is exempt from env_prefix. A variable that is set but empty counts as unset, so the
 // fallback falls through to the configuration file and default, matching [firstSetEnv].
 func flagEnvSource(v reflect.Value, envPrefix string, view *osView) recon.Source {
+	return flagEnv(v, envPrefix, view)
+}
+
+// flagEnv is [flagEnvSource] as its concrete type.
+func flagEnv(v reflect.Value, envPrefix string, view *osView) declaredEnv {
 	src := newDeclaredEnv(v, "Flags", envPrefix, view)
 	src.emptyAbsent = true
 	return src

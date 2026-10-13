@@ -61,21 +61,21 @@ func Patterns() Feature {
 // FlagGroups wires [CommandDef.FlagGroups] validation.
 func FlagGroups() Feature {
 	return Feature{name: "flag-groups", apply: func(s *featureSet) {
-		s.groups = &groupHooks{validate: validateFlagGroups}
+		s.groups = &wiredGroupHooks
 	}}
 }
 
 // FlagDependencies wires [CommandDef.FlagDependencies] validation.
 func FlagDependencies() Feature {
 	return Feature{name: "flag-dependencies", apply: func(s *featureSet) {
-		s.deps = &dependencyHooks{validate: validateFlagDependencies}
+		s.deps = &wiredDependencyHooks
 	}}
 }
 
 // StreamPaths wires the inputfile and outputfile types.
 func StreamPaths() Feature {
 	return Feature{name: "stream-paths", apply: func(s *featureSet) {
-		s.streamPaths = &streamPathHooks{check: checkStreamPath, dashOnce: stdinDashOnce}
+		s.streamPaths = &wiredStreamPathHooks
 	}}
 }
 
@@ -263,3 +263,10 @@ func parseRegexpValue(s string) (reflect.Value, error) {
 	}
 	return reflect.ValueOf(re), nil
 }
+
+// The hooks each feature wires. They never change, so every program shares one value.
+var (
+	wiredGroupHooks      = groupHooks{validate: validateFlagGroups}
+	wiredDependencyHooks = dependencyHooks{validate: validateFlagDependencies}
+	wiredStreamPathHooks = streamPathHooks{check: checkStreamPath, dashOnce: stdinDashOnce}
+)

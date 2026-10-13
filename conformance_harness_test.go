@@ -65,13 +65,14 @@ func wiredFor(rtx *Context, def Definition, meta InputSettings, inputs ...reflec
 // wiringModes runs fn twice: "legacy", where every program and Context has every feature, and
 // "wired", where NewProgram, NewProgramFunc and NewContextFor give only the features
 // featureNeeds finds for the definition's fixture. Both must pass: a wired program runs every
-// command exactly as one with every feature.
+// command exactly as one with every feature. Each runs fn under [fallbackPaths], so every case
+// also reads its fallbacks both ways.
 //
 // The wired run replaces package state, so fn and the tests it calls must not use t.Parallel
 // outside their own subtests.
 func wiringModes(t *testing.T, fn func(t *testing.T)) {
 	t.Helper()
-	t.Run("legacy", fn)
+	t.Run("legacy", func(t *testing.T) { fallbackPaths(t, fn) })
 	t.Run("wired", func(t *testing.T) {
 		var mu sync.Mutex
 		var missing []string
@@ -93,7 +94,7 @@ func wiringModes(t *testing.T, fn func(t *testing.T)) {
 				t.Errorf("Definition %q has no wiringFixtures entry", name)
 			}
 		})
-		fn(t)
+		fallbackPaths(t, fn)
 	})
 }
 

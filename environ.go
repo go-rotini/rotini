@@ -69,7 +69,12 @@ func (v *osView) withEnviron(env []string) *osView {
 
 // withClock returns a copy of v reading time from clock.
 func (v *osView) withClock(clock *runClock) *osView {
-	out := &osView{foldCase: runtime.GOOS == "windows"}
+	return v.withClockIn(new(osView), clock)
+}
+
+// withClockIn is withClock writing the copy to out.
+func (v *osView) withClockIn(out *osView, clock *runClock) *osView {
+	*out = osView{foldCase: runtime.GOOS == "windows"}
 	if v != nil {
 		*out = *v
 	}

@@ -33,7 +33,7 @@ func commandArgs(ci reflect.Value) reflect.Value {
 // position with neither a fallback value nor a default ends the fill, as it ends the defaults.
 // Each value is recorded in the store, with where it came from, so validation sees it, and the
 // leaf's Arguments are bound again.
-func reconcileArgs(reg *recon.Registry, v reflect.Value, chain []Command, store *parsedInputs, anchor int, rd fallbackRead) error {
+func reconcileArgs(reg fallbackLookup, v reflect.Value, chain []Command, store *parsedInputs, anchor int, rd fallbackRead) error {
 	leaf := len(chain) - 1
 	fi := leaf - anchor
 	if store == nil || anchor < 0 || fi < 0 || fi >= v.NumField() || leaf >= len(store.scopes) {
@@ -90,19 +90,18 @@ func hasArgFallback(t reflect.Type, from, n int) bool {
 // them (a variadic splits on its separator), checked against the field's type, and where they
 // came from. nil when no source supplies one, or when a short-circuited run skips a
 // configuration value the type cannot hold.
-func argFallback(reg *recon.Registry, field reflect.Value, sf reflect.StructField, ad ArgDef, rd fallbackRead) (vals []string, origin string, err error) {
+func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField, ad ArgDef, rd fallbackRead) (vals []string, origin string, err error) {
 	key := reconKey(sf.Tag.Get("recon"))
 	if key == "" || ad.Passthrough {
 		return nil, "", nil
 	}
-	val, found, err := reg.Get(key)
+	val, source, found, err := reg.lookup(key)
 	if err != nil {
 		return nil, "", reconBind(channelArgument, err)
 	}
 	if !found || val.Kind() == recon.NullKind { // a null leaves the default in place
 		return nil, "", nil
 	}
-	source := val.Source()
 	origin = fallbackOrigin(rd, source, sf.Tag.Get("env"), key)
 	waivable := rd.waiveFiles && source != osEnvSourceName
 	label := "<" + ad.Name + ">"
@@ -157,7 +156,7 @@ func recordArgFallbacks(set Presence, ci reflect.Value, frame Command, topName, 
 	pos := 0
 	for i := range min(len(frame.Arguments), at.NumField()) {
 		ad := frame.Arguments[i]
-		vals, origin, err := argFallback(reg, args.Field(i), at.Field(i), ad, rd)
+		vals, origin, err := argFallback(fallbackLookup{reg: reg}, args.Field(i), at.Field(i), ad, rd)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -3,7 +3,9 @@ package rotini
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"sync"
 )
 
 // Dependency is a typed handle for one of the program's dependencies, pairing the name it is
@@ -81,7 +83,7 @@ func WithDependency[T any](dep Dependency[T], value T) Option {
 // The dependency namespace belongs to the application. Rotini's own settings (input reader,
 // parser, version, help) are typed Program options, so no dependency name can shadow them.
 func (p *Program) WithDependency[T any](dep Dependency[T], value T) *Program {
-	p.rtx.setDependency(dep.name, value)
+	p.deps.set(dep.name, value)
 	return p
 }
 
@@ -186,4 +188,28 @@ func (rtx *Context) dependency(name string) (any, bool) {
 	defer rtx.mu.RUnlock()
 	v, ok := rtx.services[name]
 	return v, ok
+}
+
+// dependencyStore is the dependencies a program seeds each run with. Each run gets its own
+// copy, so a dependency set during a run stays local to it. It is safe for concurrent use.
+type dependencyStore struct {
+	mu sync.RWMutex
+	m  map[string]any
+}
+
+// set stores value under name, replacing any prior value.
+func (d *dependencyStore) set(name string, value any) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.m == nil {
+		d.m = make(map[string]any)
+	}
+	d.m[name] = value
+}
+
+// clone copies the store for a run; nil when nothing is stored.
+func (d *dependencyStore) clone() map[string]any {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return maps.Clone(d.m)
 }

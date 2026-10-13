@@ -928,7 +928,7 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 			return
 		}
 		fd, _ := findFlagDef(chain[scope].Flags, logical)
-		vals, origin, err := bindFlagFallback(flagReg, f, tag, key, fd, chain, scope, rd)
+		vals, origin, err := bindFlagFallback(fallbackLookup{reg: flagReg}, f, tag, key, fd, chain, scope, rd)
 		if err != nil || vals == nil {
 			bindErr = err
 			return
