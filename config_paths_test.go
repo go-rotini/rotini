@@ -197,8 +197,8 @@ func TestConfigFile_decodedOncePerRead(t *testing.T) {
 	if err != nil || got.App.Config.Name != "x" || got.App.Flags.Port != 8 {
 		t.Fatalf("Inputs = %+v, %v", got.App, err)
 	}
-	if decodes != 2 {
-		t.Errorf("decoded %d times, want 2: once to read the file and once to check it against its schema", decodes)
+	if decodes != 1 {
+		t.Errorf("decoded %d times, want 1: the schema check reads the document the file source decoded", decodes)
 	}
 }
 

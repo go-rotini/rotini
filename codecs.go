@@ -180,7 +180,7 @@ func (s *featureSet) codecFor(format, path string) (*codecEntry, error) {
 // newRegistry builds a recon registry whose codec set is the program's wired codecs; every
 // registry rotini builds goes through it.
 func newRegistry(fs *featureSet, opts ...recon.Option) (*recon.Registry, error) {
-	return recon.NewWithCodecs(fs.reconCodecs(), opts...) //nolint:wrapcheck // reported by the caller
+	return recon.NewWithCodecsWithoutWatch(fs.reconCodecs(), opts...) //nolint:wrapcheck // reported by the caller
 }
 
 // newFileSource builds a recon file source for path that decodes with c, or, when c is nil,

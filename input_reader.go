@@ -494,18 +494,8 @@ func fallbackTimes(t reflect.Type, def FlagDef, vals []string) []string {
 
 // reconTime binds text to a time as the config library binds an env or config input's value.
 func reconTime(s string) (time.Time, bool) {
-	reg, err := recon.NewWithCodecs(nil, recon.WithoutWatch(), recon.WithSources(recon.NewMapSource("time", map[string]any{"t": s})))
-	if err != nil {
-		return time.Time{}, false
-	}
-	defer func() { _ = reg.Close() }()
-	var dst struct {
-		T time.Time `recon:"t"`
-	}
-	if err := reg.Bind(&dst); err != nil {
-		return time.Time{}, false
-	}
-	return dst.T, true
+	t, err := recon.NewValue(s).AsTime()
+	return t, err == nil
 }
 
 // mapLeaves collects the registry's leaf keys under key as sorted key=value entries relative
@@ -1577,13 +1567,19 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 		return nil
 	}
 	path := fsrc.Path()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // absent: vacuous
+	// The document the source decoded is the one checked; a file that was missing or empty when
+	// it was opened is read again.
+	m, decoded := fsrc.Document()
+	var data []byte
+	if !decoded {
+		var err error
+		if data, err = os.ReadFile(path); err != nil {
+			if os.IsNotExist(err) {
+				return nil // absent: vacuous
+			}
+			// A present-but-unreadable file the user controls.
+			return usageBind(channelConfig, f.Name, configFileProblem(path, err), err)
 		}
-		// A present-but-unreadable file the user controls.
-		return usageBind(channelConfig, f.Name, configFileProblem(path, err), err)
 	}
 	if fs.schemas == nil {
 		return missingFeature("schemas", "Schemas()", fmt.Sprintf("configuration file %q has a schema", f.Name))
@@ -1595,10 +1591,11 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 	if c == nil {
 		return internalBind(channelConfig, f.Name, fmt.Sprintf("unsupported format %q for configuration file %s", fsrc.Format(), path), nil)
 	}
-	m, err := c.codec().Decode(stripBOM(data))
-	if err != nil {
-		pe := fileParseError(path, err)
-		return usageBind(channelConfig, f.Name, configFileProblem(path, pe), pe)
+	if !decoded {
+		if m, err = c.codec().Decode(stripBOM(data)); err != nil {
+			pe := fileParseError(path, err)
+			return usageBind(channelConfig, f.Name, configFileProblem(path, pe), pe)
+		}
 	}
 	if f.Profiles != nil {
 		m = effectiveDocument(m, f.Profiles.Under, profile)
@@ -1881,16 +1878,18 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 	if !found || err != nil {
 		return v, found, err
 	}
-	key := path.String()
+	// The key's bytes index the maps without building a string.
+	var buf [64]byte
+	key := path.AppendCanonical(buf[:0])
 	if len(s.keys.timeMaps) > 0 {
-		if tv, ok := s.timeMapValue(key, v); ok {
+		if tv, ok := s.timeMapValue(string(key), v); ok {
 			return tv, true, nil
 		}
 	}
-	if k, ok := s.keys.prefixed[key]; ok {
+	if k, ok := s.keys.prefixed[string(key)]; ok {
 		return k.decimal(v), true, nil
 	}
-	if v.Kind() == recon.IntKind && s.keys.bools[key] {
+	if v.Kind() == recon.IntKind && s.keys.bools[string(key)] {
 		// A number reads as the command line reads its text: 1 and 0 are true and false.
 		if b, perr := parseBool(v.String()); perr == nil {
 			return recon.NewValue(b), true, nil
@@ -1899,17 +1898,17 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 	if v.Kind() != recon.StringKind {
 		return v, found, err
 	}
-	if s.keys.bools[key] {
+	if s.keys.bools[string(key)] {
 		if b, perr := parseBool(v.String()); perr == nil {
 			return recon.NewValue(b), true, nil
 		}
 	}
-	if s.keys.durations[key] {
+	if s.keys.durations[string(key)] {
 		if d, perr := parseDuration(strings.TrimSpace(v.String())); perr == nil {
 			return recon.NewValue(d), true, nil
 		}
 	}
-	if ts, ok := s.keys.times[key]; ok {
+	if ts, ok := s.keys.times[string(key)]; ok {
 		// An unparseable value passes through as text so recon reports it as a usage error
 		// naming the input; an error returned from Get would be swallowed.
 		ts.clock = s.clock

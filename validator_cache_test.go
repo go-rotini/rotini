@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-rotini/jsonschema"
 	"github.com/go-rotini/recon"
 )
 
@@ -62,6 +63,23 @@ func TestSchemaFailures_noBranchMatches(t *testing.T) {
 		if got := v.Validate(tc.doc); got == nil || got.Error() != tc.want {
 			t.Errorf("%s: %v, want %q", tc.schema, got, tc.want)
 		}
+	}
+}
+
+// Each failure reaches the jsonschema error it reports, with its keyword location, through
+// errors.As, as recon's own schema validator's do.
+func TestSchemaFailures_causeIsTheSchemaError(t *testing.T) {
+	v, err := schemaValidator(`{"properties":{"port":{"type":"integer","minimum":1}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := v.Validate(map[string]any{"port": 0})
+	if _, ok := errors.AsType[*recon.ValidationError](got); !ok {
+		t.Fatalf("Validate = %v, want a recon validation error", got)
+	}
+	se, ok := errors.AsType[*jsonschema.ValidationError](got)
+	if !ok || se.Keyword != "minimum" || se.InstanceLocation != "/port" {
+		t.Errorf("errors.As jsonschema error = %+v, want the minimum failure at /port", se)
 	}
 }
 
@@ -127,12 +145,9 @@ func TestSchemaCheck_timesAreText(t *testing.T) {
 // the configuration file as not fully checked, never as invalid.
 func TestSchemaCheck_unfinishedIsNotInvalid(t *testing.T) {
 	schema := unfinishedSchema()
-	v, err := schemaValidator(schema)
+	_, err := schemaValidator(schema)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if err := v.Validate(map[string]any{}); err == nil {
-		t.Skip("this jsonschema finishes the check: it has no evaluation limit")
 	}
 	cfg := filepath.Join(t.TempDir(), "app.json")
 	if err := os.WriteFile(cfg, []byte("{}\n"), 0o600); err != nil {
@@ -169,17 +184,13 @@ func unfinishedSchema() string {
 // as not fully checked, never as a mismatch or a read failure.
 func TestSchemaCheck_unfinishedObjectAndStdin(t *testing.T) {
 	schema := unfinishedSchema()
-	v, err := schemaValidator(schema)
-	if err != nil {
+	if _, err := schemaValidator(schema); err != nil {
 		t.Fatal(err)
-	}
-	if err := v.Validate(map[string]any{}); err == nil {
-		t.Skip("this jsonschema finishes the check: it has no evaluation limit")
 	}
 	if err := validateObject(map[string]any{"a": 1}, schema); err == nil || err.Error() != "the value could not be fully checked against its schema" {
 		t.Errorf("object flag: %v", err)
 	}
-	_, err = ssRead[stDocInputs](t, strings.NewReader(`{"name":"a"}`), InputSettings{StdinSchemas: map[string]string{"stDocStdin": schema}})
+	_, err := ssRead[stDocInputs](t, strings.NewReader(`{"name":"a"}`), InputSettings{StdinSchemas: map[string]string{"stDocStdin": schema}})
 	if err == nil || err.Error() != stdinUnfinished {
 		t.Errorf("stdin document: %v", err)
 	}

@@ -39,7 +39,8 @@ const osEnvSourceName = "osenv"
 func (s declaredEnv) Name() string { return osEnvSourceName }
 
 func (s declaredEnv) Get(path recon.Path) (recon.Value, bool, error) {
-	v, ok := s.getKey(path.String())
+	var buf [64]byte
+	v, ok := s.getKey(string(path.AppendCanonical(buf[:0])))
 	return v, ok, nil
 }
 

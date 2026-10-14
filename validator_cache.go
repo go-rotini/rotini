@@ -118,21 +118,23 @@ func schemaValue(v any) (out any, changed bool) {
 // schemaFailures turns a failed check's errors into recon validation errors, descending into
 // each compound error's causes to the failures beneath it. A value that matches no branch of an
 // anyOf or oneOf, each branch failing on the value itself, is one failure naming every branch's
-// problem as alternatives.
+// problem as alternatives. Each failure's Cause is the jsonschema error it reports, as recon's
+// own schema validator sets it.
 func schemaFailures(errs []jsonschema.ValidationError) *recon.MultiError {
 	multi := &recon.MultiError{}
 	var walk func(errs []jsonschema.ValidationError)
 	walk = func(errs []jsonschema.ValidationError) {
-		for _, e := range errs {
-			if msg, ok := noBranchMatches(e); ok {
-				multi.Append(&recon.ValidationError{Path: pointerPath(e.InstanceLocation), Rule: e.Keyword, Msg: msg})
+		for i := range errs {
+			e := &errs[i]
+			if msg, ok := noBranchMatches(*e); ok {
+				multi.Append(&recon.ValidationError{Path: pointerPath(e.InstanceLocation), Rule: e.Keyword, Msg: msg, Cause: e})
 				continue
 			}
 			if len(e.Causes) > 0 {
 				walk(e.Causes)
 				continue
 			}
-			multi.Append(&recon.ValidationError{Path: pointerPath(e.InstanceLocation), Rule: e.Keyword, Msg: e.Message})
+			multi.Append(&recon.ValidationError{Path: pointerPath(e.InstanceLocation), Rule: e.Keyword, Msg: e.Message, Cause: e})
 		}
 	}
 	walk(errs)
