@@ -1,6 +1,7 @@
 == commands
 deploy	deploy a service
 help	print help
+quote	values a shell must insert as one literal word
 remote	manage remotes
 status	show status
 == command-prefix
@@ -16,6 +17,7 @@ remote	manage remotes
 --level	how much to say
 --no-color	
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 == flag-set-left-out
@@ -28,6 +30,7 @@ remote	manage remotes
 --level	how much to say
 --no-color	
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 == negated
@@ -44,18 +47,24 @@ yaml
 --format=json	
 --format=text	
 --format=yaml	
+== enum-ignore-case
+slow	
+Safe	
+== enum-ignore-case-inline
+--speed=slow	
+--speed=Safe	
 == file-extensions
-a.yaml	/w/a.yaml
-b.yml	/w/b.yml
-bin	/w/bin
-drivers	/w/drivers
-src	/w/src
-sub	/w/sub
+./a.yaml	/w/a.yaml
+./b.yml	/w/b.yml
+./bin	/w/bin
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub
 == directory
-bin	/w/bin
-drivers	/w/drivers
-src	/w/src
-sub	/w/sub
+./bin	/w/bin
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub
 == none-with-message
 <nothing: the file fallback stopped>
 == executable
@@ -72,6 +81,7 @@ replicas=
 == help-command
 deploy	deploy a service
 help	print help
+quote	values a shell must insert as one literal word
 remote	manage remotes
 status	show status
 == help-command-deep
@@ -94,6 +104,7 @@ db	the database
 --no-color	
 --quiet	say nothing
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 --verbose	say everything
@@ -109,8 +120,125 @@ db	the database
 --level	how much to say
 --no-color	
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 == sub-command-enum
 dev	
 prod	
+== fallback-extensions
+./a.yaml	/w/a.yaml
+./b.yml	/w/b.yml
+./bin	/w/bin
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub
+== fallback-directory
+./src	/w/src
+./sub	/w/sub
+== fallback-with-candidates
+./drivers	/w/drivers
+db	the database
+== fallback-none
+<nothing: the file fallback stopped>
+== fallback-file
+./c.txt	/w/c.txt
+./cases.txt	/w/cases.txt
+./completion_bash.sh	/w/completion_bash.sh
+./completion_fish.fish	/w/completion_fish.fish
+./completion_nushell.nu	/w/completion_nushell.nu
+./completion_powershell.ps1	/w/completion_powershell.ps1
+./completion_zsh.zsh	/w/completion_zsh.zsh
+== quote-all
+'a b'	a b
+'it''s $HOME'	it's $HOME
+'say "hi"'	say "hi"
+'`touch pwned`'	`touch pwned`
+'$(touch pwned)'	$(touch pwned)
+'x;touch pwned'	x;touch pwned
+'star*'	star*
+'~root'	~root
+'o’’neil;touch pwned'	o’neil;touch pwned
+'“q”'	“q”
+back\slash	
+a\:b	
+C:\Users\me	a path: C:\Users\me
+a!b	
+'ends'''	ends'
+'{a,b}'	{a,b}
+'a&b|c<d>e'	a&b|c<d>e
+'#hash'	#hash
+true	
+null	
+'-foo.bar'	-foo.bar
+@('--%')	--%
+'–a.b'	–a.b
+'-a:'	-a:
+run 'a b': argv: [quote] [--odd] [a b]
+run 'it''s $HOME': argv: [quote] [--odd] [it's $HOME]
+run 'say "hi"': argv: [quote] [--odd] [say "hi"]
+run '`touch pwned`': argv: [quote] [--odd] [`touch pwned`]
+run '$(touch pwned)': argv: [quote] [--odd] [$(touch pwned)]
+run 'x;touch pwned': argv: [quote] [--odd] [x;touch pwned]
+run 'star*': argv: [quote] [--odd] [star*]
+run '~root': argv: [quote] [--odd] [~root]
+run 'o’’neil;touch pwned': argv: [quote] [--odd] [o’neil;touch pwned]
+run '“q”': argv: [quote] [--odd] [“q”]
+run back\slash: argv: [quote] [--odd] [back\slash]
+run a\:b: argv: [quote] [--odd] [a\:b]
+run C:\Users\me: argv: [quote] [--odd] [C:\Users\me]
+run a!b: argv: [quote] [--odd] [a!b]
+run 'ends''': argv: [quote] [--odd] [ends']
+run '{a,b}': argv: [quote] [--odd] [{a,b}]
+run 'a&b|c<d>e': argv: [quote] [--odd] [a&b|c<d>e]
+run '#hash': argv: [quote] [--odd] [#hash]
+run true: argv: [quote] [--odd] [true]
+run null: argv: [quote] [--odd] [null]
+run '-foo.bar': argv: [quote] [--odd] [-foo.bar]
+run @('--%'): argv: [quote] [--odd] [--%]
+run '–a.b': argv: [quote] [--odd] [–a.b]
+run '-a:': argv: [quote] [--odd] [-a:]
+== quote-shared
+'x;touch pwned'	x;touch pwned
+'x;touch pwnedz'	x;touch pwnedz
+'x y'	x y
+'x,y'	x,y
+run 'x;touch pwned': argv: [quote] [--pair] [x;touch pwned]
+run 'x;touch pwnedz': argv: [quote] [--pair] [x;touch pwnedz]
+run 'x y': argv: [quote] [--pair] [x y]
+run 'x,y': argv: [quote] [--pair] [x,y]
+== quote-typed-quote
+'it''s $HOME'	it's $HOME
+run 'it''s $HOME': argv: [quote] [--odd] [it's $HOME]
+== quote-typed-quote-shared
+'x;touch pwned'	x;touch pwned
+'x;touch pwnedz'	x;touch pwnedz
+'x y'	x y
+'x,y'	x,y
+run 'x;touch pwned': argv: [quote] [--pair] [x;touch pwned]
+run 'x;touch pwnedz': argv: [quote] [--pair] [x;touch pwnedz]
+run 'x y': argv: [quote] [--pair] [x y]
+run 'x,y': argv: [quote] [--pair] [x,y]
+== quote-typed-backslash
+== quote-colon
+host:8080	
+host:9090	
+run host:8080: argv: [quote] [--addr] [host:8080]
+run host:9090: argv: [quote] [--addr] [host:9090]
+== quote-inline
+'--odd=x;touch pwned'	--odd=x;touch pwned
+run '--odd=x;touch pwned': argv: [quote] [--odd=x;touch pwned]
+== plain-value
+./a.yaml	/w/a.yaml
+./b.yml	/w/b.yml
+./bin	/w/bin
+./c.txt	/w/c.txt
+./cases.txt	/w/cases.txt
+./completion_bash.sh	/w/completion_bash.sh
+./completion_fish.fish	/w/completion_fish.fish
+./completion_nushell.nu	/w/completion_nushell.nu
+./completion_powershell.ps1	/w/completion_powershell.ps1
+./completion_zsh.zsh	/w/completion_zsh.zsh
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub

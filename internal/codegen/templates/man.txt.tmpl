@@ -26,8 +26,8 @@
          alsoSetBy .Env .ConfigKey "\\fB" "\\fR" renders them as "also set by ...".
          Argument, flag, env and config rows carry .Constraints (the declared bounds, lengths,
          item counts and repeatability as a short note) and .Rules (the same as sentences,
-         plus pattern and separator), and .Accepts (what a time input accepts beyond its type's
-         default: a layout, relative times).
+         plus pattern and separator), and .Accepts (what a time or integer input accepts beyond its type's
+         default: a layout, relative times, base prefixes).
          Argument, flag, env and config rows carry .EnumValues: every value that is not hidden,
          in declared order, as {.Value .Summary .Aliases .Deprecated .DeprecatedSince .RemovedIn
          .ReplacedBy .Note}, nil when no value declares more than its spelling (.Enum always
@@ -140,11 +140,16 @@ A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\f
 {{with .Output}}.SH OUTPUT
 {{with .Description}}{{roffBlock .}}
 .PP
-{{end}}{{if .Stream}}Writes a stream of \fB{{roff .Type}}\fR to standard output, one item at a time (JSON: one compact value per line; YAML: one document per item, each starting \fB\-\-\-\fR).{{else}}Writes \fB{{roff .Type}}\fR to standard output.{{end}}
+{{end}}{{if .Kinds}}Writes a stream of items to standard output, one at a time (JSON: one compact value per line; YAML: one document per item, each starting \fB\-\-\-\fR). Each item's \fB{{roff .Tag}}\fR says which kind it is.{{else if .Stream}}Writes a stream of \fB{{roff .Type}}\fR to standard output, one item at a time (JSON: one compact value per line; YAML: one document per item, each starting \fB\-\-\-\fR).{{else}}Writes \fB{{roff .Type}}\fR to standard output.{{end}}
 {{range .Fields}}.TP
 \fB{{roff .Name}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Description}}{{if .Required}} (required){{end}}
-{{end}}{{end}}
+{{end}}{{$tag := .Tag}}{{range .Kinds}}.SS "{{roff $tag}}: {{roff .Value}}{{with .Type}} ({{roff .}}){{end}}"
+{{with .Description}}{{roffBlock .}}
+{{end}}{{range .Fields}}.TP
+\fB{{roff .Name}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
+{{roff .Description}}{{if .Required}} (required){{end}}
+{{end}}{{end}}{{end}}
 {{with .ExitStatus}}.SH "EXIT STATUS"
 {{range .}}.TP
 \fB{{.Code}}\fR{{with .Name}} ({{roff .}}){{end}}

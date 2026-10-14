@@ -16,13 +16,15 @@ command:
     - taskr remote anything --at all
     - taskr sync --token abc --cert certs/missing.pem --out no-such-dir/out.txt
     # Wrong: an unknown command, an unknown flag, a bad enum value, a missing argument, a
-    # mutually exclusive pair, an extra argument in a later segment, an unclosed quote.
+    # mutually exclusive pair, an extra argument in a later segment, the root's own flag
+    # given with a sub-command, an unclosed quote.
     - taskr lst
     - taskr list --colour
     - taskr list --status closed
     - taskr add
     - taskr list --json --status open
     - echo x | taskr add one two
+    - taskr --state s list
     - taskr add "unclosed
   plugins:
     - name: remote
@@ -31,6 +33,11 @@ command:
       identifiers: [-h, --help]
       short_circuit: true
       schema: { type: bool }
+    # Not cascading, so required only when taskr itself runs: the sub-command examples
+    # above parse without it.
+    - name: state
+      identifiers: [--state]
+      schema: { type: string, required: true }
   commands:
     - name: list
       aliases: [ls]

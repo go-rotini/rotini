@@ -56,6 +56,8 @@ func acmeBin(t *testing.T) string {
 var acmeBinDir string
 
 func TestMain(m *testing.M) {
+	// The go commands tests start build throwaway modules, which a workspace would reject.
+	os.Setenv("GOWORK", "off")
 	code := m.Run()
 	if acmeBinDir != "" {
 		os.RemoveAll(acmeBinDir)

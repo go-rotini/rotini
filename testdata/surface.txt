@@ -24,6 +24,7 @@ field AppDirectories.Cache
 field AppDirectories.Config
 field AppDirectories.Data
 field AppDirectories.State
+field ArgDef.Base
 field ArgDef.Complete
 field ArgDef.Constraints
 field ArgDef.Default
@@ -37,6 +38,7 @@ field ArgDef.Hidden
 field ArgDef.IgnoreCase
 field ArgDef.Layout
 field ArgDef.Layouts
+field ArgDef.Metadata
 field ArgDef.Name
 field ArgDef.Passthrough
 field ArgDef.Relative
@@ -60,6 +62,7 @@ field Command.Flags
 field Command.Handler
 field Command.Invoked
 field Command.Matched
+field Command.Metadata
 field Command.Name
 field Command.OptionsFirst
 field Command.Output
@@ -86,6 +89,7 @@ field CommandDef.Handler
 field CommandDef.Hidden
 field CommandDef.HiddenAliases
 field CommandDef.Inputs
+field CommandDef.Metadata
 field CommandDef.Name
 field CommandDef.OptionsFirst
 field CommandDef.Output
@@ -108,6 +112,7 @@ field CompletionOptions.KeepOrder
 field CompletionOptions.NoSpace
 field CompletionResult.Candidates
 field CompletionResult.Hint
+field CompletionResult.IgnoreCase
 field CompletionResult.KeepOrder
 field CompletionResult.Messages
 field CompletionResult.NoSpace
@@ -121,6 +126,7 @@ field ConfigFile.PathFrom
 field ConfigFile.Profiles
 field ConfigFile.Schema
 field ConfigFile.Scope
+field ConfigKey.Base
 field ConfigKey.Constraints
 field ConfigKey.Enum
 field ConfigKey.EnumValues
@@ -159,6 +165,7 @@ field Definition.FlagGroups
 field Definition.Flags
 field Definition.Handler
 field Definition.Inputs
+field Definition.Metadata
 field Definition.Multicall
 field Definition.Name
 field Definition.OptionsFirst
@@ -201,6 +208,7 @@ field ExitStatusDef.DocsURL
 field ExitStatusDef.Name
 field ExitStatusDef.Retryable
 field ExitStatusDef.Summary
+field FlagDef.Base
 field FlagDef.Complete
 field FlagDef.Constraints
 field FlagDef.Default
@@ -222,6 +230,8 @@ field FlagDef.ImplicitValue
 field FlagDef.KeyPaths
 field FlagDef.Layout
 field FlagDef.Layouts
+field FlagDef.Local
+field FlagDef.Metadata
 field FlagDef.Name
 field FlagDef.Negatable
 field FlagDef.Negation
@@ -274,9 +284,14 @@ field Outcome.Infos
 field Outcome.Panics
 field Outcome.Successes
 field Outcome.Warnings
+field OutputDef.Kinds
 field OutputDef.Schema
 field OutputDef.Stream
+field OutputDef.Tag
 field OutputDef.Type
+field OutputKind.Schema
+field OutputKind.Type
+field OutputKind.Value
 field Page.Content
 field Page.Name
 field Page.Path
@@ -441,6 +456,7 @@ method Context.RecordError(err error)
 method Context.RecordInfo(msg string)
 method Context.RecordSuccess(msg string)
 method Context.RecordWarning(warn error)
+method Context.SetCompletionFallback(fallback Completion)
 method Context.SetCompletionOptions(opts CompletionOptions)
 method Context.SetContext(ctx context.Context)
 method Context.SetDependencyIfAbsent[T any](dep Dependency[T], value T)
@@ -616,6 +632,7 @@ type Option
 type Outcome
 type OutputDef
 type OutputFile
+type OutputKind
 type OutputOption
 type Page
 type PanicError

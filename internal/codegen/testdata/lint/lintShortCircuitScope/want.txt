@@ -1,0 +1,1 @@
+warning: spec: .rotini.spec.yaml:8:7: command demo: flag "help": is short_circuit but not cascading, so it applies only to "demo": `demo build --help` is a usage error; set `cascading: true` so every sub-command answers it

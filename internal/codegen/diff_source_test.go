@@ -166,6 +166,7 @@ func TestProcessorDiff_gitSource(t *testing.T) {
 		{noContract, "git:HEAD", "set generate.contract.file"},
 		{conf, "git:HEAD:../x.json", "must be module-root-relative"},
 		{conf, "git:", "names no revision"},
+		{conf, "git:--output=" + filepath.Join(mod, "pwned"), "can't start with '-'"},
 	} {
 		if _, err := p.Diff(spec, tc.conf, tc.source, "", ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", tc.source, err, tc.want)

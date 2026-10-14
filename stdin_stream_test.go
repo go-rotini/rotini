@@ -298,6 +298,8 @@ func TestStdinStream_jsonlErrorsNameTheLine(t *testing.T) {
 		"schema": {"{\"name\":\"a\"}\n\n{\"name\":\"\"}\n{\"name\":\"c\"}\n", "stdin line 3: "},
 		"decode": {"{\"name\":\"a\"}\n{\"name\":\n", "stdin line 2: not a JSON record"},
 		"type":   {"{\"name\":\"a\",\"id\":\"x\"}\n", "stdin line 1: "},
+		"repeat": {"{\"name\":\"a\"}\n{\"name\":\"b\",\"name\":\"c\"}\n", "stdin line 2: duplicate key \"name\""},
+		"utf8":   {"{\"name\":\"a\"}\n{\"name\":\"b\xffc\"}\n", "stdin line 2, column 11: invalid UTF-8 in input"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in, err := ssRead[ssJSONLInputs](t, strings.NewReader(tc.in), ssRecMeta)

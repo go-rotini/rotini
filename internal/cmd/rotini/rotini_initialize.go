@@ -3,6 +3,7 @@ package rotini
 import (
 	"context"
 	"fmt"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,13 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	args := inputs.RotiniInitialize.Arguments
 	flags := inputs.RotiniInitialize.Flags
+
+	// The name becomes the generated Go package's name, which a keyword can't be, and main
+	// can't be imported.
+	if token.IsKeyword(args.Name) || args.Name == "main" {
+		rtx.HaltWith(rotini.UsageError(fmt.Errorf("invalid CLI name %q: it would name the generated Go package, and %s; choose another name", args.Name, reservedWhy(args.Name))))
+		return
+	}
 
 	version := rtx.Version()
 	opt := codegen.InitOptions{Format: flags.Format, Template: flags.Template, Force: flags.Force}
@@ -63,8 +71,15 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	// init does not edit go.mod, so it warns when the module does not yet require the runtime
 	// the scaffold imports.
 	if !requiresRuntime(".") {
-		rtx.RecordWarning(fmt.Errorf("go.mod does not require %s yet; run `go get %s` before building ./cmd/%s", runtimeModule, runtimeModule, args.Name))
+		rtx.RecordWarning(missingRuntime(".", "building ./cmd/"+args.Name))
 	}
+}
+
+func reservedWhy(name string) string {
+	if name == "main" {
+		return "a package named main can't be imported"
+	}
+	return name + " is a Go keyword"
 }
 
 // seedLines lists the spec and conf of every CLI init wrote, the named one first.
@@ -98,23 +113,51 @@ func modRequires(gomod, module string) bool {
 	return false
 }
 
-// requiresRuntime reports whether the nearest go.mod at or above dir requires the rotini
-// runtime or is the runtime's own. With no readable go.mod it reports false, so the warning
-// is shown.
+// requiresRuntime reports whether the module file nearest dir (see moduleFile) requires the
+// rotini runtime or is the runtime's own. With no readable module file it reports false, so
+// the warning is shown.
 func requiresRuntime(dir string) bool {
-	dir, err := filepath.Abs(dir)
-	if err != nil {
+	file := moduleFile(dir)
+	if file == "" {
 		return false
 	}
+	data, err := os.ReadFile(file)
+	return err == nil && modRequires(string(data), runtimeModule)
+}
+
+// moduleFile returns the module file of the module dir is in: the nearest directory at or above
+// it holding go.mod, or vendor.mod when it holds no go.mod. It returns "" when there is none.
+func moduleFile(dir string) string {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
 	for {
-		data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-		if err == nil {
-			return modRequires(string(data), runtimeModule)
+		for _, name := range []string{"go.mod", "vendor.mod"} {
+			if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
+				return filepath.Join(dir, name)
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return false
+			return ""
 		}
 		dir = parent
 	}
+}
+
+// missingRuntime is the warning for a module that doesn't require the runtime yet, naming the
+// go get that adds it before the step that needs it. A module kept in vendor.mod names that
+// file to go get.
+func missingRuntime(dir, before string) error {
+	name, modfile := "go.mod", ""
+	if file := moduleFile(dir); filepath.Base(file) == "vendor.mod" {
+		name, modfile = "vendor.mod", " -modfile="+filepath.ToSlash(file)
+		if abs, err := filepath.Abs(dir); err == nil {
+			if rel, err := filepath.Rel(abs, file); err == nil {
+				modfile = " -modfile=" + filepath.ToSlash(rel)
+			}
+		}
+	}
+	return fmt.Errorf("%s does not require %s yet; run `go get%s %s` before %s", name, runtimeModule, modfile, runtimeModule, before)
 }

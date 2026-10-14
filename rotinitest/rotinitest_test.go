@@ -352,6 +352,16 @@ func TestRunStdin(t *testing.T) {
 			in.ToolLoad.Stdin = new("hello\nworld")
 			return rotinitest.Run(t, newTool[loadText](), in, rotinitest.Path("load"))
 		}, `"hello\nworld"`},
+		{"text ending in a line ending", func(t *testing.T) rotinitest.Result {
+			var in loadText
+			in.ToolLoad.Stdin = new("hello\n")
+			return rotinitest.Run(t, newTool[loadText](), in, rotinitest.Path("load"))
+		}, `"hello\n"`},
+		{"text ending in CRLF", func(t *testing.T) rotinitest.Result {
+			var in loadText
+			in.ToolLoad.Stdin = new("hello\r\n")
+			return rotinitest.Run(t, newTool[loadText](), in, rotinitest.Path("load"))
+		}, `"hello\r\n"`},
 		{"lines", func(t *testing.T) rotinitest.Result {
 			var in loadLines
 			in.ToolLoad.Stdin = &[]string{"a", "b"}
@@ -371,6 +381,18 @@ func TestRunStdin(t *testing.T) {
 				t.Fatalf("exit %d, stdout %s, want %s\n%s", res.Code, res.Stdout, tc.want, res.Stderr)
 			}
 		})
+	}
+}
+
+// Text no stdin payload can deliver fails the test instead of reaching the handler changed.
+func TestRunStdin_undeliverableText(t *testing.T) {
+	t.Parallel()
+	for _, text := range []string{"hello\r", "\ufeffhello"} {
+		var in loadText
+		in.ToolLoad.Stdin = new(text)
+		if msg := failure(t, func(tb testing.TB) { rotinitest.Run(tb, newTool[loadText](), in, rotinitest.Path("load")) }); msg == "" {
+			t.Errorf("stdin text %q ran without failing", text)
+		}
 	}
 }
 

@@ -1,3 +1,5 @@
+// Package rotini holds the handlers of the rotini companion CLI. The command tree, inputs,
+// help and man pages are generated into zz_rotini.go from cmd/rotini/.rotini.spec.yaml.
 package rotini
 
 import (
@@ -44,7 +46,8 @@ func releaseVersion(v string) string {
 
 // ResolveVersion returns the version the binary reports. The build info's module version wins
 // when it is a release (`go install pkg@v1.2.3`); otherwise the -ldflags stamp is used, reduced
-// to X.Y.Z when it is a semantic version and returned as is when not.
+// to X.Y.Z. A stamp that is not a semantic version, such as the bare commit hash git describe
+// gives in a clone without tags, is the dev version 0.0.0.
 func ResolveVersion(ldflagVersion string) string {
 	if info, ok := readBuildInfo(); ok {
 		if v := releaseVersion(info.Main.Version); v != "" {
@@ -54,7 +57,7 @@ func ResolveVersion(ldflagVersion string) string {
 	if v := releaseVersion(ldflagVersion); v != "" {
 		return v
 	}
-	return ldflagVersion
+	return "0.0.0"
 }
 
 func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {

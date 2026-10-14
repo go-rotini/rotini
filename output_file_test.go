@@ -9,10 +9,35 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"syscall"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestQuotePath(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"/home/me/app.yaml", `"/home/me/app.yaml"`},
+		{"dir/with space/é.txt", `"dir/with space/é.txt"`},
+		{`C:\Users\me\app.yaml`, `"C:\Users\me\app.yaml"`},
+		{`\\server\share\x`, `"\\server\share\x"`},
+		{`C:\a"b`, `"C:\\a\"b"`},
+		{"a/b\"c", `"a/b\"c"`},
+		{"C:\\a\nb", `"C:\\a\nb"`},
+		{"C:\\a\x00b", `"C:\\a\x00b"`},
+		{"C:\\a\xffb", `"C:\\a\xffb"`},
+		{"/a/\xffb", `"/a/\xffb"`},
+		{"", `""`},
+	} {
+		if got := quotePath(tc.in); got != tc.want {
+			t.Errorf("quotePath(%q) = %s, want %s", tc.in, got, tc.want)
+		}
+		if !strings.Contains(tc.in, `\`) {
+			if got, q := quotePath(tc.in), fmt.Sprintf("%q", tc.in); got != q {
+				t.Errorf("quotePath(%q) = %s, want %%q's %s", tc.in, got, q)
+			}
+		}
+	}
+}
 
 // outputDir is a run context whose directory is a fresh temporary one.
 func outputDir(t *testing.T) (*Context, string) {
@@ -191,15 +216,15 @@ func TestCreateOutput_writeErrorFailsClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.w = failingWriter{syscall.ENOSPC}
-	if _, err := f.Write([]byte("data")); !errors.Is(err, syscall.ENOSPC) {
+	f.w = failingWriter{errNoSpace}
+	if _, err := f.Write([]byte("data")); !errors.Is(err, errNoSpace) {
 		t.Fatalf("Write = %v", err)
 	}
 	err = f.Close()
-	if !errors.Is(err, syscall.ENOSPC) {
+	if !errors.Is(err, errNoSpace) {
 		t.Fatalf("Close = %v, want ENOSPC", err)
 	}
-	if want := `could not write output file "out.txt": ` + syscall.ENOSPC.Error(); err.Error() != want {
+	if want := `could not write output file "out.txt": ` + errNoSpace.Error(); err.Error() != want {
 		t.Errorf("message = %q, want %q", err, want)
 	}
 	if data, _ := os.ReadFile(path); string(data) != "old" {
@@ -251,6 +276,30 @@ func TestCreateOutput_symlinkKeepsTheLink(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(target); string(data) != "new" {
 		t.Errorf("the link's target = %q, want new", data)
+	}
+}
+
+// A link to a file that doesn't exist is refused, with or without Overwrite: it is never
+// replaced by a regular file that takes the link's own permissions.
+func TestCreateOutput_danglingLinkIsRefused(t *testing.T) {
+	t.Parallel()
+	rtx, dir := outputDir(t)
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(filepath.Join(dir, "missing.txt"), link); err != nil {
+		t.Skipf("no symlinks: %v", err)
+	}
+	for _, overwrite := range []bool{false, true} {
+		f, err := CreateOutput(rtx, "link.txt", Overwrite(overwrite))
+		if err == nil {
+			_ = f.Abort()
+			t.Fatalf("Overwrite(%v): a dangling link was accepted", overwrite)
+		}
+		if CategoryOf(err) != CategoryUsage || !strings.Contains(err.Error(), `output file "link.txt" is a symbolic link to a file that doesn't exist`) {
+			t.Errorf("Overwrite(%v): %v (category %v)", overwrite, err, CategoryOf(err))
+		}
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("the link was replaced: %v", err)
 	}
 }
 

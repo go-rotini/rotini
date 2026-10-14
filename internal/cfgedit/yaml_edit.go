@@ -3,9 +3,9 @@ package cfgedit
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/go-rotini/yaml"
 )
@@ -33,10 +33,16 @@ func newYAMLEdit(src []byte, path []string) (*yamlEdit, error) {
 		}
 		return nil, err
 	}
+	if doc.Root != nil && docMarker(src, lineStart(src, doc.Root.Start)) {
+		return nil, refused(path, "the document's content starts on its --- line")
+	}
 	return &yamlEdit{src: src, doc: doc, path: path, nl: newline(src), step: yamlIndentStep(doc.Root)}, nil
 }
 
 func (yamlEditor) set(src []byte, path []string, v any) ([]byte, error) {
+	if slices.Contains(path, "<<") {
+		return nil, refused(path, "a key named << reads as a merge key")
+	}
 	ed, err := newYAMLEdit(src, path)
 	if err != nil {
 		return nil, err
@@ -50,6 +56,14 @@ func (yamlEditor) set(src []byte, path []string, v any) ([]byte, error) {
 	}
 	if root.Kind != YAMLMapping {
 		return nil, refused(path, "the file's top level isn't a mapping")
+	}
+	if ls, le := lineStart(src, root.Start), nextLine(src, root.End); root.Flow && len(root.Pairs) == 0 &&
+		len(bytes.TrimSpace(src[ls:lineEnd(src, root.End)])) == 2 {
+		// A top-level {} alone on its line, as unset leaves under a "---" line, becomes a
+		// block mapping.
+		out := *ed
+		out.src = splice(src, ls, le, "")
+		return out.insertAt(ls, 0, path, v), nil
 	}
 	m := root
 	for i, seg := range path {
@@ -65,6 +79,9 @@ func (yamlEditor) set(src []byte, path []string, v any) ([]byte, error) {
 		}
 		if p.Value.Anchor != "" || p.Value.Kind == YAMLAlias {
 			return nil, refused(path, "the path goes through an anchor or alias")
+		}
+		if i < len(path)-1 && p.Value.Tag != "" {
+			return nil, refused(path, "the path goes through a tagged value")
 		}
 		if i == len(path)-1 {
 			return ed.replace(m, p, v)
@@ -121,11 +138,25 @@ func findYAMLPair(m *YAMLNode, key string) *YAMLPair {
 	return found
 }
 
+// underIndented reports whether p's value starts on a later line than its key without being
+// indented past it. A block sequence may start at the key's own column (`items:\n- a`).
+func (ed *yamlEdit) underIndented(p *YAMLPair) bool {
+	old := p.Value
+	if old.Empty || (old.Kind == YAMLSequence && !old.Flow) {
+		return false
+	}
+	ls := lineStart(ed.src, old.Start)
+	return ls != lineStart(ed.src, p.Colon) && old.Start-ls <= p.Col
+}
+
 // replace writes v as p's value.
 func (ed *yamlEdit) replace(m *YAMLNode, p *YAMLPair, v any) ([]byte, error) {
 	old := p.Value
 	if old.Kind == YAMLMapping {
 		return nil, refused(ed.path, "it holds a mapping, not a value")
+	}
+	if ed.underIndented(p) {
+		return nil, refused(ed.path, "its value starts on the next line, not indented past the key")
 	}
 	if old.Kind == YAMLScalar && old.Style == yaml.PlainStyle && !old.Empty && bytes.ContainsAny(ed.src[old.Body:old.End], "\n") {
 		return nil, refused(ed.path, "its value is written over several lines without quotes")
@@ -140,6 +171,12 @@ func (ed *yamlEdit) replace(m *YAMLNode, p *YAMLPair, v any) ([]byte, error) {
 		}
 		if str, ok := v.(string); ok && old.Kind == YAMLScalar {
 			text = keepQuoting(old.Style, str, text)
+		}
+		if m.Flow {
+			var err error
+			if text, err = ed.quoteBeforeBlankLine(old, v, text); err != nil {
+				return nil, err
+			}
 		}
 		switch {
 		case old.Empty:
@@ -261,6 +298,9 @@ func (yamlEditor) unset(src []byte, path []string, keep int) ([]byte, error) {
 		if p.Value.Anchor != "" || p.Value.Kind == YAMLAlias {
 			return nil, refused(path, "the path goes through an anchor or alias")
 		}
+		if i < len(path)-1 && p.Value.Tag != "" {
+			return nil, refused(path, "the path goes through a tagged value")
+		}
 		maps, pairs = append(maps, m), append(pairs, p)
 		if i < len(path)-1 {
 			if p.Value.Kind != YAMLMapping {
@@ -280,12 +320,28 @@ func (yamlEditor) unset(src []byte, path []string, keep int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if t == 0 && len(maps[0].Pairs) == 1 && ed.startMarked() {
+		// A document holding only "---" reads as null, not as a mapping.
+		at := lineStart(ed.src, pairs[0].Key.Start)
+		out = splice(out, at, at, "{}"+ed.nl)
+	}
 	if t > 0 && len(maps[t].Pairs) == 1 {
 		// A kept mapping left empty is written as {} so it still reads as a mapping.
 		at := pairs[t-1].Colon + 1
 		out = splice(out, at, at, " {}")
 	}
 	return out, nil
+}
+
+// startMarked reports whether a "---" line comes before the document's root.
+func (ed *yamlEdit) startMarked() bool {
+	end := lineStart(ed.src, ed.doc.Root.Start)
+	for ls := bomLen(ed.src); ls < end; ls = nextLine(ed.src, ls) {
+		if docMarker(ed.src, ls) && ed.src[ls] == '-' {
+			return true
+		}
+	}
+	return false
 }
 
 // removePair removes p's lines, from its key's line through the end of its value, line ending
@@ -295,7 +351,14 @@ func (ed *yamlEdit) removePair(p *YAMLPair) ([]byte, error) {
 	if len(bytes.TrimLeft(ed.src[ls:p.Key.Start], " ")) != 0 {
 		return nil, refused(ed.path, "the key shares its line with other content")
 	}
-	return splice(ed.src, ls, nextLine(ed.src, p.Value.End), ""), nil
+	end := nextLine(ed.src, p.Value.End)
+	if p.Value.Kind == YAMLMapping && !p.Value.Flow {
+		// Comment lines indented under the mapping, after its last entry, go with it.
+		for end < len(ed.src) && commentLine(ed.src, end, "#") && leadAt(ed.src, end) > p.Col {
+			end = nextLine(ed.src, end)
+		}
+	}
+	return splice(ed.src, ls, end, ""), nil
 }
 
 // keepQuoting writes a string that replaces a quoted one in the same quotes, so the edit keeps
@@ -304,8 +367,52 @@ func keepQuoting(style yaml.ScalarStyle, s, text string) string {
 	switch {
 	case style == yaml.DoubleQuotedStyle:
 		return strconv.Quote(s)
-	case style == yaml.SingleQuotedStyle && !strings.ContainsAny(s, "\n\r") && !strings.ContainsFunc(s, unicode.IsControl):
+	case style == yaml.SingleQuotedStyle && !strings.ContainsAny(s, "\n\r") && !strings.ContainsFunc(s, yamlEscapeOnly):
 		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 	}
 	return text
+}
+
+// refuseYAMLStream refuses a YAML file holding more than one document before anything decodes
+// it, so the refusal reads the same whatever the decoder makes of the extra documents.
+func refuseYAMLStream(format Format, src []byte, path []string) error {
+	if format != YAML {
+		return nil
+	}
+	if f, err := yaml.Parse(src[bomLen(src):]); err == nil && len(f.Docs) > 1 {
+		return refused(path, "the file holds more than one YAML document")
+	}
+	return nil
+}
+
+// blankLineFollows reports whether the white space that starts at offset at holds a blank line.
+func blankLineFollows(src []byte, at int) bool {
+	breaks := 0
+	for ; at < len(src); at++ {
+		switch src[at] {
+		case '\n':
+			breaks++
+			if breaks > 1 {
+				return true
+			}
+		case ' ', '\t', '\r':
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// quoteBeforeBlankLine returns text, v as written in place of old inside {…}, quoted when a
+// blank line follows old: the yaml reader keeps those line breaks at the end of a plain value,
+// so only a quoted one reads back as itself. A value that isn't a string is refused there.
+func (ed *yamlEdit) quoteBeforeBlankLine(old *YAMLNode, v any, text string) (string, error) {
+	if isCollection(v) || strings.HasPrefix(text, `"`) || strings.HasPrefix(text, "'") || !blankLineFollows(ed.src, old.End) {
+		return text, nil
+	}
+	str, ok := v.(string)
+	if !ok {
+		return "", refused(ed.path, "a blank line follows its value inside {…}")
+	}
+	return strconv.Quote(str), nil
 }

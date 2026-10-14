@@ -16,13 +16,13 @@ import (
 // including in minor releases, so construct values with field names
 // (rotini.FlagDef{Name: "verbose"}), not positionally.
 type Definition struct {
-	Name             string
-	Handler          string // ProgramHandlers method for the root command, e.g. "Rotini"
-	Flags            []FlagDef
-	Arguments        []ArgDef
-	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
-	FlagDependencies []FlagDependency // conditional cross-flag requirements validated at parse time
-	Commands         []CommandDef
+	Name             string              // the program name, which help and errors show
+	Handler          string              // ProgramHandlers method for the root command, e.g. "Rotini"
+	Flags            []FlagDef           // the root command's flags
+	Arguments        []ArgDef            // the root command's positional arguments, in order
+	FlagGroups       []FlagGroup         // cross-flag presence rules validated at parse time
+	FlagDependencies []FlagDependency    // conditional cross-flag requirements validated at parse time
+	Commands         []CommandDef        // the root's sub-commands
 	Plugins          []PluginDef         // co-located plugin binaries dispatched as sub-commands of the root
 	PluginDiscovery  *PluginDiscoveryDef // plugin auto-discovery on the root command (nil = off)
 	PluginPath       string              // extra directory searched for BOTH declared and discovered plugins
@@ -61,11 +61,14 @@ type Definition struct {
 	Topics []TopicDef
 	// Effects is what running the root command does (spec effects:); nil when undeclared.
 	Effects *Effects
+	// Metadata is the root command's own labels (spec metadata:), as written; rotini never
+	// reads them. nil when undeclared.
+	Metadata map[string]string
 }
 
 // ExitStatusDef is one exit code a command documents: the spec's `exit_status` entry.
 type ExitStatusDef struct {
-	Code      int
+	Code      int    // the exit code
 	Name      string // the code's snake_case name (`not_found`); "" when none
 	Summary   string // what the code means; "" when none
 	Retryable bool   // running the same command again may succeed
@@ -84,7 +87,7 @@ type ResponseFilesDef struct {
 // EnumValue describes one declared value of an enum input beyond its spelling: the spec's
 // object form of an enum item.
 type EnumValue struct {
-	Value   string
+	Value   string // the declared spelling, which the input binds
 	Summary string // one line saying what the value means; "" when none
 	// Aliases are other spellings accepted for the value; each binds as Value.
 	Aliases []string
@@ -138,8 +141,8 @@ const (
 // referenced by their logical Name, and "set" means explicitly provided on argv — a default or
 // fallback does not count. The [Parser] enforces it; a violation is a usage error.
 type FlagGroup struct {
-	Kind  FlagGroupKind
-	Flags []string // logical flag names that make up the group
+	Kind  FlagGroupKind // the rule the group follows
+	Flags []string      // logical flag names that make up the group
 }
 
 // FlagDependency is a conditional cross-flag rule: when the When flag is set on argv (with one
@@ -159,8 +162,8 @@ type FlagDependency struct {
 // PluginDef describes a co-located sub-command, kubectl/git plugin style: invoking it execs
 // the sibling Binary with the remaining arguments passed through.
 type PluginDef struct {
-	Name    string
-	Aliases []string
+	Name    string        // the sub-command name that dispatches to the plugin
+	Aliases []string      // other names that dispatch to it
 	Summary string        // one-line description (completion candidates carry it as "name\tsummary")
 	Binary  string        // expected executable name, e.g. "kubectl-ctx"
 	Timeout time.Duration // 0 means no timeout
@@ -177,14 +180,16 @@ type PluginDiscoveryDef struct {
 // CommandDef describes one command node within a [Definition]. Handler is the ProgramHandlers
 // method name the runtime invokes to obtain this command's [Handler].
 type CommandDef struct {
-	Name                  string
-	Aliases               []string
+	Name                  string   // the name that invokes the command
+	Aliases               []string // other names that invoke it, listed by completion
 	Summary               string   // one-line description (completion candidates carry it as "name\tsummary")
 	Handler               string   // ProgramHandlers method, e.g. "RotiniGenerate"
 	Hidden                bool     // omitted from completion candidates (it still dispatches); help omission happens at codegen
 	DeprecatedIdentifiers []string // aliases (subset of Aliases) that [Deprecations] reports when used to invoke
-	// Deprecated is the command's deprecation message: invoking it by any name reports a
-	// [Deprecation] carrying it. Empty means the command is not deprecated as a whole.
+	// Deprecated is the command's deprecation message. Invoking it by any name reports a
+	// [Deprecation] carrying it, unless DeprecatedIdentifiers lists some names: then only
+	// those report, and the message is about them. Empty means the command is not deprecated
+	// as a whole.
 	Deprecated string
 
 	// DeprecatedSince and RemovedIn are the releases (X.Y.Z) the spec says deprecated the
@@ -201,11 +206,11 @@ type CommandDef struct {
 	// and suggestions leave them out.
 	HiddenAliases []string
 
-	Flags            []FlagDef
-	Arguments        []ArgDef
-	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
-	FlagDependencies []FlagDependency // conditional cross-flag requirements validated at parse time
-	Commands         []CommandDef
+	Flags            []FlagDef           // the command's own flags
+	Arguments        []ArgDef            // the command's positional arguments, in order
+	FlagGroups       []FlagGroup         // cross-flag presence rules validated at parse time
+	FlagDependencies []FlagDependency    // conditional cross-flag requirements validated at parse time
+	Commands         []CommandDef        // the command's sub-commands
 	Plugins          []PluginDef         // plugin binaries dispatched as sub-commands of this command
 	PluginDiscovery  *PluginDiscoveryDef // plugin auto-discovery on this command (nil = off)
 	PluginPath       string              // extra directory searched for BOTH this command's declared plugins and its discovered plugins
@@ -230,10 +235,13 @@ type CommandDef struct {
 	// Effects is what running the command does (spec effects:); nil when undeclared. Not
 	// inherited by sub-commands.
 	Effects *Effects
+	// Metadata is the command's own labels (spec metadata:), as written; rotini never reads
+	// them. nil when undeclared. Not inherited by sub-commands.
+	Metadata map[string]string
 }
 
-// Constraints carries the validation bounds a spec may declare on a flag or argument. The
-// parser enforces them after reconciliation, so a value supplied via env or config is checked
+// Constraints carries the validation bounds a spec may declare on a flag or argument. Rotini
+// enforces them on a value from any channel, so one from the environment or config is checked
 // too. The numeric bounds and the two maximums are pointers, nil meaning unset, so `minimum: 0`
 // and `maxItems: 0` are enforced bounds. For the two minimums 0 means unset.
 type Constraints struct {
@@ -264,21 +272,20 @@ func Ptr[T any](v T) *T { return new(v) }
 // a value only in the inline form) and count.
 func takesValue(fd FlagDef) bool { return fd.Type != "bool" && fd.Type != "count" }
 
-// FlagDef describes a single flag of a command. Name is the logical name and
-// matches the `rotini:"<name>"` tag on the corresponding generated input field.
+// FlagDef describes a single flag of a command.
 type FlagDef struct {
-	Name        string
+	Name        string   // the logical name, matching the `rotini:"<name>"` tag on the input field
 	Identifiers []string // CLI forms, e.g. {"--loud", "-l"}
 	Summary     string   // one-line description (completion candidates carry it as "identifier\tsummary")
 	Type        string   // resolved Go type, e.g. "bool", "string", "[]string", "int", "time.Duration"
-	Required    bool
-	Default     string
+	Required    bool     // the run fails with a usage error when no channel and no default sets it
+	Default     string   // the value used when no channel sets the flag, as it would be typed; "" for none
 	// Defaults is the multi-value default for a REPEATABLE input (a `[]…` or map type):
 	// each element is seeded as one occurrence, exactly as if the user had repeated the
 	// flag. It is used only when Default is empty, and only when the input is unset from
 	// every channel — a default never merges with a supplied value.
 	Defaults []string
-	Enum     []string
+	Enum     []string // the values the flag accepts; nil accepts any
 	// EnumValues lists every Enum value, in order, with what it declares beyond its spelling (a
 	// summary); nil when no value declares more than its spelling.
 	EnumValues []EnumValue
@@ -304,6 +311,11 @@ type FlagDef struct {
 	// (2h or -2h ago, yesterday), "future" (2h or +2h from now, tomorrow) or "both" (a sign is
 	// required), plus now and today. Absolute values are tried first. Empty means absolute only.
 	Relative string
+	// Base "prefixed" lets an integer input (or a list of them) also take 0x, 0o and 0b
+	// literals, with an optional sign and `_` between digits (`0xFF`, `-0b1010`, `1_000`). A
+	// value without a prefix is decimal: `010` is ten. It applies on every channel. Empty means
+	// decimal only.
+	Base string
 	// ObjectSchema is the JSON Schema of an object-valued flag's value — set when the spec's
 	// schema is a named object (`$ref: '#/schemas/DB'`), or a list of them. The flag then
 	// takes JSON, key=value pairs, a YAML @file, or one field per flag (--db.host=…); see
@@ -312,8 +324,9 @@ type FlagDef struct {
 	Secret                bool     // when true, the value is redacted in usage/validation error output
 	Hidden                bool     // omitted from completion candidates (it still parses); help omission happens at codegen
 	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Deprecations] reports when used
-	// Deprecated is the flag's deprecation message: setting it by any identifier reports a
-	// [Deprecation] carrying it. Empty means the flag is not deprecated as a whole.
+	// Deprecated is the flag's deprecation message. Setting the flag by any identifier reports
+	// a [Deprecation] carrying it, unless DeprecatedIdentifiers lists some: then only those
+	// report, and the message is about them. Empty means the flag is not deprecated as a whole.
 	Deprecated string
 	// DeprecatedSince, RemovedIn and DeprecatedIdentifiersRemovedIn are the flag's planned
 	// lifecycle; see [CommandDef.DeprecatedSince].
@@ -338,6 +351,13 @@ type FlagDef struct {
 	// so [Context.Inputs] succeeds and the handler decides what to do. Errors reading the
 	// command line are still reported.
 	ShortCircuit bool
+	// Local makes the flag usable only when its command is the one run: given with any of the
+	// command's sub-commands, before or after their names, it is a usage error. Its rules
+	// (Required, and the flag groups and dependencies that need it) apply only then too, so
+	// a sub-command's run doesn't demand a flag it can't be given. Generated code
+	// sets it on every flag of a command with sub-commands that the spec doesn't mark
+	// `cascading`. Without it, a flag is also accepted after its sub-commands' names.
+	Local bool
 	// NoRepeat makes a single-value flag given more than once on the command line an error
 	// (spec `repeatable: false`) instead of the last value winning.
 	NoRepeat   bool
@@ -355,6 +375,9 @@ type FlagDef struct {
 	// Effects is what giving the flag adds to its command's effects (spec effects:); nil when
 	// undeclared. A run's effect is the highest of its command's and every given flag's.
 	Effects *Effects
+	// Metadata is the flag's own labels (spec metadata:), as written; rotini never reads them.
+	// nil when undeclared.
+	Metadata map[string]string
 }
 
 // Completion is a declarative hint about what an input's value is, for the shell to complete.
@@ -384,15 +407,14 @@ type Completion struct {
 	Message string
 }
 
-// ArgDef describes a single positional argument of a command. Variadic is true
-// for a trailing slice argument that absorbs the remaining positionals.
+// ArgDef describes a single positional argument of a command.
 type ArgDef struct {
-	Name     string
-	Type     string
-	Required bool
-	Variadic bool
-	Default  string
-	Enum     []string
+	Name     string   // the logical name, matching the `rotini:"<name>"` tag on the input field
+	Type     string   // resolved Go type, as for [FlagDef.Type]
+	Required bool     // the run fails with a usage error when the argument is absent
+	Variadic bool     // the argument takes the remaining positionals, less those of arguments after it
+	Default  string   // the value used when the argument is absent; "" for none
+	Enum     []string // the values the argument accepts; nil accepts any
 	// EnumValues describes the Enum values; see [FlagDef.EnumValues].
 	EnumValues []EnumValue
 	// IgnoreCase matches a value against Enum without regard to case and binds the declared
@@ -406,6 +428,8 @@ type ArgDef struct {
 	// [FlagDef.Relative].
 	Layouts  []string
 	Relative string
+	// Base is how an integer argument's value may be written; see [FlagDef.Base].
+	Base string
 	// Deprecated is the argument's deprecation message: supplying it reports a [Deprecation]
 	// carrying it.
 	Deprecated string
@@ -428,5 +452,8 @@ type ArgDef struct {
 	// paths it matches, on Windows only, where the shell passes patterns through. A word
 	// that names an existing path, or matches nothing, is kept as written.
 	Glob bool
+	// Metadata is the argument's own labels (spec metadata:), as written; rotini never reads
+	// them. nil when undeclared.
+	Metadata map[string]string
 	Constraints
 }

@@ -27,7 +27,7 @@ func TestExpandValue(t *testing.T) {
 		"tilde":                {in: "~", rule: both, want: "/home/ada"},
 		"tilde slash":          {in: "~/x/y", rule: both, want: "/home/ada/x/y"},
 		"tilde backslash":      {goos: "windows", in: `~\x`, rule: both, want: `C:\Users\ada\x`},
-		"backslash elsewhere":  {in: `~\x`, rule: both, err: `cannot expand "~\\x": no such user`},
+		"backslash elsewhere":  {in: `~\x`, rule: both, err: `cannot expand "~\x": no such user`},
 		"named user":           {in: "~bob/x", rule: both, want: "/home/bob/x"},
 		"unknown user":         {in: "~nosuch/x", rule: both, err: `cannot expand "~nosuch": no such user`},
 		"tilde inside":         {in: "a~/x", rule: both, want: "a~/x"},
@@ -46,6 +46,8 @@ func TestExpandValue(t *testing.T) {
 		"no rule":              {in: "~/$A", want: "~/$A"},
 		"percent kept":         {goos: "windows", in: "%A%", rule: both, want: "%A%"},
 		"underscore and digit": {in: "$A_1", rule: both, err: `$A_1 is not set (in "$A_1")`},
+		"doubled dollar":       {in: `C:\$$Recycle.Bin\$$1`, rule: both, want: `C:\$Recycle.Bin\$1`},
+		"doubled then var":     {in: "$$$A", rule: both, want: "$/a"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			goos := tc.goos
@@ -125,6 +127,20 @@ func TestRelativeToFile(t *testing.T) {
 	}
 	if got := relativeToFile([]string{"x"}, ""); got[0] != "x" {
 		t.Errorf("no file: %q", got)
+	}
+}
+
+// On Windows a rooted path without a drive, and a drive-relative one, aren't relative to the
+// configuration file's directory.
+func TestRelativeToFile_windowsRootedAndDrive(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path forms")
+	}
+	in := []string{`\data\x`, `D:data`, `data`}
+	got := relativeToFile(in, `C:\cfg\config.yaml`)
+	want := []string{`\data\x`, `D:data`, `C:\cfg\data`}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 

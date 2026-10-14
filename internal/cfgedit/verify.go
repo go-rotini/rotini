@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-rotini/recon"
@@ -23,7 +24,7 @@ func verify(format Format, after []byte, want map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: the edited file doesn't decode: %w", ErrVerify, err)
 	}
-	if format == JSON && !json.Valid(after[bomLen(after):]) {
+	if body := after[bomLen(after):]; format == JSON && len(bytes.TrimSpace(body)) > 0 && !json.Valid(body) {
 		return nil, fmt.Errorf("%w: the edited file isn't valid JSON", ErrVerify)
 	}
 	if !equalValue(want, got) {
@@ -99,7 +100,7 @@ func setPath(m map[string]any, path []string, v any) {
 }
 
 // unsetPath deletes path from m, then deletes each mapping on the path the deletion leaves
-// empty, deepest first, except the first keep.
+// empty, deepest first, except the first keep. An absent key changes nothing.
 func unsetPath(m map[string]any, path []string, keep int) {
 	chain := []map[string]any{m}
 	for _, seg := range path[:len(path)-1] {
@@ -108,6 +109,9 @@ func unsetPath(m map[string]any, path []string, keep int) {
 			return
 		}
 		chain = append(chain, next)
+	}
+	if _, ok := chain[len(chain)-1][path[len(path)-1]]; !ok {
+		return // an absent key leaves the document as it is
 	}
 	delete(chain[len(chain)-1], path[len(path)-1])
 	for i := len(chain) - 1; i > 0 && i > keep && len(chain[i]) == 0; i-- {
@@ -169,4 +173,82 @@ func number(v any) (string, bool) {
 		return strconv.FormatFloat(f, 'g', -1, 64), true
 	}
 	return "", false
+}
+
+// readsIntegersExactly reports whether the reader rotini uses for format, JSON, JSONC or YAML,
+// reads back every 64-bit integer exactly, beyond ±2^53 and above the largest int64.
+func readsIntegersExactly(format Format) bool {
+	switch format {
+	case JSON:
+		return jsonExact()
+	case JSONC:
+		return jsoncExact()
+	case YAML:
+		return yamlExact()
+	}
+	return false
+}
+
+// lazy holds a value computed on first use, as [sync.OnceValue] does. Its function is passed
+// at the call site rather than stored in a package variable, so a program that never asks for
+// the value links neither the function nor what it calls: the probes below would otherwise link
+// every format's reader, and the YAML 1.1 pattern the regexp engine.
+type lazy[T any] struct {
+	once sync.Once
+	get  func() T
+}
+
+func (l *lazy[T]) value(f func() T) T {
+	l.once.Do(func() { l.get = sync.OnceValue(f) })
+	return l.get()
+}
+
+var jsonExactOnce, jsoncExactOnce, yamlExactOnce, tomlReadsNULOnce lazy[bool]
+
+func jsonExact() bool {
+	return jsonExactOnce.value(func() bool {
+		return readsBack(JSON, `{"a": 18446744073709551615, "b": -9223372036854775808, "c": 9007199254740993}`)
+	})
+}
+
+func jsoncExact() bool {
+	return jsoncExactOnce.value(func() bool {
+		return readsBack(JSONC, `{"a": 18446744073709551615, "b": -9223372036854775808, "c": 9007199254740993}`)
+	})
+}
+
+func yamlExact() bool {
+	return yamlExactOnce.value(func() bool {
+		return readsBack(YAML, "a: 18446744073709551615\nb: -9223372036854775808\nc: 9007199254740993\n")
+	})
+}
+
+// readsBack reports whether src, a document with the keys a, b and c, decodes to the
+// integers its text holds.
+func readsBack(format Format, src string) bool {
+	m, err := decode(format, []byte(src))
+	if err != nil {
+		return false
+	}
+	for k, want := range map[string]string{"a": "18446744073709551615", "b": "-9223372036854775808", "c": "9007199254740993"} {
+		if got, ok := number(m[k]); !ok || got != want {
+			return false
+		}
+	}
+	return true
+}
+
+// tomlReadsNUL reports whether the TOML reader rotini uses reads back a key holding U+0000 as
+// one key, apart from the dotted path its pieces would make.
+func tomlReadsNUL() bool {
+	return tomlReadsNULOnce.value(func() bool {
+		m, err := decode(TOML, []byte(`"a\u0000b" = 1`+"\n[a]\nb = 2\n"))
+		if err != nil {
+			return false
+		}
+		nul, _ := number(m["a\x00b"])
+		sub, _ := m["a"].(map[string]any)
+		dotted, _ := number(sub["b"])
+		return nul == "1" && dotted == "2" && len(m) == 2
+	})
 }

@@ -3,7 +3,6 @@ package rotini
 import (
 	"context"
 	"io"
-	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -39,9 +38,10 @@ import (
 //   - dependencies — [Context.GetDependency] and [Context.MustGetDependency] read one;
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
-//     [Context.RecordError], and [Context.Failed]; during completion,
-//     [Context.AddCompletionMessage] and [Context.SetCompletionOptions], [Context.PartialInputs] reads
-//     what has been typed so far, and [Context.Context] is the program's base context
+//     [Context.RecordError], and [Context.Failed]; during completion, a completer adds to
+//     its answer with [Context.AddCompletionMessage], [Context.SetCompletionOptions] and
+//     [Context.SetCompletionFallback], and reads what has been typed so far with
+//     [Context.PartialInputs]
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
 //   - rotini's own settings — [Context.Version], [Context.Help] and [Context.Parser] read them;
@@ -104,7 +104,7 @@ type Context struct {
 
 	// rotini's own settings, seeded from the Program each run and kept out of services so a
 	// dependency can never shadow them.
-	meta     *InputSettings
+	meta     *boundSettings
 	readerFn func(InputSettings) *InputReader
 	version  string
 	help     HelpFunc
@@ -117,6 +117,9 @@ type Context struct {
 	// clock is the run's clock and its one reading; see [Program.WithClock]. view points at it.
 	clock runClock
 
+	// runView is where view points for a run: the run's view, allocated with its Context.
+	runView osView
+
 	// outputChecks makes WriteOutput and WriteOutputItem check each value against the declared
 	// output schema before writing it. See [Program.WithOutputChecks].
 	outputChecks bool
@@ -127,6 +130,8 @@ type Context struct {
 	// completionOptions collects what [Context.SetCompletionOptions] asks for. It is non-nil
 	// only while a completion request runs.
 	completionOptions *CompletionOptions
+	// completionFallback is what [Context.SetCompletionFallback] chose, or nil.
+	completionFallback *Completion
 
 	// stdinRead is the run's stdin, read at most once and shared by every consumer: argv can
 	// be parsed several times in one run and inputs collected more than once, but stdin can be
@@ -166,25 +171,16 @@ func (rtx *Context) AddCompletionMessage(msg string) {
 // argvAcq is what parsing this run's argv reads values from: the replayed stdin and the
 // injected directory.
 func (rtx *Context) argvAcq() argvAcq {
-	return argvAcq{stdin: rtx.flagStdin(), dir: rtx.osView().base(), clock: &rtx.clock}
-}
-
-// cloneServices copies the dependency store. Each run is seeded from the Program's copy, so a
-// dependency set during a run stays local to it.
-func (rtx *Context) cloneServices() map[string]any {
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	return maps.Clone(rtx.services)
+	return argvAcq{rtx: rtx, dir: rtx.osView().base(), clock: &rtx.clock}
 }
 
 // newContext returns an empty [Context] with the os streams and no resolved command.
 func newContext() *Context {
 	return &Context{
-		services: make(map[string]any),
-		frame:    frameUnset,
-		Stdin:    os.Stdin,
-		Stdout:   os.Stdout,
-		Stderr:   os.Stderr,
+		frame:  frameUnset,
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
 	}
 }
 
@@ -231,6 +227,12 @@ func (rtx *Context) CommandChain() []Command {
 	return slices.Clone(rtx.chain)
 }
 
+// chainRef is the run's chain itself, not a copy, for Rotini's own readers, which never write
+// to it.
+func (rtx *Context) chainRef() []Command {
+	return rtx.chain
+}
+
 // invokedCommand is the last command of the chain, whichever hook is running.
 func (rtx *Context) invokedCommand() Command {
 	rtx.mu.RLock()
@@ -275,7 +277,9 @@ const frameUnset = -1
 //	────                                 ─────────     ─────────────────
 //	mig's CascadingPreRun                mig           false
 //	db's CascadingPreRun                 db            false
+//	status's CascadingPreRun             status        true
 //	the leaf's PreRun / Run / PostRun    status        true
+//	status's CascadingPostRun            status        true
 //	db's CascadingPostRun                db            false
 //	mig's CascadingPostRun               mig           false
 //
@@ -612,7 +616,7 @@ func (rtx *Context) recordFault(pe *PanicError) {
 func (rtx *Context) WithInputSettings(meta InputSettings) *Context {
 	if rtx != nil {
 		rtx.mu.Lock()
-		rtx.meta = &meta
+		rtx.meta = bindSettings(meta)
 		rtx.mu.Unlock()
 	}
 	return rtx
@@ -653,8 +657,8 @@ func (rtx *Context) WithHelp(help HelpFunc) *Context {
 	return rtx
 }
 
-// WithParser sets the parser [Context.Parser] returns. [Parser] has no options, so this changes
-// nothing today; see [Program.WithParser]. It is for a Context built with [NewContextFor];
+// WithParser sets the parser [Context.Parser] returns. [Parser] has no options, so every parser
+// behaves alike; see [Program.WithParser]. It is for a Context built with [NewContextFor];
 // during a run, the change lasts for the rest of that run. A nil parser restores the default.
 func (rtx *Context) WithParser(parser *Parser) *Context {
 	if rtx != nil {
@@ -737,7 +741,7 @@ func (rtx *Context) Help() string {
 	if help == nil {
 		return ""
 	}
-	chain := rtx.CommandChain()
+	chain := rtx.chainRef()
 	path := make([]string, 0, len(chain))
 	for i := 1; i <= rtx.frameIndex() && i < len(chain); i++ {
 		path = append(path, chain[i].Name)
@@ -778,5 +782,5 @@ func (rtx *Context) settingsForRun() (InputSettings, bool) {
 	if rtx.meta == nil {
 		return InputSettings{}, false
 	}
-	return *rtx.meta, true
+	return rtx.meta.meta, true
 }

@@ -43,7 +43,7 @@ func expandResponseFiles(argv []string, prefix string, view *osView, skipUnreada
 				if skipUnreadable {
 					continue
 				}
-				return nil, &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("could not read response file %q: %v", name, err), Token: w}
+				return nil, &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("could not read response file %s: %v", quotePath(name), err), Token: w}
 			}
 			for j, rw := range words {
 				if rw == "--" {

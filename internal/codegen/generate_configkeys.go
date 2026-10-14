@@ -165,7 +165,7 @@ func configKeyLiteral(gp *program, k keyDef) string {
 	return b.String()
 }
 
-// writeKeyRules appends a ConfigKey's enum, layouts, separator and secrecy, omitting zero values.
+// writeKeyRules appends a ConfigKey's enum, layouts, base, separator and secrecy, omitting zero values.
 func writeKeyRules(b *strings.Builder, schema *InputSchema) {
 	if schema == nil {
 		return
@@ -184,6 +184,9 @@ func writeKeyRules(b *strings.Builder, schema *InputSchema) {
 		if len(l) > 1 {
 			fmt.Fprintf(b, ", Layouts: %s", goStringSlice(l))
 		}
+	}
+	if base := intBase(schema); base != "" {
+		fmt.Fprintf(b, ", Base: %q", base)
 	}
 	if schema.Separator != "" {
 		fmt.Fprintf(b, ", Separator: %q", runtimeSeparator(schema.Separator))

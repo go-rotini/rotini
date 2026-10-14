@@ -39,7 +39,7 @@ func TestHiddenAliases_dispatchButAreNotListed(t *testing.T) {
 	if got := complete(hiddenDef(), []string{"del", "--out", ""}, nil, nil); len(got) != 0 {
 		t.Errorf("--out's value completes %v, want nothing", got)
 	}
-	cands := childCommandNames(rtx.CommandChain()[0])
+	cands := childCommandNames(&rtx.CommandChain()[0])
 	if slices.Contains(cands, "del") {
 		t.Errorf("suggestion candidates %v include a hidden alias", cands)
 	}

@@ -117,3 +117,23 @@ func TestZeroMaxBoundsAreKept(t *testing.T) {
 		t.Errorf("an unset maxLength/maxItems emitted %s", constraintTags(got))
 	}
 }
+
+// TestWindowsDeviceElement pins the device names the go tool refuses in a path: CON, PRN, AUX,
+// NUL, COM1-9 and LPT1-9 in any case and before any dot. COM0 and LPT0 build.
+func TestWindowsDeviceElement(t *testing.T) {
+	t.Parallel()
+	for p, want := range map[string]string{
+		"internal/cmd/aux":      "aux",
+		"internal/Con.x/a.go":   "Con.x",
+		`internal\nul\a.go`:     "nul",
+		"cmd/com1":              "com1",
+		"cmd/LPT9.go":           "LPT9.go",
+		"cmd/com0/lpt0.go":      "",
+		"cmd/comx/console.go":   "",
+		"internal/cmd/app/x.go": "",
+	} {
+		if got := windowsDeviceElement(p); got != want {
+			t.Errorf("windowsDeviceElement(%q) = %q, want %q", p, got, want)
+		}
+	}
+}

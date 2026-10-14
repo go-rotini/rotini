@@ -5,12 +5,15 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/rotini/internal/testmod"
 )
 
 // TestRotiniTypeAliasesMatchTheResolver pins that rotiniTypeAliases (which lintSchemaTypes uses
@@ -133,7 +136,7 @@ func TestValueTypes_generateCompilingCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/vt\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
+	writeTestFile(t, dir, "go.mod", "module example.com/vt\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+testmod.Quote(filepath.ToSlash(repoRoot))+"\n"+testmod.Directives(repoRoot))
 	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", "version: 0.0.0\n")
 	t.Chdir(dir)
@@ -260,5 +263,48 @@ command:
 		goldenConf, "")
 	if err == nil || !strings.Contains(err.Error(), `unknown key "description"`) {
 		t.Errorf("description on an input schema: err = %v, want it rejected", err)
+	}
+}
+
+// TestUnderscoreCommandNames_generateCompilingCode pins that command names containing '_',
+// nested under one another, generate inputs structs naming each ancestor's own type and exit
+// constants naming the command as typed.
+func TestUnderscoreCommandNames_generateCompilingCode(t *testing.T) {
+	skipUnlessCompiling(t)
+	spec := `version: 0.0.0
+command:
+  name: app
+  commands:
+    - name: foo_bar
+      flags:
+        - {name: level, identifiers: [--level], schema: {type: int}}
+      commands:
+        - name: baz_qux
+          exit_status:
+            - {code: 3, name: missing, summary: not found}
+`
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/app\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+testmod.Quote(filepath.ToSlash(repoRoot))+"\n"+testmod.Directives(repoRoot))
+	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
+	writeTestFile(t, dir, ".rotini.conf.yaml", "version: 0.0.0\n")
+	t.Chdir(dir)
+	var problems []error
+	if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false,
+		func(string, error) {}, func(ps []error) { problems = ps }); err != nil {
+		t.Fatalf("Generate: %v %v", err, problems)
+	}
+	if out, err := goBuild(t, dir); err != nil {
+		t.Fatalf("generated code does not compile:\n%s", out)
+	}
+	src, err := os.ReadFile(filepath.Join(dir, "internal", "cmd", "app", "zz_rotini.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `"app foo_bar baz_qux": missing`) {
+		t.Errorf("exit constant does not name the command as typed:\n%s", src)
 	}
 }

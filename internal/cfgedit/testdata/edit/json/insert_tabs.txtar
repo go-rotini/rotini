@@ -1,0 +1,17 @@
+-- in --
+{
+	"deploy": {
+		"timeout": "5m"
+	}
+}
+-- op --
+set deploy.notify.email "ops@example.com"
+-- out --
+{
+	"deploy": {
+		"timeout": "5m",
+		"notify": {
+			"email": "ops@example.com"
+		}
+	}
+}

@@ -1,0 +1,13 @@
+-- in --
+{
+	"log": "info", // level
+}
+-- op --
+set deploy.timeout "5m"
+-- out --
+{
+	"log": "info", // level
+	"deploy": {
+		"timeout": "5m"
+	},
+}

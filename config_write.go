@@ -22,6 +22,7 @@ type ConfigKey struct {
 	IgnoreCase bool        // Enum matches without regard to case
 	Layout     string      // a time input's layout; see [FlagDef.Layout]
 	Layouts    []string    // every layout when there are several; see [FlagDef.Layouts]
+	Base       string      // an integer input's base; see [FlagDef.Base]
 	Separator  string      // what splits a list or map value given as one string; "" is ","
 	Secret     bool        // the value is a secret
 	Object     bool        // the value is an object, which is set by editing the file
@@ -40,7 +41,9 @@ type configWrite struct {
 
 // AllowSecretWrite lets [SetConfigValue] write a key declared secret. The file must not be
 // readable by other users: a new file is created with mode 0600, and an existing file readable
-// by its group or by others is refused, not changed.
+// by its group or by others is refused, not changed. On Windows, where file modes don't
+// control who can read a file, neither check applies: the file gets its directory's access
+// control list, so keep it in a directory only its user can read, such as the user's profile.
 func AllowSecretWrite() ConfigWriteOption {
 	return func(w *configWrite) { w.allowSecret = true }
 }
@@ -95,7 +98,9 @@ func ParseConfigValue(fn func(raw string) error) ConfigWriteOption {
 //
 // Errors are [*InputError] values: a usage error for what the user can fix (an unknown key,
 // an invalid value, a file that can't be parsed or written), an internal one for the author's
-// mistakes (an unknown file name, a key of a custom type without [ParseConfigValue]).
+// mistakes (an unknown file name, a key of a custom type without [ParseConfigValue]). A
+// feature the write needs that the program doesn't wire ([ConfigFiles], the file's codec,
+// [Schemas]) is a [*WiringError].
 func SetConfigValue(rtx *Context, file, key, raw string, opts ...ConfigWriteOption) error {
 	return writeConfigValue(rtx, file, key, &raw, opts)
 }
@@ -250,11 +255,11 @@ func configKeyPath(format cfgedit.Format, f ConfigFile, profile, key string) []s
 	return path
 }
 
-// editError reports a failed edit: a layout the user edits by hand, a file that can't be
-// parsed, or a bug that left the file untouched.
+// editError reports a failed edit: a layout the user edits by hand, a value the file's format
+// can't hold, a file that can't be parsed, or a bug that left the file untouched.
 func (t configFileTarget) editError(key string, err error) error {
 	switch {
-	case errors.Is(err, cfgedit.ErrRefused):
+	case errors.Is(err, cfgedit.ErrRefused), errors.Is(err, cfgedit.ErrValue):
 		return usageBind(channelConfig, key, fmt.Sprintf("configuration file %s: %v", t.path, err), err)
 	case errors.Is(err, cfgedit.ErrVerify), errors.Is(err, cfgedit.ErrUnsupported):
 		return internalBind(channelConfig, key, fmt.Sprintf("could not write config key %s to configuration file %s: %v", key, t.path, err), err)

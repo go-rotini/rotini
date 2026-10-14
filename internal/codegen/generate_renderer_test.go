@@ -276,6 +276,18 @@ func TestSmokeConvertJSONC(t *testing.T) {
 	t.Logf("jsonc:\n%s", out)
 }
 
+// TestConvert_jsonKeepsAngleBrackets pins that a JSON seed writes `<`, `>` and `&` as is, as
+// the JSONC, TOML and YAML seeds do, rather than as \u003c escapes.
+func TestConvert_jsonKeepsAngleBrackets(t *testing.T) {
+	out, err := convert([]byte("footer: \"help <command> & more\"\n"), formatJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "{\n  \"footer\": \"help <command> & more\"\n}\n"; string(out) != want {
+		t.Errorf("json seed = %q, want %q", out, want)
+	}
+}
+
 // TestTemplateFuncMapHelpers pins the output of every non-roff template helper, including both
 // branches of default, first and last.
 func TestTemplateFuncMapHelpers(t *testing.T) {
@@ -474,5 +486,23 @@ func TestHelpPage_groupedFlagSummaryStaysOnItsRow(t *testing.T) {
 	}
 	if !strings.Contains(row, "first second third") || strings.Contains(page, "\nthird") {
 		t.Errorf("the summary broke its row:\n%s", page)
+	}
+}
+
+// TestMarkdownCode pins code spans that render their text exactly, backticks included.
+func TestMarkdownCode(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"plain":     "`plain`",
+		"back`tick": "``back`tick``",
+		"^a\"b`c$":  "``^a\"b`c$``",
+		"``x":       "``` ``x ```",
+		"x`":        "`` x` ``",
+		" pad ":     "`  pad  `",
+		"  ":        "`  `",
+	} {
+		if got := markdownCode(in); got != want {
+			t.Errorf("markdownCode(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

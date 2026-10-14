@@ -1,24 +1,11 @@
-# Fuzz targets run one at a time (go test -fuzz takes a single package), so each is
-# listed as "<package> <FuzzName>". List every FuzzXxx here as it is added.
-#
-#   FuzzParse          the argv grammar
-#   FuzzArgvOf         ArgvOf's command line parses back to the value it was given
-#   FuzzSuggest        the suggestion ranking
-#   FuzzSuggestionFacts reading a token and candidates from any error tree
-#   FuzzValidateSpec   the spec loader: four codecs, schema, lint rules, source locator
-#   FuzzValidateConf   the same for the conf
-#   FuzzTemplate       shape templates: parsing, round-trips, execution errors
-#   FuzzEdit           config file splices: a successful edit reads back as intended
-#   FuzzFormat         rotini fmt: never changes a value, and formatting twice is a no-op
-FUZZ_TARGETS := .:FuzzParse .:FuzzArgvOf .:FuzzArgvOfGlob .:FuzzSuggest .:FuzzSuggestionFacts ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf ./shape:FuzzTemplate ./internal/cfgedit:FuzzEdit ./internal/codegen:FuzzFormat .:FuzzStripANSI .:FuzzDuration .:FuzzByteSize .:FuzzTagList .:FuzzInferScalar ./internal/cfgedit:FuzzBareKey ./internal/codegen:FuzzTagListWriter
-
 # The version `rotini-build` stamps into the dogfood binary: the checkout's own, from git.
 # v1.2.0 on a tagged commit; v1.2.0-3-gabc1234 between tags, which rotini reads as the last
-# release (1.2.0); a -dirty suffix with uncommitted changes. Outside a git checkout it falls
-# back to 0.0.0, which the spec and conf version guard treats as a dev build and does not judge.
+# release (1.2.0); a -dirty suffix with uncommitted changes. Outside a git checkout, or in a clone
+# with no tags (a shallow CI clone, a fork), it falls back to 0.0.0, which the spec and conf
+# version guard treats as a dev build and does not judge.
 # A real version matters: a fixed stamp passes the guard for every document up to it, which
 # hides exactly the version problems the guard exists to catch.
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0)
+VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo 0.0.0)
 
 # Where `rotini-build` writes the dogfood binary. Honors GOBIN, falling back to
 # the default $(go env GOPATH)/bin, so the target is not tied to one machine.
@@ -115,8 +102,10 @@ tools-upgrade:
 	@$(MAKE) --no-print-directory vuln-tools
 	@echo "tools upgraded; review: git diff tools.mod"
 
+# test and test-race leave out ./e2e: test-e2e runs that tier, with the toolchain and shells it
+# needs.
 test:
-	@go test -v -count=1 -coverprofile=test.out ./...
+	@go test -v -count=1 -coverprofile=test.out $$(go list ./... | grep -v '/e2e$$')
 	@go tool cover -func=test.out
 
 test-acceptance:
@@ -150,18 +139,34 @@ test-bench:
 bench-cli:
 	@go run ./internal/benchcli -root .
 
+# Every FuzzXxx target for FUZZTIME, one at a time (go test -fuzz takes a single target). The
+# targets are listed from the test files, so a new one runs without editing this file; a package
+# whose tests don't build fails the run. When the fuzz time elapses, go test can report "context
+# deadline exceeded" without a failing input; that run counts as a pass.
+FUZZTIME ?= 60s
 test-fuzz:
-	@for target in $(FUZZ_TARGETS); do \
-		pkg=$${target%%:*}; name=$${target#*:}; \
-		echo "→ $$pkg $$name"; \
-		go test -fuzz="^$$name$$" -fuzztime=60s -run=^$$ $$pkg || exit 1; \
+	@log=$$(mktemp); trap 'rm -f "$$log"' EXIT; \
+	for pkg in $$(go list ./...); do \
+		list=$$(go test -list '^Fuzz' "$$pkg") || { echo "$$list"; exit 1; }; \
+		for name in $$(echo "$$list" | grep '^Fuzz'); do \
+			echo "→ $$pkg $$name"; \
+			go test -fuzz="^$$name$$" -fuzztime=$(FUZZTIME) -run=^$$ "$$pkg" >"$$log" 2>&1; status=$$?; \
+			cat "$$log"; \
+			if [ $$status -ne 0 ]; then \
+				if grep -q '^    context deadline exceeded$$' "$$log" && ! grep -q 'Failing input written' "$$log"; then \
+					echo "→ $$name: fuzz time elapsed; deadline race in go test, no failing input"; \
+				else \
+					exit 1; \
+				fi; \
+			fi; \
+		done; \
 	done
 
 test-mutation:
 	@$(TOOL) gremlins unleash --config .gremlins.yaml
 
 test-race:
-	@go test -race -count=1 -coverprofile=test_race.out ./...
+	@go test -race -count=1 -coverprofile=test_race.out $$(go list ./... | grep -v '/e2e$$')
 	@go tool cover -func=test_race.out
 
 # rotini builds and installs the companion CLI from this working tree.

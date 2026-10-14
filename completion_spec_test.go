@@ -606,6 +606,21 @@ func (d partialDeploy) CompleteFlagValue(rtx *Context, _, _ string) []string {
 
 func (h partialHandlers) AppDeploy() Handler { return partialDeploy{got: h.got} }
 
+// BenchmarkComplete_readsInputs measures a TAB answered by a completer that reads the line
+// typed so far with PartialInputs, the costliest completion path.
+func BenchmarkComplete_readsInputs(b *testing.B) {
+	var got partialResult
+	p := NewProgram(partialDef(), partialHandlers{got: &got}).WithEnviron([]string{"PARTIAL_STORE=disk"})
+	words := []string{"--token", "t", "deploy", "--replicas", "3", "--region", ""}
+	discard := func(io.Writer, CompletionResult) error { return nil }
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := p.Complete(words, discard); err != nil || got.err != nil {
+			b.Fatal(err, got.err)
+		}
+	}
+}
+
 // failReader fails the test if anything reads it.
 type failReader struct{ t *testing.T }
 

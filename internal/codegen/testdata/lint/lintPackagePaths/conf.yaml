@@ -1,0 +1,2 @@
+# No cmd target: it defaults to internal/cmd/<root>.
+version: 0.0.0

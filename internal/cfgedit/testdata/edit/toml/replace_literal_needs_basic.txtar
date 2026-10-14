@@ -1,0 +1,6 @@
+-- in --
+a = 'x'
+-- op --
+set a "it's"
+-- out --
+a = "it's"

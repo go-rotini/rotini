@@ -12,8 +12,8 @@ import (
 )
 
 // The conformance cases for how values are spelled: argument fallbacks and acquisition, custom
-// negation, enum aliases and hidden and deprecated values, time layouts and relative times, the
-// pattern kinds, and env list separators. Each binds a small CLI of its own.
+// negation, enum aliases and hidden and deprecated values, time layouts and relative times,
+// integer bases, the pattern kinds, and env list separators. Each binds a small CLI of its own.
 
 // acShipDef is `ship <env> [service]`, both arguments falling back to the environment and the
 // configuration file, the second to a default.
@@ -206,6 +206,58 @@ func confRelativeTime(t *testing.T, _ *Context, _ InputSettings) {
 	f, e := in.App.Flags, in.App.Env
 	if !f.Since.Equal(at.Add(-2*time.Hour)) || !f.Until.Equal(at.Add(24*time.Hour)) || !e.After.Equal(at.Add(-168*time.Hour)) || !rtx.Now().Equal(at) {
 		t.Errorf("since=%v until=%v after=%v", f.Since, f.Until, e.After)
+	}
+}
+
+// FLAG-28: an integer declaring base: prefixed reads 0x, 0o and 0b literals, and a value without
+// a prefix as decimal, on argv, in a flag's environment fallback, in env and config inputs and
+// in a default; bounds compare the number. An integer without it reads decimal only.
+func confPrefixedBase(t *testing.T, _ *Context, _ InputSettings) {
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Mode uint32 `rotini:"mode"`
+				Mask int    `rotini:"mask" recon:"mask"`
+				N    int    `rotini:"n"`
+				Raw  int    `rotini:"raw"`
+			}
+			Arguments struct{}
+			Env       struct {
+				Port int `rotini:"port" recon:"port" env:"PORT" base:"prefixed"`
+			}
+			Config struct {
+				Bits int `rotini:"bits" recon:"bits" base:"prefixed"`
+			}
+		}
+	}
+	def := Definition{Name: "app", Handler: "App", Inputs: reflect.TypeFor[inputs](), Flags: []FlagDef{
+		{Name: "mode", Identifiers: []string{"--mode"}, Type: "uint32", Base: basePrefixed, Default: "0o644"},
+		{Name: "mask", Identifiers: []string{"--mask"}, Type: "int", Base: basePrefixed},
+		{Name: "n", Identifiers: []string{"--n"}, Type: "int", Base: basePrefixed, Maximum: new(255.0)},
+		{Name: "raw", Identifiers: []string{"--raw"}, Type: "int"},
+	}}
+	cfg := filepath.Join(t.TempDir(), "app.yaml")
+	if err := os.WriteFile(cfg, []byte("bits: '0b101'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := func(argv ...string) (inputs, error) {
+		var in inputs
+		rtx := NewContextFor(def, argv).WithEnviron([]string{"MASK=0xFF", "PORT=010"})
+		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
+	}
+	in, err := read("--n", "-0x1_0", "--raw", "010")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, e, c := in.App.Flags, in.App.Env, in.App.Config
+	if f.Mode != 0o644 || f.Mask != 255 || f.N != -16 || f.Raw != 10 || e.Port != 10 || c.Bits != 5 {
+		t.Errorf("bound %+v %+v %+v", f, e, c)
+	}
+	if _, err := read("--n", "0x100"); err == nil || err.Error() != "--n must be <= 255 (got 0x100)" {
+		t.Errorf("bound: %v", err)
+	}
+	if _, err := read("--raw", "0x10"); err == nil || err.Error() != `--raw: "0x10" is not a valid integer` {
+		t.Errorf("undeclared: %v", err)
 	}
 }
 

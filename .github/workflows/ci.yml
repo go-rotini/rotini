@@ -61,6 +61,14 @@ jobs:
       - name: Lint
         run: make lint
 
+      # The test matrix covers Linux, macOS and Windows; these platforms have their own
+      # build-tagged code and only need to compile.
+      - name: Cross-build
+        run: |
+          GOOS=plan9 GOARCH=amd64 go build .
+          GOOS=freebsd GOARCH=amd64 go build ./...
+          GOOS=openbsd GOARCH=amd64 go build ./...
+
   # rotini commits files it generates from its own sources: the Go types for the spec and conf
   # schemas, the published schema copies, and its own CLI's wiring. A change to a source that
   # forgot to regenerate would ship stale code with every test still passing, so this fails
@@ -221,13 +229,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      # A squash merge makes the pull request's title the commit semantic-release reads, so the
+      # title is checked too. Merge commits (main merged into the branch) are skipped.
       - name: Check conventional commits
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          TITLE: ${{ github.event.pull_request.title }}
         run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
           PATTERN='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?(!)?: .+'
           FAILED=0
-          for SHA in $(git rev-list "$BASE".."$HEAD"); do
+          if ! printf '%s\n' "$TITLE" | grep -qE "$PATTERN"; then
+            echo "BAD pull request title: $TITLE"
+            FAILED=1
+          fi
+          for SHA in $(git rev-list --no-merges "$BASE".."$HEAD"); do
             MSG=$(git log --format=%s -n1 "$SHA")
             if ! echo "$MSG" | grep -qE "$PATTERN"; then
               echo "BAD: $MSG"
@@ -235,6 +251,6 @@ jobs:
             fi
           done
           if [ "$FAILED" -eq 1 ]; then
-            echo "::error::Some commits do not follow Conventional Commits (https://www.conventionalcommits.org)"
+            echo "::error::The pull request title or some commits do not follow Conventional Commits (https://www.conventionalcommits.org)"
             exit 1
           fi

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-rotini/jsonc"
 	"github.com/go-rotini/recon"
@@ -22,10 +23,17 @@ func JSON() Feature {
 			name:  "json",
 			codec: func() recon.Codec { return recon.JSON },
 			decodeAny: func(data []byte) (any, error) {
+				if err := invalidUTF8("json", data); err != nil {
+					return nil, err
+				}
 				if !json.Valid(data) {
 					var probe any
 					err := fmt.Errorf("decode json: %w", json.Unmarshal(data, &probe))
 					return nil, jsonPositionError(err, data)
+				}
+				// A key given twice is an error, as in the other formats, not a silent last-wins.
+				if e := jsonDuplicateKey(data); e != nil {
+					return nil, duplicateKeyError(fmt.Errorf("decode json: %w", e), e.Key, e.Pos.Line, e.Pos.Column)
 				}
 				return json.RawMessage(bytes.TrimSpace(data)), nil
 			},
@@ -41,9 +49,15 @@ func YAML() Feature {
 			name:  "yaml",
 			codec: func() recon.Codec { return recon.YAML },
 			decodeAny: func(data []byte) (any, error) {
+				if err := invalidUTF8("yaml", data); err != nil {
+					return nil, err
+				}
 				var v any
-				if err := yaml.Unmarshal(data, &v); err != nil {
+				if err := yaml.UnmarshalWithOptions(data, &v, yaml.WithDisallowDuplicateKey()); err != nil {
 					wrapped := fmt.Errorf("decode yaml: %w", err)
+					if e, ok := errors.AsType[*yaml.DuplicateKeyError](err); ok {
+						return nil, duplicateKeyError(wrapped, e.Key, e.Pos.Line, e.Pos.Column)
+					}
 					if e, ok := errors.AsType[*yaml.SyntaxError](err); ok {
 						return nil, &docError{err: wrapped, line: e.Pos.Line, col: e.Pos.Column, msg: e.Message}
 					}
@@ -70,9 +84,15 @@ func JSONC() Feature {
 			name:  "jsonc",
 			codec: func() recon.Codec { return recon.JSONC },
 			decodeAny: func(data []byte) (any, error) {
+				if err := invalidUTF8("jsonc", data); err != nil {
+					return nil, err
+				}
 				var v any
 				if err := jsonc.Unmarshal(data, &v); err != nil {
 					wrapped := fmt.Errorf("decode jsonc: %w", err)
+					if e, ok := errors.AsType[*jsonc.DuplicateKeyError](err); ok {
+						return nil, duplicateKeyError(wrapped, e.Key, e.Pos.Line, e.Pos.Column)
+					}
 					if e, ok := errors.AsType[*jsonc.SyntaxError](err); ok {
 						return nil, &docError{err: wrapped, line: e.Pos.Line, col: e.Pos.Column, msg: e.Message}
 					}
@@ -160,7 +180,7 @@ func (s *featureSet) codecFor(format, path string) (*codecEntry, error) {
 // newRegistry builds a recon registry whose codec set is the program's wired codecs; every
 // registry rotini builds goes through it.
 func newRegistry(fs *featureSet, opts ...recon.Option) (*recon.Registry, error) {
-	return recon.NewWithCodecs(fs.reconCodecs(), opts...) //nolint:wrapcheck // reported by the caller
+	return recon.NewWithCodecsWithoutWatch(fs.reconCodecs(), opts...) //nolint:wrapcheck // reported by the caller
 }
 
 // newFileSource builds a recon file source for path that decodes with c, or, when c is nil,
@@ -219,20 +239,41 @@ func (e *docError) Message() string           { return e.msg }
 // jsonPositionError gives an encoding/json syntax or type error in err the line and column of
 // its byte offset into data; any other error is returned as it is.
 func jsonPositionError(err error, data []byte) error {
-	data = stripBOM(data)
-	if e, ok := errors.AsType[*json.SyntaxError](err); ok {
-		offset := e.Offset - 1
-		if e.Error() == "unexpected end of JSON input" {
-			offset = e.Offset // at the end, Offset already marks where more was expected
+	msg, ok := jsonMessage(err)
+	if !ok {
+		return err
+	}
+	line, col, _ := recon.ParsePosition(err, data)
+	return &docError{err: err, line: line, col: col, msg: msg}
+}
+
+// errInvalidUTF8 is the reason a document that is not valid UTF-8 does not decode.
+var errInvalidUTF8 = errors.New("invalid UTF-8 in input")
+
+// invalidUTF8 reports the first byte of a format document that is not valid UTF-8, with its
+// line and column, or returns nil when data is valid UTF-8.
+func invalidUTF8(format string, data []byte) error {
+	if utf8.Valid(data) {
+		return nil
+	}
+	off := 0
+	for off < len(data) {
+		r, size := utf8.DecodeRune(data[off:])
+		if r == utf8.RuneError && size <= 1 {
+			break
 		}
-		line, col := offsetPosition(data, offset)
-		return &docError{err: err, line: line, col: col, msg: e.Error()}
+		off += size
 	}
-	if e, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
-		line, col := offsetPosition(data, e.Offset)
-		return &docError{err: err, line: line, col: col, msg: e.Error()}
-	}
-	return err
+	head := data[:off]
+	line := bytes.Count(head, []byte("\n")) + 1
+	col := off - bytes.LastIndexByte(head, '\n')
+	err := fmt.Errorf("decode %s: line %d, column %d: %w", format, line, col, errInvalidUTF8)
+	return &docError{err: err, line: line, col: col, msg: errInvalidUTF8.Error()}
+}
+
+// duplicateKeyError reports a key given twice in a document, at its second occurrence.
+func duplicateKeyError(err error, key string, line, col int) error {
+	return &docError{err: err, line: line, col: col, msg: fmt.Sprintf("duplicate key %q", key)}
 }
 
 // jsonMessage reads an encoding/json error's own text, as [parseMessage]'s more.
@@ -244,14 +285,4 @@ func jsonMessage(err error) (string, bool) {
 		return e.Error(), true
 	}
 	return "", false
-}
-
-// offsetPosition converts a byte offset into data to a 1-indexed line and column. Only "\n"
-// ends a line, so CRLF input counts the same.
-func offsetPosition(data []byte, offset int64) (line, col int) {
-	offset = min(max(offset, 0), int64(len(data)))
-	head := data[:offset]
-	line = bytes.Count(head, []byte("\n")) + 1
-	col = int(offset) - (bytes.LastIndexByte(head, '\n') + 1) + 1
-	return line, col
 }

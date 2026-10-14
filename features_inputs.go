@@ -20,7 +20,7 @@ func Stdin(formats ...string) Feature {
 	formats = slices.Clone(formats)
 	return Feature{name: stdinFeatureName(formats), apply: func(s *featureSet) {
 		if s.stdin == nil {
-			s.stdin = &stdinHooks{fill: (*InputReader).bindStdin}
+			s.stdin = &wiredStdinHooks
 		}
 		for _, f := range formats {
 			if !slices.Contains(s.stdinFormats, f) {
@@ -33,7 +33,7 @@ func Stdin(formats ...string) Feature {
 // Env wires env inputs: the Env sub-structs of an inputs struct.
 func Env() Feature {
 	return Feature{name: "env", apply: func(s *featureSet) {
-		s.env = &envHooks{registry: envRegistry}
+		s.env = &wiredEnvHooks
 		s.wireChannels()
 	}}
 }
@@ -43,11 +43,7 @@ func Env() Feature {
 // back. Each file's format also needs its codec.
 func ConfigFiles() Feature {
 	return Feature{name: "config-files", apply: func(s *featureSet) {
-		s.config = &configHooks{
-			regs:        (*InputReader).configRegs,
-			fileSources: (*InputReader).fileSources,
-			locate:      locateConfigFile,
-		}
+		s.config = &wiredConfigHooks
 		s.wireChannels()
 	}}
 }
@@ -56,7 +52,7 @@ func ConfigFiles() Feature {
 // config inputs share.
 func (s *featureSet) wireChannels() {
 	if s.channels == nil {
-		s.channels = &channelHooks{fill: fillChannels, validate: validateChannels}
+		s.channels = &wiredChannelHooks
 	}
 }
 
@@ -77,14 +73,14 @@ func Profiles() Feature {
 // variable_file inputs.
 func EnvFiles() Feature {
 	return Feature{name: "env-files", apply: func(s *featureSet) {
-		s.envFiles = &envFileHooks{view: (*InputReader).inputView}
+		s.envFiles = &wiredEnvFileHooks
 	}}
 }
 
 // Fallbacks wires flag and argument fallbacks to the environment and configuration files.
 func Fallbacks() Feature {
 	return Feature{name: "fallbacks", apply: func(s *featureSet) {
-		s.fallbacks = &fallbackHooks{reconcile: (*InputReader).reconcileFlags, flagEnv: flagEnvSource}
+		s.fallbacks = &wiredFallbackHooks
 	}}
 }
 
@@ -111,7 +107,7 @@ func PathExpansion() Feature {
 // [JSON], [YAML] and [Schemas].
 func ObjectFlags() Feature {
 	return Feature{name: "object-flags", apply: func(s *featureSet) {
-		s.objects = &objectHooks{bind: bindObjectFlag}
+		s.objects = &wiredObjectHooks
 	}}
 }
 
@@ -181,3 +177,14 @@ func firstTagged(v reflect.Value, structs []string, match func(reflect.StructTag
 	}
 	return "", false
 }
+
+// The hooks each feature wires. They never change, so every program shares one value.
+var (
+	wiredConfigHooks   = configHooks{regs: (*InputReader).configRegs, fileSources: (*InputReader).fileSources, locate: locateConfigFile}
+	wiredStdinHooks    = stdinHooks{fill: (*InputReader).bindStdin}
+	wiredEnvHooks      = envHooks{registry: envRegistry}
+	wiredChannelHooks  = channelHooks{fill: fillChannels, validate: validateChannels}
+	wiredEnvFileHooks  = envFileHooks{view: (*InputReader).inputView}
+	wiredFallbackHooks = fallbackHooks{reconcile: (*InputReader).reconcileFlags, flagEnv: flagEnvSource}
+	wiredObjectHooks   = objectHooks{bind: bindObjectFlag}
+)

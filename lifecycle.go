@@ -17,8 +17,9 @@ import (
 //	teardown  leaf → root              CascadingPostRun    —                       its CascadingPreRun began
 //
 // Teardown unwinds in reverse for exactly the steps whose forward hook began, and runs to
-// completion: a panic or HaltWithCode inside teardown neither aborts the rest nor displaces the
-// first failure. Only [Context.Exit], or a panic under WithTeardownOnPanic(false), skips what
+// completion: a panic or [Context.HaltWithCode] inside teardown neither aborts the rest nor
+// displaces the first failure. Only [Context.Exit], or a panic under
+// [Program.WithTeardownOnPanic](false), skips what
 // remains. Recovered panics reach the reporter after all teardown. A custom lifecycle changes
 // only the plan; halting, unwind, reporting and exit-code semantics are fixed.
 
@@ -51,18 +52,67 @@ func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep {
 	for i, h := range handlers {
 		steps = append(steps, LifecycleStep{
 			Name: "cascading:" + chain[i].Name,
-			Do:   AsCommand(i, h.CascadingPreRun),
-			Undo: AsCommand(i, h.CascadingPostRun),
+			Do:   hookOf(i, h, hookCascadingPreRun),
+			Undo: hookOf(i, h, hookCascadingPostRun),
 		})
 	}
 	leafIdx := len(handlers) - 1
 	leaf := handlers[leafIdx]
 	leafName := chain[len(chain)-1].Name
 	steps = append(steps,
-		LifecycleStep{Name: "prerun:" + leafName, Do: AsCommand(leafIdx, leaf.PreRun), Undo: AsCommand(leafIdx, leaf.PostRun)},
-		LifecycleStep{Name: "run:" + leafName, Do: AsCommand(leafIdx, leaf.Run)},
+		LifecycleStep{Name: "prerun:" + leafName, Do: hookOf(leafIdx, leaf, hookPreRun), Undo: hookOf(leafIdx, leaf, hookPostRun)},
+		LifecycleStep{Name: "run:" + leafName, Do: hookOf(leafIdx, leaf, hookRun)},
 	)
 	return steps
+}
+
+// handlerHook names one of a [Handler]'s hooks.
+type handlerHook uint8
+
+const (
+	hookCascadingPreRun handlerHook = iota
+	hookPreRun
+	hookRun
+	hookPostRun
+	hookCascadingPostRun
+)
+
+// hookOf is AsCommand(i, h.<which>) as one closure: the method value AsCommand would wrap is
+// a second allocation per hook.
+func hookOf(i int, h Handler, which handlerHook) func(context.Context, *Context) {
+	return func(ctx context.Context, rtx *Context) { callHook(ctx, rtx, i, h, which) }
+}
+
+// callHook runs hook which of h as the hook of chain frame i, as [AsCommand] labels it.
+func callHook(ctx context.Context, rtx *Context, i int, h Handler, which handlerHook) {
+	prev := rtx.setFrame(i)
+	defer rtx.setFrame(prev)
+	switch which {
+	case hookCascadingPreRun:
+		h.CascadingPreRun(ctx, rtx)
+	case hookPreRun:
+		h.PreRun(ctx, rtx)
+	case hookRun:
+		h.Run(ctx, rtx)
+	case hookPostRun:
+		h.PostRun(ctx, rtx)
+	case hookCascadingPostRun:
+		h.CascadingPostRun(ctx, rtx)
+	}
+}
+
+// defaultStep is step k of [DefaultLifecycle]'s plan for handlers, without building the plan:
+// the frame and handler its hooks belong to, its forward hook, and its teardown, if any.
+func defaultStep(handlers []Handler, k int) (frame int, h Handler, do, undo handlerHook, hasUndo bool) {
+	leaf := len(handlers) - 1
+	switch {
+	case k <= leaf:
+		return k, handlers[k], hookCascadingPreRun, hookCascadingPostRun, true
+	case k == leaf+1:
+		return leaf, handlers[leaf], hookPreRun, hookPostRun, true
+	default:
+		return leaf, handlers[leaf], hookRun, 0, false
+	}
 }
 
 // AsCommand labels a hook with the chain index of the command it belongs to, so that
@@ -80,4 +130,13 @@ func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context
 		defer rtx.setFrame(prev)
 		hook(ctx, rtx)
 	}
+}
+
+// hasUndo reports whether step k has a teardown: of the custom plan steps, or of the default
+// plan for handlers.
+func hasUndo(custom bool, steps []LifecycleStep, handlers []Handler, k int) bool {
+	if custom {
+		return steps[k].Undo != nil
+	}
+	return k <= len(handlers) // every defaultStep but the last, the leaf's Run
 }

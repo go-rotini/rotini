@@ -3,6 +3,7 @@ package cfgedit
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -44,9 +45,10 @@ func yamlScalar(v any, flow bool) string {
 	return s
 }
 
-// yamlPlainOK reports whether s can be written unquoted and read back as the same string.
+// yamlPlainOK reports whether s can be written unquoted and read back as the same string, by
+// this package's yaml reader and by a YAML 1.1 reader.
 func yamlPlainOK(s string, flow bool) bool {
-	if s == "" || strings.TrimSpace(s) != s || strings.ContainsAny(s, "\"'") || strings.ContainsFunc(s, unicode.IsControl) {
+	if s == "" || yaml11NonString().MatchString(s) || strings.TrimSpace(s) != s || strings.ContainsAny(s, "\"'") || strings.ContainsFunc(s, yamlEscapeOnly) {
 		return false
 	}
 	doc := "k: " + s
@@ -63,7 +65,7 @@ func yamlPlainOK(s string, flow bool) bool {
 
 // yamlKey renders a mapping key, quoting it when it wouldn't read back as itself.
 func yamlKey(k string) string {
-	if k != "" && strings.TrimSpace(k) == k && !strings.ContainsAny(k, "\"'") && !strings.ContainsFunc(k, unicode.IsControl) {
+	if k != "" && strings.TrimSpace(k) == k && !strings.ContainsAny(k, "\"'") && !strings.ContainsFunc(k, yamlEscapeOnly) {
 		var got map[string]any
 		if yaml.Unmarshal([]byte(k+": 1"), &got) == nil && len(got) == 1 {
 			if _, ok := got[k]; ok {
@@ -170,4 +172,30 @@ func scalarText(v any) (string, error) {
 		return s, nil
 	}
 	return "", fmt.Errorf("a dotenv value must be a scalar, not %T", v)
+}
+
+// yamlEscapeOnly reports whether r must be written as an escape in a double-quoted YAML
+// string: a control character, or one of the line breaks U+2028 and U+2029, which editing
+// refuses to find in a file as written.
+func yamlEscapeOnly(r rune) bool {
+	return unicode.IsControl(r) || r == ' ' || r == ' '
+}
+
+// yaml11NonStringPattern matches the plain scalars a YAML 1.1 reader resolves to something
+// other than a string: booleans, nulls, integers (with _ separators, base prefixes and base 60),
+// floats and timestamps.
+const yaml11NonStringPattern = `^(?:` +
+	`y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF` +
+	`|~|null|Null|NULL` +
+	`|[-+]?0b[01_]+|[-+]?0[0-7_]+|[-+]?(?:0|[1-9][0-9_]*)|[-+]?0x[0-9a-fA-F_]+|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+` +
+	`|[-+]?(?:[0-9][0-9_]*)?\.[0-9.]*(?:[eE][-+][0-9]+)?|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN)` +
+	`|[0-9]{4}-[0-9]{2}-[0-9]{2}` +
+	`|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*Z|[ \t]*[-+][0-9]{1,2}(?::[0-9]{2})?)?` +
+	`)$`
+
+var yaml11NonStringOnce lazy[*regexp.Regexp]
+
+// yaml11NonString is [yaml11NonStringPattern], compiled on first use.
+func yaml11NonString() *regexp.Regexp {
+	return yaml11NonStringOnce.value(func() *regexp.Regexp { return regexp.MustCompile(yaml11NonStringPattern) })
 }

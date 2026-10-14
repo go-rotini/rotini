@@ -92,7 +92,8 @@ func TestUsageFuncDecl(t *testing.T) {
 	src := usageFuncDecl(runtimeLaneProgram(t, runtimeLaneSpec))
 	for _, want := range []string{
 		"case \"\":\n\t\treturn \"bb tool [flags] <command>\", nil",
-		"case \"ls\", \"dir\":\n\t\treturn \"bb tool ls [path]\", nil",
+		"switch rotiniCanonicalPath(path) {",
+		"case \"ls\":\n\t\treturn \"bb tool ls [path]\", nil",
 		"case \"admin purge\":\n\t\treturn \"bb tool admin purge\", nil",
 		`return "", fmt.Errorf("no usage for command %q", strings.Join(path, " "))`,
 	} {

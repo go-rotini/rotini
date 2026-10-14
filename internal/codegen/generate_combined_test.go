@@ -53,7 +53,7 @@ command:
 // the command line and Help do.
 func TestUsageFuncDecl_hiddenAliases(t *testing.T) {
 	t.Parallel()
-	src := usageFuncDecl(runtimeLaneProgram(t, `version: 0.0.0
+	gp := runtimeLaneProgram(t, `version: 0.0.0
 command:
   name: acme
   summary: s
@@ -62,9 +62,13 @@ command:
       summary: remove a thing
       aliases: [rm]
       hidden_aliases: [del]
-`))
-	if want := "case \"remove\", \"rm\", \"del\":\n\t\treturn \"acme remove\", nil"; !strings.Contains(src, want) {
+`)
+	src := usageFuncDecl(gp)
+	if want := "case \"remove\":\n\t\treturn \"acme remove\", nil"; !strings.Contains(src, want) {
 		t.Errorf("Usage function lacks %q\n%s", want, src)
+	}
+	if want := `"": {"del": "remove", "rm": "remove"},`; !strings.Contains(canonicalPathDecl(gp.tree), want) {
+		t.Errorf("alias table lacks %s\n%s", want, canonicalPathDecl(gp.tree))
 	}
 }
 

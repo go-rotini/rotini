@@ -3,6 +3,7 @@ package codegen
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
 	"strings"
 
 	"github.com/go-rotini/yaml"
@@ -145,15 +146,23 @@ func yamlString(s string, indent int) string {
 	return yamlJSONText(s)
 }
 
-// plainReadsBack reports whether s, written plain as a mapping value, reads back as the
-// string s (not a number, bool, null, or a different string).
+// plainReadsBack reports whether s, written plain as a mapping value, is valid YAML that
+// reads back as the string s (not a number, bool, null, or a different string).
 func plainReadsBack(s string) bool {
 	if s == "" || s != strings.TrimSpace(s) {
+		return false
+	}
+	// YAML forbids a plain scalar starting with an indicator, though rotini's own parser
+	// reads some of them back.
+	if strings.ContainsRune(",[]{}#&*!|>'\"%@`", rune(s[0])) {
 		return false
 	}
 	switch strings.ToLower(s) {
 	case "yes", "no", "on", "off", "y", "n":
 		return false // YAML 1.1 readers take these as booleans
+	}
+	if yaml11Typed.MatchString(s) {
+		return false // YAML 1.1 readers take these as numbers or timestamps
 	}
 	var got map[string]any
 	if err := yaml.Unmarshal([]byte("k: "+s+"\n"), &got); err != nil {
@@ -162,6 +171,19 @@ func plainReadsBack(s string) bool {
 	str, ok := got["k"].(string)
 	return ok && str == s
 }
+
+// yaml11Typed matches the plain scalars YAML 1.1 readers resolve to an int (including
+// base 2, 8 and 60 and `_` separators), a float (including base 60, .inf and .nan) or a
+// timestamp, which YAML 1.2 reads as strings.
+var yaml11Typed = regexp.MustCompile(`^(?:` +
+	`[-+]?0b[01_]+` +
+	`|[-+]?0x[0-9a-fA-F_]+` +
+	`|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])*` +
+	`|[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*(?:[eE][-+]?[0-9]+)?` +
+	`|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*` +
+	`|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN)` +
+	`|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)?` +
+	`)$`)
 
 // literalBlock renders multi-line s as a "|-" block at indent, or "" when a block can't
 // carry it exactly.

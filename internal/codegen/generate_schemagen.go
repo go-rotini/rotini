@@ -28,6 +28,7 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 	if len(defs) == 0 {
 		return "", nil
 	}
+	unions := collectOutputUnions(gp)
 	doc, err := json.Marshal(map[string]any{
 		"$schema":     "http://json-schema.org/draft-07/schema#",
 		"type":        "object",
@@ -46,7 +47,72 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 	for name := range defs {
 		fixed[name] = true
 	}
-	return initialismIdents(stripGenerated(string(src), outputRootSentinel), fixed)
+	types, err := initialismIdents(stripGenerated(string(src), outputRootSentinel), fixed)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString(types)
+	for _, u := range unions {
+		b.WriteString("\n\n")
+		b.WriteString(u.decl())
+	}
+	return b.String(), nil
+}
+
+// outputUnion is the <Prefix>Output interface of a stream whose items come in several kinds,
+// and the types of its kinds.
+type outputUnion struct {
+	name    string   // <Prefix>Output
+	doc     string   // the output's description, or "" for the default doc comment
+	tag     string   // the property naming each item's kind
+	members []string // each kind's type, in declared order
+}
+
+// decl renders the interface and each kind's marker method.
+func (u outputUnion) decl() string {
+	var b strings.Builder
+	if u.doc != "" {
+		for line := range strings.SplitSeq(u.doc, "\n") {
+			fmt.Fprintf(&b, "// %s\n", line)
+		}
+	} else {
+		fmt.Fprintf(&b, "// %s is one item of the stream: %s, told apart by %q.\n", u.name, orList(u.members), u.tag)
+	}
+	marker := "is" + u.name
+	fmt.Fprintf(&b, "type %s interface{ %s() }", u.name, marker)
+	for _, m := range u.members {
+		fmt.Fprintf(&b, "\n\nfunc (%s) %s() {}", m, marker)
+	}
+	return b.String()
+}
+
+// orList renders names as "A", "A or B", "A, B or C".
+func orList(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
+}
+
+// collectOutputUnions lists, root first then the tree in pre-order, the interface each own
+// command whose output is oneOf generates.
+func collectOutputUnions(gp *program) []outputUnion {
+	var out []outputUnion
+	add := func(prefix string, o *Schema) {
+		tag, kinds := outputKinds(o, gp.schemas)
+		if kinds == nil {
+			return
+		}
+		u := outputUnion{name: prefix + "Output", doc: o.Description, tag: tag}
+		for _, k := range kinds {
+			u.members = append(u.members, k.typeName(u.name))
+		}
+		out = append(out, u)
+	}
+	add(gp.rootPascal, gp.rootOutput)
+	eachOwnNode(gp.tree, func(n *rnode) { add(n.prefix, n.output) })
+	return out
 }
 
 // initialismIdents applies initialism casing to generated field and nested type names
@@ -129,6 +195,9 @@ func outputTypeNames(gp *program) []string {
 	for name := range defs {
 		out = append(out, name)
 	}
+	for _, u := range collectOutputUnions(gp) {
+		out = append(out, u.name)
+	}
 	sort.Strings(out)
 	return out
 }
@@ -155,9 +224,20 @@ func collectOutputDefs(gp *program) map[string]any {
 		defs[name] = jsonSchemaTypes(schemaToDoc(sch))
 	}
 	add := func(prefix string, out *Schema) {
-		if out != nil {
-			defs[prefix+"Output"] = jsonSchemaTypes(schemaToDoc(*out))
+		if out == nil {
+			return
 		}
+		// An output of several kinds is an interface (see collectOutputUnions); only its
+		// inline kinds are structs to generate.
+		if _, kinds := outputKinds(out, gp.schemas); kinds != nil {
+			for _, k := range kinds {
+				if k.ref == "" {
+					defs[k.typeName(prefix+"Output")] = jsonSchemaTypes(schemaToDoc(k.decl))
+				}
+			}
+			return
+		}
+		defs[prefix+"Output"] = jsonSchemaTypes(schemaToDoc(*out))
 	}
 	// Only the stdin schema's BaseSchema is type structure; required, default, etc. are
 	// input metadata.

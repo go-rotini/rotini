@@ -1,0 +1,12 @@
+-- in --
+items:
+- a
+- b
+other: 1
+-- op --
+set items ["c", "d"]
+-- out --
+items:
+- c
+- d
+other: 1

@@ -37,6 +37,7 @@ var schemaKeyChannels = map[string][]string{
 	"glob":           {"argument"},
 	"expand":         {"flag", "argument", "env", "config"},
 	"relative":       {"flag", "argument", "env", "config"},
+	"base":           {"flag", "argument", "env", "config"},
 }
 
 // channelPlurals names each channel's entries in a hint.

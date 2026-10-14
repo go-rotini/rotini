@@ -248,14 +248,15 @@ func (p *program) carapaceValues(s *InputSchema) []string {
 	}
 	var out []string
 	for _, v := range enumValues(enumOrItems(s)) {
-		if v.Hidden || v.Deprecated != "" {
-			continue
+		if v.Hidden || v.Deprecated != "" || !carapaceValueFits(v.Value) {
+			continue // see lintCarapaceValues
 		}
-		if v.Summary != "" {
-			out = append(out, v.Value+"\t"+v.Summary)
-		} else {
-			out = append(out, v.Value)
+		entry := carapaceText(v.Value)
+		// A tab would start a third field, which carapace reads as a style.
+		if sum := strings.ReplaceAll(v.Summary, "\t", " "); sum != "" && !strings.Contains(sum, carapaceModifierSep) {
+			entry += "\t" + carapaceText(sum)
 		}
+		out = append(out, entry)
 	}
 	if c := s.Complete; c != nil {
 		switch c.Kind {
@@ -286,8 +287,8 @@ func (p *program) carapaceValues(s *InputSchema) []string {
 				}
 			}
 		}
-		if c.Message != "" && len(out) == 0 {
-			out = append(out, "$message("+c.Message+")")
+		if c.Message != "" && len(out) == 0 && !strings.Contains(c.Message, carapaceModifierSep) {
+			out = append(out, "$message("+carapaceText(c.Message)+")")
 		}
 	}
 	return out
@@ -342,3 +343,16 @@ func writeYAMLMap(b *strings.Builder, m yaml.MapSlice, indent string) {
 		}
 	}
 }
+
+// carapaceModifierSep separates a carapace spec value from the modifiers applied to it.
+const carapaceModifierSep = " ||| "
+
+// carapaceValueFits reports whether the carapace spec can carry s as a plain value: it reads a
+// value starting with "$" as a macro, and splits one at " ||| " into modifiers.
+func carapaceValueFits(s string) bool {
+	return !strings.HasPrefix(s, "$") && !strings.Contains(s, carapaceModifierSep)
+}
+
+// carapaceText escapes s for the carapace spec, which substitutes ${NAME} in every value from
+// the environment; "$$" stands for "$".
+func carapaceText(s string) string { return strings.ReplaceAll(s, "$", "$$") }

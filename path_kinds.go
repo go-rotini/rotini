@@ -30,11 +30,11 @@ func checkStreamPath(label, typ, value, dir string) error {
 	}
 	full := joinDir(dir, value)
 	if info, err := os.Stat(full); err == nil && info.IsDir() {
-		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %q is a directory", label, value), Flag: label}
+		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s is a directory", label, quotePath(value)), Flag: label}
 	}
 	if info, err := os.Stat(filepath.Dir(full)); pathMissing(err) || (err == nil && !info.IsDir()) {
 		parent := filepath.Dir(value) + string(filepath.Separator)
-		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: no such directory: %q", label, parent), Flag: label}
+		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: no such directory: %s", label, quotePath(parent)), Flag: label}
 	}
 	return nil
 }
@@ -108,7 +108,7 @@ func stdinDashOnce(chain []Command, store *parsedInputs) error {
 			if constraintElemType(fd.Type) != typeInputFile || !store.setOnArgv(i, fd.Name) {
 				continue
 			}
-			if err := seen(si.label(fd), si.label(fd), si.flags[fd.Name]); err != nil {
+			if err := seen(si.label(&fd), si.label(&fd), si.flags[fd.Name]); err != nil {
 				return err
 			}
 		}

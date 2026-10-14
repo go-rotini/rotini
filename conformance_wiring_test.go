@@ -56,7 +56,7 @@ func wiringConformanceCases() []wiringCase {
 	multicall.Multicall = &MulticallDef{}
 	multicall.Commands = []CommandDef{{Name: "ls", Handler: "App"}}
 	expand := root()
-	expand.Flags = []FlagDef{{Name: "config", Identifiers: []string{"--config"}, Type: "string"}}
+	expand.Flags = []FlagDef{{Name: "config", Identifiers: []string{"--config"}, Type: "string", Default: "~rotini-no-such-user/app.yaml"}}
 	return []wiringCase{
 		// WIRE-01: a declared plugin is dispatched.
 		{id: "WIRE-01", feature: "plugins", ctor: "Plugins()", def: plugins, argv: []string{"ctx"}, fault: true},
@@ -66,14 +66,13 @@ func wiringConformanceCases() []wiringCase {
 		{id: "WIRE-03", feature: "chdir", ctor: "Chdir()", def: chdir, argv: []string{"-C", "."}, fault: true},
 		// WIRE-04: the program is multicall.
 		{id: "WIRE-04", feature: "multicall", ctor: "Multicall()", def: multicall, argv0: "ls", fault: true},
-		// WIRE-05: a configuration path chosen at run time names another user's home.
+		// WIRE-05: a config_source flag's declared default names another user's home.
 		{
 			id: "WIRE-05", feature: "path-expansion", ctor: "PathExpansion()", def: expand,
 			meta: InputSettings{ConfigFiles: []ConfigFile{{
 				Name: "app", Format: "yaml", PathFrom: &PathFromDef{Flag: "config"},
 			}}},
 			inputs: typesOf(wpInputs{}),
-			argv:   []string{"--config", "~rotini-no-such-user/app.yaml"},
 		},
 	}
 }

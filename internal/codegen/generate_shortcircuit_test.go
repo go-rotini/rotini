@@ -29,7 +29,7 @@ command:
       short_circuit: true
       schema: { type: bool }
     - name: version
-      identifiers: [-v, --version]
+      identifiers: [-v, --version]` + casc + `
       short_circuit: true
       schema: { type: bool }
   commands:

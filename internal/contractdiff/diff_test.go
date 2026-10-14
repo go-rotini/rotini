@@ -458,11 +458,11 @@ Accepted:
 	}
 }
 
-// Every rule in the catalog has a fixture pair, here or in internal/codegen's spec-built
-// tables.
+// Every rule in the catalog has a fixture pair, in this package's tests or in
+// internal/codegen's spec-built tables.
 func TestRules_everyRuleTested(t *testing.T) {
 	var src []byte
-	for _, path := range []string{"diff_test.go", "../codegen/diff_test.go", "../codegen/diff_agent_test.go"} {
+	for _, path := range []string{"diff_test.go", "kinds_test.go", "../codegen/diff_test.go", "../codegen/diff_agent_test.go"} {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -504,4 +504,306 @@ func TestDiff_argumentFrom(t *testing.T) {
 			want: []string{"possibly_breaking INPUT_FROM_ADDED app <token>"},
 		},
 	})
+}
+
+// cmds is a contract with the given commands.
+func cmds(commands ...string) []byte { return contract(strings.Join(commands, ", ")) }
+
+// cmdJSON is a command at path with the given fields.
+func cmdJSON(path, fields string) string {
+	name, p := "app", "[]"
+	if path != "" {
+		name += " " + path
+		p = `["` + strings.ReplaceAll(path, " ", `", "`) + `"]`
+	}
+	if fields != "" {
+		fields = ", " + fields
+	}
+	return `{"name": "` + name + `", "path": ` + p + fields + `}`
+}
+
+func TestDiff_flagMovesBetweenOwnAndInherited(t *testing.T) {
+	intFlag := `{"name": "limit", "identifiers": ["--limit"], "kind": "scalar", "type": "int", "schema": {"type": "integer"}`
+	enumFlag := `{"name": "limit", "identifiers": ["--limit"], "kind": "scalar", "type": "string", "schema": {"type": "string", "enum": ["a", "b"]}`
+	runRaw(t, []rawCase{
+		{
+			name: "own flag becomes an ancestor's cascading flag",
+			old:  cmds(cmdJSON("", ""), cmdJSON("list", `"flags": [`+intFlag+`}]`)),
+			new: cmds(cmdJSON("", `"flags": [`+enumFlag+`, "cascading": true}]`),
+				cmdJSON("list", `"flags": [`+enumFlag+`, "inherited": true}]`)),
+			want: []string{"safe FLAG_ADDED app --limit", "breaking INPUT_TYPE_CHANGED app list --limit", "breaking INPUT_ENUM_ADDED app list --limit"},
+		},
+		{
+			name: "own flag shadows an inherited one",
+			old: cmds(cmdJSON("", `"flags": [`+intFlag+`, "cascading": true}]`),
+				cmdJSON("list", `"flags": [`+intFlag+`, "inherited": true}]`)),
+			new: cmds(cmdJSON("", `"flags": [`+intFlag+`, "cascading": true}]`),
+				cmdJSON("list", `"flags": [`+enumFlag+`}, `+intFlag+`, "inherited": true}]`)),
+			want: []string{"breaking INPUT_TYPE_CHANGED app list --limit", "breaking INPUT_ENUM_ADDED app list --limit"},
+		},
+		{
+			name: "unchanged inherited flag",
+			old: cmds(cmdJSON("", `"flags": [`+intFlag+`, "cascading": true}]`),
+				cmdJSON("list", `"flags": [`+intFlag+`, "inherited": true}]`)),
+			new: cmds(cmdJSON("", `"flags": [`+intFlag+`, "cascading": true}]`),
+				cmdJSON("list", `"flags": [`+intFlag+`, "inherited": true}]`)),
+		},
+		{
+			name: "hidden required flag added",
+			old:  contract(root("")),
+			new:  contract(root(`"flags": [{"name": "token", "identifiers": ["--token"], "kind": "scalar", "hidden": true, "required": true, "schema": {"type": "string"}}]`)),
+			want: []string{"breaking FLAG_REQUIRED_ADDED app --token"},
+		},
+	})
+}
+
+func TestDiff_wordTakenFromArguments(t *testing.T) {
+	args := `"arguments": [{"name": "target", "kind": "scalar", "schema": {"type": "string"}}]`
+	runRaw(t, []rawCase{
+		{
+			name: "sub-command added under a command with arguments",
+			old:  cmds(cmdJSON("", args)),
+			new:  cmds(cmdJSON("", args), cmdJSON("build", "")),
+			want: []string{"possibly_breaking COMMAND_ADDED app build"},
+		},
+		{
+			name: "hidden sub-command added under a command with arguments",
+			old:  cmds(cmdJSON("", args)),
+			new:  cmds(cmdJSON("", args), cmdJSON("build", `"hidden": true`)),
+			want: []string{"possibly_breaking COMMAND_ADDED app build"},
+		},
+		{
+			name: "alias added under a command with arguments",
+			old:  cmds(cmdJSON("", args), cmdJSON("build", "")),
+			new:  cmds(cmdJSON("", args), cmdJSON("build", `"aliases": ["b"]`)),
+			want: []string{"possibly_breaking ALIAS_ADDED app build alias b"},
+		},
+		{
+			name: "rename keeping the old name as an alias under a command with arguments",
+			old:  cmds(cmdJSON("", args), cmdJSON("deploy", "")),
+			new:  cmds(cmdJSON("", args), cmdJSON("ship", `"aliases": ["deploy"]`)),
+			want: []string{"possibly_breaking COMMAND_RENAMED_ALIAS_KEPT app deploy"},
+		},
+		{
+			name: "rename to a name that was already a command under a command with arguments",
+			old:  cmds(cmdJSON("", args), cmdJSON("deploy", ""), cmdJSON("ship", "")),
+			new:  cmds(cmdJSON("", args), cmdJSON("ship", `"aliases": ["deploy"]`)),
+			want: []string{"safe COMMAND_RENAMED_ALIAS_KEPT app deploy", "safe ALIAS_ADDED app ship alias deploy"},
+		},
+		{
+			name: "sub-command added under a renamed command with arguments",
+			old:  cmds(cmdJSON("", ""), cmdJSON("deploy", args)),
+			new:  cmds(cmdJSON("", ""), cmdJSON("ship", `"aliases": ["deploy"], `+args), cmdJSON("ship x", "")),
+			want: []string{"safe COMMAND_RENAMED_ALIAS_KEPT app deploy", "possibly_breaking COMMAND_ADDED app ship x"},
+		},
+		{
+			name: "plugin discovery added on a command with arguments",
+			old:  cmds(cmdJSON("", args)),
+			new:  cmds(cmdJSON("", args+`, "plugin_discovery": {"prefix": "app-"}`)),
+			want: []string{"breaking PLUGIN_DISCOVERY_ADDED app plugin_discovery"},
+		},
+	})
+}
+
+func TestDiff_renamedWithAliasKept(t *testing.T) {
+	force := `"flags": [{"name": "force", "identifiers": ["--force"], "kind": "scalar", "schema": {"type": "boolean"}}]`
+	project := `"flags": [{"name": "project", "identifiers": ["--project"], "kind": "scalar", "required": true, "schema": {"type": "string"}}]`
+	runRaw(t, []rawCase{{
+		name: "compared with the new command, sub-tree included",
+		old:  cmds(cmdJSON("", ""), cmdJSON("deploy", force), cmdJSON("deploy now", "")),
+		new:  cmds(cmdJSON("", ""), cmdJSON("ship", `"aliases": ["deploy"], `+project), cmdJSON("ship now", "")),
+		want: []string{
+			"safe COMMAND_RENAMED_ALIAS_KEPT app deploy", "breaking FLAG_NO_DELETE app deploy --force",
+			"breaking FLAG_REQUIRED_ADDED app deploy --project",
+		},
+	}})
+}
+
+func TestDiff_argumentInserted(t *testing.T) {
+	arg := func(name string) string {
+		return `{"name": "` + name + `", "kind": "scalar", "schema": {"type": "string"}}`
+	}
+	runRaw(t, []rawCase{
+		{
+			name: "inserted before another",
+			old:  contract(root(`"arguments": [` + arg("src") + `, ` + arg("dst") + `]`)),
+			new:  contract(root(`"arguments": [` + arg("src") + `, ` + arg("mode") + `, ` + arg("dst") + `]`)),
+			want: []string{"breaking ARGUMENT_MOVED app <dst>", "safe ARGUMENT_ADDED app <mode>"},
+		},
+		{
+			name: "renamed in place",
+			old:  contract(root(`"arguments": [` + arg("src") + `, ` + arg("dst") + `]`)),
+			new:  contract(root(`"arguments": [` + arg("src") + `, ` + arg("to") + `]`)),
+			want: []string{"possibly_breaking ARGUMENT_NAME_CHANGED app <dst>"},
+		},
+	})
+}
+
+func TestDiff_replacedByHonorsRemovedIn(t *testing.T) {
+	purge := func(fields string) string {
+		return cmdJSON("purge", `"replaced_by": "clean", "removed_in": "3.0.0"`+fields)
+	}
+	flags := func(fields string) string {
+		return root(`"flags": [{"name": "o", "identifiers": ["--o"], "kind": "scalar", "replaced_by": "--out", "removed_in": "3.0.0"` + fields + `, "schema": {}}]`)
+	}
+	enum := func(values string) string {
+		details := `{"ini": {"replaced_by": "json", "removed_in": "3.0.0"}}`
+		if !strings.Contains(values, "ini") {
+			details = `{}`
+		}
+		return root(`"flags": [{"name": "f", "identifiers": ["--f"], "kind": "scalar", "enum_values": ` + details + `, "schema": {"type": "string", "enum": [` + values + `]}}]`)
+	}
+	out := root(`"flags": [{"name": "out", "identifiers": ["--out"], "kind": "scalar", "schema": {}}]`)
+	runRaw(t, []rawCase{
+		{
+			name: "command, early", old: cmds(root(""), purge(""), cmdJSON("clean", "")), new: cmds(root(""), cmdJSON("clean", "")),
+			opts: Options{Release: "2.1.0"}, want: []string{"breaking COMMAND_REPLACED app purge"},
+		},
+		{
+			name: "command, due", old: cmds(root(""), purge(""), cmdJSON("clean", "")), new: cmds(root(""), cmdJSON("clean", "")),
+			opts: Options{Release: "3.0.0"}, want: []string{"expected COMMAND_REPLACED app purge"},
+		},
+		{
+			name: "flag, early", old: contract(flags("")), new: contract(out),
+			opts: Options{Release: "2.1.0"}, want: []string{"breaking FLAG_REPLACED app --o", "safe FLAG_ADDED app --out"},
+		},
+		{
+			name: "enum value, early", old: contract(enum(`"ini", "json"`)), new: contract(enum(`"json"`)),
+			opts: Options{Release: "2.1.0"}, want: []string{"breaking ENUM_VALUE_REPLACED app --f value ini"},
+		},
+		{
+			name: "hidden command, early", old: cmds(root(""), purge(`, "hidden": true`), cmdJSON("clean", "")), new: cmds(root(""), cmdJSON("clean", "")),
+			opts: Options{Release: "2.1.0"}, want: []string{"possibly_breaking COMMAND_REPLACED app purge"},
+		},
+		{
+			name: "hidden flag, no release", old: contract(flags(`, "hidden": true`)), new: contract(out),
+			want: []string{"possibly_breaking FLAG_REPLACED app --o", "safe FLAG_ADDED app --out"},
+		},
+		{
+			name: "hidden flag, due", old: contract(flags(`, "hidden": true`)), new: contract(out),
+			opts: Options{Release: "3.0.0"}, want: []string{"expected FLAG_REPLACED app --o", "safe FLAG_ADDED app --out"},
+		},
+		{
+			name: "hidden flag not replaced, no release",
+			old:  contract(root(`"flags": [{"name": "o", "identifiers": ["--o"], "kind": "scalar", "hidden": true, "removed_in": "3.0.0", "schema": {}}]`)),
+			new:  contract(root("")),
+			want: []string{"possibly_breaking FLAG_NO_DELETE app --o"},
+		},
+	})
+}
+
+func TestDiff_definitionStability(t *testing.T) {
+	defs := func(typ string) string {
+		return `"definitions": {"Item": {"type": "object", "properties": {"id": {"type": "` + typ + `"}}}}`
+	}
+	itemFlag := func(name, stability string) string {
+		return `{"name": "` + name + `", "identifiers": ["--` + name + `"], "kind": "scalar", "stability": "` + stability + `", "schema": {"$ref": "#/definitions/Item"}}`
+	}
+	flags := func(fs ...string) string { return `"flags": [` + strings.Join(fs, ", ") + `]` }
+	lab := cmdJSON("lab", `"stability": "experimental", "output": {"$ref": "#/definitions/Item"}`)
+	get := cmdJSON("get", `"output": {"$ref": "#/definitions/Item"}`)
+	runRaw(t, []rawCase{
+		{
+			name: "used only by an experimental command",
+			old:  contract(cmdJSON("", "")+", "+lab, defs("string")), new: contract(cmdJSON("", "")+", "+lab, defs("integer")),
+			want: []string{"safe OUTPUT_TYPE_CHANGED definitions.Item.id"},
+		},
+		{
+			name: "also used by a stable command",
+			old:  contract(cmdJSON("", "")+", "+lab+", "+get, defs("string")), new: contract(cmdJSON("", "")+", "+lab+", "+get, defs("integer")),
+			want: []string{"breaking OUTPUT_TYPE_CHANGED definitions.Item.id"},
+		},
+		{
+			name: "used only by an experimental flag of a stable command",
+			old:  contract(cmdJSON("", flags(itemFlag("x", "experimental"))), defs("string")),
+			new:  contract(cmdJSON("", flags(itemFlag("x", "experimental"))), defs("integer")),
+			want: []string{"safe INPUT_TYPE_CHANGED definitions.Item.id"},
+		},
+		{
+			name: "also used by a stable flag",
+			old:  contract(cmdJSON("", flags(itemFlag("x", "experimental"), itemFlag("y", ""))), defs("string")),
+			new:  contract(cmdJSON("", flags(itemFlag("x", "experimental"), itemFlag("y", ""))), defs("integer")),
+			want: []string{"breaking INPUT_TYPE_CHANGED definitions.Item.id"},
+		},
+	})
+}
+
+func TestDiff_groupsOverNewFlags(t *testing.T) {
+	flagJSON := func(names ...string) string {
+		var parts []string
+		for _, n := range names {
+			parts = append(parts, `{"name": "`+n+`", "identifiers": ["--`+n+`"], "kind": "scalar", "schema": {"type": "boolean"}}`)
+		}
+		return `"flags": [` + strings.Join(parts, ", ") + `]`
+	}
+	runRaw(t, []rawCase{
+		{
+			name: "group and dependency over new flags",
+			old:  contract(root(flagJSON("a"))),
+			new: contract(root(flagJSON("a", "json", "yaml") + `, "flag_groups": [{"kind": "mutually_exclusive", "flags": ["json", "yaml"]}, {"kind": "mutually_exclusive", "flags": ["a", "json"]}],` +
+				` "flag_dependencies": [{"when": "json", "requires": ["a"]}]`)),
+			want: []string{
+				"safe FLAG_ADDED app --json", "safe FLAG_ADDED app --yaml",
+				"safe FLAG_GROUP_ADDED app group mutually_exclusive(json,yaml)", "safe FLAG_GROUP_ADDED app group mutually_exclusive(a,json)",
+				"safe FLAG_DEPENDENCY_ADDED app dependency json",
+			},
+		},
+		{
+			name: "group over old flags",
+			old:  contract(root(flagJSON("a", "b"))),
+			new:  contract(root(flagJSON("a", "b") + `, "flag_groups": [{"kind": "mutually_exclusive", "flags": ["a", "b"]}], "flag_dependencies": [{"when": "a", "requires": ["b"]}]`)),
+			want: []string{"breaking FLAG_GROUP_ADDED app group mutually_exclusive(a,b)", "breaking FLAG_DEPENDENCY_ADDED app dependency a"},
+		},
+	})
+}
+
+func TestDiff_numericWidening(t *testing.T) {
+	typed := func(typ, kind, schema string) string {
+		return root(`"flags": [{"name": "n", "identifiers": ["--n"], "kind": "` + kind + `", "type": "` + typ + `", "schema": ` + schema + `}]`)
+	}
+	runRaw(t, []rawCase{
+		{
+			name: "multipleOf widened", old: contract(typed("int", "scalar", `{"type": "integer", "multipleOf": 10}`)),
+			new:  contract(typed("int", "scalar", `{"type": "integer", "multipleOf": 5}`)),
+			want: []string{"safe INPUT_BOUND_WIDENED app --n"},
+		},
+		{
+			name: "multipleOf narrowed", old: contract(typed("int", "scalar", `{"type": "integer", "multipleOf": 5}`)),
+			new:  contract(typed("int", "scalar", `{"type": "integer", "multipleOf": 10}`)),
+			want: []string{"breaking INPUT_BOUND_NARROWED app --n"},
+		},
+		{
+			name: "multipleOf widened from a decimal", old: contract(typed("float64", "scalar", `{"type": "number", "multipleOf": 0.3}`)),
+			new:  contract(typed("float64", "scalar", `{"type": "number", "multipleOf": 0.1}`)),
+			want: []string{"safe INPUT_BOUND_WIDENED app --n"},
+		},
+		{
+			name: "multipleOf with a large ratio and a remainder", old: contract(typed("float64", "scalar", `{"type": "number", "multipleOf": 10000000000.5}`)),
+			new:  contract(typed("float64", "scalar", `{"type": "number", "multipleOf": 1}`)),
+			want: []string{"breaking INPUT_BOUND_NARROWED app --n"},
+		},
+		{
+			name: "scalar becomes a list", old: contract(typed("string", "scalar", `{}`)), new: contract(typed("[]string", "list", `{}`)),
+			want: []string{"breaking INPUT_KIND_CHANGED app --n"},
+		},
+		{
+			name: "int64 to float64", old: contract(typed("int64", "scalar", `{}`)), new: contract(typed("float64", "scalar", `{}`)),
+			want: []string{"possibly_breaking INPUT_TYPE_CHANGED app --n"},
+		},
+		{
+			name: "int32 to float64", old: contract(typed("int32", "scalar", `{}`)), new: contract(typed("float64", "scalar", `{}`)),
+			want: []string{"safe INPUT_TYPE_WIDENED app --n"},
+		},
+	})
+}
+
+func TestDiff_wrongShapeIsNotCalledNotJSON(t *testing.T) {
+	_, err := Diff([]byte(`{"format": "rotini-contract/1", "commands": "oops"}`), contract(root("")), Options{})
+	if err == nil || !strings.Contains(err.Error(), "the old contract has the wrong shape") {
+		t.Errorf("err = %v", err)
+	}
+	_, err = Diff([]byte(`{`), contract(root("")), Options{})
+	if err == nil || !strings.Contains(err.Error(), "the old contract is not JSON") {
+		t.Errorf("err = %v", err)
+	}
 }

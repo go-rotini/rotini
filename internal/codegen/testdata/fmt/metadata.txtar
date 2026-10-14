@@ -1,0 +1,32 @@
+-- in --
+version: 1.0.0
+command:
+  metadata:
+    tier: internal
+    owner: platform
+  flags:
+    - metadata: {audit: "yes"}
+      schema: {type: bool}
+      summary: f
+      name: force
+  stdin:
+    metadata: {owner: io}
+    format: text
+  name: tool
+  summary: s
+-- out --
+version: 1.0.0
+command:
+  name: tool
+  summary: s
+  metadata:
+    tier: internal
+    owner: platform
+  flags:
+    - name: force
+      summary: f
+      metadata: {audit: "yes"}
+      schema: {type: bool}
+  stdin:
+    format: text
+    metadata: {owner: io}

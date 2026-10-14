@@ -57,8 +57,8 @@ func checkConfigKey(k ConfigKey, raw string, view *osView, parse func(string) er
 			return checkedValue{}, usageBind(channelConfig, k.Key, fmt.Sprintf("%s: %v", label, err), err)
 		}
 	}
-	texts = flagEnum(fd).canonical(texts)
-	if err := checkFlagValues(fd, label, texts, view.base(), view.clockRef()); err != nil {
+	texts = flagEnum(&fd).canonical(texts)
+	if err := checkFlagValues(&fd, label, texts, view.base(), view.clockRef()); err != nil {
 		return checkedValue{}, configValueError(k.Key, err)
 	}
 	out := checkedValue{key: k, texts: texts}
@@ -101,7 +101,7 @@ func configValueError(key string, err error) error {
 func (k ConfigKey) flagDef() FlagDef {
 	return FlagDef{
 		Name: k.Key, Type: k.Type, Enum: k.Enum, EnumValues: k.EnumValues, IgnoreCase: k.IgnoreCase,
-		Layout: k.Layout, Layouts: k.Layouts, Separator: k.separator(), Secret: k.Secret, Constraints: k.Constraints,
+		Layout: k.Layout, Layouts: k.Layouts, Base: k.Base, Separator: k.separator(), Secret: k.Secret, Constraints: k.Constraints,
 	}
 }
 
@@ -184,7 +184,7 @@ func nativeValue(v reflect.Value) any {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return v.Uint()
 	case reflect.Float32, reflect.Float64:
-		return v.Float()
+		return typedFloat(v) // a float32 0.1 writes as 0.1, not 0.10000000149011612
 	}
 	return v.Interface()
 }

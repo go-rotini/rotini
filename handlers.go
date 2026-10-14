@@ -9,8 +9,8 @@ import "context"
 // # Instance lifetime
 //
 // Per run, the runtime asks the program's handlers (the generated ProgramHandlers, through
-// [NewProgramFunc] or [NewProgram]) once for each command in the chain, and that value serves
-// the command's hooks for the run:
+// [NewWiredProgram], [NewProgramFunc] or [NewProgram]) once for each command in the chain, and
+// that value serves the command's hooks for the run:
 //
 //   - A field carries state between one command's own hooks. The leaf's PreRun, Run and
 //     PostRun share one value, as do a command's CascadingPreRun and CascadingPostRun.
@@ -31,10 +31,17 @@ import "context"
 // across runs, and a data race under concurrent [Program.Run]. Handlers that keep state in
 // fields must be returned fresh on every call.
 type Handler interface {
+	// CascadingPreRun runs for every command in the chain, root first, before the invoked
+	// command's PreRun.
 	CascadingPreRun(ctx context.Context, rtx *Context)
+	// PreRun runs for the invoked command only, before Run.
 	PreRun(ctx context.Context, rtx *Context)
+	// Run does the invoked command's work.
 	Run(ctx context.Context, rtx *Context)
+	// PostRun is the invoked command's teardown; it runs when its PreRun began.
 	PostRun(ctx context.Context, rtx *Context)
+	// CascadingPostRun is each command's teardown, leaf first; it runs when that command's
+	// CascadingPreRun began.
 	CascadingPostRun(ctx context.Context, rtx *Context)
 }
 

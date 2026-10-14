@@ -12,7 +12,7 @@ type Deprecation struct {
 	Kind       string // "flag", "argument" or "command"
 	Name       string // the input's logical name (the flag/argument/command name)
 	Identifier string // the token actually used on argv (e.g. "--conf", "build"); an argument's <name>
-	Message    string // the spec's `deprecated:` message, when the input is deprecated as a whole
+	Message    string // the spec's `deprecated:` message, or ""
 	Since      string // the spec's `deprecated_since:` release (X.Y.Z), or ""
 	RemovedIn  string // the release that removes this token: its own planned removal, else the input's `removed_in:`, or ""
 	// Value is the deprecated enum value as typed, when the deprecation is about the value given
@@ -60,7 +60,7 @@ func Deprecations(rtx *Context) []Deprecation {
 	}
 	argv := rtx.Argv
 	var out []Deprecation
-	chain := rtx.CommandChain()
+	chain := rtx.chainRef()
 	store := quietParse(chain, argv)
 	for i, frame := range chain {
 		// A command deprecated as a whole reports however it was invoked; one with only
@@ -76,7 +76,7 @@ func Deprecations(rtx *Context) []Deprecation {
 		}
 		for _, fd := range frame.Flags {
 			out = append(out, flagDeprecations(fd, store.scopes[i].used[fd.Name])...)
-			out = append(out, valueDeprecations("flag", fd.Name, store.scopes[i].label(fd), flagEnum(fd), store.scopes[i].flags[fd.Name])...)
+			out = append(out, valueDeprecations("flag", fd.Name, store.scopes[i].label(&fd), flagEnum(&fd), store.scopes[i].flags[fd.Name])...)
 		}
 	}
 	// A deprecated argument reports when a value was supplied for it.
@@ -129,8 +129,8 @@ func flagDeprecations(fd FlagDef, used []string) []Deprecation {
 }
 
 // quietParse tokenizes argv against chain the way the parser does, on a copy of the chain with
-// value acquisition off, so asking what argv says never reads a file or stdin. nil when argv
-// does not parse.
+// value acquisition and glob expansion off, so asking what argv says never reads a file, a
+// directory or stdin. nil when argv does not parse.
 func quietParse(chain []Command, argv []string) *parsedInputs {
 	store, err := quietTokens(chain, argv)
 	if err != nil {
@@ -141,6 +141,12 @@ func quietParse(chain []Command, argv []string) *parsedInputs {
 
 // quietTokens is quietParse that also returns the parse error.
 func quietTokens(chain []Command, argv []string) (*parsedInputs, error) {
+	return parseArgvTokens(quietChain(chain), argv, argvAcq{})
+}
+
+// quietChain is a copy of chain whose flags and arguments acquire nothing and whose arguments
+// expand no globs.
+func quietChain(chain []Command) []Command {
 	quiet := make([]Command, len(chain))
 	for i, frame := range chain {
 		flags := make([]FlagDef, len(frame.Flags))
@@ -152,12 +158,13 @@ func quietTokens(chain []Command, argv []string) (*parsedInputs, error) {
 		args := make([]ArgDef, len(frame.Arguments))
 		for j, ad := range frame.Arguments {
 			ad.From = nil
+			ad.Glob = false
 			args[j] = ad
 		}
 		frame.Arguments = args
 		quiet[i] = frame
 	}
-	return parseArgvTokens(quiet, argv, argvAcq{})
+	return quiet
 }
 
 // argumentDeprecations reports each deprecated argument of the leaf that argv supplied a value
@@ -202,7 +209,7 @@ func argumentValueDeprecations(leaf Command, args []string) []Deprecation {
 	spans := argSpans(leaf.Arguments, len(args))
 	for i, ad := range leaf.Arguments {
 		if s := spans[i]; s[0] < s[1] {
-			out = append(out, valueDeprecations("argument", ad.Name, "<"+ad.Name+">", argEnum(ad), args[s[0]:s[1]])...)
+			out = append(out, valueDeprecations("argument", ad.Name, "<"+ad.Name+">", argEnum(&ad), args[s[0]:s[1]])...)
 		}
 	}
 	return out

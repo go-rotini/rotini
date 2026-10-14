@@ -28,7 +28,7 @@ import (
 // (`type: array, items: {$ref: …}`) each occurrence is one element.
 
 // isObjectFlag reports whether a flag takes a structured value.
-func isObjectFlag(fd FlagDef) bool { return fd.ObjectSchema != "" }
+func isObjectFlag(fd *FlagDef) bool { return fd.ObjectSchema != "" }
 
 // bindObjectFlag decodes, validates and binds an object flag's raw occurrences into f, which is
 // a struct, a pointer to one, or a slice of either, with the program's features fs.
@@ -46,7 +46,7 @@ func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef, fs *featureSet) e
 		for _, r := range raw {
 			doc, err := decodeObject(fs, r, elem)
 			if err != nil {
-				return err
+				return secretObjectError(fd, err)
 			}
 			v := reflect.New(elem).Elem()
 			if err := validateAndBindObject(v, doc, fd.ObjectSchema); err != nil {
@@ -70,11 +70,24 @@ func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef, fs *featureSet) e
 	for _, r := range raw {
 		m, err := decodeObject(fs, r, f.Type())
 		if err != nil {
-			return err
+			return secretObjectError(fd, err)
 		}
 		mergeObject(doc, m)
 	}
 	return validateAndBindObject(f, doc, fd.ObjectSchema)
+}
+
+// secretObjectError is err for a value of fd that didn't decode. A secret flag's error is a
+// fixed message, since a decoder's message quotes the text it read. A wiring error (a
+// missing codec) is kept: it names no value.
+func secretObjectError(fd FlagDef, err error) error {
+	if !fd.Secret {
+		return err
+	}
+	if _, ok := errors.AsType[*WiringError](err); ok {
+		return err
+	}
+	return fmt.Errorf("the value is not a valid %s", strings.TrimPrefix(fd.Type, "[]"))
 }
 
 // decodeObject turns one occurrence into a JSON-shaped document: JSON when it starts with "{",
@@ -281,25 +294,18 @@ func objectDecodeError(err error) error {
 	return err
 }
 
-var objectValidators sync.Map // schema text → *recon.JSONSchemaValidator
-
 // validateObject checks doc against a JSON Schema, reporting every problem with its key path.
 func validateObject(doc map[string]any, schema string) error {
-	cached, ok := objectValidators.Load(schema)
-	if !ok {
-		v, err := recon.NewJSONSchemaValidator([]byte(schema))
-		if err != nil {
-			return fmt.Errorf("rotini: invalid object schema: %w", err)
-		}
-		cached, _ = objectValidators.LoadOrStore(schema, v)
+	compiled, err := compileSchema(schema)
+	if err != nil {
+		return fmt.Errorf("rotini: invalid object schema: %w: %w", recon.ErrSchemaInvalid, err)
 	}
-	validator, ok := cached.(*recon.JSONSchemaValidator)
-	if !ok {
-		return errors.New("rotini: object validator cache holds a foreign value")
-	}
-	err := validator.Validate(doc)
+	err = schemaCheck{schema: compiled}.Validate(doc)
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, errSchemaUnfinished) {
+		return errors.New("the value could not be fully checked against its schema")
 	}
 	applyPatternMessages(schema, err)
 	var msgs []string
@@ -420,7 +426,7 @@ func objectFieldFlag(chain []Command, name string) (fd FlagDef, idx int, field s
 		return FlagDef{}, 0, "", false
 	}
 	fd, idx, ok = findFlagIndex(chain, base)
-	if !ok || !isObjectFlag(fd) || isArrayType(fd.Type) {
+	if !ok || !isObjectFlag(&fd) || isArrayType(fd.Type) {
 		return FlagDef{}, 0, "", false
 	}
 	return fd, idx, field, true

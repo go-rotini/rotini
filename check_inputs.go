@@ -299,7 +299,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 				return
 			}
 			if fd, ok := findFlagDef(frame.Flags, logical); ok {
-				err = dash.typed(checkTypedFlag(fs, fd, f, view.base()), fd.Type, flagLabel(fd), flagLabel(fd), f)
+				err = scoped(dash.typed(checkTypedFlag(fs, fd, f, view.base()), fd.Type, flagLabel(fd), flagLabel(fd), f), frame.Name, flagLabel(fd))
 			}
 		})
 		if err == nil && scope == len(chain)-1 {
@@ -308,7 +308,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 					return
 				}
 				if ad, ok := findArgDef(frame.Arguments, logical); ok {
-					err = dash.typed(checkTypedArg(ad, f, view.base()), ad.Type, "<"+ad.Name+">", "", f)
+					err = scoped(dash.typed(checkTypedArg(ad, f, view.base()), ad.Type, "<"+ad.Name+">", "", f), frame.Name, "")
 				}
 			})
 		}
@@ -339,7 +339,7 @@ func checkAbsentItemCounts(v reflect.Value, chain []Command, anchor int, set Pre
 			if _, given := set[fieldPath(top, "Flags", fieldName)]; err != nil || !ok || given || len(flagDefaults(fd)) > 0 {
 				return
 			}
-			err = checkItemCount(flagLabel(fd), fd.Constraints, 0)
+			err = scoped(checkItemCount(flagLabel(fd), fd.Constraints, 0), frame.Name, flagLabel(fd))
 		})
 		if scope != len(chain)-1 {
 			return
@@ -370,7 +370,7 @@ func checkTypedFlag(fs *featureSet, fd FlagDef, f reflect.Value, dir string) err
 		}
 		return checkTypedObject(fs, label, fd.ObjectSchema, elems)
 	}
-	enum := flagEnum(fd)
+	enum := flagEnum(&fd)
 	for _, s := range typedTexts(elems) {
 		if enum.declared() && !enum.has(s) {
 			return enum.violation(label, label, s, fd.Secret)
@@ -386,7 +386,7 @@ func checkTypedArg(ad ArgDef, f reflect.Value, dir string) error {
 	if !ok {
 		return nil
 	}
-	enum := argEnum(ad)
+	enum := argEnum(&ad)
 	for _, s := range typedTexts(elems) {
 		if enum.declared() && !enum.has(s) {
 			return enum.violation(label, "", s, ad.Secret)
@@ -522,6 +522,9 @@ func checkTypedStdin(fs *featureSet, ci reflect.Value, schemas map[string]string
 		return internalBind(channelStdin, "", "invalid stdin schema", err)
 	}
 	if err := validator.Validate(doc); err != nil {
+		if errors.Is(err, errSchemaUnfinished) {
+			return usageBind(channelStdin, "", stdinUnfinished, err)
+		}
 		fs.schemas.patternMessages(js, err)
 		return reconBind(channelStdin, err)
 	}
@@ -661,7 +664,7 @@ func typedNumber(e reflect.Value) (float64, bool) {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return float64(e.Uint()), true
 	case reflect.Float32, reflect.Float64:
-		return e.Float(), true
+		return typedFloat(e), true
 	}
 	return 0, false
 }
@@ -690,7 +693,7 @@ func typedText(e reflect.Value) string {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return strconv.FormatUint(e.Uint(), 10)
 	case reflect.Float32, reflect.Float64:
-		return formatNum(e.Float())
+		return strconv.FormatFloat(e.Float(), 'g', -1, e.Type().Bits())
 	case reflect.Bool:
 		return strconv.FormatBool(e.Bool())
 	}
@@ -750,4 +753,18 @@ func checkTypedRecords(fs *featureSet, records reflect.Value, schemas map[string
 		}
 	}
 	return nil
+}
+
+// typedFloat is a float field's value as the number its shortest spelling names, so a float32
+// 0.1 compares as 0.1 (as the command line reads it), not as the widened 0.10000000149011612.
+func typedFloat(e reflect.Value) float64 {
+	bits := e.Type().Bits()
+	if bits == 64 {
+		return e.Float()
+	}
+	f, err := strconv.ParseFloat(strconv.FormatFloat(e.Float(), 'g', -1, bits), 64)
+	if err != nil {
+		return e.Float()
+	}
+	return f
 }

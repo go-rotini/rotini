@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -105,7 +104,7 @@ func TestExpand_argvErrors(t *testing.T) {
 	for argv, want := range map[string]string{
 		"--paths=$A,$NOPE":   `--paths: $NOPE is not set (in "$NOPE")`,
 		"--out=${OUTDIR:-x}": `--out: only $NAME and ${NAME} are expanded (in "${OUTDIR:-x}")`,
-		"-f=~/missing":       `-f: no such file: ` + strconv.Quote(home+"/missing") + ` (written as "~/missing")`,
+		"-f=~/missing":       `-f: no such file: ` + quotePath(home+"/missing") + ` (written as "~/missing")`,
 	} {
 		_, err := exBind(t, work, conf, "", append(env, "A=1"), argv)
 		var pe *ParseError
@@ -116,6 +115,24 @@ func TestExpand_argvErrors(t *testing.T) {
 	// An argv expansion failure fails even under a short-circuit flag.
 	if _, err := exBind(t, work, conf, "", env, "--help", "--paths=$NOPE"); err == nil {
 		t.Error("--help with a bad argv value: want an error")
+	}
+}
+
+// The written form follows a Windows home's backslashes, which a path check shows as typed, and
+// a value another check quotes as a Go string.
+func TestWithWritten_quoting(t *testing.T) {
+	written := map[string]string{`C:\Users\ada/x`: "~/x", `C:\Users\ada\y`: `~\y`, "a b": "$A"}
+	for msg, want := range map[string]string{
+		`-f: no such file: "C:\Users\ada/x"`:   `-f: no such file: "C:\Users\ada/x" (written as "~/x")`,
+		`-f: no such file: "C:\Users\ada\y"`:   `-f: no such file: "C:\Users\ada\y" (written as "~\y")`,
+		`-f: "C:\\Users\\ada\\y" is not valid`: `-f: "C:\\Users\\ada\\y" is not valid (written as "~\\y")`,
+		`-n: "a b" is not a valid int`:         `-n: "a b" is not a valid int (written as "$A")`,
+		`-f: something else`:                   `-f: something else`,
+	} {
+		err := withWritten(&ParseError{Msg: msg}, []string{`C:\Users\ada/x`, `C:\Users\ada\y`, "a b"}, written)
+		if got := err.Error(); got != want {
+			t.Errorf("withWritten(%s) = %s, want %s", msg, got, want)
+		}
 	}
 }
 
@@ -172,7 +189,7 @@ func TestChannelPaths_checked(t *testing.T) {
 		t.Errorf("a relative file in the run's directory = %v", err)
 	}
 	_, err := exBind(t, work, conf, "", []string{"HOME=" + home, "APP_LOG=/nonexistent"})
-	if err == nil || err.Error() != `APP_LOG: no such file: "/nonexistent"` || !errors.Is(err, ErrUsage) {
+	if err == nil || err.Error() != `environment variable APP_LOG: no such file: "/nonexistent"` || !errors.Is(err, ErrUsage) {
 		t.Errorf("missing env file = %v", err)
 	}
 	_, err = exBind(t, work, conf, "", []string{"HOME=" + home, "APP_LOG=" + work})

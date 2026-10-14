@@ -28,7 +28,7 @@ func Plugins() Feature {
 // command line, in runs and in completion.
 func ResponseFiles() Feature {
 	return Feature{name: "response-files", apply: func(s *featureSet) {
-		s.respFiles = &responseFileHooks{expand: expandResponseFiles, completionWords: completionWords}
+		s.respFiles = &wiredResponseFileHooks
 	}}
 }
 
@@ -36,14 +36,14 @@ func ResponseFiles() Feature {
 // completion.
 func Chdir() Feature {
 	return Feature{name: "chdir", apply: func(s *featureSet) {
-		s.chdir = &chdirHooks{apply: (*Program).applyChdir, complete: (*Program).completionChdir}
+		s.chdir = &wiredChdirHooks
 	}}
 }
 
 // Multicall wires [Definition.Multicall]: dispatching on the name the program was invoked as.
 func Multicall() Feature {
 	return Feature{name: "multicall", apply: func(s *featureSet) {
-		s.multicall = &multicallHooks{route: multicallArgv}
+		s.multicall = &wiredMulticallHooks
 	}}
 }
 
@@ -85,3 +85,10 @@ func recordChdirError(rtx *Context, err error) {
 	}
 	rtx.RecordError(err)
 }
+
+// The hooks each feature wires. They never change, so every program shares one value.
+var (
+	wiredResponseFileHooks = responseFileHooks{expand: expandResponseFiles, completionWords: completionWords}
+	wiredChdirHooks        = chdirHooks{apply: (*Program).applyChdir, complete: (*Program).completionChdir}
+	wiredMulticallHooks    = multicallHooks{route: multicallArgv}
+)

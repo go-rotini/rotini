@@ -14,6 +14,14 @@ on:
       version:
         description: "Published version to verify (e.g. v1.0.0)"
         required: true
+  # The release workflow calls this once it publishes: a release made with the workflow's own
+  # token triggers no other workflow, so the release event above doesn't fire for it.
+  workflow_call:
+    inputs:
+      version:
+        description: "Published version to verify (e.g. v1.0.0)"
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -29,13 +37,14 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: stable
+          cache: false # no source tree, so no go.sum to key a cache on
 
       # Deliberately not actions/checkout: this job must not have the source tree available,
       # or a mistake could resolve against it instead of the module cache.
       - name: Scaffold a scratch module and use the published tool
         shell: bash
         env:
-          VERSION: ${{ github.event.inputs.version || github.event.release.tag_name }}
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/fidelity" && cd "$RUNNER_TEMP/fidelity"
@@ -85,7 +94,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         env:
-          VERSION: ${{ github.event.inputs.version || github.event.release.tag_name }}
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}
         run: |
           set -euo pipefail
           for schema in schema-spec.json schema-conf.json; do

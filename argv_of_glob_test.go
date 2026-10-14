@@ -124,7 +124,7 @@ func TestExpandGlobs_escapesOnlyOnWindows(t *testing.T) {
 func TestUnescapeGlob(t *testing.T) {
 	t.Parallel()
 	for _, s := range []string{"", "plain", "[", "]", "[]", "[*]", "[[]", "a*b?c[d]", `C:\dir\*.txt`, "[^a]", "?*?"} {
-		literal, isPattern := unescapeGlob(globEscaper.Replace(s))
+		literal, isPattern := unescapeGlob(escapeGlob(s))
 		if literal != s || isPattern {
 			t.Errorf("unescapeGlob(escape(%q)) = %q, %v; want %q, false", s, literal, isPattern, s)
 		}

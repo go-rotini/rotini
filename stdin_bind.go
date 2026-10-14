@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,26 +27,14 @@ import (
 // over it. A read of piped stdin ends when the run is canceled, or when the context the hook
 // holds ([Context.Context]) ends, with an [*InputError] whose cause is the cancellation's.
 func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argValues func(name string) ([]string, error)) error {
-	if v.Kind() != reflect.Struct || v.NumField() == 0 {
+	sf, raw, ok := stdinTarget(v, waived)
+	if !ok {
 		return nil
-	}
-	leaf := v.Field(v.NumField() - 1) // the running command's inputs
-	if leaf.Kind() != reflect.Struct {
-		return nil
-	}
-	sf := leaf.FieldByName("Stdin")
-	field, ok := leaf.Type().FieldByName("Stdin")
-	if !sf.IsValid() || !ok || (sf.Kind() != reflect.Pointer && sf.Kind() != reflect.Func) {
-		return nil
-	}
-	raw := field.Tag.Get("stdin")
-	if raw == "" || waived {
-		return nil // a short-circuited run never waits on stdin
 	}
 	tag := parseStdinTag(raw)
 	fs := rtx.features()
 	if fs.stdin == nil || (slices.Contains(stdinFormats, tag.format) && !fs.hasStdinFormat(tag.format)) {
-		path := pathOf(rtx.CommandChain())
+		path := pathOf(rtx.chainRef())
 		we := missingFeature("stdin:"+tag.format, fmt.Sprintf("Stdin(%q)", tag.format), fmt.Sprintf("command %q reads stdin as %s", path, tag.format))
 		we.Command = path
 		return we
@@ -55,7 +44,7 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argV
 
 // stdinSubject names the running command's stdin in a wiring error.
 func stdinSubject(rtx *Context) string {
-	return fmt.Sprintf("stdin of command %q", pathOf(rtx.CommandChain()))
+	return fmt.Sprintf("stdin of command %q", pathOf(rtx.chainRef()))
 }
 
 // bindStdin reads stdin into the leaf's Stdin field sf per its tag: everything fillStdin does
@@ -131,6 +120,9 @@ func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, 
 			return internalBind(channelStdin, "", "invalid stdin schema", err)
 		}
 		if err := validator.Validate(m); err != nil {
+			if errors.Is(err, errSchemaUnfinished) {
+				return usageBind(channelStdin, "", stdinUnfinished, err)
+			}
 			fs.schemas.patternMessages(js, err)
 			return reconBind(channelStdin, err)
 		}
@@ -275,4 +267,27 @@ func readStdin(r io.Reader) ([]byte, error) {
 		}
 	}
 	return io.ReadAll(r) //nolint:wrapcheck // reported by the caller
+}
+
+// stdinTarget is the leaf's Stdin field fillStdin fills and its stdin tag, or false when there
+// is nothing to fill: no such field, no tag, or a short-circuited run, which never waits on
+// stdin.
+func stdinTarget(v reflect.Value, waived bool) (sf reflect.Value, raw string, ok bool) {
+	if v.Kind() != reflect.Struct || v.NumField() == 0 {
+		return reflect.Value{}, "", false
+	}
+	leaf := v.Field(v.NumField() - 1) // the running command's inputs
+	if leaf.Kind() != reflect.Struct {
+		return reflect.Value{}, "", false
+	}
+	sf = leaf.FieldByName("Stdin")
+	field, found := leaf.Type().FieldByName("Stdin")
+	if !sf.IsValid() || !found || (sf.Kind() != reflect.Pointer && sf.Kind() != reflect.Func) {
+		return reflect.Value{}, "", false
+	}
+	raw = field.Tag.Get("stdin")
+	if raw == "" || waived {
+		return reflect.Value{}, "", false
+	}
+	return sf, raw, true
 }

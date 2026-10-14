@@ -11,6 +11,8 @@ negated	app --no-|
 enum-declared-order	app --level |
 enum	app --format |
 enum-inline	app --format=|
+enum-ignore-case	app --speed S|
+enum-ignore-case-inline	app --speed=s|
 file-extensions	app --config |	unordered
 directory	app --dir |	unordered
 none-with-message	app --token |
@@ -25,3 +27,16 @@ completer	app deploy |
 required-first	app deploy -|
 group-left-out	app deploy --quiet -|
 sub-command-enum	app deploy --env |
+fallback-extensions	app deploy ./|	unordered
+fallback-directory	app deploy s|	unordered
+fallback-with-candidates	app deploy d|	unordered
+fallback-none	app deploy b|
+fallback-file	app deploy c|	unordered
+quote-all	app quote --odd |
+quote-shared	app quote --pair x|
+quote-typed-quote	app quote --odd 'it|
+quote-typed-quote-shared	app quote --pair 'x|
+quote-typed-backslash	app quote --odd it\'|
+quote-colon	app quote --addr host:|
+quote-inline	app quote --odd=x|
+plain-value	app quote --note |	unordered

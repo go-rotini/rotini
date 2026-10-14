@@ -97,8 +97,9 @@ linters:
         - errors.AsType
     gosec:
       excludes:
-        # Scheduling jitter (Scheduler.next) uses math/rand deliberately: it
-        # spreads ticks, it is never a security decision.
+        # Temporary output file names (createTemp) use math/rand deliberately: the
+        # file is opened with O_EXCL and a taken name is retried, so the name is never
+        # a security decision.
         - G404
         - G304
         - G115

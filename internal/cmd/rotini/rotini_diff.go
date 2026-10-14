@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/internal/codegen"
@@ -31,6 +32,13 @@ func (*rotiniDiffHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	args := inputs.RotiniDiff.Arguments
 	flags := inputs.RotiniDiff.Flags
+	for _, source := range []string{args.Old, args.New} {
+		// git would read such a revision as one of its own options.
+		if strings.HasPrefix(source, "git:-") {
+			rtx.HaltWith(rotini.UsageError(fmt.Errorf("%s: a git revision can't start with '-'", source)))
+			return
+		}
+	}
 
 	// The current contract is built from the spec, so it must be found; with both contracts
 	// given, the spec is optional and only locates the conf.

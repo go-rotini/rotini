@@ -96,26 +96,28 @@ func (c *runClock) now() time.Time {
 	return c.at
 }
 
-// timeSpec is how a time input reads its text: its layouts, tried in order (none means RFC
-// 3339), and the relative forms it also accepts, measured from clock.
+// timeSpec is how an input reads its text beyond its type: a time input's layouts, tried in
+// order (none means RFC 3339), and the relative forms it also accepts, measured from clock; an
+// integer input's base.
 type timeSpec struct {
 	layout   string   // the first layout, "" for RFC 3339
 	layouts  []string // every layout, when there are several; nil means layout alone
 	relative string   // "", past, future or both
+	base     string   // "" for decimal only, or prefixed
 	clock    *runClock
 }
 
 // flagTimeSpec is the time spec of flag fd, measured from clock.
-func flagTimeSpec(fd FlagDef, clock *runClock) timeSpec {
-	return timeSpec{layout: fd.Layout, layouts: fd.Layouts, relative: fd.Relative, clock: clock}
+func flagTimeSpec(fd *FlagDef, clock *runClock) timeSpec {
+	return timeSpec{layout: fd.Layout, layouts: fd.Layouts, relative: fd.Relative, base: fd.Base, clock: clock}
 }
 
 // argTimeSpec is the time spec of argument ad, measured from clock.
-func argTimeSpec(ad ArgDef, clock *runClock) timeSpec {
-	return timeSpec{layout: ad.Layout, layouts: ad.Layouts, relative: ad.Relative, clock: clock}
+func argTimeSpec(ad *ArgDef, clock *runClock) timeSpec {
+	return timeSpec{layout: ad.Layout, layouts: ad.Layouts, relative: ad.Relative, base: ad.Base, clock: clock}
 }
 
-// plain reports whether the spec reads RFC 3339 only, as an undeclared time does.
+// plain reports whether a time input reads RFC 3339 only, as an undeclared time does.
 func (ts timeSpec) plain() bool {
 	return ts.layout == "" && len(ts.layouts) == 0 && ts.relative == ""
 }
@@ -346,10 +348,13 @@ func orList(items []string) string {
 	return strings.Join(items[:len(items)-1], ", ") + " or " + items[len(items)-1]
 }
 
-// coerceTime is [coerce] for a time input that declares layouts or relative forms: a
-// time.Time field (or a pointer to one, or a list of them) reads each value under ts. Any
-// other field, or a plain spec, is plain coerce.
+// coerceTime is [coerce] for an input that declares how its text reads: a time.Time field (or
+// a pointer to one, or a list of them) reads each value under ts's layouts and relative forms,
+// and an integer field under its base. Any other field, or a plain spec, is plain coerce.
 func coerceTime(f reflect.Value, raw []string, ts timeSpec) error {
+	if ts.base == basePrefixed && len(raw) > 0 && isPlainInteger(f.Type()) {
+		return coercePrefixed(f, raw, ts.clock.features())
+	}
 	if ts.plain() || len(raw) == 0 {
 		return coerce(f, raw, ts.clock.features())
 	}

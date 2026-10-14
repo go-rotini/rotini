@@ -17,7 +17,7 @@ func (rtx *Context) DashIndex() (int, bool) {
 	if rtx == nil {
 		return 0, false
 	}
-	chain := rtx.CommandChain()
+	chain := rtx.chainRef()
 	if len(chain) == 0 {
 		return 0, false
 	}

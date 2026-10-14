@@ -1,6 +1,7 @@
 == commands
 deploy	deploy a service
 help	print help
+quote	values a shell must insert as one literal word
 remote	manage remotes
 status	show status
 == command-prefix
@@ -16,6 +17,7 @@ remote	manage remotes
 --level	how much to say
 --no-color	
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 == flag-set-left-out
@@ -28,6 +30,7 @@ remote	manage remotes
 --level	how much to say
 --no-color	
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 == negated
@@ -45,6 +48,16 @@ yaml
 --format=json	
 --format=text	
 --format=yaml	
+== enum-ignore-case
+# keep-order
+# ignore-case
+slow	
+Safe	
+== enum-ignore-case-inline
+# keep-order
+# ignore-case
+--speed=slow	
+--speed=Safe	
 == file-extensions
 <_files -g *.(yaml|yml)>
 == directory
@@ -66,6 +79,7 @@ replicas=
 == help-command
 deploy	deploy a service
 help	print help
+quote	values a shell must insert as one literal word
 remote	manage remotes
 status	show status
 == help-command-deep
@@ -90,6 +104,7 @@ db	the database
 --no-color	
 --quiet	say nothing
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 --verbose	say everything
@@ -106,8 +121,68 @@ db	the database
 --level	how much to say
 --no-color	
 --set	override a setting
+--speed	how fast to go
 --token	API token
 --user	account to run as
 == sub-command-enum
 dev	
 prod	
+== fallback-extensions
+<_files -g *.(yaml|yml)>
+== fallback-directory
+<_files -/>
+== fallback-with-candidates
+<_files -/>
+db	the database
+== fallback-none
+== fallback-file
+<_files>
+== quote-all
+# keep-order
+a b	
+it's $HOME	
+say "hi"	
+`touch pwned`	
+$(touch pwned)	
+x;touch pwned	
+star*	
+~root	
+o’neil;touch pwned	
+“q”	
+back\slash	
+a\:b	
+C:\Users\me	a path: C:\Users\me
+a!b	
+ends'	
+{a,b}	
+a&b|c<d>e	
+#hash	
+true	
+null	
+-foo.bar	
+--%	
+–a.b	
+-a:	
+== quote-shared
+# keep-order
+x;touch pwned	
+x;touch pwnedz	
+x y	
+x,y	
+== quote-typed-quote
+it's $HOME	
+== quote-typed-quote-shared
+# keep-order
+x;touch pwned	
+x;touch pwnedz	
+x y	
+x,y	
+== quote-typed-backslash
+it's $HOME	
+== quote-colon
+host:8080	
+host:9090	
+== quote-inline
+--odd=x;touch pwned	
+== plain-value
+<_files>

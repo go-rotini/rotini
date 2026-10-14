@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-rotini/recon"
 )
@@ -28,7 +29,7 @@ func parseArgvStore(p *Parser, rtx *Context, out any) (*parsedInputs, []Command,
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
 	}
-	chain := rtx.CommandChain()
+	chain := rtx.chainRef()
 	if len(chain) == 0 {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}
@@ -43,7 +44,7 @@ func parseArgvStore(p *Parser, rtx *Context, out any) (*parsedInputs, []Command,
 // one entry point every reader of argv values and defaults goes through. Nothing is expanded
 // when no flag or argument v describes declares `expand`.
 func expandInputs(fs *featureSet, v reflect.Value, chain []Command, store *parsedInputs, anchor int, view *osView) error {
-	if !hasExpansionIn(v, "Flags", "Arguments") {
+	if !hasArgvExpansion(v) {
 		return nil
 	}
 	if fs.expand == nil {
@@ -83,7 +84,7 @@ func expandStore(v reflect.Value, chain []Command, store *parsedInputs, anchor i
 			if err != nil || !r.expands() || !ok {
 				return
 			}
-			label := flagErrLabel(*si, chain[scope].Flags, logical)
+			label := flagErrLabel(si, chain[scope].Flags, logical)
 			out, xerr := expandValues(vals, r, view, label)
 			if xerr != nil {
 				err = argvExpandError(xerr, label)
@@ -137,17 +138,25 @@ func (si *scopeInputs) noteWritten(expanded, written []string) {
 
 // withWritten adds the value as written to a value error that names one of vals in its expanded
 // form: `--file: no such file: "/home/ada/x" (written as "~/x")`. Any other error, or one about
-// a value expansion left alone, is returned unchanged.
+// a value expansion left alone, is returned unchanged. A path check quotes the value as typed
+// (a Windows path keeps its backslashes, see quotePath), other checks quote it as a Go string;
+// the written form is quoted the same way.
 func withWritten(err error, vals []string, written map[string]string) error {
 	pe, ok := err.(*ParseError) //nolint:errorlint // the value checks return a bare *ParseError
 	if !ok || len(written) == 0 {
 		return err
 	}
 	for _, v := range vals {
-		if w, ok := written[v]; ok && strings.Contains(pe.Msg, strconv.Quote(v)) {
-			cp := *pe
-			cp.Msg += fmt.Sprintf(" (written as %q)", w)
-			return &cp
+		w, ok := written[v]
+		if !ok {
+			continue
+		}
+		for _, quote := range []func(string) string{quotePath, strconv.Quote} {
+			if strings.Contains(pe.Msg, quote(v)) {
+				cp := *pe
+				cp.Msg += " (written as " + quote(w) + ")"
+				return &cp
+			}
 		}
 	}
 	return err
@@ -328,7 +337,7 @@ func layerView(rtx *Context, chain []Command, v reflect.Value, store *parsedInpu
 	if b == nil || !hasExpansion(v) {
 		return view
 	}
-	overrides := map[string]string{}
+	overrides := map[string]pathOverride{}
 	if store != nil {
 		overrides = b.pathOverrides(chain, store, view)
 	}
@@ -339,7 +348,11 @@ func layerView(rtx *Context, chain []Command, v reflect.Value, store *parsedInpu
 }
 
 // hasExpansion reports whether any input v describes declares `expand`.
-func hasExpansion(v reflect.Value) bool {
+func hasExpansion(v reflect.Value) bool { return typeFact(&expansionFacts, v, expansionOf) }
+
+var expansionFacts sync.Map // reflect.Type → bool
+
+func expansionOf(v reflect.Value) bool {
 	if v.Kind() != reflect.Struct {
 		return false
 	}
@@ -362,6 +375,13 @@ func hasExpansion(v reflect.Value) bool {
 	return false
 }
 
+// hasArgvExpansion reports whether a flag or argument of v declares `expand`.
+func hasArgvExpansion(v reflect.Value) bool {
+	return typeFact(&argvExpansionFacts, v, func(v reflect.Value) bool { return hasExpansionIn(v, "Flags", "Arguments") })
+}
+
+var argvExpansionFacts sync.Map // reflect.Type → bool
+
 // hasExpansionIn reports whether an input in the named sub-structs of v's command frames (a
 // flag set's flags included) declares `expand`.
 func hasExpansionIn(v reflect.Value, structs ...string) bool {
@@ -370,7 +390,11 @@ func hasExpansionIn(v reflect.Value, structs ...string) bool {
 }
 
 // hasPathRules reports whether any input v describes declares `expand` or `relative_to`.
-func hasPathRules(v reflect.Value) bool {
+func hasPathRules(v reflect.Value) bool { return typeFact(&pathRuleFacts, v, pathRulesOf) }
+
+var pathRuleFacts sync.Map // reflect.Type → bool
+
+func pathRulesOf(v reflect.Value) bool {
 	_, ok := firstTagged(v, []string{"Flags", "Arguments", "Env", "Config"}, func(t reflect.StructTag) bool { return tagExpandRule(t).declared() })
 	return ok
 }

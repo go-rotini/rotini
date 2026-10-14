@@ -1,0 +1,13 @@
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/my-app/main.go
+    - type: cmd
+      file: internal/cmd/my-app/zz_rotini.go
+      package: myapp
+  features:
+    - type: completion
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/my-app/renders

@@ -204,7 +204,7 @@ func lintInstallDir(conf *Conf) []error {
 		}
 		if why := escapesModule(f.InstallDir); why != "" {
 			problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i) + "/install_dir", loc: loc,
-				msg: fmt.Sprintf("%q %s", f.InstallDir, why)})
+				msg: fmt.Sprintf("%s %s", quotePath(f.InstallDir), why)})
 		}
 	}
 	return problems
@@ -223,7 +223,7 @@ func lintSchemaDirs(conf *Conf) []error {
 		}
 		if why := escapesModule(dir); why != "" {
 			problems = append(problems, &problem{kind: "conf", ptr: "/generate/schemas/" + label + "/dir",
-				loc: "generate.schemas." + label + ".dir", msg: fmt.Sprintf("%q %s", dir, why)})
+				loc: "generate.schemas." + label + ".dir", msg: fmt.Sprintf("%s %s", quotePath(dir), why)})
 		}
 	}
 	if s := conf.Generate.Schemas.Output; s != nil {

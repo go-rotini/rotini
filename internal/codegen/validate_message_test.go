@@ -184,7 +184,7 @@ func TestHumanizeSchemaError_patternQuotesExamples(t *testing.T) {
 			`"identifiers" item 1 must look like "-o", "--output" or "--dry-run"; one or two dashes, then a letter, then letters, digits, - or _; or a single dash and one digit (-4), as in ssh -4. No dots: --db.host is how a user sets field host of an object flag --db (declare --db with $ref to a named object schema), so a declared --db.host would compete with it; to name a flag after a nested setting, write --db-host`},
 		{jsonschema.ValidationError{Keyword: "anyOf", InstanceLocation: "/command/flags/0/schema/enum/1",
 			KeywordLocation: "#/definitions/BaseSchema/properties/enum/items/anyOf"},
-			`"enum" item 1 must be a value (json) or an object ({value: yaml, summary: human-friendly}) whose keys are value, summary, aliases, deprecated_aliases, hidden, deprecated, deprecated_since, removed_in and replaced_by`},
+			`"enum" item 1 must be a string (quote a number: "1") or an object ({value: "1", summary: one}) whose keys are value, summary, aliases, deprecated_aliases, hidden, deprecated, deprecated_since, removed_in and replaced_by`},
 		{jsonschema.ValidationError{Keyword: "pattern", InstanceLocation: "/generate/packages/0/package",
 			KeywordLocation: "#/definitions/PackageConfig/allOf/0/properties/package/pattern"},
 			`"package" must look like "app"`},

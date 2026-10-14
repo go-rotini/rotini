@@ -95,14 +95,15 @@
           "$ref": "#/definitions/JSONSchema",
           "description": "An object schema with one property per visible argument and flag, by name, each carrying its description (else its summary) as `description`: the input schema of a tool definition. Hidden inputs are left out. Self-contained."
         },
-        "output": { "$ref": "#/definitions/JSONSchema", "description": "The shape of what the command writes to stdout when it succeeds, when it declares one. A command that writes a stream of items declares one item. Self-contained." },
+        "output": { "$ref": "#/definitions/JSONSchema", "description": "The shape of what the command writes to stdout when it succeeds, when it declares one. A command that writes a stream of items declares one item; when the items come in several kinds, it is `oneOf` one object schema per kind, each naming its kind in the same required string property, which holds a `const`. Self-contained." },
         "stream": { "type": "boolean", "description": "true when the command writes a stream of `output` items rather than one value: in JSON, one compact value per line; in YAML, one document per item, each starting `---`." },
         "exit_status": { "type": "array", "items": { "$ref": "#/definitions/ExitStatus" } },
         "hidden_aliases": { "type": "array", "items": { "type": "string" }, "description": "More names that run the command but that help, completion and suggestions never list." },
         "replaced_by": { "type": "string", "description": "With `deprecated`: the command to use instead, as its command names below the root joined by spaces (\"purge\", \"remote add\")." },
         "stability": { "$ref": "#/definitions/Stability", "description": "How settled the command is, as declared. Its inputs, sub-commands, output and exit codes are at most as stable as it is." },
         "effects": { "$ref": "#/definitions/Effects", "description": "What running the command does, as declared. Absent says nothing: assume the worst (destructive, reaching outside the machine). Sub-commands don't inherit it; a flag's `effects` can raise it for a run that gives the flag." },
-        "agent": { "$ref": "#/definitions/Agent" }
+        "agent": { "$ref": "#/definitions/Agent" },
+        "metadata": { "$ref": "#/definitions/Metadata" }
       }
     },
     "Argument": {
@@ -130,6 +131,7 @@
         "removed_in": { "$ref": "#/definitions/Version" },
         "schema": { "$ref": "#/definitions/JSONSchema", "description": "The value's JSON Schema. A `$ref` in it resolves against the document's `definitions`." },
         "relative": { "$ref": "#/definitions/Relative" },
+        "base": { "$ref": "#/definitions/Base" },
         "glob": { "type": "boolean", "description": "true when, on Windows, each word containing `*`, `?` or `[` is expanded into the paths it matches (the shell does it elsewhere). A word that names an existing path, or matches nothing, is kept as written." },
         "variable_file": { "$ref": "#/definitions/VariableFile" },
         "expand": { "$ref": "#/definitions/Expand" },
@@ -138,6 +140,7 @@
         "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
         "stability": { "$ref": "#/definitions/Stability" },
         "agent": { "$ref": "#/definitions/Agent" },
+        "metadata": { "$ref": "#/definitions/Metadata" },
         "from": { "type": "array", "items": { "enum": ["file", "stdin", "value"] }, "description": "Where a value typed on the command line may come from besides the text itself: `file`, a value starting with @ is replaced by that file's contents (@@ is a literal @); `stdin`, a value of exactly - is replaced by what is piped on stdin. A secret argument whose list leaves out `value` refuses any other value typed on the command line: pass the secret through a file or stdin." }
       }
     },
@@ -153,7 +156,7 @@
         "type": { "$ref": "#/definitions/RotiniType" },
         "kind": { "$ref": "#/definitions/Kind" },
         "required": { "type": "boolean" },
-        "cascading": { "type": "boolean", "description": "true when the command declares it and every command beneath it accepts it too." },
+        "cascading": { "type": "boolean", "description": "true when the command declares it and every command beneath it accepts it too. Absent: the flag is accepted only when its own command is the one run, never with a sub-command." },
         "inherited": { "type": "boolean", "description": "true when an ancestor declares it as cascading." },
         "short_circuit": { "type": "boolean", "description": "true when setting it on the command line waives the command's required inputs and other rules, as --help does: an agent can pass it without supplying anything else." },
         "env": { "type": "array", "items": { "type": "string" }, "description": "The environment variables the flag falls back to when it is not on the command line, in lookup order: the first one set wins." },
@@ -176,6 +179,7 @@
         "schema": { "$ref": "#/definitions/JSONSchema", "description": "The value's JSON Schema. A `$ref` in it resolves against the document's `definitions`." },
         "repeatable": { "type": "boolean", "description": "false when giving the flag more than once on the command line is an error rather than the last value winning. Absent means repeats are accepted." },
         "relative": { "$ref": "#/definitions/Relative" },
+        "base": { "$ref": "#/definitions/Base" },
         "variable_file": { "$ref": "#/definitions/VariableFile" },
         "role": { "enum": ["force", "chdir", "fields", "sort", "dry-run", "confirm", "machine-output", "page"], "description": "What the flag means to a program driving the CLI. force: the bool flag that lets the command replace existing output files. fields: the list flag that chooses which output fields are written. sort: the flag that names the output field to sort by. These three change nothing at run time. chdir: the root flag naming the directory the run resolves relative paths and config discovery against, read from the command line only; a caller passes an absolute path, or one relative to its own directory. dry-run: the bool flag that previews a run without changing anything. confirm: the bool flag that answers yes for a command that would otherwise refuse or prompt. machine-output: the flag that makes the command write its output as JSON, a bool flag or a string flag whose `role_value` selects JSON. page: the flag that selects a page of results." },
         "role_value": { "type": "string", "description": "With role machine-output on a string flag: the value that selects JSON (`--format=json`)." },
@@ -188,7 +192,8 @@
         "relative_to": { "$ref": "#/definitions/RelativeTo" },
         "values_from": { "type": "string", "pattern": "^output(\\.[A-Za-z_][A-Za-z0-9_-]*)*$", "description": "The place in the command's output whose field names are this flag's allowed values (`output`, `output.tasks`): the enum in its `schema` (on `items` for a list) lists them, sorted, and changes when the output's fields do." },
         "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
-        "stability": { "$ref": "#/definitions/Stability" }
+        "stability": { "$ref": "#/definitions/Stability" },
+        "metadata": { "$ref": "#/definitions/Metadata" }
       }
     },
     "Env": {
@@ -215,12 +220,14 @@
         "schema": { "$ref": "#/definitions/JSONSchema", "description": "The value's JSON Schema. A `$ref` in it resolves against the document's `definitions`." },
         "separator": { "type": "string", "description": "The character a list or map variable is split on, when not a comma: a plain split with spaces trimmed (`:` reads PATHS=a:b)." },
         "relative": { "$ref": "#/definitions/Relative" },
+        "base": { "$ref": "#/definitions/Base" },
         "variable_file": { "$ref": "#/definitions/VariableFile" },
         "expand": { "$ref": "#/definitions/Expand" },
         "relative_to": { "$ref": "#/definitions/RelativeTo" },
         "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
         "stability": { "$ref": "#/definitions/Stability" },
-        "agent": { "$ref": "#/definitions/Agent" }
+        "agent": { "$ref": "#/definitions/Agent" },
+        "metadata": { "$ref": "#/definitions/Metadata" }
       }
     },
     "Config": {
@@ -245,11 +252,13 @@
         "enum_values": { "$ref": "#/definitions/EnumValues" },
         "schema": { "$ref": "#/definitions/JSONSchema", "description": "The value's JSON Schema. A `$ref` in it resolves against the document's `definitions`." },
         "relative": { "$ref": "#/definitions/Relative" },
+        "base": { "$ref": "#/definitions/Base" },
         "expand": { "$ref": "#/definitions/Expand" },
         "relative_to": { "$ref": "#/definitions/RelativeTo" },
         "description": { "type": "string", "description": "Longer text about the input, paragraphs separated by blank lines. It is the input's description in `parameters` when set, else its summary is." },
         "stability": { "$ref": "#/definitions/Stability" },
-        "agent": { "$ref": "#/definitions/Agent" }
+        "agent": { "$ref": "#/definitions/Agent" },
+        "metadata": { "$ref": "#/definitions/Metadata" }
       }
     },
     "Stdin": {
@@ -262,7 +271,8 @@
         "schema": { "$ref": "#/definitions/JSONSchema", "description": "The shape of what is read. Self-contained." },
         "stream": { "type": "boolean", "description": "true when lines or jsonl records are read one at a time as the command consumes them, so stdin of any size is read in constant memory." },
         "separator": { "enum": ["nul"], "description": "nul: lines are separated by NUL bytes, as `find -print0` writes them, instead of line endings." },
-        "unless_argument": { "type": "string", "description": "The argument, by name, that stands in for stdin: stdin is read only when it gets no value, or `-`. Absent means stdin is read on every run." }
+        "unless_argument": { "type": "string", "description": "The argument, by name, that stands in for stdin: stdin is read only when it gets no value, or `-`. Absent means stdin is read on every run." },
+        "metadata": { "$ref": "#/definitions/Metadata" }
       }
     },
     "ExitStatus": {
@@ -347,14 +357,14 @@
       "properties": {
         "name": { "type": "string" },
         "format": { "type": "string", "description": "The file's format, when declared; otherwise its extension says." },
-        "path": { "type": "string", "description": "A fixed path, which may start with ~." },
+        "path": { "type": "string", "description": "A fixed path, as declared: a leading `~` and `$VAR` references in it are expanded at run time, and a relative path is resolved against the run's directory." },
         "discover": {
           "type": "object",
           "required": ["strategy", "file"],
           "additionalProperties": false,
           "description": "How the file is found at run time, instead of a fixed path.",
           "properties": {
-            "strategy": { "type": "string", "description": "walk-up: from the working directory upward. xdg: $XDG_CONFIG_HOME/<app>, else ~/.config/<app>. native: the platform's config directory (~/Library/Application Support/<app> on macOS, %AppData%\\<app> on Windows, as xdg elsewhere). xdg-system: each directory of $XDG_CONFIG_DIRS (default /etc/xdg) joined with <app>." },
+            "strategy": { "type": "string", "description": "walk-up: from the run's directory upward. xdg: $XDG_CONFIG_HOME/<app>, else ~/.config/<app>. native: the platform's config directory (~/Library/Application Support/<app> on macOS, %AppData%\\<app> on Windows, as xdg elsewhere). xdg-system: each directory of $XDG_CONFIG_DIRS (default /etc/xdg) joined with <app>." },
             "app": { "type": "string" },
             "file": { "type": "string", "description": "The file name looked for." }
           }
@@ -390,6 +400,10 @@
         "prefix": { "type": "string" },
         "hidden": { "type": "boolean", "description": "true when completion leaves discovered plugins out." }
       }
+    },
+    "Base": {
+      "enum": ["prefixed"],
+      "description": "The integer input also takes a value written with a base prefix after an optional sign, `0x1F` (hexadecimal), `0o17` (octal) or `0b101` (binary), and `_` between digits (`1_000`); a value without a prefix is decimal, so `010` is ten. Its `schema` then accepts such a string as well as an integer. Present on integer inputs only."
     },
     "Relative": {
       "enum": ["past", "future", "both"],
@@ -437,6 +451,11 @@
     "Agent": {
       "type": "boolean",
       "description": "As declared: true offers the item to AI agents (tool exports, the agent skill page, permission snippets) where it would be left out by default; false keeps it, and a command's sub-commands, from them. Absent follows the defaults."
+    },
+    "Metadata": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "The item's own labels, as the spec declares them: string keys, each with a string value. Rotini never acts on them; they are for the program's own tools."
     }
   }
 }

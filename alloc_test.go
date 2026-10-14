@@ -15,9 +15,9 @@ import (
 // counts must not depend on the size of the environment.
 
 const (
-	allocBudgetHelp     = 100
-	allocBudgetDispatch = 250
-	allocBudgetRegistry = 1000
+	allocBudgetHelp     = 50
+	allocBudgetDispatch = 100
+	allocBudgetRegistry = 800
 )
 
 // allocDef has the shape of a generated program: a root with short-circuit --help and

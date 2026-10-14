@@ -54,11 +54,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-rotini/rotini/internal/testmod"
 	"github.com/rogpeppe/go-internal/testscript"
 )
 
 // TestMain hands control to testscript, which requires it to run scripts.
 func TestMain(m *testing.M) {
+	// The go commands tests start build throwaway modules, which a workspace would reject.
+	os.Setenv("GOWORK", "off")
 	testscript.Main(m, map[string]func(){})
 }
 
@@ -83,6 +86,48 @@ func rotiniBin(t *testing.T) string {
 	return bin
 }
 
+// networkOptIn is the line a script writes before it fetches a third-party module. Scripts run
+// with the module proxy off; this hands one back the proxy the test itself uses.
+const networkOptIn = "env GOPROXY=$ROTINI_NETWORK_GOPROXY"
+
+// prefetch fills the module cache with every module rotini's own build list holds, for every
+// platform, since a script's `go mod tidy` resolves them all. The scripts can then run with the
+// module proxy off.
+func prefetch(t *testing.T) {
+	t.Helper()
+	cmd := exec.Command("go", "mod", "download")
+	cmd.Dir = repoRoot(t)
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("prefetch: go mod download: %v\n%s", err, out)
+	}
+}
+
+// TestNetworkOptIn fails when a script fetches a module without networkOptIn before it: with
+// the module proxy off, it could only pass on a cache some other run filled.
+func TestNetworkOptIn(t *testing.T) {
+	scripts, err := filepath.Glob(filepath.Join("testdata", "script", "*.txtar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range scripts {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		optedIn := false
+		for line := range strings.Lines(string(data)) {
+			line = strings.TrimSpace(line)
+			if line == networkOptIn {
+				optedIn = true
+			}
+			if strings.HasPrefix(line, "exec go get ") && !optedIn {
+				t.Errorf("%s runs %q without %q before it", filepath.Base(path), line, networkOptIn)
+			}
+		}
+	}
+}
+
 // repoRoot returns the module root, one level up from this package.
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -103,6 +148,7 @@ func TestScripts(t *testing.T) {
 
 	root := repoRoot(t)
 	bin := rotiniBin(t)
+	prefetch(t)
 
 	testscript.Run(t, testscript.Params{
 		Dir: filepath.Join("testdata", "script"),
@@ -116,6 +162,10 @@ func TestScripts(t *testing.T) {
 				"GOCACHE="+goEnv("GOCACHE"),
 				"GOPATH="+goEnv("GOPATH"),
 				"GOFLAGS=-mod=mod",
+				// Scripts run offline: what they build is in the module cache already, from
+				// prefetch, so one that reaches the network fails unless it opts in.
+				"GOPROXY=off",
+				"ROTINI_NETWORK_GOPROXY="+goEnv("GOPROXY"),
 				"GOTOOLCHAIN=local",
 				// Deterministic output: no color, no terminal-dependent behavior.
 				"NO_COLOR=1",
@@ -321,7 +371,7 @@ require github.com/go-rotini/rotini %s
 tool github.com/go-rotini/rotini/cmd/rotini
 
 replace github.com/go-rotini/rotini %s => %s
-`, module, version, version, strings.ReplaceAll(root, `\`, `/`))
+%s`, module, version, version, testmod.Quote(strings.ReplaceAll(root, `\`, `/`)), testmod.Directives(root))
 }
 
 // goEnv returns one `go env` value, preferring an already-set environment variable. Results are

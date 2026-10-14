@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -14,6 +15,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/go-rotini/toml"
 )
 
 // The spec lint stage: rotini-specific rules the JSON Schema cannot express. Each
@@ -47,6 +50,8 @@ var specLints = []func(*Spec) []error{
 	lintGroupConflicts,
 	lintDuplicateFlagIdentifiers,
 	lintShadowedIdentifiers,
+	lintShortCircuitScope,
+	lintRequiredFlagScope,
 	lintSingleDashIdentifiers,
 	lintShortOnlyFlags,
 	lintDigitIdentifiers,
@@ -54,6 +59,7 @@ var specLints = []func(*Spec) []error{
 	lintHandlerFilenames,
 	lintSiblingCollisions,
 	lintDuplicateInputNames,
+	lintGoNames,
 	lintVariadicArguments,
 	lintDeprecatedIdentifiers,
 	lintPluginTimeouts,
@@ -66,6 +72,7 @@ var specLints = []func(*Spec) []error{
 	lintEnvNesting,
 	lintConfigInputFiles,
 	lintConfigKeyCollisions,
+	lintEnvVariableTypes,
 	lintConstraintApplicability,
 	lintCountFlags,
 	lintPassthrough,
@@ -81,6 +88,7 @@ var specLints = []func(*Spec) []error{
 	lintBoundsSatisfiable,
 	lintEnumValues,
 	lintEnumSummaries,
+	lintSummaryLines,
 	lintRequiredDefault,
 	lintDefaultScalar,
 	lintDefaultConstraints,
@@ -99,9 +107,11 @@ var specLints = []func(*Spec) []error{
 	lintRepeatable,
 	lintUniqueItems,
 	lintOutputStream,
+	lintOutputKinds,
 	lintDeprecationLifecycle,
 	lintArgumentFallback,
 	lintRelativeTime,
+	lintIntegerBase,
 	lintPatternKinds,
 	lintEnumValueKeys,
 	lintStdinStream,
@@ -452,11 +462,14 @@ func lintSeparator(spec *Spec) []error {
 }
 
 // enumMember reports whether v is one of schema's enum members, the way the runtime matches:
-// exactly, or regardless of case under ignore_case.
+// exactly, regardless of case under ignore_case, or by value under base: prefixed.
 func enumMember(schema *InputSchema, v string) bool {
 	spellings := enumStrings(schema.Enum)
 	for a := range enumAliases(schema.Enum) {
 		spellings = append(spellings, a) // an alias is accepted; lintEnumValueKeys asks for the value
+	}
+	if intBase(schema) == prefixedBase && slices.ContainsFunc(spellings, func(m string) bool { return prefixedText(m) == prefixedText(v) }) {
+		return true
 	}
 	if schema.IgnoreCase {
 		return slices.ContainsFunc(spellings, func(m string) bool { return strings.EqualFold(m, v) })
@@ -1133,9 +1146,10 @@ func lintDefaultScalar(spec *Spec) []error {
 			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.Default == nil {
 				return // an object input: lintObjectFlags
 			}
-			switch v := schema.Default.(type) {
-			case string, bool, float64, int, int64, nil:
+			if scalarDefault(schema.Default) {
 				return
+			}
+			switch v := schema.Default.(type) {
 			case []any, map[string]any:
 				if repeatableSchema(schema) {
 					if bad := nonScalarElement(v); bad != "" {
@@ -1187,8 +1201,8 @@ func lintPatternCompiles(spec *Spec) []error {
 		for _, name := range slices.Sorted(maps.Keys(c.Schemas)) {
 			orphans(path, ptr+"/schemas/"+name, fmt.Sprintf("schema %q", name), c.Schemas[name].BaseSchema)
 		}
-		if c.Output != nil {
-			orphans(path, ptr+"/output", "output", c.Output.BaseSchema)
+		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+			orphans(path, s.ptr, "output", s.schema.BaseSchema)
 		}
 		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
 			if schema != nil {
@@ -1316,8 +1330,8 @@ func lintImportConsistency(spec *Spec) []error {
 				walkSchemaTree(s.BaseSchema, record(site{"command " + path, ptr}))
 			}
 		})
-		if c.Output != nil {
-			walkSchemaTree(c.Output.BaseSchema, record(site{"command " + path, ptr + "/output"}))
+		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+			walkSchemaTree(s.schema.BaseSchema, record(site{"command " + path, s.ptr}))
 		}
 	})
 	for _, name := range slices.Sorted(maps.Keys(spec.Command.Schemas)) {
@@ -1441,8 +1455,8 @@ func lintSchemaRefs(spec *Spec) []error {
 			}
 			walkSchemaTree(s.BaseSchema, checkAt("command "+path, subject, ptr))
 		})
-		if c.Output != nil {
-			walkSchemaTree(c.Output.BaseSchema, checkAt("command "+path, "output", ptr+"/output"))
+		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+			walkSchemaTree(s.schema.BaseSchema, checkAt("command "+path, "output", s.ptr))
 		}
 	})
 	for _, name := range names {
@@ -1458,7 +1472,10 @@ func lintSchemaRefs(spec *Spec) []error {
 func lintHandlerFilenames(spec *Spec) []error {
 	rootName := spec.Command.Name
 	var problems []error
-	byFile := map[string]string{} // stub file name -> the command path that first produced it
+	// Keyed case-folded: on a case-insensitive file system (macOS, Windows) files that differ
+	// only in case are one file, so only the first would be written.
+	type stub struct{ file, display string }
+	byFile := map[string]stub{} // lowercased stub file name -> the command that first produced it
 	var walk func(c *Command, path, display, ptr string)
 	walk = func(c *Command, path, display, ptr string) {
 		if ov := c.Filename; ov != "" {
@@ -1472,14 +1489,18 @@ func lintHandlerFilenames(spec *Spec) []error {
 			}
 		}
 		fn := commandStubFilename(rootName, path, c.Filename)
-		if prev, dup := byFile[fn]; dup {
-			if prev == display {
+		if prev, dup := byFile[strings.ToLower(fn)]; dup {
+			if prev.display == display {
 				// Two siblings share this name; lintSiblingCollisions already reports it.
 				return
 			}
-			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + display, msg: fmt.Sprintf("generates handler file %q, already used by command %q", fn, prev)})
+			msg := fmt.Sprintf("generates handler file %q, already used by command %q", fn, prev.display)
+			if prev.file != fn {
+				msg = fmt.Sprintf("generates handler file %q, and command %q generates %q: on a case-insensitive file system (macOS, Windows) they are one file; rename one command or set its `filename`", fn, prev.display, prev.file)
+			}
+			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + display, msg: msg})
 		} else {
-			byFile[fn] = display
+			byFile[strings.ToLower(fn)] = stub{fn, display}
 		}
 		for i := range c.Commands {
 			child := &c.Commands[i]
@@ -1647,13 +1668,22 @@ func nonScalarElement(v any) string {
 		}
 	}
 	for _, it := range items {
-		switch it.(type) {
-		case string, bool, float64, int, int64, nil:
-			continue
+		if !scalarDefault(it) {
+			return defaultKindName(it)
 		}
-		return defaultKindName(it)
 	}
 	return ""
+}
+
+// scalarDefault reports whether v is a scalar as any spec format decodes one: a string, bool,
+// number of any kind, or a TOML date or time.
+func scalarDefault(v any) bool {
+	switch v.(type) {
+	case string, bool, float64, int, int64, uint64, json.Number, nil,
+		time.Time, toml.LocalDate, toml.LocalTime, toml.LocalDateTime:
+		return true
+	}
+	return false
 }
 
 // lintDefaultConstraints rejects a `default` that the input's own enum, bounds, length,
@@ -1719,7 +1749,11 @@ func defaultViolation(schema *InputSchema, label, v string) string {
 			label, v, strings.Join(enumStrings(schema.Enum), ", "))
 	}
 
-	if n, err := strconv.ParseFloat(v, 64); err == nil {
+	num := v
+	if intBase(schema) == prefixedBase {
+		num = prefixedText(v)
+	}
+	if n, err := strconv.ParseFloat(num, 64); err == nil {
 		switch {
 		case bound(schema.Minimum) != nil && n < *bound(schema.Minimum):
 			return fmt.Sprintf("%s %s is below the declared `minimum` %s", label, v, formatBound(*bound(schema.Minimum)))

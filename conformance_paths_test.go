@@ -22,7 +22,7 @@ func pathConformanceCases() []dataCase {
 		{"ENV-12", func(t *testing.T) { // an env existingfile that does not exist is a usage error naming the variable
 			_, home, work, conf := exSetup(t)
 			_, err := exBind(t, work, conf, "", []string{"HOME=" + home, "APP_LOG=/nonexistent"})
-			if err == nil || err.Error() != `APP_LOG: no such file: "/nonexistent"` {
+			if err == nil || err.Error() != `environment variable APP_LOG: no such file: "/nonexistent"` {
 				t.Errorf("err = %v", err)
 			}
 		}},

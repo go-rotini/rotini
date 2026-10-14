@@ -22,7 +22,8 @@ const name = "template"
 //
 //	schema: { type: shape.Template, import: github.com/go-rotini/rotini/shape, placeholder: TEMPLATE }
 //
-// Its zero value, also what an empty string parses to, is no template; check it with IsZero.
+// Its zero value, also what an empty string parses to, is no template; check it with
+// [Template.IsZero].
 type Template struct {
 	src string
 	t   *template.Template

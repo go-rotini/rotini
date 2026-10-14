@@ -118,6 +118,7 @@ type cmdHelp struct {
 	Topics      []Topic           // command.topics: help topics, read from the root only
 	Effects     *Effects          // command.effects: what running it does; nil when undeclared
 	Agent       *bool             // command.agent: offered to AI agents (true), kept from them (false), or unset
+	Metadata    map[string]string // command.metadata: the author's own labels, copied verbatim
 }
 
 // commandHelp gathers the doc fields of a command.
@@ -128,7 +129,7 @@ func commandHelp(c Command) cmdHelp {
 		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso, Groups: c.Groups,
 		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
 		Stability: c.Stability, Topics: c.Topics,
-		Effects: c.Effects, Agent: c.Agent,
+		Effects: c.Effects, Agent: c.Agent, Metadata: c.Metadata,
 	}
 }
 
@@ -209,7 +210,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			out = append(out, helpNode{
 				prefix:   n.prefix,
 				file:     file(childNames),
-				paths:    permute(childChain),
+				paths:    resolverPaths(gp.tree, childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
 				data:     data,
@@ -975,6 +976,20 @@ func hasVisibleFlags(inputs *Inputs) bool {
 	return false
 }
 
+// resolverPaths returns a command's resolver case values for the chain of per-segment
+// spellings (name first, then aliases): only the names when the tree has aliases, which the
+// generated resolvers map to names first (see canonicalPathDecl), else every permutation.
+func resolverPaths(tree []rnode, chain [][]string) []string {
+	if !treeHasAliases(tree) {
+		return permute(chain)
+	}
+	names := make([]string, len(chain))
+	for i, seg := range chain {
+		names[i] = seg[0]
+	}
+	return []string{strings.Join(names, " ")}
+}
+
 // permute returns every space-joined path through the chain of per-segment identifier sets
 // (name and aliases), so the resolver matches aliased paths. An empty chain yields [""].
 func permute(chain [][]string) []string {
@@ -998,7 +1013,7 @@ func permute(chain [][]string) []string {
 // buildFeatureBlock turns a feature's nodes into the template data for its vars, resolver
 // cases and optional pages list. In embed mode each var is a //go:embed path; otherwise it is
 // an inline string literal from contents.
-func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool, contents []string) templateFeature {
+func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool, contents []string, aliased bool) templateFeature {
 	h := templateFeature{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
 	if feat.manPages && len(nodes) > 0 {
 		h.Section = nodes[0].data.Section
@@ -1038,6 +1053,7 @@ func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool
 		}
 		h.Cases = append(h.Cases, templateFeatureCase{PathsLiteral: strings.Join(quoted, ", "), Var: name})
 	}
+	h.PathSwitch = resolverSwitch(aliased)
 	return h
 }
 
@@ -1126,6 +1142,7 @@ func stripForFeature(feat docFeature, text string) string {
 // default when missing, and parses it with the shared FuncMap.
 func loadFeatureTemplate(pl *planner, featDir string, feat docFeature) (*template.Template, error) {
 	path := filepath.Join(featDir, feat.tmplFile)
+	noteRead(path)
 	src, _, exists, err := pl.read(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s template %s: %w", feat.name, path, err)

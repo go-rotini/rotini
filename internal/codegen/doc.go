@@ -20,7 +20,7 @@
 //
 // # File layout
 //
-// Each file belongs to one stage, named by its prefix:
+// Files are named by the stage or command they serve:
 //
 //	processor*     the Processor and the run/watch loop
 //	schema*        rotini's JSON Schemas, the generated model types, reading and walking them
@@ -28,18 +28,26 @@
 //	validate*      schema and version validation, and the problem type
 //	lint*          lint rules for the spec and conf, composition, suggestions
 //	generate*      the generate stage
-//	initialize.go  `rotini initialize`: scaffold a new CLI, then generate it
+//	initialize*    `rotini initialize`: scaffold a new CLI, then generate it
+//	import*        `rotini import`: write a spec and conf from an existing Go CLI
+//	diff.go        `rotini diff`: compare contracts
+//	explain.go     `rotini explain`: describe a spec or conf key
+//	format*        `rotini fmt`: rewrite YAML documents in canonical form
+//	tree.go        `rotini tree`: print the resolved command tree
 //
 // # Generate
 //
 // A spec and conf resolve into a [program]: the command tree, the output layout and the target
 // module. program.generate runs the emit steps in order:
 //
-//	emit schemas → emit contract → emit models file → emit cmd file → emit feature outputs →
-//	emit handler stubs → emit entrypoint → prune orphans → audit handler hooks
+//	emit schemas → emit contract → emit program features → emit models file → emit cmd file →
+//	emit feature outputs → emit install files → emit handler stubs → emit entrypoint →
+//	prune orphans → prune installed man pages → audit handler hooks
 //
-// The last step reads the author's handler code instead of writing: it reports methods whose
-// names nearly match a lifecycle hook, which the generated `var _ rotini.Handler` assertion
-// cannot catch, and handlers that acquire another command's inputs type. The runtime is an
-// imported library and is never emitted.
+// The last step reads the author's handler code instead of writing. It warns about methods
+// whose names nearly match a lifecycle hook (which the generated `var _ rotini.Handler`
+// assertion cannot catch), handlers that acquire another command's inputs type, exit codes not
+// documented in exit_status, outputs written as a stream without `output_stream: true`, and a
+// root handler missing the CascadingPreRun its short-circuit --help relies on. The runtime is
+// an imported library and is never emitted.
 package codegen

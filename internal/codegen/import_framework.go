@@ -117,7 +117,7 @@ var kongGrammarTypes = []string{"CLI", "Cli", "cli", "Grammar", "grammar", "App"
 // one with a field tagged for Kong (cmd:"", arg:"", help:"…"). how says which rule matched.
 // With neither, the error lists the grammar types it found.
 func findKongRoot(pkgDir string) (expr, how string, err error) {
-	files, err := parsePackage(pkgDir)
+	files, broken, err := parsePackage(pkgDir)
 	if err != nil {
 		return "", "", err
 	}
@@ -181,7 +181,7 @@ func findKongRoot(pkgDir string) (expr, how string, err error) {
 		b.WriteString(strings.Join(tagged, ", "))
 	}
 	b.WriteString(`. Pass --root with a Go expression that yields a pointer to the grammar, such as --root '&cli' or --root '&Commands{}'`)
-	return "", "", errors.New(b.String())
+	return "", "", unparsed(errors.New(b.String()), broken)
 }
 
 // kongGrammarVar returns the expression for a package-level variable that holds a grammar
@@ -250,7 +250,7 @@ var urfaveConstructors = append(slices.Clone(rootConstructors), "NewApp", "newAp
 // constructor, or the only such function. how says which rule matched. With none, the
 // error lists what it found.
 func findURFaveRoot(pkgDir string) (expr, how string, err error) {
-	files, err := parsePackage(pkgDir)
+	files, broken, err := parsePackage(pkgDir)
 	if err != nil {
 		return "", "", err
 	}
@@ -312,7 +312,7 @@ func findURFaveRoot(pkgDir string) (expr, how string, err error) {
 	}
 	b.WriteString(`. Pass --root with a Go expression that yields the root command, such as --root 'newApp()', ` +
 		`or move the tree out of main into a function such as newApp()`)
-	return "", "", errors.New(b.String())
+	return "", "", unparsed(errors.New(b.String()), broken)
 }
 
 // markListed records the variables and parameterless calls in a Commands list.

@@ -160,6 +160,7 @@ func validateInstance(kind string, instance []byte, schema *jsonschema.Schema) [
 // `examples`, `x-hint`, anyOf required causes), never hardcoded, and dispatch is on
 // ve.Keyword rather than message text. Other messages pass through unchanged.
 func humanizeSchemaError(ve *jsonschema.ValidationError) string {
+	loc := staticLocation(ve.KeywordLocation)
 	switch ve.Keyword {
 	case "false":
 		// additionalProperties:false renders as a "false" schema for the offending key.
@@ -167,9 +168,9 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 		if key == "" {
 			break
 		}
-		if noun := definitionNoun(ve.KeywordLocation); noun != "" {
+		if noun := definitionNoun(loc); noun != "" {
 			msg := fmt.Sprintf("unknown key %q on %s", key, noun)
-			if hint := schemaPlacementHint(definitionName(ve.KeywordLocation), key); hint != "" {
+			if hint := schemaPlacementHint(definitionName(loc), key); hint != "" {
 				msg += "; " + hint
 			}
 			return msg
@@ -179,7 +180,7 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 		if key := pointerLeaf(ve.InstanceLocation); key != "" {
 			if want, ok := strings.CutPrefix(ve.Message, "value is not of type "); ok {
 				msg := fmt.Sprintf("%q must be of type %s", key, want)
-				if hint := schemaHint(strings.TrimSuffix(ve.KeywordLocation, "/type")); hint != "" {
+				if hint := schemaHint(strings.TrimSuffix(loc, "/type")); hint != "" {
 					msg += "; " + hint
 				}
 				return msg
@@ -188,7 +189,7 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 	case "pattern":
 		// Every patterned key in rotini's schemas declares `examples`; quote them instead of
 		// the regex.
-		node := strings.TrimSuffix(ve.KeywordLocation, "/pattern")
+		node := strings.TrimSuffix(loc, "/pattern")
 		if ex := schemaExamples(node); len(ex) > 0 {
 			msg := fmt.Sprintf("%s must look like %s", patternSubject(ve.InstanceLocation), quotedOrList(ex))
 			if hint := schemaHint(node); hint != "" {
@@ -198,7 +199,7 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 		}
 	case "anyOf":
 		// A choice between forms of one value says what the forms are in its `x-hint`.
-		if hint := schemaHint(strings.TrimSuffix(ve.KeywordLocation, "/anyOf")); hint != "" {
+		if hint := schemaHint(strings.TrimSuffix(loc, "/anyOf")); hint != "" {
 			return patternSubject(ve.InstanceLocation) + " " + hint
 		}
 		// Otherwise, in rotini's schemas an anyOf is a choice between required keys, so the
@@ -207,7 +208,7 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 		if len(keys) < 2 {
 			break
 		}
-		noun := definitionNoun(ve.KeywordLocation)
+		noun := definitionNoun(loc)
 		if noun == "" {
 			noun = "this value"
 		}
@@ -268,26 +269,65 @@ func schemaExamples(location string) []string {
 	return out
 }
 
+// staticLocation turns a keyword location given as the evaluation path ("#/properties/command/
+// $ref/properties/flags/items/$ref/type") into where the keyword sits in the schema document
+// ("#/definitions/FlagInput/type"), by following each local $ref in whichever embedded schema
+// has the path. A location with no $ref step is already static and is returned as it is.
+func staticLocation(location string) string {
+	path := strings.Split(strings.TrimPrefix(location, "#/"), "/")
+	if !slices.Contains(path, "$ref") {
+		return location
+	}
+	for _, doc := range schemaDocuments() {
+		static, node := []string{}, doc
+		for _, seg := range path {
+			if target, ok := refTarget(node, seg); ok {
+				static = strings.Split(strings.TrimPrefix(target, "#/"), "/")
+				node = schemaNode(target)
+				continue
+			}
+			static = append(static, seg)
+			node = childNode(node, unescapePointer(seg))
+		}
+		if node != nil {
+			return "#/" + strings.Join(static, "/")
+		}
+	}
+	return location
+}
+
+// refTarget returns the local $ref of node when seg steps through it.
+func refTarget(node any, seg string) (string, bool) {
+	m, ok := node.(map[string]any)
+	if !ok || seg != "$ref" {
+		return "", false
+	}
+	target, ok := m["$ref"].(string)
+	return target, ok && strings.HasPrefix(target, "#/")
+}
+
+// childNode steps from node into its member or element named seg, or nil.
+func childNode(node any, seg string) any {
+	switch n := node.(type) {
+	case map[string]any:
+		return n[seg]
+	case []any:
+		i, err := strconv.Atoi(seg)
+		if err != nil || i < 0 || i >= len(n) {
+			return nil
+		}
+		return n[i]
+	}
+	return nil
+}
+
 // schemaNode resolves a keyword location in whichever embedded schema has it.
 func schemaNode(location string) any {
 	path := strings.Split(strings.TrimPrefix(location, "#/"), "/")
 	for _, doc := range schemaDocuments() {
 		node := doc
 		for _, seg := range path {
-			seg = unescapePointer(seg)
-			switch n := node.(type) {
-			case map[string]any:
-				node = n[seg]
-			case []any:
-				i, err := strconv.Atoi(seg)
-				if err != nil || i < 0 || i >= len(n) {
-					node = nil
-				} else {
-					node = n[i]
-				}
-			default:
-				node = nil
-			}
+			node = childNode(node, unescapePointer(seg))
 		}
 		if node != nil {
 			return node
@@ -497,7 +537,13 @@ func (w *schemaBlockWalker) command(node any, ptr string) {
 		}
 	}
 	if out, ok := c["output"]; ok {
-		w.block(out, false, ptr+"/output", "the output schema", "")
+		w.block(out, false, ptr+"/output", outputBlockNoun, "")
+		if m, ok := out.(map[string]any); ok {
+			kinds, _ := m["oneOf"].([]any)
+			for i, k := range kinds {
+				w.block(k, false, fmt.Sprintf("%s/output/oneOf/%d", ptr, i), "an output kind's schema", "")
+			}
+		}
 	}
 	if statuses, ok := c["exit_status"].([]any); ok {
 		for i, s := range statuses {
@@ -518,6 +564,9 @@ func (w *schemaBlockWalker) command(node any, ptr string) {
 		w.command(sub, fmt.Sprintf("%s/commands/%d", ptr, i))
 	}
 }
+
+// outputBlockNoun names a command's own output schema, the one block that may hold oneOf.
+const outputBlockNoun = "the output schema"
 
 // entrySchemas checks the `schema` of each entry in a list such as flags or config_files.
 func (w *schemaBlockWalker) entrySchemas(list any, input bool, ptr, noun, channel string) {
@@ -544,8 +593,12 @@ func (w *schemaBlockWalker) block(node any, input bool, ptr, noun, channel strin
 		allowed = w.sets.input
 	}
 	for _, k := range slices.Sorted(maps.Keys(m)) {
-		if !allowed[k] {
+		switch {
+		case !allowed[k]:
 			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + escapePointer(k), msg: unknownSchemaKey(k, noun, channel)})
+		case k == "oneOf" && noun != outputBlockNoun:
+			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + k,
+				msg: fmt.Sprintf("`oneOf` in %s; it is accepted only on a command's `output`, listing the kinds of a stream's items", noun)})
 		}
 	}
 	if props, ok := m["properties"].(map[string]any); ok {

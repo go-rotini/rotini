@@ -2,7 +2,9 @@ package rotini
 
 import (
 	"fmt"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -17,7 +19,7 @@ import (
 // Fields copy the matching [Definition] (root) or [CommandDef] fields; an empty slice means the
 // command declares none of that kind.
 type Command struct {
-	Name                  string
+	Name                  string   // the command's name; the program's name for the root
 	Handler               string   // ProgramHandlers method for this command; see [CommandDef.Handler]
 	Matched               string   // the argv token that resolved this command (name or an alias); "" for the root
 	DeprecatedIdentifiers []string // aliases of this command that are deprecated
@@ -56,6 +58,9 @@ type Command struct {
 	// Usage is the command's usage line; see [CommandDef.Usage] and [Context.Usage].
 	Usage string
 
+	// Metadata is the command's own labels; see [CommandDef.Metadata].
+	Metadata map[string]string
+
 	// pluginPathRaw is PluginPath as declared, for re-expanding it against a run's injected
 	// environment; view is that run's environment, used by [Command.PluginBinary] and
 	// [Command.DiscoveredPlugins]. Both are set by the runtime; nil reads the process.
@@ -79,7 +84,7 @@ func rootFrame(def Definition) Command {
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Plugins: def.Plugins, PluginDiscovery: def.PluginDiscovery,
 		PluginPath: expandPluginPath(def.PluginPath), pluginPathRaw: def.PluginPath, Passthrough: def.Passthrough, OptionsFirst: def.OptionsFirst,
-		Output: def.Output, Usage: def.Usage,
+		Output: def.Output, Usage: def.Usage, Metadata: def.Metadata,
 	}
 }
 
@@ -92,7 +97,7 @@ func cmdFrame(c CommandDef) Command {
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Plugins: c.Plugins, PluginDiscovery: c.PluginDiscovery,
 		PluginPath: expandPluginPath(c.PluginPath), pluginPathRaw: c.PluginPath, Passthrough: c.Passthrough, OptionsFirst: c.OptionsFirst,
-		Output: c.Output, Usage: c.Usage,
+		Output: c.Output, Usage: c.Usage, Metadata: c.Metadata,
 	}
 }
 
@@ -103,7 +108,13 @@ func cmdFrame(c CommandDef) Command {
 //
 // It is lenient by design: unknown flags, missing values and bad input are left to the parser.
 func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
-	chain := []Command{rootFrame(def)}
+	var buf [4]Command // most chains fit, so the result is allocated once, at its final size
+	chain, plugin := descend(append(buf[:0], rootFrame(def)), def, argv)
+	return slices.Clone(chain), plugin
+}
+
+// descend is resolveChain's walk, appending each command it descends into to chain.
+func descend(chain []Command, def Definition, argv []string) ([]Command, *PluginDispatch) {
 	if def.Passthrough {
 		return chain, nil // a passthrough root: every token is a positional
 	}
@@ -122,7 +133,7 @@ func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
 		if strings.HasPrefix(tok, "-") {
 			break
 		}
-		cur := chain[len(chain)-1]
+		cur := &chain[len(chain)-1] // not a copy; unused once chain grows
 		if child, ok := findChild(cur, tok); ok {
 			frame := cmdFrame(child)
 			frame.Matched = tok // record the token used (name or alias) for deprecation detection
@@ -137,7 +148,7 @@ func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
 		}
 		// At a discovery-enabled command, an unmatched token dispatches to the executable
 		// <prefix><token>; the binary is located (and any error reported) at exec time.
-		if d := cur.PluginDiscovery; d != nil {
+		if d := cur.PluginDiscovery; d != nil && pluginToken(tok) {
 			rd := PluginDef{Name: tok, Binary: d.Prefix + tok}
 			return chain, &PluginDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: cur.PluginPath, Discovered: true}
 		}
@@ -146,8 +157,18 @@ func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
 	return chain, nil
 }
 
+// pluginToken reports whether tok can name a discovered plugin: a plain file name, so the
+// binary <prefix><tok> stays inside the directories searched. A token holding a path separator
+// (or, on Windows, a drive colon), NUL, or one that is "." or "..", is not a plugin.
+func pluginToken(tok string) bool {
+	if tok == "." || tok == ".." || strings.ContainsAny(tok, "/\\\x00") {
+		return false
+	}
+	return runtime.GOOS != "windows" || !strings.Contains(tok, ":")
+}
+
 // findPlugin returns the declared plugin of f matching tok by name or alias.
-func findPlugin(f Command, tok string) (PluginDef, bool) {
+func findPlugin(f *Command, tok string) (PluginDef, bool) {
 	for _, r := range f.Plugins {
 		if r.Name == tok {
 			return r, true
@@ -193,10 +214,10 @@ func splitFlag(tok string) (name, value string, hasValue bool) {
 }
 
 // findChild returns the sub-command of f matching tok by name, alias or hidden alias.
-func findChild(f Command, tok string) (CommandDef, bool) {
-	for _, c := range f.Commands {
-		if c.matches(tok) {
-			return c, true
+func findChild(f *Command, tok string) (CommandDef, bool) {
+	for i := range f.Commands {
+		if c := &f.Commands[i]; c.Name == tok || slices.Contains(c.Aliases, tok) || slices.Contains(c.HiddenAliases, tok) { // matches, without copying c
+			return *c, true
 		}
 	}
 	return CommandDef{}, false
@@ -272,9 +293,16 @@ func pluginHostFlags(chain []Command, before []string, plugin string) (answer bo
 		return true, nil
 	}
 	name, _, _ := splitFlag(before[first])
+	// The plugin's name may be the detached value of a secret optional-value flag before it.
+	shown := strconv.Quote(plugin)
+	last := &parsedInputs{}
+	noteDetached(last, chain, before[len(before)-1], append(slices.Clone(before), plugin), len(before)-1)
+	if last.secretWord(plugin) {
+		shown = redactValue(plugin, true)
+	}
 	return false, &ParseError{
 		Kind:    ParseKindMisplacedFlag,
-		Msg:     fmt.Sprintf("%s can't come before plugin %q: a plugin receives only the words after its name", name, plugin),
+		Msg:     fmt.Sprintf("%s can't come before plugin %s: a plugin receives only the words after its name", name, shown),
 		Command: chain[len(chain)-1].Name,
 		Flag:    name,
 		Token:   name,

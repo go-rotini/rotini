@@ -89,28 +89,34 @@ command:
 	}
 }
 
-// TestDuplicateDecls pins that a generated name made twice fails generate with a message
-// naming the spec entry, instead of writing a file that does not compile.
+// TestDuplicateDecls pins that a generated name made twice, in a way validation doesn't
+// foresee, fails generate with a message naming the spec entry, instead of writing a file that
+// does not compile.
 func TestDuplicateDecls(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
-	// `demo get`'s exit name `inputs` makes DemoGetExitInputs, which is also the inputs type of
-	// the command `demo get exit`.
+	// `demo get`'s exit name `output_data` makes DemoGetExitOutputData, which is also the type
+	// of the `data` object in the output of the command `demo get-exit`.
 	writeTestFile(t, dir, ".rotini.spec.yaml", `version: 0.0.0
 command:
   name: demo
   commands:
     - name: get
       exit_status:
-        - { code: 3, name: inputs, summary: bad inputs }
-      commands:
-        - name: exit
-          summary: a sub-command named exit
+        - { code: 3, name: output_data, summary: bad output }
+    - name: get-exit
+      output:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              id: { type: string }
 `)
 	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
 	t.Chdir(dir)
 	err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), `DemoGetExitInputs is declared twice: the exit_status name "inputs" of "demo get"`) {
+	if err == nil || !strings.Contains(err.Error(), `DemoGetExitOutputData is declared twice: the exit_status name "output_data" of "demo get"`) {
 		t.Fatalf("Generate = %v, want the collision named", err)
 	}
 }

@@ -90,7 +90,7 @@ func duplicateDefault(schema *InputSchema) string {
 		Enum: enumStrings(schema.Enum), EnumValues: runtimeEnumValues(schema.Enum), IgnoreCase: schema.IgnoreCase,
 		UniqueItems: true,
 	}
-	withTimeForms(&fd, schema)
+	withValueForms(&fd, schema)
 	argv := make([]string, len(values))
 	for i, v := range values {
 		argv[i] = "--v=" + v

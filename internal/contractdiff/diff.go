@@ -1,11 +1,15 @@
 // Package contractdiff compares two versions of a rotini contract document and reports what
 // changed for the people and scripts using the CLI: breaking, possibly breaking, expected
-// (planned for removal at or below the release being prepared) or safe.
+// (a removal planned for the release being prepared or an earlier one, or a command removed
+// in favor of its replaced_by) or safe. The old item's stability softens a finding: on an
+// experimental item every change is safe, and on a beta item a breaking one is possibly
+// breaking.
 //
-// Commands match by path, flags by identifier, arguments by position, environment variables
-// by variable and config entries by key. Input and output schemas are compared in opposite
-// directions: narrowing what a caller may pass breaks callers, widening what the program
-// writes breaks readers. A shared definition is compared once, where it is defined.
+// Commands match by path, flags by identifier, arguments by name (by position when renamed in
+// place), environment variables by variable and config entries by key. Input and output
+// schemas are compared in opposite directions: narrowing what a caller may pass breaks
+// callers, widening what the program writes breaks readers. A shared definition is compared
+// once, where it is defined, at the most settled stability of the commands that use it.
 package contractdiff
 
 import (
@@ -43,11 +47,11 @@ func (s Severity) rank() int {
 // Finding is one change between the contracts.
 type Finding struct {
 	Severity Severity    `json:"severity"`
-	Rule     string      `json:"rule"`
-	Where    string      `json:"where"`
-	Message  string      `json:"message"`
-	Note     string      `json:"note,omitempty"`
-	Accepted *Acceptance `json:"accepted,omitempty"`
+	Rule     string      `json:"rule"`               // a Rule* ID
+	Where    string      `json:"where"`              // the item changed, such as "app deploy --force"
+	Message  string      `json:"message"`            // what changed
+	Note     string      `json:"note,omitempty"`     // context, such as the item's stability or planned removal
+	Accepted *Acceptance `json:"accepted,omitempty"` // the acknowledgement it matched, if any
 }
 
 // Acceptance is the acknowledgement a finding matched.
@@ -55,7 +59,8 @@ type Acceptance struct {
 	Reason string `json:"reason"`
 }
 
-// Accept acknowledges one intentional change: it matches the finding with this rule and where.
+// Accept acknowledges one intentional change: it matches the first not yet accepted finding
+// with the same Rule and Where.
 type Accept struct {
 	Rule   string `json:"rule"`
 	Where  string `json:"where"`
@@ -192,18 +197,21 @@ func (d *differ) removal(st stability, rule, where, msg, removedIn string, hidde
 
 // removalWith is removal with a note of the caller's added.
 func (d *differ) removalWith(st stability, rule, where, msg, removedIn string, hidden bool, note string) {
-	switch {
-	case removedIn != "" && d.release != "" && compareVersions(removedIn, d.release) <= 0:
+	if removedIn != "" && d.release != "" && compareVersions(removedIn, d.release) <= 0 {
 		d.add(st, Expected, rule, where, msg, joinNote(note, "planned for removal in "+removedIn))
-	case removedIn != "" && d.release == "":
-		d.add(st, Breaking, rule, where, msg, joinNote(note, "planned for removal in "+removedIn+"; pass --release"))
-	case removedIn != "":
-		d.add(st, Breaking, rule, where, msg, joinNote(note, "planned for removal in "+removedIn))
-	case hidden:
-		d.add(st, PossiblyBreaking, rule, where, msg, joinNote(note, "was hidden"))
-	default:
-		d.add(st, Breaking, rule, where, msg, note)
+		return
 	}
+	switch {
+	case removedIn != "" && d.release == "":
+		note = joinNote(note, "planned for removal in "+removedIn+"; pass --release")
+	case removedIn != "":
+		note = joinNote(note, "planned for removal in "+removedIn)
+	}
+	if hidden {
+		d.add(st, PossiblyBreaking, rule, where, msg, joinNote(note, "was hidden"))
+		return
+	}
+	d.add(st, Breaking, rule, where, msg, note)
 }
 
 // report sorts the findings, applies the acknowledgements and counts.

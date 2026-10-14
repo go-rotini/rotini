@@ -229,8 +229,18 @@ func (rtx *Context) streamJSONL(fieldType reflect.Type, tag stdinTag, schema str
 }
 
 // decodeJSONLRecord checks one JSON Lines record against schema (when given) and decodes it
-// into out. Errors name the line.
+// into out. A key given twice in one object, or a record that is not valid UTF-8, is an error.
+// Errors name the line.
 func decodeJSONLRecord(fs *featureSet, raw []byte, line int, schema string, out any) error {
+	if err := invalidUTF8("json", raw); err != nil {
+		_, col, _ := parsePosition(err)
+		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d, column %d: %s", line, col, errInvalidUTF8), err)
+	}
+	if json.Valid(raw) {
+		if e := jsonDuplicateKey(raw); e != nil {
+			return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: duplicate key %q", line, e.Key), e)
+		}
+	}
 	if schema != "" {
 		if fs.schemas == nil {
 			return missingFeature("schemas", "Schemas()", "a stdin record schema is declared")
@@ -270,7 +280,7 @@ func checkJSONLRecord(schema string, v any) error {
 	}
 	result, err := compiled.ValidateValue(doc)
 	if err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: could not check the record against its schema", line), err)
+		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: the record could not be fully checked against its schema", line), err)
 	}
 	if err := documentResult(schema, result); err != nil {
 		if ie, ok := errors.AsType[*InputError](err); ok {

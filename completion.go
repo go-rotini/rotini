@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // completeCommand is the hidden sub-command the generated shell scripts call to
@@ -22,7 +24,8 @@ const completeCommand = "__complete"
 // dynamic completion candidates for one of its flags' values. Completion resolves the handler
 // of the command that declares the flag and, if it implements this interface, calls
 // CompleteFlagValue with the flag's logical name and the word being typed. A nil return falls
-// back to the flag's static enum; a non-nil return, empty included, is authoritative.
+// back to the static candidates (a map flag's key paths, else its enum); a non-nil return,
+// empty included, replaces them.
 //
 // rtx carries the resolved chain, the completion words in [Context.Argv] (the last is the word
 // being typed), the program's base context in [Context.Context], and the dependencies
@@ -42,7 +45,9 @@ const completeCommand = "__complete"
 // Candidates are offered in the order returned. A candidate may carry a one-line description
 // after a tab, "value\tdescription", which every shell shows beside the value (bash on the
 // second TAB) unless the conf's `descriptions_env` switches descriptions off.
-// [Context.SetCompletionOptions] asks the shell not to add a space after the inserted value.
+// [Context.SetCompletionOptions] asks the shell not to add a space after the inserted value, and
+// [Context.SetCompletionFallback] chooses what the shell falls back to, in place of the
+// declared `complete:` hint.
 type FlagValueCompleter interface {
 	CompleteFlagValue(rtx *Context, flag, partial string) []string
 }
@@ -50,7 +55,8 @@ type FlagValueCompleter interface {
 // ArgValueCompleter is the positional-argument counterpart of [FlagValueCompleter]: completion
 // calls CompleteArgValue on the invoked command's handler with the argument's logical name and
 // the word being typed. The same contract applies: a nil return falls back to the static
-// enum, candidates keep their order, and a candidate may carry a "value\tdescription" suffix.
+// candidates (command paths for a `complete: command` argument, else its enum), candidates
+// keep their order, and a candidate may carry a "value\tdescription" suffix.
 type ArgValueCompleter interface {
 	CompleteArgValue(rtx *Context, arg, partial string) []string
 }
@@ -90,6 +96,12 @@ type pendingFlag struct {
 	mapValue bool
 }
 
+// misplaced reports whether the pending flag is an ancestor's [FlagDef.Local] flag, which the
+// run rejects there, so its value has nothing to offer.
+func (cc completionContext) misplaced() bool {
+	return cc.pending.fd.Local && cc.pending.idx != len(cc.chain)-1
+}
+
 // completionAnswer is the candidate list for one request, in the order to offer it.
 type completionAnswer struct {
 	cands []string
@@ -99,6 +111,8 @@ type completionAnswer struct {
 	// noSpace asks the shell to add no space after the inserted candidate: an item of a
 	// separated list, which more items may follow.
 	noSpace bool
+	// ignoreCase reports that the candidates matched the typed word without regard to case.
+	ignoreCase bool
 }
 
 // complete returns the candidates for the word currently being typed — the last element of
@@ -158,8 +172,8 @@ func merged(names []string, vals valueCandidates, partial string) completionAnsw
 	if len(names) == 0 {
 		return ans
 	}
-	out := filterPrefix(append(names, ans.cands...), partial)
-	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (ans.keepOrder || !slices.IsSorted(out))}
+	out := filterPrefixCase(append(names, ans.cands...), partial, ans.ignoreCase)
+	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (ans.keepOrder || !slices.IsSorted(out)), ignoreCase: ans.ignoreCase}
 }
 
 // valueCandidates are the candidates for a value, with where they came from, which decides
@@ -173,16 +187,19 @@ type valueCandidates struct {
 	sorted bool
 	// noSpace marks the items of a separated list; see completionAnswer.
 	noSpace bool
+	// foldCase matches the prefix without regard to case, for an enum that ignores case.
+	foldCase bool
 }
 
 // answer filters the candidates by prefix and orders them: sorted, or kept as given.
 func (v valueCandidates) answer(prefix string) completionAnswer {
-	out := filterPrefix(v.cands, prefix)
+	out := filterPrefixCase(v.cands, prefix, v.foldCase)
+	ignoreCase := v.foldCase && len(out) > 0
 	if v.sorted {
 		sort.Strings(out)
-		return completionAnswer{cands: out}
+		return completionAnswer{cands: out, ignoreCase: ignoreCase}
 	}
-	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (v.dynamic || !slices.IsSorted(out)), noSpace: v.noSpace && len(out) > 0}
+	return completionAnswer{cands: out, keepOrder: len(out) > 1 && (v.dynamic || !slices.IsSorted(out)), noSpace: v.noSpace && len(out) > 0, ignoreCase: ignoreCase}
 }
 
 // completePendingFlagValue completes the separate-word form — "--flag <TAB>", and bash's
@@ -191,7 +208,7 @@ func (v valueCandidates) answer(prefix string) completionAnswer {
 // dispatch would read as this flag's value.
 func completePendingFlagValue(cc completionContext, words []string, partial string, lookup HandlerLookup, rtx *Context) completionAnswer {
 	p := cc.pending
-	if p.mapValue || !takesValue(p.fd) {
+	if p.mapValue || !takesValue(p.fd) || cc.misplaced() {
 		return completionAnswer{}
 	}
 	return flagValueCandidates(lookup, rtx, cc.chain, words, p.idx, p.fd, partial).answer(partial)
@@ -199,12 +216,12 @@ func completePendingFlagValue(cc completionContext, words []string, partial stri
 
 // completeFlagWord completes a word beginning with "-": either a flag name, or a flag's value in
 // the inline "--flag=value" form. Only declared, visible, current flags are offered, and the
-// whole chain contributes, since ancestor flags resolve on descendants. Unset required flags
-// come first.
+// whole chain contributes, since ancestor flags resolve on descendants, except an ancestor's
+// local flags. Unset required flags come first.
 func completeFlagWord(cc completionContext, words []string, partial string, lookup HandlerLookup, rtx *Context) completionAnswer {
 	if name, val, hasInline := splitFlag(partial); hasInline {
 		fd, idx, negated, found := findFlagMatch(cc.chain, name)
-		if !found || negated || !takesValue(fd) {
+		if !found || negated || !takesValue(fd) || (fd.Local && idx != len(cc.chain)-1) {
 			return completionAnswer{} // a flag that takes no value has nothing to offer after "="
 		}
 		vals := flagValueCandidates(lookup, rtx, cc.chain, words, idx, fd, val)
@@ -216,32 +233,26 @@ func completeFlagWord(cc completionContext, words []string, partial string, look
 		return vals.answer(partial)
 	}
 
-	var required, rest []string
-	claimed := map[string]bool{} // a spelling a nearer frame declares, which shadows an ancestor's
+	var required, rest, mine []string
+	var claimed map[string]bool // a spelling a nearer frame declares, which shadows an ancestor's
 	for i, v := range slices.Backward(cc.chain) {
-		hidden, needed := groupEffects(v, cc.setAt(i))
-		var mine []string
+		hidden, needed := groupEffects(ruleFrame(cc.chain, i), cc.setAt(i))
+		mine = mine[:0]
 		for _, f := range v.Flags {
-			mine = append(mine, matchSpellings(f)...)
-			if !offerFlag(f, cc.setAt(i), hidden) {
+			if i > 0 { // only a frame nearer the root reads what this one claims
+				mine = appendMatchSpellings(mine, f)
+			}
+			if !offerFlag(f, cc.setAt(i), hidden) || (f.Local && i != len(cc.chain)-1) {
 				continue
 			}
-			var ids []string
-			for _, id := range flagSpellings(f) {
-				switch {
-				case claimed[id]:
-				case slices.Contains(f.Identifiers, id):
-					ids = append(ids, withDescription(id, f.Summary))
-				default:
-					// The summary describes the flag, not its negated form, which sets it false.
-					ids = append(ids, id)
-				}
-			}
 			if !f.ShortCircuit && !cc.setAt(i)[f.Name] && (f.Required || needed[f.Name]) {
-				required = append(required, ids...)
+				required = appendFlagSpellings(required, f, claimed, partial)
 			} else {
-				rest = append(rest, ids...)
+				rest = appendFlagSpellings(rest, f, claimed, partial)
 			}
+		}
+		if len(mine) > 0 && claimed == nil {
+			claimed = make(map[string]bool, len(mine))
 		}
 		for _, id := range mine {
 			claimed[id] = true
@@ -253,6 +264,24 @@ func completeFlagWord(cc completionContext, words []string, partial string, look
 	sort.Strings(rest)
 	out := filterPrefix(append(required, rest...), partial)
 	return completionAnswer{cands: out, keepOrder: !slices.IsSorted(out)}
+}
+
+// appendFlagSpellings appends to dst the spellings of f completion offers for partial: each one
+// no nearer frame claims, an identifier with the flag's description. A spelling partial does
+// not start is left out here, as filterPrefix would leave it out, so its description is never
+// built.
+func appendFlagSpellings(dst []string, f FlagDef, claimed map[string]bool, partial string) []string {
+	for _, id := range flagSpellings(f) {
+		switch {
+		case claimed[id], !strings.HasPrefix(candidateName(id), partial):
+		case slices.Contains(f.Identifiers, id):
+			dst = append(dst, withDescription(id, f.Summary))
+		default:
+			// The summary describes the flag, not its negated form, which sets it false.
+			dst = append(dst, id)
+		}
+	}
+	return dst
 }
 
 // offerFlag reports whether flag f, of a frame whose set flags are set, is offered by name:
@@ -278,6 +307,9 @@ func repeatableFlag(f FlagDef) bool {
 // negated forms of a negatable flag, leaving out deprecated identifiers and their negated
 // forms. They are still accepted when typed.
 func flagSpellings(f FlagDef) []string {
+	if !f.Negatable && !slices.ContainsFunc(f.Identifiers, func(id string) bool { return slices.Contains(f.DeprecatedIdentifiers, id) }) {
+		return f.Identifiers // every identifier, as is; callers only read it
+	}
 	var ids []string
 	for _, id := range f.Identifiers {
 		if !slices.Contains(f.DeprecatedIdentifiers, id) {
@@ -296,6 +328,9 @@ func flagSpellings(f FlagDef) []string {
 // there: hidden are the other members of an exclusive group (mutually_exclusive or one_of) one
 // of whose members is set, and needed are the flags the groups and dependencies require now.
 func groupEffects(frame Command, set map[string]bool) (hidden, needed map[string]bool) {
+	if len(frame.FlagGroups) == 0 && len(frame.FlagDependencies) == 0 {
+		return nil, nil // callers only read them
+	}
 	hidden, needed = map[string]bool{}, map[string]bool{}
 	anySet := func(names []string) bool {
 		return slices.ContainsFunc(names, func(n string) bool { return set[n] })
@@ -356,6 +391,12 @@ func dispatchableNames(cur Command) []string {
 	return names
 }
 
+// hasDispatchable reports whether [dispatchableNames] lists anything, scanning for discovered
+// plugins only when no sub-command or declared plugin answers it.
+func hasDispatchable(cur Command) bool {
+	return len(commandNames(cur)) > 0 || len(cur.Plugins) > 0 || len(cur.DiscoveredPlugins()) > 0
+}
+
 // commandNames lists cur's visible sub-commands and their aliases, without deprecated ones.
 func commandNames(cur Command) []string {
 	var names []string
@@ -381,7 +422,9 @@ func commandNames(cur Command) []string {
 // Flags stop where the parser stops them: at "--", at an options_first leaf's first argument,
 // and at the leaf's passthrough argument (see completionContext.operands).
 func walkContext(def Definition, before []string) completionContext {
-	cc := completionContext{chain: []Command{rootFrame(def)}, set: make([]map[string]bool, 1)}
+	chain := make([]Command, 1, 1+descentHint(def, before)) // a command is large: grow it once
+	chain[0] = rootFrame(def)
+	cc := completionContext{chain: chain, set: make([]map[string]bool, 1, cap(chain))}
 	for i := 0; i < len(before); i++ {
 		tok := before[i]
 		if cc.afterTerminator || cc.operands {
@@ -401,13 +444,15 @@ func walkContext(def Definition, before []string) completionContext {
 			continue
 		}
 		cur := cc.chain[len(cc.chain)-1]
-		if cc.positionals == 0 {
-			if child, ok := findChild(cur, tok); ok {
+		// A non-flag word beginning with "-" (a negative number) is a positional, never a
+		// command or plugin name, as dispatch reads it.
+		if cc.positionals == 0 && !strings.HasPrefix(tok, "-") {
+			if child, ok := findChild(&cur, tok); ok {
 				cc.chain = append(cc.chain, cmdFrame(child))
 				cc.set = append(cc.set, nil)
 				continue
 			}
-			if _, ok := findPlugin(cur, tok); ok || cur.PluginDiscovery != nil {
+			if _, ok := findPlugin(&cur, tok); ok || (cur.PluginDiscovery != nil && pluginToken(tok)) {
 				cc.plugin = true
 				return cc
 			}
@@ -425,9 +470,9 @@ func walkContext(def Definition, before []string) completionContext {
 func (cc *completionContext) walkFlag(before []string, i int) int {
 	tok := before[i]
 	var last *pendingFlag
-	capture := func(idx int, fd FlagDef, value, _ string) error {
+	capture := func(idx int, fd *FlagDef, value, _ string) error {
 		cc.mark(idx, fd, value)
-		last = &pendingFlag{fd: fd, idx: idx}
+		last = &pendingFlag{fd: *fd, idx: idx}
 		return nil
 	}
 
@@ -478,7 +523,7 @@ func (cc *completionContext) walkMapValue(before []string, j int, last *pendingF
 
 // mark records that flag fd of chain frame idx is set to value, and whether that starts a
 // short-circuit run.
-func (cc *completionContext) mark(idx int, fd FlagDef, value string) {
+func (cc *completionContext) mark(idx int, fd *FlagDef, value string) {
 	for len(cc.set) <= idx {
 		cc.set = append(cc.set, nil)
 	}
@@ -519,7 +564,7 @@ func flagValueCandidates(lookup HandlerLookup, rtx *Context, chain []Command, wo
 		}
 		return valueCandidates{cands: keys, sorted: true}
 	}
-	return enumListCandidates(flagEnum(fd), fd.Separator, partial)
+	return enumListCandidates(flagEnum(&fd), fd.Separator, partial)
 }
 
 // argValueCandidates returns the candidates for the argument the completed word would bind to
@@ -546,7 +591,7 @@ func argValueCandidates(def Definition, lookup HandlerLookup, rtx *Context, cc c
 		}
 		return valueCandidates{cands: commandPathCandidates(def, path), sorted: true}
 	}
-	return enumListCandidates(argEnum(ad), ad.Separator, partial)
+	return enumListCandidates(argEnum(&ad), ad.Separator, partial)
 }
 
 // commandPathCandidates returns the visible sub-commands of the command path names below the
@@ -559,7 +604,7 @@ func commandPathCandidates(def Definition, path []string) []string {
 	}
 	cur := rootFrame(def)
 	for _, w := range path {
-		child, ok := findChild(cur, w)
+		child, ok := findChild(&cur, w)
 		if !ok {
 			return nil
 		}
@@ -593,21 +638,21 @@ func enumCandidates(enum enumSet) []string {
 func enumListCandidates(enum enumSet, sep, partial string) valueCandidates {
 	cands := enumCandidates(enum)
 	if sep == "" || sep == "\x00" || len(cands) == 0 {
-		return valueCandidates{cands: cands}
+		return valueCandidates{cands: cands, foldCase: enum.ignoreCase}
 	}
 	i := strings.LastIndex(partial, sep)
 	if i < 0 {
-		return valueCandidates{cands: cands, noSpace: true}
+		return valueCandidates{cands: cands, noSpace: true, foldCase: enum.ignoreCase}
 	}
 	head, typed := partial[:i+len(sep)], strings.Split(partial[:i], sep)
 	out := make([]string, 0, len(cands))
 	for _, c := range cands {
 		name, _, _ := strings.Cut(c, "\t")
-		if !slices.Contains(typed, name) {
+		if !slices.ContainsFunc(typed, func(t string) bool { return t == name || (enum.ignoreCase && strings.EqualFold(t, name)) }) {
 			out = append(out, head+c)
 		}
 	}
-	return valueCandidates{cands: out, noSpace: true}
+	return valueCandidates{cands: out, noSpace: true, foldCase: enum.ignoreCase}
 }
 
 // dynamicFlagValues asks the handler of chain frame idx, which declares the flag, for
@@ -742,21 +787,64 @@ func discoverPlugins(d *PluginDiscoveryDef, pluginPath string, view *osView) ([]
 // filterPrefix keeps the candidates whose name starts with prefix, dropping empty names and
 // duplicate names (the first one stays), in their given order.
 func filterPrefix(candidates []string, prefix string) []string {
-	seen := map[string]bool{}
+	return filterPrefixCase(candidates, prefix, false)
+}
+
+// filterPrefixCase is [filterPrefix], matching the prefix without regard to case when fold is
+// set.
+func filterPrefixCase(candidates []string, prefix string, fold bool) []string {
+	var seen map[string]bool // for more than dedupSmall candidates; fewer are checked against out
 	out := make([]string, 0, len(candidates))
 	for _, c := range candidates {
 		// A candidate may carry a "\t<description>" suffix (see withDescription);
 		// the prefix matches — and duplicates collapse — on the NAME part only.
-		name := c
-		if before, _, ok := strings.Cut(c, "\t"); ok {
-			name = before
+		name := candidateName(c)
+		has := strings.HasPrefix(name, prefix) || (fold && foldedPrefix(name, prefix))
+		if name == "" || !has {
+			continue
 		}
-		if name != "" && strings.HasPrefix(name, prefix) && !seen[name] {
+		if len(candidates) > dedupSmall {
+			if seen == nil {
+				seen = map[string]bool{}
+			}
+			if seen[name] {
+				continue
+			}
 			seen[name] = true
-			out = append(out, c)
+		} else if slices.ContainsFunc(out, func(o string) bool { return candidateName(o) == name }) {
+			continue
 		}
+		out = append(out, c)
 	}
 	return out
+}
+
+// dedupSmall is how many candidates filterPrefixCase dedupes by scanning what it kept.
+const dedupSmall = 32
+
+// candidateName is a candidate's name: the text before its "\t<description>" suffix.
+func candidateName(c string) string {
+	if before, _, ok := strings.Cut(c, "\t"); ok {
+		return before
+	}
+	return c
+}
+
+// foldedPrefix reports whether s begins with prefix under Unicode case folding, as
+// [strings.EqualFold] compares, rune by rune: a rune and its other case may differ in length.
+func foldedPrefix(s, prefix string) bool {
+	for prefix != "" {
+		if s == "" {
+			return false
+		}
+		_, n := utf8.DecodeRuneInString(s)
+		_, m := utf8.DecodeRuneInString(prefix)
+		if !strings.EqualFold(s[:n], prefix[:m]) {
+			return false
+		}
+		s, prefix = s[n:], prefix[m:]
+	}
+	return true
 }
 
 // withDescription suffixes a candidate with its one-line description as "name\tdescription",
@@ -764,17 +852,34 @@ func filterPrefix(candidates []string, prefix string) []string {
 // the summary's first line rides, since the protocol is line-based. ANSI styling is stripped:
 // escape sequences would corrupt the shell's completion rendering.
 func withDescription(name, summary string) string {
-	if summary == "" {
-		return name
-	}
-	if i := strings.IndexByte(summary, '\n'); i >= 0 {
-		summary = summary[:i]
-	}
-	summary = StripANSI(summary)
-	if summary = strings.TrimSpace(summary); summary == "" {
+	if summary = descriptionLine(summary); summary == "" {
 		return name
 	}
 	return name + "\t" + summary
+}
+
+// descriptionLine is the part of a description a candidate line carries: its first line, ANSI
+// styling stripped, any other control character (a tab, a carriage return) made a space, and
+// the ends trimmed.
+func descriptionLine(text string) string {
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		text = text[:i]
+	}
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, StripANSI(text))
+	return strings.TrimSpace(text)
+}
+
+// wireSafeValue reports whether a candidate value can travel as one candidate line: it holds no
+// control character (a line break would start another line) and doesn't start with a marker
+// the completion formats read as a directive or a message.
+func wireSafeValue(value string) bool {
+	return !strings.HasPrefix(value, completionDirectivePrefix) && !strings.HasPrefix(value, pluginMessageMarker) &&
+		!strings.ContainsFunc(value, unicode.IsControl)
 }
 
 // completionDirectivePrefix marks the directive lines in __complete's output. It is a word no
@@ -839,6 +944,7 @@ func completionHintFor(def Definition, words []string) Completion {
 	// "--flag <TAB>": the word is the preceding flag's value.
 	if p := cc.pending; p != nil {
 		switch {
+		case cc.misplaced():
 		case p.mapValue, isMapType(p.fd.Type) && strings.Contains(partial, "="):
 			return mapValueHint(p.fd)
 		case takesValue(p.fd):
@@ -849,26 +955,35 @@ func completionHintFor(def Definition, words []string) Completion {
 
 	// "--flag=<TAB>": the word carries its own flag.
 	if strings.HasPrefix(partial, "-") {
-		if name, val, hasInline := splitFlag(partial); hasInline {
-			if fd, _, negated, found := findFlagMatch(cc.chain, name); found && !negated && takesValue(fd) {
-				if isMapType(fd.Type) && strings.Contains(val, "=") {
-					return mapValueHint(fd)
-				}
-				return fd.Complete
-			}
-		}
-		return Completion{} // a flag NAME is being typed; paths are not candidates
+		return inlineValueHint(cc.chain, partial)
 	}
 
 	// Otherwise the word binds to a positional — but only once dispatch can no longer
 	// descend, since before that it may still be a sub-command name.
-	if cc.positionals == 0 && len(dispatchableNames(cur)) > 0 {
+	if cc.positionals == 0 && hasDispatchable(cur) {
 		return Completion{}
 	}
 	if ad, ok := positionalAt(cur.Arguments, cc.positionals); ok {
 		return ad.Complete
 	}
 	return Completion{}
+}
+
+// inlineValueHint is the hint for a word that starts with "-": the flag's own for
+// "--flag=<TAB>", nothing while a flag name is being typed (paths are not candidates).
+func inlineValueHint(chain []Command, partial string) Completion {
+	name, val, hasInline := splitFlag(partial)
+	if !hasInline {
+		return Completion{}
+	}
+	fd, idx, negated, found := findFlagMatch(chain, name)
+	if !found || negated || !takesValue(fd) || (fd.Local && idx != len(chain)-1) {
+		return Completion{}
+	}
+	if isMapType(fd.Type) && strings.Contains(val, "=") {
+		return mapValueHint(fd)
+	}
+	return fd.Complete
 }
 
 // positionalAt returns the argument the next positional binds to, a variadic absorbing
@@ -909,10 +1024,10 @@ type CompletionResult struct {
 	// off ([Program.WithCompletionDescriptions]).
 	Candidates []CompletionCandidate
 	// Hint is the spec's declared `complete:` hint for the input being completed, or the zero
-	// value when it declares none. A completer that answers still wins over it: the hint is the
-	// fallback for when Candidates is empty, except kind "none", which also means "never offer
-	// files" when there are candidates. Kind "command" is answered in Candidates, and means
-	// "none" to the shell.
+	// value when it declares none; a completer's [Context.SetCompletionFallback] replaces its
+	// Kind and Extensions. The hint is the fallback for when Candidates is empty, except kind
+	// "none", which also means "never offer files" when there are candidates. Kind "command" is
+	// answered in Candidates, and means "none" to the shell.
 	Hint Completion
 	// Messages are lines for the shell to show, not offer: what completers added with
 	// [Context.AddCompletionMessage], in order, or else, when there are no candidates, the
@@ -926,6 +1041,10 @@ type CompletionResult struct {
 	// KeepOrder asks the shell to show the candidates in the order given, not sorted: a
 	// completer's own order, an enum's declared order, or unset required flags first.
 	KeepOrder bool
+	// IgnoreCase reports that the candidates match the typed word without regard to case (an
+	// enum that ignores case), so a shell that filters candidates by the typed word should
+	// match them that way too.
+	IgnoreCase bool
 }
 
 // CompletionCandidate is one offered value and its optional one-line description.
@@ -1006,18 +1125,32 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 	answer := completeAnswer(p.def, words, p.lookup, rtx)
 	result := CompletionResult{Hint: completionHintFor(p.def, words)}
 	describe := p.completionDescriptionsOn(rtx)
-	allKeys := len(answer.cands) > 0
+	allKeys := true
+	if len(answer.cands) > 0 {
+		result.Candidates = make([]CompletionCandidate, 0, len(answer.cands))
+	}
 	for _, c := range answer.cands {
 		value, desc, _ := strings.Cut(c, "\t")
+		if !wireSafeValue(value) {
+			continue // text from outside the program can't inject lines into the protocol
+		}
+		desc = descriptionLine(desc)
 		if !describe {
 			desc = ""
 		}
 		allKeys = allKeys && strings.HasSuffix(value, "=")
 		result.Candidates = append(result.Candidates, CompletionCandidate{Value: value, Description: desc})
 	}
+	if len(result.Candidates) == 0 {
+		result.Candidates = nil // none survived: as if none were offered
+	}
 	rtx.mu.RLock()
-	result.NoSpace = asked.NoSpace || allKeys || answer.noSpace
+	result.NoSpace = asked.NoSpace || (allKeys && len(result.Candidates) > 0) || answer.noSpace
 	result.KeepOrder = asked.KeepOrder || answer.keepOrder
+	result.IgnoreCase = answer.ignoreCase
+	if fb := rtx.completionFallback; fb != nil {
+		result.Hint.Kind, result.Hint.Extensions = fb.Kind, fb.Extensions
+	}
 	rtx.mu.RUnlock()
 	if p.def.CompletionMessages != nil && p.completionMessagesOn(rtx) {
 		result.Messages = completionMessages(added, result)
@@ -1125,28 +1258,72 @@ const completionOptionPrefix = completionDirectivePrefix + "option "
 // rotiniCompletion is rotini's own format: what the hidden __complete prints by default, and
 // what the generated shell scripts read. One candidate per line ("value\tdescription"), then a
 // ":rotini:message <text>" line per message, then a ":rotini:option <word>…" line when the
-// answer has options (nospace, keep-order), then the hint's ":rotini:" kind line when the input
+// answer has options (nospace, keep-order, ignore-case), then the hint's ":rotini:" kind line when the input
 // declares one. The kind line is always last, so a script that doesn't know an option line
 // still reads the kind.
 func rotiniCompletion(w io.Writer, result CompletionResult) error {
-	lines := candidateLines(result.Candidates)
+	d := directiveFor(result.Hint)
+	n := candidateBytes(result.Candidates) + len(d) + 1
 	for _, m := range result.Messages {
-		lines = append(lines, completionMessagePrefix+m)
+		n += len(completionMessagePrefix) + len(m) + 1
 	}
-	var opts []string
-	if result.NoSpace {
-		opts = append(opts, "nospace")
+	opts := [...]struct {
+		on   bool
+		word string
+	}{{result.NoSpace, "nospace"}, {result.KeepOrder, "keep-order"}, {result.IgnoreCase, "ignore-case"}}
+	for _, o := range opts {
+		n += len(o.word) + 1
 	}
-	if result.KeepOrder {
-		opts = append(opts, "keep-order")
+	var b strings.Builder
+	b.Grow(n + len(completionOptionPrefix))
+	writeCandidateLines(&b, result.Candidates)
+	for _, m := range result.Messages {
+		b.WriteString(completionMessagePrefix)
+		b.WriteString(m)
+		b.WriteByte('\n')
 	}
-	if len(opts) > 0 {
-		lines = append(lines, completionOptionPrefix+strings.Join(opts, " "))
+	if result.NoSpace || result.KeepOrder || result.IgnoreCase {
+		b.WriteString(completionOptionPrefix)
+		sep := ""
+		for _, o := range opts {
+			if o.on {
+				b.WriteString(sep)
+				b.WriteString(o.word)
+				sep = " "
+			}
+		}
+		b.WriteByte('\n')
 	}
-	if d := directiveFor(result.Hint); d != "" {
-		lines = append(lines, d)
+	if d != "" {
+		b.WriteString(d)
+		b.WriteByte('\n')
 	}
-	return writeLines(w, lines)
+	return writeCompletion(w, b.String())
+}
+
+// candidateBytes is how many bytes [writeCandidateLines] writes for candidates.
+func candidateBytes(candidates []CompletionCandidate) int {
+	n := 0
+	for _, c := range candidates {
+		n += len(c.Value) + 1
+		if c.Description != "" {
+			n += 1 + len(c.Description)
+		}
+	}
+	return n
+}
+
+// writeCandidateLines writes the candidate lines [candidateLines] renders, each
+// newline-terminated.
+func writeCandidateLines(b *strings.Builder, candidates []CompletionCandidate) {
+	for _, c := range candidates {
+		b.WriteString(c.Value)
+		if c.Description != "" {
+			b.WriteByte('\t')
+			b.WriteString(c.Description)
+		}
+		b.WriteByte('\n')
+	}
 }
 
 // candidateLines renders candidates as "value" or "value\tdescription", the candidate line both
@@ -1165,12 +1342,22 @@ func candidateLines(candidates []CompletionCandidate) []string {
 
 // writeLines writes lines, each newline-terminated, in one write.
 func writeLines(w io.Writer, lines []string) error {
+	n := 0
+	for _, l := range lines {
+		n += len(l) + 1
+	}
 	var b strings.Builder
+	b.Grow(n)
 	for _, l := range lines {
 		b.WriteString(l)
 		b.WriteByte('\n')
 	}
-	if _, err := io.WriteString(w, b.String()); err != nil {
+	return writeCompletion(w, b.String())
+}
+
+// writeCompletion writes a completion's output in one write.
+func writeCompletion(w io.Writer, s string) error {
+	if _, err := io.WriteString(w, s); err != nil {
 		return fmt.Errorf("write completion: %w", err)
 	}
 	return nil
@@ -1268,4 +1455,20 @@ func mapValueHint(fd FlagDef) Completion {
 		h.Kind = "none"
 	}
 	return h
+}
+
+// descentHint counts the words of before that name a sub-command in turn: walkContext's
+// capacity hint for its chain. It is only a hint, so a word that turns out to be a flag's value
+// costs nothing but a regrow.
+func descentHint(def Definition, before []string) int {
+	cmds, n := def.Commands, 0
+	for _, tok := range before {
+		for _, c := range cmds {
+			if c.matches(tok) {
+				cmds, n = c.Commands, n+1
+				break
+			}
+		}
+	}
+	return n
 }

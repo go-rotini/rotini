@@ -2,7 +2,7 @@
 
 package e2e
 
-import "os"
+import "os/exec"
 
-// maxRSS is not reported on this platform.
-func maxRSS(*os.ProcessState) (int64, bool) { return 0, false }
+// runPeakRSS runs cmd; its peak memory is not reported on this platform.
+func runPeakRSS(cmd *exec.Cmd) (int64, bool, error) { return 0, false, cmd.Run() }

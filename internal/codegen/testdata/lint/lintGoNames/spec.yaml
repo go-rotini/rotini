@@ -1,0 +1,39 @@
+# Names that differ only in case, "-" or "_" generate one Go name, so the generated code
+# wouldn't compile; a property name must also make a json tag of its own. Whether two
+# properties share a field depends on the schema generator, so a unit test covers that
+# against the generator itself.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: x-y
+      identifiers: [--x-y]
+      schema: { type: string }
+    # The same field XY as x-y.
+    - name: x_y
+      identifiers: [--x_y]
+      schema: { type: string }
+  env:
+    - name: a-b
+      schema: { type: string }
+    # The same field AB as a-b.
+    - name: a_b
+      schema: { type: string }
+  schemas:
+    Item:
+      type: object
+      properties:
+        foo: { type: string }
+        # Doesn't make a json tag.
+        "x,omitempty": { type: string }
+  commands:
+    - name: deploy
+    # The same type prefix DemoDeploy as deploy (its own handler file aside).
+    - name: Deploy
+      filename: deploy_upper.go
+    - name: a
+      commands:
+        - name: b
+    # The same type prefix DemoAB as "a b".
+    - name: aB
+      filename: a_upper_b.go

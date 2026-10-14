@@ -9,26 +9,34 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 )
 
 // Plugin dispatch resolves a co-located plugin binary (declared in the spec as plugins or
-// plugin_discovery) and execs it with the program's streams. Canceling the run's context kills
-// the plugin.
+// plugin_discovery) and execs it with the program's streams. Canceling the run's context, or
+// the plugin's timeout, asks the plugin to stop: outside Windows it is sent the signal that
+// canceled the run, or SIGTERM. A plugin still running after pluginGrace (or the
+// WithTerminationTimeout duration) is killed.
+
+// pluginGrace is how long a plugin asked to stop has before it is killed.
+const pluginGrace = 5 * time.Second
+
+// errPluginTimeout is the cause of a plugin's own timeout.
+var errPluginTimeout = errors.New("plugin timed out")
 
 // PluginErrorKind classifies a plugin-dispatch failure: the plugin binary could
 // not be located, it exceeded its declared timeout, or it could not be spawned.
 type PluginErrorKind int
 
+// The plugin-dispatch failure kinds.
 const (
-	// PluginNotFound: no binary was found next to the executable, in the
-	// plugin path, or on PATH.
+	// PluginNotFound means no binary was found next to the executable, in the plugin path, or
+	// on PATH.
 	PluginNotFound PluginErrorKind = iota
-	// PluginTimeout: the plugin ran past its declared timeout and was killed.
+	// PluginTimeout means the plugin ran past its declared timeout and was stopped.
 	PluginTimeout
-	// PluginStartFailed: the binary was found but could not be started (a fork,
-	// exec or pipe failure). The plugin's own non-zero exit is not an error kind.
+	// PluginStartFailed means the binary was found but could not be started (a fork, exec or
+	// pipe failure). The plugin's own non-zero exit is not an error kind.
 	PluginStartFailed
 )
 
@@ -97,9 +105,9 @@ func (e *PluginError) Unwrap() []error {
 // Args. Dir is the command's plugin path, searched after the host binary's own directory and
 // before PATH; empty means none.
 type PluginDispatch struct {
-	Def  PluginDef
-	Args []string
-	Dir  string
+	Def  PluginDef // the plugin, declared or built from the discovery prefix and token
+	Args []string  // the arguments passed to the binary
+	Dir  string    // the command's plugin path; "" for none
 	// Discovered marks a plugin-discovery dispatch rather than a declared plugin, which
 	// decides the error category when the binary cannot be resolved.
 	Discovered bool
@@ -119,7 +127,7 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 		if r.Discovered {
 			cat = CategoryUsage
 			if len(chain) > 0 {
-				candidates = childCommandNames(chain[len(chain)-1])
+				candidates = childCommandNames(&chain[len(chain)-1])
 			}
 		}
 		return p.pluginFailure(ctx, rtx, &PluginError{
@@ -128,13 +136,24 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 		})
 	}
 
+	// The plugin's own timeout gets its own cause, so a deadline of the caller's context is a
+	// cancellation of the run, not the plugin timing out.
+	pctx := ctx
 	if r.Def.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.Def.Timeout)
+		pctx, cancel = context.WithTimeoutCause(ctx, r.Def.Timeout, errPluginTimeout)
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, path, r.Args...)
+	cmd := exec.CommandContext(pctx, path, r.Args...)
+	// When the context ends the plugin is asked to stop (stopPlugin) and killed only if it is
+	// still running after the grace period, so its own cleanup can finish. The same delay bounds
+	// the wait for output pipes a process the plugin started still holds.
+	cmd.Cancel = func() error { return stopPlugin(ctx, cmd.Process) }
+	cmd.WaitDelay = pluginGrace
+	if p.terminationTimeout > 0 {
+		cmd.WaitDelay = p.terminationTimeout
+	}
 	// All three streams come from the Program, so redirecting them redirects the plugin too.
 	// By default p.stdin is os.Stdin, which exec.Cmd passes as a raw descriptor, so an
 	// interactive plugin still gets the terminal.
@@ -147,15 +166,21 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 		cmd.Env, cmd.Dir = view.environ(), view.base()
 	}
 
-	switch err := cmd.Run(); {
-	case err == nil:
+	err = cmd.Run()
+	exited := cmd.ProcessState != nil && cmd.ProcessState.Success()
+	switch {
+	case err == nil, exited && errors.Is(err, exec.ErrWaitDelay):
+		// The plugin succeeded; a process it left running held the output open past the delay.
 		return 0, nil
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+	case errors.Is(context.Cause(pctx), errPluginTimeout):
 		// cat is left unset: a timeout is operational, so CategoryNone.
 		return p.pluginFailure(ctx, rtx, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginTimeout, Timeout: r.Def.Timeout,
 			Msg: fmt.Sprintf("%s: timed out after %s", r.Def.Name, r.Def.Timeout),
 		})
+	case exited && ctx.Err() != nil:
+		// The run was canceled and the plugin stopped cleanly when asked.
+		return canceledExitCode(ctx), nil
 	default:
 		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			return pluginExitCode(ctx, ee), err
@@ -176,8 +201,8 @@ func pluginExitCode(ctx context.Context, ee *exec.ExitError) int {
 			return code
 		}
 	}
-	if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-		return 128 + int(ws.Signal())
+	if n, ok := exitSignal(ee); ok {
+		return 128 + n
 	}
 	return ee.ExitCode()
 }
@@ -195,15 +220,16 @@ func (p *Program) pluginFailure(ctx context.Context, rtx *Context, re *PluginErr
 // plugins are installed.
 //
 // name may be a declared plugin's name or alias, or a discovered plugin's token. It returns
-// "", false when cmd declares no such plugin and has no discovery, or when the binary is not
-// found. It reads the filesystem on every call.
+// "", false when cmd declares no such plugin and has no discovery, when the binary is not
+// found, or for a discovery token that is not a plain file name (it holds a path separator, or
+// is "." or ".."). It reads the filesystem on every call.
 func (cmd Command) PluginBinary(name string) (string, bool) {
 	dir := cmd.PluginPath
 	var binary string
-	switch rd, ok := findPlugin(cmd, name); {
+	switch rd, ok := findPlugin(&cmd, name); {
 	case ok:
 		binary = rd.Binary
-	case cmd.PluginDiscovery != nil:
+	case cmd.PluginDiscovery != nil && pluginToken(name):
 		binary = cmd.PluginDiscovery.Prefix + name
 	default:
 		return "", false

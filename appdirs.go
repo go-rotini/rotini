@@ -23,11 +23,12 @@ type AppDirectories struct {
 //   - "xdg": the XDG base-directory layout on every OS: $XDG_CONFIG_HOME (default
 //     ~/.config), $XDG_DATA_HOME (~/.local/share), $XDG_CACHE_HOME (~/.cache) and
 //     $XDG_STATE_HOME (~/.local/state), each joined with app.
-//   - "native": the platform's own. On macOS, ~/Library/Application Support/<app> for config
-//     and data, ~/Library/Caches/<app>, and ~/Library/Application Support/<app>/state, with
-//     XDG variables ignored. On Windows, %AppData%\<app> (roaming) for config,
-//     %LocalAppData%\<app> for data, and %LocalAppData%\<app>\cache and \state. Elsewhere,
-//     the same as "xdg".
+//   - "native": the platform's own. On macOS and iOS, ~/Library/Application Support/<app> for
+//     config and data, ~/Library/Caches/<app>, and ~/Library/Application Support/<app>/state,
+//     with XDG variables ignored. On Windows, %AppData%\<app> (roaming) for config,
+//     %LocalAppData%\<app> for data, and %LocalAppData%\<app>\cache and \state. On Plan 9,
+//     $home/lib/<app> for config and data, $home/lib/cache/<app>, and $home/lib/<app>/state.
+//     Elsewhere, the same as "xdg".
 //
 // An XDG variable holding a relative path is ignored, as the XDG spec requires. app must be a
 // single directory name. A missing home directory is an error. A nil rtx reads the process

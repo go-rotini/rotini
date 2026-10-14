@@ -1,22 +1,25 @@
-//go:build !mutation && unix
+//go:build !mutation && unix && !linux
 
 package e2e
 
 import (
-	"os"
+	"os/exec"
 	"runtime"
 	"syscall"
 )
 
-// maxRSS is a finished process's peak resident memory in bytes. Linux reports it in kilobytes,
-// darwin in bytes.
-func maxRSS(ps *os.ProcessState) (int64, bool) {
-	ru, ok := ps.SysUsage().(*syscall.Rusage)
+// runPeakRSS runs cmd and returns its peak resident memory in bytes, from its rusage: darwin
+// reports it in bytes, the BSDs in kilobytes.
+func runPeakRSS(cmd *exec.Cmd) (int64, bool, error) {
+	if err := cmd.Run(); err != nil {
+		return 0, false, err
+	}
+	ru, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage)
 	if !ok {
-		return 0, false
+		return 0, false, nil
 	}
 	if runtime.GOOS == "darwin" || runtime.GOOS == "ios" {
-		return ru.Maxrss, true
+		return ru.Maxrss, true, nil
 	}
-	return ru.Maxrss << 10, true
+	return ru.Maxrss << 10, true, nil
 }

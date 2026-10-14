@@ -3,7 +3,9 @@ package rotini
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"sync"
 )
 
 // Dependency is a typed handle for one of the program's dependencies, pairing the name it is
@@ -81,7 +83,7 @@ func WithDependency[T any](dep Dependency[T], value T) Option {
 // The dependency namespace belongs to the application. Rotini's own settings (input reader,
 // parser, version, help) are typed Program options, so no dependency name can shadow them.
 func (p *Program) WithDependency[T any](dep Dependency[T], value T) *Program {
-	p.rtx.setDependency(dep.name, value)
+	p.deps.set(dep.name, value)
 	return p
 }
 
@@ -118,8 +120,14 @@ func (e *DependencyError) Unwrap() []error { return []error{ErrDependencyNotFoun
 //
 //	client, ok := rtx.GetDependency(tasks.Client)
 func (rtx *Context) GetDependency[T any](dep Dependency[T]) (T, bool) {
-	v, ok := rtx.dependency(dep.name).(T)
-	return v, ok
+	stored, registered := rtx.dependency(dep.name)
+	if v, ok := stored.(T); ok {
+		return v, true
+	}
+	// A nil registered under an interface type is stored as a nil any, which no assertion
+	// matches.
+	var zero T
+	return zero, registered && stored == nil && reflect.TypeFor[T]().Kind() == reflect.Interface
 }
 
 // MustGetDependency returns the value registered under dep, or panics with a
@@ -131,7 +139,7 @@ func (rtx *Context) MustGetDependency[T any](dep Dependency[T]) T {
 	v, ok := rtx.GetDependency(dep)
 	if !ok {
 		de := &DependencyError{Name: dep.name}
-		if registered := rtx.dependency(dep.name); registered != nil {
+		if registered, _ := rtx.dependency(dep.name); registered != nil {
 			de.got, de.want = fmt.Sprintf("%T", registered), reflect.TypeFor[T]().String()
 		}
 		panic(de)
@@ -174,9 +182,34 @@ func (rtx *Context) setDependency(name string, value any) {
 	rtx.services[name] = value
 }
 
-// dependency returns the value stored under name, or nil when there is none.
-func (rtx *Context) dependency(name string) any {
+// dependency returns the value stored under name and whether anything is stored there.
+func (rtx *Context) dependency(name string) (any, bool) {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
-	return rtx.services[name]
+	v, ok := rtx.services[name]
+	return v, ok
+}
+
+// dependencyStore is the dependencies a program seeds each run with. Each run gets its own
+// copy, so a dependency set during a run stays local to it. It is safe for concurrent use.
+type dependencyStore struct {
+	mu sync.RWMutex
+	m  map[string]any
+}
+
+// set stores value under name, replacing any prior value.
+func (d *dependencyStore) set(name string, value any) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.m == nil {
+		d.m = make(map[string]any)
+	}
+	d.m[name] = value
+}
+
+// clone copies the store for a run; nil when nothing is stored.
+func (d *dependencyStore) clone() map[string]any {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return maps.Clone(d.m)
 }

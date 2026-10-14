@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-rotini/rotini/internal/testmod"
 	"github.com/rogpeppe/go-internal/txtar"
 )
 
@@ -58,8 +59,8 @@ func run(root string, runs, warm int) error {
 	if err := txtar.Write(ar, dir); err != nil {
 		return fmt.Errorf("write the fixture: %w", err)
 	}
-	gomod := fmt.Sprintf("module example.com/app\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini v0.0.0 => %s\n",
-		filepath.ToSlash(root))
+	gomod := fmt.Sprintf("module example.com/app\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini v0.0.0 => %s\n%s",
+		testmod.Quote(filepath.ToSlash(root)), testmod.Directives(root))
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o600); err != nil {
 		return fmt.Errorf("write go.mod: %w", err)
 	}
@@ -112,9 +113,15 @@ func run(root string, runs, warm int) error {
 	return nil
 }
 
-// timeRuns runs bin with args warm times untimed, then runs times timed, and returns the
-// durations sorted.
+// timeRuns checks that bin with args exits 0, so a broken case can't pass for a fast one, then
+// runs it warm times untimed and runs times timed, and returns the durations sorted.
 func timeRuns(bin string, args []string, runs, warm int) ([]time.Duration, error) {
+	check := exec.Command(bin, args...)
+	var stderr strings.Builder
+	check.Stderr = &stderr
+	if err := check.Run(); err != nil {
+		return nil, fmt.Errorf("%s %s: %w: %s", bin, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
 	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", os.DevNull, err)
@@ -126,9 +133,8 @@ func timeRuns(bin string, args []string, runs, warm int) ([]time.Duration, error
 		start := time.Now()
 		err := cmd.Run()
 		d := time.Since(start)
-		var ee *exec.ExitError
-		if err != nil && !errors.As(err, &ee) {
-			return 0, fmt.Errorf("run %s: %w", bin, err)
+		if err != nil {
+			return 0, fmt.Errorf("%s %s: %w", bin, strings.Join(args, " "), err)
 		}
 		return d, nil
 	}

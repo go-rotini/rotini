@@ -83,6 +83,9 @@ const (
 	RuleReplacedByChanged  = "REPLACED_BY_CHANGED"
 	RuleStabilityPromoted  = "STABILITY_PROMOTED"
 	RuleStabilityDemoted   = "STABILITY_DEMOTED"
+	RuleMetadataAdded      = "METADATA_ADDED"
+	RuleMetadataRemoved    = "METADATA_REMOVED"
+	RuleMetadataChanged    = "METADATA_CHANGED"
 
 	// Flags.
 
@@ -114,6 +117,7 @@ const (
 	RuleArgumentRequiredAdded      = "ARGUMENT_REQUIRED_ADDED"
 	RuleArgumentRequiredRemoved    = "ARGUMENT_REQUIRED_REMOVED"
 	RuleArgumentNameChanged        = "ARGUMENT_NAME_CHANGED"
+	RuleArgumentMoved              = "ARGUMENT_MOVED"
 	RuleArgumentVariadicRemoved    = "ARGUMENT_VARIADIC_REMOVED"
 	RuleArgumentVariadicAdded      = "ARGUMENT_VARIADIC_ADDED"
 	RuleArgumentPassthroughChanged = "ARGUMENT_PASSTHROUGH_CHANGED"
@@ -156,6 +160,8 @@ const (
 	RuleInputLayoutFirstChanged    = "INPUT_LAYOUT_FIRST_CHANGED"
 	RuleInputRelativeAdded         = "INPUT_RELATIVE_ADDED"
 	RuleInputRelativeChanged       = "INPUT_RELATIVE_CHANGED"
+	RuleInputBaseAdded             = "INPUT_BASE_ADDED"
+	RuleInputBaseRemoved           = "INPUT_BASE_REMOVED"
 	RuleInputExpandAdded           = "INPUT_EXPAND_ADDED"
 	RuleInputExpandRemoved         = "INPUT_EXPAND_REMOVED"
 	RuleInputRelativeToChanged     = "INPUT_RELATIVE_TO_CHANGED"
@@ -210,6 +216,9 @@ const (
 	RuleOutputEnumValueRemoved       = "OUTPUT_ENUM_VALUE_REMOVED"
 	RuleOutputEnumAdded              = "OUTPUT_ENUM_ADDED"
 	RuleOutputEnumRemoved            = "OUTPUT_ENUM_REMOVED"
+	RuleOutputKindNoDelete           = "OUTPUT_KIND_NO_DELETE"
+	RuleOutputKindAdded              = "OUTPUT_KIND_ADDED"
+	RuleOutputKindTagChanged         = "OUTPUT_KIND_TAG_CHANGED"
 
 	// What a command or flag does, and what AI agents are offered.
 
@@ -256,7 +265,8 @@ var catalog = []string{
 	RuleExitRetryableRemoved, RuleExitRetryableAdded,
 
 	RuleDeprecationAdded, RuleDeprecationChanged, RuleDeprecationRemoved, RuleLifecycleChanged,
-	RuleReplacedByChanged, RuleStabilityPromoted, RuleStabilityDemoted,
+	RuleReplacedByChanged, RuleStabilityPromoted, RuleStabilityDemoted, RuleMetadataAdded, RuleMetadataRemoved,
+	RuleMetadataChanged,
 
 	RuleFlagNoDelete, RuleFlagReplaced, RuleFlagAdded, RuleFlagRequiredAdded, RuleFlagRequiredRemoved,
 	RuleFlagNameChanged, RuleFlagIdentifierNoDelete, RuleFlagIdentifierAdded, RuleFlagHiddenIdentifierNoDelete,
@@ -265,7 +275,7 @@ var catalog = []string{
 	RuleFlagRepeatForbidden, RuleFlagRepeatAllowed, RuleFlagRoleChanged,
 
 	RuleArgumentNoDelete, RuleArgumentAdded, RuleArgumentRequiredAdded, RuleArgumentRequiredRemoved,
-	RuleArgumentNameChanged, RuleArgumentVariadicRemoved, RuleArgumentVariadicAdded,
+	RuleArgumentNameChanged, RuleArgumentMoved, RuleArgumentVariadicRemoved, RuleArgumentVariadicAdded,
 	RuleArgumentPassthroughChanged, RuleArgumentGlobChanged,
 
 	RuleEnvNoDelete, RuleEnvAdded, RuleEnvRequiredAdded, RuleEnvRequiredRemoved, RuleEnvVariableNoDelete,
@@ -277,7 +287,8 @@ var catalog = []string{
 	RuleInputSeparatorChanged, RuleInputFromNoDelete, RuleInputFromAdded, RuleInputImplicitValueAdded,
 	RuleInputImplicitValueRemoved, RuleInputImplicitValueChanged, RuleInputIgnoreCaseRemoved,
 	RuleInputIgnoreCaseAdded, RuleInputLayoutNoDelete, RuleInputLayoutAdded, RuleInputLayoutFirstChanged,
-	RuleInputRelativeAdded, RuleInputRelativeChanged, RuleInputExpandAdded, RuleInputExpandRemoved,
+	RuleInputRelativeAdded, RuleInputRelativeChanged, RuleInputBaseAdded, RuleInputBaseRemoved,
+	RuleInputExpandAdded, RuleInputExpandRemoved,
 	RuleInputRelativeToChanged, RuleInputValuesFromAdded, RuleInputValuesFromRemoved, RuleInputValuesFromChanged,
 	RuleInputEnvNoDelete, RuleInputEnvAdded, RuleInputVariableFileNoDelete, RuleInputVariableFileAdded,
 	RuleInputConfigKeyChanged, RuleInputConfigKeyAdded, RuleInputConfigSourceChanged, RuleInputDottedKeysChanged,
@@ -291,6 +302,7 @@ var catalog = []string{
 
 	RuleOutputTypeChanged, RuleOutputPropertyNoDelete, RuleOutputPropertyRequiredRemove, RuleOutputPropertyAdded,
 	RuleOutputEnumValueAdded, RuleOutputEnumValueRemoved, RuleOutputEnumAdded, RuleOutputEnumRemoved,
+	RuleOutputKindNoDelete, RuleOutputKindAdded, RuleOutputKindTagChanged,
 
 	RuleEffectsAdded, RuleEffectsRemoved, RuleEffectsRaised, RuleEffectsLowered, RuleFlagRoleAdded,
 	RuleFlagRoleValueChanged, RuleAgentRemoved, RuleAgentAdded,

@@ -1,0 +1,17 @@
+== commands
+deploy	
+status	
+== flags
+--format	
+--quiet	
+-q	
+== enum
+json	
+text	
+== sub-command-flags
+--env	
+--format	
+--quiet	
+== sub-command-enum
+prod	
+staging	

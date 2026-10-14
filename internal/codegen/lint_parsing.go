@@ -14,7 +14,7 @@ import (
 )
 
 // Rules for how input values are spelled: negated forms, argument fallbacks, time layouts and
-// relative times, and the regexp and glob kinds.
+// relative times, integer bases, and the regexp and glob kinds.
 
 // lintNegatable restricts negatable to bool flags, with a long identifier to derive
 // "--no-<name>" from unless it names its own form, and rejects a negated form another
@@ -147,6 +147,45 @@ func lintRelativeTime(spec *Spec) []error {
 	return problems
 }
 
+// lintIntegerBase keeps `base` to integer inputs and lists of them, and checks an env or config
+// input's default under it; a flag's or argument's default is lintValuesParse's, and an enum
+// value lintEnumValues', each read the way a run reads them.
+func lintIntegerBase(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
+			if intBase(schema) == "" {
+				return
+			}
+			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			if channel == "stdin" {
+				add("sets `base` on stdin, which is a document, not an integer; declare it on an integer input")
+				return
+			}
+			if !isIntegerType(strings.TrimPrefix(getSchemaType(schema), "[]")) {
+				add(fmt.Sprintf("sets `base` but its type is %s; `base: prefixed` reads 0x, 0o and 0b integer literals, so it applies to the int and uint types and lists of them", displayType(getSchemaType(schema))))
+				return
+			}
+			if d := defaultString(schema.Default); d != "" && (channel == "env" || channel == "config") {
+				if msg := runtimeRejects(schema, []string{d}); msg != "" {
+					add(fmt.Sprintf("`default` %s; %s", msg, defaultFails))
+				}
+			}
+		})
+	})
+	return problems
+}
+
+// isIntegerType reports whether typ, a Go type as getSchemaType resolves it, is an int or uint
+// type, which `base` applies to.
+func isIntegerType(typ string) bool {
+	switch strings.TrimPrefix(typ, "*") {
+	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64":
+		return true
+	}
+	return false
+}
+
 // lintPatternKinds keeps the regexp and glob kinds to what they mean: a pattern is a value
 // that is itself matched against, so an enum would check the pattern's text, and a regexp is
 // already a pointer, so nullable adds nothing. Pattern and length bounds, which apply to
@@ -244,8 +283,9 @@ func lintContext(def rotini.Definition, argv []string) *rotini.Context {
 	return rotini.NewContextFor(def, argv).WithClock(func() time.Time { return sampleTime })
 }
 
-// withTimeForms sets fd's time layouts and relative forms from schema, as generated code does.
-func withTimeForms(fd *rotini.FlagDef, schema *InputSchema) {
+// withValueForms sets fd's time layouts and relative forms, and its integer base, from schema,
+// as generated code does.
+func withValueForms(fd *rotini.FlagDef, schema *InputSchema) {
 	if l := layoutsFor(schema); len(l) > 0 {
 		fd.Layout = l[0]
 		if len(l) > 1 {
@@ -253,6 +293,7 @@ func withTimeForms(fd *rotini.FlagDef, schema *InputSchema) {
 		}
 	}
 	fd.Relative = relative(schema)
+	fd.Base = intBase(schema)
 }
 
 // lintFrom restricts `from` to non-bool flags and to arguments whose position is known as the
@@ -308,6 +349,19 @@ func lintFrom(spec *Spec) []error {
 	return problems
 }
 
+// outputEnumDetailProblems reports an enum value in a command's output, or in any kind of it,
+// that declares aliases, `hidden` or `deprecated`.
+func outputEnumDetailProblems(c *Command, path, ptr string) []error {
+	var problems []error
+	for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+		if schemaHasEnumDetail(s.schema) {
+			problems = append(problems, &problem{kind: "spec", ptr: s.ptr, loc: "command " + path,
+				msg: "gives an `enum` value in `output` aliases, `hidden` or `deprecated`; these describe what a user types, so write plain values here"})
+		}
+	}
+	return problems
+}
+
 // lintEnumValueKeys checks what enum values declare beyond a summary: aliases are spellings of
 // their own (no alias repeats another alias or a value, in the enum's case when it ignores
 // case), deprecated_aliases are among the aliases, the deprecation plan needs a deprecation
@@ -324,10 +378,7 @@ func lintEnumValueKeys(spec *Spec) []error {
 		}
 	}
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		if c.Output != nil && schemaHasEnumDetail(*c.Output) {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/output", loc: "command " + path,
-				msg: "gives an `enum` value in `output` aliases, `hidden` or `deprecated`; these describe what a user types, so write plain values here"})
-		}
+		problems = append(problems, outputEnumDetailProblems(c, path, ptr)...)
 		eachInputAt(c, ptr, func(channel, name, iptr string, schema *InputSchema) {
 			if schema == nil {
 				return

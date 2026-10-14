@@ -183,15 +183,13 @@ func fromRunSignal(ctx context.Context, err error) bool {
 	return errors.Is(err, context.Cause(ctx)) || errors.Is(err, context.Canceled)
 }
 
-// PanicError carries a panic recovered from a lifecycle hook to the reporter: Value is the
-// value passed to panic, Stack the goroutine stack captured at recovery. Error renders Value
-// alone.
+// PanicError carries a panic recovered from a lifecycle hook to the reporter.
 //
 // It also carries faults rotini detects without a panic, such as a [*WiringError] or a
 // resolver failure, with the error as Value and a nil Stack.
 type PanicError struct {
-	Value any
-	Stack []byte
+	Value any    // the value passed to panic
+	Stack []byte // the goroutine stack captured at recovery
 }
 
 // Error renders the panic value without the stack.

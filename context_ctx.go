@@ -3,8 +3,9 @@ package rotini
 import "context"
 
 // Context returns the [context.Context] the running hook received: the run's context, or one
-// an earlier hook passed to [Context.SetContext]. It is never nil. Read it in the hook; from a
-// goroutine that outlives the hook it returns whatever is current.
+// an earlier hook passed to [Context.SetContext]. During completion it is the program's base
+// context. It is never nil. Read it in the hook; from a goroutine that outlives the hook it
+// returns whatever is current.
 func (rtx *Context) Context() context.Context {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()

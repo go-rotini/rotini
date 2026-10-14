@@ -107,7 +107,7 @@ func TestContext_concurrentRegistry(t *testing.T) {
 			key := fmt.Sprintf("svc-%d", w%keys)
 			for range iters {
 				rtx.SetDependency(NewDependency[any](key), any(w))
-				_ = rtx.dependency(key)
+				_, _ = rtx.dependency(key)
 				_, _ = rtx.GetDependency(NewDependency[int](key))
 			}
 		}(w)
@@ -115,7 +115,7 @@ func TestContext_concurrentRegistry(t *testing.T) {
 	wg.Wait()
 
 	for k := range keys {
-		if rtx.dependency(fmt.Sprintf("svc-%d", k)) == nil {
+		if v, _ := rtx.dependency(fmt.Sprintf("svc-%d", k)); v == nil {
 			t.Errorf("key svc-%d unbound after concurrent access", k)
 		}
 	}
@@ -564,7 +564,7 @@ func TestContext_nilReceiverPanicsAtTheCall(t *testing.T) {
 		"Chain":         func(rtx *Context) { _ = rtx.CommandChain() },
 		"Command":       func(rtx *Context) { _ = rtx.Command() },
 		"Path":          func(rtx *Context) { _ = rtx.CommandPath() },
-		"Value":         func(rtx *Context) { _ = rtx.dependency("k") },
+		"Value":         func(rtx *Context) { _, _ = rtx.dependency("k") },
 		"Failed":        func(rtx *Context) { _ = rtx.Failed() },
 		"Halt":          func(rtx *Context) { rtx.Halt() },
 		"HaltWithCode":  func(rtx *Context) { rtx.HaltWithCode(1) },

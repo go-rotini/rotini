@@ -1,0 +1,33 @@
+== commands
+deploy	
+status	
+== flags
+--config	
+--dir	
+--format	
+--token	
+== enum
+json	
+text	
+yaml	
+== file-extensions
+a.yaml	
+b.yml	
+bin	
+drivers	
+src	
+sub	
+== directory
+bin	
+drivers	
+src	
+sub	
+== none-with-message
+! an API token, from your account page
+== completer
+web	
+api	
+db	
+== sub-command-enum
+dev	
+prod	

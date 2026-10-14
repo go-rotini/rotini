@@ -47,6 +47,9 @@ func reconcileData[T any](resolved string, format fileFormat, data []byte) (doc 
 	}
 	instance, err = bytesToJSON(format, data)
 	if err != nil {
+		if nf := nonFiniteNumber(resolved, format, data); nf != nil {
+			return nil, nil, nil, nf
+		}
 		return nil, nil, nil, fmt.Errorf("%s: %w", resolved, err)
 	}
 	return doc, instance, newSourceLocator(format, data), nil

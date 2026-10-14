@@ -40,7 +40,8 @@ type InitializeDryRunFn = InitializeFn
 
 // InitOptions are init's choices besides the CLI's name.
 type InitOptions struct {
-	// Format is the spec and conf format: yaml (the default), json, jsonc or toml.
+	// Format is the spec and conf format: yaml (the default; yml is the same), json, jsonc or
+	// toml.
 	Format string
 	// Template is the shape to start from: plugin, daemon or suite; "" for the plain seed.
 	Template string
@@ -77,6 +78,9 @@ func (p *Processor) initialize(name string, opt InitOptions, pl *planner) ([]See
 	}
 	if !cliNameRe.MatchString(name) {
 		return nil, fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+	}
+	if windowsDeviceElement(name) != "" {
+		return nil, fmt.Errorf("invalid CLI name %q: it is a Windows device name, which the go tool refuses as a directory in an import path on every system", name)
 	}
 
 	moduleRoot, modulePath, err := findModule()

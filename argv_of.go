@@ -29,6 +29,7 @@ type ArgvError struct {
 	Reason string
 }
 
+// Error returns "rotini: <field>: <reason>".
 func (e *ArgvError) Error() string {
 	return fmt.Sprintf("rotini: %s: %s", e.Field, e.Reason)
 }
@@ -90,6 +91,7 @@ func ArgvPath(names ...string) ArgvOption {
 //   - a secret flag or argument that refuses a literal value (its from: leaves out value), even
 //     with [ArgvSecrets]: pass it through a file or stdin;
 //   - a config or stdin input (write the file, or supply stdin, yourself);
+//   - a [FlagDef.Local] flag of a command other than the invoked one;
 //   - an argument of a command other than the invoked one, or one after an unset argument;
 //   - "-" on a flag or argument that reads stdin from it;
 //   - an explicit empty list or map on a flag without a separator, or a nil pointer in set;
@@ -193,7 +195,7 @@ func argvChain(def Definition, path []string) ([]Command, error) {
 		if cur.Passthrough {
 			return nil, fmt.Errorf("rotini: ArgvOf: %q is a passthrough command, so it has no sub-command %q", pathOf(chain), name)
 		}
-		c, ok := findChild(cur, name)
+		c, ok := findChild(&cur, name)
 		if !ok {
 			return nil, fmt.Errorf("rotini: ArgvOf: %q has no sub-command %q", pathOf(chain), name)
 		}
@@ -238,6 +240,10 @@ func (w *argvWriter) frame(top string, ci reflect.Value, frame Command, leaf boo
 			err = fmt.Errorf("rotini: ArgvOf: %s: %q declares no flag %q", p, frame.Name, logical)
 			return
 		}
+		if fd.Local && !leaf {
+			err = &ArgvError{Field: p, Reason: fmt.Sprintf("the flag applies only when %q is the command run, and it is an ancestor", frame.Name)}
+			return
+		}
 		err = w.flag(p, fd, f)
 	})
 	if err != nil {
@@ -268,7 +274,7 @@ func (w *argvWriter) frame(top string, ci reflect.Value, frame Command, leaf boo
 	return w.arguments(top, ci, frame, leaf)
 }
 
-// identifier picks the spelling ArgvOf writes a flag with: its first long identifier that isn't
+// argvIdentifier picks the spelling ArgvOf writes a flag with: its first long identifier that isn't
 // deprecated, else its first short one that isn't, else its first.
 func argvIdentifier(fd FlagDef) string {
 	for _, long := range []bool{true, false} {
@@ -308,7 +314,7 @@ func (w *argvWriter) flag(p FieldPath, fd FlagDef, f reflect.Value) error {
 			return &ArgvError{Field: p, Reason: err.Error()}
 		}
 		return w.occurrences(p, fd, id, pairs)
-	case isObjectFlag(fd):
+	case isObjectFlag(&fd):
 		return w.objectFlag(p, fd, id, f)
 	case f.Kind() == reflect.Bool:
 		w.boolFlag(fd, id, f.Bool())
@@ -471,7 +477,7 @@ func (w *argvWriter) arguments(top string, ci reflect.Value, frame Command, leaf
 		}
 		if defs[j].Glob && w.cfg.goos == "windows" {
 			for i, s := range vals {
-				vals[i] = globEscaper.Replace(s)
+				vals[i] = escapeGlob(s)
 			}
 		}
 		counts[j] = len(vals)
@@ -877,7 +883,7 @@ func anyText(key string, v any) (string, error) {
 		if math.IsNaN(x) || math.IsInf(x, 0) {
 			return "", fmt.Errorf("the value of %q is %v, which has no JSON spelling", key, x)
 		}
-		return strconv.FormatFloat(x, 'g', -1, 64), nil
+		return strconv.FormatFloat(x, 'g', -1, rv.Type().Bits()), nil
 	}
 	return "", fmt.Errorf("the value of %q is a %T; only text, numbers, booleans and null can be written", key, v)
 }

@@ -79,6 +79,9 @@ type program struct {
 	configFiles     []scopedConfigFile // per-command config-file sources, tagged with their command path (for the input reader's cascade)
 	envPrefix       string             // document-level env_prefix for DERIVED env-var names
 	adoptedPrefixes map[string]string  // env_prefix → child root name, from composed children (see resolveEnvPrefix)
+	// pathSegments maps each underscore-joined command path to its command names. A name may
+	// itself contain '_', so a path is never split back on it.
+	pathSegments map[string][]string
 
 	root         genCommand               // the root command (own)
 	own          []genCommand             // inline sub-commands, sorted by prefix
@@ -328,10 +331,10 @@ func (p *program) resolveFeatures() error {
 		if f.cfg.Embed {
 			rel, err := filepath.Rel(p.layout.cmdDir, absEmbedDir)
 			if err != nil {
-				return fmt.Errorf("feature %s embed_dir %q is not under the cmd package: %w", f.desc.name, f.cfg.EmbedDir, err)
+				return fmt.Errorf("feature %s embed_dir %s is not under the cmd package: %w", f.desc.name, quotePath(f.cfg.EmbedDir), err)
 			}
 			if strings.HasPrefix(rel, "..") {
-				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmd package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(p.conf.Generate.cmdTarget().File)))
+				return fmt.Errorf("generate.features.%s.embed_dir %s must resolve under the cmd package %s so //go:embed can reach it", f.desc.name, quotePath(f.cfg.EmbedDir), quotePath(path.Dir(filepath.ToSlash(p.conf.Generate.cmdTarget().File))))
 			}
 			embedRel = filepath.ToSlash(rel)
 		}
@@ -347,7 +350,7 @@ func (p *program) resolveFeatures() error {
 			return err
 		}
 
-		p.featureBlocks = append(p.featureBlocks, buildFeatureBlock(nodes, embedRel, f.desc, f.cfg.Embed, contents))
+		p.featureBlocks = append(p.featureBlocks, buildFeatureBlock(nodes, embedRel, f.desc, f.cfg.Embed, contents, !f.desc.perShell && treeHasAliases(p.tree)))
 		p.featureOutputs = append(p.featureOutputs, featureOutput{desc: f.desc, absEmbedDir: absEmbedDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
 	}
 	return nil
@@ -366,11 +369,11 @@ func writeSchemas(pl *planner, conf *Conf, moduleRoot string) error {
 		}
 		rel := filepath.FromSlash(sc.File)
 		if filepath.IsAbs(rel) {
-			return fmt.Errorf("generate.schemas.%s.file %q must be module-root-relative, not absolute", label, sc.File)
+			return fmt.Errorf("generate.schemas.%s.file %s must be module-root-relative, not absolute", label, quotePath(sc.File))
 		}
 		abs := filepath.Join(moduleRoot, rel)
 		if r, err := filepath.Rel(moduleRoot, abs); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("generate.schemas.%s.file %q must resolve under the module root", label, sc.File)
+			return fmt.Errorf("generate.schemas.%s.file %s must resolve under the module root", label, quotePath(sc.File))
 		}
 		return pl.write(abs, content)
 	}
@@ -476,6 +479,7 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		ExitCodes:     exitConstantsDecl(gp.exitConstants(), lay.splitModels),
 		Contract:      contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo) + examplesDecl(gp.examples),
 		UsageFunc:     usageFuncDecl(gp),
+		CanonicalPath: canonicalPathDecl(gp.tree),
 	})
 }
 

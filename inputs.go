@@ -34,8 +34,9 @@ type InputSource struct {
 	// Origin names where in the layer the value came from: "argv:--port" (the identifier as
 	// typed), "argv:<target>" (an argument), "env:TASKR_PORT", "env:TASKR_TOKEN_FILE" (read
 	// from the file a variable_file variable names), "env:TASKR_HTTP__*" (a nested env family),
-	// "config:user#deploy.port" (a configuration file's name and key), "default"
-	// or "stdin". It is "" for a hand-built layer, which names itself by Layer.
+	// "config:user#deploy.port" (a configuration file's name and key),
+	// "config:user#profiles.prod.port" (a key of the selected profile), "default" or "stdin". It
+	// is "" for a hand-built layer, which names itself by Layer.
 	Origin string
 }
 
@@ -57,9 +58,9 @@ type Presence map[FieldPath]InputSource
 // "[redacted]" whatever the layer gave. Both need a rotini layer in the merge, which says what
 // the spec declares.
 type InputLayer[T any] struct {
-	Name   string
-	Values T
-	Set    Presence
+	Name   string   // the layer's name, as [InputSource.Layer] reports it
+	Values T        // the supplied values; fields Set doesn't name are ignored
+	Set    Presence // the fields the layer supplied
 
 	core *layerCore // validation data: nil for hand-built layers
 }
@@ -70,6 +71,7 @@ type layerCore struct {
 	chain       []Command
 	store       *parsedInputs
 	argDefaults map[int]string // the per-index argument values a layer supplies past argv: defaults or fallbacks (sparse)
+	argOrigins  map[int]string // where each fallback argument's value came from, by argument index
 	// anchor is the chain index of the inputs type's first field (see frameAnchor), so a merged
 	// report can check hand-built values against the right commands; anchored says it is set.
 	anchor   int
@@ -109,8 +111,9 @@ type layerCore struct {
 //
 // Inputs delegates to [InputReader.Read]; errors are [*ParseError] and [*InputError] values, or
 // a [*WiringError] when a command declares config inputs and the program has no
-// [InputSettings], or when an input needs a [Feature] the program does not wire. On error the returned T is partially filled and must not be used. A command
-// line that doesn't parse is reported before any other channel is read. Use
+// [InputSettings], or when an input needs a [Feature] the program does not wire. On error the
+// returned T is partially filled and must not be used. A command line that doesn't parse is
+// reported before any other channel is read. Use
 // [Context.InputsWithReport] for a merged value and per-field provenance alongside the error.
 func (rtx *Context) Inputs[T any]() (T, error) {
 	var t T
@@ -166,17 +169,18 @@ func (rtx *Context) ArgvInputs[T any]() (InputLayer[T], error) {
 }
 
 // EnvInputs acquires the environment channel: every Env input, by its explicit variable or the
-// SNAKE_UPPER projection of its key, plus the env fallback of any flag that declares a recon
-// key. A missing required input or a constraint violation is this call's error.
+// SNAKE_UPPER projection of its key, plus the env fallback of any flag or argument that declares
+// one. A missing required input or a constraint violation is this call's error.
 func (rtx *Context) EnvInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := envLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())
 	return InputLayer[T]{Name: "env", Values: t, Set: set, core: core}, err
 }
 
-// FileInputs acquires the configuration-files channel: every Config input from the InputSettings
-// sources, declared order being precedence, plus the config fallback of any flag that declares
-// a recon key. Required and constraint failures are this call's errors.
+// FileInputs acquires the configuration-files channel: every Config input from the
+// configuration files in scope for the command chain (the nearest command's first) and any
+// custom [InputSettings.Sources] after them, plus the config fallback of any flag or argument
+// that declares one. Required and constraint failures are this call's errors.
 func (rtx *Context) FileInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := filesLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())
@@ -242,6 +246,7 @@ func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport) {
 		rep.absorb(l.core)
 	}
 	rep.finalize()
+	rep.dropUnplacedArgs(dst)
 	rep.merged = reflect.ValueOf(out)
 	rep.fillHandBuiltRaw(hand)
 	return out, rep
@@ -285,6 +290,8 @@ type InputReport struct {
 	chain   []Command
 	store   *parsedInputs
 	argDefs map[int]string
+	// argOrigins names the source of each argument a fallback layer supplied, by argument index.
+	argOrigins map[int]string
 
 	// merged is the overlay's result, and handBuilt the fields whose final value came from a
 	// hand-built layer; Validate checks those values the way CheckInputs does.
@@ -393,6 +400,15 @@ func (r *InputReport) absorb(core *layerCore) {
 		}
 		maps.Copy(merged, core.argDefaults)
 		r.argDefs = merged
+		origins := maps.Clone(r.argOrigins)
+		for i := range core.argDefaults {
+			delete(origins, i)
+		}
+		if len(core.argOrigins) > 0 && origins == nil {
+			origins = map[int]string{}
+		}
+		maps.Copy(origins, core.argOrigins)
+		r.argOrigins = origins
 	}
 	if core.anchored {
 		r.anchor, r.anchored = core.anchor, true
@@ -441,13 +457,51 @@ func (r *InputReport) finalize() {
 		return
 	}
 	leaf := len(r.chain) - 1
-	for i := len(r.store.scopes[leaf].args); ; i++ {
+	si := &r.store.scopes[leaf]
+	start := len(si.args)
+	for i := start; ; i++ {
 		d, ok := r.argDefs[i]
 		if !ok {
 			break
 		}
-		r.store.scopes[leaf].args = append(r.store.scopes[leaf].args, d)
+		si.args = append(si.args, d)
 	}
+	for i, origin := range r.argOrigins {
+		if i >= start && i < len(si.args) {
+			if si.argOrigin == nil {
+				si.argOrigin = map[int]string{}
+			}
+			si.argOrigin[i] = origin
+		}
+	}
+}
+
+// dropUnplacedArgs applies the gap rule to the merged value: an argument value a rotini layer
+// supplied past the first argument with no value at all is not placed, as [Context.Inputs]
+// would not place it, so it is cleared and has no winner.
+func (r *InputReport) dropUnplacedArgs(dst reflect.Value) {
+	if r.store == nil || len(r.chain) == 0 || !r.anchored {
+		return
+	}
+	leaf := len(r.chain) - 1
+	fi := leaf - r.anchor
+	if fi < 0 || fi >= dst.NumField() || hasArgTail(r.chain[leaf].Arguments) {
+		return
+	}
+	top := dst.Type().Field(fi).Name
+	gap := false
+	eachTaggedField(dst.Field(fi), "Arguments", func(fieldName, _ string, _ reflect.StructTag, f reflect.Value) {
+		path := fieldPath(top, "Arguments", fieldName)
+		_, supplied := r.set[path]
+		switch {
+		case !gap && supplied:
+		case !supplied:
+			gap = true
+		case !r.handBuilt[path]:
+			f.SetZero()
+			delete(r.set, path)
+		}
+	})
 }
 
 // argvSetAt returns the argv-set record at chain index idx, or nil when p is nil or idx is out
@@ -573,7 +627,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				if i < len(frame.Arguments) {
 					ad = frame.Arguments[i]
 				}
-				_ = coerceTime(f, []string{d}, argTimeSpec(ad, rtx.osView().clockRef()))
+				_ = coerceTime(f, []string{d}, argTimeSpec(&ad, rtx.osView().clockRef()))
 				secret := ad.Secret
 				set[fieldPath(topName, "Arguments", fieldName)] = InputSource{
 					Layer:  "defaults",
@@ -611,8 +665,8 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 	if err != nil {
 		return nil, nil, err
 	}
-	view := rtx.osView()
-	overrides := map[string]string{}
+	view := rtx.osView().withFileCache()
+	overrides := map[string]pathOverride{}
 	if store, err := parseInto(chain, rtx.Argv, rtx.argvAcq()); err == nil {
 		overrides = b.pathOverrides(chain, store, view)
 	}
@@ -685,8 +739,8 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 	if err != nil {
 		return nil, nil, err
 	}
-	view := rtx.osView()
-	boot := fileBootstrap{paths: map[string]string{}}
+	view := rtx.osView().withFileCache()
+	boot := fileBootstrap{paths: map[string]pathOverride{}}
 	waived := false
 	store, perr := parseInto(chain, rtx.Argv, rtx.argvAcq())
 	if perr == nil {
@@ -743,7 +797,7 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	var bindErr error
-	var placed map[int]string // the leaf's argument fallbacks, by position
+	var placed, origins map[int]string // the leaf's argument fallbacks, by position, and where each came from, by argument
 
 	walkCommandStructs(v, chain, anchor, func(topName string, scope int, ci reflect.Value) {
 		if bindErr != nil {
@@ -765,14 +819,14 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 				return
 			}
 			if scope == len(chain)-1 {
-				placed, bindErr = recordArgFallbacks(set, ci, chain[scope], topName, layerName, flagReg, rd)
+				placed, origins, bindErr = recordArgFallbacks(set, ci, chain[scope], topName, layerName, flagReg, rd)
 			}
 		}
 	})
 	if bindErr != nil {
 		return nil, nil, bindErr
 	}
-	return set, &layerCore{chain: chain, store: store, argDefaults: placed, anchor: anchor, anchored: true, view: view}, nil
+	return set, &layerCore{chain: chain, store: store, argDefaults: placed, argOrigins: origins, anchor: anchor, anchored: true, view: view}, nil
 }
 
 // fillChannelStruct binds one command's channel struct from the registry, validates it, and
@@ -783,14 +837,18 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 	if !cs.IsValid() || cs.Kind() != reflect.Struct {
 		return nil
 	}
-	bind := bindReconWaived
 	if cfg != nil {
-		bind = bindConfigWaived
-	} else if err := checkEnvMaps(cs, reg, labels); err != nil {
-		return err
-	}
-	if err := bind(reg, cs.Addr().Interface(), waived); err != nil {
-		return labels.bind(channelOf(cfg), err)
+		// A pinned field reads only its own file, before it is expanded and checked.
+		if err := fillConfig(cs, cfg, waived); err != nil {
+			return err
+		}
+	} else {
+		if err := checkEnvMaps(cs, reg, labels); err != nil {
+			return err
+		}
+		if err := bindReconWaived(reg, cs.Addr().Interface(), waived); err != nil {
+			return labels.bindStruct(channelEnv, err, reg, cs)
+		}
 	}
 	expanded, err := expandChannelStruct(cs, reg, cfg, waived, labels)
 	if err != nil {
@@ -798,11 +856,6 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 	}
 	if !waived {
 		if err := validateChannelStruct(cs, reg, cfg, view); err != nil {
-			return err
-		}
-	}
-	if cfg != nil {
-		if err := bindPinnedConfig(cs, cfg); err != nil {
 			return err
 		}
 	}
@@ -875,7 +928,7 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 			return
 		}
 		fd, _ := findFlagDef(chain[scope].Flags, logical)
-		vals, origin, err := bindFlagFallback(flagReg, f, tag, key, fd, chain, scope, rd)
+		vals, origin, err := bindFlagFallback(fallbackLookup{reg: flagReg}, f, tag, key, fd, chain, scope, rd)
 		if err != nil || vals == nil {
 			bindErr = err
 			return
@@ -937,7 +990,7 @@ func layerChain(rtx *Context) ([]Command, error) {
 	if rtx == nil {
 		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: parse on nil context"}
 	}
-	chain := rtx.CommandChain()
+	chain := rtx.chainRef()
 	if len(chain) == 0 {
 		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}

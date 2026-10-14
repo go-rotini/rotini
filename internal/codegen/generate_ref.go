@@ -128,7 +128,21 @@ func parseModLocator(loc string) (module, version, sub string, err error) {
 	if version == "" {
 		return "", "", "", fmt.Errorf("invalid module ref %q; missing version", loc)
 	}
+	if strings.HasPrefix(module, "-") || strings.HasPrefix(version, "-") {
+		return "", "", "", fmt.Errorf("invalid module ref %q; a module path or version can't start with '-'", loc)
+	}
+	if modSubpathEscapes(sub) {
+		return "", "", "", fmt.Errorf("$ref %q escapes its module %s", loc, module)
+	}
 	return module, version, sub, nil
+}
+
+// modSubpathEscapes reports whether a cleaned module subpath leaves the module directory: one
+// that is absolute or climbs out with "..", in either separator.
+func modSubpathEscapes(sub string) bool {
+	s := strings.ReplaceAll(sub, `\`, "/")
+	return path.IsAbs(s) || filepath.IsAbs(sub) || filepath.VolumeName(sub) != "" ||
+		s == ".." || strings.HasPrefix(s, "../") || strings.Contains(s, "/../") || strings.HasSuffix(s, "/..")
 }
 
 // joinModLocator resolves a relative ref against a mod:// base subtree, refusing to
@@ -139,7 +153,7 @@ func joinModLocator(base, ref string) (string, error) {
 		return "", err
 	}
 	sub := path.Clean(path.Join(dir, filepath.ToSlash(ref)))
-	if sub == ".." || strings.HasPrefix(sub, "../") {
+	if modSubpathEscapes(sub) {
 		return "", fmt.Errorf("relative $ref %q escapes its module %s", ref, module)
 	}
 	return modLocator(module, version, sub), nil

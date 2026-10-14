@@ -4,12 +4,20 @@ package codegen
 // for schema validation, spec and conf discovery, and module resolution.
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-rotini/fs"
 	"github.com/go-rotini/jsonc"
@@ -64,6 +72,7 @@ func readRaw(path string) (fileFormat, []byte, error) {
 	if data, ok := seedOverlayRead(path); ok {
 		return format, data, nil
 	}
+	noteRead(path)
 	data, err := fs.ReadFile(path)
 	if err != nil {
 		// The fs error repeats the path; report a missing file plainly.
@@ -73,6 +82,61 @@ func readRaw(path string) (fileFormat, []byte, error) {
 		return format, nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	return format, data, nil
+}
+
+// readLog collects the files read while recordReads runs, so watch mode can watch every file
+// a pass depends on. paths is nil while nothing records.
+var readLog struct {
+	mu    sync.Mutex
+	paths map[string]fileStamp
+}
+
+// fileStamp is what a file looked like when a pass read it, so watch mode can tell whether it
+// changed before its watcher started.
+type fileStamp struct {
+	exists  bool
+	size    int64
+	modTime time.Time
+}
+
+// stampFile stats path; a file that can't be stat'ed stamps as missing.
+func stampFile(path string) fileStamp {
+	fi, err := fs.Stat(path)
+	if err != nil {
+		return fileStamp{}
+	}
+	return fileStamp{exists: true, size: fi.Size(), modTime: fi.ModTime()}
+}
+
+// noteRead adds path to the read log when one is recording, stamped as it is now. Call it
+// before reading the file, so a change made after the stamp is seen as a change.
+func noteRead(path string) {
+	readLog.mu.Lock()
+	defer readLog.mu.Unlock()
+	if readLog.paths == nil {
+		return
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	if _, ok := readLog.paths[path]; ok {
+		return
+	}
+	readLog.paths[path] = stampFile(path)
+}
+
+// recordReads runs fn and returns the files read through readRaw or noteRead meanwhile, each
+// stamped as it was when first read.
+func recordReads(fn func()) map[string]fileStamp {
+	readLog.mu.Lock()
+	readLog.paths = map[string]fileStamp{}
+	readLog.mu.Unlock()
+	fn()
+	readLog.mu.Lock()
+	defer readLog.mu.Unlock()
+	paths := readLog.paths
+	readLog.paths = nil
+	return paths
 }
 
 // readFile reads and decodes the file at path into a T, choosing the decoder by extension.
@@ -97,9 +161,9 @@ func decodeData[T any](format fileFormat, data []byte, path string) (*T, error) 
 	case formatYAML:
 		err = yaml.Unmarshal(data, out)
 	case formatJSON:
-		err = json.Unmarshal(data, out)
+		err = decodeJSONNumbers(data, out)
 	case formatJSONC:
-		err = jsonc.Unmarshal(data, out)
+		err = jsonc.UnmarshalWithOptions(data, out, jsonc.WithUseNumber())
 	case formatTOML:
 		err = toml.Unmarshal(data, out)
 	default:
@@ -115,6 +179,20 @@ func decodeData[T any](format fileFormat, data []byte, path string) (*T, error) 
 		n.normalize()
 	}
 	return out, nil
+}
+
+// decodeJSONNumbers decodes one JSON document into out, keeping numbers as json.Number so an
+// integer default keeps its exact spelling instead of passing through float64.
+func decodeJSONNumbers(data []byte, out any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(out); err != nil {
+		return fmt.Errorf("%w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("invalid character after top-level value")
+	}
+	return nil
 }
 
 // decodeError reports a document that read but did not decode into rotini's Go types,
@@ -153,6 +231,63 @@ func bytesToJSON(format fileFormat, data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("convert %s to json: %w", format, err)
 	}
 	return out, nil
+}
+
+// nonFiniteNumber reports the first infinite or NaN number in a YAML or TOML document, at its
+// position, or nil when there is none. JSON has no spelling for those values, so the document
+// can't be converted for schema validation.
+func nonFiniteNumber(path string, format fileFormat, data []byte) error {
+	var doc any
+	var derr error
+	switch format {
+	case formatYAML:
+		derr = yaml.Unmarshal(data, &doc)
+	case formatTOML:
+		derr = toml.Unmarshal(data, &doc)
+	default:
+		return nil
+	}
+	if derr != nil {
+		return nil //nolint:nilerr // a document that doesn't decode has no number to point at
+	}
+	ptr, ok := findNonFinite(doc, "")
+	if !ok {
+		return nil
+	}
+	// Place it at the value, or at the nearest enclosing key the locator resolves.
+	where, locate := path, newSourceLocator(format, data)
+	for p := ptr; p != ""; p = p[:strings.LastIndex(p, "/")] {
+		if line, col, ok := locate(p); ok {
+			where = fmt.Sprintf("%s:%d:%d", path, line, col)
+			break
+		}
+	}
+	return fmt.Errorf("%s: %s is infinite or not a number, which a spec can't hold; write a finite number, or quote the value to mean the text", where, ptr)
+}
+
+// findNonFinite returns the JSON pointer of the first infinite or NaN float64 in v, walking
+// map keys in sorted order.
+func findNonFinite(v any, ptr string) (string, bool) {
+	switch x := v.(type) {
+	case float64:
+		if math.IsInf(x, 0) || math.IsNaN(x) {
+			return ptr, true
+		}
+	case []any:
+		for i, e := range x {
+			if p, ok := findNonFinite(e, ptr+"/"+strconv.Itoa(i)); ok {
+				return p, true
+			}
+		}
+	case map[string]any:
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			key := strings.ReplaceAll(strings.ReplaceAll(k, "~", "~0"), "/", "~1")
+			if p, ok := findNonFinite(x[k], ptr+"/"+key); ok {
+				return p, true
+			}
+		}
+	}
+	return "", false
 }
 
 // readSpec reads and decodes the spec at path without schema validation.
@@ -233,29 +368,43 @@ func discoverConf(dir string) (string, error) {
 }
 
 // findModule walks up from the working directory to the nearest go.mod and returns the
-// module root directory and module path.
+// module root directory and module path. A directory that keeps its module in vendor.mod, and
+// holds no go.mod, is found by its vendor.mod.
 func findModule() (root, name string, err error) {
+	root, name, _, err = findModuleFile()
+	return root, name, err
+}
+
+// findModuleFile is findModule that also returns the file the module was read from: go.mod,
+// or vendor.mod in a directory with no go.mod.
+func findModuleFile() (root, name, file string, err error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return "", "", fmt.Errorf("get working directory: %w", err)
+		return "", "", "", fmt.Errorf("get working directory: %w", err)
 	}
-	// Raise fs's default ancestor bound (32) to effectively reach the filesystem root.
-	goMod, ok, err := fs.FindUp("go.mod", dir, fs.WithMaxAncestors(256))
-	if err != nil {
-		return "", "", fmt.Errorf("find go.mod: %w", err)
-	}
-	if !ok {
-		return "", "", errors.New("go.mod not found in any parent of working directory")
+	goMod := ""
+	for d := dir; goMod == ""; {
+		for _, name := range []string{"go.mod", "vendor.mod"} {
+			if info, err := os.Stat(filepath.Join(d, name)); err == nil && !info.IsDir() {
+				goMod = filepath.Join(d, name)
+				break
+			}
+		}
+		parent := filepath.Dir(d)
+		if goMod == "" && parent == d {
+			return "", "", "", errors.New("go.mod not found in any parent of working directory")
+		}
+		d = parent
 	}
 	data, err := os.ReadFile(goMod)
 	if err != nil {
-		return "", "", fmt.Errorf("read %s: %w", goMod, err)
+		return "", "", "", fmt.Errorf("read %s: %w", goMod, err)
 	}
 	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if after, ok := strings.CutPrefix(line, "module "); ok {
-			return filepath.Dir(goMod), strings.TrimSpace(after), nil
+			return filepath.Dir(goMod), strings.TrimSpace(after), goMod, nil
 		}
 	}
-	return "", "", fmt.Errorf("no module path in %s", goMod)
+	return "", "", "", fmt.Errorf("no module path in %s", goMod)
 }

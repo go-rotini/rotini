@@ -207,7 +207,7 @@ func (p *program) embedExamples(f *Feature, feature string, examples []exampleTe
 	dir := filepath.Join(p.module.root, filepath.FromSlash(f.EmbedDir))
 	rel, err := filepath.Rel(p.layout.cmdDir, dir)
 	if err != nil || strings.HasPrefix(rel, "..") {
-		return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmd package so //go:embed can reach it", feature, f.EmbedDir)
+		return fmt.Errorf("generate.features.%s.embed_dir %s must resolve under the cmd package so //go:embed can reach it", feature, quotePath(f.EmbedDir))
 	}
 	for i, e := range examples {
 		name := file(e)
@@ -379,7 +379,7 @@ func (p *program) configExampleText(cf scopedConfigFile, entries []exampleEntry,
 		b.WriteString("}\n")
 	case "dotenv":
 		for _, e := range entries {
-			fmt.Fprintf(&b, "%s%s\n", note, e.doc)
+			b.WriteString(commentEachLine(note, e.doc))
 			fmt.Fprintf(&b, "%s%s=%s\n", key, strings.Join(e.path, "."), dotenvValue(e.value))
 		}
 	default:
@@ -419,7 +419,7 @@ func yamlExample(b *strings.Builder, n *exampleNode, depth int) {
 			b.WriteString("\n")
 		}
 		if c.entry != nil {
-			fmt.Fprintf(b, "## %s%s\n", indent, c.entry.doc)
+			b.WriteString(commentEachLine("## "+indent, c.entry.doc))
 			fmt.Fprintf(b, "# %s%s: %s\n", indent, yamlKey(c.name), yamlValue(c.entry.value))
 			continue
 		}
@@ -436,7 +436,8 @@ func yamlKey(k string) string {
 	return strconv.Quote(k)
 }
 
-// yamlValue writes a value inline: scalars as YAML, lists and maps in flow (JSON) form.
+// yamlValue writes a value inline: scalars as YAML, lists, maps and multi-line text in flow
+// (JSON) form, so the value stays on its commented-out line.
 func yamlValue(v any) string {
 	switch v.(type) {
 	case []any, map[string]any:
@@ -446,7 +447,22 @@ func yamlValue(v any) string {
 	if err != nil {
 		return `""`
 	}
-	return strings.TrimSpace(string(out))
+	if text := strings.TrimSpace(string(out)); !strings.Contains(text, "\n") {
+		return text
+	}
+	return jsonInline(v)
+}
+
+// commentEachLine writes text as comment lines, each line of it after marker, so a summary or
+// default holding a newline can't end the comment early.
+func commentEachLine(marker, text string) string {
+	var b strings.Builder
+	for line := range strings.SplitSeq(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		b.WriteString(marker)
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // jsonInline writes a value as one line of JSON. The values are decoded spec values, which
@@ -466,7 +482,7 @@ var bareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 func tomlExample(b *strings.Builder, n *exampleNode, at []string) {
 	for _, c := range n.children {
 		if c.entry != nil {
-			fmt.Fprintf(b, "## %s\n", c.entry.doc)
+			b.WriteString(commentEachLine("## ", c.entry.doc))
 			fmt.Fprintf(b, "# %s = %s\n", tomlKey(c.name), tomlValue(c.entry.value))
 		}
 	}
@@ -525,7 +541,7 @@ func jsoncExample(b *strings.Builder, n *exampleNode, depth int) {
 			comma = ""
 		}
 		if c.entry != nil {
-			fmt.Fprintf(b, "///%s%s\n", indent, c.entry.doc)
+			b.WriteString(commentEachLine("///"+indent, c.entry.doc))
 			fmt.Fprintf(b, "// %s%q: %s%s\n", indent, c.name, jsonInline(c.entry.value), comma)
 			continue
 		}
@@ -635,7 +651,8 @@ func (p *program) envExampleText() string {
 		if r.Secret {
 			value = ""
 		}
-		fmt.Fprintf(&b, "\n## %s\n", doc)
+		b.WriteString("\n")
+		b.WriteString(commentEachLine("## ", doc))
 		fmt.Fprintf(&b, "# %s=%s\n", name, dotenvValue(value))
 	}
 	return b.String()

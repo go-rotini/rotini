@@ -46,9 +46,11 @@ var errStdinStreaming error = constError("stdin is already being read as a strea
 // run context, which a trapped signal cancels with the signal's exit code as the cause, and a
 // channel closed when the run settles.
 type stdinRun struct {
-	ctx  context.Context
-	done chan struct{}
-	once sync.Once
+	ctx context.Context
+
+	mu    sync.Mutex
+	done  chan struct{} // made by the first settled, so a run no read watches makes none
+	ended bool
 }
 
 // canceled is the run context's Done channel, or nil outside a run.
@@ -89,6 +91,14 @@ func (r *stdinRun) settled() <-chan struct{} {
 	if r == nil {
 		return nil
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.done == nil {
+		r.done = make(chan struct{})
+		if r.ended {
+			close(r.done)
+		}
+	}
 	return r.done
 }
 
@@ -97,7 +107,7 @@ func (r *stdinRun) settled() <-chan struct{} {
 func (rtx *Context) bindRun(ctx context.Context) {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
-	rtx.runState = &stdinRun{ctx: ctx, done: make(chan struct{})}
+	rtx.runState = &stdinRun{ctx: ctx}
 }
 
 // endStdin marks the run settled: a stdin reader goroutine that is not blocked inside the
@@ -107,7 +117,14 @@ func (rtx *Context) endStdin() {
 	r := rtx.runState
 	rtx.mu.RUnlock()
 	if r != nil {
-		r.once.Do(func() { close(r.done) })
+		r.mu.Lock()
+		if !r.ended {
+			r.ended = true
+			if r.done != nil {
+				close(r.done)
+			}
+		}
+		r.mu.Unlock()
 	}
 }
 

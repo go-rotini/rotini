@@ -51,7 +51,7 @@
         "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "info": {
           "type": "object",
-          "description": "A message the default reporter would print to stdout before everything else.",
+          "description": "A message the default reporter would print first, before any warning or error.",
           "required": ["message"],
           "additionalProperties": false,
           "properties": {
@@ -68,7 +68,7 @@
         "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." },
         "success": {
           "type": "object",
-          "description": "A message the default reporter would print to stdout after everything else.",
+          "description": "A message the default reporter would print last, after any error.",
           "required": ["message"],
           "additionalProperties": false,
           "properties": {

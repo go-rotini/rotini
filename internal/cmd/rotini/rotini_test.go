@@ -399,7 +399,7 @@ func TestResolveVersion(t *testing.T) {
 		{"build info wins over ldflags", "0.0.0", "v2.0.0", "2.0.0"},
 		{"a devel build falls back to ldflags", "1.2.3", "(devel)", "1.2.3"},
 		{"pre-release suffix is trimmed", "v1.2.3-rc1+meta", "", "1.2.3"},
-		{"an unparseable version passes through", "not-a-version", "", "not-a-version"},
+		{"an unparseable version is the dev version", "not-a-version", "", "0.0.0"},
 
 		// A pseudo-version is not a release, so the -ldflags stamp wins.
 		{"a pseudo-version is not a release", "1.4.2", "v0.0.0-20260901233311-3ef400c2a629", "1.4.2"},
@@ -408,12 +408,12 @@ func TestResolveVersion(t *testing.T) {
 		{"a real tag still wins", "0.0.0", "v1.9.4", "1.9.4"},
 		{"a tagged pre-release wins and is trimmed", "0.0.0", "v2.0.0-rc.1", "2.0.0"},
 
-		// `make rotini-build` stamps `git describe --tags --always --dirty`; a build between
+		// `make rotini-build` stamps `git describe --tags --dirty`; a build between
 		// tags reports the last release.
 		{"git describe on a tag", "v1.2.0", "v1.2.1-0.20261003120000-805e610abcde", "1.2.0"},
 		{"git describe between tags", "v1.1.1-3-g805e610", "(devel)", "1.1.1"},
 		{"git describe with uncommitted changes", "v1.1.1-3-g805e610-dirty", "", "1.1.1"},
-		{"git describe with no tags is a bare hash", "805e610", "", "805e610"},
+		{"git describe with no tags is the dev version", "805e610", "", "0.0.0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -432,20 +432,30 @@ func TestResolveVersion(t *testing.T) {
 	}
 }
 
-// The root's -v and --version print the bound version, like the version sub-command.
+// The root's --version prints the bound version, like the version sub-command.
 func TestCLI_rootVersionFlag(t *testing.T) {
-	for _, flag := range []string{"-v", "--version"} {
-		p, out, _ := newTestCLI(t)
-		code, err := p.Run([]string{flag})
-		if err != nil {
-			t.Fatalf("Run(%s): %v", flag, err)
-		}
-		if code != 0 {
-			t.Errorf("Run(%s) exit = %d, want 0", flag, code)
-		}
-		if got := strings.TrimSpace(out.String()); got != "v"+testVersion {
-			t.Errorf("Run(%s) = %q, want %q", flag, got, "v"+testVersion)
-		}
+	p, out, _ := newTestCLI(t)
+	code, err := p.Run([]string{"--version"})
+	if err != nil {
+		t.Fatalf("Run(--version): %v", err)
+	}
+	if code != 0 {
+		t.Errorf("Run(--version) exit = %d, want 0", code)
+	}
+	if got := strings.TrimSpace(out.String()); got != "v"+testVersion {
+		t.Errorf("Run(--version) = %q, want %q", got, "v"+testVersion)
+	}
+}
+
+// --version has no short form, matching what `rotini init` seeds, so -v is an unknown flag.
+func TestCLI_noShortVersionFlag(t *testing.T) {
+	p, out, errb := newTestCLI(t)
+	code, err := p.Run([]string{"-v"})
+	if err == nil || code == 0 {
+		t.Errorf("Run(-v) = %d, %v; want a usage error", code, err)
+	}
+	if out.Len() != 0 || !strings.Contains(errb.String(), `unknown flag "-v"`) {
+		t.Errorf("Run(-v) stdout %q, stderr %q", out.String(), errb.String())
 	}
 }
 
@@ -537,6 +547,41 @@ func TestRequiresRuntime(t *testing.T) {
 		if got := requiresRuntime(dir); got != want {
 			t.Errorf("requiresRuntime(%s) = %v, want %v", dir, got, want)
 		}
+	}
+}
+
+// TestMissingRuntime_vendorMod pins that a module kept in vendor.mod is read for the runtime
+// requirement, ahead of a go.mod further up, and that the warning names vendor.mod and the go get
+// that edits it.
+func TestMissingRuntime_vendorMod(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/outer\n\nrequire github.com/go-rotini/rotini v1.0.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vm := filepath.Join(root, "vm")
+	sub := filepath.Join(vm, "cmd", "app")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vm, "vendor.mod"), []byte("module example.com/vm\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if requiresRuntime(sub) {
+		t.Error("requiresRuntime read the outer go.mod, not the vendor.mod of the module")
+	}
+	if got := moduleFile(sub); got != filepath.Join(vm, "vendor.mod") {
+		t.Errorf("moduleFile = %s, want the vendor.mod", got)
+	}
+	for dir, want := range map[string]string{
+		vm:  "vendor.mod does not require github.com/go-rotini/rotini yet; run `go get -modfile=vendor.mod github.com/go-rotini/rotini` before building",
+		sub: "run `go get -modfile=../../vendor.mod github.com/go-rotini/rotini`",
+	} {
+		if got := missingRuntime(dir, "building").Error(); !strings.Contains(got, want) {
+			t.Errorf("missingRuntime(%s) = %q, want it to hold %q", dir, got, want)
+		}
+	}
+	if got := missingRuntime(t.TempDir(), "building").Error(); !strings.HasPrefix(got, "go.mod does not require") || !strings.Contains(got, "run `go get github.com/go-rotini/rotini`") {
+		t.Errorf("with no module file: %q", got)
 	}
 }
 
@@ -714,4 +759,20 @@ func TestCLI_manDir(t *testing.T) {
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(s, "\n")
 	return line
+}
+
+// A Go keyword or main can't name a CLI, since the name becomes the generated package's; init
+// refuses it before writing anything, dry run or not.
+func TestCLI_initializeRefusesReservedNames(t *testing.T) {
+	for _, argv := range [][]string{{"init", "func"}, {"init", "type", "--dry-run"}, {"init", "main"}} {
+		p, _, errb := newTestCLI(t)
+		ran := func(string, codegen.InitOptions) (codegen.Initialized, error) {
+			t.Errorf("%v: initialize ran", argv)
+			return codegen.Initialized{}, nil
+		}
+		p.WithDependency(initializeDep, codegen.InitializeFn(ran)).WithDependency(initializeDryRunDep, codegen.InitializeDryRunFn(ran))
+		if code, _ := p.Run(argv); code != 1 || !strings.Contains(errb.String(), "invalid CLI name") {
+			t.Errorf("%v: exit %d, stderr %q", argv, code, errb.String())
+		}
+	}
 }

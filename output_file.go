@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -80,7 +81,8 @@ func FileMode(perm fs.FileMode) OutputOption {
 // An existing regular file is replaced only with [Overwrite](true); otherwise CreateOutput
 // returns a usage error that matches [fs.ErrExist]. The check is repeated before the rename,
 // but a file created in between is still replaced. A symbolic link is followed, so the file
-// it points to is replaced and the link is kept. Replacing a file gives it a new identity: hard
+// it points to is replaced and the link is kept; a link to a file that doesn't exist is a usage
+// error. Replacing a file gives it a new identity: hard
 // links to the old one, its owner and its extended attributes are not carried over. On Windows,
 // the rename is retried briefly while another program holds the file open, and a read-only
 // file cannot be replaced.
@@ -105,20 +107,25 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	info, err := os.Lstat(target)
 	exists := err == nil
 	if exists && info.Mode()&fs.ModeSymlink != 0 {
-		if resolved, rerr := filepath.EvalSymlinks(target); rerr == nil {
-			target = resolved
-			info, err = os.Stat(target)
-			exists = err == nil
+		resolved, rerr := filepath.EvalSymlinks(target)
+		if errors.Is(rerr, fs.ErrNotExist) {
+			return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %s is a symbolic link to a file that doesn't exist", quotePath(path)), err: rerr})
 		}
+		if rerr != nil {
+			return nil, &pathError{msg: fmt.Sprintf("could not follow output file %s", quotePath(path)), err: rerr, detail: true}
+		}
+		target = resolved
+		info, err = os.Stat(target)
+		exists = err == nil
 	}
 	switch {
 	case exists && info.IsDir():
-		return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %q is a directory", path)})
+		return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %s is a directory", quotePath(path))})
 	case exists && !info.Mode().IsRegular() && info.Mode()&fs.ModeSymlink == 0:
 		// No O_TRUNC: it does nothing to a device or pipe, and Windows refuses it on NUL.
 		f, err := os.OpenFile(target, os.O_WRONLY, 0)
 		if err != nil {
-			return nil, &pathError{msg: fmt.Sprintf("could not open output file %q", path), err: err, detail: true}
+			return nil, &pathError{msg: fmt.Sprintf("could not open output file %s", quotePath(path)), err: err, detail: true}
 		}
 		return rtx.trackOutput(&OutputFile{rtx: rtx, name: path, w: f, file: f, target: target}), nil
 	case exists && !cfg.overwrite:
@@ -135,14 +142,14 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	}
 	f, tmp, err := createTemp(target, perm)
 	if err != nil {
-		return nil, &pathError{msg: fmt.Sprintf("could not create output file %q", path), err: err, detail: true}
+		return nil, &pathError{msg: fmt.Sprintf("could not create output file %s", quotePath(path)), err: err, detail: true}
 	}
 	if keepMode {
 		// The temporary file was created through the umask; give it the replaced file's mode.
 		if err := f.Chmod(perm); err != nil {
 			_ = f.Close()
 			_ = os.Remove(tmp)
-			return nil, &pathError{msg: fmt.Sprintf("could not create output file %q", path), err: err, detail: true}
+			return nil, &pathError{msg: fmt.Sprintf("could not create output file %s", quotePath(path)), err: err, detail: true}
 		}
 	}
 	return rtx.trackOutput(&OutputFile{
@@ -183,8 +190,10 @@ func (f *OutputFile) Name() string { return f.name }
 
 // Close commits the file: the temporary file is closed and renamed into place. If a write
 // failed, or closing or renaming fails (a full disk often shows only here), the temporary file
-// is removed, an existing file is left as it was, and the error is returned. Close on stdout,
-// or after Close or Abort, does nothing.
+// is removed, an existing file is left as it was, and the error is returned. Without
+// [Overwrite], a file that appeared at the path since [CreateOutput] is not replaced and Close
+// returns the same usage error CreateOutput would. A file written directly (a device or a named
+// pipe) is only closed. Close on stdout, or after Close or Abort, does nothing.
 func (f *OutputFile) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -199,13 +208,13 @@ func (f *OutputFile) Close() error {
 	cerr := f.file.Close()
 	if f.tmp == "" {
 		if err := cmp.Or(f.werr, cerr); err != nil {
-			return &pathError{msg: fmt.Sprintf("could not write output file %q", f.name), err: err, detail: true}
+			return &pathError{msg: fmt.Sprintf("could not write output file %s", quotePath(f.name)), err: err, detail: true}
 		}
 		return nil
 	}
 	if err := cmp.Or(f.werr, cerr); err != nil {
 		_ = os.Remove(f.tmp)
-		return &pathError{msg: fmt.Sprintf("could not write output file %q", f.name), err: err, detail: true}
+		return &pathError{msg: fmt.Sprintf("could not write output file %s", quotePath(f.name)), err: err, detail: true}
 	}
 	if !f.overwrite {
 		if _, err := os.Lstat(f.target); err == nil {
@@ -215,7 +224,7 @@ func (f *OutputFile) Close() error {
 	}
 	if err := renameOutput(f.tmp, f.target); err != nil {
 		_ = os.Remove(f.tmp)
-		return &pathError{msg: fmt.Sprintf("could not replace output file %q", f.name), err: err, detail: true}
+		return &pathError{msg: fmt.Sprintf("could not replace output file %s", quotePath(f.name)), err: err, detail: true}
 	}
 	return nil
 }
@@ -239,14 +248,14 @@ func (f *OutputFile) Abort() error {
 		return nil
 	}
 	if err := os.Remove(f.tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return &pathError{msg: fmt.Sprintf("could not remove the temporary file for %q", f.name), err: err, detail: true}
+		return &pathError{msg: fmt.Sprintf("could not remove the temporary file for %s", quotePath(f.name)), err: err, detail: true}
 	}
 	return nil
 }
 
 // existsError is the error for an output file that exists and may not be replaced.
 func existsError(path string) error {
-	return UsageError(&pathError{msg: fmt.Sprintf("output file %q already exists", path), err: fs.ErrExist})
+	return UsageError(&pathError{msg: fmt.Sprintf("output file %s already exists", quotePath(path)), err: fs.ErrExist})
 }
 
 // pathError is a file error in rotini's words that still matches its cause with errors.Is.
@@ -273,6 +282,18 @@ func (e *pathError) Error() string {
 }
 
 func (e *pathError) Unwrap() error { return e.err }
+
+// quotePath quotes a file path for a message as the user typed it: like %q, except that a
+// backslash stays a single backslash, so a Windows path reads as written. A path that needs
+// any other escaping (a quote, a control character, invalid UTF-8) is quoted as %q would.
+func quotePath(p string) string {
+	if strings.Contains(p, `\`) {
+		if s := strings.ReplaceAll(p, `\`, "/"); strconv.Quote(s) == `"`+s+`"` {
+			return `"` + p + `"`
+		}
+	}
+	return strconv.Quote(p)
+}
 
 // trackOutput registers f with the run, which aborts it when the run settles with f still
 // open. It returns f.

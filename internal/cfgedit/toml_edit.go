@@ -65,12 +65,28 @@ func (tomlEditor) set(src []byte, path []string, v any) ([]byte, error) {
 			if old.Kind == toml.InlineTableNode {
 				return nil, refused(path, "it holds a table, not a value")
 			}
-			return splice(src, old.Span.Start.Offset, old.Span.End.Offset, tomlValue(v)), nil
+			text := tomlValue(v)
+			if s, ok := v.(string); ok && ed.literal(old) && literalSafe(s) {
+				text = "'" + s + "'" // keep the file's literal-string style
+			}
+			return splice(src, old.Span.Start.Offset, old.Span.End.Offset, text), nil
 		default:
 			return nil, refused(path, "%s holds a value, not a table", strings.Join(path[:i+1], "."))
 		}
 	}
 	return src, nil
+}
+
+// literal reports whether n is written as a one-line literal string: 'text'.
+func (ed *tomlEdit) literal(n *toml.Node) bool {
+	text := ed.src[n.Span.Start.Offset:n.Span.End.Offset]
+	return len(text) >= 2 && text[0] == '\'' && !strings.HasPrefix(string(text), "'''")
+}
+
+// literalSafe reports whether s can be written as a one-line literal string, which has no
+// escapes: no single quote and no control character but tab.
+func literalSafe(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool { return r == '\'' || (r < 0x20 && r != '\t') || r == 0x7f })
 }
 
 // explicit reports whether t is a table written with its own [header].
@@ -139,19 +155,23 @@ func (ed *tomlEdit) tables(depth int) []*toml.Node {
 	return chain
 }
 
-// sectionEnd returns the end of the last key/value pair written in t's section: its direct
-// pairs and those of tables its dotted keys create. -1 when there is none.
-func sectionEnd(t *toml.Node) int {
-	end := -1
+// lastPair returns the span of the last key/value pair written in t's section: its direct pairs
+// and those of tables its dotted keys create. end is -1 when there is none.
+func lastPair(t *toml.Node) (start, end int) {
+	start, end = -1, -1
 	for _, c := range t.Children {
+		s, e := -1, -1
 		switch {
 		case c.Kind == toml.KeyValueNode && !c.Span.IsZero():
-			end = max(end, c.Span.End.Offset)
+			s, e = c.Span.Start.Offset, c.Span.End.Offset
 		case c.Kind == toml.TableNode && c.Span.IsZero() && !headerImplied(c):
-			end = max(end, sectionEnd(c))
+			s, e = lastPair(c)
+		}
+		if e > end {
+			start, end = s, e
 		}
 	}
-	return end
+	return start, end
 }
 
 // insertInSection writes `path = v` in table t's section, after its last pair, or right after
@@ -160,9 +180,11 @@ func sectionEnd(t *toml.Node) int {
 func (ed *tomlEdit) insertInSection(t *toml.Node, path []string, v any) []byte {
 	line := tomlKeyPath(path) + " = " + tomlValue(v) + ed.nl
 	var at int
-	switch end := sectionEnd(t); {
+	switch start, end := lastPair(t); {
 	case end >= 0:
 		at = nextLine(ed.src, end)
+		ls := lineStart(ed.src, start)
+		line = string(ed.src[ls:ls+leadAt(ed.src, ls)]) + line // indented like the key before it
 	case t != ed.root:
 		at = nextLine(ed.src, t.Span.End.Offset)
 	default:
@@ -272,6 +294,11 @@ func (ed *tomlEdit) removeEntry(chain []*toml.Node, k int, kv *toml.Node) ([]byt
 			edits = append(edits, edit{ls, le, ""})
 			outer = i
 		}
+	}
+	if hs := edits[len(edits)-1].start; outer >= 0 && le < len(ed.src) && blankLine(ed.src, le) &&
+		(hs <= bomLen(ed.src) || blankLine(ed.src, lineStart(ed.src, hs-1))) {
+		// The section went; so does one of the blank lines that set it apart.
+		edits[0].end = nextLine(ed.src, le)
 	}
 	if k > 0 && len(chain[k].Children) == 1 && !explicit(chain[k]) {
 		header := "[" + tomlKeyPath(ed.path[:k]) + "]"

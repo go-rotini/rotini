@@ -48,7 +48,7 @@ command:
         - name: importer_version
           identifiers:
             - --importer-version
-          summary: the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
+          summary: the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
           schema:
             type: string
         - name: force
@@ -68,7 +68,6 @@ command:
   flags:
     - name: version
       identifiers:
-        - -v
         - --version
       summary: print version
       cascading: true
@@ -319,7 +318,7 @@ command:
           identifiers:
             - -w
             - --watch
-          summary: watch the spec and conf for changes and re-generate
+          summary: watch the spec, conf and the files they use for changes and re-generate
           schema:
             type: bool
         - name: dry-run
@@ -365,7 +364,7 @@ command:
           identifiers:
             - -w
             - --watch
-          summary: watch the spec and conf for changes and re-validate
+          summary: watch the spec, conf and the files they use for changes and re-validate
           schema:
             type: bool
         - name: release
@@ -610,7 +609,7 @@ command:
         contracts, the spec is given with --spec.
 
         The conf's diff.accept entries acknowledge intended changes, one finding each; an entry
-        that matches no finding fails the run.
+        that matches no finding fails the run, unless --fail-on is never.
       examples:
         - rotini diff git:v1.2.0
         - rotini diff git:v1.2.0 --release 2.0.0
@@ -625,7 +624,7 @@ command:
           summary: a contract, the spec or the conf could not be read
         - name: breaking
           code: 2
-          summary: a change at or above --fail-on, or a diff.accept entry that matched no finding
+          summary: a change at or above --fail-on, or a diff.accept entry that matched no finding (unless --fail-on is never)
       flags:
         - name: spec_file_path
           identifiers:

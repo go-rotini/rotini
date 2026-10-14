@@ -61,7 +61,7 @@ func expandGlob(dir, word string) []string {
 		return []string{word}
 	}
 	pattern := joinDir(dir, word)
-	matches, err := filepath.Glob(pattern)
+	matches, err := globFold(pattern)
 	if err != nil || len(matches) == 0 {
 		return []string{literal}
 	}
@@ -75,11 +75,91 @@ func expandGlob(dir, word string) []string {
 	return matches
 }
 
-// globEscaper writes each glob metacharacter as a one-character class, which matches it
-// literally on every system (a backslash is a separator on Windows, not an escape).
-var globEscaper = strings.NewReplacer("[", "[[]", "*", "[*]", "?", "[?]")
+// globFold is [filepath.Glob] matching names regardless of case, as Windows file systems and
+// tools do: `*.TXT` matches a.txt.
+func globFold(pattern string) ([]string, error) {
+	if _, err := filepath.Match(pattern, ""); err != nil {
+		return nil, err //nolint:wrapcheck // the caller keeps the word as written
+	}
+	if !strings.ContainsAny(pattern, "*?[") {
+		if _, err := os.Lstat(pattern); err != nil {
+			return nil, nil //nolint:nilerr // a word naming no file matches nothing, as filepath.Glob reads it
+		}
+		return []string{pattern}, nil
+	}
+	dir, file := filepath.Split(pattern)
+	dir = cleanGlobDir(dir)
+	if !strings.ContainsAny(dir[len(filepath.VolumeName(dir)):], "*?[") {
+		return globDirFold(dir, file, nil), nil
+	}
+	if dir == pattern {
+		return nil, filepath.ErrBadPattern
+	}
+	parents, err := globFold(dir)
+	if err != nil {
+		return nil, err
+	}
+	var matches []string
+	for _, d := range parents {
+		matches = globDirFold(d, file, matches)
+	}
+	return matches, nil
+}
 
-// unescapeGlob removes the escapes globEscaper writes, and reports whether word holds any
+// cleanGlobDir is the directory part of a split pattern without its trailing separator, as
+// [filepath.Glob] reads it: "" is ".", a root or volume root is kept, and a bare volume "C:"
+// is "C:.".
+func cleanGlobDir(dir string) string {
+	vol := len(filepath.VolumeName(dir))
+	switch {
+	case dir == "":
+		return "."
+	case vol+1 == len(dir) && os.IsPathSeparator(dir[len(dir)-1]):
+		return dir
+	case vol == len(dir):
+		return dir + "."
+	}
+	return dir[:len(dir)-1]
+}
+
+// globDirFold appends to matches the entries of dir whose names match pattern regardless of
+// case, in name order.
+func globDirFold(dir, pattern string, matches []string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return matches
+	}
+	folded := strings.ToLower(pattern)
+	for _, e := range entries {
+		if ok, err := filepath.Match(folded, strings.ToLower(e.Name())); err == nil && ok {
+			matches = append(matches, filepath.Join(dir, e.Name()))
+		}
+	}
+	return matches
+}
+
+// escapeGlob writes each glob metacharacter as a one-character class, which matches it
+// literally on every system (a backslash is a separator on Windows, not an escape).
+func escapeGlob(s string) string {
+	if !strings.ContainsAny(s, "[*?") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for i := range len(s) {
+		switch c := s[i]; c {
+		case '[', '*', '?':
+			b.WriteByte('[')
+			b.WriteByte(c)
+			b.WriteByte(']')
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// unescapeGlob removes the escapes escapeGlob writes, and reports whether word holds any
 // unescaped `*`, `?` or `[`.
 func unescapeGlob(word string) (literal string, isPattern bool) {
 	var b strings.Builder

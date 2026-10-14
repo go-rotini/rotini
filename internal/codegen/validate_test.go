@@ -256,6 +256,7 @@ var schemaBlockLocations = map[string]string{
 	"BaseSchema.properties":    "  output: { type: object, properties: { p: { type: string, bogus: 1 } } }\n",
 	"BaseSchema.items":         "  output: { type: array, items: { type: string, bogus: 1 } }\n",
 	"ExitStatusEntry.output":   "  exit_status:\n    - code: 3\n      output: { type: object, bogus: 1 }\n",
+	"Schema.oneOf":             "  output_stream: true\n  output:\n    oneOf:\n      - { type: object, bogus: 1 }\n",
 }
 
 func TestSchemaBlockProblems_reachesEveryBlockLocation(t *testing.T) {
@@ -334,6 +335,28 @@ func TestSchemaBlockProblems_acceptsEveryDefinedKey(t *testing.T) {
 	}
 }
 
+// TestSchemaBlockProblems_oneOfOnlyOnOutput pins that `oneOf` is accepted on a command's own
+// output and refused, positioned, in every other object schema.
+func TestSchemaBlockProblems_oneOfOnlyOnOutput(t *testing.T) {
+	kinds := "oneOf: [{ type: object, properties: { kind: { type: string, const: a } }, required: [kind] }]"
+	if problems := blockProblems(t, "  output_stream: true\n  output: { "+kinds+" }\n"); len(problems) != 0 {
+		t.Errorf("oneOf on output reported problems: %v", problems)
+	}
+	for name, body := range map[string]string{
+		"named schema":   "  schemas:\n    X: { " + kinds + " }\n",
+		"property":       "  output: { type: object, properties: { p: { " + kinds + " } } }\n",
+		"items":          "  output: { type: array, items: { " + kinds + " } }\n",
+		"exit status":    "  exit_status:\n    - code: 3\n      output: { " + kinds + " }\n",
+		"inside a kind":  "  output_stream: true\n  output:\n    oneOf:\n      - { " + kinds + " }\n",
+		"input property": "  stdin:\n    format: json\n    schema: { type: object, properties: { p: { " + kinds + " } } }\n",
+	} {
+		problems := blockProblems(t, body)
+		if len(problems) != 1 || !strings.Contains(problems[0].Error(), "accepted only on a command's `output`") {
+			t.Errorf("%s: problems = %v, want one saying oneOf is accepted only on output", name, problems)
+		}
+	}
+}
+
 // TestSchemaBlockProblems_explainsUnimplementedJSONSchemaKeywords pins the distinct message for
 // an unimplemented JSON Schema keyword versus a typo.
 func TestSchemaBlockProblems_explainsUnimplementedJSONSchemaKeywords(t *testing.T) {
@@ -398,10 +421,10 @@ func TestValidate_typeErrorsAreReportedByTheSchemaWithPositions(t *testing.T) {
 func TestExplainDecodeFailure_schemaAcceptsButTypesReject(t *testing.T) {
 	p := NewProcessor("0.0.0")
 	body := blockSpecHead + "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n" +
-		"      schema: { type: string, minLength: 99999999999999999999999 }\n"
+		"      schema: { type: string, minLength: 1e30 }\n"
 	_, err := decodeData[Spec](formatYAML, []byte(body), "s.yaml")
 	if err == nil {
-		t.Skip("this YAML library accepted the overflow; no schema/type disagreement to exercise")
+		t.Fatal("the YAML decoder accepted an overflowing minLength")
 	}
 	got := p.explainDecodeFailure("spec", err)
 	if !strings.Contains(got.Error(), "rotini bug") {
@@ -415,5 +438,20 @@ func TestExplainDecodeFailure_passesOtherErrorsThrough(t *testing.T) {
 	orig := errors.New("no such file")
 	if got := NewProcessor("0.0.0").explainDecodeFailure("spec", orig); got != orig {
 		t.Errorf("a non-decode error was rewritten: %v", got)
+	}
+}
+
+// A keyword location given as the evaluation path maps back to where the keyword sits in the
+// schema; a location that's already static is kept.
+func TestStaticLocation(t *testing.T) {
+	for in, want := range map[string]string{
+		"#/properties/command/$ref/properties/flags/items/$ref/additionalProperties": "#/definitions/FlagInput/additionalProperties",
+		"#/properties/command/$ref/anyOf":                                            "#/definitions/Command/anyOf",
+		"#/definitions/FlagInput/additionalProperties":                               "#/definitions/FlagInput/additionalProperties",
+		"#/properties/nope/$ref/type":                                                "#/properties/nope/$ref/type",
+	} {
+		if got := staticLocation(in); got != want {
+			t.Errorf("staticLocation(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

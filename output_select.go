@@ -402,9 +402,10 @@ func boolRank(b bool) int {
 	return 0
 }
 
-// partialSchema returns the JSON Schema document schema with every `required` keyword removed,
-// so a value missing fields still matches. Only schema positions are visited, so a property
-// that happens to be named required is kept.
+// partialSchema returns the JSON Schema document schema with every keyword that demands a field
+// be present removed (`required`, `dependentRequired`, `minProperties` and draft-7 array
+// `dependencies`), so a value missing fields still matches. Only schema positions are visited,
+// so a property that happens to be named required is kept.
 func partialSchema(schema []byte) ([]byte, error) {
 	var doc any
 	if err := json.Unmarshal(schema, &doc); err != nil {
@@ -414,7 +415,8 @@ func partialSchema(schema []byte) ([]byte, error) {
 	return json.Marshal(doc) //nolint:wrapcheck // wrapped by the caller
 }
 
-// dropRequired removes `required` from the schema s and every schema below it.
+// dropRequired removes the presence keywords [partialSchema] lists from the schema s and every
+// schema below it.
 func dropRequired(s any) {
 	m, ok := s.(map[string]any)
 	if !ok {
@@ -423,14 +425,25 @@ func dropRequired(s any) {
 	if _, ok := m["required"].([]any); ok {
 		delete(m, "required")
 	}
-	for _, key := range []string{"properties", "patternProperties", "definitions", "$defs"} {
+	delete(m, "dependentRequired")
+	delete(m, "minProperties")
+	if deps, ok := m["dependencies"].(map[string]any); ok {
+		for k, v := range deps {
+			if _, isList := v.([]any); isList {
+				delete(deps, k)
+			} else {
+				dropRequired(v)
+			}
+		}
+	}
+	for _, key := range []string{"properties", "patternProperties", "definitions", "$defs", "dependentSchemas"} {
 		if sub, ok := m[key].(map[string]any); ok {
 			for _, v := range sub {
 				dropRequired(v)
 			}
 		}
 	}
-	for _, key := range []string{"items", "additionalProperties", "additionalItems", "not", "if", "then", "else", "contains", "propertyNames"} {
+	for _, key := range []string{"items", "additionalProperties", "additionalItems", "not", "if", "then", "else", "contains", "propertyNames", "unevaluatedProperties", "unevaluatedItems"} {
 		dropRequired(m[key])
 	}
 	for _, key := range []string{"allOf", "anyOf", "oneOf", "items", "prefixItems"} {

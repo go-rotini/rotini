@@ -137,3 +137,18 @@ func TestCLI_diffSpecAndRelease(t *testing.T) {
 		t.Errorf("a bad --release: exit %d, stderr %q", code, stderr)
 	}
 }
+
+// A git revision starting with '-' is refused before git runs, since git would take it as one of
+// its own options (--output=<path> writes a file).
+func TestCLI_diffRefusesOptionLikeRevision(t *testing.T) {
+	run, call := diffCLI(t, report(nil), nil)
+	for _, argv := range [][]string{
+		{"diff", "git:--output=x:c.json", "new.json", "--spec", "s.yaml"},
+		{"diff", "old.json", "git:-p", "--spec", "s.yaml"},
+	} {
+		code, _, stderr := run(argv...)
+		if code != 1 || !strings.Contains(stderr, "a git revision can't start with '-'") || *call != (diffCall{}) {
+			t.Errorf("%v: exit %d, stderr %q, diff called %+v", argv, code, stderr, *call)
+		}
+	}
+}

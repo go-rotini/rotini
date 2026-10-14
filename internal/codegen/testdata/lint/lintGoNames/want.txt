@@ -1,0 +1,5 @@
+spec: .rotini.spec.yaml:32:7: command demo/Deploy: generates the Go name DemoDeploy, which command demo/deploy also generates (a Go name capitalizes each word, drops "-" and "_", and joins the path's names, so two paths can make one); rename one
+spec: .rotini.spec.yaml:38:7: command demo/aB: generates the Go name DemoAB, which command demo/a/b also generates (a Go name capitalizes each word, drops "-" and "_", and joins the path's names, so two paths can make one); rename one
+spec: .rotini.spec.yaml:13:7: command demo: flag "x_y": generates the struct field XY, which flag "x-y" also generates (names that differ only in case, "-" or "_" make the same Go name); rename one
+spec: .rotini.spec.yaml:20:7: command demo: env "a_b": generates the struct field AB, which env "a-b" also generates (names that differ only in case, "-" or "_" make the same Go name); rename one
+spec: .rotini.spec.yaml:28:24: command demo schema "Item": property "x,omitempty": can't become a json tag; leave out backticks, '"' and ','

@@ -55,7 +55,7 @@ func fallbackValueOrigin(reg *recon.Registry, view *osView, tag reflect.StructTa
 	source := ""
 	if val, found, err := reg.Get(key); err == nil && found {
 		source = val.Source()
-	} else if _, leafSource, err := mapLeaves(reg, key); err == nil {
+	} else if _, leafSource, err := mapLeaves(fallbackLookup{reg: reg}, key); err == nil {
 		source = leafSource
 	}
 	return valueOrigin(view, source, tag.Get("env"), key)
@@ -79,8 +79,9 @@ func nestedEnvOrigin(tag reflect.StructTag) string {
 //	TaskrDeploy.Stdin = (document) from stdin
 //
 // A field the spec marks secret prints [redacted] whatever a layer supplied, a hand-built
-// layer's text included. A value with no text prints (document) for a decoded stdin document,
-// (stream) for streamed stdin, which Format never reads, and (set) otherwise.
+// layer's text included. A value with no text prints (stream) for streamed stdin, which Format
+// never reads, (document) for a decoded stdin document, "" for an empty string, and (set)
+// otherwise.
 func (r InputReport) Format(w io.Writer) error {
 	paths := r.Fields()
 	if len(paths) == 0 {

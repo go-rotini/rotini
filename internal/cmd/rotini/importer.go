@@ -10,7 +10,8 @@ import (
 )
 
 // runImport runs an import with opts, completed by the flags every import command takes,
-// and reports it: the notes and summary on stderr, then the files on stdout.
+// and reports it: the notes and summary on stderr, then the files on stdout, with a warning
+// when go.mod doesn't require the runtime yet.
 func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOptions, set RotiniImportFlagSet) {
 	opts.Dir = set.Dir
 	opts.Format = set.Format
@@ -52,6 +53,6 @@ func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOpti
 		return
 	}
 	if !requiresRuntime(".") {
-		rtx.RecordWarning(fmt.Errorf("go.mod does not require %s yet; run `go get %s` before building the imported CLI", runtimeModule, runtimeModule))
+		rtx.RecordWarning(missingRuntime(".", "building the imported CLI"))
 	}
 }

@@ -309,9 +309,12 @@ func lintEnumSummaries(spec *Spec) []error {
 				})
 			}
 		})
-		if c.Output != nil && (enumDescribed(c.Output.Enum) || schemaHasDescribedEnum(c.Output.Properties) || (c.Output.Items != nil && enumDescribed(c.Output.Items.Enum))) {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/output", loc: "command " + path,
-				msg: "gives an `enum` value in `output` a summary; summaries belong on an input's own schema, so write plain values here"})
+		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+			o := s.schema
+			if enumDescribed(o.Enum) || schemaHasDescribedEnum(o.Properties) || (o.Items != nil && enumDescribed(o.Items.Enum)) {
+				problems = append(problems, &problem{kind: "spec", ptr: s.ptr, loc: "command " + path,
+					msg: "gives an `enum` value in `output` a summary; summaries belong on an input's own schema, so write plain values here"})
+			}
 		}
 	})
 	return problems

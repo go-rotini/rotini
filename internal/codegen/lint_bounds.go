@@ -276,8 +276,8 @@ func lintBoundsSatisfiable(spec *Spec) []error {
 				problems = append(problems, inputProblem(ptr, path, channel, name, msg))
 			}
 		})
-		if c.Output != nil {
-			tree("command "+path, "output", ptr+"/output", c.Output.BaseSchema)
+		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+			tree("command "+path, "output", s.ptr, s.schema.BaseSchema)
 		}
 	})
 	return problems

@@ -337,3 +337,56 @@ func TestExecutableNames_windowsRules(t *testing.T) {
 		t.Errorf("elsewhere every file counts, unchanged: got (%q, %v)", got, ok)
 	}
 }
+
+// A discovery token that is not a plain file name never runs a file: "../" would otherwise
+// reach outside the plugin path and drop the prefix.
+func TestRun_discoveryTokenTraversal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a shell-script stand-in for a plugin cannot run on Windows")
+	}
+	root := t.TempDir()
+	pluginDir, outside := filepath.Join(root, "plugins"), filepath.Join(root, "outside")
+	for _, d := range []string{pluginDir, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marker := filepath.Join(root, "ran")
+	if err := os.WriteFile(filepath.Join(outside, "evil"), []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	def := Definition{
+		Name: "app", Handler: "App",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "app-"}, PluginPath: pluginDir,
+	}
+	p, _, _ := pluginProgram(def, []string{"x/../../outside/evil"})
+	p.WithoutSignalHandling()
+	_, _ = p.Run(p.args)
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("a token with ../ ran a file outside the plugin path")
+	}
+	if _, ok := rootFrame(def).PluginBinary("x/../../outside/evil"); ok {
+		t.Error("PluginBinary resolved a token with ../")
+	}
+}
+
+// A secret optional-value flag's detached word that names a discovered plugin is not repeated
+// when the flag is refused before the plugin.
+func TestPlugin_hostFlagCheckRedactsSecretWord(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags:           []FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string", Secret: true, ImplicitValue: "prompt"}},
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "app-"},
+		PluginPath:      t.TempDir(),
+		Commands:        []CommandDef{{Name: "sub", Handler: "Sub"}},
+	}
+	p, _, errb := pluginProgram(def, []string{"--token", "hunter2"})
+	p.WithoutSignalHandling()
+	_, err := p.Run(p.args)
+	if err == nil || strings.Contains(err.Error(), "hunter2") || strings.Contains(errb.String(), "hunter2") {
+		t.Fatalf("err = %v, stderr = %q; want an error that leaves the secret out", err, errb)
+	}
+	if want := "--token can't come before plugin [redacted]"; !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+}

@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func TestQuotePath(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"cmd/app/embed", `"cmd/app/embed"`},
+		{`cmd\app\embed`, `"cmd\app\embed"`},
+		{`C:\abs\file.json`, `"C:\abs\file.json"`},
+		{`C:\a"b`, `"C:\\a\"b"`},
+		{"C:\\a\tb", `"C:\\a\tb"`},
+		{"C:\\a\xffb", `"C:\\a\xffb"`},
+	} {
+		if got := quotePath(tc.in); got != tc.want {
+			t.Errorf("quotePath(%q) = %s, want %s", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestSplitProblems(t *testing.T) {
 	warn := &problem{kind: "spec", loc: "x", msg: "advisory", sev: severityWarning}
 	hard := &problem{kind: "spec", loc: "y", msg: "fatal"}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -35,8 +34,8 @@ func TestWriteOutputItemTo(t *testing.T) {
 	if got := strings.Count(w.String(), "\n"); got != 2 || stdout.Len() != 0 {
 		t.Errorf("writer = %q, stdout = %q", w.String(), stdout.String())
 	}
-	err := rtx.WriteOutputItemTo(failingWriter{syscall.EPIPE}, outTask{}, "json", nil)
-	if !errors.Is(err, syscall.EPIPE) || !strings.HasPrefix(err.Error(), "taskr watch: write output: ") {
+	err := rtx.WriteOutputItemTo(failingWriter{errBrokenPipe}, outTask{}, "json", nil)
+	if !errors.Is(err, errBrokenPipe) || !strings.HasPrefix(err.Error(), "taskr watch: write output: ") {
 		t.Errorf("a failed write: %v", err)
 	}
 }

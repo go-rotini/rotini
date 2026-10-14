@@ -274,8 +274,12 @@ func runInputCase(t *testing.T, c inputCase) {
 		t.Setenv(k, v)
 	}
 
-	rtx := NewContextFor(acmeDef(), c.args).WithStdin(strings.NewReader(c.stdin))
-	c.check(t, rtx, acmeMeta(dir))
+	mk := func() *Context { return NewContextFor(acmeDef(), c.args).WithStdin(strings.NewReader(c.stdin)) }
+	c.check(t, mk(), acmeMeta(dir))
+	if fallbackMode == "direct" {
+		checkProbesBothPaths(t, mk, acmeMeta(dir))
+		checkProbesBothPaths(t, mk, envOnlySettings(acmeMeta(dir)))
+	}
 }
 
 // ── the matrix, in-process tier ──────────────────────────────────────────────
@@ -1131,6 +1135,7 @@ func conformanceCases() []inputCase {
 		{id: "DEP-05", args: []string{"deploy"}, check: confDependencyTyped},
 		{id: "SEC-04", args: []string{"deploy"}, check: confSecretLiteralFree},
 		{id: "FLAG-27", args: []string{"deploy"}, check: confDigitsAfterSwitch},
+		{id: "FLAG-28", args: []string{"deploy"}, check: confPrefixedBase},
 	}
 }
 
@@ -1169,11 +1174,17 @@ func mustGetwd(t *testing.T) string {
 
 // TestConformance_InputMatrix runs the in-process tier of the matrix.
 func TestConformance_InputMatrix(t *testing.T) {
+	before := fallbackPathCounts.direct.Load()
 	wiringModes(t, func(t *testing.T) {
 		for _, c := range conformanceCases() {
 			t.Run(c.id, func(t *testing.T) { runInputCase(t, c) })
 		}
 	})
+	// The whole matrix takes the direct lookup in over 400 fallback passes. Far fewer means the
+	// comparison has quietly stopped reaching it.
+	if got := fallbackPathCounts.direct.Load() - before; got < 200 && !subtestsFiltered() {
+		t.Errorf("the direct lookup was taken in %d fallback passes; want at least 200", got)
+	}
 }
 
 // TestConformance_matrixComplete enforces the suite's shape: every matrix ID
@@ -1203,7 +1214,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"OUT-01", "OUT-02", "OUT-03", "OUT-04",
 		"PROF-01", "PROF-02", "PROF-03", "PROF-04", "PROF-05", "PROF-06", "PROF-07", "PROF-08", "PROF-09",
 		"WRITE-01", "WRITE-02", "WRITE-03", "WRITE-04", "WRITE-05", "WRITE-06", "WRITE-07", "WRITE-08",
-		"FLAG-27",
+		"FLAG-27", "FLAG-28",
 		"WIRE-01", "WIRE-02", "WIRE-03", "WIRE-04", "WIRE-05",
 	}
 	seen := map[string]int{}

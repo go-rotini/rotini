@@ -1,0 +1,9 @@
+-- in --
+items:
+- a
+- b
+other: 1
+-- op --
+unset items
+-- out --
+other: 1

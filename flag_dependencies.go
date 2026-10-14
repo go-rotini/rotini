@@ -13,10 +13,11 @@ import (
 // follows the same explicit-argv convention as flag groups, and so does the value Equals
 // compares: the command line's, never a default or fallback.
 func validateFlagDependencies(chain []Command, store *parsedInputs) error {
-	for i, f := range chain {
+	for i := range chain {
 		if !store.covers(i) {
 			continue
 		}
+		f := ruleFrame(chain, i)
 		for _, dep := range f.FlagDependencies {
 			trigger, ok := dependencyTrigger(f, i, store, dep)
 			if !ok {
@@ -38,14 +39,14 @@ func validateFlagDependencies(chain []Command, store *parsedInputs) error {
 				if len(missing) > 1 {
 					noun, verb = "flags", "are"
 				}
-				return constraintViolation("%s %s %s required %s", noun, joinAnd(missing), verb, trigger)
+				return scoped(constraintViolation("%s %s %s required %s", noun, joinAnd(missing), verb, trigger), f.Name, "")
 			}
 			if len(forbidden) > 0 {
 				noun := "flag"
 				if len(forbidden) > 1 {
 					noun = "flags"
 				}
-				return constraintViolation("%s %s can't be used %s", noun, joinAnd(forbidden), trigger)
+				return scoped(constraintViolation("%s %s can't be used %s", noun, joinAnd(forbidden), trigger), f.Name, "")
 			}
 		}
 	}
@@ -119,11 +120,21 @@ func dependencyCanonical(fd FlagDef, v string) string {
 			return strconv.FormatBool(b)
 		}
 	case isNumericType(fd.Type):
+		if fd.Base == basePrefixed {
+			v = prefixedText(v)
+		}
+		// Integers compare exactly; a float64 would merge those above 2^53.
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && isIntegerType(fd.Type) {
+			return strconv.FormatInt(n, 10)
+		}
+		if n, err := strconv.ParseUint(v, 10, 64); err == nil && isIntegerType(fd.Type) {
+			return strconv.FormatUint(n, 10)
+		}
 		if n, ok := parseNumber(v); ok {
 			return formatNum(n)
 		}
 	}
-	return flagEnum(fd).canonical([]string{v})[0]
+	return flagEnum(&fd).canonical([]string{v})[0]
 }
 
 // noteDependencyValue records a typed flag's value for the dependencies that compare it, in a
@@ -146,4 +157,15 @@ func dependencyOffers(dep FlagDependency, set map[string]bool) bool {
 		return false
 	}
 	return !slices.ContainsFunc(dep.Unless, func(n string) bool { return set[n] })
+}
+
+// isIntegerType reports whether typ (or its element type) is a Go integer type or the JSON
+// Schema "integer".
+func isIntegerType(typ string) bool {
+	switch constraintElemType(typ) {
+	case "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64", "integer":
+		return true
+	}
+	return false
 }

@@ -33,6 +33,7 @@ type jsonEdit struct {
 	path []string
 	nl   string
 	step int
+	tab  bool // the file indents with tabs
 	root *jsonNode
 }
 
@@ -54,7 +55,42 @@ func newJSONEdit(src []byte, path []string, strict bool) (*jsonEdit, error) {
 		return nil, err
 	}
 	ed.step = ed.indentStep(ed.root)
+	ed.tab = ed.indentsWithTabs(ed.root)
 	return ed, nil
+}
+
+// indentsWithTabs reports whether the first member written on its own line is indented with a
+// tab.
+func (ed *jsonEdit) indentsWithTabs(n *jsonNode) bool {
+	if n == nil {
+		return false
+	}
+	for _, m := range n.members {
+		if ls := lineStart(ed.src, m.keyStart); ls != lineStart(ed.src, n.start) && m.keyStart > ls {
+			return ed.src[ls] == '\t'
+		}
+		if ed.indentsWithTabs(m.value) {
+			return true
+		}
+	}
+	return false
+}
+
+// pad is n bytes of indentation in the file's style.
+func (ed *jsonEdit) pad(n int) string {
+	if ed.tab {
+		return strings.Repeat("\t", n)
+	}
+	return spaces(n)
+}
+
+// leadAt counts the spaces and tabs that start the line at start.
+func leadAt(src []byte, start int) int {
+	n := 0
+	for start+n < len(src) && (src[start+n] == ' ' || src[start+n] == '\t') {
+		n++
+	}
+	return n
 }
 
 // index builds the node tree. jsonc reports offsets past a byte-order mark, so shift adds it
@@ -99,7 +135,7 @@ func (ed *jsonEdit) indentStep(n *jsonNode) int {
 	if len(n.members) > 0 {
 		first := n.members[0].keyStart
 		if lineStart(ed.src, first) != lineStart(ed.src, n.start) {
-			if step := column(ed.src, first) - indentAt(ed.src, lineStart(ed.src, n.start)); step > 0 {
+			if step := column(ed.src, first) - leadAt(ed.src, lineStart(ed.src, n.start)); step > 0 {
 				return step
 			}
 		}
@@ -143,7 +179,7 @@ func (e jsonEditor) set(src []byte, path []string, v any) ([]byte, error) {
 		return nil, err
 	}
 	if ed.root == nil {
-		text := "{" + ed.nl + spaces(ed.step) + jsonString(path[0]) + ": " + ed.nested(path[1:], v, ed.step, true) + ed.nl + "}" + ed.nl
+		text := "{" + ed.nl + ed.pad(ed.step) + jsonString(path[0]) + ": " + ed.nested(path[1:], v, ed.step, true) + ed.nl + "}" + ed.nl
 		if !endsWithNewline(src) {
 			text = ed.nl + text
 		}
@@ -189,7 +225,7 @@ func (ed *jsonEdit) nested(path []string, v any, col int, multiline bool) string
 	if !multiline {
 		return "{" + inner + "}"
 	}
-	return "{" + ed.nl + spaces(col+ed.step) + inner + ed.nl + spaces(col) + "}"
+	return "{" + ed.nl + ed.pad(col+ed.step) + inner + ed.nl + ed.pad(col) + "}"
 }
 
 // multiline reports whether obj writes its members on their own lines.
@@ -204,7 +240,7 @@ func (ed *jsonEdit) multiline(obj *jsonNode) bool {
 // and (in JSONC) its trailing-comma style.
 func (ed *jsonEdit) insert(obj *jsonNode, path []string, v any, strict bool) []byte {
 	multi := ed.multiline(obj)
-	openIndent := indentAt(ed.src, lineStart(ed.src, obj.start))
+	openIndent := leadAt(ed.src, lineStart(ed.src, obj.start))
 	col := openIndent + ed.step
 	if len(obj.members) > 0 {
 		col = column(ed.src, obj.members[len(obj.members)-1].keyStart)
@@ -214,9 +250,9 @@ func (ed *jsonEdit) insert(obj *jsonNode, path []string, v any, strict bool) []b
 		inner := ed.src[obj.start+1 : obj.end-1]
 		switch {
 		case len(bytes.TrimSpace(inner)) != 0:
-			return splice(ed.src, obj.start+1, obj.start+1, ed.nl+spaces(col)+member)
+			return splice(ed.src, obj.start+1, obj.start+1, ed.nl+ed.pad(col)+member)
 		case multi:
-			return splice(ed.src, obj.start+1, obj.end-1, ed.nl+spaces(col)+member+ed.nl+spaces(openIndent))
+			return splice(ed.src, obj.start+1, obj.end-1, ed.nl+ed.pad(col)+member+ed.nl+ed.pad(openIndent))
 		}
 		return splice(ed.src, obj.start+1, obj.end-1, member)
 	}
@@ -228,26 +264,44 @@ func (ed *jsonEdit) insert(obj *jsonNode, path []string, v any, strict bool) []b
 			return splice(ed.src, next+1, next+1, " "+member+",")
 		}
 		at := ed.lineTail(next + 1)
-		return splice(ed.src, at, at, ed.nl+spaces(col)+member+",")
+		return splice(ed.src, at, at, ed.nl+ed.pad(col)+member+",")
 	}
 	if !multi {
 		return splice(ed.src, last.end, last.end, ", "+member)
 	}
 	at := ed.lineTail(last.end)
 	if at == last.end {
-		return splice(ed.src, last.end, last.end, ","+ed.nl+spaces(col)+member)
+		return splice(ed.src, last.end, last.end, ","+ed.nl+ed.pad(col)+member)
 	}
-	out := splice(ed.src, at, at, ed.nl+spaces(col)+member)
+	out := splice(ed.src, at, at, ed.nl+ed.pad(col)+member)
 	return splice(out, last.end, last.end, ",")
 }
 
-// lineTail returns the end of off's line when the rest of it after off is only blanks and a
-// line comment, so an insert there keeps that comment with the line it's on; otherwise off.
+// lineTail returns where an insert after off goes so the comments after off stay with off's
+// line: the end of the line when the rest of it is only blanks, block comments and a line
+// comment, following a block comment that runs onto later lines to the end of the line it closes
+// on. When other text follows, it is off.
 func (ed *jsonEdit) lineTail(off int) int {
-	le := lineEnd(ed.src, off)
-	rest := bytes.TrimLeft(ed.src[off:le], " \t")
-	if len(rest) == 0 || bytes.HasPrefix(rest, []byte("//")) {
-		return le
+	at := off
+	for {
+		at = skipBlanks(ed.src, at)
+		if !bytes.HasPrefix(ed.src[at:], []byte("/*")) {
+			break
+		}
+		end := bytes.Index(ed.src[at+2:], []byte("*/"))
+		if end < 0 {
+			return off
+		}
+		next := at + 2 + end + 2
+		if bytes.ContainsAny(ed.src[at:next], "\n") {
+			if rest := skipBlanks(ed.src, next); rest != lineEnd(ed.src, next) && !bytes.HasPrefix(ed.src[rest:], []byte("//")) {
+				return off
+			}
+		}
+		at = next
+	}
+	if at == lineEnd(ed.src, at) || bytes.HasPrefix(ed.src[at:], []byte("//")) {
+		return lineEnd(ed.src, at)
 	}
 	return off
 }
@@ -300,8 +354,19 @@ func (ed *jsonEdit) remove(obj *jsonNode, k int) []byte {
 		}
 	}
 	ls := lineStart(ed.src, start)
-	if len(bytes.TrimSpace(ed.src[ls:start])) == 0 && ed.lineTail(end) == lineEnd(ed.src, end) {
+	switch {
+	case len(bytes.TrimSpace(ed.src[ls:start])) == 0 && ed.lineTail(end) == lineEnd(ed.src, end):
 		start, end = ls, nextLine(ed.src, end)
+	case prevComma < 0:
+		// The blanks after the comma went with the member: {"b": 2}, not { "b": 2}.
+		for end < len(ed.src) && (ed.src[end] == ' ' || ed.src[end] == '\t') {
+			end++
+		}
+	default:
+		// And the blanks before it: {"a": 1}, not {"a": 1 }.
+		for start > prevComma+1 && (ed.src[start-1] == ' ' || ed.src[start-1] == '\t') {
+			start--
+		}
 	}
 	out := splice(ed.src, start, end, "")
 	if prevComma >= 0 {

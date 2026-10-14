@@ -53,7 +53,7 @@ Commands:
   diff                compare two versions of a cli's contract
 
 Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -114,7 +114,7 @@ Flags:
   -n, --[no-]dry-run       show what init would write, and change nothing
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -182,7 +182,7 @@ Commands:
   urfave    import a urfave/cli v3 program
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -220,12 +220,12 @@ Flags:
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
       --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -265,12 +265,12 @@ Flags:
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
       --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -308,12 +308,12 @@ Flags:
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
       --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -348,8 +348,8 @@ created: internal/cmd/mycli/mycli_greet.go
 [14:05:37] 6.12ms
 {{< /code >}}
 
-`--watch` keeps running and regenerates whenever the spec or conf changes. Leave it open in a
-terminal while you edit.
+`--watch` keeps running and regenerates whenever the spec, the conf or a file they pull in (a
+composed spec, a seeded template) changes. Leave it open in a terminal while you edit.
 
 `--dry-run` (`-n`) works out everything `generate` would write, create or remove, and changes
 nothing. The exit code says what it found:
@@ -386,11 +386,11 @@ Arguments:
 
 Flags:
   -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)
-  -w, --watch            watch the spec and conf for changes and re-generate
+  -w, --watch            watch the spec, conf and the files they use for changes and re-generate
   -n, --[no-]dry-run     show what would be written, created or removed, and change nothing; exits 2 when something would change
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -409,7 +409,7 @@ reports each problem with a `file:line:col`.
 
 It finds the spec and conf the same way `generate` does. `--fail fast` stops at the first
 problem; `--fail collect` reports every problem at once, and is the default unless the conf's
-`validate.fail` says otherwise. `--watch` validates again whenever the spec or conf changes.
+`validate.fail` says otherwise. `--watch` validates again whenever the spec, the conf or a composed spec changes.
 
 `--release 2.0.0` also fails for each command, input or deprecated identifier still declared
 whose `removed_in` is at or below that release, so a planned removal can't ship by accident.
@@ -434,12 +434,12 @@ Arguments:
 Flags:
   -c, --config string    path to the rotini conf file (default the .rotini.conf.* beside the spec)
       --fail string      failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect [fast|collect]
-  -w, --watch            watch the spec and conf for changes and re-validate
+  -w, --watch            watch the spec, conf and the files they use for changes and re-validate
       --release X.Y.Z    fail for each item whose removed_in is at or below this release; defaults to the variable validate.release_env names
       --format string    how to report problems — text, or json (one object listing every problem, on stdout) (default text) [text|json]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Output:
@@ -497,7 +497,7 @@ Arguments:
   [spec_file_path]    path to the spec file (default the .rotini.spec.* in the working directory)
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -548,7 +548,7 @@ to the contract built from the current spec and conf. Because both arguments are
 contracts, the spec is given with --spec.
 
 The conf's diff.accept entries acknowledge intended changes, one finding each; an entry
-that matches no finding fails the run.
+that matches no finding fails the run, unless --fail-on is never.
 
 Usage:
   rotini diff [flags] <old> [new]
@@ -565,7 +565,7 @@ Flags:
       --format string     how to write the findings (default text) [text|json]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Output:
@@ -603,7 +603,7 @@ Arguments:
   <key>    the key path, such as command.flags.schema.from
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -655,7 +655,7 @@ Flags:
       --kind string    what the files are, when their keys and names don't tell [spec|conf|command]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -680,7 +680,7 @@ Arguments:
   [command...]    name of the command to print help for
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -717,7 +717,7 @@ Arguments:
   <shell>    the shell to print the script for [bash|zsh|fish|powershell|nushell]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -751,7 +751,7 @@ Flags:
       --dir string    write every page into this directory instead of printing one
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Examples:
@@ -807,7 +807,7 @@ Flags:
       --format string    output format (default text) [text|json]
 
 Global Flags:
-  -v, --version    print version
+      --version    print version
   -h, --help       print help
 
 Output:

@@ -78,7 +78,7 @@ deploy:
   # how many
   replicas: 3
   timeout: 5s
-tags: [x, y]
+tags: [x, "y"]
 level: info
 verbose: true
 `
@@ -148,6 +148,8 @@ func TestSetConfigValue_checksAsTheCommandLine(t *testing.T) {
 		{ConfigKey{Key: "n", Type: "string", Enum: []string{"a", "b"}}, "c"},
 		{ConfigKey{Key: "n", Type: "rotini.ByteSize", Maximum: new(1024.0)}, "2KiB"},
 		{ConfigKey{Key: "n", Type: "time.Time", Layout: "2006-01-02"}, "yesterday"},
+		{ConfigKey{Key: "n", Type: "int", Base: basePrefixed, Maximum: new(255.0)}, "0x100"},
+		{ConfigKey{Key: "n", Type: "int", Base: basePrefixed}, "1__0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key.Type+"="+tt.raw, func(t *testing.T) {
@@ -523,6 +525,43 @@ func TestSetConfigValue_refusedLayout(t *testing.T) {
 	}
 }
 
+// An integer the file's format, or the reader rotini uses for it, can't hold exactly is a usage
+// error that says why, and the file is left as it was. One the reader holds exactly is written.
+func TestSetConfigValue_bigIntegers(t *testing.T) {
+	tests := []struct {
+		file, typ, raw, why string
+		always              bool // refused whatever the reader holds
+	}{
+		{"c.yaml", "uint64", "18446744073709551615", "YAML reader can't hold", false},
+		{"c.yaml", "uint64", "9223372036854775808", "YAML reader can't hold", false},
+		{"c.json", "int64", "9007199254740993", "JSON can't hold", false},
+		{"c.toml", "uint64", "18446744073709551615", "TOML integers are 64-bit signed", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file+" "+tt.raw, func(t *testing.T) {
+			dir := t.TempDir()
+			path := pfWrite(t, dir, tt.file, "")
+			f := ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{{Key: "big", Type: tt.typ}}}
+			err := SetConfigValue(cwContext(dir, nil, f), "app", "big", tt.raw)
+			if err == nil {
+				if tt.always {
+					t.Fatal("written, want a usage error")
+				}
+				if got := cwRead(t, path); !strings.Contains(got, tt.raw) {
+					t.Errorf("file:\n%s\nwant it to hold %s", got, tt.raw)
+				}
+				return
+			}
+			if !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), tt.why) || strings.Contains(err.Error(), "cannot be read") {
+				t.Errorf("err = %v, want a usage error saying %q", err, tt.why)
+			}
+			if got := cwRead(t, path); got != "" {
+				t.Errorf("the refused edit changed the file:\n%s", got)
+			}
+		})
+	}
+}
+
 func TestSetConfigValue_unknownFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := SetConfigValue(cwContext(dir, nil, cwFile(filepath.Join(dir, "a.yaml"))), "nosuch", "region", "x"); !errors.Is(err, ErrInternal) {
@@ -564,5 +603,44 @@ func TestSetConfigValue_everyReaderOfTheKey(t *testing.T) {
 	}
 	if got := cwRead(t, path); got != "n: 7\n" {
 		t.Errorf("file:\n%s", got)
+	}
+}
+
+// A float32 key is written in its own shortest spelling, not widened to float64's.
+func TestSetConfigValue_float32(t *testing.T) {
+	for _, name := range []string{"app.yaml", "app.toml", "app.json"} {
+		dir := t.TempDir()
+		path := pfWrite(t, dir, name, "")
+		rtx := cwContext(dir, nil, ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{{Key: "ratio", Type: "float32"}}})
+		if err := SetConfigValue(rtx, "app", "ratio", "0.1"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := cwRead(t, path); !strings.Contains(got, "0.1") || strings.Contains(got, "0.100000") {
+			t.Errorf("%s:\n%s\nwant ratio written as 0.1", name, got)
+		}
+	}
+}
+
+// A float32 value is judged and spelled as the number it was written as: CheckInputs takes
+// 0.1 against a maximum of 0.1, and ArgvOf writes --ratio=0.1.
+func TestFloat32_typedChecks(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "ratio", Identifiers: []string{"--ratio"}, Type: "float32", Maximum: new(0.1)},
+	}}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Ratio float32 `rotini:"ratio"`
+			}
+		}
+	}
+	var in inputs
+	in.App.Flags.Ratio = 0.1
+	if err := NewContextFor(def, nil).CheckInputs(in, PresenceOf(in)); err != nil {
+		t.Errorf("CheckInputs(0.1 <= 0.1): %v", err)
+	}
+	argv, _, err := ArgvOf(def, in, PresenceOf(in), ArgvPath())
+	if err != nil || len(argv) != 1 || argv[0] != "--ratio=0.1" {
+		t.Errorf("ArgvOf = %q, %v; want --ratio=0.1", argv, err)
 	}
 }

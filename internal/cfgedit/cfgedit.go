@@ -32,8 +32,13 @@ var (
 	ErrUnsupported = errors.New("unsupported format")
 
 	// ErrVerify marks an edit whose result didn't decode to the original document with only
-	// the intended change. It is a bug in cfgedit, never in the file; nothing is returned.
+	// the intended change. It is a bug in cfgedit, never in the file, and no edited bytes are
+	// returned with it.
 	ErrVerify = errors.New("edit verification failed")
+
+	// ErrValue marks a key or value Set can't write: a type it doesn't write, or one the format,
+	// or the reader rotini uses for it, can't read back exactly.
+	ErrValue = errors.New("value can't be written")
 )
 
 // RefusedError is an edit refused because of the file's layout. It matches [ErrRefused].
@@ -42,6 +47,7 @@ type RefusedError struct {
 	Reason string // why, in a few words: "the path goes through an alias"
 }
 
+// Error names the path and reason and tells the user to edit the file by hand.
 func (e *RefusedError) Error() string {
 	return fmt.Sprintf("can't edit %q: %s; edit the file by hand", e.Path, e.Reason)
 }
@@ -51,6 +57,20 @@ func (*RefusedError) Is(target error) bool { return target == ErrRefused }
 
 func refused(path []string, format string, args ...any) error {
 	return &RefusedError{Path: strings.Join(path, "."), Reason: fmt.Sprintf(format, args...)}
+}
+
+// valueError is a key or value Set can't write. It matches [ErrValue].
+type valueError struct {
+	path string
+	err  error
+}
+
+func (e *valueError) Error() string      { return fmt.Sprintf("can't write %q: %v", e.path, e.err) }
+func (e *valueError) Unwrap() error      { return e.err }
+func (*valueError) Is(target error) bool { return target == ErrValue }
+
+func badValue(path []string, err error) error {
+	return &valueError{path: strings.Join(path, "."), err: err}
 }
 
 // Option adjusts an edit.
@@ -76,20 +96,24 @@ func KeepParents(n int) Option {
 // Strings are written plainly when that reads back as the same string, and quoted otherwise.
 //
 // Every byte outside the edited span is kept. A layout that can't be edited safely returns an
-// error matching [ErrRefused]; a format cfgedit can't write returns [ErrUnsupported].
+// error matching [ErrRefused]; a format cfgedit can't write returns [ErrUnsupported]; a key or value
+// it can't write returns [ErrValue].
 func Set(src []byte, format Format, path []string, value any) ([]byte, error) {
 	if !validPath(path) {
-		return nil, fmt.Errorf("cfgedit: invalid key path %q", strings.Join(path, "."))
+		return nil, badValue(path, errors.New("invalid key path"))
 	}
 	v, err := normalizeValue(value)
 	if err != nil {
-		return nil, fmt.Errorf("cfgedit: %q: %w", strings.Join(path, "."), err)
+		return nil, badValue(path, err)
 	}
 	if format == Dotenv {
 		// Every dotenv value is a string; compare what's written.
 		if v, err = scalarText(v); err != nil {
-			return nil, fmt.Errorf("cfgedit: %q: %w", strings.Join(path, "."), err)
+			return nil, badValue(path, err)
 		}
+	}
+	if err := fits(format, v); err != nil {
+		return nil, badValue(path, err)
 	}
 	ed, err := editorFor(format)
 	if err != nil {
@@ -97,6 +121,9 @@ func Set(src []byte, format Format, path []string, value any) ([]byte, error) {
 	}
 	if loneCR(src) {
 		return nil, refused(path, "the file ends lines with a lone carriage return")
+	}
+	if err := refuseYAMLStream(format, src, path); err != nil {
+		return nil, err
 	}
 	before, err := decode(format, src)
 	if err != nil {
@@ -107,7 +134,13 @@ func Set(src []byte, format Format, path []string, value any) ([]byte, error) {
 		return nil, err
 	}
 	setPath(before, path, v)
-	return verify(format, out, before)
+	out, err = verify(format, out, before)
+	if err != nil && format == TOML && !tomlReadsNUL() && slices.ContainsFunc(path, func(s string) bool { return strings.ContainsRune(s, 0) }) {
+		// The edit is right, but the TOML reader reads a key holding U+0000 as the dotted path
+		// its pieces name.
+		return nil, badValue(path, errors.New("the TOML reader can't read back a key holding U+0000 here"))
+	}
+	return out, err
 }
 
 // Unset removes the key at path from src and returns the edited bytes. Comment lines above
@@ -116,7 +149,7 @@ func Set(src []byte, format Format, path []string, value any) ([]byte, error) {
 // unchanged.
 func Unset(src []byte, format Format, path []string, opts ...Option) ([]byte, error) {
 	if !validPath(path) {
-		return nil, fmt.Errorf("cfgedit: invalid key path %q", strings.Join(path, "."))
+		return nil, badValue(path, errors.New("invalid key path"))
 	}
 	var o options
 	for _, opt := range opts {
@@ -128,6 +161,9 @@ func Unset(src []byte, format Format, path []string, opts ...Option) ([]byte, er
 	}
 	if loneCR(src) {
 		return nil, refused(path, "the file ends lines with a lone carriage return")
+	}
+	if err := refuseYAMLStream(format, src, path); err != nil {
+		return nil, err
 	}
 	before, err := decode(format, src)
 	if err != nil {
@@ -236,6 +272,44 @@ func normalizeValue(v any) (any, error) {
 		return out, nil
 	}
 	return nil, fmt.Errorf("can't write a value of type %T", v)
+}
+
+// maxExactJSON is the largest integer a JSON reader that holds numbers as float64 reads back
+// exactly.
+const maxExactJSON = 1 << 53
+
+// fits returns an error for an integer in v that format, or the reader rotini uses for it, can't
+// hold exactly: one above the largest int64 in TOML; one beyond ±2^53 in JSON, and one above the
+// largest int64 in YAML, when the reader holds such numbers as float64.
+func fits(format Format, v any) error {
+	switch x := v.(type) {
+	case []any:
+		for _, item := range x {
+			if err := fits(format, item); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		for _, k := range sortedKeys(x) {
+			if err := fits(format, x[k]); err != nil {
+				return err
+			}
+		}
+	case int64:
+		if (format == JSON || format == JSONC) && (x > maxExactJSON || x < -maxExactJSON) && !readsIntegersExactly(format) {
+			return fmt.Errorf("JSON can't hold %d exactly; integers are limited to ±2^53", x)
+		}
+	case uint64:
+		switch {
+		case (format == JSON || format == JSONC) && x > maxExactJSON && !readsIntegersExactly(format):
+			return fmt.Errorf("JSON can't hold %d exactly; integers are limited to ±2^53", x)
+		case x > math.MaxInt64 && format == TOML:
+			return fmt.Errorf("TOML integers are 64-bit signed; %d is too large", x)
+		case x > math.MaxInt64 && format == YAML && !readsIntegersExactly(format):
+			return fmt.Errorf("the YAML reader can't hold %d exactly; integers are limited to 64-bit signed", x)
+		}
+	}
+	return nil
 }
 
 // normalizeScalar is normalizeValue for a list item or map value, which must be a scalar.

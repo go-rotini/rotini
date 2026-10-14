@@ -6,4 +6,4 @@ set profiles.prod.region "y"
 -- out --
 profiles:
   prod: # p
-    region: y
+    region: "y"

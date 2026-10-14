@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/scanner"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -29,7 +30,7 @@ var rootConstructors = []string{
 // preferred), else a parameterless function returning one, named like a root constructor.
 // how says which rule matched. With neither, the error lists what it found.
 func findImportRoot(pkgDir string) (expr, how string, err error) {
-	files, err := parsePackage(pkgDir)
+	files, broken, err := parsePackage(pkgDir)
 	if err != nil {
 		return "", "", err
 	}
@@ -68,7 +69,7 @@ func findImportRoot(pkgDir string) (expr, how string, err error) {
 			return name + "()", "a root constructor", nil
 		}
 	}
-	return "", "", rootNotFound(funcs, others)
+	return "", "", unparsed(rootNotFound(funcs, others), broken)
 }
 
 // rootNotFound explains how to name the root when findImportRoot can't pick one.
@@ -88,14 +89,14 @@ func rootNotFound(funcs, others []string) error {
 }
 
 // parsePackage parses the non-test files of the package in pkgDir, in name order, skipping
-// any that don't parse.
-func parsePackage(pkgDir string) ([]*ast.File, error) {
+// any that don't parse. broken describes the first file skipped that way ("main.go:26: …"),
+// for a root finder to report when it finds no root.
+func parsePackage(pkgDir string) (files []*ast.File, broken, err error) {
 	paths, err := filepath.Glob(filepath.Join(pkgDir, "*.go"))
 	if err != nil {
-		return nil, fmt.Errorf("read the package: %w", err)
+		return nil, nil, fmt.Errorf("read the package: %w", err)
 	}
 	slices.Sort(paths)
-	var files []*ast.File
 	fset := token.NewFileSet()
 	for _, path := range paths {
 		if strings.HasSuffix(path, "_test.go") {
@@ -103,13 +104,36 @@ func parsePackage(pkgDir string) ([]*ast.File, error) {
 		}
 		src, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("read the package: %w", err)
+			return nil, nil, fmt.Errorf("read the package: %w", err)
 		}
-		if f, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution); err == nil {
-			files = append(files, f)
+		f, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
+		if err != nil {
+			if broken == nil {
+				broken = parseFailure(path, err)
+			}
+			continue
 		}
+		files = append(files, f)
 	}
-	return files, nil
+	return files, broken, nil
+}
+
+// parseFailure is a file's first syntax error as "name.go:line: message".
+func parseFailure(path string, err error) error {
+	var list scanner.ErrorList
+	if errors.As(err, &list) && len(list) > 0 {
+		return fmt.Errorf("%s:%d: %s", filepath.Base(path), list[0].Pos.Line, list[0].Msg)
+	}
+	return fmt.Errorf("%s: %w", filepath.Base(path), err)
+}
+
+// unparsed returns notFound, or when a file of the package didn't parse, an error naming
+// that file's syntax error, the likelier reason no root was found.
+func unparsed(notFound, broken error) error {
+	if broken == nil {
+		return notFound
+	}
+	return fmt.Errorf("no root command found, and %w; fix it or pass --root", broken)
 }
 
 // packageSpecs returns the package-level specs of files declared with tok: *ast.TypeSpec for

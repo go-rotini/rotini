@@ -1,0 +1,15 @@
+# A device name in a target's file, and a package named with a Go keyword.
+version: 0.0.0
+generate:
+  packages:
+    - type: models
+      file: internal/con/models.go
+      package: type
+    # COM0 builds, but a file named AUX can't be created on Windows or zipped in a module.
+    - type: main
+      file: cmd/com0/aux.go
+      package: main
+    # main names a program, which the cmd package (imported by main.go) can't be.
+    - type: cmd
+      file: internal/cmd/demo/zz_rotini.go
+      package: main

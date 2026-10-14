@@ -23,8 +23,8 @@ const forceExitCode = 130
 // signalExitCode maps a trapped signal to 128 + signum, falling back to forceExitCode for
 // a signal carrying no numeric value.
 func signalExitCode(s os.Signal) int {
-	if sig, ok := s.(syscall.Signal); ok {
-		return 128 + int(sig)
+	if n, ok := signalNumber(s); ok {
+		return 128 + n
 	}
 	return forceExitCode
 }
@@ -53,10 +53,11 @@ const (
 //     [Program.WithBufferedOutput] to buffer stdout
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
 //     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion],
-//     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions], and the environment and working directory a run reads,
-//     [Program.WithEnviron] and [Program.WithDir], and the clock relative times read,
-//     [Program.WithClock]; [Program.WithTerminationTimeout] bounds the wait after a signal, and
-//     [Program.WithArgv0] sets the name a multicall program dispatches on
+//     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions]; the environment
+//     and working directory a run reads, [Program.WithEnviron] and [Program.WithDir]; the clock
+//     relative times read, [Program.WithClock]; [Program.WithTerminationTimeout] bounds the
+//     wait after a signal, and [Program.WithArgv0] sets the name a multicall program dispatches
+//     on
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
@@ -82,15 +83,15 @@ const (
 // sequential runs, they take effect on the next one.
 //
 // Methods do not check for a nil receiver. The zero value is not usable; start from
-// [NewProgram] or [NewProgramFunc].
+// [NewWiredProgram], [NewProgramFunc] or [NewProgram].
 type Program struct {
 	ctx        context.Context
 	args       []string
 	def        Definition
-	rtx        *Context  // seed dependencies: Program.WithDependency lands here; each run's Context clones them
-	reporterFn Reporter  // nil → defaultReporter
-	resolver   Resolver  // nil → DefaultResolver
-	lifecycle  Lifecycle // nil → DefaultLifecycle
+	deps       dependencyStore // seed dependencies: Program.WithDependency lands here; each run clones them
+	reporterFn Reporter        // nil → defaultReporter
+	resolver   Resolver        // nil → DefaultResolver
+	lifecycle  Lifecycle       // nil → DefaultLifecycle
 	stdin      io.Reader
 	stdout     io.Writer
 	stderr     io.Writer
@@ -120,7 +121,7 @@ type Program struct {
 
 	// rotini's own settings, kept out of the dependency store so a program's dependency can
 	// never shadow them.
-	meta     *InputSettings                   // WithInputSettings: the generated descriptor; nil → none
+	meta     *boundSettings                   // WithInputSettings: the generated descriptor; nil → none
 	readerFn func(InputSettings) *InputReader // WithInputReader: nil → NewInputReader
 	version  string                           // WithVersion
 	help     HelpFunc                         // WithHelp: nil → no pages
@@ -135,7 +136,7 @@ type Program struct {
 }
 
 // NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
-// calls the method of handlers named by each [Command.Handler] in def to obtain that
+// calls the method of handlers named by each [CommandDef.Handler] (and [Definition.Handler]) in def to obtain that
 // command's [Handler]. A nil handlers value is accepted here; a run that reaches dispatch then
 // fails with a [*WiringError].
 //
@@ -171,7 +172,6 @@ func newProgram(def Definition, lookup HandlerLookup) *Program {
 		argv0:           invokedName(),
 		def:             def,
 		lookup:          lookup,
-		rtx:             newContext(),
 		stdin:           os.Stdin,
 		stdout:          os.Stdout,
 		stderr:          os.Stderr,
@@ -358,7 +358,7 @@ func (p *Program) With(opts ...Option) *Program {
 // env prefix and the stdin schemas [Context.Inputs] reads from. The generated NewProgram calls
 // it; a hand-built program calls it to enable those channels.
 func (p *Program) WithInputSettings(meta InputSettings) *Program {
-	p.meta = &meta
+	p.meta = bindSettings(meta)
 	return p
 }
 
@@ -417,10 +417,8 @@ func (p *Program) WithParser(parser *Parser) *Program {
 // dependencies, its streams and its settings.
 func (p *Program) newRunContext() *Context {
 	rtx := newContext()
-	if p.rtx != nil {
-		if svcs := p.rtx.cloneServices(); svcs != nil {
-			rtx.services = svcs
-		}
+	if svcs := p.deps.clone(); svcs != nil {
+		rtx.services = svcs
 	}
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
 	rtx.meta, rtx.readerFn = p.meta, p.readerFn
@@ -428,7 +426,7 @@ func (p *Program) newRunContext() *Context {
 	rtx.outputChecks = p.outputChecks
 	rtx.clock.fn = p.clock
 	rtx.clock.feats = p.feats
-	rtx.view = p.view.resolved().withClock(&rtx.clock)
+	rtx.view = p.view.resolved().withClockIn(&rtx.runView, &rtx.clock)
 	if p.bufferedOutput && !IsTerminal(p.stdout) {
 		rtx.bufOut = newBufferedStdout(p.stdout)
 		rtx.Stdout = rtx.bufOut
@@ -571,7 +569,8 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 	// where it writes out what the handlers wrote.
 	defer rtx.flushOutput()
 	if trap {
-		defer p.installTrap(cancel, rtx.flushOutput, oneShot)()
+		sigCh, done := p.installTrap(cancel, rtx)
+		defer removeTrap(sigCh, done, oneShot)
 	}
 
 	resolve := p.resolver
@@ -650,6 +649,10 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 	}
 
 	rtx.Argv = argv
+	if p.resolver == nil {
+		// DefaultResolver's chain is new on every call, so it needs no copy.
+		return p.dispatch(ctx, rtx.adoptChain(res.Chain), rtx)
+	}
 	return p.dispatch(ctx, rtx.bindChain(res.Chain), rtx)
 }
 
@@ -657,23 +660,27 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 // and returns the copy. The copy keeps marking the invoked command from writing into a slice a
 // custom resolver may share between runs.
 func (rtx *Context) bindChain(chain []Command) []Command {
-	chain = slices.Clone(chain)
+	return rtx.adoptChain(slices.Clone(chain))
+}
+
+// adoptChain is bindChain for a chain the run owns, without the copy.
+func (rtx *Context) adoptChain(chain []Command) []Command {
 	markInvoked(chain)
 	bindChainView(chain, rtx.view)
 	rtx.chain = chain
 	return chain
 }
 
-// installTrap starts rotini's signal trap for one run and returns the function that removes
-// it. The first signal cancels the run with the signal's exit code as the cause, so dispatch
-// halts and teardown runs; a second calls the exit action with forceExitCode, skipping the
-// remaining teardown after beforeExit, a best-effort flush of buffered stdout. With
+// installTrap starts rotini's signal trap for one run; [removeTrap] with what it returns
+// removes it. The first signal cancels the run with the signal's exit code as the cause, so
+// dispatch halts and teardown runs; a second calls the exit action with forceExitCode, skipping
+// the remaining teardown after a best-effort flush of rtx's buffered stdout. With
 // WithTerminationTimeout, a run still going that long after the first signal exits the same
 // way, with the first signal's code.
 //
-// With oneShot the process exits when the run returns, so stop ends the trap's goroutine but
-// leaves the handler registered: unregistering costs more than the rest of the trap.
-func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func(), oneShot bool) (stop func()) {
+// The trap's state travels as values rather than in a closure, so arming it allocates only the
+// channels and the goroutine.
+func (p *Program) installTrap(cancel context.CancelCauseFunc, rtx *Context) (chan os.Signal, chan struct{}) {
 	sigs := p.signalSet
 	if len(sigs) == 0 {
 		sigs = trapSignals
@@ -700,19 +707,24 @@ func (p *Program) installTrap(cancel context.CancelCauseFunc, beforeExit func(),
 		}
 		select {
 		case <-sigCh:
-			beforeExit()
+			rtx.flushOutput()
 			p.exit(forceExitCode)
 		case <-expired:
-			beforeExit()
+			rtx.flushOutput()
 			p.exit(code)
 		case <-done:
 		}
 	}()
-	return func() {
-		close(done)
-		if !oneShot {
-			stopSignals(sigCh)
-		}
+	return sigCh, done
+}
+
+// removeTrap removes the trap [Program.installTrap] armed. With oneShot the process exits when
+// the run returns, so it ends the trap's goroutine but leaves the handler registered:
+// unregistering costs more than the rest of the trap.
+func removeTrap(sigCh chan os.Signal, done chan struct{}, oneShot bool) {
+	close(done)
+	if !oneShot {
+		stopSignals(sigCh)
 	}
 }
 
@@ -778,11 +790,17 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 		return p.settle(ctx, rtx)
 	}
 
-	plan := p.lifecycle
-	if plan == nil {
-		plan = DefaultLifecycle
+	// The default plan runs straight from handlers (see defaultStep); a custom one is built.
+	var steps []LifecycleStep
+	nSteps := len(handlers) + 2
+	if p.lifecycle != nil {
+		steps = p.lifecycle(chain, handlers)
+		nSteps = len(steps)
 	}
-	steps := plan(chain, handlers)
+	// call runs step k's Do, or its Undo when undo is set.
+	call := func(hookCtx context.Context, k int, undo bool) {
+		p.callStep(hookCtx, rtx, steps, handlers, k, undo)
+	}
 
 	// run wraps every hook so a panic leaves the lifecycle in control, except with
 	// panicRecover=false and teardownOnPanic=false, where the hook runs unguarded and the panic
@@ -790,9 +808,9 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	// after teardown rather than reported.
 	panicked := false
 	var panicValue any
-	run := func(hookCtx context.Context, hook func(context.Context, *Context)) {
+	run := func(hookCtx context.Context, k int, undo bool) {
 		if !p.panicRecover && !p.teardownOnPanic {
-			hook(hookCtx, rtx) // unguarded: original stack, no teardown
+			call(hookCtx, k, undo) // unguarded: original stack, no teardown
 			return
 		}
 		defer func() {
@@ -805,7 +823,7 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 				}
 			}
 		}()
-		hook(hookCtx, rtx)
+		call(hookCtx, k, undo)
 	}
 
 	// halt reports whether forward progress should stop, converting a cancellation into
@@ -831,14 +849,19 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	// rtx holds the context the next hook receives, moved on by SetContext; received keeps
 	// what each step's Do received, for its teardown. halt and the reporter keep the run's ctx.
 	began := 0
-	received := make([]context.Context, len(steps))
+	var buf [8]context.Context // a typical plan fits, so its record stays on the stack
+	received := buf[:0]
+	if nSteps > len(buf) {
+		received = make([]context.Context, 0, nSteps)
+	}
+	received = received[:nSteps]
 	rtx.enterHook(ctx, false)
-	for i, s := range steps {
+	for i := range nSteps {
 		began++
 		received[i] = rtx.Context() //nolint:fatcontext // one context per step, recorded, not nested
 		// A nil Do is a step with only a teardown.
-		if s.Do != nil {
-			run(received[i], s.Do) //nolint:contextcheck // the context SetContext handed on
+		if p.lifecycle == nil || steps[i].Do != nil {
+			run(received[i], i, false) //nolint:contextcheck // the context SetContext handed on
 		}
 		if halt() {
 			break
@@ -848,9 +871,9 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	// Unwind. Both guards are re-checked per step, so an Exit or panic from within a teardown
 	// hook stops the rest too.
 	for i := began - 1; i >= 0 && !exitNow() && (p.teardownOnPanic || !panicked); i-- {
-		if steps[i].Undo != nil {
+		if hasUndo(p.lifecycle != nil, steps, handlers, i) {
 			rtx.enterHook(received[i], true) //nolint:contextcheck // what this step's Do received
-			run(received[i], steps[i].Undo)  //nolint:contextcheck // what this step's Do received
+			run(received[i], i, true)        //nolint:contextcheck // what this step's Do received
 		}
 	}
 	rtx.enterHook(ctx, true)
@@ -862,4 +885,22 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	}
 
 	return p.settle(ctx, rtx)
+}
+
+// callStep runs step k's Do, or its Undo when undo is set: one of steps when the program has
+// a custom lifecycle, else of the default plan for handlers.
+func (p *Program) callStep(ctx context.Context, rtx *Context, steps []LifecycleStep, handlers []Handler, k int, undo bool) {
+	if p.lifecycle != nil {
+		if undo {
+			steps[k].Undo(ctx, rtx)
+		} else {
+			steps[k].Do(ctx, rtx)
+		}
+		return
+	}
+	frame, h, do, un, _ := defaultStep(handlers, k)
+	if undo {
+		do = un
+	}
+	callHook(ctx, rtx, frame, h, do)
 }

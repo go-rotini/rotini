@@ -1,0 +1,63 @@
+# base: prefixed reads 0x, 0o and 0b integer literals, so it applies to integer inputs and lists
+# of them, and a default or enum value must read under it.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Fine: prefixed defaults and enum values, a list, and a bound the default meets.
+    - name: mode
+      identifiers: [--mode]
+      schema:
+        type: uint32
+        base: prefixed
+        default: '0o644'
+        maximum: 0o777
+    - name: mask
+      identifiers: [--mask]
+      schema:
+        type: '[]uint8'
+        base: prefixed
+        default: [0xFF, 0b1]
+    - name: level
+      identifiers: [--level]
+      schema:
+        type: int
+        base: prefixed
+        enum: ['0x1', '0x2']
+        default: 2
+    # Not an integer.
+    - name: name
+      identifiers: [--name]
+      schema:
+        type: string
+        base: prefixed
+    - name: ratio
+      identifiers: [--ratio]
+      schema:
+        type: float64
+        base: prefixed
+    # A default that is no literal, and one above the bound.
+    - name: bad
+      identifiers: [--bad]
+      schema:
+        type: int
+        base: prefixed
+        default: 0x_
+    - name: big
+      identifiers: [--big]
+      schema:
+        type: int
+        base: prefixed
+        maximum: 255
+        default: '0x100'
+  env:
+    - name: port
+      schema:
+        type: int
+        base: prefixed
+        default: '0x1F'
+    - name: umask
+      schema:
+        type: int
+        base: prefixed
+        default: 1__0

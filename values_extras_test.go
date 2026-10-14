@@ -12,7 +12,7 @@ import (
 )
 
 // A custom negated identifier replaces the derived one: it sets the flag false, takes no value,
-// and --no-<x> is no longer accepted.
+// and --no-<x> is not accepted.
 func TestParse_customNegation(t *testing.T) {
 	type inputs struct {
 		App struct {
@@ -103,7 +103,7 @@ func TestParse_enumAliasesHiddenDeprecated(t *testing.T) {
 	if !errors.As(err, &pe) || !slices.Equal(pe.Candidates, []string{"json", "yaml"}) || !strings.Contains(pe.Msg, "(one of: json, yaml)") {
 		t.Errorf("err = %v (%+v)", err, pe)
 	}
-	if cands := enumCandidates(flagEnum(def.Flags[0])); !slices.Equal(cands, []string{"json", "yaml"}) {
+	if cands := enumCandidates(flagEnum(&def.Flags[0])); !slices.Equal(cands, []string{"json", "yaml"}) {
 		t.Errorf("completion offers %q", cands)
 	}
 }

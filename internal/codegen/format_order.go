@@ -36,6 +36,7 @@ var commandKeyOrder = []string{
 	"effects",
 	"agent",
 	"hidden",
+	"metadata",
 
 	// What it reads.
 	"env_prefix",
@@ -95,6 +96,7 @@ var inputKeyOrder = []string{
 	"removed_in",
 	"deprecated_identifiers_removed_in",
 	"replaced_by",
+	"metadata",
 
 	"schema",
 }

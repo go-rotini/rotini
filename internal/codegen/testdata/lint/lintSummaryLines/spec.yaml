@@ -1,0 +1,37 @@
+# A summary is shown on one line; a second line misaligns help and leaks out of comments.
+version: 0.0.0
+command:
+  name: demo
+  summary: |
+    two
+    lines
+  flags:
+    - name: level
+      identifiers: [--level]
+      summary: "first\nsecond"
+      schema: { type: string }
+    - name: fine
+      identifiers: [--fine]
+      summary: one line
+      schema: { type: string }
+    # A block scalar of one line ends in a line break, which every surface trims.
+    - name: block
+      identifiers: [--block]
+      summary: |
+        one line
+      schema: { type: string }
+  env:
+    - name: region
+      summary: "a\r\nb"
+      schema: { type: string }
+  plugins:
+    - name: extra
+      summary: "an extra plugin\nsecond line"
+  topics:
+    - name: filters
+      summary: "filter syntax\nsecond line"
+      body: Filters are words.
+  exit_status:
+    - code: 3
+      name: partial
+      summary: "partly done\nsecond line"

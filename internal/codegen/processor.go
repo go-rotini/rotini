@@ -12,7 +12,8 @@ import (
 	"github.com/go-rotini/jsonschema"
 )
 
-// Processor drives rotini's pipeline for Generate, Validate and Initialize:
+// Processor drives rotini's pipeline for the companion CLI's commands (generate, validate,
+// initialize, import, diff, tree, explain):
 //
 //	reconcile (read + decode)  →  validate (version + schema)  →  lint (rotini rules)  →  generate
 //
@@ -47,8 +48,8 @@ func NewProcessor(version string) *Processor {
 // summary, preceded by one "created: <path>" line per file the pass created that the author
 // owns from then on (handler stubs, main.go, editable templates), and each pass's error;
 // without watch the pass's error is also returned. onNotices (optional) receives each pass's
-// non-fatal findings: validation warnings, pruned files, and hook-audit warnings about
-// handler files.
+// non-fatal findings: validation warnings, pruned and restored stubs, hook-audit warnings
+// about handler files, and whole-program feature warnings.
 func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error {
 	if onGenerate == nil {
 		onGenerate = func(string, error) {}
@@ -86,8 +87,8 @@ type Planned struct {
 }
 
 // GenerateDryRun reconciles, validates and plans the program exactly as [Processor.Generate]
-// does, and writes nothing. onNotices (optional) receives validation and hook-audit warnings;
-// a file the run would prune is a change, not a notice.
+// does, and writes nothing. onNotices (optional) receives Generate's notices, except that a
+// file the run would prune is a change, not a notice.
 func (p *Processor) GenerateDryRun(specPath, confPath string, onNotices func(notices []error)) (Planned, error) {
 	var planned Planned
 	pl := newPlanner(true)
@@ -141,6 +142,10 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode, re
 // ready-to-build program. opt.Force replaces an existing seed spec and conf. It never deletes
 // files; stale handlers are pruned by the next generate.
 func (p *Processor) Initialize(name string, opt InitOptions) (Initialized, error) {
+	// Plan the whole init first, so a seed that fails to validate or generate writes nothing.
+	if _, err := p.initializeWith(name, opt, newPlanner(true)); err != nil {
+		return Initialized{}, err
+	}
 	return p.initializeWith(name, opt, newPlanner(false))
 }
 
@@ -322,7 +327,8 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 
 // validateAndEmit validates both documents and, only if they pass, applies conf defaults and
 // emits the program. prune controls whether orphaned stubs are removed (init passes false).
-// It returns notices: validation warnings, pruned files, and hook-audit warnings.
+// It returns notices: validation warnings, pruned and restored stubs, hook-audit warnings and
+// whole-program feature warnings.
 func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prune bool, pl *planner) ([]error, error) {
 	warnings, err := p.validateDocuments(rs, rc, "")
 	if err != nil {
@@ -359,8 +365,9 @@ func failFast(failMode string, rc *reconciledConf) bool {
 	return mode == "fast"
 }
 
-// run resolves the spec and conf paths once, so watch mode watches exactly the files read,
-// then runs pass once or per change, reporting a timed summary to onResult.
+// run resolves the spec and conf paths, then runs pass once or, in watch mode, per change,
+// reporting a timed summary to onResult. While watching, a conf discovered beside the spec is
+// looked for again on every pass.
 func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPath, confPath string) (warnings []error, err error), onResult func(result string, err error), onWarnings func([]error)) error {
 	resolvedSpec, err := resolveSpecPath(specPath)
 	if err != nil {
@@ -373,7 +380,11 @@ func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPat
 
 	timed := func() (string, error) {
 		start := time.Now()
-		warnings, err := pass(resolvedSpec, resolvedConf)
+		conf := resolvedConf
+		if watch && confPath == "" {
+			conf = resolveConfBesideSpec(resolvedSpec, "") // a conf created while watching
+		}
+		warnings, err := pass(resolvedSpec, conf)
 		if onWarnings != nil && len(warnings) > 0 {
 			onWarnings(warnings)
 		}

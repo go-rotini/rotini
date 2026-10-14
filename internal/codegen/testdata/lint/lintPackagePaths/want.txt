@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:5:9: command aux: the name "aux" is a Windows device name, and the cmd package defaults to internal/cmd/aux, which the go tool refuses in an import path on every system; set the cmd target's `file` in the conf to another directory, or rename the command

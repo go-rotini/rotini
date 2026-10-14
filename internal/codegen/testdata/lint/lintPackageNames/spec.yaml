@@ -1,0 +1,4 @@
+# Any valid spec: the conf is what this fixture checks.
+version: 0.0.0
+command:
+  name: demo

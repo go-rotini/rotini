@@ -1,0 +1,101 @@
+# R1 — flag scope: a flag applies to its own command unless it is `cascading`.
+#
+# --init (root) and --dsn (db) aren't cascading, so each is accepted only when its own command
+# is the one run, wherever it is written. --verbose is cascading, so every command takes it, on
+# either side of a sub-command's name. Help and completion follow the same rule.
+
+gomodinit example.com/scope
+
+exec rotini generate cmd/scope/.rotini.spec.yaml --config cmd/scope/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o scope$exe ./cmd/scope
+
+grep 'Name: "init".*Local: true' internal/cmd/scope/zz_scope.go
+grep 'Name: "dsn".*Local: true' internal/cmd/scope/zz_scope.go
+! grep 'Name: "verbose".*Local' internal/cmd/scope/zz_scope.go
+! grep 'Name: "steps".*Local' internal/cmd/scope/zz_scope.go
+
+# Each local flag on its own command, and the cascading flag anywhere. scope and db have
+# sub-commands, so a bare run of either prints usage; --help shows the flag was accepted.
+exec ./scope$exe --init --help
+exec ./scope$exe db --dsn x --help
+exec ./scope$exe db migrate --verbose --steps 2
+exec ./scope$exe --verbose db migrate
+
+# A local flag with a sub-command is a usage error naming its command, before or after the
+# sub-command's name.
+wantexit 1 ./scope$exe db migrate --init
+stderr '^Error: --init belongs to "scope", not "scope db migrate"$'
+wantexit 1 ./scope$exe --init db migrate
+stderr '^Error: --init belongs to "scope", not "scope db migrate"$'
+wantexit 1 ./scope$exe db migrate --dsn x
+stderr '^Error: --dsn belongs to "scope db", not "scope db migrate"$'
+
+# A sub-command's help lists the cascading flag only.
+exec ./scope$exe db migrate --help
+stdout 'Global Flags:'
+stdout '--verbose'
+! stdout '--init'
+! stdout '--dsn'
+
+# Completion offers a command's own local flags, and no ancestor's.
+exec ./scope$exe __complete --
+stdout '^--init'
+exec ./scope$exe __complete db migrate --
+stdout '^--steps'
+stdout '^--verbose'
+! stdout '^--init'
+! stdout '^--dsn'
+
+-- cmd/scope/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: scope
+  summary: flag scope
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: init
+      summary: write a starter config
+      identifiers: [--init]
+      schema: { type: bool }
+    - name: verbose
+      summary: say more
+      identifiers: [--verbose]
+      cascading: true
+      schema: { type: bool }
+  commands:
+    - name: db
+      summary: database commands
+      flags:
+        - name: dsn
+          summary: the database to use
+          identifiers: [--dsn]
+          schema: { type: string }
+      commands:
+        - name: migrate
+          summary: apply migrations
+          flags:
+            - name: steps
+              summary: how many to apply
+              identifiers: [--steps]
+              schema: { type: int }
+-- cmd/scope/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/scope/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/scope/zz_scope.go
+      package: scope
+  features:
+    - type: help
+      enabled: true
+validate:
+  fail: collect

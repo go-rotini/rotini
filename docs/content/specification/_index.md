@@ -110,13 +110,19 @@ With `deprecated`: the command to use instead, as its path below this spec's roo
 
 How settled this command is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it in the parent's command list, and a line on its own pages; the contract carries it. Its inputs, sub-commands, output and exit codes are as unstable as it is. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time: to gate an experimental command, check in its handler.
 
+#### `metadata`
+
+`object`
+
+Your own labels for this command, for your tools to read: string keys, each with a string value (`{owner: platform-team, tier: internal}`). Rotini never acts on them and shows them on no page (help, man, markdown, completion). It copies them as written into the generated Definition (CommandDef.Metadata, or Definition.Metadata on the root), where a handler reads them as rtx.Command().Metadata, and into the contract. `rotini diff` rates any change to them as safe. Sub-commands don't inherit them. Set next to a `$ref`, they replace the composed command's.
+
 ### Inputs
 
 #### `flags`
 
 array of [`FlagInput`](#flaginput)
 
-Flag inputs for this command
+Flag inputs for this command. Each applies only when this command is the one run, unless it is `cascading`.
 
 #### `arguments`
 
@@ -152,7 +158,7 @@ Configuration files this command reads values from, each at a fixed 'path' or fo
 
 `string`
 
-Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
+Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, the unprefixed name does not bind: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
 
 In a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a parent that declares none adopts the child's, a parent that declares one wins, and two children with different prefixes are rejected.
 
@@ -209,7 +215,7 @@ Git and https URLs are not accepted. Either way, the mounted command uses the ha
 
 The composed spec is the base, and the parent can adjust it where it is mounted:
 
-- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path, hidden_aliases, replaced_by) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
+- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path, hidden_aliases, replaced_by, metadata) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
 - A 'commands:' list next to the $ref is added to the child's own sub-commands: its inline entries get their own handler files, and its $ref entries are mounted as further children.
 - `handler:` on a $ref command points it at a different handler package.
 - Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, use, output, plugins, plugin_discovery, passthrough, options_first) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
@@ -254,7 +260,7 @@ Auto-expose external '&lt;prefix&gt;\*' executables as plugin sub-commands of th
 
 `string`
 
-Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time; a leading ~ and $VAR references are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. A relative path is resolved against the run's directory; $VAR references and then a leading ~ are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
 
 #### `timeout`
 
@@ -372,13 +378,13 @@ Root only: help topics, pages that aren't commands. `<program> help <topic>` sho
 
 [`Schema`](#schema)
 
-The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '&lt;Prefix&gt;Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type &lt;Prefix&gt;Output Task', so convert a value with &lt;Prefix&gt;Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
+The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '&lt;Prefix&gt;Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type &lt;Prefix&gt;Output Task', so convert a value with &lt;Prefix&gt;Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item, and a stream whose items come in several kinds declares them with `oneOf`.
 
 #### `output_stream`
 
 `boolean` · default `false`
 
-When true, the command writes a stream of items rather than one value, and `output:` declares one item. Write each item with rtx.WriteOutputItem: JSON is one compact value per line, YAML one document per item, each starting `---`. Help, man and markdown say so in the OUTPUT section, and the contract marks the command `stream: true`. Needs `output`. `rotini generate` warns when a handler calls WriteOutputItem on a command without it.
+When true, the command writes a stream of items rather than one value, and `output:` declares one item. Write each item with rtx.WriteOutputItem: JSON is one compact value per line, YAML one document per item, each starting `---`. Help, man and markdown say so in the OUTPUT section, and the contract marks the command `stream: true`. Needs `output`. `rotini generate` warns when a handler calls WriteOutputItem on a command without it. When the items come in several kinds (progress updates, then a result), `output:` lists one schema per kind under `oneOf`, each tagged by the same required string property holding a `const` (`kind: {type: string, const: progress}`); see `oneOf`.
 
 #### `schemas`
 
@@ -427,7 +433,7 @@ Whether this flag is a tool parameter for AI agents (tool exports and the MCP co
 
 `boolean` · default `false`
 
-When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: at run time a flag may be written anywhere after the name of the command that declares it — after its sub-commands' names too — regardless of this setting, but never before that name (a flag written before a sub-command's name belongs to an ancestor, which is how two commands may declare the same flag). cascading controls whether descendants document it.
+When true, this flag applies to its command and to every command below it: it may be written anywhere after its command's name, after its sub-commands' names too, and every descendant's generated help lists it (under the 'Global Flags' section). When false (the default), the flag applies only when its own command is the one run: given with any of its sub-commands, before or after their names, it is a usage error naming the command it belongs to, and descendants' help and completion leave it out. A flag is never accepted before its own command's name (one written before a sub-command's name belongs to an ancestor, which is how two commands may declare the same flag). Environment and configuration values are unaffected.
 
 ### `deprecated`
 
@@ -489,9 +495,15 @@ Identifiers the command line accepts for this flag but that are never listed: he
 
 array of `string`
 
-CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle. Reusing an identifier of a cascading or short-circuit ancestor flag is a warning, since after this command's name it means this flag; it is an error when this command's flags take every identifier of that flag, which then can't be given after this command's name at all. A flag of the same name that redeclares the switch is not reported.
+CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run). `rotini validate` warns about a flag with no long form and about a one-dash word of several letters ('-name'), which POSIX tools read as a bundle of short flags; it rejects such a word when the command's short flags spell it as a bundle. Reusing an identifier of a cascading ancestor flag is a warning, since after this command's name it means this flag; it is an error when this command's flags take every identifier of that flag, which then can't be given after this command's name at all. A flag of the same name that redeclares the switch is not reported.
 
 A single dash and one digit (`-4`) declares a digit option, on a bool or count flag (`identifiers: ['-4', --ipv4]`; quoted, since a bare -4 is a number in YAML). A word starting with that dash and digit is then the flag, on this command and every command below it, while other negative numbers still parse as numbers. `rotini validate` rejects it when an argument of this command or one below it takes negative numbers.
+
+### `metadata`
+
+`object`
+
+Your own labels for this flag, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the generated FlagDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
 
 ### `removed_in`
 
@@ -584,6 +596,12 @@ Longer text about this argument, paragraphs separated by blank lines, shown unde
 
 When true, the argument is omitted from generated help (it still parses on the command line).
 
+### `metadata`
+
+`object`
+
+Your own labels for this argument, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the generated ArgDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
+
 ### `passthrough`
 
 `boolean` · default `false`
@@ -653,6 +671,12 @@ Longer text about this environment variable, paragraphs separated by blank lines
 
 When true, the input is omitted from generated help (it is still bound).
 
+### `metadata`
+
+`object`
+
+Your own labels for this environment variable, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+
 ### `removed_in`
 
 `string`
@@ -716,6 +740,12 @@ Longer text about this config value, paragraphs separated by blank lines, shown 
 
 When true, the input is omitted from generated help (it is still bound).
 
+### `metadata`
+
+`object`
+
+Your own labels for this config value, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+
 ### `removed_in`
 
 `string`
@@ -756,6 +786,12 @@ The four document formats (json, yaml, jsonc, toml) decode it into the generated
 The raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as one string (`*string`), 'lines' binds its lines (`*[]string`, a trailing newline adds no empty element; with `stream: true`, `iter.Seq2[string, error]`), and 'bytes' binds the payload byte for byte (`*[]byte`), nothing trimmed. Their schema type is implied when left out ('string' for text and bytes, '[]string' for lines); none generates a &lt;Prefix&gt;Stdin type, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help, man and markdown pages and the contract.
 
 One leading UTF-8 byte-order mark is removed before the payload is read, in every format but 'bytes'. A declared stdin that is not streamed is held in memory for the run.
+
+### `metadata`
+
+`object`
+
+Your own labels for this command's stdin, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
 
 ### `schema`
 
@@ -812,7 +848,7 @@ The file's format. When omitted, the format is inferred from the file extension;
 
 `string`
 
-File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.
+File path. A leading `~` or `~user` and `$VAR` or `${VAR}` references (with the shell forms `${VAR:-x}`, `${VAR:?message}` and the like) are expanded from the run's environment, and a relative path is resolved against the run's directory. Exactly one of 'path' or 'discover' must be set.
 
 ### `profiles`
 
@@ -824,7 +860,7 @@ Named sets of settings in this file, one chosen per run by a declared input (`--
 
 [`Schema`](#schema)
 
-Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/&lt;Name&gt;". No typed struct is generated from this — typed access to config values is the config: inputs channel.
+Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). Every value in a dotenv file is a string, so a schema for one uses string types; a TOML date or time is checked as its text (`2024-01-02T03:04:05Z`), as in YAML or JSON. The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/&lt;Name&gt;". No typed struct is generated from this — typed access to config values is the config: inputs channel.
 
 
 ## FlagGroup
@@ -1111,11 +1147,23 @@ Build the topic's text from the spec. 'environment' lists every environment vari
 
 JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.
 
+### `const`
+
+The one value this property may hold (standard JSON Schema semantics), checked wherever the shape is: output checks, stdin payloads, config files and object flags. Its Go field keeps the declared `type`. In a stream whose items come in several kinds (`oneOf` on `output`), each kind names itself with a required string property holding a `const`, such as `kind: {type: string, const: progress}`.
+
 ### `description`
 
 `string`
 
 What this shape or property is, in a sentence. Rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema uses `summary:` on the input instead.
+
+### `oneOf`
+
+array of [`Schema`](#schema)
+
+On a command's `output` with `output_stream: true` only: the stream's items come in several kinds, one schema per kind, each an object written inline or a `$ref` to a named object schema. Every kind declares the same property, its tag, as a required string with a `const` naming the kind (`kind: {type: string, const: progress}`), and no two kinds share a value. Nothing else may sit beside `oneOf`.
+
+The generated &lt;Prefix&gt;Output is then an interface that only the kinds' types satisfy: a `$ref` kind is its named schema's type, and an inline kind gets &lt;Prefix&gt;Output&lt;Value&gt; (&lt;Prefix&gt;OutputProgress for `progress`). rtx.WriteOutputItem takes any kind, fills in an empty tag from the item's type, and refuses an item whose tag names another kind. rotini.DecodeOutput decodes each item into its kind's type by reading the tag. Help, man and markdown list each kind with its fields; the contract and the output schema files describe the stream as standard JSON Schema `oneOf`.
 
 ### `required`
 
@@ -1162,6 +1210,7 @@ document instead; see [StdinSpec](#stdinspec).
 | Key | flag | argument | env | config |
 |---|:-:|:-:|:-:|:-:|
 | `$ref` | ✓ | ✓ | ✓ | ✓ |
+| `base` | ✓ | ✓ | ✓ | ✓ |
 | `complete` | ✓ | ✓ | — | — |
 | `config_source` | ✓ | — | ✓ | — |
 | `default` | ✓ | ✓ | ✓ | ✓ |
@@ -1198,7 +1247,7 @@ document instead; see [StdinSpec](#stdinspec).
 | `relative_to` | ✓ | ✓ | — | ✓ |
 | `repeatable` | ✓ | — | — | — |
 | `required` | ✓ | ✓ | ✓ | ✓ |
-| `secret` | — | ✓ | ✓ | ✓ |
+| `secret` | ✓ | ✓ | ✓ | ✓ |
 | `separator` | ✓ | ✓ | ✓ | — |
 | `type` | ✓ | ✓ | ✓ | ✓ |
 | `uniqueItems` | ✓ | ✓ | ✓ | ✓ |
@@ -1206,19 +1255,27 @@ document instead; see [StdinSpec](#stdinspec).
 | `variable` | ✓ | ✓ | ✓ | — |
 | `variable_file` | ✓ | ✓ | ✓ | — |
 
+### `base`
+
+`string` · one of `prefixed`
+
+Integer inputs only (the int and uint types, integer, and lists of them): with `base: prefixed`, a value may also be written with a base prefix after an optional sign — `0x1F` or `0X1F` (hexadecimal), `0o17` (octal), `0b101` (binary) — and `_` may separate digits, as in Go literals (`1_000`, `0xFF_FF`). A value without a prefix is still decimal: `010` is ten, never octal. Misplaced underscores (`_1`, `1_`, `1__0`, `-_1`) are invalid, and a value out of the type's range is an error as usual.
+
+It applies wherever the input reads text: the command line, a flag's or argument's environment and config fallbacks, env inputs, config values written as strings, and `default` and `enum` values. Bounds, enum and `uniqueItems` compare the number a value reads as, so `0x10` and `16` are the same. Without `base`, an integer is decimal from every source, so `0x10` is an invalid value. Help notes what the input accepts. `prefixed` is the only value.
+
 ### `complete`
 
 [`CompletionHint`](#completionhint)
 
 Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
 
-Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
+Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback, which the completer can replace for one request with rtx.SetCompletionFallback.
 
 ### `config_source`
 
 `string`
 
-Flag and env inputs only: names a config_files entry whose file path this input supplies, so a user can point the program at a config file (`--config ./other.yaml`). The command line and environment are read first, then the file they name is opened. The path comes from the flag if set on the command line, then the env input's variable, then the flag's default, then the entry's own path or discover. A path supplied this way must exist: unlike a declared path, a missing file is then an error, because the user asked for it. The input's type must be string. At most one flag and one env input may name the same entry.
+Flag and env inputs only: names a config_files entry whose file path this input supplies, so a user can point the program at a config file (`--config ./other.yaml`). The command line and environment are read first, then the file they name is opened. The path comes from the flag if set on the command line, then the env input's variable, then the flag's default, then the entry's own path or discover. A path supplied this way must exist: unlike a declared path, a missing file is then an error, because the user asked for it. A path given on the command line or in the variable has a leading `~` expanded to the home directory (`~user` too when the program wires path expansion, and kept as written otherwise) and is otherwise used as written, so `$VAR` stays literal; the flag's default is expanded like a declared path. An empty value on the command line is a usage error; an empty variable counts as unset. The input's type must be string. At most one flag and one env input may name the same entry.
 
 ### `default`
 
@@ -1245,7 +1302,7 @@ Path inputs (string, existingfile, existingdir, inputfile, outputfile, and lists
 - 'home' — a value that is exactly `~`, or starts with `~/`, becomes the home directory plus the rest; `~name/...` becomes that user's home directory, read from the system's user database. A `~` anywhere else is kept.
 - 'env' — `$NAME` and `${NAME}` become that variable's value, from the run's environment (including .env files). An unset or empty variable is a usage error naming it, and `${NAME:-x}` and the other shell operators are errors. A `$` not followed by a name is kept (`C$`, `$1`).
 
-`~` is expanded first, then variables, in one pass: text a variable supplies is never expanded again. Each item of a list is expanded after the value is split on its `separator`. `%VAR%` is not expanded on Windows (cmd and PowerShell expand their own syntax), but `~\` is. There is no escape for a literal `$NAME`, so leave 'env' out for inputs that need one. A project configuration file found by walk-up discovery can then read the user's environment into a path, so prefer `[home]` for inputs such a file sets. Not valid on secret inputs.
+`~` is expanded first, then variables, in one pass: text a variable supplies is never expanded again. Each item of a list is expanded after the value is split on its `separator`. `%VAR%` is not expanded on Windows (cmd and PowerShell expand their own syntax), but `~\` is. Write `$$` for a literal `$`. A project configuration file found by walk-up discovery can then read the user's environment into a path, so prefer `[home]` for inputs such a file sets. Not valid on secret inputs.
 
 ### `file`
 
@@ -1396,7 +1453,7 @@ A run-time location strategy for a configuration file, instead of a fixed 'path'
 
 `string` · **required** · one of `walk-up`, `xdg`, `native`, `xdg-system`
 
-'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
+'walk-up': search from the run's directory (the working directory, unless a `role: chdir` flag or Program.WithDir sets another) upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
 
 'xdg': search $XDG_CONFIG_HOME/&lt;app&gt;, defaulting to ~/.config/&lt;app&gt;, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/&lt;app&gt; reads the same path everywhere, and a dotfiles repository works unchanged across machines. This is the portable choice. A relative $XDG_CONFIG_HOME is ignored, as the XDG spec requires: it must be absolute (with a drive letter on Windows).
 
@@ -1469,7 +1526,7 @@ array of `string` or `object`
 
 Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.
 
-Each member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.
+Members are strings, so quote a number (`enum: ["1", "2"]` on an int input). Each member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.
 
 The object form also takes `aliases` (other spellings accepted and bound as the value: `{value: yaml, aliases: [yml]}`), `hidden: true` (accepted, but left out of help's list, completion and error messages), and `deprecated` with a message, optionally `deprecated_since`, `removed_in` and `replaced_by` (another value). A deprecated value is still accepted and is left out of the same lists; `rotini.Deprecations` reports it when given on the command line, as it does `deprecated_aliases`, the aliases being retired. Help keeps its short list of the values to use; man and markdown pages list each value with its aliases and deprecation.
 

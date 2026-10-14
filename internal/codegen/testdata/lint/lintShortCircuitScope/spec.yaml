@@ -1,0 +1,39 @@
+# A short_circuit flag that isn't cascading applies only to its own command, so a sub-command
+# that doesn't declare its own can't take it.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # build declares no --help: a warning.
+    - name: help
+      identifiers: [-h, --help]
+      short_circuit: true
+      schema: { type: bool }
+    # Every sub-command declares its own --version: nothing to report.
+    - name: version
+      identifiers: [--version]
+      short_circuit: true
+      schema: { type: bool }
+    # Cascading: every sub-command takes it.
+    - name: about
+      identifiers: [--about]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: build
+      flags:
+        - name: version
+          identifiers: [--version]
+          short_circuit: true
+          schema: { type: bool }
+    - name: test
+      flags:
+        - name: help
+          identifiers: [--help]
+          short_circuit: true
+          schema: { type: bool }
+        - name: version
+          identifiers: [--version]
+          short_circuit: true
+          schema: { type: bool }

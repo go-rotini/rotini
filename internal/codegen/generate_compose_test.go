@@ -449,3 +449,29 @@ func TestCompose_validatesComposedSpecs(t *testing.T) {
 		}
 	}
 }
+
+// TestLintComposedTree_missingRefWithoutModule pins that validate reports a local $ref naming no
+// file when there is no module for the composer to run in, as generate does.
+func TestLintComposedTree_missingRefWithoutModule(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	spec := &Spec{Command: Command{Name: "app", Commands: []Command{{Ref: "../status/.rotini.spec.yaml"}}}}
+	problems := lintComposedTree(spec, filepath.Join(dir, "app", ".rotini.spec.yaml"))
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), `compose "../status/.rotini.spec.yaml"`) || !strings.Contains(problems[0].Error(), "file does not exist") {
+		t.Errorf("problems = %v, want one naming the missing ref", problems)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "status"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "status", ".rotini.spec.yaml"), []byte("version: 0.0.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if problems := lintComposedTree(spec, filepath.Join(dir, "app", ".rotini.spec.yaml")); len(problems) != 0 {
+		t.Errorf("with the file in place: %v", problems)
+	}
+	// A $ref naming a directory is reported too, as the composer reports it.
+	dirSpec := &Spec{Command: Command{Name: "app", Commands: []Command{{Ref: "../status"}}}}
+	if problems := lintComposedTree(dirSpec, filepath.Join(dir, "app", ".rotini.spec.yaml")); len(problems) != 1 || !strings.Contains(problems[0].Error(), `compose "../status"`) {
+		t.Errorf("a directory: %v, want one problem naming the ref", problems)
+	}
+}

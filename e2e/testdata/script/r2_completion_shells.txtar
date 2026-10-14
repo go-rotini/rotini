@@ -257,6 +257,7 @@ command:
       summary: output format
       identifiers:
         - --format
+      cascading: true
       schema:
         type: string
         enum:

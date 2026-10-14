@@ -4,5 +4,7 @@ version: 0.0.0
 command:
   name: notes
   commands:
-    - name: Remove
+    - name: reMove
+      # Its own handler file, so only the man page names clash.
+      filename: re_move.go
     - name: remove

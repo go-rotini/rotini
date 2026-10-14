@@ -3,8 +3,10 @@ package codegen
 import (
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -247,7 +249,7 @@ func (sb *importSpecBuilder) examples(c *importCommand, path string) []string {
 		line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ex), "$ "))
 		if !runsProgram(line, words) {
 			sb.dropped = append(sb.dropped, importNote{Path: path, Level: "lossy",
-				Msg: fmt.Sprintf("example %q dropped: it doesn't run %s", ex, program)})
+				Msg: fmt.Sprintf("example %q dropped: it doesn't run %s", ex, program), example: ex, why: "they don't run " + program})
 			continue
 		}
 		if first, rest, _ := strings.Cut(line, " "); first == program {
@@ -255,7 +257,7 @@ func (sb *importSpecBuilder) examples(c *importCommand, path string) []string {
 		}
 		if msg, bad := sb.unparsed[line]; bad {
 			sb.dropped = append(sb.dropped, importNote{Path: path, Level: "lossy",
-				Msg: fmt.Sprintf("example %q dropped: it doesn't parse: %s", ex, msg)})
+				Msg: fmt.Sprintf("example %q dropped: it doesn't parse: %s", ex, msg), example: ex, why: "they don't parse"})
 			continue
 		}
 		kept = append(kept, line)
@@ -306,14 +308,18 @@ func (sb *importSpecBuilder) commentsFor(path string) []string {
 		if h.Path != path {
 			continue
 		}
-		where := h.File
-		if rel, err := filepath.Rel(sb.moduleRoot, h.File); err == nil && filepath.IsAbs(h.File) && !strings.HasPrefix(rel, "..") {
-			where = filepath.ToSlash(rel)
-		}
+		where := hookLocation(sb.moduleRoot, h.File)
 		if h.Line > 0 {
 			where = fmt.Sprintf("%s:%d", where, h.Line)
 		}
-		lines = append(lines, fmt.Sprintf("%s %s -> rotini %s: %s", sb.res.Source.Framework, h.Framework, h.Rotini, where))
+		if where == "" {
+			where = h.Func
+		}
+		line := fmt.Sprintf("%s %s -> rotini %s", sb.res.Source.Framework, h.Framework, h.Rotini)
+		if where != "" {
+			line += ": " + where
+		}
+		lines = append(lines, line)
 	}
 	for _, n := range append(sb.res.Notes, sb.dropped...) {
 		if n.Path == path && (n.Level == "lossy" || n.Level == "unsupported") {
@@ -321,4 +327,112 @@ func (sb *importSpecBuilder) commentsFor(path string) []string {
 		}
 	}
 	return lines
+}
+
+// groupDropped folds a command's dropped-example notes that share a reason into one note
+// listing the examples, so a program with many stale examples reports a line per command
+// rather than per example. Other notes, and a lone drop, pass through unchanged.
+func groupDropped(notes []importNote) []importNote {
+	type key struct{ path, why string }
+	groups := map[key][]string{}
+	for _, n := range notes {
+		if n.why != "" {
+			k := key{n.Path, n.why}
+			groups[k] = append(groups[k], n.example)
+		}
+	}
+	var out []importNote
+	done := map[key]bool{}
+	for _, n := range notes {
+		k := key{n.Path, n.why}
+		if n.why == "" || len(groups[k]) < 2 {
+			out = append(out, n)
+			continue
+		}
+		if done[k] {
+			continue
+		}
+		done[k] = true
+		quoted := make([]string, len(groups[k]))
+		for i, ex := range groups[k] {
+			quoted[i] = strconv.Quote(ex)
+		}
+		out = append(out, importNote{Path: n.Path, Level: n.Level,
+			Msg: fmt.Sprintf("%d examples dropped, as %s: %s", len(quoted), k.why, strings.Join(quoted, ", "))})
+	}
+	return out
+}
+
+// hookLocation writes a hook's file for a spec comment without a machine's own directories:
+// relative to the module root for a file inside it, as module@version/path for one in the
+// module cache, under "~/" for one elsewhere in the home directory, and otherwise relative to
+// the module root, such as for a local replace target. A file on another volume keeps only its
+// name.
+func hookLocation(moduleRoot, file string) string {
+	if !filepath.IsAbs(file) {
+		return file
+	}
+	rel, relErr := filepath.Rel(moduleRoot, file)
+	if relErr == nil && !relLeaves(rel) {
+		return filepath.ToSlash(rel)
+	}
+	if rel, ok := relUnder(moduleCache(), file); ok {
+		return unescapeModulePath(rel)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if rel, ok := relUnder(home, file); ok {
+			return "~/" + rel
+		}
+	}
+	if relErr == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.Base(file)
+}
+
+// relLeaves reports whether a relative path leaves its base directory.
+func relLeaves(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// relUnder returns file relative to dir, with forward slashes, when file is inside dir.
+func relUnder(dir, file string) (string, bool) {
+	if dir == "" {
+		return "", false
+	}
+	rel, err := filepath.Rel(dir, file)
+	if err != nil || relLeaves(rel) || rel == "." {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
+// moduleCache returns the module cache directory as the go command finds it: $GOMODCACHE, or
+// pkg/mod in the first GOPATH entry, $HOME/go by default.
+func moduleCache() string {
+	if dir := os.Getenv("GOMODCACHE"); dir != "" {
+		return dir
+	}
+	gopath := filepath.SplitList(os.Getenv("GOPATH"))
+	if len(gopath) > 0 && gopath[0] != "" {
+		return filepath.Join(gopath[0], "pkg", "mod")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, "go", "pkg", "mod")
+	}
+	return ""
+}
+
+// unescapeModulePath undoes the module cache's case encoding, where "!a" stands for "A".
+func unescapeModulePath(p string) string {
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		if p[i] == '!' && i+1 < len(p) && p[i+1] >= 'a' && p[i+1] <= 'z' {
+			i++
+			b.WriteByte(p[i] - 'a' + 'A')
+			continue
+		}
+		b.WriteByte(p[i])
+	}
+	return b.String()
 }

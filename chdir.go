@@ -51,7 +51,7 @@ func chdirSites(chain []Command, argv []string) []chdirSite {
 		}
 		if isFlag(chain[:depth], tok) {
 			found := -1
-			extra, err := consumeFlagToken(chain[:depth], tok, argv, i, func(_ int, fd FlagDef, value, typed string) error {
+			extra, err := consumeFlagToken(chain[:depth], tok, argv, i, func(_ int, fd *FlagDef, value, typed string) error {
 				if fd.Role == roleChdir {
 					found = len(sites)
 					sites = append(sites, chdirSite{flag: i, at: i, attached: true, value: value, typed: typed})
@@ -68,7 +68,7 @@ func chdirSites(chain []Command, argv []string) []chdirSite {
 			continue
 		}
 		if !startedArgs && depth < len(chain) {
-			if c, ok := findChild(chain[depth-1], tok); ok && c.Name == chain[depth].Name {
+			if c, ok := findChild(&chain[depth-1], tok); ok && c.Name == chain[depth].Name {
 				depth++
 				continue
 			}
