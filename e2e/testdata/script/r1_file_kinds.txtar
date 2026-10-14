@@ -49,7 +49,7 @@ cmp stdout want_emit.json
 
 # The output's directory must exist, and the output can't be a directory.
 ! exec ./files$exe emit -o missing/out.json
-stderr '-o: no such directory: "missing(/|\\\\)"'
+stderr '-o: no such directory: "missing(/|\\)"'
 mkdir adir
 ! exec ./files$exe emit -o adir
 stderr '-o: "adir" is a directory'
