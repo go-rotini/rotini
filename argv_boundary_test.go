@@ -539,6 +539,7 @@ func TestResponseFileWords(t *testing.T) {
 func FuzzResponseFileWords(f *testing.F) {
 	f.Add("a\nb\n")
 	f.Add("\xef\xbb\xbf# x\r\n y \n")
+	f.Add("\xef\xbb\xbf\xef\xbb\xbf")
 	f.Fuzz(func(t *testing.T, text string) {
 		words := responseFileWords(text)
 		var kept []string
@@ -551,7 +552,13 @@ func FuzzResponseFileWords(f *testing.F) {
 			}
 			kept = append(kept, w)
 		}
-		if again := responseFileWords(strings.Join(kept, "\n")); !slices.Equal(again, words) {
+		written := strings.Join(kept, "\n")
+		// A file's leading byte-order mark is removed, so a first word that starts with one is
+		// written after another.
+		if strings.HasPrefix(written, utf8BOM) {
+			written = utf8BOM + written
+		}
+		if again := responseFileWords(written); !slices.Equal(again, words) {
 			t.Fatalf("round trip %q → %q", words, again)
 		}
 	})

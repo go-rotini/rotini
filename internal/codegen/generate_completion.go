@@ -97,6 +97,8 @@ func shellIdentifier(prog string) string {
 const bashCompletionTemplate = `# bash completion for PROG
 # Completion messages show on the second TAB in bash 4.4 or later, and descriptions on the
 # second TAB in bash 4.0 or later.
+# Counters are set with $(( )) rather than run as (( )) commands: in bash 4.1 or later a (( ))
+# that comes to 0 fails, which ends a shell running with set -e.
 
 # compopt is missing in bash 3.2 (macOS's /bin/bash) and fails outside a completion; bash
 # before 4.4 rejects -o nosort.
@@ -127,9 +129,11 @@ _PROG_show_messages() {
     return 0
 }
 
-# Appends each line of standard input to COMPREPLY as one candidate, unexpanded.
+# Appends each line of standard input to COMPREPLY as one candidate, unexpanded. Lines are read
+# as bytes: bash 5.2 in a UTF-8 locale reads a newline after a byte that starts a character
+# but doesn't finish one as part of the line, joining two lines.
 _PROG_add_lines() {
-    local line k=${#COMPREPLY[@]}
+    local LC_ALL=C line k=${#COMPREPLY[@]}
     while IFS= read -r line; do
         COMPREPLY[k++]=$line
     done
@@ -186,12 +190,12 @@ _PROG_words() {
         word=${COMP_WORDS[i]}
         space=${COMP_LINE:pos}
         space=${space%%[![:space:]]*}
-        (( pos += ${#space} ))
+        pos=$(( pos + ${#space} ))
         if [[ ${COMP_LINE:pos:${#word}} != "$word" ]]; then
             raw=("${COMP_WORDS[@]:0:COMP_CWORD+1}")
             break
         fi
-        (( pos += ${#word} ))
+        pos=$(( pos + ${#word} ))
         last=$(( ${#raw[@]} - 1 ))
         if (( i > 1 )) && [[ -z $space && -n $joins ]] && [[ $word == ["$joins"]* || ${raw[last]} == *["$joins"] ]]; then
             raw[last]+=$word
@@ -222,7 +226,7 @@ _PROG_unquote() {
             if [[ $c == '"' ]]; then
                 q=""
             elif [[ $c == '\' && ${w:i+1:1} == [\"\\\$\` + "`" + `] ]]; then
-                (( i++ ))
+                i=$(( i + 1 ))
                 REPLY+=${w:i:1}
             else
                 REPLY+=$c
@@ -234,7 +238,7 @@ _PROG_unquote() {
                     qlead=$REPLY
                     ;;
                 \\)
-                    (( i++ ))
+                    i=$(( i + 1 ))
                     REPLY+=${w:i:1}
                     ;;
                 *)
@@ -243,7 +247,7 @@ _PROG_unquote() {
                     ;;
             esac
         fi
-        (( i++ ))
+        i=$(( i + 1 ))
     done
     open=$q
     lead=$brk
@@ -348,8 +352,38 @@ _PROG_quote_all() {
     return 0
 }
 
+# Reads the program's output from standard input into COMPREPLY, __PROG_descs, __PROG_messages,
+# options and directive. Output: candidates as "name<TAB>description", then
+# ":rotini:message <text>" lines, then a ":rotini:option <word>..." line (nospace, keep-order),
+# then a ":rotini:<directive>" line (none, file, file <exts>, directory, executable, user, group,
+# host). Read line by line, as bytes (see _PROG_add_lines): an unquoted $(...) would also
+# glob-expand each candidate.
+_PROG_read_output() {
+    local LC_ALL=C line value i=0
+    while IFS= read -r line; do
+        case "$line" in
+            ":rotini:message "*) __PROG_messages+=("${line#:rotini:message }") ;;
+            ":rotini:option "*) options=" ${line#:rotini:option } " ;;
+            ":rotini:"*) directive="${line#:rotini:}" ;;
+            *)
+                # Readline replaces only the text after lead.
+                value=${line%%$'\t'*}
+                [[ $value == "$lead"* ]] && value=${value#"$lead"}
+                COMPREPLY[i]=$value
+                __PROG_descs[i]=""
+                if [[ $line == *$'\t'* ]]; then
+                    __PROG_descs[i]=${line#*$'\t'}
+                    __PROG_described=1
+                fi
+                i=$(( i + 1 ))
+                ;;
+        esac
+    done
+    return 0
+}
+
 _PROG_complete() {
-    local line value cur="" lead="" open="" directive="" options="" ext exts i=0 REPLY joins
+    local cur="" lead="" open="" directive="" options="" ext exts REPLY joins
     local -a args=()
     __PROG_messages=()
     __PROG_descs=()
@@ -360,29 +394,7 @@ _PROG_complete() {
     _PROG_words
     COMPREPLY=()
     local IFS=$'\n'
-    # Output: candidates as "name<TAB>description", then ":rotini:message <text>" lines, then
-    # a ":rotini:option <word>..." line (nospace, keep-order), then a ":rotini:<directive>"
-    # line (none, file, file <exts>, directory, executable, user, group, host).
-    # Read line by line: an unquoted $(...) would also glob-expand each candidate.
-    while IFS= read -r line; do
-        case "$line" in
-            ":rotini:message "*) __PROG_messages+=("${line#:rotini:message }") ;;
-            ":rotini:option "*) options=" ${line#:rotini:option } " ;;
-            ":rotini:"*) directive="${line#:rotini:}" ;;
-            *)
-                # Readline replaces only the text after lead.
-                value=${line%%$'\t'*}
-                [[ $value == "$lead"* ]] && value=${value:${#lead}}
-                COMPREPLY[i]=$value
-                __PROG_descs[i]=""
-                if [[ $line == *$'\t'* ]]; then
-                    __PROG_descs[i]=${line#*$'\t'}
-                    __PROG_described=1
-                fi
-                i=$(( i + 1 ))
-                ;;
-        esac
-    done < <(PROG __complete "${args[@]}" 2>/dev/null)
+    _PROG_read_output < <(PROG __complete "${args[@]}" 2>/dev/null)
 
     [[ $options == *" nospace "* ]] && _PROG_compopt -o nospace
     [[ $options == *" keep-order "* ]] && _PROG_compopt -o nosort
