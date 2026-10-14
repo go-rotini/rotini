@@ -121,6 +121,13 @@ func (pl *planner) read(path string) (content []byte, mode os.FileMode, exists b
 // apply records op and, in a real run, carries it out at once. Parent directories are
 // created as needed, and writes are atomic.
 func (pl *planner) apply(op fs.PlanOp) error {
+	if pl.dry && op.Action != fs.PlanActionDelete {
+		// A real run would fail to make the file's directory. Windows reports a path under a
+		// file as missing rather than as not a directory, so reading it doesn't catch this.
+		if file := pl.fileAncestor(op.Path); file != "" {
+			return fmt.Errorf("%s %s: %s is not a directory", op.Action, op.Path, file)
+		}
+	}
 	pl.plan.Ops = append(pl.plan.Ops, op)
 	if pl.dry {
 		switch op.Action {
@@ -137,6 +144,29 @@ func (pl *planner) apply(op fs.PlanOp) error {
 		return fmt.Errorf("%s %s: %w", op.Action, op.Path, err)
 	}
 	return nil
+}
+
+// fileAncestor returns the nearest ancestor of path that exists, on disk or in the plan, when
+// it is a file rather than a directory, and "" otherwise.
+func (pl *planner) fileAncestor(path string) string {
+	for dir := filepath.Dir(path); ; {
+		if _, ok := pl.pending[dir]; ok {
+			return dir
+		}
+		if !pl.removed[dir] {
+			if info, err := os.Stat(dir); err == nil {
+				if info.IsDir() {
+					return ""
+				}
+				return dir
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // Changes lists the planned operations one per line, in [fs.Plan.Diff]'s format, with each

@@ -39,7 +39,7 @@ func TestConfigSource_userPathIsLiteral(t *testing.T) {
 	writeTestFile(t, lit, "name: literal\n")
 	writeTestFile(t, filepath.Join(dir, "ab.yaml"), "name: expanded\n")
 	writeTestFile(t, filepath.Join(dir, "dflt.yaml"), "name: default\n")
-	env := []string{"HOME=" + dir, "X=b"}
+	env := []string{"HOME=" + dir, "USERPROFILE=" + dir, "X=b"}
 
 	rtx := NewContextFor(configPathDef(""), []string{"--config", lit}).WithInputSettings(configPathSettings()).WithEnviron(env)
 	if in, err := rtx.Inputs[configPathInputs](); err != nil || in.App.Config.Name != "literal" {
@@ -139,8 +139,9 @@ func TestPinnedConfig_expandedInEveryReader(t *testing.T) {
 	}
 	writeTestFile(t, user, "dir: ~/x\ndirs: [~/a, ~/b]\nrel: data\n")
 	set := InputSettings{ConfigFiles: []ConfigFile{{Name: "user", Path: user}}}
-	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithInputSettings(set).WithEnviron([]string{"HOME=" + home})
-	want := filepath.Join(home, "x") + " " + filepath.Join(home, "a") + "," + filepath.Join(home, "b") + " " + filepath.Join(dir, "sub", "data")
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithInputSettings(set).WithEnviron([]string{"HOME=" + home, "USERPROFILE=" + home})
+	// ~ is replaced by the home directory as written, so the rest keeps its slash on Windows too.
+	want := home + "/x " + home + "/a," + home + "/b " + filepath.Join(dir, "sub", "data")
 	show := func(in pinnedExpandInputs) string {
 		c := in.App.Config
 		return c.Dir + " " + strings.Join(c.Dirs, ",") + " " + c.Rel

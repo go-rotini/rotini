@@ -40,10 +40,16 @@ func completionQuotingDir(t *testing.T) string {
 // bashQuotingDriver completes one line the way readline's TAB does and prints, for each
 // candidate, the words the line then holds after the program (or INCOMPLETE when the shell
 // would wait for more), and the same for the text the candidates share.
-// Usage: bash driver.sh <script> <kept text> <open quote> <COMP_LINE> <COMP_WORDS...>
+// Usage: bash driver.sh <script> <line file>, where the line file holds the kept text, the open
+// quote, COMP_LINE and then each of COMP_WORDS, one per line. They are read from a file because
+// on Windows a bash built on the MSYS or Cygwin runtime splits its command line on quotes again,
+// so an argument holding an unmatched ' can't reach the script intact.
 const bashQuotingDriver = `source "$1"
-keep=$2 quote=$3 COMP_LINE=$4
-shift 4
+lines=$2
+set --
+while IFS= read -r arg; do set -- "$@" "$arg"; done < "$lines"
+keep=$1 quote=$2 COMP_LINE=$3
+shift 3
 COMP_POINT=${#COMP_LINE} COMP_WORDS=("$@") COMP_CWORD=$(( $# - 1 )) COMP_TYPE=9 COMPREPLY=()
 fn=$(complete -p my-prog | sed -n 's/.* -F \([^ ]*\) .*/\1/p')
 "$fn" >/dev/null 2>&1
@@ -165,6 +171,7 @@ func TestCompletionScript_bashInsertsLiteralWords(t *testing.T) {
 	dir := completionQuotingDir(t)
 	scriptPath := filepath.Join(dir, "completion.bash")
 	driverPath := filepath.Join(dir, "driver.sh")
+	linePath := filepath.Join(dir, "line.txt")
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -177,8 +184,12 @@ func TestCompletionScript_bashInsertsLiteralWords(t *testing.T) {
 			sets = append(sets, []string{c})
 		}
 		for _, words := range tc.words {
+			lines := append([]string{tc.keep, tc.quote, tc.line}, words...)
+			if err := os.WriteFile(linePath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			for _, cands := range sets {
-				out := runQuotingDriver(t, dir, cands, bash, append([]string{driverPath, scriptPath, tc.keep, tc.quote, tc.line}, words...)...)
+				out := runQuotingDriver(t, dir, cands, bash, driverPath, scriptPath, linePath)
 				checkInserted(t, tc, words, cands, out)
 			}
 		}

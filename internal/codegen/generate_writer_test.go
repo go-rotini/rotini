@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-rotini/fs"
@@ -102,5 +103,30 @@ func TestPlanner_updateKeepsTheMode(t *testing.T) {
 	}
 	if body, _ := os.ReadFile(path); string(body) != "new" {
 		t.Errorf("a.go = %q, want new", body)
+	}
+}
+
+// TestPlanner_dryRunRefusesAFileAsDirectory pins that a dry run fails a file whose directory
+// is a file, on disk or planned, as the real run would, so init writes nothing.
+func TestPlanner_dryRunRefusesAFileAsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "pkg", "not a directory")
+	pl := newPlanner(true)
+	under := filepath.Join(dir, "pkg", "sub", "a.go")
+	err := pl.apply(fs.PlanOp{Action: fs.PlanActionCreate, Path: under, Data: []byte("a")})
+	if want := filepath.Join(dir, "pkg") + " is not a directory"; err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("under a file on disk: %v, want %q", err, want)
+	}
+	if err := pl.write(filepath.Join(dir, "planned"), []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := pl.write(filepath.Join(dir, "planned", "a.go"), []byte("a")); err == nil || !strings.HasSuffix(err.Error(), filepath.Join(dir, "planned")+" is not a directory") {
+		t.Errorf("under a planned file: %v", err)
+	}
+	if err := pl.write(filepath.Join(dir, "new", "a.go"), []byte("a")); err != nil {
+		t.Errorf("under a missing directory: %v", err)
+	}
+	if len(pl.plan.Ops) != 2 {
+		t.Errorf("ops = %v, want the refused files left out", pl.plan.Ops)
 	}
 }

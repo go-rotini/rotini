@@ -293,13 +293,15 @@ func TestImporterWithoutPackage(t *testing.T) {
 }
 
 // TestCommentsFor_unlocatedHookNamesFunc pins that a hook the importer couldn't locate is
-// named by its function in the spec comment, instead of ending in an empty position.
+// named by its function in the spec comment, instead of ending in an empty position. A located
+// hook's file is a runtime file name, which has forward slashes on every system.
 func TestCommentsFor_unlocatedHookNamesFunc(t *testing.T) {
-	sb := &importSpecBuilder{moduleRoot: "/m", res: &importResult{
+	root := t.TempDir()
+	sb := &importSpecBuilder{moduleRoot: root, res: &importResult{
 		Source: importSource{Framework: "cobra"},
 		Hooks: []importHook{
 			{Path: "app", Framework: "RunE", Rotini: "Run", Func: "(*server).run"},
-			{Path: "app", Framework: "PreRunE", Rotini: "PreRun", Func: "pre", File: "/m/cmd/a.go", Line: 3},
+			{Path: "app", Framework: "PreRunE", Rotini: "PreRun", Func: "pre", File: filepath.ToSlash(filepath.Join(root, "cmd", "a.go")), Line: 3},
 			{Path: "app", Framework: "PostRunE", Rotini: "PostRun"},
 		},
 	}}

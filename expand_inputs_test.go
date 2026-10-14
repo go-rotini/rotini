@@ -118,6 +118,24 @@ func TestExpand_argvErrors(t *testing.T) {
 	}
 }
 
+// The written form follows a Windows home's backslashes, which a path check shows as typed, and
+// a value another check quotes as a Go string.
+func TestWithWritten_quoting(t *testing.T) {
+	written := map[string]string{`C:\Users\ada/x`: "~/x", `C:\Users\ada\y`: `~\y`, "a b": "$A"}
+	for msg, want := range map[string]string{
+		`-f: no such file: "C:\Users\ada/x"`:   `-f: no such file: "C:\Users\ada/x" (written as "~/x")`,
+		`-f: no such file: "C:\Users\ada\y"`:   `-f: no such file: "C:\Users\ada\y" (written as "~\y")`,
+		`-f: "C:\\Users\\ada\\y" is not valid`: `-f: "C:\\Users\\ada\\y" is not valid (written as "~\\y")`,
+		`-n: "a b" is not a valid int`:         `-n: "a b" is not a valid int (written as "$A")`,
+		`-f: something else`:                   `-f: something else`,
+	} {
+		err := withWritten(&ParseError{Msg: msg}, []string{`C:\Users\ada/x`, `C:\Users\ada\y`, "a b"}, written)
+		if got := err.Error(); got != want {
+			t.Errorf("withWritten(%s) = %s, want %s", msg, got, want)
+		}
+	}
+}
+
 func TestExpand_envAndConfig(t *testing.T) {
 	root, home, work, conf := exSetup(t)
 	env := []string{"HOME=" + home, "USERPROFILE=" + home, "APP_HOME=~", "APP_CACHE=~/c", "APP_LOG=" + filepath.Join(home, "f.txt")}

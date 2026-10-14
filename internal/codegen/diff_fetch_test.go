@@ -19,7 +19,7 @@ func TestProcessorDiff_modSourceFetched(t *testing.T) {
 		"go.mod":            "module example.com/app\n\ngo 1.27\n",
 		"cli-contract.json": readTestFile(t, filepath.Join(dir, "cli-contract.json")),
 	})
-	t.Setenv("GOPROXY", (&url.URL{Scheme: "file", Path: filepath.ToSlash(proxy)}).String())
+	t.Setenv("GOPROXY", fileURL(proxy))
 	t.Setenv("GOMODCACHE", t.TempDir())
 	t.Setenv("GOFLAGS", "-modcacherw") // so the temporary cache can be removed
 	t.Setenv("GOSUMDB", "off")         // the proxy's module is unknown to the checksum database
@@ -68,5 +68,32 @@ func writeProxyModule(t *testing.T, root, module, version string, files map[stri
 	}
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// fileURL is the file:// URL of the absolute path dir. A Windows path's volume follows a third
+// slash (file:///C:/x), as the go command requires of a file:// GOPROXY.
+func fileURL(dir string) string {
+	p := filepath.ToSlash(dir)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
+}
+
+func TestFileURL(t *testing.T) {
+	for dir, want := range map[string]string{
+		"/tmp/proxy":        "file:///tmp/proxy",
+		"/a b/%x":           "file:///a%20b/%25x",
+		"C:/Users/me/proxy": "file:///C:/Users/me/proxy",
+	} {
+		if got := fileURL(dir); got != want {
+			t.Errorf("fileURL(%q) = %q, want %q", dir, got, want)
+		}
+	}
+	if filepath.Separator == '\\' {
+		if got, want := fileURL(`C:\Users\me\proxy`), "file:///C:/Users/me/proxy"; got != want {
+			t.Errorf("fileURL = %q, want %q", got, want)
+		}
 	}
 }

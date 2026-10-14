@@ -138,17 +138,25 @@ func (si *scopeInputs) noteWritten(expanded, written []string) {
 
 // withWritten adds the value as written to a value error that names one of vals in its expanded
 // form: `--file: no such file: "/home/ada/x" (written as "~/x")`. Any other error, or one about
-// a value expansion left alone, is returned unchanged.
+// a value expansion left alone, is returned unchanged. A path check quotes the value as typed
+// (a Windows path keeps its backslashes, see quotePath), other checks quote it as a Go string;
+// the written form is quoted the same way.
 func withWritten(err error, vals []string, written map[string]string) error {
 	pe, ok := err.(*ParseError) //nolint:errorlint // the value checks return a bare *ParseError
 	if !ok || len(written) == 0 {
 		return err
 	}
 	for _, v := range vals {
-		if w, ok := written[v]; ok && strings.Contains(pe.Msg, strconv.Quote(v)) {
-			cp := *pe
-			cp.Msg += fmt.Sprintf(" (written as %q)", w)
-			return &cp
+		w, ok := written[v]
+		if !ok {
+			continue
+		}
+		for _, quote := range []func(string) string{quotePath, strconv.Quote} {
+			if strings.Contains(pe.Msg, quote(v)) {
+				cp := *pe
+				cp.Msg += " (written as " + quote(w) + ")"
+				return &cp
+			}
 		}
 	}
 	return err
