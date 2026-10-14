@@ -220,7 +220,7 @@ Flags:
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
       --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
@@ -265,7 +265,7 @@ Flags:
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
       --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
@@ -308,7 +308,7 @@ Flags:
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.0), or the path of a local checkout
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
       --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
   -n, --[no-]dry-run               show what the import would write, and change nothing
 

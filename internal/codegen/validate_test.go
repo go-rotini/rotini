@@ -424,7 +424,7 @@ func TestExplainDecodeFailure_schemaAcceptsButTypesReject(t *testing.T) {
 		"      schema: { type: string, minLength: 1e30 }\n"
 	_, err := decodeData[Spec](formatYAML, []byte(body), "s.yaml")
 	if err == nil {
-		t.Skip("this YAML library accepted the overflow; no schema/type disagreement to exercise")
+		t.Fatal("the YAML decoder accepted an overflowing minLength")
 	}
 	got := p.explainDecodeFailure("spec", err)
 	if !strings.Contains(got.Error(), "rotini bug") {

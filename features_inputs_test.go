@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/go-rotini/recon"
-	"github.com/go-rotini/yaml"
 )
 
 // everyFeatureContext is a bare Context, outside any program, with every feature.
@@ -295,10 +294,6 @@ func TestDecodeAny_duplicateKey(t *testing.T) {
 		"yaml":  "- a: 1\n  a: 2\n",
 	}
 	fs := allFeatures()
-	var probe any
-	if yaml.UnmarshalWithOptions([]byte("- a: 1\n  a: 2\n"), &probe, yaml.WithDisallowDuplicateKey()) == nil {
-		delete(docs, "yaml") // this yaml release checks only typed maps
-	}
 	for format, body := range docs {
 		_, err := fs.codec(format).decodeAny([]byte(body))
 		if err == nil {
