@@ -91,6 +91,21 @@ func TestPropertyLintRejectsUntaggable(t *testing.T) {
 	}
 }
 
+// TestCommandPrefixClashesSkipsSameName pins that two siblings with one name, and their
+// sub-commands, aren't reported again as a Go name clash; distinct paths still are.
+func TestCommandPrefixClashesSkipsSameName(t *testing.T) {
+	t.Parallel()
+	build := Command{Name: "build", Commands: []Command{{Name: "image"}}}
+	spec := &Spec{Command: Command{Name: "app", Commands: []Command{build, build}}}
+	if got := commandPrefixClashes(spec); len(got) != 0 {
+		t.Errorf("same-named siblings: lint problems %q, want none", got)
+	}
+	spec = &Spec{Command: Command{Name: "app", Commands: []Command{{Name: "a-b"}, {Name: "a_b"}}}}
+	if got := commandPrefixClashes(spec); len(got) != 1 {
+		t.Errorf("a-b and a_b: lint problems %q, want one", got)
+	}
+}
+
 // TestGeneratedFieldNamesAllMatchesOneByOne pins that asking the generator for many objects in
 // one document names every object's fields as asking for each object alone does, including
 // objects it refuses, repeated key sets and objects without keys.
