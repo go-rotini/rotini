@@ -32,10 +32,11 @@ func lintGoNames(spec *Spec) []error {
 
 // commandPrefixClashes reports a command whose generated type prefix (root name plus its
 // path, PascalCased) another command already makes. Composed children name their own types.
+// Two commands at one path are left to the sibling-name lint, which already reports them.
 func commandPrefixClashes(spec *Spec) []error {
 	var problems []error
 	eachOwnPrefix(spec, func(_ *Command, path, ptr, prefix, prev string) {
-		if prev != "" {
+		if prev != "" && prev != path {
 			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path, msg: fmt.Sprintf(
 				"generates the Go name %s, which command %s also generates (a Go name capitalizes each word, drops \"-\" and \"_\", and joins the path's names, so two paths can make one); rename one",
 				prefix, prev)})
