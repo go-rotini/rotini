@@ -10,7 +10,7 @@ title: "configuration"
 
 The conf controls what `rotini generate` writes and where: the Go packages, the documentation and completion features, the JSON Schemas and the contract document. It also sets how `rotini validate` reports problems.
 
-{{< code title=".rotini.conf.yaml — every key" language="yaml" file="examples/rotini.conf.yaml" open="true" copy="true" >}}{{< /code >}}
+{{< code title="every key" language="yaml" file="examples/rotini.conf.yaml" open="true" copy="true" >}}{{< /code >}}
 
 {{< code title="the JSON Schema" language="json" file="schemas/schema-conf.json" open="false" copy="true" >}}{{< /code >}}
 

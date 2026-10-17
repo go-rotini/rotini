@@ -10,7 +10,7 @@ title: "specification"
 
 The spec describes your CLI: its commands, their inputs and what they write. The document holds a top-level `version` and one root `command` (the program itself), and every sub-command below it has the same shape. `env_prefix` and `schemas` are valid only on the root command, and `$schema` is an optional key for editor tooling.
 
-{{< code title=".rotini.spec.yaml — every key" language="yaml" file="examples/rotini.spec.yaml" open="true" copy="true" >}}{{< /code >}}
+{{< code title="every key" language="yaml" file="examples/rotini.spec.yaml" open="true" copy="true" >}}{{< /code >}}
 
 {{< code title="the JSON Schema" language="json" file="schemas/schema-spec.json" open="false" copy="true" >}}{{< /code >}}
 

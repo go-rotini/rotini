@@ -203,7 +203,7 @@ func renderSchemaMarkdown(page schemaDocPage, channelTable string) (string, erro
 	if doc.Description != "" {
 		fmt.Fprintf(&b, "%s\n\n", prose(doc.Description))
 	}
-	fmt.Fprintf(&b, "{{< code title=\"%s — every key\" language=\"yaml\" file=%q open=\"true\" copy=\"true\" >}}{{< /code >}}\n\n", page.fileName, page.example)
+	fmt.Fprintf(&b, "{{< code title=\"every key\" language=\"yaml\" file=%q open=\"true\" copy=\"true\" >}}{{< /code >}}\n\n", page.example)
 	fmt.Fprintf(&b, "{{< code title=\"the JSON Schema\" language=\"json\" file=%q open=\"false\" copy=\"true\" >}}{{< /code >}}\n\n", page.schema)
 	b.WriteString("Below, every key. `rotini validate` checks all of them before any code is generated, and\n")
 	b.WriteString("this list is rendered from the schema, so it always matches what the tool accepts.\n\n")

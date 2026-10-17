@@ -65,12 +65,20 @@ func TestIndexYAMLRefusals(t *testing.T) {
 		"& a: 1\n",
 		"!tag\na: 1\n",
 		"a: | x\n  y\n",
+		"a: |21\n  y\n",
+		"a: |+-\n  y\n",
+		"a: >1-2\n  y\n",
 		"a: [\n",
 		"a: \"open\n",
 	} {
 		_, err := IndexYAML([]byte(src))
 		var le *LayoutError
 		if !errors.As(err, &le) && !strings.Contains(fmtErr(err), "parse yaml") {
+			t.Errorf("%q: %v", src, err)
+		}
+	}
+	for _, src := range []string{"a: |2-\n   y\n", "a: >-2\n   y\n"} {
+		if doc, err := IndexYAML([]byte(src)); err != nil || doc.Root.Pairs[0].Value.End != len(src)-1 {
 			t.Errorf("%q: %v", src, err)
 		}
 	}

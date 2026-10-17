@@ -413,9 +413,9 @@ func TestTutorialHandlerMatchesTheSetupPage(t *testing.T) {
 		t.Fatalf("read r0_tutorial: %v", err)
 	}
 
-	want, ok := codeBlock(string(page), "internal/cmd/todo/todo_add.go")
+	want, ok := codeBlock(string(page), "todo_add.go")
 	if !ok {
-		t.Fatal(`the setup page no longer shows a "internal/cmd/todo/todo_add.go" block`)
+		t.Fatal(`the setup page no longer shows a "todo_add.go" block`)
 	}
 	_, rest, ok := strings.Cut(string(script), "-- handler.go.txt --\n")
 	if !ok {

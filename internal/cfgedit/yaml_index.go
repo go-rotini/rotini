@@ -493,9 +493,19 @@ func quotedEnd(src []byte, off int) (int, bool) {
 // blank lines. With keep chomping (+) the trailing blank lines are content and included.
 func (ix *yamlIndexer) blockScalarEnd(off, parentCol int) (int, error) {
 	le := lineEnd(ix.src, off)
+	// The header holds at most one indentation indicator and one chomping indicator.
 	hdr := off + 1
-	for hdr < le && (ix.src[hdr] == '+' || ix.src[hdr] == '-' || (ix.src[hdr] >= '1' && ix.src[hdr] <= '9')) {
-		hdr++
+	digit, chomp := false, false
+header:
+	for ; hdr < le; hdr++ {
+		switch c := ix.src[hdr]; {
+		case (c == '+' || c == '-') && !chomp:
+			chomp = true
+		case c >= '1' && c <= '9' && !digit:
+			digit = true
+		default:
+			break header
+		}
 	}
 	if rest := bytes.TrimLeft(ix.src[hdr:le], " \t"); len(rest) > 0 && (rest[0] != '#' || hdr == le-len(rest)) {
 		return 0, ix.layout(off, "a block scalar header with more after it than a comment")
