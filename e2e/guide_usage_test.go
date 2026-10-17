@@ -14,7 +14,7 @@ import (
 // TestUsageRecipeMatchesTheGuide pins the guide's usage-line reporter to the file r3_usage
 // builds and runs.
 func TestUsageRecipeMatchesTheGuide(t *testing.T) {
-	const title = "internal/cmd/todo/report_usage.go"
+	const title, file = "report_usage.go", "internal/cmd/todo/report_usage.go"
 	page, err := os.ReadFile(filepath.Join("..", "docs", "content", "docs", "_index.md"))
 	if err != nil {
 		t.Fatalf("read the guide: %v", err)
@@ -28,12 +28,12 @@ func TestUsageRecipeMatchesTheGuide(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range archive.Files {
-		if f.Name == title {
+		if f.Name == file {
 			if got := strings.TrimRight(string(f.Data), "\n"); got != want {
-				t.Errorf("r3_usage's %s is not the guide's block.\n--- script\n%s\n--- guide\n%s", title, got, want)
+				t.Errorf("r3_usage's %s is not the guide's block.\n--- script\n%s\n--- guide\n%s", file, got, want)
 			}
 			return
 		}
 	}
-	t.Errorf("r3_usage carries no %s", title)
+	t.Errorf("r3_usage carries no %s", file)
 }

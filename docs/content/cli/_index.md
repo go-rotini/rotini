@@ -30,7 +30,7 @@ rotini suggests nothing unless you opt in the same way; see
 
 ## rotini
 
-{{< code title="$ rotini --help" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="--help" language="text" open="true" collapsible="false" copy="false" >}}
 The companion CLI for Rotini, the spec-first Go CLI framework: scaffold, validate and generate a CLI from its spec.
 
 Documentation: https://rotini.dev
@@ -81,7 +81,7 @@ On success `init` reports the way `generate` and `validate` do: the spec and con
 the time and how long it took. In a module that does not yet require the rotini package, it also
 warns, since the first build would fail without it:
 
-{{< code title="rotini init mycli — output" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="init output" language="text" open="true" collapsible="false" copy="false" >}}
 spec: cmd/mycli/.rotini.spec.yaml
 conf: cmd/mycli/.rotini.conf.yaml
 [14:02:11] 5.05ms
@@ -95,7 +95,7 @@ does not appear there.
 lines, lists each file it would create (or, with `--force`, replace) on stderr, and exits 2.
 `--no-dry-run` runs a real init; given after `--dry-run`, the last one wins.
 
-{{< code title="$ rotini help initialize" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help initialize" language="text" open="true" collapsible="false" copy="false" >}}
 Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.
 
 Usage:
@@ -146,7 +146,7 @@ What the import can't carry across exactly is reported on stderr, one line per i
 `lossy`, `unsupported` or `info`, then a count. A YAML spec also carries the `lossy` and
 `unsupported` lines, and the file and line of each hook to port, as comments above each command:
 
-{{< code title="rotini import cobra ./cmd — output" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="import output" language="text" open="true" collapsible="false" copy="false" >}}
 [info] acme: the root is rootCmd (a package-level command variable); pass --root to choose another
 [info] acme serve: Args unset: Cobra accepts any positionals, so a trailing variadic args was added; delete it to reject extras
 [lossy] acme: viper is linked in: its bindings (BindPFlag, AutomaticEnv, SetEnvPrefix, config paths) were not imported; declare variable: and key: on inputs, env_prefix and config_files by hand
@@ -170,7 +170,7 @@ does. The import runs with `GOWORK=off`, so the package must build from its own 
 `--importer-version` picks the importer release to run, or the path of a local checkout of
 `github.com/go-rotini/import`.
 
-{{< code title="$ rotini help import" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help import" language="text" open="true" collapsible="false" copy="false" >}}
 Build a rotini spec, conf and handler stubs from an existing Go command-line program, read from the command tree it builds.
 
 Usage:
@@ -193,7 +193,7 @@ Examples:
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
 
-{{< code title="$ rotini help import cobra" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help import cobra" language="text" open="true" collapsible="false" copy="false" >}}
 Read the command tree a Cobra program builds in <package> and write a rotini spec and
 conf for it under cmd/<dir>, then generate, seeding handler stubs that match the
 imported spec. Anything that can't be carried across exactly is reported on stderr,
@@ -236,7 +236,7 @@ Examples:
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
 
-{{< code title="$ rotini help import kong" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help import kong" language="text" open="true" collapsible="false" copy="false" >}}
 Read the grammar a Kong program declares in <package> and write a rotini spec and
 conf for it under cmd/<dir>, then generate, seeding handler stubs that match the
 imported spec. Anything that can't be carried across exactly is reported on stderr,
@@ -281,7 +281,7 @@ Examples:
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
 
-{{< code title="$ rotini help import urfave" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help import urfave" language="text" open="true" collapsible="false" copy="false" >}}
 Read the command tree a urfave/cli v3 program builds in <package> and write a rotini
 spec and conf for it under cmd/<dir>, then generate, seeding handler stubs that match
 the imported spec. Anything that can't be carried across exactly is reported on
@@ -341,7 +341,7 @@ Before its timing line, `generate` lists each file it created that is yours from
 handler for a new command, `main.go`, or an editable feature template. Files it rewrites on every
 run are not listed.
 
-{{< code title="rotini generate — output" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="generate output" language="text" open="true" collapsible="false" copy="false" >}}
 spec: cmd/mycli/.rotini.spec.yaml
 conf: cmd/mycli/.rotini.conf.yaml
 created: internal/cmd/mycli/mycli_greet.go
@@ -360,7 +360,7 @@ nothing. The exit code says what it found:
 | 1 | An error, such as an invalid spec, reported as `generate` reports it. |
 | 2 | Something would change. Each change is listed on stderr, then a count. |
 
-{{< code title="rotini generate --dry-run — output" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="dry-run output" language="text" open="true" collapsible="false" copy="false" >}}
 spec: cmd/mycli/.rotini.spec.yaml
 conf: cmd/mycli/.rotini.conf.yaml
 1. update internal/cmd/mycli/zz_rotini.go (14211 bytes, mode 0644)
@@ -375,7 +375,7 @@ With `dry_run_env: CI`, `go generate ./...` checks every CLI in the module on mo
 which set `CI=true`. `--no-dry-run` runs a real generate whatever the variable says, and
 `--dry-run` can't be combined with `--watch`.
 
-{{< code title="$ rotini help generate" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help generate" language="text" open="true" collapsible="false" copy="false" >}}
 Generate a cli program from a rotini spec file and its conf.
 
 Usage:
@@ -422,7 +422,7 @@ Specs composed from another module (`mod://`) are left out: they follow that mod
 about it), for an editor or an agent to read. The exit code is the same: 1 when any problem is an
 error. It can't be combined with `--watch`.
 
-{{< code title="$ rotini help validate" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help validate" language="text" open="true" collapsible="false" copy="false" >}}
 Validate a rotini spec file and its conf for correctness.
 
 Usage:
@@ -464,7 +464,7 @@ declared plugin is listed as a child marked `[plugin]`, and plugin discovery as 
 A deprecated alias is suffixed `(deprecated alias)`. A command under a hidden one isn't marked
 itself.
 
-{{< code title="rotini tree — output" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="tree output" language="text" open="true" collapsible="false" copy="false" >}}
 musak
   artists  [$ref ../artists/.rotini.spec.yaml]
     list, ls
@@ -480,7 +480,7 @@ The output is the tree alone, so it can be piped to `grep`. A spec with errors i
 the errors `validate` reports. A `mod://` child is downloaded through the module cache, as
 `generate` does, which needs a `go.mod` and may use the network.
 
-{{< code title="$ rotini help tree" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help tree" language="text" open="true" collapsible="false" copy="false" >}}
 Print the command tree of a rotini spec, with composed children ($ref) resolved: each
 command's name and aliases, indented under its parent, with markers for hidden, deprecated,
 passthrough and composed commands and declared plugins.
@@ -536,7 +536,7 @@ that matches no change also exits 2, so the list doesn't outlive its release. `-
 writes the findings as one JSON document, described by the command's `output` in the
 companion's own contract. `--release` falls back to the variable `validate.release_env` names.
 
-{{< code title="$ rotini help diff" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help diff" language="text" open="true" collapsible="false" copy="false" >}}
 Compare two versions of a cli's contract and report each change for the people and
 scripts using it: breaking, possibly breaking, expected (a removal planned for this
 release) or safe. Findings are written to stdout, grouped by severity.
@@ -591,7 +591,7 @@ and pattern, read from the same schemas as the [spec](/specification) and
 by dots, without list positions: `command.flags.schema.from`. A key both documents have, such as
 `version`, is shown for each. The argument completes one key at a time.
 
-{{< code title="$ rotini help explain" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help explain" language="text" open="true" collapsible="false" copy="false" >}}
 Print what a spec or conf key means: its description, type, allowed values, default and examples, read from the same schemas as the reference pages. Write the keys from the document's top, separated by dots and without list positions: command.flags.schema.from. A key both documents have, such as version, is shown for each.
 
 Effects: read, idempotent, local only
@@ -632,7 +632,7 @@ file that has neither. `--check` writes nothing and exits 2 when a file isn't fo
 all are, and 1 on an error. Only YAML files can be formatted for now; JSON, JSONC and TOML files
 are reported as not supported yet.
 
-{{< code title="$ rotini help fmt" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help fmt" language="text" open="true" collapsible="false" copy="false" >}}
 Rewrite rotini spec, conf and composed command files in canonical form: keys in
 reading order (a command's name and docs, then its inputs, output and sub-commands;
 an input's name and docs, then its behavior, then its schema); two-space indentation,
@@ -670,7 +670,7 @@ Use "rotini help <command>" for more information about a command.
 
 Prints help for any command.
 
-{{< code title="$ rotini help help" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help help" language="text" open="true" collapsible="false" copy="false" >}}
 Print help for a specific command.
 
 Usage:
@@ -696,7 +696,7 @@ Use "rotini help <command>" for more information about a command.
 Prints the shell completion script for bash, zsh, fish, PowerShell or Nushell, using the same generated
 `Completion(shell)` function any rotini CLI gets with the `completion` feature on.
 
-{{< code title="$ rotini help completion" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help completion" language="text" open="true" collapsible="false" copy="false" >}}
 Print the completion script for a shell. Load it once per session, or install it so
 every new shell has it:
 
@@ -734,7 +734,7 @@ Prints a command's man page, or with `--dir` writes every page into a directory,
 `ManSection` that any rotini CLI gets with the `man` feature on, so you can ship your own CLI's
 pages the same way.
 
-{{< code title="$ rotini help man" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help man" language="text" open="true" collapsible="false" copy="false" >}}
 Print a command's man page as roff, the markup the man program reads, or write every
 page into a directory with --dir. With no command, it prints the page for rotini itself.
 
@@ -787,7 +787,7 @@ When rotini is installed through the module graph — `go get -tool`, then `go t
 and version from its build info, as one JSON object. The text output and `--version` stay
 `v1.x.y`.
 
-{{< code title="rotini version --format json — output" language="json" open="true" collapsible="false" copy="false" >}}
+{{< code title="version output" language="json" open="true" collapsible="false" copy="false" >}}
 {
   "go_version": "go1.27.1",
   "module_path": "github.com/go-rotini/rotini",
@@ -796,7 +796,7 @@ and version from its build info, as one JSON object. The text output and `--vers
 }
 {{< /code >}}
 
-{{< code title="$ rotini help version" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="help version" language="text" open="true" collapsible="false" copy="false" >}}
 Print the rotini cli version. With --format json, print the version, the Go version that built
 the binary, and the module path and version from its build info, as one JSON object.
 

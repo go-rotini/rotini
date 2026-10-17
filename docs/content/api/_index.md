@@ -14,7 +14,7 @@ type and method is documented in full on
 `Execute`. The generated `NewProgram` calls `rotini.NewWiredProgram` with the runtime features
 its spec uses:
 
-{{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func main() {
 	cmd.NewProgram().
 		WithDependency(cmd.Store, openStore()). // something your handlers share
@@ -50,7 +50,7 @@ func main() {
 A dependency is declared once in the generated package's directory, next to your handlers, and
 read in any hook:
 
-{{< code title="internal/cmd/todo/store.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="store.go" language="golang" open="true" collapsible="false" copy="true" >}}
 var Store = rotini.NewDependency[*store.Store]("todo.store")
 {{< /code >}}
 
@@ -105,7 +105,7 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rotini.SortBy(items, field, desc)` / `rotini.SelectFields(v, at, fields)` | sort a command's output by a field and keep the fields the user chose; see [choosing fields and order](/docs#choosing-fields-and-order) |
 | `rtx.WriteOutputTo(w, v, …)` / `rtx.WriteOutputItemTo(w, item, …)` | write structured output, or one item of a stream, to another writer |
 
-{{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rtx.Inputs[TodoAddInputs]()
 	if err != nil {
@@ -164,7 +164,7 @@ outside its hooks, cancel its context with `rotini.ExitCause(code)`; see
 
 Run a program in-process and check its exit code, error and output:
 
-{{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAdd(t *testing.T) {
 	var out bytes.Buffer
 	code, err := NewProgram().WithStdout(&out).Run([]string{"add", "buy milk"})

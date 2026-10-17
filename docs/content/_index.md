@@ -72,7 +72,7 @@ internal/cmd/helloworld/
 
 Add a `hello` command, with an optional argument and a flag, under `commands:` in the spec:
 
-{{< code title="cmd/helloworld/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
     - name: hello
       summary: say hello
       arguments:
@@ -93,7 +93,7 @@ reads the typed, validated inputs; `--help` is answered for every command by the
 `init` wrote. Replace the line that prints the inputs with the greeting code, and add `"strings"`
 to the imports:
 
-{{< code title="internal/cmd/helloworld/helloworld_hello.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="helloworld_hello.go" language="go" open="true" collapsible="false" copy="true" >}}
 func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
 	if err != nil {

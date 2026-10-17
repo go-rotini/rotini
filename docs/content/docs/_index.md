@@ -178,7 +178,7 @@ function to rewrite as a completer), `unsupported` (dropped), and `info`. In a Y
 `lossy` and `unsupported` lines also sit as comments above the command they concern, next to a
 pointer to each hook to port:
 
-{{< code title="cmd/acme/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="false" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="false" >}}
     # cobra RunE -> rotini Run: cmd/deploy.go:42
     # [lossy] --at is a time flag: the formats it accepts are not exported; set layout: if they are not RFC 3339
     - name: deploy
@@ -280,7 +280,7 @@ The root command is the binary, and `commands:` nests sub-commands to any depth.
 declares its own `flags:` and `arguments:`, and each input has a `schema:` that sets its type and
 rules:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
   commands:
     - name: add
       summary: add a task
@@ -394,7 +394,7 @@ Rotini prints nothing when a deprecated spelling is used. `rotini.Deprecations(r
 this run used, and the handler decides what to say. In the root handler's `CascadingPreRun`,
 one loop covers every command on the path:
 
-{{< code title="internal/cmd/todo/todo.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo.go" language="go" open="true" collapsible="false" copy="true" >}}
 for _, d := range rotini.Deprecations(rtx) {
 	rtx.RecordWarning(d)
 }
@@ -433,7 +433,7 @@ command from a composed spec names a command of that spec, and rotini writes it 
 the parent mounts it at. Help, man and markdown add it to the note, `(deprecated: renamed; use
 todo purge instead)`, and `validate` checks that it exists and isn't deprecated itself:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 commands:
   - name: clear
     deprecated: renamed
@@ -448,7 +448,7 @@ commands:
 Each `Deprecation` carries it as `ReplacedBy`, written as the user types it (`todo purge`,
 `--output`, or the enum value), so the handler can say it:
 
-{{< code title="internal/cmd/todo/todo.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo.go" language="go" open="true" collapsible="false" copy="true" >}}
 for _, d := range rotini.Deprecations(rtx) {
 	if d.ReplacedBy != "" {
 		rtx.RecordWarning(fmt.Errorf("%w; use %s instead", d, d.ReplacedBy))
@@ -526,7 +526,7 @@ command adds them with `use:`. A set's flags come after the command's own, with 
 parse, fall back, show in help and appear in the contract like any other. `group:` on the set
 lists its flags under one heading in help, unless a flag names its own:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: todo
   flag_sets:
@@ -548,7 +548,7 @@ The generated code has one struct per set, embedded in each command's flags, so 
 flag into a set changes no handler code. A helper that every using command shares can take the
 set's struct:
 
-{{< code title="internal/cmd/todo/print.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="print.go" language="go" open="true" collapsible="false" copy="true" >}}
 func print(rtx *rotini.Context, out TodoOutputFlagSet, items []Item) { /* … */ }
 
 print(rtx, in.TodoList.Flags.TodoOutputFlagSet, items)
@@ -570,7 +570,7 @@ field repeats one of the command's, and warns about a set no command uses.
   rule applies on every run unless one of them is set.
 - **`requires: [...]`** must then be set, and **`forbids: [...]`** can't be.
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 flag_dependencies:
   - when: format
     equals: [csv]
@@ -601,7 +601,7 @@ that scripts still use, without advertising it. The help resolvers accept a hidd
 the contract lists them as `hidden_aliases` and `hidden_identifiers`, and they may be listed in
 `deprecated_identifiers` to report their use:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 commands:
   - name: remove
     aliases: [rm]
@@ -622,7 +622,7 @@ generated definition (`CommandDef.Metadata`, `FlagDef.Metadata`, `ArgDef.Metadat
 `rtx.Command().Metadata` in a handler) and into the contract, and `rotini diff` rates any change
 to them as safe:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 commands:
   - name: purge
     metadata: { owner: storage-team, audit: "true" }
@@ -633,7 +633,7 @@ commands:
 A flag can also be read from an environment variable and a configuration file. Give it a `key:`
 and declare the file:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: todo
   env_prefix: TODO
@@ -726,7 +726,7 @@ item at a time.
 no file, or `-`. This is the `grep PATTERN [FILE...]` shape, and it keeps a command that was
 given a file from waiting on a stdin its caller holds open:
 
-{{< code title="cmd/logs/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 commands:
   - name: grep
     arguments:
@@ -740,7 +740,7 @@ commands:
       unless_argument: files
 {{< /code >}}
 
-{{< code title="internal/cmd/logs/logs_grep.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="logs_grep.go" language="go" open="true" collapsible="false" copy="true" >}}
 in, err := rtx.Inputs[LogsGrepInputs]()
 if err != nil {
 	rtx.HaltWith(err)
@@ -785,7 +785,7 @@ content on NUL instead. `--tags @tags.txt` with `a,b` and `c` on two lines is `[
 `variable_file:` names a variable holding the path of a file to read the value from, the way
 Docker and Kubernetes mount secrets. Setting both forms is an error:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 env:
   - name: token
     schema: { type: string, variable: TODO_TOKEN, variable_file: TODO_TOKEN_FILE, secret: true }
@@ -801,7 +801,7 @@ variable by variable, so the order is: command line, environment, `.env` file, c
 files, default. Its values are literal (`${OTHER}` is not expanded), and rotini's own variables
 (`HOME`, `XDG_*`, `PATH`) never come from it. Prefer a fixed `path: .env` to discovery:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 config_files:
   - name: dotenv
     path: .env
@@ -815,7 +815,7 @@ A value typed on the command line shows in the process list and in shell history
 or argument whose `from:` leaves out `value` refuses one, so the secret can only come from a
 file or stdin:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 flags:
   - name: token
     schema: { type: string, secret: true, from: [file, stdin] }
@@ -853,7 +853,7 @@ so the user's file overrides the system one key by key.
 One config file can hold several named sets of settings, with a flag or variable choosing one per
 run, like `--profile prod`. Declare where the profiles live and which input chooses:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: todo
   config_files:
@@ -868,7 +868,7 @@ command:
       schema: { type: string, variable: TODO_PROFILE }
 {{< /code >}}
 
-{{< code title="~/.config/todo/config.yaml" language="yaml" open="true" collapsible="false" copy="false" >}}
+{{< code title="config.yaml" language="yaml" open="true" collapsible="false" copy="false" >}}
 server: { host: todo.example.com, port: 443 }
 profiles:
   default: {}
@@ -954,7 +954,7 @@ line, environment variables, `.env` files, configuration files and the default. 
 path is what gets checked and bound. An `existingfile` or `existingdir` input is checked on
 every channel, environment and configuration included:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 flags:
   - name: file
     identifiers: [--file]
@@ -990,7 +990,7 @@ Error: --file: $NOTES is not set (in "$NOTES/today.txt")
 platform's own (`~/Library` on macOS, `%AppData%` and `%LocalAppData%` on Windows). Use the
 same strategy as your config files, and create data and state directories with `0o700`:
 
-{{< code title="internal/cmd/todo/todo_sync.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_sync.go" language="go" open="true" collapsible="false" copy="true" >}}
 dirs, err := rotini.AppDirs(rtx, "todo", "xdg")
 if err != nil {
 	rtx.HaltWith(err)
@@ -1065,7 +1065,7 @@ prints `(stream)` and is never read.
 To offer this to users, declare a hidden short-circuit flag on the command and print the report
 in its handler, before checking the error, since the run may be the one being explained:
 
-{{< code title="internal/cmd/todo/todo_deploy.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_deploy.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	in, report, err := rtx.InputsWithReport[TodoDeployInputs]()
 	if in.TodoDeploy.Flags.ExplainInputs {
@@ -1132,7 +1132,7 @@ file's. A secret's value is left blank, and a file with profiles shows where the
 comments, so a JSON file's example holds only the keys with a default, set. With
 `generate.schemas.config` on, YAML and TOML examples point editors at the file's schema.
 
-{{< code title="examples/config/app.example.yaml" language="yaml" open="true" collapsible="false" copy="false" >}}
+{{< code title="app.example.yaml" language="yaml" open="true" collapsible="false" copy="false" >}}
 ## app: ./todo.yaml, read by todo and its sub-commands.
 ## Each line starting with "# " is a key: remove the "# " to set it.
 
@@ -1154,7 +1154,7 @@ When its command leaves the spec, the next `go generate` disables the file (addi
 returns to the build as it was. To keep it, delete its `var _ rotini.Handler` line or list it
 under the conf's [`keep:`](/configuration#keep). Fill in `Run`:
 
-{{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
 
 import (
@@ -1238,7 +1238,7 @@ title missing.
 
 A short-circuit flag can belong to one command, too:
 
-{{< code title="a command-local short circuit" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="local short circuit" language="golang" open="true" collapsible="false" copy="true" >}}
 // spec, under the deploy command:
 //   - name: print-plan
 //     summary: print what would be deployed, and deploy nothing
@@ -1271,7 +1271,7 @@ test, check them against the spec with `rtx.CheckInputs`. It applies the same ru
 applies (required inputs, enums, bounds, patterns, flag groups and dependencies) and returns the
 same errors:
 
-{{< code title="checking prompted answers" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="prompted answers" language="golang" open="true" collapsible="false" copy="true" >}}
 argv, err := rtx.ArgvInputs[TodoAddInputs]()
 if err != nil {
 	rtx.HaltWith(err)
@@ -1297,7 +1297,7 @@ applies no defaults and never changes the value, and it names each input by its 
 A layer you build yourself can also join rotini's own in a merge. Its values are checked too when
 you validate the merged report:
 
-{{< code title="mixing your own source with rotini's" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="your source + rotini's" language="golang" open="true" collapsible="false" copy="true" >}}
 argv, _ := rtx.ArgvInputs[TodoAddInputs]()
 env, _ := rtx.EnvInputs[TodoAddInputs]()
 vault := rotini.InputLayer[TodoAddInputs]{Name: "vault", Values: fromVault(), Set: vaultSet}
@@ -1328,7 +1328,7 @@ entirely: it prints only what it prints, and it sets the exit code with `rtx.Exi
 doesn't, the run keeps any code a handler set, and otherwise exits 0, so give it a fallback
 code for errors with no category. The codes below are common conventions, not Rotini defaults:
 
-{{< code title="internal/cmd/todo/report.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo/report.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
 
 import (
@@ -1441,7 +1441,7 @@ so a handler doesn't repeat the number:
     - { code: 4, name: busy, summary: the store is locked, retryable: true }
 {{< /code >}}
 
-{{< code title="internal/cmd/todo/todo_get.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_get.go" language="go" open="true" collapsible="false" copy="true" >}}
 rtx.HaltWithCode(TodoGetExitNotFound)
 {{< /code >}}
 
@@ -1467,7 +1467,7 @@ Definition carries each code's link as `ExitStatusDef.DocsURL`.
 
 A reporter can't read the code a handler set, so the handler records it with the error:
 
-{{< code title="internal/cmd/todo/report_links.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="report_links.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
 
 import (
@@ -1647,7 +1647,7 @@ rotini derives from the command's shape. The generated `Usage(path...)` returns 
 by names or aliases, and is generated whether or not the help feature is on. Nothing prints the
 line by default. A reporter can print it after a usage error:
 
-{{< code title="internal/cmd/todo/report_usage.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="report_usage.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
 
 import (
@@ -1725,7 +1725,7 @@ closed pipe, as in `todo list | head -1`, ends the program quietly with 141.
 
 To stop a run with an exit code of your own, cancel its context with `rotini.ExitCause`:
 
-{{< code title="cmd/todo/main.go (time limit)" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go (time limit)" language="golang" open="true" collapsible="false" copy="true" >}}
 //go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
 package main
 
@@ -1765,7 +1765,7 @@ Every hook receives the run's `context.Context`. A hook that derives one, to add
 tracing span, hands it to the hooks after it with `rtx.SetContext`, so a root `--timeout` can
 limit the command's `Run`:
 
-{{< code title="internal/cmd/todo/todo.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo.go" language="golang" open="true" collapsible="false" copy="true" >}}
 type todoHandler struct {
 	rotini.NoPreRun
 	rotini.NoPostRun
@@ -1801,7 +1801,7 @@ teardowns to finish; a second signal exits at once with 130. A process that a su
 with one SIGTERM can't send the second, so a handler that ignores its context would keep it
 running. `WithTerminationTimeout` bounds the wait:
 
-{{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go" language="go" open="true" collapsible="false" copy="true" >}}
 cmd.NewProgram().WithTerminationTimeout(10 * time.Second).Execute()
 {{< /code >}}
 
@@ -1840,7 +1840,7 @@ stack on request, see [a DEBUG variable](#a-debug-variable); to save crash repor
 `main.go`. A dependency that depends on the command line, such as a client for the server a
 `--endpoint` flag names, is built in the root's `CascadingPreRun` and set for that run only:
 
-{{< code title="internal/cmd/todo/client.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="client.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
 
 import "github.com/go-rotini/rotini"
@@ -1878,7 +1878,7 @@ keeps the list in step with the spec.
 Code the spec does not describe can need a feature the list leaves out, for example a custom
 `InputSettings.Sources` entry, which needs `rotini.ConfigFiles()`. Add it in `main.go`:
 
-{{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.NewProgram().
 	WithFeatures(rotini.ConfigFiles(), rotini.TOML()).
 	Execute()
@@ -1956,7 +1956,7 @@ Choosing a format is up to you; here it is the value of the `--output` flag abov
 writes json (indented), yaml and toml itself, and hands any other format to your renderer. Pass
 `nil` as the renderer if you only ever use those three:
 
-{{< code title="internal/cmd/todo/todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
 func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rtx.Inputs[TodoListInputs]()
 	if err != nil {
@@ -2054,7 +2054,7 @@ command:
 `RunrDeployOutputProgress` for the kind written inline, and `Result` for the named one. Pass
 any of them to `WriteOutputItem`, which fills in an empty `kind` from the item's type:
 
-{{< code title="internal/cmd/runr/runr_deploy.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="runr_deploy.go" language="go" open="true" collapsible="false" copy="true" >}}
 package runr
 
 import (
@@ -2121,7 +2121,7 @@ command:
 
 When the flag is set, pass `shape.Render` to `WriteOutput` or `WriteOutputItem` as the renderer:
 
-{{< code title="internal/cmd/todo/todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
 list := TodoListOutput{Tasks: load()}
 if format := in.Todo.Flags.Format; !format.IsZero() {
 	rtx.HaltWith(rtx.WriteOutput(list, "template", shape.Render[TodoListOutput](format)))
@@ -2197,7 +2197,7 @@ output field and the flag follows. Only the item's own fields are listed, not ne
 chose. Fields are named by their JSON names, the names `-o json` shows. Sort first, since the
 sort field need not be selected:
 
-{{< code title="internal/cmd/todo/todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
 list := TodoListOutput{Tasks: load()}
 flags := in.TodoList.Flags
 if flags.SortBy != "" {
@@ -2291,7 +2291,7 @@ The reporter runs after the command, and the run may have failed because parsing
 rule reads the command line itself rather than validated inputs. For a program that declares a
 `--json` flag:
 
-{{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go" language="go" open="true" collapsible="false" copy="true" >}}
 cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 	return slices.Contains(rtx.Argv, "--json")
 })).Execute()
@@ -2374,7 +2374,7 @@ Two value kinds give a command the usual `-` conventions:
 
 Help, man and markdown pages add `(- for stdin)` or `(- for stdout)` to the input's line.
 
-{{< code title="internal/cmd/todo/todo_cat.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_cat.go" language="go" open="true" collapsible="false" copy="true" >}}
 files := in.TodoCat.Arguments.Files // type: '[]inputfile'
 if len(files) == 0 {
 	files = []string{"-"}
@@ -2394,7 +2394,7 @@ for _, name := range files {
 }
 {{< /code >}}
 
-{{< code title="internal/cmd/todo/todo_export.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_export.go" language="go" open="true" collapsible="false" copy="true" >}}
 func export(rtx *rotini.Context, path string, force bool) error {
 	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
 	if err != nil {
@@ -2421,7 +2421,7 @@ output shows as it is written). Rotini flushes it before the reporter runs and c
 result, so a full disk or a closed pipe is an error exit even when the handler ignored its own
 write errors:
 
-{{< code title="cmd/todo/main.go (buffered)" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go (buffered)" language="go" open="true" collapsible="false" copy="true" >}}
 cmd.NewProgram().WithBufferedOutput(true).Execute()
 {{< /code >}}
 
@@ -2452,7 +2452,7 @@ standing for stdin among them. Three declarations give that shape:
   given, or one is `-` (see [reading stdin](#reading-stdin));
 - `stream: true`, so stdin is read a line at a time and memory stays flat at any input size.
 
-{{< code title="cmd/logs/.rotini.spec.yaml (filter)" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml (filter)" language="yaml" open="true" collapsible="false" copy="true" >}}
 version: 0.0.0
 command:
   name: logs
@@ -2482,7 +2482,7 @@ loop serves both. `bufio.Scanner` drops each line's `\n` or `\r\n`, as the strea
 buffer is raised here because by default a line over 64 KiB is an error. With `-z`, each match
 ends with NUL instead of a newline, so lines holding spaces or quotes reach `xargs -0` intact:
 
-{{< code title="internal/cmd/logs/logs_grep.go (filter)" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="logs_grep.go (filter)" language="go" open="true" collapsible="false" copy="true" >}}
 package logs
 
 import (
@@ -2615,7 +2615,7 @@ tools read. Nothing appears unless you declare it, and none of it adds a flag or
   changes only when a line's shape changes in a way that breaks a reader. Pick it from a
   variable you name, so an agent's harness can ask for it:
 
-  {{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
+  {{< code title="main.go" language="go" open="true" collapsible="false" copy="true" >}}
 cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 	return os.Getenv("TODO_AGENT") == "1"
 })).Execute()
@@ -2643,7 +2643,7 @@ show a line (`Effects: destructive, idempotent`); the contract and the generated
 A flag can raise its command's effects for the run that gives it, never lower them, so a
 preview flag is a role, not a `read` flag:
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 - name: sync
   effects: { kind: write, idempotent: true, open_world: true }
   flags:
@@ -2819,7 +2819,7 @@ Pages show what the spec declares, so they stay accurate without editing:
 - **Enum values** are a short list on their row. When values have summaries, they are also
   listed under the row, one per line in the declared order.
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: todo
   groups:
@@ -2973,7 +2973,7 @@ Turn messages on with `messages:` on the completion feature. `declared` shows on
 write in the spec as `complete.message`; `all` also shows a line made from each other flag's and
 argument's summary:
 
-{{< code title="cmd/todo/.rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 generate:
   features:
     - type: completion
@@ -2982,7 +2982,7 @@ generate:
       messages_env: TODO_COMPLETION_MESSAGES
 {{< /code >}}
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 arguments:
   - name: title
     summary: the task title
@@ -2994,7 +2994,7 @@ arguments:
 A completer can add its own with `rtx.AddCompletionMessage`. These are shown even beside
 candidates, in the order added, and take the place of the static line:
 
-{{< code title="internal/cmd/todo/todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
 	tasks, err := rtx.MustGetDependency(Store).Open()
 	if err != nil {
@@ -3057,7 +3057,7 @@ the second TAB, the one that lists the candidates. Give your users an off switch
 every shell. `Program.WithCompletionDescriptions` replaces the variable check with a rule of your
 own.
 
-{{< code title="cmd/todo/.rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 generate:
   features:
     - type: completion
@@ -3092,7 +3092,7 @@ and `rtx` gives it:
   `Extensions` for files; the zero value leaves it to the shell's own default. It combines with
   candidates the way `complete:` does.
 
-{{< code title="internal/cmd/todo/todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
 	in, _, _ := rtx.PartialInputs[TodoDoneInputs]()
 	ctx, cancel := context.WithTimeout(rtx.Context(), 2*time.Second)
@@ -3104,7 +3104,7 @@ func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial strin
 An argument that takes a remote name or a local path can offer the remote names that match, and
 the user's files otherwise:
 
-{{< code title="internal/cmd/todo/todo_import.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_import.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoImportHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
 	if names := remoteListsMatching(rtx.Context(), partial); len(names) > 0 {
 		return names
@@ -3173,7 +3173,7 @@ need beyond this, see [Agent-ready CLIs](#agent-ready-clis).
 
 Declare the flags on the root, `cascading: true`, so every command takes them:
 
-{{< code title="cmd/todo/.rotini.spec.yaml (conventions)" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: todo
   flags:
@@ -3202,7 +3202,7 @@ command:
 Then decide once per run, in the root handler's `CascadingPreRun`, and hand the result to every
 command as a [per-run dependency](#per-run-dependencies):
 
-{{< code title="internal/cmd/todo/conventions.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="conventions.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
 
 import "github.com/go-rotini/rotini"
@@ -3267,7 +3267,7 @@ env:
 The reporter reads it with `rtx.LookupEnv`, since a run that failed to parse its inputs is still
 reported:
 
-{{< code title="internal/cmd/todo/report_debug.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="report_debug.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
 
 import (
@@ -3371,7 +3371,7 @@ programs as its own sub-commands, and it can itself be a plugin for kubectl, Doc
 Declare the plugins your CLI knows about under `plugins:`, or turn on `plugin_discovery:` to
 pick up any executable whose name starts with a prefix. Both can be used together:
 
-{{< code title="cmd/plug/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: plug
   plugin_path: ./plugins/bin
@@ -3416,7 +3416,7 @@ command:
 Rotini prints nothing about discovered plugins itself. To list them, in your own help or a
 `plugins` command, call `DiscoveredPlugins()` on the command that has discovery:
 
-{{< code title="internal/cmd/plug/plug_plugins.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="plug_plugins.go" language="golang" open="true" collapsible="false" copy="true" >}}
 for _, p := range rtx.CommandChain()[0].DiscoveredPlugins() {
 	fmt.Fprintf(rtx.Stdout, "  %s\t%s\n", p.Name, p.Path)
 }
@@ -3450,7 +3450,7 @@ For kubectl, each `-` in the binary name is a level of sub-command: `kubectl-ctx
 itself. The root accepts Docker's global options (`--config`, `-c`/`--context`, `-D`, `-H`,
 `-l`, `--tls…`), marked `cascading: true`, and the plugin is a sub-command beneath it:
 
-{{< code title="cmd/docker-where/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: docker-where
   display_name: docker
@@ -3472,7 +3472,7 @@ The hidden `docker-cli-plugin-metadata` command answers Docker's probe. Its hand
 JSON object and nothing else. Docker refuses a plugin whose `SchemaVersion` is not `0.1.0` or
 whose `Vendor` is empty, and lists the plugin in `docker --help` with its `ShortDescription`:
 
-{{< code title="internal/cmd/docker-where/docker_where_docker_cli_plugin_metadata.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="docker_where_docker_cli_plugin_metadata.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*dockerWhereDockerCliPluginMetadataHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	meta := map[string]string{
 		"SchemaVersion":    "0.1.0",
@@ -3503,7 +3503,7 @@ Another program reads a rotini CLI's completion through `Program.Complete` or
 `multicall` on the root and install the plugin's binary a second time under that name (a copy or
 a symlink); run that way, it answers in `rotini.PluginCompletion`'s format:
 
-{{< code title="cmd/kubectl-ctx/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: kubectl-ctx
   multicall: {complete: kubectl_complete-}
@@ -3517,7 +3517,7 @@ See [one binary, several names](#one-binary-several-names). A program that decid
 has that command; by default it answers in the format rotini's own generated shell scripts read.
 Set the plugin format in `main.go`:
 
-{{< code title="cmd/docker-where/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.NewProgram().
 	WithVersion(version).
 	WithCompletion(rotini.PluginCompletion).
@@ -3551,7 +3551,7 @@ and hand the parsed values to `ConfigFlags` from `k8s.io/cli-runtime`. It then d
 kubectl does with them: loading and merging kubeconfigs, choosing the context, impersonation, TLS,
 and the namespace default.
 
-{{< code title="internal/cmd/kubectl-ctx/kube.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="kube.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func configFlags(f KubectlCtxFlags) *genericclioptions.ConfigFlags {
 	cf := genericclioptions.NewConfigFlags(true)
 	*cf.KubeConfig = f.Kubeconfig
@@ -3612,7 +3612,7 @@ name only. Tests set the invoked name with `Program.WithArgv0`.
 Build a fresh `Program` per test and run it with arguments, in-process: no subprocess and no
 `os.Exit`. `Run` returns the exit code and the error the run recorded:
 
-{{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAdd(t *testing.T) {
 	var out bytes.Buffer
 	code, err := NewProgram().WithStdout(&out).Run([]string{"add", "buy milk"})
@@ -3645,7 +3645,7 @@ Keep two things in mind:
   directory walk-up discovery, relative config paths and `@file` values start from. A test that
   sets both doesn't touch the process, so it can run in parallel:
 
-{{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAddDefaultPriority(t *testing.T) {
 	t.Parallel()
 	code, err := NewProgram().
@@ -3668,7 +3668,7 @@ The `rotinitest` package (`github.com/go-rotini/rotini/rotinitest`) runs a comma
 inputs type `rotini generate` wrote for it, so a test sets fields instead of spelling out
 arguments:
 
-{{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAddHigh(t *testing.T) {
 	t.Parallel()
 	var in TodoAddInputs
@@ -3756,7 +3756,7 @@ generate:
     file: cli-contract.json
 {{< /code >}}
 
-{{< code title=".github/workflows/ci.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title="ci.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0 # git:<ref> reads the tag locally and never fetches
@@ -3985,7 +3985,7 @@ A dependency that is costly to set up, such as a database or an API client, shou
 `--help` or the commands that never use it. Register a function that opens it on first use:
 `sync.OnceValues` runs the opener once and hands every later caller the same result.
 
-{{< code title="internal/cmd/lazydemo/store.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="store.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package lazydemo
 
 import (
@@ -4027,7 +4027,7 @@ func openStore() (*Store, error) {
 Call `registerStore(rtx)` first in the root handler's `CascadingPreRun`, which runs before every
 command. A command that needs the store calls the function; one that doesn't never opens it:
 
-{{< code title="internal/cmd/lazydemo/lazydemo_get.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="lazydemo_get.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package lazydemo
 
 import (
@@ -4072,7 +4072,7 @@ Some packages want a single man page rather than one per command. The man featur
 returns every visible command's page, root first, and `man` reads several pages in one stream
 as one document. Declare a `man` command and print them all:
 
-{{< code title="internal/cmd/mandemo/mandemo_man.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="mandemo_man.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package mandemo
 
 import (
@@ -4190,7 +4190,7 @@ release without publishing.
 help, man and markdown pages read `gh hello` (see [help that reads like the host](#help-that-reads-like-the-host)).
 A variable the host sets is read only when declared:
 
-{{< code title="cmd/gh-hello/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title="gh-hello/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 version: 0.0.0
 command:
   name: gh-hello
@@ -4229,7 +4229,7 @@ feature, which is already named after the root, as `git-hello.1`.
 One GitHub Actions job that checks the spec, the generated code, the build and the contract on
 every push:
 
-{{< code title=".github/workflows/ci.yaml (full)" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title="ci.yaml (full)" language="yaml" open="true" collapsible="false" copy="true" >}}
 name: ci
 on: [push, pull_request]
 jobs:
@@ -4269,7 +4269,7 @@ command that takes the words typed so far, the last one being the word under the
 directly to see exactly what a shell receives, with no shell in the way. `''` stands for an
 empty word, as when you press TAB after a space:
 
-{{< code title="$ taskr __complete list --status ''" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="__complete list --status" language="text" open="true" collapsible="false" copy="false" >}}
 all
 done
 open
@@ -4280,11 +4280,11 @@ Each line is a candidate; a candidate with a description has it after a tab. Lin
 of guidance to show (see [completion messages](#completion-messages)), and
 `:rotini:file` asks the shell to complete file names, here only those ending in `.txt`:
 
-{{< code title="$ taskr __complete add ''" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="__complete add" language="text" open="true" collapsible="false" copy="false" >}}
 :rotini:message a short title, in quotes
 {{< /code >}}
 
-{{< code title="$ taskr __complete list --out ''" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="__complete list --out" language="text" open="true" collapsible="false" copy="false" >}}
 :rotini:message --out string: write the list to a file
 :rotini:file txt
 {{< /code >}}
@@ -4306,7 +4306,7 @@ against your real program: each script runs commands and checks their output, ex
 files in a fresh directory. A test in the `main` package hands the program's own `main` to
 testscript, so scripts run it as a command without building it first:
 
-{{< code title="cmd/tsdemo/main_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="main_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package main
 
 import (
@@ -4334,7 +4334,7 @@ func TestScripts(t *testing.T) {
 }
 {{< /code >}}
 
-{{< code title="cmd/tsdemo/testdata/script/hello.txtar" language="text" open="true" collapsible="false" copy="true" >}}
+{{< code title="hello.txtar" language="text" open="true" collapsible="false" copy="true" >}}
 # hello greets on stdout and writes nothing to stderr.
 exec tsdemo hello
 stdout '^hello$'
@@ -4358,7 +4358,7 @@ Unit tests measure the code they call. A binary built with `-cover` measures wha
 end-to-end tests, or you, run the real program. It writes its counters to the directory
 `GOCOVERDIR` names, and `go tool covdata` reads them:
 
-{{< code title="$ coverage of a built binary" language="sh" open="true" collapsible="false" copy="true" >}}
+{{< code title="binary coverage" language="sh" open="true" collapsible="false" copy="true" >}}
 go build -cover -coverpkg=./... -o covdemo ./cmd/covdemo
 mkdir -p cover
 GOCOVERDIR=cover ./covdemo hello
@@ -4384,7 +4384,7 @@ Run it in-process with `Program.Run`: a usage error is a correct answer to a bad
 only a panic fails the test. `Run` returns every recorded error and panic joined, so `errors.As`
 finds a `*rotini.PanicError` with its stack:
 
-{{< code title="internal/cmd/fuzzdemo/fuzz_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="fuzz_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package fuzzdemo
 
 import (
@@ -4435,7 +4435,7 @@ under it. The root handler's `CascadingPreRun`, which runs first in every run, s
 and passes its context on with [`rtx.SetContext`](#passing-a-context-on), so `Run` and
 every later hook receive it:
 
-{{< code title="internal/cmd/tracedemo/tracedemo.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="tracedemo.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package tracedemo
 
 import (
@@ -4490,7 +4490,7 @@ The root's `CascadingPostRun` receives the context its `CascadingPreRun` receive
 it set, so the span is kept in a handler field to end there. A command starts its own spans
 from the context it is given:
 
-{{< code title="internal/cmd/tracedemo/tracedemo_work.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="tracedemo_work.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package tracedemo
 
 import (
@@ -4525,7 +4525,7 @@ with the code `Run` returned.
 A counted `-v` flag can choose how much a program logs: warnings by default, more with each
 `-v`. Declare it on the root as `type: count`, cascading so every command takes it:
 
-{{< code title="cmd/logdemo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 flags:
   - name: verbose
     summary: log more; repeat for more detail
@@ -4538,7 +4538,7 @@ The root handler's `CascadingPreRun`, which runs before every command, builds a 
 logger at the level the count asks for and sets it as a dependency for this run. Logs go to
 `rtx.Stderr`, so stdout keeps the command's output:
 
-{{< code title="internal/cmd/logdemo/logdemo.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="logdemo.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package logdemo
 
 import (
@@ -4594,7 +4594,7 @@ func (*logdemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
 
 A command reads the logger where it needs it:
 
-{{< code title="internal/cmd/logdemo/logdemo_run.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="logdemo_run.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package logdemo
 
 import (
@@ -4637,7 +4637,7 @@ For logs a machine reads, add a `--log-format` flag and choose `slog.NewJSONHand
 Hidden `--cpuprofile` and `--trace` flags let you profile any command without a separate build.
 Declare them on the root, cascading and `hidden: true` so help doesn't list them:
 
-{{< code title="cmd/profdemo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 flags:
   - name: cpuprofile
     summary: write a CPU profile to this file
@@ -4656,7 +4656,7 @@ flags:
 The root handler starts the profiler and the tracer in its `CascadingPreRun` and stops them in
 its `CascadingPostRun`. The open files are kept in handler fields, which belong to this run:
 
-{{< code title="internal/cmd/profdemo/profdemo.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="profdemo.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package profdemo
 
 import (
@@ -4754,7 +4754,7 @@ A panic in a handler is recovered and reaches the reporter as a `*rotini.PanicEr
 the user asks, and never include the command line or inputs, which may hold secrets. Declare
 the variable that turns it on, so help, man pages and the contract list it:
 
-{{< code title="cmd/crashdemo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: crashdemo
   env:
@@ -4765,7 +4765,7 @@ command:
 
 The default reporter can't be extended, so this one prints everything the run recorded itself:
 
-{{< code title="internal/cmd/crashdemo/report.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="crashdemo/report.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package crashdemo
 
 import (
@@ -4821,7 +4821,7 @@ func writeCrash(dir, version string, p *rotini.PanicError) (string, error) {
 }
 {{< /code >}}
 
-{{< code title="cmd/crashdemo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="crashdemo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 //go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
 package main
 
@@ -4859,7 +4859,7 @@ file is written to a temporary name and renamed into place by `Close`, so a run 
 part-way leaves any earlier file as it was. The flag is `type: outputfile`, and `--force`
 carries `role: force`:
 
-{{< code title="internal/cmd/teedemo/teedemo_export.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="teedemo_export.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package teedemo
 
 import (
@@ -4943,7 +4943,7 @@ your own and merge it with Rotini's, so the value is checked like any other (see
 [checking inputs you collected yourself](#checking-inputs-you-collected-yourself)). Here a
 helper program named by `SECDEMO_CREDENTIAL_HELPER` supplies `--token` when the user didn't:
 
-{{< code title="internal/cmd/secdemo/secdemo_sync.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="secdemo_sync.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package secdemo
 
 import (
@@ -5043,7 +5043,7 @@ a source set, and `report.Winner(path)` says which source won it, with the raw v
 `argv:--region`, `default`). Declare the list as the command's `output:` so scripts can read it
 with `-o json`:
 
-{{< code title="internal/cmd/origindemo/origindemo_config_list.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="origindemo_config_list.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package origindemo
 
 import (
@@ -5102,7 +5102,7 @@ func (*origindemoConfigListHandler) Run(ctx context.Context, rtx *rotini.Context
 }
 {{< /code >}}
 
-{{< code title="$ ORIGINDEMO_REGION=us-2 origindemo config list --show-origin" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="--show-origin" language="text" open="true" collapsible="false" copy="false" >}}
 Region = us-2	(env:ORIGINDEMO_REGION)
 Timeout = 5s	(config:user#timeout)
 {{< /code >}}
@@ -5117,7 +5117,7 @@ flag can offer them. `rotini.ConfigProfiles` reads the file the running command 
 through its `config_source` path or `discover` search, and returns the names sorted. Implement
 `CompleteFlagValue` on the handler of the command that declares the flag:
 
-{{< code title="internal/cmd/app/app_complete.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="app_complete.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package app
 
 import "github.com/go-rotini/rotini"
@@ -5143,7 +5143,7 @@ rather than an error, since completion runs on every keystroke.
 [Writing config values](#writing-config-values) gives your program `git config`-style
 commands that edit a declared config file and keep its comments. Declare the commands:
 
-{{< code title="cmd/cfgctl/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 command:
   name: cfgctl
   config_files:
@@ -5177,7 +5177,7 @@ command:
 `set` reads only its arguments, so a broken config file doesn't stop it from running, and offers
 the file's keys from the generated key table:
 
-{{< code title="internal/cmd/cfgctl/cfgctl_config_set.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="cfgctl_config_set.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package cfgctl
 
 import (
@@ -5240,7 +5240,7 @@ long-running command can take it as "reread the configuration": calling `rtx.Inp
 reads every source afresh. Keep the old settings when the new ones don't validate, so a bad edit
 doesn't take the server down:
 
-{{< code title="internal/cmd/reloaddemo/reloaddemo_serve.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="reloaddemo_serve.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package reloaddemo
 
 import (
@@ -5322,7 +5322,7 @@ checking them, ask for the missing ones, then check the result against the spec 
 when stdin is a terminal and the user hasn't passed a declared `--no-input`. Otherwise the
 missing input is the usual usage error, so scripts and CI never hang:
 
-{{< code title="internal/cmd/promptdemo/promptdemo_greet.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="promptdemo_greet.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package promptdemo
 
 import (
@@ -5393,7 +5393,7 @@ only to stderr, stay quiet when stderr isn't a terminal or `CI` is set, and decl
 that turns it off. Both variables are env inputs in the spec. Remove `rotini.NoCascadingPostRun`
 from the root handler and add:
 
-{{< code title="internal/cmd/updemo/notify.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="notify.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package updemo
 
 import (
@@ -5506,7 +5506,7 @@ Go's build information:
 
 To use it, read the build information when no version was stamped:
 
-{{< code title="cmd/todo/main.go (build info)" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go (build info)" language="go" open="true" collapsible="false" copy="true" >}}
 //go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
 package main
 
