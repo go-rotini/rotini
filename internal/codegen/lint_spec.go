@@ -120,6 +120,7 @@ var specLints = []func(*Spec) []error{
 	lintVariableFile,
 	lintConfigFilesAsEnv,
 	lintDiscoverApp,
+	lintConfigSourceFormat,
 	lintStreamPaths,
 	lintRoles,
 	lintGlob,
@@ -538,8 +539,8 @@ func lintDottedKeys(spec *Spec) []error {
 }
 
 // lintConfigurationFiles requires each config_files entry to set exactly one of path or
-// discover, with xdg requiring app and walk-up rejecting it. Name uniqueness is checked by
-// lintConfigFilesScope.
+// discover, with xdg requiring app, walk-up rejecting it, and discover naming a file alone. Name
+// uniqueness is checked by lintConfigFilesScope.
 func lintConfigurationFiles(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -557,6 +558,9 @@ func lintConfigurationFiles(spec *Spec) []error {
 				}
 				if d.Strategy == "walk-up" && d.App != "" {
 					add("`discover` strategy \"walk-up\" does not use `app`; remove it (it would be silently ignored)")
+				}
+				if d.File == "." || d.File == ".." || strings.ContainsAny(d.File, `/\`) {
+					add(fmt.Sprintf("`discover` file %q is not a file name; name the file alone, and the strategy picks the directories searched", d.File))
 				}
 			}
 		}

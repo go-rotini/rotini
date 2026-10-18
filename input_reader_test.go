@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -238,6 +239,41 @@ func TestInputReader_discoverXDG(t *testing.T) {
 	}
 }
 
+// An xdg search doesn't depend on the working directory, so it works when that is gone.
+func TestInputReader_discoverXDGWithoutWorkingDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the working directory can't be removed on Windows")
+	}
+	xdg := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(xdg, "acme"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "acme", "config.yaml"), []byte("api:\n  endpoint: from-xdg\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	gone := t.TempDir()
+	t.Chdir(gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("this platform still reports a removed working directory")
+	}
+
+	meta := InputSettings{ConfigFiles: []ConfigFile{{
+		Name: "user", Format: "yaml",
+		Discover: &DiscoverDef{Strategy: "xdg", App: "acme", File: "config.yaml"},
+	}}}
+	var in tbNoReqInputs
+	if err := NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in); err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if in.App.Config.Endpoint != "from-xdg" {
+		t.Errorf("Endpoint = %q, want from-xdg", in.App.Config.Endpoint)
+	}
+}
+
 // Config-schema shapes (spec configuration_files[].schema): the loaded
 // document is validated at bind time, before any value is read.
 const tbCfgSchema = `{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","required":["api"],"properties":{"api":{"type":"object","required":["endpoint"],"properties":{"endpoint":{"type":"string"}}}}}`
@@ -386,6 +422,57 @@ func TestInputReader_configSourceTwoPhase(t *testing.T) {
 			t.Error("Bind = nil error, want a missing-file error — the user explicitly asked for that file")
 		}
 	})
+}
+
+// A config_source flag with its own variable is set by the command line or the variable,
+// never by a key in a configuration file.
+func TestInputReader_configSourceFlagNotFromFile(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Config string `rotini:"config" recon:"config" env:"APP_CONFIG"`
+			}
+			Arguments struct{}
+			Config    struct {
+				Endpoint string `rotini:"endpoint" recon:"api.endpoint"`
+			}
+		}
+	}
+	other := writeConfig(t, "api:\n  endpoint: from-other\n")
+	declared := writeConfig(t, "config: "+other+"\napi:\n  endpoint: from-declared\n")
+	meta := InputSettings{ConfigFiles: []ConfigFile{{
+		Name: "app", Path: declared, Format: "yaml",
+		PathFrom: &PathFromDef{Flag: "config", Env: "APP_CONFIG"},
+	}}}
+	reads := map[string]func(*Context) (inputs, error){
+		"Read": func(rtx *Context) (inputs, error) {
+			var in inputs
+			err := NewInputReader(meta).Read(rtx, &in)
+			return in, err
+		},
+		"InputsWithReport": func(rtx *Context) (inputs, error) {
+			in, _, err := rtx.WithInputSettings(meta).InputsWithReport[inputs]()
+			return in, err
+		},
+	}
+	for name, read := range reads {
+		t.Run(name, func(t *testing.T) {
+			in, err := read(NewContextFor(tbCfgSrcDef(""), nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if in.App.Flags.Config != "" || in.App.Config.Endpoint != "from-declared" {
+				t.Errorf("--config = %q, endpoint = %q; want the file's config key ignored", in.App.Flags.Config, in.App.Config.Endpoint)
+			}
+			t.Setenv("APP_CONFIG", other)
+			if in, err = read(NewContextFor(tbCfgSrcDef(""), nil)); err != nil {
+				t.Fatal(err)
+			}
+			if in.App.Flags.Config != other || in.App.Config.Endpoint != "from-other" {
+				t.Errorf("--config = %q, endpoint = %q; want both from APP_CONFIG", in.App.Flags.Config, in.App.Config.Endpoint)
+			}
+		})
+	}
 }
 
 // Explicit-env-var shape: an env field whose `env:"…"` tag pins the environment

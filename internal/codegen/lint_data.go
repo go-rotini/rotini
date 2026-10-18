@@ -276,6 +276,33 @@ func lintDiscoverApp(spec *Spec) []error {
 	return problems
 }
 
+// lintConfigSourceFormat warns about a config_files entry that an input names with
+// `config_source` and that declares no `format`: the user may name a file of any format, so
+// the generated program links every format's decoder.
+func lintConfigSourceFormat(spec *Spec) []error {
+	claimed := map[string]bool{}
+	walkCommandsAt(spec, func(c *Command, _, ptr string) {
+		eachInputAt(c, ptr, func(channel, _, _ string, schema *InputSchema) {
+			if schema != nil && schema.ConfigSource != "" && (channel == "flag" || channel == "env") {
+				claimed[schema.ConfigSource] = true
+			}
+		})
+	})
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		for i, cf := range c.ConfigFiles {
+			if cf.Format != "" || !claimed[cf.Name] {
+				continue
+			}
+			p := configFileProblem(ptr, path, i, cf.Name,
+				"is named by a `config_source` input and declares no `format`, so the program links every config format (JSON, YAML, TOML, JSONC and dotenv) to read whichever file the user names; set `format` if users will only ever name one kind of file")
+			p.sev = severityWarning
+			problems = append(problems, p)
+		}
+	})
+	return problems
+}
+
 // runtimeSeparator is a declared `separator` as the runtime splits on it: the word "nul" is the
 // NUL byte.
 func runtimeSeparator(sep string) string {

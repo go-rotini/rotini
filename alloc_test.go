@@ -83,12 +83,12 @@ type allocRoot struct {
 }
 
 func (allocRoot) CascadingPreRun(_ context.Context, rtx *Context) {
-	in, err := rtx.Inputs[allocAppInputs]()
+	argv, err := rtx.ArgvInputs[allocAppInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
-	if in.App.Flags.Help {
+	if argv.Values.App.Flags.Help {
 		_, _ = io.WriteString(rtx.Stdout, rtx.Help())
 		rtx.HaltWithCode(0)
 	}

@@ -1,10 +1,10 @@
 # R0 — short-circuit flags: --help and --version replace the run.
 #
 # The root's --help and --version are short_circuit and cascading, the shape
-# `rotini init` seeds. Setting one on the command line waives every declared requirement of the
-# chain, so `rtx.Inputs` succeeds and the root's single CascadingPreRun answers it for every
-# command; sub-command stubs carry no help code of their own. What cannot be read (an unknown
-# flag) is still an error, and without the flag every requirement still holds.
+# `rotini init` seeds. The root's single CascadingPreRun reads them from the command line alone
+# and answers them for every command; sub-command stubs carry no help code of their own, and a
+# short-circuit flag waives every declared requirement of the chain. What cannot be read (an
+# unknown flag) is still an error, and without the flag every requirement still holds.
 
 gomodinit example.com/sc
 
@@ -17,6 +17,11 @@ exec go build -o sc$exe ./cmd/sc
 grep 'func \(\*scHandler\) CascadingPreRun' internal/cmd/sc/sc.go
 ! grep 'NoCascadingPreRun' internal/cmd/sc/sc.go
 ! grep 'ArgvInputs' internal/cmd/sc/sc_grab.go
+
+# The hook reads the command line only, leaving the environment and config files to the
+# command's own handler; the root's Run, which prints its help, reads them once.
+grep -count=1 'rtx.ArgvInputs\[ScInputs\]\(\)' internal/cmd/sc/sc.go
+grep -count=1 'rtx.Inputs\[ScInputs\]\(\)' internal/cmd/sc/sc.go
 
 # --help wins over a missing required argument and an invalid enum value, in both spellings.
 exec ./sc$exe grab --help
@@ -37,6 +42,53 @@ stdout '^sc 0\.0\.0$'
 exec ./sc$exe --version
 stdout '^sc 0\.0\.0$'
 
+# A cascading flag is read anywhere on the command line, before the command too.
+exec ./sc$exe --help grab
+stdout 'a command with a required argument'
+exec ./sc$exe -h grab --tone loud
+stdout 'a command with a required argument'
+
+# --help and --version don't depend on the environment or a config file: an unreadable
+# variable, a broken file, or a --config path that doesn't exist still gets an answer. Without
+# the flag, the command's handler reports each.
+env RETRIES=abc
+exec ./sc$exe grab --help
+stdout 'a command with a required argument'
+exec ./sc$exe --version
+stdout '^sc 0\.0\.0$'
+wantexit 1 ./sc$exe grab thing
+stderr 'RETRIES'
+env RETRIES=
+exec ./sc$exe grab --config broken.yaml --help
+stdout 'a command with a required argument'
+exec ./sc$exe grab --config missing.yaml --help
+stdout 'a command with a required argument'
+exec ./sc$exe --config missing.yaml --version
+stdout '^sc 0\.0\.0$'
+! exec ./sc$exe grab thing --config broken.yaml
+stderr 'broken\.yaml'
+! exec ./sc$exe grab thing --config missing.yaml
+stderr 'missing\.yaml'
+
+# An invalid value in a root input is still reported, by the command that reads its inputs,
+# from the command line or a config file.
+wantexit 1 ./sc$exe grab thing --tier bronze
+stderr 'invalid value "bronze"'
+wantexit 1 ./sc$exe grab thing --config bad-tier.yaml
+stderr 'invalid value "bronze" for --tier .*\(from configuration file .*bad-tier\.yaml, key tier\)'
+exec ./sc$exe grab thing --config good-tier.yaml
+stdout 'thing'
+
+# The root's own Run reads its inputs before printing its help, so it reports them too, and an
+# unknown command.
+wantexit 1 ./sc$exe --tier bronze
+stderr 'invalid value "bronze"'
+! stderr 'short-circuit flags'
+wantexit 1 ./sc$exe bogus
+stderr 'unknown command "bogus"'
+wantexit 1 ./sc$exe
+stderr 'short-circuit flags'
+
 # Without the flag, every requirement still holds.
 wantexit 1 ./sc$exe grab
 stderr 'missing required input: <what>'
@@ -53,11 +105,16 @@ stderr 'unknown flag "--bogus"'
 wantexit 1 ./sc$exe --bogus
 stderr 'unknown flag "--bogus"'
 
-# Input that can't be read is still an error with --help: a value that isn't a number, and
-# more positionals than the command takes.
-wantexit 1 ./sc$exe grab --help --count abc
+# The hook reads only the root's flags, so it doesn't check what only a sub-command reads: with
+# --help, a sub-command value that isn't a number, or more positionals than the command takes,
+# still gets the page. Without --help, the command reports both.
+exec ./sc$exe grab --help --count abc
+stdout 'a command with a required argument'
+exec ./sc$exe grab one two --help
+stdout 'a command with a required argument'
+wantexit 1 ./sc$exe grab thing --count abc
 stderr '--count'
-wantexit 1 ./sc$exe grab one two --help
+wantexit 1 ./sc$exe grab one two
 stderr 'accepts at most 1 argument'
 
 # --help=false is not a short circuit.
@@ -74,6 +131,9 @@ version: 0.0.0
 command:
   name: sc
   summary: short-circuit flags
+  config_files:
+    - name: scconf
+      path: ./sc.yaml
   flags:
     - name: help
       summary: print help
@@ -87,6 +147,21 @@ command:
       cascading: true
       short_circuit: true
       schema: { type: bool }
+    - name: config
+      summary: read this config file
+      identifiers: [--config]
+      cascading: true
+      schema: { type: string, config_source: scconf }
+    - name: tier
+      summary: service tier
+      identifiers: [--tier]
+      cascading: true
+      schema: { type: string, key: tier, enum: [gold, silver] }
+    - name: retries
+      summary: how many times to retry
+      identifiers: [--retries]
+      cascading: true
+      schema: { type: int, key: retries }
   commands:
     - name: grab
       summary: a command with a required argument
@@ -118,3 +193,9 @@ generate:
       enabled: true
 validate:
   fail: collect
+-- broken.yaml --
+tier: [gold
+-- bad-tier.yaml --
+tier: bronze
+-- good-tier.yaml --
+tier: gold

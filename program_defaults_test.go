@@ -119,7 +119,7 @@ func TestContext_settingsNilRestoreDefault(t *testing.T) {
 		WithInputReader(NewInputReader).
 		WithOutputChecks(true)
 	rtx.WithHelp(nil).WithParser(nil).WithInputReader(nil).WithOutputChecks(false)
-	if rtx.help != nil || rtx.parser != nil || rtx.readerFn != nil || rtx.outputChecks {
+	if rtx.help != nil || rtx.parser != nil || rtx.readerFn != nil || rtx.outputChecks != nil {
 		t.Error("a nil or false setting kept the earlier value")
 	}
 }

@@ -882,16 +882,16 @@ func checkFlagValues(fd *FlagDef, label string, vals []string, dir string, clock
 }
 
 // checkUnique enforces [Constraints.UniqueItems] on an input's command-line values through the
-// run's bounds.
+// run's unique-items hooks.
 func checkUnique(fs *featureSet, label string, vals []string, typ string, ts timeSpec, enum enumSet, secret bool) error {
 	if len(vals) < 2 {
 		return nil
 	}
-	b := fs.bounds
-	if b == nil {
-		return missingBounds(label)
+	u := fs.unique
+	if u == nil {
+		return missingFeature("unique-items", "UniqueItems()", "input "+label+" declares unique items")
 	}
-	return b.unique(label, vals, b.uniqueKey(typ, ts, enum), secret)
+	return u.values(label, vals, u.key(typ, ts, enum), secret)
 }
 
 // missingBounds is the error for input label's bounds, which the program does not wire.

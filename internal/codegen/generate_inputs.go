@@ -67,6 +67,15 @@ func flagReconKey(name string, schema *InputSchema) string {
 	return ""
 }
 
+// flagConfigKey is the config key a flag falls back to: its reconciliation key, except for a
+// config_source flag, whose path names a config file and so is never read from one.
+func flagConfigKey(name string, schema *InputSchema) string {
+	if schema != nil && schema.ConfigSource != "" {
+		return ""
+	}
+	return flagReconKey(name, schema)
+}
+
 // envFields returns the <Prefix>Env struct fields, one per environment input. The recon key
 // is the input name, and the variable is always pinned in the field's tag (see envVarFor).
 func envFields(in *Inputs, envPrefix string) []fieldDef {
@@ -504,8 +513,8 @@ func toTemplateFields(fs []fieldDef) []templateInputField {
 }
 
 // collectPathFrom maps each configuration_files name to the own-tree inputs supplying its
-// path: a flag by logical name, an env input by its variable. Validation guarantees at most
-// one claim per channel and that the named entry exists.
+// path: a flag by logical name and its environment fallback, an env input by its variable.
+// Validation guarantees at most one claim per channel and that the named entry exists.
 func collectPathFrom(gp *program) map[string]pathFromClaim {
 	out := map[string]pathFromClaim{}
 	add := func(in *Inputs) {
@@ -516,6 +525,7 @@ func collectPathFrom(gp *program) map[string]pathFromClaim {
 			if f.Schema != nil && f.Schema.ConfigSource != "" {
 				c := out[f.Schema.ConfigSource]
 				c.flag = f.Name
+				c.flagEnv = flagEnvVar(f.Schema, flagReconKey(f.Name, f.Schema), gp.envPrefix)
 				out[f.Schema.ConfigSource] = c
 			}
 		}

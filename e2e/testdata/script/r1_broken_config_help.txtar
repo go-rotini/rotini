@@ -33,10 +33,14 @@ stdout 'a sub-command'
 ! exec ./bc$exe sub
 stderr '--limit'
 
-# An environment value of the wrong type is still an error, --help or not.
+# An environment value of the wrong type doesn't block --help either: the seeded root hook reads
+# only the command line. A normal run still reports it.
 rm .bc.yaml
 env BC_LIST_LIMIT=abc
-! exec ./bc$exe sub --help
+exec ./bc$exe sub --help
+stdout 'a sub-command'
+! stderr .
+! exec ./bc$exe sub
 stderr '--limit'
 
 -- unparseable.yaml --

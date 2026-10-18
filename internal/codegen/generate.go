@@ -698,8 +698,8 @@ func helpFlagFor(gp *program, c genCommand) (field, frame string) {
 // short-circuit flags are answered once, by the root's CascadingPreRun. When the root's --help
 // is short_circuit and cascading, a command relying on it carries no check of its own; a
 // command declaring its own help flag shadows the root's, so it still answers it. Otherwise
-// each stub answers its own --help and --version.
-func seedHelpAndVersion(gp *program, c genCommand, d *templateHandlerData, isRoot, helpOn bool) {
+// each stub answers its own --help and --version. It reports whether the root has that hook.
+func seedHelpAndVersion(gp *program, c genCommand, d *templateHandlerData, isRoot, helpOn bool) bool {
 	rootHelp := ""
 	if helpOn {
 		rootHelp = rootShortCircuitFlag(gp, "help", false)
@@ -720,9 +720,11 @@ func seedHelpAndVersion(gp *program, c genCommand, d *templateHandlerData, isRoo
 	if isRoot && rootVersion != "" {
 		d.VersionFlag = ""
 	}
-	if isRoot && (rootHelp != "" || rootVersion != "") {
+	hooked := rootHelp != "" || rootVersion != ""
+	if isRoot && hooked {
 		d.RootHook, d.RootHelpFlag, d.RootVersionFlag = true, rootHelp, rootVersion
 	}
+	return hooked
 }
 
 // rootShortCircuitFlag returns the Go field of the root's bool flag named logical when the
@@ -756,7 +758,7 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		Header:        cmdHeader,
 	}
 	isRoot := c.prefix == gp.root.prefix
-	seedHelpAndVersion(gp, c, &d, isRoot, helpOn)
+	rootHooked := seedHelpAndVersion(gp, c, &d, isRoot, helpOn)
 
 	switch name := commandName(c.invocation); {
 	case name == "help" && !isRoot && helpOn:
@@ -770,13 +772,18 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		d.PrintHelpWhenBare = true
 	}
 	d.Redact = d.HelpPathArg+d.CompletionArg == "" && !d.VersionOnly && !d.PrintHelpWhenBare && chainHasSecret(gp, c)
-
-	// NeedsInputs: the body calls rtx.Inputs, which also reports unknown flags.
-	// UsesInputs: the body reads the result; otherwise it is discarded to `_`.
-	d.NeedsInputs = d.HelpFlag != "" || d.VersionFlag != "" || d.HelpPathArg != "" ||
-		(!d.VersionOnly && !d.PrintHelpWhenBare)
-	d.UsesInputs = d.HelpPathArg != "" || (!d.VersionOnly && !d.PrintHelpWhenBare && !d.Redact)
+	d.setInputsUse(rootHooked)
 	return d
+}
+
+// setInputsUse decides how the stub's body reads its inputs. NeedsInputs: the body calls
+// rtx.Inputs, which also reports unknown flags and commands and invalid values. Under the
+// root's hook, which reads only the command line, a bare group reads its inputs for that alone.
+// UsesInputs: the body reads the result; otherwise it is discarded to `_`.
+func (d *templateHandlerData) setInputsUse(rootHooked bool) {
+	d.NeedsInputs = d.HelpFlag != "" || d.VersionFlag != "" || d.HelpPathArg != "" ||
+		(!d.VersionOnly && (!d.PrintHelpWhenBare || rootHooked))
+	d.UsesInputs = d.HelpPathArg != "" || (!d.VersionOnly && !d.PrintHelpWhenBare && !d.Redact)
 }
 
 // chainHasSecret reports whether c or any own ancestor declares a secret input. Its inputs type

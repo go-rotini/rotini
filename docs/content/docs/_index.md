@@ -1234,7 +1234,12 @@ what to do.
 `rotini init` marks `--help` and `--version` this way, makes both cascading so every command's
 page lists them, and writes one `CascadingPreRun` in the root handler that answers both for every
 command: `--version` prints the program's name, then its version (`todo 1.2.3`). So a command's handler needs no help code, and `todo add --help` works even with the
-title missing.
+title missing. The hook reads the root's flags with `rtx.ArgvInputs`, which parses only the
+command line, since a short-circuit flag can only come from there. So `--help` and `--version`
+answer even when an environment variable or a configuration file can't be read, and the hook
+doesn't check what only a sub-command reads: `todo add one two --help` prints the page, though
+`add` takes one argument. Without the flag, the command's own handler reads and validates every
+source.
 
 A short-circuit flag can belong to one command, too:
 
@@ -1873,7 +1878,9 @@ The generated `NewProgram` passes `rotini.NewWiredProgram` the runtime features 
 `rotini.Env()` for env inputs, `rotini.ConfigFiles()` and `rotini.YAML()` for a YAML
 configuration file, `rotini.URLValues()` for a `url` flag, and so on. The program links only
 those, so a CLI that uses few of them builds a smaller binary that starts faster. `go generate`
-keeps the list in step with the spec.
+keeps the list in step with the spec. A `config_files` entry that a `config_source` input names
+links every config format, since the user may name any kind of file, unless the entry declares
+`format:`; `rotini validate` warns about it.
 
 Code the spec does not describe can need a feature the list leaves out, for example a custom
 `InputSettings.Sources` entry, which needs `rotini.ConfigFiles()`. Add it in `main.go`:
@@ -3357,7 +3364,7 @@ The names users try first. Each is an ordinary spec entry:
 | `-y`, `--yes` | answer yes instead of prompting | `role: confirm` |
 | `--no-input` | never prompt | `type: bool` |
 | `--color[=when]` | `auto`, `always` or `never` | an `enum` with `implicit_value: always` |
-| `--config <file>` | read this config file | `config_source: <entry>` on a string flag, naming a `config_files` entry |
+| `--config <file>` | read this config file | `config_source: <entry>` on a string flag, naming a `config_files` entry; the flag's `variable:` names the file too |
 | `-C <dir>` | run as if started in this directory | `role: chdir` on any flag you name (see [a directory flag](#a-directory-flag)) |
 
 ## Plugins

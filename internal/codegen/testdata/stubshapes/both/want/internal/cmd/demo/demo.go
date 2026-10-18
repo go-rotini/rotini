@@ -17,11 +17,12 @@ type demoHandler struct {
 }
 
 func (*demoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	inputs, err := rtx.Inputs[DemoInputs]()
+	argv, err := rtx.ArgvInputs[DemoInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
+	inputs := argv.Values
 
 	if inputs.Demo.Flags.Help {
 		var path []string
@@ -61,6 +62,11 @@ func (*demoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 }
 
 func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[DemoInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
 }

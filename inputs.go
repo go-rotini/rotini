@@ -813,6 +813,7 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 			rd := fallbackRead{view: view, waiveFiles: waived, files: labels.files}
 			if cfg != nil {
 				rd.selectors = cfg.boot.selectorFlags(cfg.files)
+				rd.pathFlags = pathFlags(cfg.files)
 			}
 			if err := recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg, rd); err != nil {
 				bindErr = err
@@ -924,7 +925,7 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 			return
 		}
 		key := reconKey(tag.Get("recon"))
-		if _, selector := rd.selectors[logical]; key == "" || selector {
+		if _, selector := rd.selectors[logical]; key == "" || selector || rd.pathFlags[logical] {
 			return
 		}
 		fd, _ := findFlagDef(chain[scope].Flags, logical)
