@@ -1275,7 +1275,7 @@ Flags and arguments only. Each generated completion script turns the hint into t
 
 `string`
 
-Flag and env inputs only: names a config_files entry whose file path this input supplies, so a user can point the program at a config file (`--config ./other.yaml`). The command line and environment are read first, then the file they name is opened. The path comes from the flag if set on the command line, then the env input's variable, then the flag's default, then the entry's own path or discover. A path supplied this way must exist: unlike a declared path, a missing file is then an error, because the user asked for it. A path given on the command line or in the variable has a leading `~` expanded to the home directory (`~user` too when the program wires path expansion, and kept as written otherwise) and is otherwise used as written, so `$VAR` stays literal; the flag's default is expanded like a declared path. An empty value on the command line is a usage error; an empty variable counts as unset. The input's type must be string. At most one flag and one env input may name the same entry.
+Flag and env inputs only: names a config_files entry whose file path this input supplies, so a user can point the program at a config file (`--config ./other.yaml`, or `ACME_CONFIG=./other.yaml` for a flag that declares `variable: ACME_CONFIG`). The command line and environment are read first, then the file they name is opened. The path comes from the flag if set on the command line, then the first variable that is set (the flag's own `variable:` names, then the env input's), then the flag's default, then the entry's own path or discover. A path supplied this way must exist: unlike a declared path, a missing file is then an error, because the user asked for it. A path given on the command line or in a variable has a leading `~` expanded to the home directory (`~user` too when the program wires path expansion, and kept as written otherwise) and is otherwise used as written, so `$VAR` stays literal; the flag's default is expanded like a declared path. An empty value on the command line is a usage error; an empty variable counts as unset. The flag's own value comes from the command line, its variable or its default, never from a configuration file. The input's type must be string. At most one flag and one env input may name the same entry. The file the user names is read in the format its extension implies unless the entry declares `format`, so an entry without one links every config format, and `rotini validate` warns about it; declaring `format` links only that format.
 
 ### `default`
 
@@ -1467,7 +1467,7 @@ A run-time location strategy for a configuration file, instead of a fixed 'path'
 
 `string` · **required**
 
-The file name to look for in each searched directory (e.g. '.acme.toml', 'config.yaml').
+The file name to look for in each searched directory (e.g. '.acme.toml', 'config.yaml'). It is a name alone: the strategy picks the directories, so `rotini validate` rejects a path (one with `/` or `\`) and `.` or `..`.
 
 ### `app`
 

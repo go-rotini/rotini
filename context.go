@@ -120,9 +120,9 @@ type Context struct {
 	// runView is where view points for a run: the run's view, allocated with its Context.
 	runView osView
 
-	// outputChecks makes WriteOutput and WriteOutputItem check each value against the declared
-	// output schema before writing it. See [Program.WithOutputChecks].
-	outputChecks bool
+	// outputChecks, when set, makes WriteOutput and WriteOutputItem check each value against the
+	// declared output schema before writing it. See [Program.WithOutputChecks].
+	outputChecks outputCheck
 
 	// completionMessages collects what [Context.AddCompletionMessage] adds. It is non-nil only
 	// while a completion request runs with completion messages on.
@@ -722,7 +722,7 @@ func (rtx *Context) WithStderr(w io.Writer) *Context {
 func (rtx *Context) WithOutputChecks(enabled bool) *Context {
 	if rtx != nil {
 		rtx.mu.Lock()
-		rtx.outputChecks = enabled
+		rtx.outputChecks = outputCheckFor(enabled)
 		rtx.mu.Unlock()
 	}
 	return rtx

@@ -22,7 +22,8 @@ import (
 //   - input channels — [Stdin], [Env], [ConfigFiles], [Profiles], [EnvFiles],
 //     [Fallbacks], [PathExpansion], [ObjectFlags], [Schemas]
 //   - document formats — [JSON], [YAML], [TOML], [JSONC], [Dotenv]
-//   - validation — [Bounds], [Patterns], [FlagGroups], [FlagDependencies], [StreamPaths]
+//   - validation — [Bounds], [UniqueItems], [Patterns], [FlagGroups], [FlagDependencies],
+//     [StreamPaths]
 //   - value types — [URLValues], [EmailValues], [TimeZoneValues], [MACValues], [IPValues],
 //     [RegexpValues]
 //
@@ -64,6 +65,7 @@ type featureSet struct {
 	schemas   *schemaHooks
 
 	bounds      *boundHooks
+	unique      *uniqueHooks
 	patterns    *patternHooks
 	groups      *groupHooks
 	deps        *dependencyHooks
@@ -162,10 +164,13 @@ type schemaHooks struct {
 }
 
 type boundHooks struct {
-	items     func(label string, c Constraints, n int) error
-	value     func(label, elem, base string, c Constraints, v string, secret bool) error // numeric, measured, length
-	unique    func(label string, vals []string, key func(string) string, secret bool) error
-	uniqueKey func(typ string, ts timeSpec, enum enumSet) func(string) string
+	items func(label string, c Constraints, n int) error
+	value func(label, elem, base string, c Constraints, v string, secret bool) error // numeric, measured, length
+}
+
+type uniqueHooks struct {
+	values    func(label string, vals []string, key func(string) string, secret bool) error
+	key       func(typ string, ts timeSpec, enum enumSet) func(string) string
 	typed     func(label string, elems []reflect.Value, secret bool) error
 	documents func(docs []map[string]any) string
 }
@@ -232,7 +237,7 @@ func allFeatures() *featureSet {
 			Stdin(), Env(), ConfigFiles(), Profiles(), EnvFiles(), Fallbacks(),
 			PathExpansion(), ObjectFlags(), Schemas(),
 			YAML(), TOML(), JSONC(), JSON(), Dotenv(),
-			Bounds(), Patterns(), FlagGroups(), FlagDependencies(), StreamPaths(),
+			Bounds(), UniqueItems(), Patterns(), FlagGroups(), FlagDependencies(), StreamPaths(),
 			URLValues(), EmailValues(), TimeZoneValues(), MACValues(), IPValues(), RegexpValues(),
 		})
 		s.all = true

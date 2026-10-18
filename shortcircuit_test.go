@@ -227,7 +227,7 @@ func TestShortCircuit_readerSkipsUnparseableConfig(t *testing.T) {
 }
 
 // brokenConfigDef is a root with a short-circuit --help and an int flag that falls back to a
-// configuration key, the shape a seeded root hook reads under --help.
+// configuration key, the shape a root hook reading every source sees under --help.
 func brokenConfigDef() Definition {
 	return Definition{
 		Name: "app", Handler: "App",

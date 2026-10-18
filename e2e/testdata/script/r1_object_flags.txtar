@@ -67,6 +67,7 @@ command:
   config_files:
     - name: appconf
       path: ./absent.yaml
+      format: yaml
   schemas:
     DB:
       type: object

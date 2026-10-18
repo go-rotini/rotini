@@ -1,4 +1,5 @@
-# Exactly one of path/discover, and the xdg strategy needs an app directory.
+# Exactly one of path/discover, the xdg strategy needs an app directory, and discover looks
+# for a file name, not a path.
 version: 0.0.0
 command:
   name: demo
@@ -12,3 +13,19 @@ command:
       discover:
         strategy: xdg
         file: config.yaml
+    - name: nested
+      discover:
+        strategy: walk-up
+        file: conf/demo.yaml
+    - name: windows
+      discover:
+        strategy: walk-up
+        file: conf\demo.yaml
+    - name: parent
+      discover:
+        strategy: walk-up
+        file: ..
+    - name: dotted
+      discover:
+        strategy: walk-up
+        file: .demo.d...yaml

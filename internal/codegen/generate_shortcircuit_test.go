@@ -49,7 +49,9 @@ command:
 
 // TestStubs_shortCircuitShape pins the stubs the short-circuit shape seeds: one root
 // CascadingPreRun answering --help and --version, no help code in a stub that relies on the
-// root's flag, and the per-stub answer kept where a command declares its own --help.
+// root's flag, and the per-stub answer kept where a command declares its own --help. The hook
+// reads the command line only, since the flags it checks are argv-only; a bare group's Run
+// reads its inputs, so an unknown command or an invalid value is still reported.
 func TestStubs_shortCircuitShape(t *testing.T) {
 	files := emitInModule(t, scSpec(true), scConf)
 
@@ -59,8 +61,15 @@ func TestStubs_shortCircuitShape(t *testing.T) {
 			t.Errorf("root stub is missing %q:\n%s", want, root)
 		}
 	}
-	if strings.Contains(root, "NoCascadingPreRun") || strings.Contains(root, "ArgvInputs") {
+	if strings.Contains(root, "NoCascadingPreRun") || strings.Count(root, "ArgvInputs") != 1 {
 		t.Errorf("root stub keeps the NoCascadingPreRun embed or a per-stub help check:\n%s", root)
+	}
+	hook, run, _ := strings.Cut(root, "func (*demoHandler) Run(")
+	if !strings.Contains(hook, "rtx.ArgvInputs[DemoInputs]()") || strings.Contains(hook, "rtx.Inputs[") {
+		t.Errorf("root stub's hook reads more than the command line:\n%s", root)
+	}
+	if !strings.Contains(run, "rtx.Inputs[DemoInputs]()") {
+		t.Errorf("root stub's Run prints its help without reading its inputs:\n%s", root)
 	}
 	if build := files["internal/cmd/demo/demo_build.go"]; strings.Contains(build, "ArgvInputs") {
 		t.Errorf("a command relying on the root's --help still checks it itself:\n%s", build)

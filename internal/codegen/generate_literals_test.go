@@ -1,6 +1,8 @@
 package codegen
 
 import (
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -193,5 +195,85 @@ func TestDefsLiteral_deprecatedMessages(t *testing.T) {
 	cmds := rnodesLiteral("app", "app", []rnode{{name: "build", prefix: "AppBuild", deprecated: "use app make"}}, nil)
 	if !strings.Contains(cmds, `Deprecated: "use app make"`) {
 		t.Errorf("command literal missing its message:\n%s", cmds)
+	}
+}
+
+// A config_source flag's own environment fallback supplies the path, ahead of an env input's
+// variable.
+func TestInputSettings_configSourceVariables(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, inputs, want string
+	}{
+		{"the flag's variable", `
+  flags:
+    - {name: config, identifiers: [--config], schema: {type: string, variable: ACME_CONFIG, config_source: user}}`,
+			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: "ACME_CONFIG"}`},
+		{"the flag's variables, then the env input's", `
+  flags:
+    - {name: config, identifiers: [--config], schema: {type: string, variable: [ACME_CONFIG, ACME_CFG], config_source: user}}
+  env:
+    - {name: config_path, schema: {type: string, config_source: user}}`,
+			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: "ACME_CONFIG,ACME_CFG,ACME_CONFIG_PATH"}`},
+		{"a variable both name is listed once", `
+  flags:
+    - {name: config, identifiers: [--config], schema: {type: string, variable: ACME_CONFIG, config_source: user}}
+  env:
+    - {name: config, schema: {type: string, variable: ACME_CONFIG, config_source: user}}`,
+			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: "ACME_CONFIG"}`},
+		{"a flag with no variable", `
+  flags:
+    - {name: config, identifiers: [--config], schema: {type: string, config_source: user}}`,
+			`PathFrom: &rotini.PathFromDef{Flag: "config"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			spec := "version: 0.0.0\ncommand:\n  name: acme\n  env_prefix: ACME\n  config_files:\n    - {name: user, path: ~/.acme.yaml}" + tt.inputs + "\n"
+			gp, err := resolveTree(decodeSpecYAML(t, spec), filepath.Join(t.TempDir(), ".rotini.spec.yaml"), "example.com/acme")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := renderInputSettings(gp); !strings.Contains(got, tt.want) {
+				t.Errorf("settings lack %s:\n%s", tt.want, got)
+			}
+		})
+	}
+}
+
+// A config_source flag's path names a config file, so neither help nor the contract gives it a
+// config key; its variable still shows.
+func TestConfigSourceFlag_hasNoConfigKey(t *testing.T) {
+	const spec = `version: 0.0.0
+command:
+  name: acme
+  config_files:
+    - {name: user, path: ~/.acme.yaml}
+  flags:
+    - {name: config, identifiers: [--config], schema: {type: string, variable: ACME_CONFIG, config_source: user}}
+    - {name: region, identifiers: [--region], schema: {type: string, variable: ACME_REGION}}
+`
+	_, commands := contractJSON(t, spec)
+	for _, f := range commands["acme"]["flags"].([]any) {
+		f := f.(map[string]any)
+		switch f["name"] {
+		case "config":
+			if f["config_key"] != nil {
+				t.Errorf("contract: --config has config_key %v", f["config_key"])
+			}
+		case "region":
+			if f["config_key"] != "region" {
+				t.Errorf("contract: --region has config_key %v, want region", f["config_key"])
+			}
+		}
+	}
+	gp, err := resolveTree(decodeSpecYAML(t, spec), filepath.Join(t.TempDir(), ".rotini.spec.yaml"), "example.com/acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := buildHelpData("acme", gp.rootHelp, gp.rootInputs, gp.tree, nil, nil, gp.envPrefix, gp.configReadsOf(nil)).Flags
+	row := rowFor(t, rows, "--config")
+	if row.ConfigKey != "" || !slices.Equal(row.Env, []string{"ACME_CONFIG"}) {
+		t.Errorf("help: --config has Env %v, ConfigKey %q; want [ACME_CONFIG] and no key", row.Env, row.ConfigKey)
 	}
 }

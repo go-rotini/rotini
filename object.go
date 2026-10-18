@@ -56,10 +56,10 @@ func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef, fs *featureSet) e
 			docs = append(docs, doc)
 		}
 		if fd.UniqueItems {
-			if fs.bounds == nil {
-				return missingFeature("bounds", "Bounds()", fmt.Sprintf("flag --%s declares unique items", fd.Name))
+			if fs.unique == nil {
+				return missingFeature("unique-items", "UniqueItems()", fmt.Sprintf("flag --%s declares unique items", fd.Name))
 			}
-			if dup := fs.bounds.documents(docs); dup != "" {
+			if dup := fs.unique.documents(docs); dup != "" {
 				return duplicateObjectError(redactValue(dup, fd.Secret))
 			}
 		}

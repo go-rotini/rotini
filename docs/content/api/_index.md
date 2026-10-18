@@ -218,7 +218,7 @@ Generated code and most programs never need these, but they are supported:
 | `rotini.Plugins`, `rotini.ResponseFiles`, `rotini.Chdir`, `rotini.Multicall` | program features: plugins, response files, `role: chdir`, `multicall` |
 | `rotini.Stdin(formats...)`, `rotini.Env`, `rotini.ConfigFiles`, `rotini.Profiles`, `rotini.EnvFiles`, `rotini.Fallbacks`, `rotini.PathExpansion`, `rotini.ObjectFlags`, `rotini.Schemas` | input features: stdin formats, env inputs, configuration files and their profiles, `.env` files and `variable_file`, flag fallbacks, `expand` and `~user` paths, object flags, schema checks |
 | `rotini.JSON`, `rotini.YAML`, `rotini.TOML`, `rotini.JSONC`, `rotini.Dotenv` | document formats, each linking only its own decoder |
-| `rotini.Bounds`, `rotini.Patterns`, `rotini.FlagGroups`, `rotini.FlagDependencies`, `rotini.StreamPaths` | validation: bounds and `uniqueItems`, `pattern`, flag groups, flag dependencies, `inputfile`/`outputfile` |
+| `rotini.Bounds`, `rotini.UniqueItems`, `rotini.Patterns`, `rotini.FlagGroups`, `rotini.FlagDependencies`, `rotini.StreamPaths` | validation: bounds, `uniqueItems`, `pattern`, flag groups, flag dependencies, `inputfile`/`outputfile` |
 | `rotini.URLValues`, `rotini.EmailValues`, `rotini.TimeZoneValues`, `rotini.MACValues`, `rotini.IPValues`, `rotini.RegexpValues` | the value types `url`, `email`, `timezone`, `mac`, `ip`/`cidr`/`hostport`, `regexp` |
 | `WiringError.Feature` | the feature a run needed but its program does not wire |
 | `Program.WithResolver` / `rotini.DefaultResolver` | replace how the command line is resolved to a command or a plugin |

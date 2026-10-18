@@ -129,8 +129,8 @@ type Program struct {
 	view     *osView                          // WithEnviron, WithDir: nil → the process environment and directory
 	clock    func() time.Time                 // WithClock: nil → time.Now
 
-	outputChecks   bool // WithOutputChecks: check every written output against its schema
-	bufferedOutput bool // WithBufferedOutput: buffer stdout and flush it when the run settles
+	outputChecks   outputCheck // WithOutputChecks: check every written output against its schema; nil when off
+	bufferedOutput bool        // WithBufferedOutput: buffer stdout and flush it when the run settles
 
 	feats *featureSet // the features each run has: every one, or NewWiredProgram's and WithFeatures'
 }

@@ -219,13 +219,13 @@ func TestWriteOutput_checks(t *testing.T) {
 func TestProgramWithOutputChecks(t *testing.T) {
 	t.Parallel()
 	p := NewProgram(outDef(), nil).WithOutputChecks(true)
-	if !p.newRunContext().outputChecks {
+	if p.newRunContext().outputChecks == nil {
 		t.Error("WithOutputChecks did not reach the run's Context")
 	}
-	if p.WithOutputChecks(false).newRunContext().outputChecks {
+	if p.WithOutputChecks(false).newRunContext().outputChecks != nil {
 		t.Error("WithOutputChecks(false) did not turn the checks off")
 	}
-	if NewProgram(outDef(), nil).newRunContext().outputChecks {
+	if NewProgram(outDef(), nil).newRunContext().outputChecks != nil {
 		t.Error("output checks are on by default")
 	}
 }

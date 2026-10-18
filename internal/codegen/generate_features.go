@@ -641,7 +641,7 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		Accepts:     acceptsNote(f.Schema),
 		Rules:       rules,
 		name:        f.Name,
-		key:         flagReconKey(f.Name, f.Schema),
+		key:         flagConfigKey(f.Name, f.Schema),
 		Effects:     effectsText(f.Effects),
 
 		DeprecatedSince: f.DeprecatedSince, RemovedIn: f.RemovedIn,
@@ -656,7 +656,7 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 			}
 		}
 	}
-	if env := flagEnvVar(f.Schema, row.key, envPrefix); env != "" {
+	if env := flagEnvVar(f.Schema, flagReconKey(f.Name, f.Schema), envPrefix); env != "" {
 		row.Env = strings.Split(env, ",")
 		if f.Schema.VariableFile != "" {
 			row.Env = append(row.Env, f.Schema.VariableFile+fileVariableNote)

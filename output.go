@@ -294,8 +294,8 @@ func writeOutput[T any](rtx *Context, w io.Writer, v T, format string, render fu
 	if format == "" {
 		format = "json"
 	}
-	if schema != "" && rtx.outputChecks {
-		if err := checkOutputSchema(name, schema, v, selected); err != nil {
+	if schema != "" && rtx.outputChecks != nil {
+		if err := rtx.outputChecks(name, schema, v, selected); err != nil {
 			return err
 		}
 	}
@@ -367,6 +367,17 @@ func encodeOutput[T any](w *bytes.Buffer, v T, format string, render func(io.Wri
 		if err := render(w, format, v); err != nil {
 			return rendererError{err}
 		}
+	}
+	return nil
+}
+
+// outputCheck checks a value against a command's output schema. A program holds one only when
+// output checks are on, so a program that never turns them on doesn't link the schema validator.
+type outputCheck func(name, schema string, v any, partial bool) error
+
+func outputCheckFor(enabled bool) outputCheck {
+	if enabled {
+		return checkOutputSchema
 	}
 	return nil
 }
@@ -747,6 +758,6 @@ func unmarshalExact(data []byte) (any, error) {
 // Only output written through those methods is checked. To check captured stdout, use
 // [DecodeOutput].
 func (p *Program) WithOutputChecks(enabled bool) *Program {
-	p.outputChecks = enabled
+	p.outputChecks = outputCheckFor(enabled)
 	return p
 }

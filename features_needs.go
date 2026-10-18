@@ -24,14 +24,14 @@ func featureNeeds(def Definition, meta InputSettings, inputs ...reflect.Type) []
 
 // needs records which features a program needs.
 type needs struct {
-	plugins, respFiles, chdir, multicall               bool
-	stdin                                              []string
-	env, config, profiles, envFiles, fallbacks, expand bool
-	objects, schemas                                   bool
-	json, yaml, toml, jsonc, dotenv                    bool
-	bounds, patterns, groups, deps, streamPaths        bool
-	url, email, timezone, mac, ip, regexp              bool
-	visited                                            map[reflect.Type]bool
+	plugins, respFiles, chdir, multicall                bool
+	stdin                                               []string
+	env, config, profiles, envFiles, fallbacks, expand  bool
+	objects, schemas                                    bool
+	json, yaml, toml, jsonc, dotenv                     bool
+	bounds, unique, patterns, groups, deps, streamPaths bool
+	url, email, timezone, mac, ip, regexp               bool
+	visited                                             map[reflect.Type]bool
 }
 
 // features lists the recorded needs in canonical order.
@@ -67,6 +67,7 @@ func (n *needs) features() []Feature {
 	add(n.jsonc, JSONC)
 	add(n.dotenv, Dotenv)
 	add(n.bounds, Bounds)
+	add(n.unique, UniqueItems)
 	add(n.patterns, Patterns)
 	add(n.groups, FlagGroups)
 	add(n.deps, FlagDependencies)
@@ -165,8 +166,11 @@ func (n *needs) declared(typ string, c Constraints) {
 // constraints records the validation features c needs.
 func (n *needs) constraints(c Constraints) {
 	if c.Minimum != nil || c.Maximum != nil || c.ExclusiveMinimum != nil || c.ExclusiveMaximum != nil ||
-		c.MultipleOf != nil || c.MinLength > 0 || c.MaxLength != nil || c.MinItems > 0 || c.MaxItems != nil || c.UniqueItems {
+		c.MultipleOf != nil || c.MinLength > 0 || c.MaxLength != nil || c.MinItems > 0 || c.MaxItems != nil {
 		n.bounds = true
+	}
+	if c.UniqueItems {
+		n.unique = true
 	}
 	if c.Pattern != "" {
 		n.patterns = true

@@ -14,13 +14,13 @@ import (
 
 // wiring records the features a program needs, one flag per feature.
 type wiring struct {
-	plugins, respFiles, chdir, multicall               bool
-	stdin                                              map[string]bool
-	env, config, profiles, envFiles, fallbacks, expand bool
-	objects, schemas                                   bool
-	json, yaml, toml, jsonc, dotenv                    bool
-	bounds, patterns, groups, deps, streamPaths        bool
-	url, email, timezone, mac, ip, regexp              bool
+	plugins, respFiles, chdir, multicall                bool
+	stdin                                               map[string]bool
+	env, config, profiles, envFiles, fallbacks, expand  bool
+	objects, schemas                                    bool
+	json, yaml, toml, jsonc, dotenv                     bool
+	bounds, unique, patterns, groups, deps, streamPaths bool
+	url, email, timezone, mac, ip, regexp               bool
 }
 
 // stdinFormatOrder is the order stdin formats are passed to rotini.Stdin.
@@ -113,8 +113,8 @@ func (w *wiring) command(gp *program, in *Inputs, plugins []PluginSpec, discover
 	}
 }
 
-// input records what one input's schema needs: its bounds, pattern, expansion, variable
-// file, and the value types of the input and of everything its schema names.
+// input records what one input's schema needs: its bounds, unique items, pattern, expansion,
+// variable file, and the value types of the input and of everything its schema names.
 func (w *wiring) input(schema *InputSchema, schemas map[string]Schema) {
 	if schema == nil {
 		return
@@ -123,6 +123,8 @@ func (w *wiring) input(schema *InputSchema, schemas map[string]Schema) {
 		switch tag {
 		case "pattern", "patternmsg":
 			w.patterns = true
+		case "unique":
+			w.unique = true
 		default:
 			w.bounds = true
 		}
@@ -313,6 +315,7 @@ func (w *wiring) expressions() []string {
 	add(w.jsonc, "JSONC")
 	add(w.dotenv, "Dotenv")
 	add(w.bounds, "Bounds")
+	add(w.unique, "UniqueItems")
 	add(w.patterns, "Patterns")
 	add(w.groups, "FlagGroups")
 	add(w.deps, "FlagDependencies")

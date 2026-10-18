@@ -17,6 +17,11 @@ type demoVaultHandler struct {
 }
 
 func (*demoVaultHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[DemoVaultInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
 }

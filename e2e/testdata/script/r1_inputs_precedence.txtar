@@ -7,6 +7,8 @@
 gomodinit example.com/prec
 
 exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+# --conf may name a file of any format, so every format is linked, with a warning.
+stderr 'config_files "appconf": is named by a `config_source` input and declares no `format`'
 exec go mod tidy
 exec go build -o app$exe ./cmd/app
 

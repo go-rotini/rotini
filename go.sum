@@ -12,8 +12,8 @@ github.com/go-rotini/recon v1.2.1 h1:Q5EXF2oqQGfGwJdUCo9AHaPMNE7f3+9Eiy28Tc3xII8
 github.com/go-rotini/recon v1.2.1/go.mod h1:I4qC9nTRGnDucftVkP5K57JLP/hfrM/Twhv783kMAfw=
 github.com/go-rotini/toml v1.2.1 h1:OkhwmbtDpA8YNfivI7FEozTw1EPQ+TBICwsgb892ukM=
 github.com/go-rotini/toml v1.2.1/go.mod h1:5R61YyC6cmJ+WcDJRaymjEsYgb2eV5yzJjfibtsg60k=
-github.com/go-rotini/yaml v1.2.4 h1:abyQJYcxrL4NNwP3OZVslPmTzeP9+RBRzuLPszTgUew=
-github.com/go-rotini/yaml v1.2.4/go.mod h1:8he7cn5KkOe3AiQwT/fy55vKFX4xDH2ouENU6ZBSf4E=
+github.com/go-rotini/yaml v1.2.5 h1:Un47uDd925LjuqTkZhoSRgMrjL6bJ4Tkju+Fh3XRjAg=
+github.com/go-rotini/yaml v1.2.5/go.mod h1:8he7cn5KkOe3AiQwT/fy55vKFX4xDH2ouENU6ZBSf4E=
 github.com/rogpeppe/go-internal v1.16.0 h1:O9DK+vNMDVGLr2BeZqmpLeMjiMNkuXfcqntWbZV6S5g=
 github.com/rogpeppe/go-internal v1.16.0/go.mod h1:DrUVZyrJU+txYW5/1kwtXQSMFio52ZOxX7yM1VHvnxs=
 golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=

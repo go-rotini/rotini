@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"slices"
 	"sort"
 	"strings"
 
@@ -256,10 +257,25 @@ func collectOutputDefs(gp *program) map[string]any {
 }
 
 // pathFromClaim holds the config_source inputs claiming one configuration_files entry: a
-// flag's logical name and/or an env input's variable.
+// flag's logical name and its own environment fallback, and/or an env input's variable.
 type pathFromClaim struct {
-	flag string
-	env  string
+	flag    string
+	flagEnv string
+	env     string
+}
+
+// variables are the claim's environment variables, comma-separated, first preferred: the
+// flag's own, then the env input's.
+func (c pathFromClaim) variables() string {
+	var out []string
+	for _, names := range []string{c.flagEnv, c.env} {
+		for v := range strings.SplitSeq(names, ",") {
+			if v != "" && !slices.Contains(out, v) {
+				out = append(out, v)
+			}
+		}
+	}
+	return strings.Join(out, ",")
 }
 
 // collectStdinSchemas maps each own command's "<Prefix>Stdin" name to the self-contained JSON

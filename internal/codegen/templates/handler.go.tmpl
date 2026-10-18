@@ -23,11 +23,12 @@ type {{.HandlerType}} struct {
 {{- if .RootHook}}
 
 func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	inputs, err := rtx.Inputs[{{.InputsType}}]()
+	argv, err := rtx.ArgvInputs[{{.InputsType}}]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
+	inputs := argv.Values
 {{- if .RootHelpFlag}}
 
 	if inputs.{{.Prefix}}.Flags.{{.RootHelpFlag}} {

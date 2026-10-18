@@ -1,0 +1,29 @@
+# A config_files entry a config_source input names, with no format, links every config format.
+# Declaring the format, or naming no entry, says nothing.
+version: 0.0.0
+command:
+  name: demo
+  config_files:
+    - name: user
+      discover: {strategy: xdg, app: demo, file: config.yaml}
+    - name: pinned
+      path: ./pinned.yaml
+      format: yaml
+    - name: fixed
+      path: ./fixed.toml
+  flags:
+    - name: config
+      identifiers: [--config]
+      schema: {type: string, config_source: user}
+    - name: pinned-config
+      identifiers: [--pinned-config]
+      schema: {type: string, config_source: pinned}
+  commands:
+    - name: run
+      summary: run it
+      config_files:
+        - name: local
+          path: ./local.json
+      env:
+        - name: local-config
+          schema: {type: string, config_source: local}

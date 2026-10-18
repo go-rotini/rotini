@@ -123,7 +123,17 @@ func TestWiredFeatures_perDeclaration(t *testing.T) {
 `, []string{"rotini.Bounds()"}},
 		{"unique items", `  env:
     - {name: tags, schema: {type: "[]string", uniqueItems: true}}
-`, []string{"rotini.Env()", "rotini.Bounds()"}},
+`, []string{"rotini.Env()", "rotini.UniqueItems()"}},
+		{"unique items beside bounds", `  flags:
+    - {name: tag, identifiers: [--tag], schema: {type: "[]string", minItems: 1, uniqueItems: true}}
+  arguments:
+    - {name: n, schema: {type: "[]int", uniqueItems: true}}
+`, []string{"rotini.Bounds()", "rotini.UniqueItems()"}},
+		{"unique objects", `  flags:
+    - {name: mount, identifiers: [--mount], schema: {type: array, items: {$ref: "#/schemas/Mount"}, uniqueItems: true}}
+  schemas:
+    Mount: {type: object, properties: {src: {type: string}}}
+`, []string{"rotini.ObjectFlags()", "rotini.Schemas()", "rotini.JSON()", "rotini.YAML()", "rotini.UniqueItems()"}},
 		{"pattern", `  config_files:
     - {name: app, path: ./app.yaml}
   config:

@@ -14,14 +14,19 @@ import (
 	"time"
 )
 
-// Bounds wires numeric, length and item-count bounds and unique items.
+// Bounds wires numeric, length and item-count bounds.
 func Bounds() Feature {
 	return Feature{name: "bounds", apply: func(s *featureSet) {
-		s.bounds = &boundHooks{
-			items:     checkItemCount,
-			value:     checkValueBounds,
-			unique:    checkUniqueItems,
-			uniqueKey: uniqueKeyFor,
+		s.bounds = &boundHooks{items: checkItemCount, value: checkValueBounds}
+	}}
+}
+
+// UniqueItems wires [Constraints.UniqueItems].
+func UniqueItems() Feature {
+	return Feature{name: "unique-items", apply: func(s *featureSet) {
+		s.unique = &uniqueHooks{
+			values:    checkUniqueItems,
+			key:       uniqueKeyFor,
 			typed:     checkUniqueTyped,
 			documents: duplicateDocument,
 		}

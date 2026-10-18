@@ -11,7 +11,7 @@ require (
 	github.com/go-rotini/jsonschema v1.2.3
 	github.com/go-rotini/recon v1.2.1
 	github.com/go-rotini/toml v1.2.1
-	github.com/go-rotini/yaml v1.2.4
+	github.com/go-rotini/yaml v1.2.5
 	github.com/rogpeppe/go-internal v1.16.0
 )
 

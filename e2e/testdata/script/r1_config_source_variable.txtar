@@ -1,0 +1,130 @@
+# R1 — a config_source flag's own variable names the config file, as its command line does.
+# The order is the flag on the command line, then the flag's variable, then an env input's
+# variable, then the discovered file.
+
+gomodinit example.com/acme
+
+exec rotini validate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+! stdout '(?i)warning|error'
+! stderr .
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o acme$exe ./cmd/acme
+
+env HOME=$WORK/home
+env USERPROFILE=$WORK/home
+env XDG_CONFIG_HOME=$WORK/xdg
+
+# Nothing names a file: the discovered one is read. Its `config:` key doesn't set --config,
+# since a path that names a config file is never read from one.
+exec ./acme$exe
+stdout '^profile=discovered$'
+stdout '^config=$'
+
+# The flag's variable names the file, and sets the flag.
+env ACME_CONFIG=ci.yaml
+exec ./acme$exe
+stdout '^profile=ci$'
+stdout '^config=ci.yaml$'
+
+# A leading ~ in the variable is the home directory.
+env ACME_CONFIG=~/home.yaml
+exec ./acme$exe
+stdout '^profile=home$'
+
+# The command line wins over the variable.
+env ACME_CONFIG=ci.yaml
+exec ./acme$exe --config local.yaml
+stdout '^profile=local$'
+
+# The flag's variable wins over the env input's.
+env ACME_CONFIG_PATH=local.yaml
+exec ./acme$exe
+stdout '^profile=ci$'
+
+# The env input's variable is read when the flag's isn't set; an empty variable counts as unset.
+env ACME_CONFIG=
+exec ./acme$exe
+stdout '^profile=local$'
+env ACME_CONFIG_PATH=
+
+# A file the variable names must exist, because the user asked for it.
+env ACME_CONFIG=missing.yaml
+! exec ./acme$exe
+stderr 'missing\.yaml'
+
+-- ci.yaml --
+profile: ci
+-- local.yaml --
+profile: local
+-- home/home.yaml --
+profile: home
+-- xdg/acme/config.yaml --
+config: local.yaml
+profile: discovered
+-- cmd/acme/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: a config-reading client
+  config_files:
+    - name: user
+      format: yaml
+      discover: {strategy: xdg, app: acme, file: config.yaml}
+  flags:
+    - name: config
+      summary: the config file to read
+      identifiers: [--config]
+      schema: {type: string, variable: ACME_CONFIG, config_source: user}
+  env:
+    - name: config_path
+      summary: the config file to read, when --config and ACME_CONFIG are not set
+      schema: {type: string, variable: ACME_CONFIG_PATH, config_source: user}
+  config:
+    - name: profile
+      schema: {type: string}
+-- cmd/acme/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_acme.go
+      package: acme
+-- internal/cmd/acme/acme.go --
+package acme
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type acmeHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*acmeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AcmeInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "profile=%s\nconfig=%s\n", in.Acme.Config.Profile, in.Acme.Flags.Config)
+}
+-- cmd/acme/main.go --
+package main
+
+import (
+	acme "example.com/acme/internal/cmd/acme"
+)
+
+func main() {
+	acme.NewProgram().
+		Execute()
+}

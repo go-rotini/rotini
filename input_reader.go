@@ -315,6 +315,12 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 		return nil // a struct that does not fit the chain; checkFrameFit reports it
 	}
 	selectors := boot.selectorFlags(cfgFiles)
+	paths := pathFlags(cfgFiles)
+	envReg := reg
+	if paths != nil && len(files) > 0 {
+		env := flagEnv(v, b.envPrefix, view)
+		envReg = fallbackLookup{env: &env}
+	}
 	for i := range v.NumField() {
 		flags := commandFlags(v.Field(i))
 		if !flags.IsValid() {
@@ -327,7 +333,11 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 				}
 				continue
 			}
-			if err := reconcileFlag(reg, f, sf, chain, store, anchor+i, rd); err != nil {
+			from := reg
+			if paths[sf.Tag.Get("rotini")] {
+				from = envReg
+			}
+			if err := reconcileFlag(from, f, sf, chain, store, anchor+i, rd); err != nil {
 				return err
 			}
 		}
@@ -366,6 +376,7 @@ type fallbackRead struct {
 	waiveFiles bool
 	files      map[string]string
 	selectors  map[string]profileChoice // profile selector flags, which a configuration file never sets
+	pathFlags  map[string]bool          // config_source flags, which a configuration file never sets
 }
 
 // reconcileFlag binds one fallback flag, at chain frame idx, from the registry: argv > env >
@@ -1365,7 +1376,14 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 	if !overridden {
 		override = pathOverride{path: path, declared: true}
 	}
-	resolved, err := override.resolve(view)
+	var resolved string
+	var err error
+	if dirs != nil {
+		// Only the file name is searched for, so it is expanded but not made absolute.
+		resolved, err = view.expandPath(path)
+	} else {
+		resolved, err = override.resolve(view)
+	}
 	if err != nil {
 		if isWiringError(err) {
 			return nil, "", err
@@ -1640,6 +1658,22 @@ func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *
 		case defaulted != "":
 			out[f.Name] = pathOverride{path: defaulted, declared: true}
 		}
+	}
+	return out
+}
+
+// pathFlags is the set of files' config_source flags. A path that names a configuration file
+// is never read from one, so these flags fall back to the environment alone.
+func pathFlags(files []ConfigFile) map[string]bool {
+	var out map[string]bool
+	for _, f := range files {
+		if f.PathFrom == nil || f.PathFrom.Flag == "" {
+			continue
+		}
+		if out == nil {
+			out = map[string]bool{}
+		}
+		out[f.PathFrom.Flag] = true
 	}
 	return out
 }

@@ -143,18 +143,19 @@ func renderDiscover(b *strings.Builder, d *ConfigurationFileDiscover) {
 	b.WriteString("}")
 }
 
-// renderPathFrom renders a config file's PathFrom field: the flag and/or env var whose
+// renderPathFrom renders a config file's PathFrom field: the flag and/or env vars whose
 // value supplies the file's path at run time.
 func renderPathFrom(b *strings.Builder, c pathFromClaim) {
 	fmt.Fprintf(b, ", PathFrom: &%s.PathFromDef{", rotiniPkgName)
+	env := c.variables()
 	if c.flag != "" {
 		fmt.Fprintf(b, "Flag: %q", c.flag)
-		if c.env != "" {
+		if env != "" {
 			b.WriteString(", ")
 		}
 	}
-	if c.env != "" {
-		fmt.Fprintf(b, "Env: %q", c.env)
+	if env != "" {
+		fmt.Fprintf(b, "Env: %q", env)
 	}
 	b.WriteString("}")
 }

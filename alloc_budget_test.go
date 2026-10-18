@@ -25,10 +25,10 @@ var guardAllocBudgets = []struct {
 	budget   float64
 	legacy   float64
 }{
-	{"help", []string{"--help"}, 0, 21, 21},
-	{"help, large environment", []string{"--help"}, 200, 21, 21},
-	{"dispatch", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 0, 41, 41},
-	{"dispatch, large environment", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 200, 41, 41},
+	{"help", []string{"--help"}, 0, 22, 22},
+	{"help, large environment", []string{"--help"}, 200, 22, 22},
+	{"dispatch", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 0, 38, 38},
+	{"dispatch, large environment", []string{"build", "--name", "x", "--count", "2", "--timeout", "5s", "--tag", "a", "tgt"}, 200, 38, 38},
 	{"complete a sub-command", []string{"__complete", "bu"}, 0, 15, 15},
 	{"complete a flag value", []string{"__complete", "build", "--mode", ""}, 0, 20, 20},
 }
@@ -65,7 +65,7 @@ type guardBuildInputs struct {
 	}
 }
 
-// guardRoot is the seeded root handler: it answers --help and --version from rtx.Inputs.
+// guardRoot is the seeded root handler: it answers --help and --version from rtx.ArgvInputs.
 type guardRoot struct {
 	NoPreRun
 	NoPostRun
@@ -73,12 +73,12 @@ type guardRoot struct {
 }
 
 func (*guardRoot) CascadingPreRun(_ context.Context, rtx *Context) {
-	in, err := rtx.Inputs[guardRootInputs]()
+	argv, err := rtx.ArgvInputs[guardRootInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
-	if in.App.Flags.Help {
+	if argv.Values.App.Flags.Help {
 		fmt.Fprintln(rtx.Stdout, "Usage: app [command]")
 		rtx.HaltWithCode(0)
 	}

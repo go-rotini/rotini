@@ -238,7 +238,7 @@ func TestValidate_wiring(t *testing.T) {
 		}
 		return NewParser().Parse(wired(NewContextFor(def, argv), fs...), &in)
 	}
-	all := []Feature{Bounds(), FlagGroups(), FlagDependencies(), StreamPaths()}
+	all := []Feature{UniqueItems(), FlagGroups(), FlagDependencies(), StreamPaths()}
 	without := func(name string) []Feature {
 		var out []Feature
 		for _, f := range all {
@@ -248,7 +248,7 @@ func TestValidate_wiring(t *testing.T) {
 		}
 		return out
 	}
-	wantMissing(t, parse(without("bounds"), "--tags", "x", "--tags", "y"), "bounds", "Bounds()")
+	wantMissing(t, parse(without("unique-items"), "--tags", "x", "--tags", "y"), "unique-items", "UniqueItems()")
 	wantMissing(t, parse(without("flag-groups")), "flag-groups", "FlagGroups()")
 	wantMissing(t, parse(without("flag-dependencies")), "flag-dependencies", "FlagDependencies()")
 	wantMissing(t, parse(without("stream-paths")), "stream-paths", "StreamPaths()")
@@ -268,6 +268,32 @@ func TestValidate_wiring(t *testing.T) {
 	err = NewParser().Parse(wiredFor(NewContextFor(objDef(), []string{"--db", `{"host":"h"}`}), objDef(), InputSettings{}, reflect.TypeFor[objInputs]()), &obj)
 	if err != nil || obj.App.Flags.DB.Host != "h" {
 		t.Errorf("wired object flag: %v", err)
+	}
+}
+
+// TestUniqueItems_ownFeature pins that unique items and bounds are separate features: neither
+// wires the other's checks, and a run missing one names it.
+func TestUniqueItems_ownFeature(t *testing.T) {
+	bounds := newFeatureSet([]Feature{Bounds()})
+	unique := newFeatureSet([]Feature{UniqueItems()})
+	if bounds.unique != nil || unique.bounds != nil {
+		t.Fatal("Bounds and UniqueItems wire each other's hooks")
+	}
+	wantMissing(t, checkUnique(bounds, "--tags", []string{"x", "y"}, "[]string", timeSpec{}, enumSet{}, false), "unique-items", "UniqueItems()")
+	if err := checkUnique(unique, "--tags", []string{"1", "01"}, "[]int", timeSpec{}, enumSet{}, false); err == nil || !strings.Contains(err.Error(), "must not repeat") {
+		t.Errorf("wired unique: %v", err)
+	}
+	wantMissing(t, checkConstraints(unique, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, ""), "bounds", "Bounds()")
+
+	def := objDef()
+	def.Flags[1].UniqueItems = true
+	argv := []string{"--mount", `{"src":"a","dst":"b"}`, "--mount", `{"dst":"b","src":"a"}`}
+	objects := []Feature{ObjectFlags(), Schemas(), JSON(), YAML(), Bounds()}
+	var obj objInputs
+	wantMissing(t, NewParser().Parse(wired(NewContextFor(def, argv), objects...), &obj), "unique-items", "UniqueItems()")
+	err := NewParser().Parse(wired(NewContextFor(def, argv), append(objects, UniqueItems())...), &obj)
+	if err == nil || !strings.Contains(err.Error(), "must not repeat") {
+		t.Errorf("wired unique objects: %v", err)
 	}
 }
 
