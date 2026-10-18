@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // This file drives the generate stage: resolveProgram turns a validated spec and conf
@@ -252,7 +253,7 @@ func (p *program) emitEntrypoint() error {
 }
 
 // programVarUse matches a package-qualified Program, as in cmd.Program.Execute().
-var programVarUse = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.Program\b`)
+var programVarUse = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.Program\b`) })
 
 // staleProgramVar reports an existing main.go that uses the generated package's Program
 // variable, which generated code no longer declares, with the line that replaces it.
@@ -266,7 +267,7 @@ func (p *program) staleProgramVar() error {
 	if err != nil {
 		return nil //nolint:nilerr // a missing or unreadable main.go has nothing to report
 	}
-	for _, m := range programVarUse.FindAllSubmatch(src, -1) {
+	for _, m := range programVarUse().FindAllSubmatch(src, -1) {
 		if pkg := string(m[1]); pkg != rotiniPkgName {
 			name, err := filepath.Rel(p.module.root, path)
 			if err != nil {

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-rotini/rotini"
 )
@@ -322,13 +323,13 @@ type exampleWord struct {
 }
 
 // examplePrompt is a leading shell prompt to strip.
-var examplePrompt = regexp.MustCompile(`^\s*[$%]\s+`)
+var examplePrompt = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^\s*[$%]\s+`) })
 
 // exampleAssignment is a leading VAR=value word, which sets the environment for the command.
-var exampleAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+var exampleAssignment = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`) })
 
 // examplePlaceholder is a <placeholder> word, which isn't a redirect.
-var examplePlaceholder = regexp.MustCompile(`^<[^<>\s]+>`)
+var examplePlaceholder = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^<[^<>\s]+>`) })
 
 // exampleSegments splits an example into the words of each command in it, POSIX style: single
 // quotes are literal, double quotes take \" \\ \$ and \`, a backslash outside quotes escapes the
@@ -336,7 +337,7 @@ var examplePlaceholder = regexp.MustCompile(`^<[^<>\s]+>`)
 // redirect (>, >>, <, <<, 2>, 2>&1, &>) ends the words of its segment. Leading VAR=value words
 // are dropped. unclosed reports a quote left open.
 func exampleSegments(line string) (segments [][]exampleWord, unclosed bool) {
-	l := &exampleLexer{src: []rune(examplePrompt.ReplaceAllString(line, ""))}
+	l := &exampleLexer{src: []rune(examplePrompt().ReplaceAllString(line, ""))}
 	for ; l.i < len(l.src); l.i++ {
 		if !l.step() {
 			return l.segments, true
@@ -380,8 +381,8 @@ func (l *exampleLexer) step() bool {
 		if l.i+1 < len(l.src) && (l.src[l.i+1] == '|' || l.src[l.i+1] == '&') {
 			l.i++
 		}
-	case r == '<' && examplePlaceholder.MatchString(string(l.src[l.i:])):
-		m := examplePlaceholder.FindString(string(l.src[l.i:]))
+	case r == '<' && examplePlaceholder().MatchString(string(l.src[l.i:])):
+		m := examplePlaceholder().FindString(string(l.src[l.i:]))
 		l.cur.WriteString(m)
 		l.inWord, l.opaque = true, true
 		l.i += len([]rune(m)) - 1
@@ -459,7 +460,7 @@ func (l *exampleLexer) endWord() {
 func (l *exampleLexer) endSegment() {
 	l.endWord()
 	words := l.words
-	for len(words) > 0 && exampleAssignment.MatchString(words[0].text) && !words[0].opaque {
+	for len(words) > 0 && exampleAssignment().MatchString(words[0].text) && !words[0].opaque {
 		words = words[1:]
 	}
 	if len(words) > 0 {

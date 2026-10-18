@@ -67,7 +67,7 @@ command:
 	if want := "case \"remove\":\n\t\treturn \"acme remove\", nil"; !strings.Contains(src, want) {
 		t.Errorf("Usage function lacks %q\n%s", want, src)
 	}
-	if want := `"": {"del": "remove", "rm": "remove"},`; !strings.Contains(canonicalPathDecl(gp.tree), want) {
+	if want := "case \"\":\n\t\tswitch alias {\n\t\tcase \"del\":\n\t\t\treturn \"remove\", true\n\t\tcase \"rm\":\n\t\t\treturn \"remove\", true\n"; !strings.Contains(canonicalPathDecl(gp.tree), want) {
 		t.Errorf("alias table lacks %s\n%s", want, canonicalPathDecl(gp.tree))
 	}
 }

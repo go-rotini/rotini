@@ -272,10 +272,10 @@ func (e *pathError) Error() string {
 		return e.msg
 	}
 	cause := e.err
-	if pe, ok := errors.AsType[*fs.PathError](cause); ok {
+	if pe, ok := asError[*fs.PathError](cause); ok {
 		cause = pe.Err
 	}
-	if le, ok := errors.AsType[*os.LinkError](cause); ok {
+	if le, ok := asError[*os.LinkError](cause); ok {
 		cause = le.Err
 	}
 	return e.msg + ": " + cause.Error()

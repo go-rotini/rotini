@@ -14,7 +14,14 @@ func inputsTypeLiteral(typeExpr string) string {
 	if typeExpr == "" {
 		return ""
 	}
-	return fmt.Sprintf("Inputs: reflect.TypeFor[%s](),\n", typeExpr)
+	return "Inputs: " + typeOfLiteral(typeExpr) + ",\n"
+}
+
+// typeOfLiteral renders the reflect.Type of the type named typeExpr through the generated
+// rotiniTypeOf rather than reflect.TypeFor: each reflect.TypeFor[T] call links a generic
+// dictionary for T, a pointer the loader relocates at start-up, and this form links none.
+func typeOfLiteral(typeExpr string) string {
+	return "rotiniTypeOf((*" + typeExpr + ")(nil))"
 }
 
 // exitStatusLiteral renders a Definition or CommandDef literal's ExitStatus field, or "" when

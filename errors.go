@@ -157,7 +157,7 @@ func (e exitCodeError) Is(target error) bool {
 // canceledExitCode returns the code carried by a run context's cancellation cause, or 0 when
 // it carries none.
 func canceledExitCode(ctx context.Context) int {
-	if ec, ok := errors.AsType[exitCodeError](context.Cause(ctx)); ok {
+	if ec, ok := asError[exitCodeError](context.Cause(ctx)); ok {
 		return ec.code
 	}
 	return 0
@@ -168,7 +168,7 @@ func signalCanceled(ctx context.Context) bool {
 	if ctx == nil {
 		return false
 	}
-	ec, ok := errors.AsType[exitCodeError](context.Cause(ctx))
+	ec, ok := asError[exitCodeError](context.Cause(ctx))
 	return ok && ec.signal
 }
 

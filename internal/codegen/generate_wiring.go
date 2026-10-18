@@ -17,6 +17,7 @@ type wiring struct {
 	plugins, respFiles, chdir, multicall                bool
 	stdin                                               map[string]bool
 	env, config, profiles, envFiles, fallbacks, expand  bool
+	homes                                               bool // a path may name another user's home ("~bob")
 	objects, schemas                                    bool
 	json, yaml, toml, jsonc, dotenv                     bool
 	bounds, unique, patterns, groups, deps, streamPaths bool
@@ -59,7 +60,7 @@ func (w *wiring) command(gp *program, in *Inputs, plugins []PluginSpec, discover
 		w.plugins = true
 	}
 	if namesOtherHome(pluginPath) {
-		w.expand = true
+		w.homes = true
 	}
 	if in == nil {
 		return
@@ -196,7 +197,7 @@ func (w *wiring) typeName(t string) {
 // configFile records what one configuration file needs. Any file wires the configuration
 // file machinery, which also locates files for write-back; an .env file adds the .env
 // layer and its codec. A file whose path the user can supply at run time (pathFrom) may name
-// another user's home.
+// another user's home (UserHomes).
 func (w *wiring) configFile(f ConfigurationFile, pathFrom bool) {
 	w.config = true
 	if f.As == "env" {
@@ -213,7 +214,7 @@ func (w *wiring) configFile(f ConfigurationFile, pathFrom bool) {
 		discover = f.Discover.File
 	}
 	if pathFrom || namesOtherHome(f.Path) || namesOtherHome(discover) {
-		w.expand = true
+		w.homes = true
 	}
 	format := f.Format
 	if format == "" {
@@ -307,6 +308,7 @@ func (w *wiring) expressions() []string {
 	add(w.envFiles, "EnvFiles")
 	add(w.fallbacks, "Fallbacks")
 	add(w.expand, "PathExpansion")
+	add(w.homes && !w.expand, "UserHomes") // PathExpansion includes UserHomes
 	add(w.objects, "ObjectFlags")
 	add(w.schemas, "Schemas")
 	add(w.json, "JSON")

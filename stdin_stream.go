@@ -283,7 +283,7 @@ func checkJSONLRecord(schema string, v any) error {
 		return usageBind(channelStdin, "", fmt.Sprintf("stdin line %d: the record could not be fully checked against its schema", line), err)
 	}
 	if err := documentResult(schema, result); err != nil {
-		if ie, ok := errors.AsType[*InputError](err); ok {
+		if ie, ok := asError[*InputError](err); ok {
 			return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin line %d: %s", line, ie.Msg), Cause: ie.Cause, usage: ie.usage}
 		}
 		return err

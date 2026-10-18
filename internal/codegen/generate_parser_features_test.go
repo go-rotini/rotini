@@ -89,7 +89,7 @@ func TestFlagSets_generate(t *testing.T) {
 			t.Errorf("generated file is missing\n%s", want)
 		}
 	}
-	for _, want := range []string{`HiddenIdentifiers: []string{"--everything"}`, `ReplacedBy: "acme show"`, `"ls-all": "list"`} {
+	for _, want := range []string{`HiddenIdentifiers: []string{"--everything"}`, `ReplacedBy: "acme show"`, "case \"ls-all\":\n\t\t\treturn \"list\", true"} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated file is missing %s", want)
 		}

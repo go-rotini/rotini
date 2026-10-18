@@ -221,7 +221,7 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 		body, _ := line["error"].(map[string]any)
 		body["category"] = CategoryOf(err).String()
 		body["exit_code"] = exitCode
-		if pe, ok := errors.AsType[*ParseError](err); ok {
+		if pe, ok := asError[*ParseError](err); ok {
 			if pe.Kind != ParseKindUnspecified {
 				body["kind"] = pe.Kind.String()
 			}
@@ -231,7 +231,7 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 			if pe.Token != "" {
 				body["token"] = pe.Token
 			}
-		} else if pe, ok := errors.AsType[*PluginError](err); ok {
+		} else if pe, ok := asError[*PluginError](err); ok {
 			body["kind"] = pe.Kind.String()
 		}
 		// Candidates go with the token they were checked against, so both come from one error.

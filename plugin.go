@@ -182,7 +182,7 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 		// The run was canceled and the plugin stopped cleanly when asked.
 		return canceledExitCode(ctx), nil
 	default:
-		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
+		if ee, ok := asError[*exec.ExitError](err); ok {
 			return pluginExitCode(ctx, ee), err
 		}
 		return p.pluginFailure(ctx, rtx, &PluginError{
@@ -375,6 +375,11 @@ func (cmd Command) PluginDiscoveryErrors() []error {
 // [Command.PluginDiscoveryErrors]: the collision-filtered plugin tokens plus any problems
 // scanning the configured path.
 func discoveredFor(cmd Command) ([]DiscoveredPlugin, []error) {
+	return discoveredWith(cmd, discoverPlugins)
+}
+
+// discoveredWith is discoveredFor with the discovery function discover.
+func discoveredWith(cmd Command, discover func(d *PluginDiscoveryDef, pluginPath string, view *osView) ([]DiscoveredPlugin, []error)) ([]DiscoveredPlugin, []error) {
 	d := cmd.PluginDiscovery
 	if d == nil || d.Hidden {
 		return nil, nil
@@ -392,7 +397,7 @@ func discoveredFor(cmd Command) ([]DiscoveredPlugin, []error) {
 			declared[a] = true
 		}
 	}
-	all, problems := discoverPlugins(d, cmd.PluginPath, cmd.view)
+	all, problems := discover(d, cmd.PluginPath, cmd.view)
 	var out []DiscoveredPlugin
 	for _, plugin := range all {
 		if !declared[plugin.Name] {

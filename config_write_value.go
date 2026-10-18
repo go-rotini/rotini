@@ -1,7 +1,6 @@
 package rotini
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/mail"
@@ -82,10 +81,10 @@ func checkConfigKey(k ConfigKey, raw string, view *osView, parse func(string) er
 // internal) [*InputError] a config write reports, keeping its message and suggestion facts. A
 // [*WiringError] is returned as it is.
 func configValueError(key string, err error) error {
-	if we, ok := errors.AsType[*WiringError](err); ok {
+	if we, ok := asError[*WiringError](err); ok {
 		return we
 	}
-	pe, ok := errors.AsType[*ParseError](err)
+	pe, ok := asError[*ParseError](err)
 	if !ok {
 		return usageBind(channelConfig, key, err.Error(), err)
 	}

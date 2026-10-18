@@ -159,7 +159,7 @@ func completeAnswer(def Definition, words []string, lookup HandlerLookup, rtx *C
 	// come first, sorted, then the argument's candidates in their own order.
 	var names []string
 	if !cc.afterTerminator && !cc.operands && cc.positionals == 0 {
-		names = filterPrefix(dispatchableNames(cur), partial)
+		names = filterPrefix(dispatchableNames(rtx.features(), cur), partial)
 		sort.Strings(names)
 	}
 	vals := argValueCandidates(def, lookup, rtx, cc, words, partial)
@@ -377,7 +377,7 @@ func groupEffects(frame Command, set map[string]bool) (hidden, needed map[string
 // dispatchableNames lists everything the next positional word could dispatch to: sub-commands
 // and declared plugins with their aliases, and the plugins discovery finds. Hidden and
 // deprecated commands and deprecated aliases are left out; they still dispatch when typed.
-func dispatchableNames(cur Command) []string {
+func dispatchableNames(fs *featureSet, cur Command) []string {
 	names := commandNames(cur)
 	for _, r := range cur.Plugins {
 		names = append(names, withDescription(r.Name, r.Summary))
@@ -385,16 +385,26 @@ func dispatchableNames(cur Command) []string {
 			names = append(names, withDescription(a, r.Summary))
 		}
 	}
-	for _, p := range cur.DiscoveredPlugins() {
+	for _, p := range completionPlugins(fs, cur) {
 		names = append(names, p.Name)
 	}
 	return names
 }
 
+// completionPlugins is the plugins discovery finds for cur, through the run's plugins feature,
+// so a program that doesn't wire [Plugins] doesn't link discovery for completion.
+func completionPlugins(fs *featureSet, cur Command) []DiscoveredPlugin {
+	if fs.plugins == nil {
+		return nil
+	}
+	plugins, _ := discoveredWith(cur, fs.plugins.discover)
+	return plugins
+}
+
 // hasDispatchable reports whether [dispatchableNames] lists anything, scanning for discovered
 // plugins only when no sub-command or declared plugin answers it.
-func hasDispatchable(cur Command) bool {
-	return len(commandNames(cur)) > 0 || len(cur.Plugins) > 0 || len(cur.DiscoveredPlugins()) > 0
+func hasDispatchable(fs *featureSet, cur Command) bool {
+	return len(commandNames(cur)) > 0 || len(cur.Plugins) > 0 || len(completionPlugins(fs, cur)) > 0
 }
 
 // commandNames lists cur's visible sub-commands and their aliases, without deprecated ones.
@@ -914,6 +924,11 @@ func completionHint(def Definition, words []string) string {
 // Completion when there is none. It is the wire-neutral half of completionHint, handed to
 // every [CompletionFormat].
 func completionHintFor(def Definition, words []string) Completion {
+	return completionHintWith(allFeatures(), def, words)
+}
+
+// completionHintWith is completionHintFor with the run's features fs.
+func completionHintWith(fs *featureSet, def Definition, words []string) Completion {
 	if len(words) == 0 {
 		return Completion{}
 	}
@@ -960,7 +975,7 @@ func completionHintFor(def Definition, words []string) Completion {
 
 	// Otherwise the word binds to a positional — but only once dispatch can no longer
 	// descend, since before that it may still be a sub-command name.
-	if cc.positionals == 0 && hasDispatchable(cur) {
+	if cc.positionals == 0 && hasDispatchable(fs, cur) {
 		return Completion{}
 	}
 	if ad, ok := positionalAt(cur.Arguments, cc.positionals); ok {
@@ -1123,7 +1138,7 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 	rtx.completionOptions = &asked
 
 	answer := completeAnswer(p.def, words, p.lookup, rtx)
-	result := CompletionResult{Hint: completionHintFor(p.def, words)}
+	result := CompletionResult{Hint: completionHintWith(p.features(), p.def, words)}
 	describe := p.completionDescriptionsOn(rtx)
 	allKeys := true
 	if len(answer.cands) > 0 {

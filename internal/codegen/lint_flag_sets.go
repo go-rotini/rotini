@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // lintFlagSets checks `flag_sets` and `use`: sets are declared on the root and used by name,
@@ -107,7 +108,9 @@ func flagSetClashes(c *Command, sets map[string]FlagSet) []string {
 }
 
 // setItemPointer matches the pointer of a command's flag, flag group or flag dependency.
-var setItemPointer = regexp.MustCompile(`^(.*)/(flags|flag_groups|flag_dependencies)/(\d+)(/.*)?$`)
+var setItemPointer = sync.OnceValue(func() *regexp.Regexp {
+	return regexp.MustCompile(`^(.*)/(flags|flag_groups|flag_dependencies)/(\d+)(/.*)?$`)
+})
 
 // remapFlagSetProblems points each problem about a flag, flag group or flag dependency a
 // command got from a flag set at the set's declaration instead, where the source has it, and
@@ -144,7 +147,7 @@ func remapFlagSetProblems(spec *Spec, problems []error) []error {
 // setPointer maps ptr, if it points at an item a command got from a flag set, to the item in
 // the set.
 func setPointer(cmds map[string]*Command, sets map[string]FlagSet, ptr string) (string, bool) {
-	m := setItemPointer.FindStringSubmatch(ptr)
+	m := setItemPointer().FindStringSubmatch(ptr)
 	if m == nil {
 		return "", false
 	}

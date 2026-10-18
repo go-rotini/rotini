@@ -81,7 +81,7 @@ func (r *stdinRun) signalCode(err error) int {
 	if !r.interrupted(err) {
 		return 0
 	}
-	if ec, ok := errors.AsType[exitCodeError](r.cause()); ok {
+	if ec, ok := asError[exitCodeError](r.cause()); ok {
 		return ec.code
 	}
 	return 0
@@ -275,7 +275,7 @@ func (s *stdinState) streamLocked() *cancelReader {
 // cancellation, or by the reading hook's context ending, keeps the cause; anything else is an
 // internal read failure.
 func stdinReadError(run *stdinRun, err error) error {
-	if _, ended := errors.AsType[readEndedError](err); ended || run.interrupted(err) {
+	if errors.As(err, new(readEndedError)) || run.interrupted(err) {
 		return usageBind(channelStdin, "", "reading stdin was interrupted", err)
 	}
 	return internalBind(channelStdin, "", "could not read stdin", err)

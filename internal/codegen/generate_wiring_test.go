@@ -86,7 +86,7 @@ func TestWiredFeatures_perDeclaration(t *testing.T) {
     - {name: app, path: ./app.yaml}
   flags:
     - {name: config, identifiers: [--config], schema: {type: string, config_source: app}}
-`, []string{"rotini.ConfigFiles()", "rotini.PathExpansion()", "rotini.JSON()", "rotini.YAML()", "rotini.TOML()", "rotini.JSONC()", "rotini.Dotenv()"}},
+`, []string{"rotini.ConfigFiles()", "rotini.UserHomes()", "rotini.JSON()", "rotini.YAML()", "rotini.TOML()", "rotini.JSONC()", "rotini.Dotenv()"}},
 		{"profiles", `  config_files:
     - {name: app, path: ./app.yaml, profiles: {select: profile, under: profiles}}
   flags:
@@ -112,6 +112,11 @@ func TestWiredFeatures_perDeclaration(t *testing.T) {
 `, []string{"rotini.PathExpansion()"}},
 		{"another user's home", `  config_files:
     - {name: app, path: ~bob/app.yaml}
+`, []string{"rotini.ConfigFiles()", "rotini.UserHomes()", "rotini.YAML()"}},
+		{"another user's home and an expansion", `  config_files:
+    - {name: app, path: ~bob/app.yaml}
+  flags:
+    - {name: root, identifiers: [--root], schema: {type: string, expand: [home]}}
 `, []string{"rotini.ConfigFiles()", "rotini.PathExpansion()", "rotini.YAML()"}},
 		{"object flag", `  flags:
     - {name: db, identifiers: [--db], schema: {$ref: "#/schemas/DB"}}

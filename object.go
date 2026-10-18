@@ -84,7 +84,7 @@ func secretObjectError(fd FlagDef, err error) error {
 	if !fd.Secret {
 		return err
 	}
-	if _, ok := errors.AsType[*WiringError](err); ok {
+	if errors.As(err, new(*WiringError)) {
 		return err
 	}
 	return fmt.Errorf("the value is not a valid %s", strings.TrimPrefix(fd.Type, "[]"))
@@ -347,7 +347,7 @@ func applyPatternMessages(schema string, err error) {
 			}
 			return
 		}
-		if ve, ok := errors.AsType[*recon.ValidationError](err); ok && ve.Rule == "pattern" {
+		if ve, ok := asError[*recon.ValidationError](err); ok && ve.Rule == "pattern" {
 			if msg, ok := msgs[wildcardIndexes(ve.Path.String())]; ok {
 				ve.Msg = msg
 			}
@@ -402,7 +402,7 @@ func collectValidation(err error, out *[]string) {
 		}
 		return
 	}
-	if ve, ok := errors.AsType[*recon.ValidationError](err); ok {
+	if ve, ok := asError[*recon.ValidationError](err); ok {
 		msg := ve.Msg
 		if strings.Contains(msg, "schema is false") {
 			*out = append(*out, fmt.Sprintf("unknown key %q", ve.Path.String()))

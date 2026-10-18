@@ -68,7 +68,7 @@ func wiringConformanceCases() []wiringCase {
 		{id: "WIRE-04", feature: "multicall", ctor: "Multicall()", def: multicall, argv0: "ls", fault: true},
 		// WIRE-05: a config_source flag's declared default names another user's home.
 		{
-			id: "WIRE-05", feature: "path-expansion", ctor: "PathExpansion()", def: expand,
+			id: "WIRE-05", feature: "user-homes", ctor: "UserHomes()", def: expand,
 			meta: InputSettings{ConfigFiles: []ConfigFile{{
 				Name: "app", Format: "yaml", PathFrom: &PathFromDef{Flag: "config"},
 			}}},

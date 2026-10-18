@@ -13,9 +13,15 @@ import (
 // through. It runs once every word is in, so a variadic argument followed by fixed ones knows
 // which words are its own.
 func (p *parsedInputs) expandGlobs(args []ArgDef, idx int, goos string) {
-	if cmp.Or(goos, runtime.GOOS) != "windows" || !hasGlobArg(args) {
+	if cmp.Or(goos, runtime.GOOS) != "windows" || windowsGlobs == nil || !hasGlobArg(args) {
 		return
 	}
+	windowsGlobs(p, args, idx)
+}
+
+// expandWindowsGlobs is expandGlobs on Windows. Only windowsGlobs refers to it, and only a
+// Windows build sets that, so a binary for another system doesn't link the expansion.
+func expandWindowsGlobs(p *parsedInputs, args []ArgDef, idx int) {
 	si := &p.scopes[idx]
 	spans := argSpans(args, len(si.args))
 	out := make([]string, 0, len(si.args))

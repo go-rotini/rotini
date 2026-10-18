@@ -39,7 +39,7 @@ var definition = rotini.Definition{
 		{Name: "version", Identifiers: []string{"--version"}, Summary: "print version", Type: "bool", ShortCircuit: true},
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool", ShortCircuit: true},
 	},
-	Inputs: reflect.TypeFor[RotiniInputs](),
+	Inputs: rotiniTypeOf((*RotiniInputs)(nil)),
 	Usage:  "rotini [flags] <command>",
 	Commands: []rotini.CommandDef{
 		{Name: "initialize",
@@ -59,13 +59,13 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "name", Type: "string", Required: true, Complete: rotini.Completion{Message: "<name>: the root command name written to the created spec file (expected binary name)"}},
 			},
-			Inputs: reflect.TypeFor[RotiniInitializeInputs](),
+			Inputs: rotiniTypeOf((*RotiniInitializeInputs)(nil)),
 			Usage:  "rotini initialize [flags] <name>",
 		},
 		{Name: "import",
 			Handler: "RotiniImport",
 			Summary: "build a rotini spec from an existing cli",
-			Inputs:  reflect.TypeFor[RotiniImportInputs](),
+			Inputs:  rotiniTypeOf((*RotiniImportInputs)(nil)),
 			Usage:   "rotini import <command>",
 			Commands: []rotini.CommandDef{
 				{Name: "cobra",
@@ -86,7 +86,7 @@ var definition = rotini.Definition{
 					Arguments: []rotini.ArgDef{
 						{Name: "package", Type: "string", Required: true, Complete: rotini.Completion{Message: "<package>: the Go package that builds the command tree, such as ./cmd"}},
 					},
-					Inputs: reflect.TypeFor[RotiniImportCobraInputs](),
+					Inputs: rotiniTypeOf((*RotiniImportCobraInputs)(nil)),
 					Usage:  "rotini import cobra [flags] <package>",
 				},
 				{Name: "kong",
@@ -107,7 +107,7 @@ var definition = rotini.Definition{
 					Arguments: []rotini.ArgDef{
 						{Name: "package", Type: "string", Required: true, Complete: rotini.Completion{Message: "<package>: the Go package that declares the grammar, such as ./cmd/acme"}},
 					},
-					Inputs: reflect.TypeFor[RotiniImportKongInputs](),
+					Inputs: rotiniTypeOf((*RotiniImportKongInputs)(nil)),
 					Usage:  "rotini import kong [flags] <package>",
 				},
 				{Name: "urfave",
@@ -128,7 +128,7 @@ var definition = rotini.Definition{
 					Arguments: []rotini.ArgDef{
 						{Name: "package", Type: "string", Required: true, Complete: rotini.Completion{Message: "<package>: the Go package that builds the command tree, such as ./cmd/acme"}},
 					},
-					Inputs: reflect.TypeFor[RotiniImportUrfaveInputs](),
+					Inputs: rotiniTypeOf((*RotiniImportUrfaveInputs)(nil)),
 					Usage:  "rotini import urfave [flags] <package>",
 				},
 			},
@@ -145,7 +145,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
 			},
-			Inputs: reflect.TypeFor[RotiniGenerateInputs](),
+			Inputs: rotiniTypeOf((*RotiniGenerateInputs)(nil)),
 			Usage:  "rotini generate [flags] [spec_file_path]",
 		},
 		{Name: "validate",
@@ -162,8 +162,8 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
 			},
-			Output: &rotini.OutputDef{Type: reflect.TypeFor[RotiniValidateOutput](), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.","properties":{"problems":{"description":"the problems, errors first, each as it is reported in text","items":{"properties":{"col":{"description":"the column, from 1","type":"integer"},"document":{"description":"the document the problem is in","enum":["spec","conf"],"type":"string"},"file":{"description":"the document's path","type":"string"},"hint":{"description":"what to do about it","type":"string"},"line":{"description":"the line, from 1","type":"integer"},"message":{"description":"what is wrong","type":"string"},"pointer":{"description":"the JSON pointer of the key at fault","type":"string"},"severity":{"description":"an error fails validation; a warning does not","enum":["error","warning"],"type":"string"}},"required":["severity","message"],"type":"object"},"type":"array"}},"required":["problems"],"type":"object"}`},
-			Inputs: reflect.TypeFor[RotiniValidateInputs](),
+			Output: &rotini.OutputDef{Type: rotiniTypeOf((*RotiniValidateOutput)(nil)), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"Every problem validate found. Exits 1 when any is an error, 0 when there are only warnings or none.","properties":{"problems":{"description":"the problems, errors first, each as it is reported in text","items":{"properties":{"col":{"description":"the column, from 1","type":"integer"},"document":{"description":"the document the problem is in","enum":["spec","conf"],"type":"string"},"file":{"description":"the document's path","type":"string"},"hint":{"description":"what to do about it","type":"string"},"line":{"description":"the line, from 1","type":"integer"},"message":{"description":"what is wrong","type":"string"},"pointer":{"description":"the JSON pointer of the key at fault","type":"string"},"severity":{"description":"an error fails validation; a warning does not","enum":["error","warning"],"type":"string"}},"required":["severity","message"],"type":"object"},"type":"array"}},"required":["problems"],"type":"object"}`},
+			Inputs: rotiniTypeOf((*RotiniValidateInputs)(nil)),
 			Usage:  "rotini validate [flags] [spec_file_path]",
 		},
 		{Name: "tree",
@@ -172,7 +172,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string", Complete: rotini.Completion{Message: "<spec_file_path>: path to the spec file (default the .rotini.spec.* in the working directory)"}},
 			},
-			Inputs:  reflect.TypeFor[RotiniTreeInputs](),
+			Inputs:  rotiniTypeOf((*RotiniTreeInputs)(nil)),
 			Usage:   "rotini tree [spec_file_path]",
 			Effects: &rotini.Effects{Kind: "read", Idempotent: new(true)},
 		},
@@ -182,7 +182,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "key", Type: "string", Required: true, Complete: rotini.Completion{Message: "<key>: the key path, such as command.flags.schema.from"}},
 			},
-			Inputs:  reflect.TypeFor[RotiniExplainInputs](),
+			Inputs:  rotiniTypeOf((*RotiniExplainInputs)(nil)),
 			Usage:   "rotini explain <key>",
 			Effects: &rotini.Effects{Kind: "read", Idempotent: new(true), OpenWorld: new(false)},
 		},
@@ -196,7 +196,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "files", Type: "[]string", Variadic: true, Complete: rotini.Completion{Kind: "file", Extensions: []string{"yaml", "yml"}, Message: "<files>: the files to format (default the spec in the working directory and its conf)"}},
 			},
-			Inputs: reflect.TypeFor[RotiniFmtInputs](),
+			Inputs: rotiniTypeOf((*RotiniFmtInputs)(nil)),
 			Usage:  "rotini fmt [flags] [files...]",
 		},
 		{Name: "help",
@@ -205,7 +205,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "command", Type: "[]string", Variadic: true, Complete: rotini.Completion{Kind: "command", Message: "<command>: name of the command to print help for"}},
 			},
-			Inputs: reflect.TypeFor[RotiniHelpInputs](),
+			Inputs: rotiniTypeOf((*RotiniHelpInputs)(nil)),
 			Usage:  "rotini help [command...]",
 		},
 		{Name: "version",
@@ -214,8 +214,8 @@ var definition = rotini.Definition{
 			Flags: []rotini.FlagDef{
 				{Name: "format", Identifiers: []string{"--format"}, Summary: "output format", Type: "string", Default: "text", Enum: []string{"text", "json"}, Complete: rotini.Completion{Message: "--format string: output format"}, Role: "machine-output"},
 			},
-			Output: &rotini.OutputDef{Type: reflect.TypeFor[RotiniVersionOutput](), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"The version and build of the rotini binary.","properties":{"go_version":{"description":"the Go toolchain that built the binary, such as go1.27.1","type":"string"},"module_path":{"description":"the main module path from the build info","type":"string"},"module_version":{"description":"the main module version from the build info: a release, a pseudo-version (with +dirty when built from a modified checkout), or (devel)","type":"string"},"version":{"description":"what rotini version prints, such as v1.4.0","type":"string"}},"required":["version","go_version"],"type":"object"}`},
-			Inputs: reflect.TypeFor[RotiniVersionInputs](),
+			Output: &rotini.OutputDef{Type: rotiniTypeOf((*RotiniVersionOutput)(nil)), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"The version and build of the rotini binary.","properties":{"go_version":{"description":"the Go toolchain that built the binary, such as go1.27.1","type":"string"},"module_path":{"description":"the main module path from the build info","type":"string"},"module_version":{"description":"the main module version from the build info: a release, a pseudo-version (with +dirty when built from a modified checkout), or (devel)","type":"string"},"version":{"description":"what rotini version prints, such as v1.4.0","type":"string"}},"required":["version","go_version"],"type":"object"}`},
+			Inputs: rotiniTypeOf((*RotiniVersionInputs)(nil)),
 			Usage:  "rotini version [flags]",
 		},
 		{Name: "completion",
@@ -224,7 +224,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "shell", Type: "string", Required: true, Enum: []string{"bash", "zsh", "fish", "powershell", "nushell"}, Complete: rotini.Completion{Message: "<shell>: the shell to print the script for"}},
 			},
-			Inputs: reflect.TypeFor[RotiniCompletionInputs](),
+			Inputs: rotiniTypeOf((*RotiniCompletionInputs)(nil)),
 			Usage:  "rotini completion <shell>",
 		},
 		{Name: "man",
@@ -236,7 +236,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "command", Type: "[]string", Variadic: true, Complete: rotini.Completion{Message: "<command>: the command whose page to print (default rotini itself)"}},
 			},
-			Inputs: reflect.TypeFor[RotiniManInputs](),
+			Inputs: rotiniTypeOf((*RotiniManInputs)(nil)),
 			Usage:  "rotini man [flags] [command...]",
 		},
 		{Name: "diff",
@@ -253,8 +253,8 @@ var definition = rotini.Definition{
 				{Name: "old", Type: "string", Required: true, Complete: rotini.Completion{Message: "<old>: the earlier contract: a file, git:<ref>[:<path>] or mod://<module>@<version>/<path>"}},
 				{Name: "new", Type: "string", Complete: rotini.Completion{Message: "<new>: the later contract (default the one built from the current spec and conf)"}},
 			},
-			Output: &rotini.OutputDef{Type: reflect.TypeFor[RotiniDiffOutput](), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"Every change between the contracts, the acknowledgements that matched none, and the counts.","properties":{"findings":{"description":"The changes, most severe first, then by where.","items":{"properties":{"accepted":{"description":"The diff.accept entry that acknowledges the change.","properties":{"reason":{"type":"string"}},"required":["reason"],"type":"object"},"message":{"type":"string"},"note":{"type":"string"},"rule":{"description":"The rule ID, which a diff.accept entry names.","type":"string"},"severity":{"enum":["breaking","possibly_breaking","expected","safe"],"type":"string"},"where":{"description":"The item in the old contract, written as on the command line.","type":"string"}},"required":["severity","rule","where","message"],"type":"object"},"type":"array"},"summary":{"description":"The changes by severity; an accepted change counts only as accepted.","properties":{"accepted":{"type":"integer"},"breaking":{"type":"integer"},"expected":{"type":"integer"},"possibly_breaking":{"type":"integer"},"safe":{"type":"integer"}},"required":["breaking","possibly_breaking","expected","safe","accepted"],"type":"object"},"unmatched_accepts":{"description":"The diff.accept entries that matched no change.","items":{"properties":{"reason":{"type":"string"},"rule":{"type":"string"},"where":{"type":"string"}},"required":["rule","where","reason"],"type":"object"},"type":"array"}},"required":["findings","unmatched_accepts","summary"],"type":"object"}`},
-			Inputs: reflect.TypeFor[RotiniDiffInputs](),
+			Output: &rotini.OutputDef{Type: rotiniTypeOf((*RotiniDiffOutput)(nil)), Schema: `{"$schema":"http://json-schema.org/draft-07/schema#","description":"Every change between the contracts, the acknowledgements that matched none, and the counts.","properties":{"findings":{"description":"The changes, most severe first, then by where.","items":{"properties":{"accepted":{"description":"The diff.accept entry that acknowledges the change.","properties":{"reason":{"type":"string"}},"required":["reason"],"type":"object"},"message":{"type":"string"},"note":{"type":"string"},"rule":{"description":"The rule ID, which a diff.accept entry names.","type":"string"},"severity":{"enum":["breaking","possibly_breaking","expected","safe"],"type":"string"},"where":{"description":"The item in the old contract, written as on the command line.","type":"string"}},"required":["severity","rule","where","message"],"type":"object"},"type":"array"},"summary":{"description":"The changes by severity; an accepted change counts only as accepted.","properties":{"accepted":{"type":"integer"},"breaking":{"type":"integer"},"expected":{"type":"integer"},"possibly_breaking":{"type":"integer"},"safe":{"type":"integer"}},"required":["breaking","possibly_breaking","expected","safe","accepted"],"type":"object"},"unmatched_accepts":{"description":"The diff.accept entries that matched no change.","items":{"properties":{"reason":{"type":"string"},"rule":{"type":"string"},"where":{"type":"string"}},"required":["rule","where","reason"],"type":"object"},"type":"array"}},"required":["findings","unmatched_accepts","summary"],"type":"object"}`},
+			Inputs: rotiniTypeOf((*RotiniDiffInputs)(nil)),
 			ExitStatus: []rotini.ExitStatusDef{
 				{Code: 0, Name: "ok", Summary: "no change at or above --fail-on"},
 				{Code: 1, Name: "error", Summary: "a contract, the spec or the conf could not be read"},
@@ -708,21 +708,35 @@ func Usage(path ...string) (string, error) {
 func rotiniCanonicalPath(path []string) string {
 	words := strings.Split(strings.Join(path, " "), " ")
 	for i, w := range words {
-		if name, ok := rotiniCanonicalPathAliases[strings.Join(words[:i], " ")][w]; ok {
+		if name, ok := rotiniCanonicalPathAlias(strings.Join(words[:i], " "), w); ok {
 			words[i] = name
 		}
 	}
 	return strings.Join(words, " ")
 }
 
-// rotiniCanonicalPathAliases maps each command's path of names to its sub-commands' aliases
-// and the names they stand for.
-var rotiniCanonicalPathAliases = map[string]map[string]string{
-	"": {"gen": "generate", "init": "initialize", "val": "validate"},
+// rotiniCanonicalPathAlias returns the name a sub-command's alias stands for, under the
+// command whose path of names is parent.
+func rotiniCanonicalPathAlias(parent, alias string) (string, bool) {
+	switch parent {
+	case "":
+		switch alias {
+		case "gen":
+			return "generate", true
+		case "init":
+			return "initialize", true
+		case "val":
+			return "validate", true
+		}
+	}
+	return "", false
 }
 
 // InputSettings is the generated descriptor the default input reader (rotini.InputReader) reads.
 var InputSettings = rotini.InputSettings{}
+
+// rotiniTypeOf is the reflect.Type of the type p points to.
+func rotiniTypeOf(p any) reflect.Type { return reflect.TypeOf(p).Elem() }
 
 // NewProgram builds the program from the generated command tree and handlers.
 func NewProgram() *rotini.Program {

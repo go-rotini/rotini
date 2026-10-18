@@ -248,15 +248,28 @@ func (rtx *Context) CheckOutput(v any) error {
 	return checkOutputSchema(name, schema, v, selected)
 }
 
-// writeOutput is WriteOutput and WriteOutputItem, and their To forms, writing to w.
+// writeOutput is WriteOutput and WriteOutputItem, and their To forms, writing to w. It is
+// instantiated once per output type, so all it does is hand v to writeOutputValue, which is not.
 func writeOutput[T any](rtx *Context, w io.Writer, v T, format string, render func(io.Writer, string, T) error, item bool) error {
+	var r func(io.Writer, string, any) error
+	if render != nil {
+		r = func(w io.Writer, format string, v any) error {
+			tv, _ := v.(T) // always v's own type; a nil interface value stays the zero T
+			return render(w, format, tv)
+		}
+	}
+	return writeOutputValue(rtx, w, v, reflect.TypeFor[T](), format, r, item)
+}
+
+// writeOutputValue is writeOutput for v of static type t.
+func writeOutputValue(rtx *Context, w io.Writer, v any, t reflect.Type, format string, render func(io.Writer, string, any) error, item bool) error {
 	cmd := rtx.invokedCommand()
 	name := rtx.commandName()
 	out := cmd.Output
 	if out != nil && out.Stream && !item {
 		return InternalError(fmt.Errorf("%s: declares a stream (output_stream); write each item with WriteOutputItem", name))
 	}
-	sel, selected := any(v).(Selection)
+	sel, selected := v.(Selection)
 	if selected && sel.from == nil {
 		return InternalError(fmt.Errorf("%s: the output written is a zero Selection; make one with SelectFields", name))
 	}
@@ -270,18 +283,15 @@ func writeOutput[T any](rtx *Context, w io.Writer, v T, format string, render fu
 		}
 		schema = kind.Schema
 	case out.Tag != "":
-		kind, tagged, err := tagItem(name, out, any(v))
+		kind, tagged, err := tagItem(name, out, v)
 		if err != nil {
 			return err
 		}
-		if tv, ok := tagged.(T); ok { // always: tagged has v's own type
-			v = tv
-		}
+		v = tagged // always v's own type
 		schema = kind.Schema
 	default:
-		t := reflect.TypeFor[T]()
 		if t.Kind() == reflect.Interface {
-			t = reflect.TypeOf(any(v))
+			t = reflect.TypeOf(v)
 		}
 		if selected {
 			t = sel.from
@@ -304,7 +314,7 @@ func writeOutput[T any](rtx *Context, w io.Writer, v T, format string, render fu
 		if errors.Is(err, errNoRenderer) {
 			return InternalError(fmt.Errorf("%s: no renderer was passed for the output format %q", name, format))
 		}
-		if rf, ok := errors.AsType[rendererError](err); ok {
+		if rf, ok := asError[rendererError](err); ok {
 			return rf.err // the handler's own error, as it returned it
 		}
 		return InternalError(fmt.Errorf("%s: write output as %s: %w", name, format, err))
@@ -323,7 +333,7 @@ type rendererError struct{ err error }
 func (r rendererError) Error() string { return r.err.Error() }
 
 // encodeOutput serializes v in format into w.
-func encodeOutput[T any](w *bytes.Buffer, v T, format string, render func(io.Writer, string, T) error, item bool) error {
+func encodeOutput(w *bytes.Buffer, v any, format string, render func(io.Writer, string, any) error, item bool) error {
 	switch format {
 	case "json":
 		var b []byte
@@ -351,7 +361,7 @@ func encodeOutput[T any](w *bytes.Buffer, v T, format string, render func(io.Wri
 		if item {
 			return errors.New("toml cannot be written as a stream")
 		}
-		var doc any = v
+		doc := v
 		if s, ok := doc.(Selection); ok {
 			doc = nativeNumbers(s.data) // the toml encoder doesn't ask the top-level value
 		}

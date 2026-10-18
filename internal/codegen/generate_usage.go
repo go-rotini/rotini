@@ -85,7 +85,8 @@ func treeHasAliases(nodes []rnode) bool {
 
 // canonicalPathDecl renders the function the path resolvers switch on when the tree has
 // aliases, and its table: for each command, by its path of names, its sub-commands' aliases
-// and the names they stand for. It is "" for a tree without aliases.
+// and the names they stand for. The table is a switch rather than a map, so a program builds
+// nothing at package init for it. It is "" for a tree without aliases.
 func canonicalPathDecl(tree []rnode) string {
 	if !treeHasAliases(tree) {
 		return ""
@@ -114,22 +115,20 @@ func canonicalPathDecl(tree []rnode) string {
 	b.WriteString("func " + canonicalPathFunc + "(path []string) string {\n")
 	b.WriteString("\twords := strings.Split(strings.Join(path, \" \"), \" \")\n")
 	b.WriteString("\tfor i, w := range words {\n")
-	b.WriteString("\t\tif name, ok := " + canonicalPathFunc + "Aliases[strings.Join(words[:i], \" \")][w]; ok {\n")
+	b.WriteString("\t\tif name, ok := " + canonicalPathFunc + "Alias(strings.Join(words[:i], \" \"), w); ok {\n")
 	b.WriteString("\t\t\twords[i] = name\n\t\t}\n\t}\n")
 	b.WriteString("\treturn strings.Join(words, \" \")\n}\n\n")
-	b.WriteString("// " + canonicalPathFunc + "Aliases maps each command's path of names to its sub-commands' aliases\n")
-	b.WriteString("// and the names they stand for.\n")
-	b.WriteString("var " + canonicalPathFunc + "Aliases = map[string]map[string]string{\n")
+	b.WriteString("// " + canonicalPathFunc + "Alias returns the name a sub-command's alias stands for, under the\n")
+	b.WriteString("// command whose path of names is parent.\n")
+	b.WriteString("func " + canonicalPathFunc + "Alias(parent, alias string) (string, bool) {\n")
+	b.WriteString("\tswitch parent {\n")
 	for _, parent := range slices.Sorted(maps.Keys(table)) {
-		fmt.Fprintf(&b, "\t%q: {", parent)
-		for i, a := range slices.Sorted(maps.Keys(table[parent])) {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			fmt.Fprintf(&b, "%q: %q", a, table[parent][a])
+		fmt.Fprintf(&b, "\tcase %q:\n\t\tswitch alias {\n", parent)
+		for _, a := range slices.Sorted(maps.Keys(table[parent])) {
+			fmt.Fprintf(&b, "\t\tcase %q:\n\t\t\treturn %q, true\n", a, table[parent][a])
 		}
-		b.WriteString("},\n")
+		b.WriteString("\t\t}\n")
 	}
-	b.WriteString("}\n")
+	b.WriteString("\t}\n\treturn \"\", false\n}\n")
 	return b.String()
 }

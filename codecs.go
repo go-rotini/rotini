@@ -55,10 +55,10 @@ func YAML() Feature {
 				var v any
 				if err := yaml.UnmarshalWithOptions(data, &v, yaml.WithDisallowDuplicateKey()); err != nil {
 					wrapped := fmt.Errorf("decode yaml: %w", err)
-					if e, ok := errors.AsType[*yaml.DuplicateKeyError](err); ok {
+					if e, ok := asError[*yaml.DuplicateKeyError](err); ok {
 						return nil, duplicateKeyError(wrapped, e.Key, e.Pos.Line, e.Pos.Column)
 					}
-					if e, ok := errors.AsType[*yaml.SyntaxError](err); ok {
+					if e, ok := asError[*yaml.SyntaxError](err); ok {
 						return nil, &docError{err: wrapped, line: e.Pos.Line, col: e.Pos.Column, msg: e.Message}
 					}
 					return nil, wrapped
@@ -90,10 +90,10 @@ func JSONC() Feature {
 				var v any
 				if err := jsonc.Unmarshal(data, &v); err != nil {
 					wrapped := fmt.Errorf("decode jsonc: %w", err)
-					if e, ok := errors.AsType[*jsonc.DuplicateKeyError](err); ok {
+					if e, ok := asError[*jsonc.DuplicateKeyError](err); ok {
 						return nil, duplicateKeyError(wrapped, e.Key, e.Pos.Line, e.Pos.Column)
 					}
-					if e, ok := errors.AsType[*jsonc.SyntaxError](err); ok {
+					if e, ok := asError[*jsonc.SyntaxError](err); ok {
 						return nil, &docError{err: wrapped, line: e.Pos.Line, col: e.Pos.Column, msg: e.Message}
 					}
 					return nil, wrapped
@@ -195,10 +195,10 @@ func newFileSource(fs *featureSet, path string, c *codecEntry, opts ...recon.Fil
 // parsePosition is the 1-indexed line and column at which a document failed to decode, read
 // from a [*recon.ParseError] or a [recon.PositionError] in err's chain.
 func parsePosition(err error) (line, col int, ok bool) {
-	if pe, isParse := errors.AsType[*recon.ParseError](err); isParse && pe.Position.Line > 0 {
+	if pe, isParse := asError[*recon.ParseError](err); isParse && pe.Position.Line > 0 {
 		return pe.Position.Line, pe.Position.Column, true
 	}
-	if e, isPos := errors.AsType[recon.PositionError](err); isPos {
+	if e, isPos := asError[recon.PositionError](err); isPos {
 		line, col = e.Position()
 		return line, col, line > 0
 	}
@@ -209,10 +209,10 @@ func parsePosition(err error) (line, col int, ok bool) {
 // [*recon.ParseError] or a [recon.PositionError] in err's chain, else from more, else err's
 // own text.
 func parseMessage(err error, more func(error) (string, bool)) string {
-	if e, ok := errors.AsType[*recon.ParseError](err); ok && e.Msg != "" {
+	if e, ok := asError[*recon.ParseError](err); ok && e.Msg != "" {
 		return e.Msg
 	}
-	if e, ok := errors.AsType[recon.PositionError](err); ok {
+	if e, ok := asError[recon.PositionError](err); ok {
 		return e.Message()
 	}
 	if more != nil {
@@ -278,10 +278,10 @@ func duplicateKeyError(err error, key string, line, col int) error {
 
 // jsonMessage reads an encoding/json error's own text, as [parseMessage]'s more.
 func jsonMessage(err error) (string, bool) {
-	if e, ok := errors.AsType[*json.SyntaxError](err); ok {
+	if e, ok := asError[*json.SyntaxError](err); ok {
 		return e.Error(), true
 	}
-	if e, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
+	if e, ok := asError[*json.UnmarshalTypeError](err); ok {
 		return e.Error(), true
 	}
 	return "", false

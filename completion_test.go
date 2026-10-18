@@ -37,7 +37,7 @@ func TestComplete_discoversPlugins(t *testing.T) {
 		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 
-	got := complete(def, []string{""}, nil, nil)
+	got := completeNames(t, def, "")
 	if !contains(got, "foo") {
 		t.Errorf("discovered plugin %q missing from %v", "foo", got)
 	}
@@ -53,7 +53,7 @@ func TestComplete_discoversPlugins(t *testing.T) {
 
 	// Hidden discovery dispatches but lists nothing.
 	def.PluginDiscovery.Hidden = true
-	if hidden := complete(def, []string{""}, nil, nil); contains(hidden, "foo") {
+	if hidden := completeNames(t, def, ""); contains(hidden, "foo") {
 		t.Errorf("hidden discovery should not list plugins: %v", hidden)
 	}
 }
@@ -1048,5 +1048,39 @@ func TestComplete_enumIgnoreCase(t *testing.T) {
 		if got := complete(def, c.words, nil, nil); !reflect.DeepEqual(got, c.want) && (len(got) > 0 || len(c.want) > 0) {
 			t.Errorf("complete(%q) = %q, want %q", c.words, got, c.want)
 		}
+	}
+}
+
+// completeNames completes words through a program wired with every feature, returning the
+// candidate values without descriptions or directives.
+func completeNames(t *testing.T, def Definition, words ...string) []string {
+	t.Helper()
+	var names []string
+	for line := range strings.SplitSeq(completeWire(t, def, nil, nil, words...), "\n") {
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		value, _, _ := strings.Cut(line, "\t")
+		names = append(names, value)
+	}
+	return names
+}
+
+// A program that doesn't wire Plugins lists no discovered plugins in completion.
+func TestComplete_discoveryNeedsPluginsFeature(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, progFile("acme-foo")), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	def := Definition{Name: "acme", Handler: "App", PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: dir}
+	var out bytes.Buffer
+	if _, err := NewWiredProgram(def, nil).WithStdout(&out).Complete([]string{""}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "foo") {
+		t.Errorf("completion listed a discovered plugin without the plugins feature: %q", out.String())
+	}
+	if got := completeNames(t, def, ""); !contains(got, "foo") {
+		t.Errorf("completion with every feature should list foo: %v", got)
 	}
 }

@@ -286,12 +286,12 @@ func (v *osView) expandTilde(p string) (string, error) {
 		return home + p[1:], nil
 	}
 	name := p[1:end]
-	expand := v.clockRef().features().expand
-	if expand == nil || expand.lookupUser == nil {
-		return "", missingFeature("path-expansion", "PathExpansion()",
+	lookupUser := v.clockRef().features().lookupUser
+	if lookupUser == nil {
+		return "", missingFeature("user-homes", "UserHomes()",
 			fmt.Sprintf("path %s names another user's home", quotePath(p)))
 	}
-	home, err := expand.lookupUser(name)
+	home, err := lookupUser(name)
 	if err != nil {
 		return "", fmt.Errorf("cannot expand %s: no such user", quotePath("~"+name))
 	}
