@@ -35,8 +35,10 @@ stdout '^kubectl-hello 0\.0\.0$'
 exec ./kubectl-hello$exe -o json
 stdout 'Output:json'
 
-# Run as kubectl_complete-hello, the same binary answers kubectl's completion request.
-cp kubectl-hello$exe kubectl_complete-hello$exe
+# Run as kubectl_complete-hello, the same binary answers kubectl's completion request. It's
+# built, not copied: a copy written by the test process can fail to run on Linux with "text
+# file busy" while a parallel script forks.
+exec go build -o kubectl_complete-hello$exe ./cmd/kubectl-hello
 exec ./kubectl_complete-hello$exe -o ''
 stdout '^text$'
 stdout '^json$'
