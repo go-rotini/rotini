@@ -411,6 +411,7 @@ func URLValues() Feature
 func UniqueItems() Feature
 func UnsetConfigValue(rtx *Context, file, key string, opts ...ConfigWriteOption) error
 func UsageError(err error) error
+func UserHomes() Feature
 func WithDependency[T any](dep Dependency[T], value T) Option
 func YAML() Feature
 method ArgValueCompleter.CompleteArgValue

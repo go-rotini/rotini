@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 )
 
@@ -33,7 +34,7 @@ var (
 const skillLineLimit = 500
 
 // skillName is the Agent Skills rule for a skill's name.
-var skillName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+var skillName = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`) })
 
 // templateProgramData is what the whole-program page templates render.
 type templateProgramData struct {
@@ -176,7 +177,7 @@ func renderSkill(p *program, f *Feature, a *agentProgram, tmpl *template.Templat
 	if name == "" {
 		name = strings.Trim(regexp.MustCompile(`-+`).ReplaceAllString(strings.ToLower(strings.ReplaceAll(a.doc.Name, "_", "-")), "-"), "-")
 	}
-	if len(name) > 64 || !skillName.MatchString(name) {
+	if len(name) > 64 || !skillName().MatchString(name) {
 		return nil, nil, fmt.Errorf("the skill name %q isn't valid: use 1 to 64 lowercase letters, digits and single hyphens; set `name`", name)
 	}
 	refs := map[string]string{}

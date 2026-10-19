@@ -261,7 +261,7 @@ func parseMACValue(s string) (reflect.Value, error) {
 func parseRegexpValue(s string) (reflect.Value, error) {
 	re, err := regexp.Compile(s)
 	if err != nil {
-		if se, ok := errors.AsType[*syntax.Error](err); ok {
+		if se, ok := asError[*syntax.Error](err); ok {
 			return reflect.Value{}, fmt.Errorf("%s: `%s`", se.Code, se.Expr)
 		}
 		return reflect.Value{}, fmt.Errorf("want a regular expression: %w", err)

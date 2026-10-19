@@ -1,7 +1,6 @@
 package rotini
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -132,7 +131,7 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 		if waivable {
 			return nil, "", nil
 		}
-		if mistake, ok := errors.AsType[authorMistake](err); ok {
+		if mistake, ok := asError[authorMistake](err); ok {
 			return nil, "", internalBind(channelArgument, ad.Name, fmt.Sprintf("%s: %s", label, mistake), err)
 		}
 		return nil, "", usageBind(channelArgument, ad.Name, fmt.Sprintf("%s: %s", label, coerceMessage(err, ad.Secret))+fromSource(origin), err)

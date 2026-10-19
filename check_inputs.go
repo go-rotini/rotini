@@ -308,7 +308,7 @@ func checkTypedValues(v reflect.Value, chain []Command, anchor int, include func
 					return
 				}
 				if ad, ok := findArgDef(frame.Arguments, logical); ok {
-					err = scoped(dash.typed(checkTypedArg(ad, f, view.base()), ad.Type, "<"+ad.Name+">", "", f), frame.Name, "")
+					err = scoped(dash.typed(checkTypedArg(fs, ad, f, view.base()), ad.Type, "<"+ad.Name+">", "", f), frame.Name, "")
 				}
 			})
 		}
@@ -364,7 +364,7 @@ func checkTypedFlag(fs *featureSet, fd FlagDef, f reflect.Value, dir string) err
 	}
 	if fd.ObjectSchema != "" {
 		if fd.UniqueItems && isArrayType(fd.Type) {
-			if err := checkUniqueTyped(label, elems, fd.Secret); err != nil {
+			if err := checkUniqueTypedVia(fs, label, elems, fd.Secret); err != nil {
 				return err
 			}
 		}
@@ -376,11 +376,11 @@ func checkTypedFlag(fs *featureSet, fd FlagDef, f reflect.Value, dir string) err
 			return enum.violation(label, label, s, fd.Secret)
 		}
 	}
-	return checkTypedConstraints(label, fd.Type, fd.Constraints, count, elems, fd.Secret, dir)
+	return checkTypedConstraints(fs, label, fd.Type, fd.Constraints, count, elems, fd.Secret, dir)
 }
 
 // checkTypedArg applies an argument's value rules to its typed field.
-func checkTypedArg(ad ArgDef, f reflect.Value, dir string) error {
+func checkTypedArg(fs *featureSet, ad ArgDef, f reflect.Value, dir string) error {
 	label := "<" + ad.Name + ">"
 	elems, count, ok := typedElems(f)
 	if !ok {
@@ -392,7 +392,7 @@ func checkTypedArg(ad ArgDef, f reflect.Value, dir string) error {
 			return enum.violation(label, "", s, ad.Secret)
 		}
 	}
-	return checkTypedConstraints(label, ad.Type, ad.Constraints, count, elems, ad.Secret, dir)
+	return checkTypedConstraints(fs, label, ad.Type, ad.Constraints, count, elems, ad.Secret, dir)
 }
 
 // checkTypedChannelField applies an environment or config field's tag-declared enum and
@@ -428,7 +428,7 @@ func checkTypedChannelField(channel string, tag reflect.StructTag, f reflect.Val
 	if isPathType(typ) && len(elems) == 1 && typedText(elems[0]) == "" {
 		typ = channelGoType(f.Type()) // an empty path is no path: nothing to check
 	}
-	return checkTypedConstraints(label, typ, c, count, elems, secret, view.base())
+	return checkTypedConstraints(view.clockRef().features(), label, typ, c, count, elems, secret, view.base())
 }
 
 // checkTypedChannelPresence reports a required environment, config or stdin input the
@@ -563,14 +563,14 @@ func toDocument(v any) (map[string]any, error) {
 
 // checkTypedConstraints is [checkConstraints] over typed values: count is the collection's
 // size (for item-count bounds) and elems its values, each checked by the input's element type.
-func checkTypedConstraints(label, typ string, c Constraints, count int, elems []reflect.Value, secret bool, dir string) error {
+func checkTypedConstraints(fs *featureSet, label, typ string, c Constraints, count int, elems []reflect.Value, secret bool, dir string) error {
 	if isArrayType(typ) || isMapType(typ) {
 		if err := checkItemCount(label, c, count); err != nil {
 			return err
 		}
 	}
 	if c.UniqueItems && isArrayType(typ) {
-		if err := checkUniqueTyped(label, elems, secret); err != nil {
+		if err := checkUniqueTypedVia(fs, label, elems, secret); err != nil {
 			return err
 		}
 	}
@@ -589,11 +589,11 @@ func checkTypedConstraints(label, typ string, c Constraints, count int, elems []
 			}
 		case isPathType(elem):
 			s := typedText(e)
-			if err = checkStringBounds(label, c, s, secret); err == nil {
+			if err = checkStringBounds(fs, label, c, s, secret); err == nil {
 				err = checkPathExists(label, elem, s, dir)
 			}
 		case elem == "string":
-			err = checkStringBounds(label, c, typedText(e), secret)
+			err = checkStringBounds(fs, label, c, typedText(e), secret)
 		}
 		if err != nil {
 			return err
@@ -746,7 +746,7 @@ func checkTypedRecords(fs *featureSet, records reflect.Value, schemas map[string
 			return internalBind(channelStdin, "", "could not encode the stdin payload", err)
 		}
 		if err := fs.schemas.document(js, raw); err != nil {
-			if ie, ok := errors.AsType[*InputError](err); ok {
+			if ie, ok := asError[*InputError](err); ok {
 				return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin record %d: %s", i+1, ie.Msg), Cause: ie.Cause, usage: ie.usage}
 			}
 			return err
@@ -767,4 +767,16 @@ func typedFloat(e reflect.Value) float64 {
 		return e.Float()
 	}
 	return f
+}
+
+// checkUniqueTypedVia enforces [Constraints.UniqueItems] on typed values through the run's
+// unique-items hooks, so a program that doesn't wire UniqueItems doesn't link the comparison.
+func checkUniqueTypedVia(fs *featureSet, label string, elems []reflect.Value, secret bool) error {
+	if len(elems) < 2 {
+		return nil
+	}
+	if fs.unique == nil {
+		return missingFeature("unique-items", "UniqueItems()", "input "+label+" declares unique items")
+	}
+	return fs.unique.typed(label, elems, secret)
 }

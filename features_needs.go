@@ -27,6 +27,7 @@ type needs struct {
 	plugins, respFiles, chdir, multicall                bool
 	stdin                                               []string
 	env, config, profiles, envFiles, fallbacks, expand  bool
+	homes                                               bool // a path may name another user's home ("~bob")
 	objects, schemas                                    bool
 	json, yaml, toml, jsonc, dotenv                     bool
 	bounds, unique, patterns, groups, deps, streamPaths bool
@@ -59,6 +60,7 @@ func (n *needs) features() []Feature {
 	add(n.envFiles, EnvFiles)
 	add(n.fallbacks, Fallbacks)
 	add(n.expand, PathExpansion)
+	add(n.homes && !n.expand, UserHomes) // PathExpansion includes UserHomes
 	add(n.objects, ObjectFlags)
 	add(n.schemas, Schemas)
 	add(n.json, JSON)
@@ -122,7 +124,7 @@ func (n *needs) command(flags []FlagDef, args []ArgDef, groups []FlagGroup, deps
 		n.plugins = true
 	}
 	if namesOtherHome(pluginPath) {
-		n.expand = true
+		n.homes = true
 	}
 	n.groups = n.groups || len(groups) > 0
 	n.deps = n.deps || len(deps) > 0
@@ -199,11 +201,11 @@ func (n *needs) settings(meta InputSettings) {
 			n.schemas = true
 		}
 		if namesOtherHome(f.Path) || (f.Discover != nil && namesOtherHome(f.Discover.File)) {
-			n.expand = true
+			n.homes = true
 		}
 		// A path chosen at run time may name another user's home ("~bob/app.yaml").
 		if f.PathFrom != nil {
-			n.expand = true
+			n.homes = true
 		}
 		for _, k := range f.Keys {
 			n.declared(k.Type, k.Constraints) // a config write checks a key as the flag it is

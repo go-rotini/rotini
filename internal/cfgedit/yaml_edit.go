@@ -179,7 +179,9 @@ func (ed *yamlEdit) replace(m *YAMLNode, p *YAMLPair, v any) ([]byte, error) {
 			}
 		}
 		switch {
-		case old.Empty:
+		case old.Empty, m.Flow && old.Start == p.Colon+1:
+			// A value right after a flow mapping's colon parsed only because it started with a
+			// flow indicator ({a:[]}); without a space, {a:"0"} reads as one plain key.
 			return splice(ed.src, old.Start, old.End, " "+text), nil
 		case old.Kind == YAMLSequence && !old.Flow:
 			return splice(ed.src, p.Colon+1, old.End, " "+text), nil

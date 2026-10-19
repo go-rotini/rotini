@@ -129,6 +129,9 @@ type {{.Prefix}}Inputs struct {
 {{- with .InputSettings}}
 {{.}}
 {{end}}
+// rotiniTypeOf is the reflect.Type of the type p points to.
+func rotiniTypeOf(p any) reflect.Type { return reflect.TypeOf(p).Elem() }
+
 // NewProgram builds the program from the generated command tree and handlers.
 func NewProgram() *rotini.Program {
 	return NewProgramWith(&handlers{})

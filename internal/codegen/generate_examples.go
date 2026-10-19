@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 
 	"github.com/go-rotini/toml"
@@ -430,7 +431,7 @@ func yamlExample(b *strings.Builder, n *exampleNode, depth int) {
 
 // yamlKey writes a key as YAML needs it.
 func yamlKey(k string) string {
-	if bareKey.MatchString(k) && !strings.HasPrefix(k, "-") {
+	if bareKey().MatchString(k) && !strings.HasPrefix(k, "-") {
 		return k
 	}
 	return strconv.Quote(k)
@@ -476,7 +477,7 @@ func jsonInline(v any) string {
 }
 
 // bareKey matches a key YAML and TOML take unquoted.
-var bareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var bareKey = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9_-]+$`) })
 
 // tomlExample writes a TOML example: the keys of each table, then its sub-tables.
 func tomlExample(b *strings.Builder, n *exampleNode, at []string) {
@@ -505,7 +506,7 @@ func tomlExample(b *strings.Builder, n *exampleNode, at []string) {
 
 // tomlKey writes a key as TOML needs it.
 func tomlKey(k string) string {
-	if bareKey.MatchString(k) {
+	if bareKey().MatchString(k) {
 		return k
 	}
 	return strconv.Quote(k)
@@ -583,14 +584,14 @@ func dotenvValue(v any) string {
 	default:
 		s = defaultString(v)
 	}
-	if dotenvBare.MatchString(s) {
+	if dotenvBare().MatchString(s) {
 		return s
 	}
 	return strconv.Quote(s)
 }
 
 // dotenvBare matches a dotenv value that needs no quotes.
-var dotenvBare = regexp.MustCompile(`^[A-Za-z0-9_./:@%+,-]*$`)
+var dotenvBare = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z0-9_./:@%+,-]*$`) })
 
 // ─── the .env example ─────────────────────────────────────────────────────────.
 

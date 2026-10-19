@@ -12,15 +12,15 @@ func TestCompose_recordsInputsTypes(t *testing.T) {
 	// gofmt aligns the literal's fields, so compare with runs of space collapsed.
 	root := strings.Join(strings.Fields(composeModuleStaged(t, transitiveTree())["internal/cmd/root/zz_root.go"]), " ")
 	for _, want := range []string{
-		"Inputs: reflect.TypeFor[RootInputs](),",
-		"Inputs: reflect.TypeFor[childcli.ChildInputs](),",
-		"Inputs: reflect.TypeFor[grandcli.GrandInputs](),",
+		"Inputs: rotiniTypeOf((*RootInputs)(nil)),",
+		"Inputs: rotiniTypeOf((*childcli.ChildInputs)(nil)),",
+		"Inputs: rotiniTypeOf((*grandcli.GrandInputs)(nil)),",
 	} {
 		if !strings.Contains(root, want) {
 			t.Errorf("root Definition lacks %q:\n%s", want, root)
 		}
 	}
-	if n := strings.Count(root, "Inputs: reflect.TypeFor["); n != 3 {
+	if n := strings.Count(root, "Inputs: rotiniTypeOf((*"); n != 3 {
 		t.Errorf("root Definition records %d inputs types, want 3:\n%s", n, root)
 	}
 	if !strings.Contains(root, `"reflect"`) {
@@ -43,7 +43,7 @@ func TestInputsTypeLiteral(t *testing.T) {
 	if got := inputsTypeLiteral(""); got != "" {
 		t.Errorf("no type: %q", got)
 	}
-	if got := inputsTypeLiteral("buildcli.BuildInputs"); got != "Inputs: reflect.TypeFor[buildcli.BuildInputs](),\n" {
+	if got := inputsTypeLiteral("buildcli.BuildInputs"); got != "Inputs: rotiniTypeOf((*buildcli.BuildInputs)(nil)),\n" {
 		t.Errorf("got %q", got)
 	}
 }
@@ -80,9 +80,9 @@ command:
 `
 	root := strings.Join(strings.Fields(composeModuleStaged(t, files)["internal/cmd/root/zz_root.go"]), " ")
 	for _, want := range []string{
-		"Output: &rotini.OutputDef{Type: reflect.TypeFor[childcli.ChildOutput]()",
-		"Output: &rotini.OutputDef{Type: reflect.TypeFor[childcli.ChildListOutput](), Schema: `",
-		"Output: &rotini.OutputDef{Type: reflect.TypeFor[grandcli.GrandOutput]()",
+		"Output: &rotini.OutputDef{Type: rotiniTypeOf((*childcli.ChildOutput)(nil))",
+		"Output: &rotini.OutputDef{Type: rotiniTypeOf((*childcli.ChildListOutput)(nil)), Schema: `",
+		"Output: &rotini.OutputDef{Type: rotiniTypeOf((*grandcli.GrandOutput)(nil))",
 		`"id":{"type":"string"}`,
 		"Stream: true",
 	} {

@@ -78,8 +78,8 @@ func TestOutputKinds_goTypes(t *testing.T) {
 		"func (Result) isAcmeWatchOutput() {}",
 		"// How far the run has got.\ntype AcmeWatchOutputProgress struct {",
 		"Kind string `json:\"kind\"`",
-		"Tag: \"kind\", Kinds: []rotini.OutputKind{{Value: \"progress\", Type: reflect.TypeFor[AcmeWatchOutputProgress](), Schema: `",
-		"{Value: \"result\", Type: reflect.TypeFor[Result](), Schema: `",
+		"Tag: \"kind\", Kinds: []rotini.OutputKind{{Value: \"progress\", Type: rotiniTypeOf((*AcmeWatchOutputProgress)(nil)), Schema: `",
+		"{Value: \"result\", Type: rotiniTypeOf((*Result)(nil)), Schema: `",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated code lacks %q", want)

@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os/exec"
 )
@@ -79,7 +78,7 @@ func (p *Program) chdir(fs *featureSet, rtx *Context, chain []Command, argv []st
 // recordChdirError records a chdir failure: a [*WiringError] is a fault, anything else the
 // user's to fix.
 func recordChdirError(rtx *Context, err error) {
-	if we, ok := errors.AsType[*WiringError](err); ok {
+	if we, ok := asError[*WiringError](err); ok {
 		rtx.recordFault(asFault(we))
 		return
 	}

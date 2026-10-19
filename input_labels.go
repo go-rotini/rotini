@@ -145,7 +145,7 @@ func (l channelLabels) bind(channel string, err error) error {
 // its field's type cannot hold is reported as the command line reports one, with the value
 // (redacted for a secret input), why it doesn't fit, and where it came from.
 func (l channelLabels) bindStruct(channel string, err error, reg *recon.Registry, s reflect.Value) error {
-	if ce, ok := errors.AsType[*recon.CoercionError](err); ok && reg != nil && l.view != nil {
+	if ce, ok := asError[*recon.CoercionError](err); ok && reg != nil && l.view != nil {
 		path := ce.Path.String()
 		if msg, ok := l.valueProblem(reg, s, path, ce.Secret); ok {
 			return usageBind(channel, path, l.name(channel, path)+": "+msg+l.origin(ce.Source), err)
@@ -173,7 +173,7 @@ func (l channelLabels) valueProblem(reg *recon.Registry, s reflect.Value, path s
 		ts := tagTimeSpec(f.Tag)
 		ts.clock = l.view.clockRef()
 		cerr := coerceTime(reflect.New(f.Type).Elem(), channelTexts(val, f.Tag, f.Type), ts)
-		if _, ok := errors.AsType[*coerceError](cerr); !ok {
+		if !errors.As(cerr, new(*coerceError)) {
 			return "", false
 		}
 		return coerceMessage(cerr, secret), true

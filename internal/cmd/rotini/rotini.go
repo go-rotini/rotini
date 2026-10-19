@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"sync"
 
 	"github.com/go-rotini/rotini"
 )
@@ -16,11 +17,13 @@ var (
 	readBuildInfo = debug.ReadBuildInfo
 	// releaseVersionRe matches a full semantic version, anchored at both ends, and captures
 	// its X.Y.Z.
-	releaseVersionRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	releaseVersionRe = sync.OnceValue(func() *regexp.Regexp {
+		return regexp.MustCompile(`^v?(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	})
 	// pseudoVersionRe matches a Go pseudo-version tail: a 14-digit UTC timestamp and a 12-hex
 	// commit prefix, after '-' (v0.0.0-20260901233311-3ef400c2a629) or '.'
 	// (v1.3.0-0.20260901233311-3ef400c2a629).
-	pseudoVersionRe = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(?:\+[0-9A-Za-z.-]+)?$`)
+	pseudoVersionRe = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(?:\+[0-9A-Za-z.-]+)?$`) })
 )
 
 var _ rotini.Handler = (*rotiniHandler)(nil)
@@ -35,10 +38,10 @@ type rotiniHandler struct {
 // "(devel)", a Go pseudo-version, or anything else that is not a semantic version.
 func releaseVersion(v string) string {
 	v = strings.TrimSpace(v)
-	if v == "" || v == "(devel)" || pseudoVersionRe.MatchString(v) {
+	if v == "" || v == "(devel)" || pseudoVersionRe().MatchString(v) {
 		return ""
 	}
-	if m := releaseVersionRe.FindStringSubmatch(v); m != nil {
+	if m := releaseVersionRe().FindStringSubmatch(v); m != nil {
 		return m[1]
 	}
 	return ""

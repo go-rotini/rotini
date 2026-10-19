@@ -73,7 +73,7 @@ func TestExpandValue(t *testing.T) {
 }
 
 func TestExpandValue_homeMissing(t *testing.T) {
-	_, err := expandValueFor("linux", "~/x", expandRule{home: true}, newOSView([]string{}, "", "linux"), allFeatures().expand.lookupUser)
+	_, err := expandValueFor("linux", "~/x", expandRule{home: true}, newOSView([]string{}, "", "linux"), allFeatures().lookupUser)
 	want := `cannot expand "~/x": $HOME is not defined` // home() follows the running OS
 	if runtime.GOOS == "windows" {
 		want = `cannot expand "~/x": %userprofile% is not defined`
@@ -88,7 +88,7 @@ func TestExpandValue_currentUser(t *testing.T) {
 	if err != nil || u.Username == "" || u.HomeDir == "" {
 		t.Skip("no current user")
 	}
-	got, err := expandValueFor("linux", "~"+u.Username+"/x", expandRule{home: true}, newOSView(nil, "", "linux"), allFeatures().expand.lookupUser)
+	got, err := expandValueFor("linux", "~"+u.Username+"/x", expandRule{home: true}, newOSView(nil, "", "linux"), allFeatures().lookupUser)
 	if err != nil || got != u.HomeDir+"/x" {
 		t.Errorf("~%s/x = %q, %v", u.Username, got, err)
 	}

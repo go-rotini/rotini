@@ -449,7 +449,7 @@ func bindFlagFallback(reg fallbackLookup, field reflect.Value, tag reflect.Struc
 	vals = flagEnum(&def).canonical(vals)
 	waivable := rd.waiveFiles && source != osEnvSourceName
 	if vals, err = expandFallbackWired(vals, tag, source, fallbackLabel(chain, idx, name), rd); err != nil {
-		if we, ok := errors.AsType[*WiringError](err); ok {
+		if we, ok := asError[*WiringError](err); ok {
 			return nil, "", we
 		}
 		if waivable {
@@ -465,7 +465,7 @@ func bindFlagFallback(reg fallbackLookup, field reflect.Value, tag reflect.Struc
 	}
 	// A fallback value the flag's type cannot hold is a user error, as a bad argv value is.
 	if err := coerceFlagValues(field, def, vals, rd.view.clockRef()); err != nil {
-		if we, ok := errors.AsType[*WiringError](err); ok {
+		if we, ok := asError[*WiringError](err); ok {
 			return nil, "", we
 		}
 		if waivable {
@@ -689,10 +689,10 @@ func fallbackCoerceError(chain []Command, idx int, name, source string, err erro
 			secret = def.Secret
 		}
 	}
-	if we, ok := errors.AsType[*WiringError](err); ok {
+	if we, ok := asError[*WiringError](err); ok {
 		return we
 	}
-	if mistake, ok := errors.AsType[authorMistake](err); ok {
+	if mistake, ok := asError[authorMistake](err); ok {
 		return internalBind(channelFlag, name, fmt.Sprintf("%s: %s", label, mistake), err)
 	}
 	msg := fmt.Sprintf("%s: %s", label, coerceMessage(err, secret)) + fromSource(source)
@@ -1122,8 +1122,9 @@ func shapeAny(v reflect.Value) (out reflect.Value, changed bool) {
 			if e, ok := shapeAny(iter.Value()); ok {
 				if !changed {
 					out = reflect.MakeMapWithSize(v.Type(), v.Len())
-					for k, e := range v.Seq2() {
-						out.SetMapIndex(k, e)
+					// MapRange, not Seq2: Seq2 links reflect.MakeFunc and its call machinery.
+					for all := v.MapRange(); all.Next(); {
+						out.SetMapIndex(all.Key(), all.Value())
 					}
 					changed = true
 				}
@@ -1334,7 +1335,7 @@ func profilesMissing(f ConfigFile) *WiringError {
 
 // isWiringError reports whether err is a [*WiringError], which no short-circuited run waives.
 func isWiringError(err error) bool {
-	_, ok := errors.AsType[*WiringError](err)
+	_, ok := asError[*WiringError](err)
 	return ok
 }
 
@@ -1490,6 +1491,9 @@ func (c *fileCache) check(k checkedKey, run func() error) error {
 // searchFile returns the first of dirs holding name, else name in the first directory, as a
 // discover search resolves it.
 func searchFile(dirs []string, name string) string {
+	if len(dirs) == 1 {
+		return filepath.Join(dirs[0], name) // found or not, the one directory is the answer
+	}
 	for _, d := range dirs {
 		p := filepath.Join(d, name)
 		if _, err := os.Stat(p); err == nil {
@@ -1505,14 +1509,14 @@ func searchFile(dirs []string, name string) string {
 // configFileProblem says why a configuration file could not be used: where a syntax error is
 // and what it is, or why the file could not be read.
 func configFileProblem(path string, err error) string {
-	if de, ok := errors.AsType[*toml.DuplicateKeyError](err); ok {
+	if de, ok := asError[*toml.DuplicateKeyError](err); ok {
 		at := strconv.Itoa(de.Pos.Line)
 		if de.Pos.Column > 0 {
 			at += ":" + strconv.Itoa(de.Pos.Column)
 		}
 		return fmt.Sprintf("could not parse configuration file %s:%s: duplicate key %q", path, at, de.Key)
 	}
-	if pe, ok := errors.AsType[*recon.ParseError](err); ok {
+	if pe, ok := asError[*recon.ParseError](err); ok {
 		loc := path
 		if at := pe.Position.String(); at != "" {
 			loc += ":" + at
@@ -1541,7 +1545,7 @@ func configFileProblem(path string, err error) string {
 func innermostCause(err error) error {
 	for {
 		next := errors.Unwrap(err)
-		if multi, ok := errors.AsType[interface {
+		if multi, ok := asError[interface {
 			error
 			Unwrap() []error
 		}](err); ok && next == nil {
@@ -1602,6 +1606,14 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 	if fs.schemas == nil {
 		return missingFeature("schemas", "Schemas()", fmt.Sprintf("configuration file %q has a schema", f.Name))
 	}
+	return fs.schemas.configFile(fs, f, fsrc, m, decoded, data, profile)
+}
+
+// checkConfigDocument is the rest of validateConfigFileAs once the program is known to wire
+// Schemas(), which installs it: a program that doesn't, doesn't link it. m is the document the
+// source decoded when decoded, else data holds the file read again.
+func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m map[string]any, decoded bool, data []byte, profile string) error {
+	path := fsrc.Path()
 	c, err := fs.codecFor(fsrc.Format(), path)
 	if err != nil {
 		return err
@@ -1710,13 +1722,13 @@ func (o pathOverride) resolve(view *osView) (string, error) {
 }
 
 // expandGivenTilde expands a leading ~ of a path the user gave. ~user is expanded only when
-// the program has path expansion, and is otherwise kept as written.
+// the program has path expansion or user homes, and is otherwise kept as written.
 func (v *osView) expandGivenTilde(p string) (string, error) {
 	if !strings.HasPrefix(p, "~") {
 		return p, nil
 	}
 	if end := strings.IndexAny(p, `/\`); end != 1 && len(p) > 1 {
-		if x := v.clockRef().features().expand; x == nil || x.lookupUser == nil {
+		if v.clockRef().features().lookupUser == nil {
 			return p, nil
 		}
 	}
@@ -2063,22 +2075,29 @@ func envFamily(view *osView, base, sep string) (map[string]any, error) {
 		return out, nil
 	}
 	prefix := view.key(base + sep)
-	type member struct{ name, val string }
-	var fam []member
+	// The members stay NAME=value strings, sorted by name: a []string sort is linked anyway,
+	// where a sort of name/value pairs would be one more copy of the sorting code.
+	var fam []string
 	for _, kv := range view.inputEnviron() {
-		name, val, ok := strings.Cut(kv, "=")
+		name, _, ok := strings.Cut(kv, "=")
 		if !ok || len(name) <= len(prefix) || view.key(name[:len(prefix)]) != prefix {
 			continue
 		}
-		fam = append(fam, member{name, val})
+		fam = append(fam, kv)
 	}
-	slices.SortFunc(fam, func(a, b member) int { return strings.Compare(a.name, b.name) })
+	slices.SortFunc(fam, func(a, b string) int {
+		an, _, _ := strings.Cut(a, "=")
+		bn, _, _ := strings.Cut(b, "=")
+		return strings.Compare(an, bn)
+	})
 	type use struct {
 		name  string // the first variable that set the key or a key under it
 		value bool   // that variable set the key itself
 	}
 	owner := map[string]use{}
-	for _, m := range fam {
+	for _, kv := range fam {
+		var m struct{ name, val string }
+		m.name, m.val, _ = strings.Cut(kv, "=")
 		segs := strings.Split(strings.ToLower(m.name[len(prefix):]), strings.ToLower(sep))
 		if slices.Contains(segs, "") {
 			return nil, fmt.Errorf("environment variable %s has an empty key segment (a doubled %s)", m.name, sep)
@@ -2257,7 +2276,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		// A list is checked element by element as bound, since an environment variable's list
 		// arrives as one string.
 		if elems, count, ok := typedElems(s.Field(j)); ok && isArrayType(typ) {
-			if err := checkTypedConstraints(label, typ, c, count, elems, secret, view.base()); err != nil {
+			if err := checkTypedConstraints(view.clockRef().features(), label, typ, c, count, elems, secret, view.base()); err != nil {
 				return withOrigin(err, origin)
 			}
 			continue
@@ -2520,7 +2539,7 @@ func schemaVerdict(err error, invalid string) string {
 // rule it names — falling back to a generic phrase for any other error, so the message never
 // echoes raw recon text.
 func schemaDetail(err error) string {
-	if ve, ok := errors.AsType[*recon.ValidationError](err); ok {
+	if ve, ok := asError[*recon.ValidationError](err); ok {
 		if ve.Path.String() != "" {
 			return fmt.Sprintf("%s: %s", ve.Path.String(), ve.Msg)
 		}

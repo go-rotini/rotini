@@ -89,9 +89,9 @@ func TestFeatureNeeds(t *testing.T) {
 				{Name: "b", Discover: &DiscoverDef{File: "app.jsonc"}, Schema: "{}"},
 				{Name: "c", As: "env", Path: ".env"},
 			},
-		}, nil, []string{"config-files", "config-profiles", "env-files", "path-expansion", "schemas", "codec:toml", "codec:jsonc", "codec:dotenv"}},
+		}, nil, []string{"config-files", "config-profiles", "env-files", "user-homes", "schemas", "codec:toml", "codec:jsonc", "codec:dotenv"}},
 		{"runtime path", plain, InputSettings{ConfigFiles: []ConfigFile{{Name: "a", PathFrom: &PathFromDef{Flag: "config"}}}},
-			nil, []string{"config-files", "path-expansion", "codec:json", "codec:yaml", "codec:toml", "codec:jsonc", "codec:dotenv"}},
+			nil, []string{"config-files", "user-homes", "codec:json", "codec:yaml", "codec:toml", "codec:jsonc", "codec:dotenv"}},
 		{"inputs types", plain, InputSettings{}, typesOf(needsKitchenInputs{}), []string{
 			"stdin(jsonl)", "env", "config-files", "env-files", "fallbacks", "path-expansion", "codec:json", "bounds",
 			"patterns", "values:url", "values:timezone", "values:mac", "values:ip",

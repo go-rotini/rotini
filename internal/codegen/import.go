@@ -108,7 +108,7 @@ func (p *Processor) importWith(ctx context.Context, opts ImportOptions, pl *plan
 	if name == "" {
 		name = res.Command.Name
 	}
-	if !cliNameRe.MatchString(name) {
+	if !cliNameRe().MatchString(name) {
 		return Imported{}, fmt.Errorf("the program's name %q can't name a rotini CLI; pass --name", name)
 	}
 	dir := opts.Dir
@@ -185,10 +185,10 @@ func importNameClashes(specPath string, specBytes []byte, f fileFormat) error {
 
 // checkImportNames refuses a --name or --dir that can't name a rotini CLI or its directory.
 func checkImportNames(opts ImportOptions) error {
-	if opts.Name != "" && !cliNameRe.MatchString(opts.Name) {
+	if opts.Name != "" && !cliNameRe().MatchString(opts.Name) {
 		return fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Name)
 	}
-	if opts.Dir != "" && !cliNameRe.MatchString(opts.Dir) {
+	if opts.Dir != "" && !cliNameRe().MatchString(opts.Dir) {
 		return fmt.Errorf("invalid --dir %q: must start with a letter and contain only letters, digits, '-' or '_'", opts.Dir)
 	}
 	return nil

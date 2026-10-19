@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 )
 
@@ -837,7 +838,7 @@ var geminiKeys = []string{
 }
 
 // geminiName is the rule Gemini (Vertex AI) has for parameter names.
-var geminiName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+var geminiName = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`) })
 
 // geminiTools renders the tools as Gemini function declarations, with JSON Schema parameters
 // (parametersJsonSchema). References are inlined unless a schema is recursive, and parameter
@@ -861,7 +862,7 @@ func geminiTools(tools []tool) (any, []error) {
 		renamed := map[string]any{}
 		for name, s := range props {
 			g := strings.ReplaceAll(name, "-", "_")
-			if !geminiName.MatchString(g) {
+			if !geminiName().MatchString(g) {
 				notices = append(notices, fmt.Errorf("tools: %q's parameter %q breaks Gemini's parameter-name rule (letters, digits and _, at most 64)", t.cmd.invocation, name))
 			}
 			renamed[g] = s

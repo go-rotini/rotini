@@ -198,7 +198,7 @@ func TestToolExports_validate(t *testing.T) {
 			m := d.(map[string]any)
 			props := m["parametersJsonSchema"].(map[string]any)["properties"].(map[string]any)
 			for name := range props {
-				if !geminiName.MatchString(name) {
+				if !geminiName().MatchString(name) {
 					t.Errorf("%v: parameter %q breaks Gemini's name rule", m["name"], name)
 				}
 			}
@@ -440,7 +440,7 @@ func TestSkill_format(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(parts[1]), &fm); err != nil {
 		t.Fatal(err)
 	}
-	if fm.Name != "taskr" || len(fm.Name) > 64 || !skillName.MatchString(fm.Name) {
+	if fm.Name != "taskr" || len(fm.Name) > 64 || !skillName().MatchString(fm.Name) {
 		t.Errorf("name %q", fm.Name)
 	}
 	if fm.Description == "" || len(fm.Description) > 1024 {

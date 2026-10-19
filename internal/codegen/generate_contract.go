@@ -533,7 +533,7 @@ func outputDefLiteral(typeName string, shape *Schema, schemas map[string]Schema,
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Output: &%s.OutputDef{Type: reflect.TypeFor[%s]()", rotiniPkgName, typeName)
+	fmt.Fprintf(&b, "Output: &%s.OutputDef{Type: %s", rotiniPkgName, typeOfLiteral(typeName))
 	if doc, ok := outputSchemaDoc(shape, schemas); ok {
 		if raw, err := json.Marshal(doc); err == nil {
 			b.WriteString(", Schema: ")
@@ -554,7 +554,7 @@ func outputDefLiteral(typeName string, shape *Schema, schemas map[string]Schema,
 			if k.ref != "" {
 				name = qualifier + k.ref
 			}
-			fmt.Fprintf(&b, "{Value: %q, Type: reflect.TypeFor[%s]()", k.value, name)
+			fmt.Fprintf(&b, "{Value: %q, Type: %s", k.value, typeOfLiteral(name))
 			if doc, ok := outputSchemaDoc(&k.decl, schemas); ok {
 				if raw, err := json.Marshal(doc); err == nil {
 					b.WriteString(", Schema: ")

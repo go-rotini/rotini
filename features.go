@@ -64,6 +64,10 @@ type featureSet struct {
 	objects   *objectHooks
 	schemas   *schemaHooks
 
+	// lookupUser finds another user's home directory for a "~user" path; set by UserHomes()
+	// and PathExpansion().
+	lookupUser func(name string) (homeDir string, err error)
+
 	bounds      *boundHooks
 	unique      *uniqueHooks
 	patterns    *patternHooks
@@ -143,10 +147,9 @@ type channelHooks struct {
 }
 
 type expandHooks struct {
-	store      func(v reflect.Value, chain []Command, store *parsedInputs, anchor int, view *osView) error
-	channels   func(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived bool, labels channelLabels) error
-	fallback   func(vals []string, tag reflect.StructTag, source, label string, rd fallbackRead) ([]string, error)
-	lookupUser func(name string) (homeDir string, err error)
+	store    func(v reflect.Value, chain []Command, store *parsedInputs, anchor int, view *osView) error
+	channels func(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived bool, labels channelLabels) error
+	fallback func(vals []string, tag reflect.StructTag, source, label string, rd fallbackRead) ([]string, error)
 }
 
 type objectHooks struct {
@@ -161,6 +164,7 @@ type schemaHooks struct {
 	document        func(schema string, raw []byte) error
 	record          func(schema string, v any) error
 	patternMessages func(schema string, err error)
+	configFile      func(fs *featureSet, f ConfigFile, src *recon.FileSource, doc map[string]any, decoded bool, data []byte, profile string) error
 }
 
 type boundHooks struct {
@@ -235,7 +239,7 @@ func allFeatures() *featureSet {
 		s := newFeatureSet([]Feature{
 			Plugins(), ResponseFiles(), Chdir(), Multicall(),
 			Stdin(), Env(), ConfigFiles(), Profiles(), EnvFiles(), Fallbacks(),
-			PathExpansion(), ObjectFlags(), Schemas(),
+			PathExpansion(), UserHomes(), ObjectFlags(), Schemas(),
 			YAML(), TOML(), JSONC(), JSON(), Dotenv(),
 			Bounds(), UniqueItems(), Patterns(), FlagGroups(), FlagDependencies(), StreamPaths(),
 			URLValues(), EmailValues(), TimeZoneValues(), MACValues(), IPValues(), RegexpValues(),

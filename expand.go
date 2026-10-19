@@ -1,7 +1,6 @@
 package rotini
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,11 +46,11 @@ func (e *expandError) Error() string { return e.msg }
 // expandValue expands one input value by rule over the run's view: ~ first, then variables,
 // in one pass, so text a variable supplies is never expanded again. Variables are read the way
 // env inputs read them, .env files and variable_file values included. Another user's home
-// (~name) is looked up through the run's path-expansion feature.
+// (~name) is looked up through the run's path-expansion or user-homes feature.
 func expandValue(v string, r expandRule, view *osView) (string, error) {
 	lookupUser := noUserLookup
-	if x := view.clockRef().features().expand; x != nil {
-		lookupUser = x.lookupUser
+	if lu := view.clockRef().features().lookupUser; lu != nil {
+		lookupUser = lu
 	}
 	return expandValueFor(runtime.GOOS, v, r, view, lookupUser)
 }
@@ -104,7 +103,7 @@ func expandHome(goos, v string, view *osView, lookupUser func(string) (string, e
 	}
 	name := v[1:end]
 	dir, uerr := lookupUser(name)
-	if we, ok := errors.AsType[*WiringError](uerr); ok {
+	if we, ok := asError[*WiringError](uerr); ok {
 		return "", "", we
 	}
 	if uerr != nil || dir == "" {
@@ -244,7 +243,7 @@ func relativeToFile(vals []string, file string) []string {
 
 // labelExpandError prefixes an expansion failure with the input's label.
 func labelExpandError(label string, err error) error {
-	if ee, ok := errors.AsType[*expandError](err); ok {
+	if ee, ok := asError[*expandError](err); ok {
 		return &expandError{label + ": " + ee.msg}
 	}
 	return err

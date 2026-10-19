@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // baselineVersion is stamped into a seed's `version` when the binary has no version.
@@ -29,7 +30,7 @@ func seedVersion(version string) string {
 
 // cliNameRe constrains a new CLI's name, which becomes the scaffold directory, package name
 // and root command, to a single path segment starting with a letter.
-var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
+var cliNameRe = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`) })
 
 // InitializeFn is the signature of [Processor.Initialize]. The companion CLI injects it as a
 // dependency so tests can substitute a double (see [GenerateFn]).
@@ -76,7 +77,7 @@ func (p *Processor) initialize(name string, opt InitOptions, pl *planner) ([]See
 	if name == "" {
 		return nil, errors.New("a CLI name is required")
 	}
-	if !cliNameRe.MatchString(name) {
+	if !cliNameRe().MatchString(name) {
 		return nil, fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
 	}
 	if windowsDeviceElement(name) != "" {

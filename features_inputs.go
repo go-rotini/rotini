@@ -85,22 +85,35 @@ func Fallbacks() Feature {
 }
 
 // PathExpansion wires declared path expansion ("~", "~user", $VAR, relative to a
-// configuration file) and "~user" in configuration file and plugin paths.
+// configuration file) and "~user" in configuration file and plugin paths. It includes
+// [UserHomes].
 func PathExpansion() Feature {
 	return Feature{name: "path-expansion", apply: func(s *featureSet) {
 		s.expand = &expandHooks{
 			store:    expandStore,
 			channels: expandChannels,
 			fallback: expandFallback,
-			lookupUser: func(name string) (string, error) {
-				u, err := user.Lookup(name)
-				if err != nil {
-					return "", err //nolint:wrapcheck // reported by the caller
-				}
-				return u.HomeDir, nil
-			},
 		}
+		s.lookupUser = userHome
 	}}
+}
+
+// UserHomes wires "~user" (another user's home directory) in configuration file and plugin
+// paths, without declared path expansion: what a program needs when a user may name such a
+// path at run time but no input declares `expand` or `relative_to`. [PathExpansion] includes it.
+func UserHomes() Feature {
+	return Feature{name: "user-homes", apply: func(s *featureSet) {
+		s.lookupUser = userHome
+	}}
+}
+
+// userHome is a user's home directory by name.
+func userHome(name string) (string, error) {
+	u, err := user.Lookup(name)
+	if err != nil {
+		return "", err //nolint:wrapcheck // reported by the caller
+	}
+	return u.HomeDir, nil
 }
 
 // ObjectFlags wires flags whose value is an object ([FlagDef.ObjectSchema]). It also needs
@@ -126,6 +139,7 @@ func Schemas() Feature {
 			document:        validateDocumentJSON,
 			record:          checkJSONLRecord,
 			patternMessages: applyPatternMessages,
+			configFile:      checkConfigDocument,
 		}
 	}}
 }

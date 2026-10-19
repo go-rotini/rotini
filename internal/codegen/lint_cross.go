@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // lintAcross runs the rules that need both documents: spec problems that arise from how the
@@ -157,7 +158,7 @@ func lintFlagsFirst(spec *Spec, conf *Conf) []error {
 
 // posixUtilityName matches a POSIX utility name (XBD 12.2, guidelines 1 and 2): 2 to 9
 // lowercase letters and digits.
-var posixUtilityName = regexp.MustCompile(`^[a-z0-9]{2,9}$`)
+var posixUtilityName = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[a-z0-9]{2,9}$`) })
 
 // lintPosixNames, turned on by the conf's `validate.posix_names`, warns when the root
 // command's name, which is the program's name, isn't a POSIX utility name. Sub-command names
@@ -168,7 +169,7 @@ func lintPosixNames(spec *Spec, conf *Conf) []error {
 		return nil
 	}
 	name := spec.Command.Name
-	if name == "" || posixUtilityName.MatchString(name) {
+	if name == "" || posixUtilityName().MatchString(name) {
 		return nil
 	}
 	return []error{&problem{

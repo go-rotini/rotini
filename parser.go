@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"encoding"
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
@@ -1198,7 +1197,7 @@ func checkExistingPath(label, typ, value, dir string) error {
 // scoped fills the Command and Flag a [*ParseError] in err left empty, for a check that knows
 // which command and flag it judged. Other errors pass through.
 func scoped(err error, command, flag string) error {
-	if pe, ok := errors.AsType[*ParseError](err); ok {
+	if pe, ok := asError[*ParseError](err); ok {
 		if pe.Command == "" {
 			pe.Command = command
 		}
@@ -1270,14 +1269,12 @@ func parseNumber(v string) (float64, bool) {
 
 // checkStringBounds enforces the length and pattern bounds on one value. A secret's length is
 // redacted, since the length alone leaks information about a credential.
-func checkStringBounds(label string, c Constraints, v string, secret bool) error {
+func checkStringBounds(fs *featureSet, label string, c Constraints, v string, secret bool) error {
 	if err := checkLengthBounds(label, c, v, secret); err != nil {
 		return err
 	}
 	if c.Pattern != "" {
-		if re, err := compiledPattern(c.Pattern); err == nil && !re.MatchString(v) {
-			return patternViolation(label, c, v, secret)
-		}
+		return checkPattern(fs, label, c, v, secret)
 	}
 	return nil
 }
@@ -1689,7 +1686,7 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 		data, err := readStdin(src)
 		if err != nil {
 			// An interrupted read keeps its own error, so the run's signal cause stays reachable.
-			if ie, ok := errors.AsType[*InputError](err); ok {
+			if ie, ok := asError[*InputError](err); ok {
 				return "", ie
 			}
 			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: label + ": could not read stdin", Flag: flag}
@@ -2129,10 +2126,10 @@ func bindFlags(v reflect.Value, si *scopeInputs, defs []FlagDef, clock *runClock
 					return missingFeature("object-flags", "ObjectFlags()", "flag "+label+" takes an object")
 				}
 				if err := objects.bind(field, raw, *def, clock.features()); err != nil {
-					if we, ok := errors.AsType[*WiringError](err); ok {
+					if we, ok := asError[*WiringError](err); ok {
 						return we
 					}
-					if _, dup := errors.AsType[duplicateObjectError](err); dup {
+					if errors.As(err, new(duplicateObjectError)) {
 						return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s %v", label, err), Flag: label}
 					}
 					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", label, err), Flag: label}
@@ -2238,16 +2235,121 @@ func splitValue(value, sep string) ([]string, error) {
 	if strings.ContainsAny(value, "\r\n") && unquotedLineBreak(value, comma) {
 		return nil, fmt.Errorf("the value holds a line break outside quotes; separate items with %q, or quote an item that holds one", sep)
 	}
-	r := csv.NewReader(strings.NewReader(value))
-	r.Comma = comma
-	r.TrimLeadingSpace = true
-	r.LazyQuotes = true
-	r.FieldsPerRecord = -1
-	items, err := r.Read()
+	items, err := splitCSV(value, comma)
 	if err != nil {
 		return nil, fmt.Errorf("could not split %q on %q: %w", value, sep, err)
 	}
 	return items, nil
+}
+
+var errInvalidDelim error = constError("csv: invalid field or comment delimiter")
+
+// splitCSV is the first record encoding/csv's Reader reads from value with Comma set to comma,
+// TrimLeadingSpace and LazyQuotes on and FieldsPerRecord -1, with the same fields and errors.
+func splitCSV(value string, comma rune) ([]string, error) {
+	if comma == 0 || comma == '"' || comma == '\r' || comma == '\n' || !utf8.ValidRune(comma) || comma == utf8.RuneError {
+		return nil, errInvalidDelim
+	}
+	lines := csvLines{s: value}
+	var line string
+	for {
+		var ok bool
+		if line, ok = lines.next(); !ok {
+			return nil, io.EOF
+		}
+		if len(line) != lengthNL(line) {
+			break // empty lines are skipped
+		}
+	}
+	buf := make([]byte, 0, len(value))
+	ends := make([]int, 0, 8)
+	for done := false; !done; ends = append(ends, len(buf)) {
+		line = strings.TrimLeftFunc(line, unicode.IsSpace)
+		if line != "" && line[0] == '"' {
+			buf, line, done = csvQuoted(buf, line[1:], &lines, comma)
+			continue
+		}
+		i := strings.IndexRune(line, comma)
+		if i < 0 {
+			buf = append(buf, line[:len(line)-lengthNL(line)]...)
+			done = true
+			continue
+		}
+		buf = append(buf, line[:i]...)
+		line = line[i+utf8.RuneLen(comma):]
+	}
+	str := string(buf)
+	items := make([]string, len(ends))
+	start := 0
+	for i, end := range ends {
+		items[i] = str[start:end]
+		start = end
+	}
+	return items, nil
+}
+
+// csvQuoted reads a quoted item whose opening quote is gone, as encoding/csv does with
+// LazyQuotes: it appends the item to buf and returns what follows it, and whether the record
+// ended with it.
+func csvQuoted(buf []byte, line string, lines *csvLines, comma rune) (_ []byte, rest string, done bool) {
+	for {
+		i := strings.IndexByte(line, '"')
+		switch {
+		case i >= 0:
+			buf = append(buf, line[:i]...)
+			line = line[i+1:]
+			switch r, _ := utf8.DecodeRuneInString(line); {
+			case r == '"': // a doubled quote is one quote
+				buf = append(buf, '"')
+				line = line[1:]
+			case r == comma:
+				return buf, line[utf8.RuneLen(comma):], false
+			case len(line) == lengthNL(line):
+				return buf, line, true
+			default: // a bare quote is kept
+				buf = append(buf, '"')
+			}
+		case line != "": // the item goes on to the next line
+			buf = append(buf, line...)
+			line, _ = lines.next()
+		default: // the input ended inside quotes
+			return buf, line, true
+		}
+	}
+}
+
+// csvLines reads s line by line as encoding/csv does.
+type csvLines struct {
+	s   string
+	off int
+}
+
+// next returns the next line with its '\n', reading "\r\n" as "\n" and dropping a '\r' that
+// ends the input; ok is false once the input is used up.
+func (l *csvLines) next() (line string, ok bool) {
+	if l.off >= len(l.s) {
+		return "", false
+	}
+	rest := l.s[l.off:]
+	if i := strings.IndexByte(rest, '\n'); i >= 0 {
+		line = rest[:i+1]
+		l.off += i + 1
+	} else {
+		line = strings.TrimSuffix(rest, "\r")
+		l.off = len(l.s)
+	}
+	if n := len(line); n >= 2 && line[n-2] == '\r' && line[n-1] == '\n' {
+		line = line[:n-2] + "\n"
+	}
+	return line, true
+}
+
+// lengthNL is 1 when b ends with a '\n', else 0.
+func lengthNL(b string) int {
+	if b != "" && b[len(b)-1] == '\n' {
+		return 1
+	}
+	return 0
 }
 
 // unquotedLineBreak reports whether value has a '\n' or '\r' outside a quoted item, reading
@@ -2401,7 +2503,7 @@ func valueParser(t reflect.Type, fs *featureSet) func(string) (reflect.Value, er
 // user wrote it; flag is the flag label, "" for an argument. A [*WiringError] is returned as
 // it is, naming the input when it is a value kind's.
 func coerceFailure(label, flag string, err error, secret bool) error {
-	if we, ok := errors.AsType[*WiringError](err); ok {
+	if we, ok := asError[*WiringError](err); ok {
 		if rest, ok := strings.CutPrefix(we.Msg, "input is "); ok && strings.HasPrefix(we.Feature, "values:") {
 			cp := *we
 			cp.Msg = "input " + label + " is " + rest
@@ -2409,7 +2511,7 @@ func coerceFailure(label, flag string, err error, secret bool) error {
 		}
 		return we
 	}
-	if mistake, ok := errors.AsType[authorMistake](err); ok {
+	if mistake, ok := asError[authorMistake](err); ok {
 		return &ParseError{Kind: ParseKindInternal, Msg: fmt.Sprintf("rotini: %s: %s", label, mistake), Flag: flag}
 	}
 	return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, secret)), Flag: flag}

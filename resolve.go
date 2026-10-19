@@ -108,7 +108,7 @@ func cmdFrame(c CommandDef) Command {
 //
 // It is lenient by design: unknown flags, missing values and bad input are left to the parser.
 func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
-	var buf [4]Command // most chains fit, so the result is allocated once, at its final size
+	var buf [6]Command // most chains fit (root and five levels), so the result is allocated once, at its final size
 	chain, plugin := descend(append(buf[:0], rootFrame(def)), def, argv)
 	return slices.Clone(chain), plugin
 }

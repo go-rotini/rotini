@@ -23,7 +23,7 @@ var definition = rotini.Definition{
 	Flags: []rotini.FlagDef{
 		{Name: "verbose", Identifiers: []string{"--verbose", "-v"}, Summary: "verbose output", Type: "bool", Local: true},
 	},
-	Inputs: reflect.TypeFor[DemoInputs](),
+	Inputs: rotiniTypeOf((*DemoInputs)(nil)),
 	Usage:  "demo [flags] <command>",
 	Commands: []rotini.CommandDef{
 		{Name: "build",
@@ -36,7 +36,7 @@ var definition = rotini.Definition{
 			Arguments: []rotini.ArgDef{
 				{Name: "target", Type: "string"},
 			},
-			Inputs:  reflect.TypeFor[DemoBuildInputs](),
+			Inputs:  rotiniTypeOf((*DemoBuildInputs)(nil)),
 			Usage:   "demo build [flags] [target]",
 			Effects: &rotini.Effects{Kind: "write", Idempotent: new(true)},
 		},
@@ -102,6 +102,9 @@ func Usage(path ...string) (string, error) {
 var InputSettings = rotini.InputSettings{
 	EnvPrefix: "DEMO",
 }
+
+// rotiniTypeOf is the reflect.Type of the type p points to.
+func rotiniTypeOf(p any) reflect.Type { return reflect.TypeOf(p).Elem() }
 
 // NewProgram builds the program from the generated command tree and handlers.
 func NewProgram() *rotini.Program {

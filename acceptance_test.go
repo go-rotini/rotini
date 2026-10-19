@@ -58,6 +58,8 @@ var acmeBinDir string
 func TestMain(m *testing.M) {
 	// The go commands tests start build throwaway modules, which a workspace would reject.
 	os.Setenv("GOWORK", "off")
+	// A test passing goos "windows" reads glob arguments as Windows does on any system.
+	windowsGlobs = expandWindowsGlobs
 	code := m.Run()
 	if acmeBinDir != "" {
 		os.RemoveAll(acmeBinDir)

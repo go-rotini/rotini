@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"encoding"
-	"errors"
 	"reflect"
 	"strconv"
 	"strings"
@@ -106,7 +105,7 @@ func coercePrefixed(f reflect.Value, raw []string, fs *featureSet) error {
 		return coerce(f, []string{last}, fs)
 	}
 	err := coerce(f, []string{d}, fs)
-	if ce, isCoerce := errors.AsType[*coerceError](err); isCoerce {
+	if ce, isCoerce := asError[*coerceError](err); isCoerce {
 		ce.Value = last
 	}
 	return err

@@ -9,8 +9,8 @@ gomodinit example.com/suite
 exec rotini generate cmd/probe/.rotini.spec.yaml --config cmd/probe/.rotini.conf.yaml
 exec rotini generate cmd/status/.rotini.spec.yaml --config cmd/status/.rotini.conf.yaml
 exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
-grep 'Output: &rotini.OutputDef\{Type: reflect.TypeFor\[statuscli.StatusOutput\]\(\)' internal/cmd/demo/zz_demo.go
-grep 'Inputs: +reflect.TypeFor\[probecli.ProbeInputs\]\(\)' internal/cmd/demo/zz_demo.go
+grep 'Output: &rotini.OutputDef\{Type: rotiniTypeOf\(\(\*statuscli.StatusOutput\)\(nil\)\)' internal/cmd/demo/zz_demo.go
+grep 'Inputs: +rotiniTypeOf\(\(\*probecli.ProbeInputs\)\(nil\)\)' internal/cmd/demo/zz_demo.go
 
 exec go mod tidy
 exec go vet ./...
