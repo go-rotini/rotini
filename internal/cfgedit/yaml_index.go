@@ -493,12 +493,11 @@ func quotedEnd(src []byte, off int) (int, bool) {
 	return 0, false
 }
 
-// blockScalarEnd finds a literal or folded scalar's end: its last body line, the body being
-// the following lines indented at least as far as its first (or as its indicator says), and
-// blank lines. With keep chomping (+) the trailing blank lines are content and included.
-func (ix *yamlIndexer) blockScalarEnd(off, parentCol int) (int, error) {
+// blockScalarHeader returns the end of the block scalar header ("|", ">-2") at off. The header
+// holds at most one indentation indicator and one chomping indicator, and only a comment may
+// follow it on its line.
+func (ix *yamlIndexer) blockScalarHeader(off int) (int, error) {
 	le := lineEnd(ix.src, off)
-	// The header holds at most one indentation indicator and one chomping indicator.
 	hdr := off + 1
 	digit, chomp := false, false
 header:
@@ -514,6 +513,17 @@ header:
 	}
 	if rest := bytes.TrimLeft(ix.src[hdr:le], " \t"); len(rest) > 0 && (rest[0] != '#' || hdr == le-len(rest)) {
 		return 0, ix.layout(off, "a block scalar header with more after it than a comment")
+	}
+	return hdr, nil
+}
+
+// blockScalarEnd finds a literal or folded scalar's end: its last body line, the body being
+// the following lines indented at least as far as its first (or as its indicator says), and
+// blank lines. With keep chomping (+) the trailing blank lines are content and included.
+func (ix *yamlIndexer) blockScalarEnd(off, parentCol int) (int, error) {
+	hdr, err := ix.blockScalarHeader(off)
+	if err != nil {
+		return 0, err
 	}
 	keep := bytes.IndexByte(ix.src[off:hdr], '+') >= 0
 	end, blankEnd, content := hdr, hdr, -1
