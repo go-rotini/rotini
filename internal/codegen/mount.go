@@ -412,7 +412,7 @@ func spliceMounts(doc *cfgedit.YAMLDoc, cmdMap *cfgedit.YAMLNode, list *cfgedit.
 			at = doc.NextLine(cmdMap.End)
 			dash = cmdMap.Col + 2
 			body = dash + 2
-			head = strings.Repeat(" ", cmdMap.Col) + "commands:" + nl
+			head = spaces(cmdMap.Col) + "commands:" + nl
 		case len(existing) == 0:
 			// commands: written empty, or as []: replace the value and write the list below it.
 			ops = append(ops, splice{list.Colon + 1, list.Value.End, ""})
@@ -451,9 +451,9 @@ func spliceMounts(doc *cfgedit.YAMLDoc, cmdMap *cfgedit.YAMLNode, list *cfgedit.
 		}
 		b.WriteString(head)
 		for _, e := range add {
-			b.WriteString(strings.Repeat(" ", dash) + "- " + strings.Repeat(" ", body-dash-2) + "$ref: " + yamlText(e.Ref) + nl)
+			fmt.Fprintf(&b, "%s- %s$ref: %s%s", spaces(dash), spaces(body-dash-2), yamlText(e.Ref), nl)
 			if group != "" {
-				b.WriteString(strings.Repeat(" ", body) + "group: " + yamlText(group) + nl)
+				fmt.Fprintf(&b, "%sgroup: %s%s", spaces(body), yamlText(group), nl)
 			}
 		}
 		ops = append(ops, splice{at, at, b.String()})
