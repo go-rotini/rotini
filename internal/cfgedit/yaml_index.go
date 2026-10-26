@@ -90,6 +90,11 @@ func IndexYAML(src []byte) (*YAMLDoc, error) {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 	doc := &YAMLDoc{Src: src}
+	if bytes.HasPrefix(src[bomLen(src):], []byte(bom)) {
+		// Rotini's config reader drops both marks, the parser keeps the second as text, so the
+		// two would disagree on the first key.
+		return nil, &LayoutError{Line: 1, Reason: "the file starts with more than one byte-order mark"}
+	}
 	if loneCR(src) || bytes.Contains(src, []byte("\u0085")) || bytes.Contains(src, []byte("\u2028")) || bytes.Contains(src, []byte("\u2029")) {
 		return nil, &LayoutError{Line: 1, Reason: "the file uses a line break other than \\n or \\r\\n"}
 	}
@@ -521,8 +526,12 @@ header:
 			// Whitespace past the body's indentation is content, not an empty line, and so is
 			// a tab after the indentation.
 			ind := indentAt(ix.src, ls)
-			if (content >= 0 && ind > content) || (ind > parentCol && bytes.IndexByte(ix.src[ls:blankEnd], '\t') >= 0) {
+			tab := ind > parentCol && bytes.IndexByte(ix.src[ls:blankEnd], '\t') >= 0
+			if (content >= 0 && ind > content) || tab {
 				end = blankEnd
+			}
+			if tab && content < 0 {
+				content = ind // YAML reads " \t" as the first content line, so it sets the indentation
 			}
 			continue
 		}

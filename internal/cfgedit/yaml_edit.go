@@ -220,7 +220,7 @@ func (ed *yamlEdit) mappingEnd(m *YAMLNode) int {
 // markers.
 func yamlTrivia(src []byte) bool {
 	for ls := bomLen(src); ls < len(src); ls = nextLine(src, ls) {
-		line := bytes.TrimLeft(src[ls:lineEnd(src, ls)], " ")
+		line := bytes.TrimLeft(src[ls:lineEnd(src, ls)], " \t") // a line of tabs is as blank as one of spaces
 		if len(line) != 0 && line[0] != '#' && line[0] != '%' && !docMarker(src, ls) {
 			return false
 		}

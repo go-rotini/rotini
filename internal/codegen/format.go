@@ -431,9 +431,11 @@ func (p *yamlPrinter) continuation(v *cfgedit.YAMLNode, firstLine, from, to int)
 			lines = lines[1:]
 		}
 	}
+	// The body's indentation is the first line that is more than spaces: YAML reads a tab after
+	// the indentation as content, so " \t" is the first content line, indented one.
 	body := -1
 	for _, l := range lines {
-		if !l.blank() {
+		if strings.Trim(string(p.src[l.start:p.doc.LineEnd(l.start)]), " ") != "" {
 			body = l.indent
 			break
 		}

@@ -219,11 +219,13 @@ func (ed *tomlEdit) firstHeaderBlock() int {
 	return at
 }
 
+// firstHeader returns the offset of the earliest header in n's subtree, or -1. A table's own
+// header can come after one of its sub-tables' ([a.b] before [a]), so both are checked.
 func firstHeader(n *toml.Node) int {
-	if (n.Kind == toml.TableNode || n.Kind == toml.ArrayTableNode) && !n.Span.IsZero() {
-		return n.Span.Start.Offset
-	}
 	first := -1
+	if (n.Kind == toml.TableNode || n.Kind == toml.ArrayTableNode) && !n.Span.IsZero() {
+		first = n.Span.Start.Offset
+	}
 	if n.Kind == toml.TableNode {
 		for _, c := range n.Children {
 			if s := firstHeader(c); s >= 0 && (first < 0 || s < first) {
