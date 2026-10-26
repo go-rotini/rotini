@@ -14,6 +14,7 @@ var (
 	explainDep    = rotini.NewDependency[codegen.ExplainFn]("rotini.explain")
 	treeDep       = rotini.NewDependency[codegen.TreeFn]("rotini.tree")
 	importDep     = rotini.NewDependency[codegen.ImportFn]("rotini.import")
+	mountDep      = rotini.NewDependency[codegen.MountFn]("rotini.mount")
 
 	generateDryRunDep   = rotini.NewDependency[codegen.GenerateDryRunFn]("rotini.generate.dry-run")
 	initializeDryRunDep = rotini.NewDependency[codegen.InitializeDryRunFn]("rotini.initialize.dry-run")

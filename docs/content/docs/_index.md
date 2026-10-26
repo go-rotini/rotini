@@ -3968,7 +3968,8 @@ A command can be another CLI's spec: `- $ref: ../db/.rotini.spec.yaml` mounts it
 sub-command, and it still builds and ships on its own. To mount a spec from a module your project
 depends on, use `$ref: mod://<module>@<version>/<path>`; it is read from the module cache and
 verified by `go.sum`. Keys set next to the `$ref`, such as a new `name`, `summary` or `group`, adjust
-it for its new parent; see [`$ref`](/specification#ref).
+it for its new parent; see [`$ref`](/specification#ref). [`rotini mount`](/cli#rotini-mount) writes
+the `$ref` entries for you, and can be re-run as CLIs are added or removed.
 
 Help inside a mounted child is the parent's: `acme db --help`, `acme db help migrate` and
 `acme help db migrate` all show the full path, through the handlers `rotini init` writes. Text the

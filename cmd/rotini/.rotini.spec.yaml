@@ -494,6 +494,84 @@ command:
               extensions:
                 - yaml
                 - yml
+    - name: mount
+      summary: mount cli specs as sub-commands of another
+      description: |-
+        Add a $ref entry to the spec named by --into for each spec given, so each cli runs as a
+        sub-command of that one and still builds on its own. New entries go after the last $ref
+        entry, or at the end of the commands list, with --group written next to each. Every
+        other line of the spec is kept as it was.
+
+        --under mounts below a command of the --into spec instead of its root, named by its
+        path from the root: "db" or "db migrate". The path can go through any command written in
+        the spec, including one mounted with $ref, whose new entries are added to that cli's own
+        sub-commands.
+
+        A spec that is already mounted is left alone, and the --into spec itself is skipped, so
+        a shell wildcard such as cmd/*/.rotini.spec.yaml can name every cli each time. A command
+        name or alias that two entries would share is an error, and nothing is written.
+        --prune also removes the entries, in the commands list being mounted into, whose spec
+        file no longer exists. Regenerate the parent afterwards. Only YAML specs can be mounted
+        into for now.
+      examples:
+        - rotini mount cmd/db/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml
+        - rotini mount cmd/*/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --group tools
+        - rotini mount cmd/migrate/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --under db
+        - rotini mount --prune --into cmd/acme/.rotini.spec.yaml
+      footer: Use "rotini help <command>" for more information about a command.
+      flags:
+        - name: into
+          identifiers:
+            - --into
+          summary: the spec to mount into
+          schema:
+            type: string
+            required: true
+            complete:
+              kind: file
+              extensions:
+                - yaml
+                - yml
+        - name: under
+          identifiers:
+            - --under
+          summary: mount below this command of the --into spec instead of its root, such as "db" or "db migrate"
+          schema:
+            type: string
+            placeholder: COMMAND
+        - name: group
+          identifiers:
+            - --group
+          summary: the help group written next to each new entry
+          schema:
+            type: string
+        - name: prune
+          identifiers:
+            - --prune
+          summary: remove the entries whose spec file no longer exists
+          schema:
+            type: bool
+        - name: dry-run
+          identifiers:
+            - -n
+            - --dry-run
+          summary: show what would change, and change nothing; exits 2 when something would change
+          schema:
+            type: bool
+            negatable: true
+      arguments:
+        - name: specs
+          summary: the spec files to mount
+          schema:
+            type: array
+            complete:
+              kind: file
+              extensions:
+                - yaml
+                - yml
+                - json
+                - jsonc
+                - toml
     - name: help
       summary: print help
       description: Print help for a specific command.

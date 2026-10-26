@@ -27,6 +27,7 @@ type ProgramHandlers interface {
 	RotiniImportUrfave() rotini.Handler
 	RotiniInitialize() rotini.Handler
 	RotiniMan() rotini.Handler
+	RotiniMount() rotini.Handler
 	RotiniTree() rotini.Handler
 	RotiniValidate() rotini.Handler
 	RotiniVersion() rotini.Handler
@@ -198,6 +199,22 @@ var definition = rotini.Definition{
 			},
 			Inputs: rotiniTypeOf((*RotiniFmtInputs)(nil)),
 			Usage:  "rotini fmt [flags] [files...]",
+		},
+		{Name: "mount",
+			Handler: "RotiniMount",
+			Summary: "mount cli specs as sub-commands of another",
+			Flags: []rotini.FlagDef{
+				{Name: "into", Identifiers: []string{"--into"}, Summary: "the spec to mount into", Type: "string", Required: true, Complete: rotini.Completion{Kind: "file", Extensions: []string{"yaml", "yml"}, Message: "--into string: the spec to mount into"}},
+				{Name: "under", Identifiers: []string{"--under"}, Summary: "mount below this command of the --into spec instead of its root, such as \"db\" or \"db migrate\"", Type: "string", Complete: rotini.Completion{Message: "--under COMMAND: mount below this command of the --into spec instead of its root, such as \"db\" or \"db migrate\""}},
+				{Name: "group", Identifiers: []string{"--group"}, Summary: "the help group written next to each new entry", Type: "string", Complete: rotini.Completion{Message: "--group string: the help group written next to each new entry"}},
+				{Name: "prune", Identifiers: []string{"--prune"}, Summary: "remove the entries whose spec file no longer exists", Type: "bool"},
+				{Name: "dry-run", Identifiers: []string{"-n", "--dry-run"}, Summary: "show what would change, and change nothing; exits 2 when something would change", Type: "bool", Negatable: true},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "specs", Type: "[]string", Variadic: true, Complete: rotini.Completion{Kind: "file", Extensions: []string{"yaml", "yml", "json", "jsonc", "toml"}, Message: "<specs>: the spec files to mount"}},
+			},
+			Inputs: rotiniTypeOf((*RotiniMountInputs)(nil)),
+			Usage:  "rotini mount [flags] [specs...]",
 		},
 		{Name: "help",
 			Handler: "RotiniHelp",
@@ -521,6 +538,28 @@ type RotiniManInputs struct {
 	RotiniMan RotiniManCommandInputs
 }
 
+type RotiniMountFlags struct {
+	Into   string `rotini:"into"`
+	Under  string `rotini:"under"`
+	Group  string `rotini:"group"`
+	Prune  bool   `rotini:"prune"`
+	DryRun bool   `rotini:"dry-run"`
+}
+
+type RotiniMountArguments struct {
+	Specs []string `rotini:"specs"`
+}
+
+type RotiniMountCommandInputs struct {
+	Flags     RotiniMountFlags
+	Arguments RotiniMountArguments
+}
+
+type RotiniMountInputs struct {
+	Rotini      RotiniCommandInputs
+	RotiniMount RotiniMountCommandInputs
+}
+
 type RotiniTreeFlags struct{}
 
 type RotiniTreeArguments struct {
@@ -688,6 +727,8 @@ func Usage(path ...string) (string, error) {
 		return "rotini explain <key>", nil
 	case "fmt":
 		return "rotini fmt [flags] [files...]", nil
+	case "mount":
+		return "rotini mount [flags] [specs...]", nil
 	case "help":
 		return "rotini help [command...]", nil
 	case "version":
@@ -775,6 +816,8 @@ func NewProgramWith(handlers ProgramHandlers) *rotini.Program {
 			return handlers.RotiniInitialize(), true
 		case "RotiniMan":
 			return handlers.RotiniMan(), true
+		case "RotiniMount":
+			return handlers.RotiniMount(), true
 		case "RotiniTree":
 			return handlers.RotiniTree(), true
 		case "RotiniValidate":
@@ -855,6 +898,10 @@ func (*handlers) RotiniMan() rotini.Handler {
 	return &rotiniManHandler{}
 }
 
+func (*handlers) RotiniMount() rotini.Handler {
+	return &rotiniMountHandler{}
+}
+
 func (*handlers) RotiniTree() rotini.Handler {
 	return &rotiniTreeHandler{}
 }
@@ -867,7 +914,7 @@ func (*handlers) RotiniVersion() rotini.Handler {
 	return &rotiniVersionHandler{}
 }
 
-var HelpRotini = "The companion CLI for Rotini, the spec-first Go CLI framework: scaffold, validate and generate a CLI from its spec.\n\nDocumentation: https://rotini.dev\n\nUsage:\n  rotini [flags] <command>\n\nCommands:\n  initialize, init    scaffold a cli program\n  import              build a rotini spec from an existing cli\n  generate, gen       generate a cli program\n  validate, val       validate a spec and conf\n  tree                print a spec's command tree\n  explain             describe a spec or conf key\n  fmt                 format a spec and conf\n  help                print help\n  version             print version\n  completion          print a shell completion script\n  man                 print or install the man pages\n  diff                compare two versions of a cli's contract\n\nFlags:\n      --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotini = "The companion CLI for Rotini, the spec-first Go CLI framework: scaffold, validate and generate a CLI from its spec.\n\nDocumentation: https://rotini.dev\n\nUsage:\n  rotini [flags] <command>\n\nCommands:\n  initialize, init    scaffold a cli program\n  import              build a rotini spec from an existing cli\n  generate, gen       generate a cli program\n  validate, val       validate a spec and conf\n  tree                print a spec's command tree\n  explain             describe a spec or conf key\n  fmt                 format a spec and conf\n  mount               mount cli specs as sub-commands of another\n  help                print help\n  version             print version\n  completion          print a shell completion script\n  man                 print or install the man pages\n  diff                compare two versions of a cli's contract\n\nFlags:\n      --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniInitialize = "Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize [flags] <name>\n\nArguments:\n  <name>    the root command name written to the created spec file (expected binary name)\n\nFlags:\n      --format string      the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n      --template string    start from a shape other than the plain seed [plugin|daemon|suite]\n                             plugin    a kubectl-style plugin named <host>-<plugin>, with completion through the host\n                             daemon    a long-running serve command that stops cleanly on a signal\n                             suite     two binaries composing one shared command from its own spec\n      --force              replace an existing spec and conf with the seed (never deletes a file)\n  -n, --[no-]dry-run       show what init would write, and change nothing\n\nGlobal Flags:\n      --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n  rotini init mycli --dry-run\n  rotini init kubectl-hello --template plugin\n\nUse \"rotini help <command>\" for more information about a command."
 
@@ -888,6 +935,8 @@ var HelpRotiniTree = "Print the command tree of a rotini spec, with composed chi
 var HelpRotiniExplain = "Print what a spec or conf key means: its description, type, allowed values, default and examples, read from the same schemas as the reference pages. Write the keys from the document's top, separated by dots and without list positions: command.flags.schema.from. A key both documents have, such as version, is shown for each.\n\nEffects: read, idempotent, local only\n\nUsage:\n  rotini explain <key>\n\nArguments:\n  <key>    the key path, such as command.flags.schema.from\n\nGlobal Flags:\n      --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini explain command.flags.role\n  rotini explain generate.features.targets\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniFmt = "Rewrite rotini spec, conf and composed command files in canonical form: keys in\nreading order (a command's name and docs, then its inputs, output and sub-commands;\nan input's name and docs, then its behavior, then its schema); two-space indentation,\nwith lists indented under their key; and runs of blank lines folded into one.\nComments stay with the entries they describe, and every value is kept exactly as\nwritten.\n\nWith no file, it formats the .rotini.spec.* in the working directory and the conf\nbeside it. --check writes nothing and exits 2 when a file isn't formatted, for CI.\nOnly YAML files can be formatted for now.\n\nUsage:\n  rotini fmt [flags] [files...]\n\nArguments:\n  [files...]    the files to format (default the spec in the working directory and its conf)\n\nFlags:\n      --check          write nothing; exit 2 when a file isn't formatted\n      --kind string    what the files are, when their keys and names don't tell [spec|conf|command]\n\nGlobal Flags:\n      --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini fmt\n  rotini fmt cmd/app/.rotini.spec.yaml cmd/app/.rotini.conf.yaml\n  rotini fmt --check\n\nUse \"rotini help <command>\" for more information about a command."
+
+var HelpRotiniMount = "Add a $ref entry to the spec named by --into for each spec given, so each cli runs as a\nsub-command of that one and still builds on its own. New entries go after the last $ref\nentry, or at the end of the commands list, with --group written next to each. Every\nother line of the spec is kept as it was.\n\n--under mounts below a command of the --into spec instead of its root, named by its\npath from the root: \"db\" or \"db migrate\". The path can go through any command written in\nthe spec, including one mounted with $ref, whose new entries are added to that cli's own\nsub-commands.\n\nA spec that is already mounted is left alone, and the --into spec itself is skipped, so\na shell wildcard such as cmd/*/.rotini.spec.yaml can name every cli each time. A command\nname or alias that two entries would share is an error, and nothing is written.\n--prune also removes the entries, in the commands list being mounted into, whose spec\nfile no longer exists. Regenerate the parent afterwards. Only YAML specs can be mounted\ninto for now.\n\nUsage:\n  rotini mount [flags] [specs...]\n\nArguments:\n  [specs...]    the spec files to mount\n\nFlags:\n      --into string      the spec to mount into (required)\n      --under COMMAND    mount below this command of the --into spec instead of its root, such as \"db\" or \"db migrate\"\n      --group string     the help group written next to each new entry\n      --prune            remove the entries whose spec file no longer exists\n  -n, --[no-]dry-run     show what would change, and change nothing; exits 2 when something would change\n\nGlobal Flags:\n      --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini mount cmd/db/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml\n  rotini mount cmd/*/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --group tools\n  rotini mount cmd/migrate/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --under db\n  rotini mount --prune --into cmd/acme/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniHelp = "Print help for a specific command.\n\nUsage:\n  rotini help [command...]\n\nArguments:\n  [command...]    name of the command to print help for\n\nGlobal Flags:\n      --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini help\n  rotini help generate\n  rotini help init\n\nUse \"rotini help <command>\" for more information about a command."
 
@@ -926,6 +975,8 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniExplain, nil
 	case "fmt":
 		return HelpRotiniFmt, nil
+	case "mount":
+		return HelpRotiniMount, nil
 	case "help":
 		return HelpRotiniHelp, nil
 	case "version":
@@ -941,7 +992,7 @@ func Help(path ...string) (string, error) {
 	}
 }
 
-var ManRotini = ".TH \"ROTINI\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini \\- scaffold, validate and generate rotini CLIs\n.SH SYNOPSIS\n\\fBrotini\\fR [flags] <command>\n.SH DESCRIPTION\nThe companion CLI for Rotini, the spec\\-first Go CLI framework: scaffold,\nvalidate and generate a CLI from its spec.\n.PP\nDocumentation: https://rotini.dev\n.SH \"COMMANDS\"\n.TP\n\\fBinitialize\\fR, \\fBinit\\fR\nscaffold a cli program\n.TP\n\\fBimport\\fR\nbuild a rotini spec from an existing cli\n.TP\n\\fBgenerate\\fR, \\fBgen\\fR\ngenerate a cli program\n.TP\n\\fBvalidate\\fR, \\fBval\\fR\nvalidate a spec and conf\n.TP\n\\fBtree\\fR\nprint a spec\\(aqs command tree\n.TP\n\\fBexplain\\fR\ndescribe a spec or conf key\n.TP\n\\fBfmt\\fR\nformat a spec and conf\n.TP\n\\fBhelp\\fR\nprint help\n.TP\n\\fBversion\\fR\nprint version\n.TP\n\\fBcompletion\\fR\nprint a shell completion script\n.TP\n\\fBman\\fR\nprint or install the man pages\n.TP\n\\fBdiff\\fR\ncompare two versions of a cli\\(aqs contract\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH ENVIRONMENT\n.TP\n\\fBROTINI_COMPLETION_MESSAGES\\fR\nset to 0, false or off to hide completion messages\n.SH EXAMPLES\n.RS 4\n.nf\nrotini init mycli\n.sp\nrotini validate .rotini.spec.yaml\n.sp\nrotini generate ./path/to/.rotini.spec.json\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-initialize\\fR(1), \\fBrotini\\-import\\fR(1), \\fBrotini\\-generate\\fR(1),\n\\fBrotini\\-validate\\fR(1), \\fBrotini\\-tree\\fR(1), \\fBrotini\\-explain\\fR(1),\n\\fBrotini\\-fmt\\fR(1), \\fBrotini\\-help\\fR(1), \\fBrotini\\-version\\fR(1),\n\\fBrotini\\-completion\\fR(1), \\fBrotini\\-man\\fR(1), \\fBrotini\\-diff\\fR(1)\n"
+var ManRotini = ".TH \"ROTINI\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini \\- scaffold, validate and generate rotini CLIs\n.SH SYNOPSIS\n\\fBrotini\\fR [flags] <command>\n.SH DESCRIPTION\nThe companion CLI for Rotini, the spec\\-first Go CLI framework: scaffold,\nvalidate and generate a CLI from its spec.\n.PP\nDocumentation: https://rotini.dev\n.SH \"COMMANDS\"\n.TP\n\\fBinitialize\\fR, \\fBinit\\fR\nscaffold a cli program\n.TP\n\\fBimport\\fR\nbuild a rotini spec from an existing cli\n.TP\n\\fBgenerate\\fR, \\fBgen\\fR\ngenerate a cli program\n.TP\n\\fBvalidate\\fR, \\fBval\\fR\nvalidate a spec and conf\n.TP\n\\fBtree\\fR\nprint a spec\\(aqs command tree\n.TP\n\\fBexplain\\fR\ndescribe a spec or conf key\n.TP\n\\fBfmt\\fR\nformat a spec and conf\n.TP\n\\fBmount\\fR\nmount cli specs as sub\\-commands of another\n.TP\n\\fBhelp\\fR\nprint help\n.TP\n\\fBversion\\fR\nprint version\n.TP\n\\fBcompletion\\fR\nprint a shell completion script\n.TP\n\\fBman\\fR\nprint or install the man pages\n.TP\n\\fBdiff\\fR\ncompare two versions of a cli\\(aqs contract\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH ENVIRONMENT\n.TP\n\\fBROTINI_COMPLETION_MESSAGES\\fR\nset to 0, false or off to hide completion messages\n.SH EXAMPLES\n.RS 4\n.nf\nrotini init mycli\n.sp\nrotini validate .rotini.spec.yaml\n.sp\nrotini generate ./path/to/.rotini.spec.json\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\-initialize\\fR(1), \\fBrotini\\-import\\fR(1), \\fBrotini\\-generate\\fR(1),\n\\fBrotini\\-validate\\fR(1), \\fBrotini\\-tree\\fR(1), \\fBrotini\\-explain\\fR(1),\n\\fBrotini\\-fmt\\fR(1), \\fBrotini\\-mount\\fR(1), \\fBrotini\\-help\\fR(1),\n\\fBrotini\\-version\\fR(1), \\fBrotini\\-completion\\fR(1), \\fBrotini\\-man\\fR(1),\n\\fBrotini\\-diff\\fR(1)\n"
 
 var ManRotiniInitialize = ".TH \"ROTINI\\-INITIALIZE\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-initialize \\- scaffold a cli program\n.SH SYNOPSIS\n\\fBrotini initialize\\fR [flags] <name>\n.SH DESCRIPTION\nScaffold a new rotini cli \\[u2014] write the spec + conf, then run the first\ngenerate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n.SH ARGUMENTS\n.TP\n\\fI<name>\\fR\nthe root command name written to the created spec file (expected binary name)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-format\\fR \\fIstring\\fR\nthe created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]\n.TP\n\\fB\\-\\-template\\fR \\fIstring\\fR\nstart from a shape other than the plain seed [plugin|daemon|suite]\n.RS\n.RS 2\n\\fBplugin\\fR \\- a kubectl\\-style plugin named <host>\\-<plugin>, with completion\nthrough the host\n.br\n\\fBdaemon\\fR \\- a long\\-running serve command that stops cleanly on a signal\n.br\n\\fBsuite\\fR \\- two binaries composing one shared command from its own spec\n.RE\n.RE\n.TP\n\\fB\\-\\-force\\fR\nreplace an existing spec and conf with the seed (never deletes a file)\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what init would write, and change nothing\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini initialize mycli\n.sp\nrotini init mycli \\-\\-format json\n.sp\nrotini init mycli \\-\\-force\n.sp\nrotini init mycli \\-\\-dry\\-run\n.sp\nrotini init kubectl\\-hello \\-\\-template plugin\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
@@ -962,6 +1013,8 @@ var ManRotiniTree = ".TH \"ROTINI\\-TREE\" 1 \"\" \"rotini\" \"User Commands\"\n
 var ManRotiniExplain = ".TH \"ROTINI\\-EXPLAIN\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-explain \\- describe a spec or conf key\n.SH SYNOPSIS\n\\fBrotini explain\\fR <key>\n.SH DESCRIPTION\nPrint what a spec or conf key means: its description, type, allowed values,\ndefault and examples, read from the same schemas as the reference pages. Write\nthe keys from the document\\(aqs top, separated by dots and without list\npositions: command.flags.schema.from. A key both documents have, such as\nversion, is shown for each.\n.PP\nEffects: read, idempotent, local only\n.SH ARGUMENTS\n.TP\n\\fI<key>\\fR\nthe key path, such as command.flags.schema.from\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini explain command.flags.role\n.sp\nrotini explain generate.features.targets\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 var ManRotiniFmt = ".TH \"ROTINI\\-FMT\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-fmt \\- format a spec and conf\n.SH SYNOPSIS\n\\fBrotini fmt\\fR [flags] [files...]\n.SH DESCRIPTION\nRewrite rotini spec, conf and composed command files in canonical form: keys in\nreading order (a command\\(aqs name and docs, then its inputs, output and\nsub\\-commands;\nan input\\(aqs name and docs, then its behavior, then its schema); two\\-space\nindentation,\nwith lists indented under their key; and runs of blank lines folded into one.\nComments stay with the entries they describe, and every value is kept exactly as\nwritten.\n.PP\nWith no file, it formats the .rotini.spec.* in the working directory and the\nconf\nbeside it. \\-\\-check writes nothing and exits 2 when a file isn\\(aqt formatted,\nfor CI.\nOnly YAML files can be formatted for now.\n.SH ARGUMENTS\n.TP\n\\fI[files...]\\fR\nthe files to format (default the spec in the working directory and its conf)\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-check\\fR\nwrite nothing; exit 2 when a file isn\\(aqt formatted\n.TP\n\\fB\\-\\-kind\\fR \\fIstring\\fR\nwhat the files are, when their keys and names don\\(aqt tell [spec|conf|command]\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini fmt\n.sp\nrotini fmt cmd/app/.rotini.spec.yaml cmd/app/.rotini.conf.yaml\n.sp\nrotini fmt \\-\\-check\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
+
+var ManRotiniMount = ".TH \"ROTINI\\-MOUNT\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-mount \\- mount cli specs as sub\\-commands of another\n.SH SYNOPSIS\n\\fBrotini mount\\fR [flags] [specs...]\n.SH DESCRIPTION\nAdd a $ref entry to the spec named by \\-\\-into for each spec given, so each cli\nruns as a\nsub\\-command of that one and still builds on its own. New entries go after the\nlast $ref\nentry, or at the end of the commands list, with \\-\\-group written next to each.\nEvery\nother line of the spec is kept as it was.\n.PP\n\\-\\-under mounts below a command of the \\-\\-into spec instead of its root, named\nby its\npath from the root: \"db\" or \"db migrate\". The path can go through any command\nwritten in\nthe spec, including one mounted with $ref, whose new entries are added to that\ncli\\(aqs own\nsub\\-commands.\n.PP\nA spec that is already mounted is left alone, and the \\-\\-into spec itself is\nskipped, so\na shell wildcard such as cmd/*/.rotini.spec.yaml can name every cli each time. A\ncommand\nname or alias that two entries would share is an error, and nothing is written.\n\\-\\-prune also removes the entries, in the commands list being mounted into,\nwhose spec\nfile no longer exists. Regenerate the parent afterwards. Only YAML specs can be\nmounted\ninto for now.\n.SH ARGUMENTS\n.TP\n\\fI[specs...]\\fR\nthe spec files to mount\n.SH \"OPTIONS\"\n.TP\n\\fB\\-\\-into\\fR \\fIstring\\fR\nthe spec to mount into (required)\n.TP\n\\fB\\-\\-under\\fR \\fICOMMAND\\fR\nmount below this command of the \\-\\-into spec instead of its root, such as \"db\"\nor \"db migrate\"\n.TP\n\\fB\\-\\-group\\fR \\fIstring\\fR\nthe help group written next to each new entry\n.TP\n\\fB\\-\\-prune\\fR\nremove the entries whose spec file no longer exists\n.TP\n\\fB\\-n\\fR, \\fB\\-\\-[no\\-]dry\\-run\\fR\nshow what would change, and change nothing; exits 2 when something would change\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini mount cmd/db/.rotini.spec.yaml \\-\\-into cmd/acme/.rotini.spec.yaml\n.sp\nrotini mount cmd/*/.rotini.spec.yaml \\-\\-into cmd/acme/.rotini.spec.yaml \\-\\-group tools\n.sp\nrotini mount cmd/migrate/.rotini.spec.yaml \\-\\-into cmd/acme/.rotini.spec.yaml \\-\\-under db\n.sp\nrotini mount \\-\\-prune \\-\\-into cmd/acme/.rotini.spec.yaml\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
 var ManRotiniHelp = ".TH \"ROTINI\\-HELP\" 1 \"\" \"rotini\" \"User Commands\"\n.SH NAME\nrotini\\-help \\- print help\n.SH SYNOPSIS\n\\fBrotini help\\fR [command...]\n.SH DESCRIPTION\nPrint help for a specific command.\n.SH ARGUMENTS\n.TP\n\\fI[command...]\\fR\nname of the command to print help for\n.SH \"GLOBAL OPTIONS\"\n.TP\n\\fB\\-\\-version\\fR\nprint version\n.TP\n\\fB\\-h\\fR, \\fB\\-\\-help\\fR\nprint help\n.SH EXAMPLES\n.RS 4\n.nf\nrotini help\n.sp\nrotini help generate\n.sp\nrotini help init\n.fi\n.RE\n.SH \"SEE ALSO\"\n\\fBrotini\\fR(1)\n"
 
@@ -1004,6 +1057,8 @@ func Man(path ...string) (string, error) {
 		return ManRotiniExplain, nil
 	case "fmt":
 		return ManRotiniFmt, nil
+	case "mount":
+		return ManRotiniMount, nil
 	case "help":
 		return ManRotiniHelp, nil
 	case "version":
@@ -1035,6 +1090,7 @@ func ManPages() []rotini.Page {
 		{Name: "rotini-tree", Path: []string{"tree"}, Content: ManRotiniTree},
 		{Name: "rotini-explain", Path: []string{"explain"}, Content: ManRotiniExplain},
 		{Name: "rotini-fmt", Path: []string{"fmt"}, Content: ManRotiniFmt},
+		{Name: "rotini-mount", Path: []string{"mount"}, Content: ManRotiniMount},
 		{Name: "rotini-help", Path: []string{"help"}, Content: ManRotiniHelp},
 		{Name: "rotini-version", Path: []string{"version"}, Content: ManRotiniVersion},
 		{Name: "rotini-completion", Path: []string{"completion"}, Content: ManRotiniCompletion},

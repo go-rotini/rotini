@@ -46,6 +46,7 @@ Commands:
   tree                print a spec's command tree
   explain             describe a spec or conf key
   fmt                 format a spec and conf
+  mount               mount cli specs as sub-commands of another
   help                print help
   version             print version
   completion          print a shell completion script
@@ -662,6 +663,85 @@ Examples:
   rotini fmt
   rotini fmt cmd/app/.rotini.spec.yaml cmd/app/.rotini.conf.yaml
   rotini fmt --check
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
+## rotini mount
+
+Adds a `$ref` entry to the spec named by `--into` for each spec given, so each CLI runs as a
+sub-command of that one and still builds on its own (see
+[composing CLIs](/docs#composing-clis)). Each `$ref` is written relative to the `--into` spec,
+and `--group` is written next to each new entry. New entries go after the last `$ref` entry, or
+at the end of the commands list, and every other line of the spec is kept as it was.
+
+Running it again is safe: a spec that is already mounted is left alone, and the `--into` spec
+itself is skipped, so a shell wildcard can name every CLI each time. A command name or alias
+that two entries would share is an error naming both, and nothing is written. `--prune` also
+removes the entries whose spec file no longer exists, which `generate` would fail on; an entry
+is never removed for any other reason. Regenerate the parent afterwards.
+
+`--under` mounts below a command of the `--into` spec instead of its root, named by its path
+from the root: `--under db` or `--under "db migrate"`. The path can go through any command
+written in that spec. Under a command mounted with `$ref`, the new entries are added to that
+CLI's own sub-commands, so they can't reuse a name that CLI already has. A command declared
+inside the `$ref`'d spec isn't written in the `--into` spec; mount into that spec instead.
+Already-mounted checks and `--prune` cover the commands list being mounted into.
+
+Here `rotini mount --prune cmd/*/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --group tools`
+mounts a new `db` CLI and removes the entry for a deleted `cache` one:
+
+{{< code title="mount output" language="text" open="true" collapsible="false" copy="false" >}}
+mounted db from ../db/.rotini.spec.yaml
+removed ../cache/.rotini.spec.yaml: the file no longer exists
+skipped cmd/acme/.rotini.spec.yaml: it is the spec being mounted into
+cmd/acme/.rotini.spec.yaml: 1 mounted, 2 already mounted, 1 removed
+{{< /code >}}
+
+`--dry-run` writes nothing and exits 2 when something would change. Only YAML specs can be
+mounted into for now; the specs being mounted can be in any format. A `mod://` `$ref` is written
+by hand.
+
+{{< code title="help mount" language="text" open="true" collapsible="false" copy="false" >}}
+Add a $ref entry to the spec named by --into for each spec given, so each cli runs as a
+sub-command of that one and still builds on its own. New entries go after the last $ref
+entry, or at the end of the commands list, with --group written next to each. Every
+other line of the spec is kept as it was.
+
+--under mounts below a command of the --into spec instead of its root, named by its
+path from the root: "db" or "db migrate". The path can go through any command written in
+the spec, including one mounted with $ref, whose new entries are added to that cli's own
+sub-commands.
+
+A spec that is already mounted is left alone, and the --into spec itself is skipped, so
+a shell wildcard such as cmd/*/.rotini.spec.yaml can name every cli each time. A command
+name or alias that two entries would share is an error, and nothing is written.
+--prune also removes the entries, in the commands list being mounted into, whose spec
+file no longer exists. Regenerate the parent afterwards. Only YAML specs can be mounted
+into for now.
+
+Usage:
+  rotini mount [flags] [specs...]
+
+Arguments:
+  [specs...]    the spec files to mount
+
+Flags:
+      --into string      the spec to mount into (required)
+      --under COMMAND    mount below this command of the --into spec instead of its root, such as "db" or "db migrate"
+      --group string     the help group written next to each new entry
+      --prune            remove the entries whose spec file no longer exists
+  -n, --[no-]dry-run     show what would change, and change nothing; exits 2 when something would change
+
+Global Flags:
+      --version    print version
+  -h, --help       print help
+
+Examples:
+  rotini mount cmd/db/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml
+  rotini mount cmd/*/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --group tools
+  rotini mount cmd/migrate/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --under db
+  rotini mount --prune --into cmd/acme/.rotini.spec.yaml
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}

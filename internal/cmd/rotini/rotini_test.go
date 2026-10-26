@@ -728,7 +728,7 @@ func TestCLI_manDir(t *testing.T) {
 	if code, err := p.Run([]string{"man", "--dir", dir}); code != 0 || err != nil {
 		t.Fatalf("man --dir = (%d, %v)", code, err)
 	}
-	if !strings.Contains(errb.String(), "wrote 16 man pages to "+dir) {
+	if !strings.Contains(errb.String(), "wrote 17 man pages to "+dir) {
 		t.Errorf("stderr = %q, want it to say what it wrote", errb.String())
 	}
 	entries, err := os.ReadDir(dir)
@@ -741,7 +741,7 @@ func TestCLI_manDir(t *testing.T) {
 	}
 	want := []string{"rotini-completion.1", "rotini-diff.1", "rotini-explain.1", "rotini-fmt.1", "rotini-generate.1", "rotini-help.1", "rotini-import-cobra.1", "rotini-import-kong.1", "rotini-import-urfave.1", "rotini-import.1",
 		"rotini-initialize.1",
-		"rotini-man.1", "rotini-tree.1", "rotini-validate.1", "rotini-version.1", "rotini.1"}
+		"rotini-man.1", "rotini-mount.1", "rotini-tree.1", "rotini-validate.1", "rotini-version.1", "rotini.1"}
 	if !slices.Equal(names, want) {
 		t.Errorf("wrote %q, want %q", names, want)
 	}
