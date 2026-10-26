@@ -1,0 +1,85 @@
+# R0 — `rotini mount` writes a $ref entry for each cli into another cli's spec, so the composed
+# parent builds and runs each one as a sub-command. Re-running is safe, --prune drops entries
+# whose spec is gone, and a name two entries would share is refused.
+#
+# Exit codes: 0 when done, 2 from --dry-run when something would change, 1 for an error.
+
+gomodinit example.com/demo
+exec rotini init acme
+exec rotini init db
+exec rotini init web
+
+# ── mount every cli; the parent's own spec is skipped ─────────────────────────
+wantexit 2 rotini mount cmd/acme/.rotini.spec.yaml cmd/db/.rotini.spec.yaml cmd/web/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --group tools --dry-run
+stdout '^would mount db from \.\./db/\.rotini\.spec\.yaml$'
+! grep 'db/\.rotini' cmd/acme/.rotini.spec.yaml
+
+exec rotini mount cmd/acme/.rotini.spec.yaml cmd/db/.rotini.spec.yaml cmd/web/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --group tools
+stdout '^mounted db from \.\./db/\.rotini\.spec\.yaml$'
+stdout '^mounted web from \.\./web/\.rotini\.spec\.yaml$'
+stdout '^skipped cmd/acme/\.rotini\.spec\.yaml: it is the spec being mounted into$'
+stdout ': 2 mounted, 0 already mounted, 0 removed$'
+grep '^    - \$ref: \.\./db/\.rotini\.spec\.yaml$' cmd/acme/.rotini.spec.yaml
+grep '^      group: tools$' cmd/acme/.rotini.spec.yaml
+exec rotini validate cmd/acme/.rotini.spec.yaml
+! stderr .
+
+# Again: nothing changes.
+cp cmd/acme/.rotini.spec.yaml mounted.yaml
+exec rotini mount cmd/db/.rotini.spec.yaml cmd/web/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --dry-run
+stdout ': 0 would mount, 2 already mounted, 0 would remove$'
+cmp cmd/acme/.rotini.spec.yaml mounted.yaml
+
+# ── the composed parent builds and runs each child ────────────────────────────
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o acme$exe ./cmd/acme
+exec ./acme$exe --help
+stdout '^  db '
+stdout '^  web '
+exec ./acme$exe db --help
+stdout 'acme db \[flags\]'
+
+# ── a name already taken is refused, and nothing is written ───────────────────
+mkdir cmd/other
+cp other.spec.yaml cmd/other/.rotini.spec.yaml
+wantexit 1 rotini mount cmd/other/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml
+stderr 'the command name "db" is already taken by \.\./db/\.rotini\.spec\.yaml'
+cmp cmd/acme/.rotini.spec.yaml mounted.yaml
+
+# ── --prune drops the entry for a cli that's gone ─────────────────────────────
+rm cmd/web
+exec rotini mount --prune --into cmd/acme/.rotini.spec.yaml
+stdout '^removed \.\./web/\.rotini\.spec\.yaml: the file no longer exists$'
+! grep 'web/\.rotini' cmd/acme/.rotini.spec.yaml
+grep 'db/\.rotini' cmd/acme/.rotini.spec.yaml
+
+# ── --under mounts below a command; under a $ref it extends that cli ─────────
+exec rotini init migrate
+exec rotini mount cmd/migrate/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --under db
+stdout '^mounted migrate from \.\./migrate/\.rotini\.spec\.yaml$'
+stdout ', under db: 1 mounted, 0 already mounted, 0 removed$'
+grep '^        - \$ref: \.\./migrate/\.rotini\.spec\.yaml$' cmd/acme/.rotini.spec.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go build -o acme$exe ./cmd/acme
+exec ./acme$exe db --help
+stdout '^  migrate '
+exec ./acme$exe db migrate --help
+stdout 'acme db migrate \[flags\]'
+
+# A path into a command declared in db's own spec is refused, and so is one that doesn't exist.
+wantexit 1 rotini mount cmd/migrate/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --under 'db help'
+stderr 'acme db has no command "help" written here; if it''s declared in \.\./db/\.rotini\.spec\.yaml, mount into that spec instead'
+wantexit 1 rotini mount cmd/acme/.rotini.spec.yaml cmd/nope/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --under nope
+stderr 'acme has no command "nope"'
+
+# ── mistakes ──────────────────────────────────────────────────────────────────
+wantexit 1 rotini mount --into cmd/acme/.rotini.spec.yaml
+stderr 'name a spec to mount, or pass --prune'
+wantexit 1 rotini mount cmd/db/.rotini.spec.yaml
+stderr 'into'
+-- other.spec.yaml --
+version: 0.1.0
+command:
+  name: db
+  summary: another db
