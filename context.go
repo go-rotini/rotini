@@ -44,7 +44,8 @@ import (
 //     [Context.PartialInputs]
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
-//   - rotini's own settings — [Context.Version], [Context.Help] and [Context.Parser] read them;
+//   - rotini's own settings — [Context.Version], [Context.Help], [Context.InvokedHelp],
+//     [Context.HelpFor] and [Context.Parser] read them;
 //     [Context.WithVersion], [Context.WithHelp], [Context.WithParser],
 //     [Context.WithInputSettings], [Context.WithInputReader], [Context.WithEnviron],
 //     [Context.WithDir], [Context.WithClock], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
@@ -751,6 +752,50 @@ func (rtx *Context) Help() string {
 		return ""
 	}
 	return page
+}
+
+// InvokedHelp returns the help page of the invoked command, whichever hook is running, as a
+// --help answered in the root's cascading hook prints it. Like [Context.Help] the page is the
+// running program's, so in a composed child it shows the full path, `acme db migrate`, not the
+// child's own. It returns "" and no error when [Program.WithHelp] set no pages.
+func (rtx *Context) InvokedHelp() (string, error) {
+	rtx.mu.RLock()
+	help := rtx.help
+	rtx.mu.RUnlock()
+	if help == nil {
+		return "", nil
+	}
+	chain := rtx.chainRef()
+	return help(helpPath(chain, 1, len(chain))...)
+}
+
+// HelpFor returns the help page of the command at path, read the way a help command's arguments
+// are: from the command [Context.Command] sits under. In `acme db help migrate`, run in the hook
+// of db's help command, HelpFor("migrate") is the page of `acme db migrate`, and HelpFor() is
+// db's. The page is the running program's, as with [Context.Help]. It returns an error when
+// path names no command, and "" and no error when [Program.WithHelp] set no pages.
+func (rtx *Context) HelpFor(path ...string) (string, error) {
+	rtx.mu.RLock()
+	help := rtx.help
+	frame := rtx.frameIndexLocked()
+	rtx.mu.RUnlock()
+	if help == nil {
+		return "", nil
+	}
+	return help(append(helpPath(rtx.chainRef(), 1, frame), path...)...)
+}
+
+// helpPath is the names of chain[from:to], or none when the range is empty.
+func helpPath(chain []Command, from, to int) []string {
+	to = min(to, len(chain))
+	if from >= to {
+		return nil
+	}
+	names := make([]string, 0, to-from)
+	for _, c := range chain[from:to] {
+		names = append(names, c.Name)
+	}
+	return names
 }
 
 // Version returns the version set by [Program.WithVersion], or "" if none was set.

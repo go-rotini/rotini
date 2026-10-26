@@ -90,6 +90,11 @@ func IndexYAML(src []byte) (*YAMLDoc, error) {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 	doc := &YAMLDoc{Src: src}
+	if bytes.HasPrefix(src[bomLen(src):], []byte(bom)) {
+		// Rotini's config reader drops both marks, the parser keeps the second as text, so the
+		// two would disagree on the first key.
+		return nil, &LayoutError{Line: 1, Reason: "the file starts with more than one byte-order mark"}
+	}
 	if loneCR(src) || bytes.Contains(src, []byte("\u0085")) || bytes.Contains(src, []byte("\u2028")) || bytes.Contains(src, []byte("\u2029")) {
 		return nil, &LayoutError{Line: 1, Reason: "the file uses a line break other than \\n or \\r\\n"}
 	}
@@ -488,12 +493,11 @@ func quotedEnd(src []byte, off int) (int, bool) {
 	return 0, false
 }
 
-// blockScalarEnd finds a literal or folded scalar's end: its last body line, the body being
-// the following lines indented at least as far as its first (or as its indicator says), and
-// blank lines. With keep chomping (+) the trailing blank lines are content and included.
-func (ix *yamlIndexer) blockScalarEnd(off, parentCol int) (int, error) {
+// blockScalarHeader returns the end of the block scalar header ("|", ">-2") at off. The header
+// holds at most one indentation indicator and one chomping indicator, and only a comment may
+// follow it on its line.
+func (ix *yamlIndexer) blockScalarHeader(off int) (int, error) {
 	le := lineEnd(ix.src, off)
-	// The header holds at most one indentation indicator and one chomping indicator.
 	hdr := off + 1
 	digit, chomp := false, false
 header:
@@ -510,6 +514,17 @@ header:
 	if rest := bytes.TrimLeft(ix.src[hdr:le], " \t"); len(rest) > 0 && (rest[0] != '#' || hdr == le-len(rest)) {
 		return 0, ix.layout(off, "a block scalar header with more after it than a comment")
 	}
+	return hdr, nil
+}
+
+// blockScalarEnd finds a literal or folded scalar's end: its last body line, the body being
+// the following lines indented at least as far as its first (or as its indicator says), and
+// blank lines. With keep chomping (+) the trailing blank lines are content and included.
+func (ix *yamlIndexer) blockScalarEnd(off, parentCol int) (int, error) {
+	hdr, err := ix.blockScalarHeader(off)
+	if err != nil {
+		return 0, err
+	}
 	keep := bytes.IndexByte(ix.src[off:hdr], '+') >= 0
 	end, blankEnd, content := hdr, hdr, -1
 	if d := bytes.IndexAny(ix.src[off:hdr], "123456789"); d >= 0 {
@@ -521,8 +536,12 @@ header:
 			// Whitespace past the body's indentation is content, not an empty line, and so is
 			// a tab after the indentation.
 			ind := indentAt(ix.src, ls)
-			if (content >= 0 && ind > content) || (ind > parentCol && bytes.IndexByte(ix.src[ls:blankEnd], '\t') >= 0) {
+			tab := ind > parentCol && bytes.IndexByte(ix.src[ls:blankEnd], '\t') >= 0
+			if (content >= 0 && ind > content) || tab {
 				end = blankEnd
+			}
+			if tab && content < 0 {
+				content = ind // YAML reads " \t" as the first content line, so it sets the indentation
 			}
 			continue
 		}

@@ -217,7 +217,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 				path:     childNames,
 				listed:   listed && !n.hidden,
 			})
-			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs, gp.envPrefix)...)
+			childCascading := append(slices.Clone(unshadowed(cascading, ownFlags(n.inputs, true))), cascadingFlagsOf(n.inputs, gp.envPrefix)...)
 			walk(n.children, childChain, childNames, childCascading, listed && !n.hidden, data.Stability)
 		}
 	}
@@ -336,7 +336,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Description: h.Description,
 		Usage:       h.Usage,
 		Footer:      h.Footer,
-		Cascading:   withConfigKeys(ancestorCascading, reads),
+		Cascading:   withConfigKeys(unshadowed(ancestorCascading, ownFlags(inputs, false)), reads),
 		Examples:    h.Examples,
 		SeeAlso:     h.SeeAlso,
 		Effects:     effectsText(h.Effects),
@@ -641,6 +641,7 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 		Accepts:     acceptsNote(f.Schema),
 		Rules:       rules,
 		name:        f.Name,
+		ids:         flagIdentifiers(f),
 		key:         flagConfigKey(f.Name, f.Schema),
 		Effects:     effectsText(f.Effects),
 
@@ -725,6 +726,77 @@ func labelFlags(pages ...[]templateDocFlagRow) {
 			}
 		}
 	}
+}
+
+// unshadowed drops the rows of ancestor cascading flags whose every identifier one of flags
+// redeclares. After that command's name the parser finds the nearer flag first, so the
+// ancestor's flag no longer applies there: a composed child redeclaring its parent's --help is
+// listed once, not twice.
+func unshadowed(ancestors []templateDocFlagRow, flags []FlagInput) []templateDocFlagRow {
+	taken := identifierSet(flags)
+	if len(taken) == 0 {
+		return ancestors
+	}
+	var kept []templateDocFlagRow
+	for _, r := range ancestors {
+		if !allTaken(r.ids, taken) {
+			kept = append(kept, r)
+		}
+	}
+	return kept
+}
+
+// unshadowedFlags is unshadowed for the flags themselves, as the contract lists them.
+func unshadowedFlags(ancestors, flags []FlagInput) []FlagInput {
+	taken := identifierSet(flags)
+	if len(taken) == 0 {
+		return ancestors
+	}
+	var kept []FlagInput
+	for _, f := range ancestors {
+		if !allTaken(flagIdentifiers(f), taken) {
+			kept = append(kept, f)
+		}
+	}
+	return kept
+}
+
+// identifierSet is every identifier flags answer to.
+func identifierSet(flags []FlagInput) map[string]bool {
+	set := map[string]bool{}
+	for _, f := range flags {
+		for _, id := range flagIdentifiers(f) {
+			set[id] = true
+		}
+	}
+	return set
+}
+
+// allTaken reports whether ids is non-empty and every one of them is in taken.
+func allTaken(ids []string, taken map[string]bool) bool {
+	for _, id := range ids {
+		if !taken[id] {
+			return false
+		}
+	}
+	return len(ids) > 0
+}
+
+// ownFlags returns a command's flags, or only its cascading ones; nil when it has no inputs.
+func ownFlags(inputs *Inputs, cascadingOnly bool) []FlagInput {
+	if inputs == nil {
+		return nil
+	}
+	if !cascadingOnly {
+		return inputs.Flags
+	}
+	var flags []FlagInput
+	for _, f := range inputs.Flags {
+		if f.Cascading {
+			flags = append(flags, f)
+		}
+	}
+	return flags
 }
 
 // cascadingFlagsOf returns help rows for a command's visible cascading flags, in declaration

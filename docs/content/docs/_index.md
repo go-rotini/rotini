@@ -1233,7 +1233,10 @@ what to do.
 
 `rotini init` marks `--help` and `--version` this way, makes both cascading so every command's
 page lists them, and writes one `CascadingPreRun` in the root handler that answers both for every
-command: `--version` prints the program's name, then its version (`todo 1.2.3`). So a command's handler needs no help code, and `todo add --help` works even with the
+command: `--help` prints `rtx.InvokedHelp()`, the page of the command that was run, and
+`--version` prints the program's name, then its version (`todo 1.2.3`). Both read the running
+program, so in a [composed](#composing-clis) child `acme db migrate --help` shows `acme db migrate`
+and `acme db --version` prints acme's. So a command's handler needs no help code, and `todo add --help` works even with the
 title missing. The hook reads the root's flags with `rtx.ArgvInputs`, which parses only the
 command line, since a short-circuit flag can only come from there. So `--help` and `--version`
 answer even when an environment variable or a configuration file can't be read, and the hook
@@ -2903,8 +2906,8 @@ command:
 {{< /code >}}
 
 The root's help lists them under `Help Topics:` (`headings.topics` renames it), and the generated
-`Help("filters")` returns the page, so a `help` command whose handler calls `Help(path...)` shows
-`todo help filters`. The man and markdown features write a page for each topic too, in the man
+`Help("filters")` returns the page, so the `help` command `rotini init` writes, whose handler
+calls `rtx.HelpFor(path...)`, shows `todo help filters`. The man and markdown features write a page for each topic too, in the man
 feature's section (`todo-filters.1`), listed after the commands in `ManPages()` and
 `MarkdownPages()` with `Topic` set. `help <TAB>` completes topic names along with command names.
 
@@ -3966,6 +3969,11 @@ sub-command, and it still builds and ships on its own. To mount a spec from a mo
 depends on, use `$ref: mod://<module>@<version>/<path>`; it is read from the module cache and
 verified by `go.sum`. Keys set next to the `$ref`, such as a new `name`, `summary` or `group`, adjust
 it for its new parent; see [`$ref`](/specification#ref).
+
+Help inside a mounted child is the parent's: `acme db --help`, `acme db help migrate` and
+`acme help db migrate` all show the full path, through the handlers `rotini init` writes. Text the
+child's spec spells out, such as a footer naming its own program, is shown as written; set
+`footer` next to the `$ref` to word it for the parent.
 
 A `mod://` child stays at the version `go.sum` pins, so upgrading rotini doesn't move it. Upgrade
 the child's module on its own, then regenerate; its own `version:` check reports it if it needs

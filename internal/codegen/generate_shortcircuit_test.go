@@ -56,7 +56,7 @@ func TestStubs_shortCircuitShape(t *testing.T) {
 	files := emitInModule(t, scSpec(true), scConf)
 
 	root := files["internal/cmd/demo/demo.go"]
-	for _, want := range []string{"func (*demoHandler) CascadingPreRun(", "Help(path...)", "inputs.Demo.Flags.Version"} {
+	for _, want := range []string{"func (*demoHandler) CascadingPreRun(", "rtx.InvokedHelp()", "inputs.Demo.Flags.Version"} {
 		if !strings.Contains(root, want) {
 			t.Errorf("root stub is missing %q:\n%s", want, root)
 		}

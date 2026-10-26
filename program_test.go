@@ -1388,6 +1388,93 @@ func TestProgram_WithHelp_pageOfTheRunningCommand(t *testing.T) {
 	}
 }
 
+// helpPathsProgram is app > db > help, the shape of a composed child's help command, recording
+// what InvokedHelp and HelpFor ask the program's HelpFunc for.
+type helpPathsProgram struct {
+	record func(hook string, rtx *Context)
+}
+
+func (p helpPathsProgram) App() Handler       { return helpPathsHook{name: "root", record: p.record} }
+func (p helpPathsProgram) AppDb() Handler     { return ocNoop{} }
+func (p helpPathsProgram) AppDbHelp() Handler { return helpPathsHook{name: "help", record: p.record} }
+
+type helpPathsHook struct {
+	NoHooks
+	name   string
+	record func(hook string, rtx *Context)
+}
+
+func (h helpPathsHook) CascadingPreRun(_ context.Context, rtx *Context) {
+	if h.name == "root" {
+		h.record("root", rtx)
+	}
+}
+
+func (h helpPathsHook) Run(_ context.Context, rtx *Context) {
+	if h.name == "help" {
+		h.record("help", rtx)
+	}
+}
+
+// TestContext_InvokedHelpAndHelpFor pins the paths the two methods ask for: InvokedHelp the
+// whole invocation from any hook, HelpFor its path below the command the running one sits
+// under, so a composed child's help command reaches pages through the program it runs in.
+func TestContext_InvokedHelpAndHelpFor(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{
+		Name: "db", Handler: "AppDb", Commands: []CommandDef{{
+			Name: "help", Handler: "AppDbHelp",
+			Arguments: []ArgDef{{Name: "command", Type: "[]string", Variadic: true}},
+		}},
+	}}}
+	var asked []string
+	pages := func(path ...string) (string, error) {
+		asked = append(asked, strings.Join(path, " "))
+		if len(path) > 0 && path[len(path)-1] == "nope" {
+			return "", errors.New("no page")
+		}
+		return "page", nil
+	}
+	var errs []error
+	record := func(hook string, rtx *Context) {
+		if _, err := rtx.InvokedHelp(); err != nil {
+			errs = append(errs, err)
+		}
+		if hook == "help" {
+			for _, path := range [][]string{{"migrate"}, nil} {
+				if _, err := rtx.HelpFor(path...); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			if _, err := rtx.HelpFor("nope"); err == nil {
+				errs = append(errs, errors.New("HelpFor of a missing command should fail"))
+			}
+		}
+	}
+	NewProgram(def, helpPathsProgram{record: record}).WithHelp(pages).WithArgs([]string{"db", "help", "migrate"}).
+		WithStdout(io.Discard).WithStderr(io.Discard).WithExit(func(int) {}).Execute()
+
+	want := []string{
+		"db help",    // InvokedHelp in the root's cascading hook: the invoked command, not the root
+		"db help",    // InvokedHelp in the help command's own hook
+		"db migrate", // HelpFor("migrate"): from db, which help sits under
+		"db",         // HelpFor(): db itself
+		"db nope",
+	}
+	if !reflect.DeepEqual(asked, want) {
+		t.Errorf("asked for %q, want %q", asked, want)
+	}
+	if len(errs) > 0 {
+		t.Errorf("unexpected errors: %v", errs)
+	}
+
+	asked, errs = nil, nil
+	NewProgram(def, helpPathsProgram{record: record}).WithArgs([]string{"db", "help"}).
+		WithStdout(io.Discard).WithStderr(io.Discard).WithExit(func(int) {}).Execute()
+	if len(asked) != 0 || len(errs) != 1 {
+		t.Errorf("with no WithHelp: asked %q, errors %v; want no asks and only the missing-command check failing", asked, errs)
+	}
+}
+
 // The reporter is handed everything a run recorded, and Run reports the same thing to its caller.
 // These pin where one ends and the other begins.
 

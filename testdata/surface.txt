@@ -447,8 +447,10 @@ method Context.Halt()
 method Context.HaltWith(err error)
 method Context.HaltWithCode(code int)
 method Context.Help() string
+method Context.HelpFor(path ...string) (string, error)
 method Context.InputsWithReport[T any]() (T, InputReport, error)
 method Context.Inputs[T any]() (T, error)
+method Context.InvokedHelp() (string, error)
 method Context.LookupEnv(name string) (string, bool)
 method Context.MustGetDependency[T any](dep Dependency[T]) T
 method Context.Now() time.Time

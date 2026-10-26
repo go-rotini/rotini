@@ -33,7 +33,7 @@ func (*demoHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	page, err := Help(inputs.DemoHelp.Arguments.Command...)
+	page, err := rtx.HelpFor(inputs.DemoHelp.Arguments.Command...)
 	if err != nil {
 		rtx.HaltWith(err)
 		return

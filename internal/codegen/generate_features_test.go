@@ -637,3 +637,47 @@ command:
 		t.Error("an explicit default_text on a secret input should still show")
 	}
 }
+
+// TestHelpData_nearerFlagShadowsAncestorCascading pins that a command redeclaring every
+// identifier of an ancestor's cascading flag, as a composed child does with --help, drops the
+// ancestor's row from Global Flags, while a flag taking only some of them leaves it listed.
+func TestHelpData_nearerFlagShadowsAncestorCascading(t *testing.T) {
+	t.Parallel()
+	help := FlagInput{Name: "help", Identifiers: []string{"-h", "--help"}, Cascading: true, Schema: &InputSchema{Type: "bool"}}
+	ancestors := []templateDocFlagRow{flagRow(help, "")}
+	names := func(rows []templateDocFlagRow) []string {
+		var out []string
+		for _, r := range rows {
+			out = append(out, r.name)
+		}
+		return out
+	}
+
+	tests := []struct {
+		name string
+		own  []FlagInput
+		want []string
+	}{
+		{"redeclared", []FlagInput{help}, nil},
+		{"one identifier taken", []FlagInput{{Name: "host", Identifiers: []string{"-h", "--host"}, Schema: &InputSchema{Type: "string"}}}, []string{"help"}},
+		{"unrelated", []FlagInput{{Name: "name", Identifiers: []string{"--name"}, Schema: &InputSchema{Type: "string"}}}, []string{"help"}},
+	}
+	for _, tt := range tests {
+		data := buildHelpData("app child", cmdHelp{}, &Inputs{Flags: tt.own}, nil, nil, ancestors, "", configReads{})
+		if got := names(data.Cascading); !slices.Equal(got, tt.want) {
+			t.Errorf("%s: Global Flags = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+
+	if got := names(unshadowed(append(slices.Clone(ancestors), ancestors...), ownFlags(&Inputs{Flags: []FlagInput{help}}, true))); got != nil {
+		t.Errorf("a redeclared cascading flag should replace every ancestor row it covers, kept %v", got)
+	}
+
+	host := FlagInput{Name: "host", Identifiers: []string{"-h", "--host"}, Schema: &InputSchema{Type: "string"}}
+	if got := unshadowedFlags([]FlagInput{help}, []FlagInput{help}); got != nil {
+		t.Errorf("the contract should drop a redeclared ancestor flag, kept %v", got)
+	}
+	if got := unshadowedFlags([]FlagInput{help}, []FlagInput{host}); len(got) != 1 {
+		t.Errorf("the contract should keep an ancestor flag still reachable by --help, got %v", got)
+	}
+}

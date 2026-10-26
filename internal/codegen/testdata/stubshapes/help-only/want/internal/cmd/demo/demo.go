@@ -3,7 +3,6 @@ package demo
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/go-rotini/rotini"
 )
@@ -25,12 +24,7 @@ func (*demoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	inputs := argv.Values
 
 	if inputs.Demo.Flags.Help {
-		var path []string
-		for _, c := range rtx.CommandChain()[len(strings.Fields(rtx.CommandPath())):] {
-			path = append(path, c.Name)
-		}
-
-		page, err := Help(path...)
+		page, err := rtx.InvokedHelp()
 		if err != nil {
 			rtx.HaltWith(err)
 			return
