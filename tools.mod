@@ -2,7 +2,7 @@ module github.com/go-rotini/rotini
 
 go 1.27
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 tool (
 	github.com/go-gremlins/gremlins/cmd/gremlins

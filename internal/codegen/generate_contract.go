@@ -367,12 +367,13 @@ func (p *program) contractNodes() []contractNode {
 			names := append(slices.Clone(path), n.name)
 			nodes = append(nodes, contractNode{
 				path: names, help: n.help, inputs: n.inputs, output: n.output, stream: n.stream,
-				aliases: n.aliases, plugins: n.plugins, inherited: inherited, deprecate: n.deprecated,
+				aliases: n.aliases, plugins: n.plugins, inherited: unshadowedFlags(inherited, ownFlags(n.inputs, false)), deprecate: n.deprecated,
 				deprecatedIDs: n.deprecatedIdentifiers, lifecycle: n.lifecycle, hidden: hidden || n.hidden,
 				passthrough: n.passthrough, discovery: n.discovery, pluginHost: n.pluginHost, scope: n.scope,
 				hiddenAliases: n.hiddenAliases, replacedBy: n.replacedBy, flagSets: n.flagSets,
 			})
-			walk(n.children, names, append(cascading(n.inputs), inherited...), hidden || n.hidden)
+			own := cascading(n.inputs)
+			walk(n.children, names, append(own, unshadowedFlags(inherited, own)...), hidden || n.hidden)
 		}
 	}
 	walk(p.tree, nil, cascading(p.rootInputs), false)

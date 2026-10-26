@@ -2,9 +2,11 @@ package codegen
 
 // commandKeyOrder is the order `rotini fmt` writes a command's keys in, the order a reader
 // wants them: what the command is called and does, then what it reads, then what it writes,
-// then what it is made of.
+// then what it is made of. A composed command leads with its $ref: what it is, then what the
+// parent changes about it.
 var commandKeyOrder = []string{
 	"$schema",
+	"$ref",
 	"name",
 
 	// What it is called, and its documentation.
@@ -61,7 +63,6 @@ var commandKeyOrder = []string{
 
 	// What it is made of.
 	"commands",
-	"$ref",
 	"handler",
 	"filename",
 	"plugins",

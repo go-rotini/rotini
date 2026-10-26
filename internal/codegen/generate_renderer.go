@@ -585,8 +585,9 @@ type templateDocFlagRow struct {
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 
-	key  string // the config fallback key whether or not the page reads config files
-	name string // the flag's name
+	key  string   // the config fallback key whether or not the page reads config files
+	ids  []string // every identifier the flag answers to, to tell when a nearer flag shadows it
+	name string   // the flag's name
 }
 
 // templateDocFlagGroup is one bucket of flags in the Flags section. Title is the `group` value;

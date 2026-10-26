@@ -3,9 +3,6 @@ package {{.Package}}
 import (
 	"context"
 	"fmt"
-{{- if and .RootHook .RootHelpFlag}}
-	"strings"
-{{- end}}
 
 	{{.RuntimeImport}}
 )
@@ -32,12 +29,7 @@ func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Contex
 {{- if .RootHelpFlag}}
 
 	if inputs.{{.Prefix}}.Flags.{{.RootHelpFlag}} {
-		var path []string
-		for _, c := range rtx.CommandChain()[len(strings.Fields(rtx.CommandPath())):] {
-			path = append(path, c.Name)
-		}
-
-		page, err := Help(path...)
+		page, err := rtx.InvokedHelp()
 		if err != nil {
 			rtx.HaltWith(err)
 			return
@@ -150,7 +142,7 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 {{end}}
 {{- end}}
 {{- if .HelpPathArg}}
-	page, err := Help(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...)
+	page, err := rtx.HelpFor(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...)
 	if err != nil {
 		rtx.HaltWith(err)
 		return
