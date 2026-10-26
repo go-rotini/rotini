@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -109,9 +110,7 @@ func TestMount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			files := map[string]string{"cmd/app/.rotini.spec.yaml": tt.parent}
-			for k, v := range children {
-				files[k] = v
-			}
+			maps.Copy(files, children)
 			mountTree(t, files)
 			if _, err := Mount("cmd/app/.rotini.spec.yaml", tt.specs, tt.opts); err != nil {
 				t.Fatal(err)
@@ -209,9 +208,7 @@ func TestMount_refuses(t *testing.T) {
 				into = "command:\n  name: app\n  commands:\n    - name: help\n"
 			}
 			files := map[string]string{"cmd/app/.rotini.spec.yaml": into}
-			for k, v := range tt.files {
-				files[k] = v
-			}
+			maps.Copy(files, tt.files)
 			mountTree(t, files)
 			_, err := Mount("cmd/app/.rotini.spec.yaml", tt.specs, MountOptions{})
 			if err == nil || !strings.Contains(err.Error(), tt.errHas) {
@@ -307,9 +304,7 @@ func TestMount_under(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			files := map[string]string{"cmd/app/.rotini.spec.yaml": tt.parent, "cmd/other/.rotini.spec.yaml": childSpec("other", "bk")}
-			for k, v := range children {
-				files[k] = v
-			}
+			maps.Copy(files, children)
 			mountTree(t, files)
 			_, err := Mount("cmd/app/.rotini.spec.yaml", tt.specs, MountOptions{Under: tt.under})
 			got := readText(t, "cmd/app/.rotini.spec.yaml")
