@@ -2,10 +2,10 @@ github.com/go-rotini/dotenv v1.0.3 h1:yI/I8/VuLBxvNFLf/tzXscGKV4x0uh5Y6D3GLhM27+
 github.com/go-rotini/dotenv v1.0.3/go.mod h1:N0Q/gVMBhE2TacOUWY0iG6ww6fkmayGJ8j2SI/5S5Ps=
 github.com/go-rotini/env v1.0.4 h1:EuaI/C10N1onNzRiYqnoiVEhaCp9lLuR3mA1J+/ysRk=
 github.com/go-rotini/env v1.0.4/go.mod h1:LXP8BVY0G9GxB9gQPiybdzu7RwQbQHD7LFCzwyyCMfU=
-github.com/go-rotini/fs v1.1.3 h1:b/G41lQPDqkajXsJepLu4YS+EotNFbqmhVE5iebmMfw=
-github.com/go-rotini/fs v1.1.3/go.mod h1:b644dSdz5SeHQGZuABa3f+7LeVtUnxkUM6WUBzJhi7s=
-github.com/go-rotini/jsonc v1.1.4 h1:qeGUDjz3lVl+hAliZZ77VZMLRg19mBC/twUZOtRYC84=
-github.com/go-rotini/jsonc v1.1.4/go.mod h1:t709DMcbWVANfnK3FrplXYPAWSpD7R7P78omko/9He8=
+github.com/go-rotini/fs v1.1.4 h1:0rcMrQMV4wjen6cOP0RF/d1ItXBwwxVdXDOmkOeul+E=
+github.com/go-rotini/fs v1.1.4/go.mod h1:NElMbPqeey9I2Yfpda7/pbCE2Di0mCgL3ht8NsvHRf4=
+github.com/go-rotini/jsonc v1.1.5 h1:geepDAghmLgGHXZvaUmA30vXzQ9GS8wkeCJk2R0h9E4=
+github.com/go-rotini/jsonc v1.1.5/go.mod h1:FHueyiNbJS95pgL63BrvkN7rpwPWYVhJn6oLv3gxLMI=
 github.com/go-rotini/jsonschema v1.2.4 h1:Hi4kUpqCcqg6SjJHv9KS2S/nsrcH0vCUzl65p2tkzew=
 github.com/go-rotini/jsonschema v1.2.4/go.mod h1:JSMWZmszoXzpplBYp79zuHW/uP6MedL5WGG1c/UaCWg=
 github.com/go-rotini/recon v1.2.2 h1:1xgAaTSa0mOD2PJJCev4EZqdLfTnazvC6wM1Tx+z2p0=
