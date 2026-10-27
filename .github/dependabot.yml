@@ -1,15 +1,30 @@
+# Minor and patch updates come grouped, and merge themselves once CI passes on them
+# (auto-merge.yml); a major version gets its own pull request, for review.
 version: 2
 updates:
-  # fix(deps) so semantic-release ships each dependency bump as a patch release.
+  # fix(deps) so semantic-release ships each dependency bump as a patch release. go-rotini
+  # modules are checked daily, so a release reaches the rest of the family within a day; other
+  # modules are proposed once a release has been out for three days.
   - package-ecosystem: gomod
     directory: /
     schedule:
-      interval: weekly
+      interval: daily
     commit-message:
       prefix: fix
       include: scope
+    cooldown:
+      default-days: 3
+      exclude: ["github.com/go-rotini/*"]
+    groups:
+      go-rotini:
+        patterns: ["github.com/go-rotini/*"]
+        update-types: [minor, patch]
+      go-deps:
+        patterns: ["*"]
+        update-types: [minor, patch]
 
-  # ci(deps) so an Actions bump, which changes nothing users get, cuts no release.
+  # ci(deps) so an Actions bump, which changes nothing users get, cuts no release. Most actions
+  # live in the shared workflows (go-rotini/.github); this covers the ones used here.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -17,3 +32,23 @@ updates:
     commit-message:
       prefix: ci
       include: scope
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # The shell images the completion tests run in, pinned by digest. A major version is never
+  # proposed: each image is a chosen shell release (bash 3, 4 and 5).
+  - package-ecosystem: docker
+    directory: /e2e/testdata/shells/images
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: test
+      include: scope
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
+    groups:
+      docker:
+        patterns: ["*"]

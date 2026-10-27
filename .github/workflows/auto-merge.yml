@@ -1,0 +1,21 @@
+# Merges a pull request once CI passes on it: a grouped minor or patch Dependabot update, or one
+# a go-rotini organization owner enabled auto-merge on.
+name: Auto-merge
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  pull_request_target:
+    types: [auto_merge_enabled]
+
+permissions: {}
+
+jobs:
+  merge:
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    uses: go-rotini/.github/.github/workflows/auto-merge.yml@main
+    secrets: inherit

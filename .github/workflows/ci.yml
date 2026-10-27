@@ -5,252 +5,60 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-
-      - name: Test
-        run: make test
-
-      - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: coverage
-          path: test.out
-
-  acceptance:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-
-      - name: Acceptance
-        run: make test-acceptance
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-          # This job runs the development tools, which tools.mod pins separately from go.mod,
-          # so a tool bump has to change the cache key too.
-          cache-dependency-path: |
-            go.sum
-            tools.sum
-
-      - name: Lint
-        run: make lint
-
-      # The test matrix covers Linux, macOS and Windows; these platforms have their own
-      # build-tagged code and only need to compile.
-      - name: Cross-build
-        run: |
-          GOOS=plan9 GOARCH=amd64 go build .
-          GOOS=freebsd GOARCH=amd64 go build ./...
-          GOOS=openbsd GOARCH=amd64 go build ./...
-
-  # rotini commits files it generates from its own sources: the Go types for the spec and conf
-  # schemas, the published schema copies, and its own CLI's wiring. A change to a source that
-  # forgot to regenerate would ship stale code with every test still passing, so this fails
-  # when regenerating from a clean checkout changes anything.
-  generated:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-          # This job runs the development tools, which tools.mod pins separately from go.mod,
-          # so a tool bump has to change the cache key too.
-          cache-dependency-path: |
-            go.sum
-            tools.sum
-
-      - name: Generated files and go.mod are up to date
-        run: make check-generated
-
-  fuzz:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-
-      - name: Fuzz smoke test
-        run: make test-fuzz
-
-  conformance:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-
-      - name: Cross-platform conformance
-        run: make test-conformance
-
-  e2e:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      # The scripts run with GOTOOLCHAIN=local, and r11_lean_runtime checks the linker's output
-      # and the binary's size only with the toolchain go.mod names, so install exactly that one.
-      - name: Read the go.mod toolchain
-        id: toolchain
-        shell: bash
-        run: echo "version=$(awk '/^toolchain /{sub(/^go/, "", $2); print $2}' go.mod)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version: ${{ steps.toolchain.outputs.version }}
-
-      # The completion rigs skip a shell that is not installed, so install them all here.
-      # bash and zsh ship with the runner.
-      - name: Install the shells the completion rigs drive
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fish powershell || sudo apt-get install -y fish
-
-      - name: Install Nushell for the completion rigs
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          NU_VERSION: 0.116.0
-        run: |
-          curl -fsSL "https://github.com/nushell/nushell/releases/download/${NU_VERSION}/nu-${NU_VERSION}-x86_64-unknown-linux-gnu.tar.gz" |
-            tar -xz -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/nu-${NU_VERSION}-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/nu-${NU_VERSION}-x86_64-unknown-linux-gnu/nu" --version
-
-      - name: Install the shells the completion rigs drive
-        if: matrix.os == 'macos-latest'
-        run: brew install fish powershell/tap/powershell || brew install fish
-
-      - name: The e2e tier runs the go.mod toolchain
-        if: matrix.os == 'ubuntu-latest'
-        run: test "$(GOTOOLCHAIN=local go env GOVERSION)" = "$(awk '/^toolchain /{print $2}' go.mod)"
-
-      # The outside-in tier: spec -> generate -> build -> run the binary, as a user does.
-      - name: End-to-end
-        run: make test-e2e
-
-  # The completion scripts in one pinned Docker image per shell, against the same generated CLI
-  # and cases (e2e/shells_test.go). The runner's Docker builds the images.
-  completion-shells:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-
-      - name: Completion shell matrix
-        run: make test-completion-shells
-
-  benchmark:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-
-      - name: Benchmarks
-        run: make test-bench
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: benchmarks
-          path: test_bench.out
-
-  race:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-
-      - name: Race detector
-        run: make test-race
-
-  dependency-review:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
-
-  commitlint:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      # A squash merge makes the pull request's title the commit semantic-release reads, so the
-      # title is checked too. Merge commits (main merged into the branch) are skipped.
-      - name: Check conventional commits
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-          TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          PATTERN='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?(!)?: .+'
-          FAILED=0
-          if ! printf '%s\n' "$TITLE" | grep -qE "$PATTERN"; then
-            echo "BAD pull request title: $TITLE"
-            FAILED=1
-          fi
-          for SHA in $(git rev-list --no-merges "$BASE".."$HEAD"); do
-            MSG=$(git log --format=%s -n1 "$SHA")
-            if ! echo "$MSG" | grep -qE "$PATTERN"; then
-              echo "BAD: $MSG"
-              FAILED=1
-            fi
-          done
-          if [ "$FAILED" -eq 1 ]; then
-            echo "::error::The pull request title or some commits do not follow Conventional Commits (https://www.conventionalcommits.org)"
-            exit 1
-          fi
+  ci:
+    uses: go-rotini/.github/.github/workflows/go-ci.yml@main
+    with:
+      jobs: |
+        - name: test
+          run: make test
+          os: [ubuntu-latest, macos-latest, windows-latest]
+          artifact: test.out
+        - name: acceptance
+          run: make test-acceptance
+        - name: lint
+          run: |
+            make lint
+            GOOS=plan9 GOARCH=amd64 go build .
+            GOOS=freebsd GOARCH=amd64 go build ./...
+            GOOS=openbsd GOARCH=amd64 go build ./...
+        - name: generated
+          run: make check-generated
+        - name: fuzz
+          run: make test-fuzz
+        - name: conformance
+          run: make test-conformance
+          os: [ubuntu-latest, macos-latest, windows-latest]
+        # The completion rigs drive the shells installed here; the e2e tier runs the go.mod toolchain.
+        - name: e2e
+          os: [ubuntu-latest, macos-latest, windows-latest]
+          run: |
+            case "$RUNNER_OS" in
+              Linux)
+                sudo apt-get update
+                sudo apt-get install -y fish powershell || sudo apt-get install -y fish
+                NU_VERSION=0.116.0
+                curl -fsSL "https://github.com/nushell/nushell/releases/download/${NU_VERSION}/nu-${NU_VERSION}-x86_64-unknown-linux-gnu.tar.gz" |
+                  tar -xz -C "$RUNNER_TEMP"
+                export PATH="$RUNNER_TEMP/nu-${NU_VERSION}-x86_64-unknown-linux-gnu:$PATH"
+                nu --version
+                test "$(GOTOOLCHAIN=local go env GOVERSION)" = "$(awk '/^toolchain /{print $2}' go.mod)"
+                ;;
+              macOS)
+                brew install fish powershell/tap/powershell || brew install fish
+                ;;
+            esac
+            make test-e2e
+        - name: completion-shells
+          run: make test-completion-shells
+        - name: benchmark
+          run: make test-bench
+          artifact: test_bench.out
+        - name: race
+          run: make test-race
+          os: [ubuntu-latest, macos-latest, windows-latest]

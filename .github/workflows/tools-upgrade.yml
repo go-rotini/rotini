@@ -1,0 +1,18 @@
+# Moves go.mod's toolchain line to its newest patch release and the tools in tools.mod to their
+# latest releases, which Dependabot doesn't, ahead of the weekly vulnerability scan.
+name: Tools upgrade
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  upgrade:
+    permissions:
+      contents: read
+      issues: write
+    uses: go-rotini/.github/.github/workflows/go-tools-upgrade.yml@main
+    secrets: inherit
