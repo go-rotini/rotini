@@ -15,11 +15,14 @@ remote	manage remotes
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == flag-set-left-out
 --color	colorize output
 --config	config file
@@ -28,9 +31,11 @@ remote	manage remotes
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 == negated
@@ -54,6 +59,7 @@ Safe
 --speed=slow	
 --speed=Safe	
 == file-extensions
+`sp ace.yaml`	
 a.yaml	
 b.yml	
 bin/	
@@ -96,13 +102,16 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --quiet	say nothing
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 --verbose	say everything
+-l	log file
 == group-left-out
 --env	target environment
 --color	colorize output
@@ -113,11 +122,14 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == sub-command-enum
 dev	
 prod	
@@ -128,6 +140,7 @@ prod
 ./drivers/	
 ./src/	
 ./sub/	
+`./sp ace.yaml`	
 == fallback-directory
 src/	
 sub/	
@@ -187,6 +200,7 @@ host:9090
 == quote-inline
 '--odd=x;touch pwned'	
 == plain-value
+`sp ace.yaml`	
 a.yaml	
 b.yml	
 bin/	
@@ -200,3 +214,36 @@ completion_zsh.zsh
 drivers/	
 src/	
 sub/	
+== file-one-extension
+sub/e.log	
+== file-short-inline
+== file-inline
+== file-word-break
+sub/x:y.yaml	
+== directory-inline
+== directory-no-subdirectories
+== user-inline
+== group-inline
+== at-file
+== at-file-inline
+== at-file-directory
+== list-item
+'blue,canary'	
+'blue,green'	
+== program-path
+a.yaml	
+b.yml	
+bin/	
+c.txt	
+cases.txt	
+completion_bash.sh	
+completion_fish.fish	
+completion_nushell.nu	
+completion_powershell.ps1	
+completion_zsh.zsh	
+drivers/	
+`sp ace.yaml`	
+src/	
+sub/	
+== directory-unique
+src/	

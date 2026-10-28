@@ -56,6 +56,17 @@ commands:
   - name: exec
     description: run anything
     parsing: disabled
+  - name: remote
+    description: manage remotes
+    commands:
+      - name: add
+        description: add a remote
+      - name: help
+        description: show help for a remote command
+        completion:
+          positionalany:
+            - add
+            - help
   - name: legacy
     description: the old way
     hidden: true
@@ -66,6 +77,7 @@ commands:
         - build
         - run
         - exec
+        - remote
         - help
   - name: sync
     description: sync through a plugin

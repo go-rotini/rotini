@@ -179,6 +179,7 @@ export PATH="$PWD:$PATH"
 export APP_SERVICES=api,web
 _message() { print -r -- "MSG: $2" }
 _describe() { print -r -- "DESCRIBE" }
+_wanted() { print -r -- "DESCRIBE" }
 _files() { print -r -- "FILES" }
 compdef() { : }
 source ./completion_zsh.sh

@@ -15,11 +15,14 @@ remote	manage remotes
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == flag-set-left-out
 --color	colorize output
 --config	config file
@@ -28,9 +31,11 @@ remote	manage remotes
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 == negated
@@ -54,6 +59,7 @@ Safe
 --speed=slow	
 --speed=Safe	
 == file-extensions
+'./sp ace.yaml'	/w/sp ace.yaml
 ./a.yaml	/w/a.yaml
 ./b.yml	/w/b.yml
 ./bin	/w/bin
@@ -101,13 +107,16 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --quiet	say nothing
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 --verbose	say everything
+-l	log file
 == group-left-out
 --env	target environment
 --color	colorize output
@@ -118,15 +127,19 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == sub-command-enum
 dev	
 prod	
 == fallback-extensions
+'./sp ace.yaml'	/w/sp ace.yaml
 ./a.yaml	/w/a.yaml
 ./b.yml	/w/b.yml
 ./bin	/w/bin
@@ -220,6 +233,7 @@ run 'x;touch pwnedz': argv: [quote] [--pair] [x;touch pwnedz]
 run 'x y': argv: [quote] [--pair] [x y]
 run 'x,y': argv: [quote] [--pair] [x,y]
 == quote-typed-backslash
+<nothing: the file fallback stopped>
 == quote-colon
 host:8080	
 host:9090	
@@ -229,6 +243,7 @@ run host:9090: argv: [quote] [--addr] [host:9090]
 '--odd=x;touch pwned'	--odd=x;touch pwned
 run '--odd=x;touch pwned': argv: [quote] [--odd=x;touch pwned]
 == plain-value
+'./sp ace.yaml'	/w/sp ace.yaml
 ./a.yaml	/w/a.yaml
 ./b.yml	/w/b.yml
 ./bin	/w/bin
@@ -242,3 +257,72 @@ run '--odd=x;touch pwned': argv: [quote] [--odd=x;touch pwned]
 ./drivers	/w/drivers
 ./src	/w/src
 ./sub	/w/sub
+== file-one-extension
+./sub/e.log	/w/sub/e.log
+== file-short-inline
+'-l=./sub/e.log'	/w/sub/e.log
+== file-inline
+'--config=./a.yaml'	/w/a.yaml
+'--config=./b.yml'	/w/b.yml
+'--config=./bin'	/w/bin
+'--config=./drivers'	/w/drivers
+'--config=./sp ace.yaml'	/w/sp ace.yaml
+'--config=./src'	/w/src
+'--config=./sub'	/w/sub
+== file-word-break
+<nothing: the file fallback stopped>
+== directory-inline
+'--dir=./bin'	/w/bin
+'--dir=./drivers'	/w/drivers
+'--dir=./src'	/w/src
+'--dir=./sub'	/w/sub
+== directory-no-subdirectories
+<nothing: the file fallback stopped>
+== user-inline
+<nothing: the file fallback stopped>
+== group-inline
+<nothing: the file fallback stopped>
+== at-file
+'@./a.yaml'	/w/a.yaml
+'@./b.yml'	/w/b.yml
+'@./bin'	/w/bin
+'@./c.txt'	/w/c.txt
+'@./cases.txt'	/w/cases.txt
+'@./completion_bash.sh'	/w/completion_bash.sh
+'@./completion_fish.fish'	/w/completion_fish.fish
+'@./completion_nushell.nu'	/w/completion_nushell.nu
+'@./completion_powershell.ps1'	/w/completion_powershell.ps1
+'@./completion_zsh.zsh'	/w/completion_zsh.zsh
+'@./drivers'	/w/drivers
+'@./sp ace.yaml'	/w/sp ace.yaml
+'@./src'	/w/src
+'@./sub'	/w/sub
+== at-file-inline
+'--token=@./a.yaml'	/w/a.yaml
+'--token=@./b.yml'	/w/b.yml
+'--token=@./bin'	/w/bin
+'--token=@./c.txt'	/w/c.txt
+'--token=@./cases.txt'	/w/cases.txt
+'--token=@./completion_bash.sh'	/w/completion_bash.sh
+'--token=@./completion_fish.fish'	/w/completion_fish.fish
+'--token=@./completion_nushell.nu'	/w/completion_nushell.nu
+'--token=@./completion_powershell.ps1'	/w/completion_powershell.ps1
+'--token=@./completion_zsh.zsh'	/w/completion_zsh.zsh
+'--token=@./drivers'	/w/drivers
+'--token=@./sp ace.yaml'	/w/sp ace.yaml
+'--token=@./src'	/w/src
+'--token=@./sub'	/w/sub
+== at-file-directory
+'@./sub/d.yaml'	/w/sub/d.yaml
+'@./sub/e.log'	/w/sub/e.log
+'@./sub/x:y.yaml'	/w/sub/x:y.yaml
+== list-item
+deploy	deploy a service
+help	print help
+quote	values a shell must insert as one literal word
+remote	manage remotes
+status	show status
+== program-path
+typed-path	the program typed
+== directory-unique
+./src	/w/src

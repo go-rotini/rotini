@@ -104,7 +104,7 @@ func TestComplete_ignoreCaseOption(t *testing.T) {
 	}{
 		{[]string{"--mode", "S"}, "slow\nSafe\n:rotini:option keep-order ignore-case\n"},
 		{[]string{"--mode=s"}, "--mode=slow\n--mode=Safe\n:rotini:option keep-order ignore-case\n"},
-		{[]string{"--mode", "x"}, ""},
+		{[]string{"--mode", "x"}, ":rotini:none\n"}, // the enum is the whole vocabulary
 		{[]string{"--strict", "s"}, "slow\n"},
 		{[]string{"S"}, "slow\nSafe\n:rotini:option keep-order ignore-case\n"},
 	} {

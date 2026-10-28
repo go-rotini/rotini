@@ -17,12 +17,20 @@ command:
       schema:
         type: string
         complete: { kind: directory }
+    - name: log
+      cascading: true
+      summary: log file
+      identifiers: [--log, -l]
+      schema:
+        type: string
+        complete: { kind: file, extensions: [log] }
     - name: token
       cascading: true
       summary: API token
       identifiers: [--token]
       schema:
         type: string
+        from: [file, value]
         complete: { kind: none, message: "an API token, from your account page" }
     - name: exec
       cascading: true
@@ -77,6 +85,14 @@ command:
         type: string
         enum: [fast, slow, Safe]
         ignore_case: true
+    - name: tag
+      cascading: true
+      summary: tags to apply
+      identifiers: [--tag]
+      schema:
+        type: '[]string'
+        separator: ','
+        enum: [blue, canary, green]
     - name: set
       cascading: true
       summary: override a setting

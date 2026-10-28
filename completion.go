@@ -42,9 +42,10 @@ const completeCommand = "__complete"
 // read-only and fast; a completer that calls the network derives a deadline from
 // [Context.Context].
 //
-// Candidates are offered in the order returned. A candidate may carry a one-line description
-// after a tab, "value\tdescription", which every shell shows beside the value (bash on the
-// second TAB) unless the conf's `descriptions_env` switches descriptions off.
+// Candidates are offered in the order returned, those that don't start with the typed word
+// left out. A candidate may carry a one-line description after a tab, "value\tdescription",
+// which every shell shows beside the value (bash on the second TAB) unless the conf's
+// `descriptions_env` switches descriptions off.
 // [Context.SetCompletionOptions] asks the shell not to add a space after the inserted value, and
 // [Context.SetCompletionFallback] chooses what the shell falls back to, in place of the
 // declared `complete:` hint.
@@ -215,22 +216,21 @@ func completePendingFlagValue(cc completionContext, words []string, partial stri
 }
 
 // completeFlagWord completes a word beginning with "-": either a flag name, or a flag's value in
-// the inline "--flag=value" form. Only declared, visible, current flags are offered, and the
-// whole chain contributes, since ancestor flags resolve on descendants, except an ancestor's
-// local flags. Unset required flags come first.
+// the inline "--flag=value" form or attached to a short flag ("-fvalue"). Only declared,
+// visible, current flags are offered, and the whole chain contributes, since ancestor flags
+// resolve on descendants, except an ancestor's local flags. Unset required flags come first.
 func completeFlagWord(cc completionContext, words []string, partial string, lookup HandlerLookup, rtx *Context) completionAnswer {
-	if name, val, hasInline := splitFlag(partial); hasInline {
-		fd, idx, negated, found := findFlagMatch(cc.chain, name)
-		if !found || negated || !takesValue(fd) || (fd.Local && idx != len(cc.chain)-1) {
-			return completionAnswer{} // a flag that takes no value has nothing to offer after "="
-		}
+	if fd, idx, prefix, val, ok := inlineFlagValue(cc.chain, partial); ok {
 		vals := flagValueCandidates(lookup, rtx, cc.chain, words, idx, fd, val)
 		inline := make([]string, len(vals.cands))
 		for i, c := range vals.cands {
-			inline[i] = name + "=" + c
+			inline[i] = prefix + c
 		}
 		vals.cands = inline
 		return vals.answer(partial)
+	}
+	if _, _, hasInline := splitFlag(partial); hasInline {
+		return completionAnswer{} // an unknown flag, or one that takes no value, has nothing to offer after "="
 	}
 
 	var required, rest, mine []string
@@ -595,32 +595,45 @@ func argValueCandidates(def Definition, lookup HandlerLookup, rtx *Context, cc c
 		return valueCandidates{cands: cands, dynamic: true}
 	}
 	if ad.Complete.Kind == completeKindCommand {
-		var path []string
-		if v := variadicIndex(cur.Arguments); v >= 0 && v <= len(cc.args) {
-			path = cc.args[v:]
-		}
-		return valueCandidates{cands: commandPathCandidates(def, path), sorted: true}
+		cands, _ := commandPathCandidates(def, cc.chain, commandPathWords(cc))
+		return valueCandidates{cands: cands, sorted: true}
 	}
 	return enumListCandidates(argEnum(&ad), ad.Separator, partial)
 }
 
-// commandPathCandidates returns the visible sub-commands of the command path names below the
-// root, or nothing when a word names no command. The path is root-relative, as the program's
-// help is, whichever command the argument belongs to. An empty path also offers the help
-// topics.
-func commandPathCandidates(def Definition, path []string) []string {
-	if len(path) == 0 {
-		return append(commandNames(rootFrame(def)), topicCandidates(def)...)
+// commandPathWords returns the words of the leaf's command path argument typed so far: the
+// variadic argument's, or none.
+func commandPathWords(cc completionContext) []string {
+	cur := cc.chain[len(cc.chain)-1]
+	if v := variadicIndex(cur.Arguments); v >= 0 && v <= len(cc.args) {
+		return cc.args[v:]
 	}
-	cur := rootFrame(def)
+	return nil
+}
+
+// commandPathCandidates returns the visible sub-commands of the command path names, read from
+// the command the argument's command sits under, as [Context.HelpFor] reads a help command's
+// arguments: in `app db help <TAB>` the path starts at db. An empty path read from the root
+// also offers the help topics, which only the root's help reaches. open reports whether the
+// path names a command with sub-commands, so another word can follow.
+func commandPathCandidates(def Definition, chain []Command, path []string) (cands []string, open bool) {
+	base := rootFrame(def)
+	if len(chain) > 1 {
+		base = chain[len(chain)-2]
+	}
+	cur := base
 	for _, w := range path {
 		child, ok := findChild(&cur, w)
 		if !ok {
-			return nil
+			return nil, false
 		}
 		cur = cmdFrame(child)
 	}
-	return commandNames(cur)
+	cands = commandNames(cur)
+	if len(path) == 0 && len(chain) <= 2 {
+		cands = append(cands, topicCandidates(def)...)
+	}
+	return cands, len(cands) > 0
 }
 
 // enumCandidates returns an enum's offered values in declared order, each with its summary:
@@ -898,8 +911,28 @@ func wireSafeValue(value string) bool {
 // doesn't know, and the kind line stays the last line.
 const completionDirectivePrefix = ":rotini:"
 
-// completeKindCommand is the [Completion] kind for command paths below the root.
+// completeKindCommand is the [Completion] kind for a help command's command path.
 const completeKindCommand = "command"
+
+// impliedNone is the hint for a word nothing else can fill: no argument is left to take it, or
+// the input's values are all declared. It goes out as "none" when no candidate matches, and
+// as no hint beside candidates, where the shell offers no files anyway, so a request with
+// candidates reads as it always has.
+const impliedNone = "\x00none"
+
+// resolveImplied turns an impliedNone hint into what the shell is told, given whether there
+// are candidates.
+func resolveImplied(h Completion, candidates bool) Completion {
+	if h.Kind != impliedNone {
+		return h
+	}
+	if candidates {
+		h.Kind = ""
+	} else {
+		h.Kind = "none"
+	}
+	return h
+}
 
 // completionHint returns the directive line for the word being completed, or "" when the input
 // declares no hint and the shell should apply its own default.
@@ -924,7 +957,7 @@ func completionHint(def Definition, words []string) string {
 // Completion when there is none. It is the wire-neutral half of completionHint, handed to
 // every [CompletionFormat].
 func completionHintFor(def Definition, words []string) Completion {
-	return completionHintWith(allFeatures(), def, words)
+	return resolveImplied(completionHintWith(allFeatures(), def, words), false)
 }
 
 // completionHintWith is completionHintFor with the run's features fs.
@@ -950,10 +983,7 @@ func completionHintWith(fs *featureSet, def Definition, words []string) Completi
 	}
 	if cc.afterTerminator || cc.operands {
 		// Flags have stopped: the word is an argument, whatever it looks like.
-		if ad, ok := positionalAt(cur.Arguments, cc.positionals); ok {
-			return ad.Complete
-		}
-		return Completion{}
+		return positionalHint(def, cc, partial)
 	}
 
 	// "--flag <TAB>": the word is the preceding flag's value.
@@ -963,42 +993,160 @@ func completionHintWith(fs *featureSet, def Definition, words []string) Completi
 		case p.mapValue, isMapType(p.fd.Type) && strings.Contains(partial, "="):
 			return mapValueHint(p.fd)
 		case takesValue(p.fd):
-			return p.fd.Complete
+			return flagValueHint(p.fd, partial)
 		}
 		return Completion{}
 	}
 
-	// "--flag=<TAB>": the word carries its own flag.
+	// "--flag=<TAB>" and "-fvalue<TAB>": the word carries its own flag.
 	if strings.HasPrefix(partial, "-") {
 		return inlineValueHint(cc.chain, partial)
 	}
 
-	// Otherwise the word binds to a positional — but only once dispatch can no longer
-	// descend, since before that it may still be a sub-command name.
+	// Until dispatch can no longer descend the word may be a sub-command name, which the
+	// candidates cover; past that, only the argument it binds to can take it.
 	if cc.positionals == 0 && hasDispatchable(fs, cur) {
-		return Completion{}
+		if ad, ok := positionalAt(cur.Arguments, cc.positionals); ok {
+			return argHint(def, cc, ad, partial)
+		}
+		return Completion{Kind: impliedNone}
 	}
-	if ad, ok := positionalAt(cur.Arguments, cc.positionals); ok {
-		return ad.Complete
+	return positionalHint(def, cc, partial)
+}
+
+// positionalHint is the hint for the argument the word binds to, or none when the command
+// takes no further argument: the run would reject any word there.
+func positionalHint(def Definition, cc completionContext, partial string) Completion {
+	ad, ok := positionalAt(cc.chain[len(cc.chain)-1].Arguments, cc.positionals)
+	if !ok {
+		return Completion{Kind: impliedNone}
 	}
-	return Completion{}
+	return argHint(def, cc, ad, partial)
+}
+
+// argHint is an argument's hint for partial. An "@" on a from:file argument starts a path, so
+// files; a command path that can take no further word offers nothing more; and an enum with
+// no declared hint is the whole vocabulary, so nothing else is offered when no value matches.
+func argHint(def Definition, cc completionContext, ad ArgDef, partial string) Completion {
+	if strings.HasPrefix(partial, "@") && slices.Contains(ad.From, "file") {
+		return Completion{Kind: "file"}
+	}
+	h := ad.Complete
+	switch {
+	case h.Kind == completeKindCommand:
+		if _, open := commandPathCandidates(def, cc.chain, commandPathWords(cc)); !open {
+			h.Message = "" // the path is complete, or names no command
+		}
+	case h.Kind == "" && argEnum(&ad).declared():
+		h.Kind = impliedNone
+	}
+	return h
+}
+
+// flagValueHint is a value-taking flag's hint for partial, read as argHint reads an
+// argument's: files after "@" on a from:file flag, and none for an enum, or a map's declared
+// keys, with no declared hint.
+func flagValueHint(fd FlagDef, partial string) Completion {
+	if strings.HasPrefix(partial, "@") && slices.Contains(fd.From, "file") {
+		return Completion{Kind: "file"}
+	}
+	h := fd.Complete
+	if h.Kind == "" && (flagEnum(&fd).declared() || (isMapType(fd.Type) && len(fd.KeyPaths) > 0)) {
+		h.Kind = impliedNone
+	}
+	return h
 }
 
 // inlineValueHint is the hint for a word that starts with "-": the flag's own for
-// "--flag=<TAB>", nothing while a flag name is being typed (paths are not candidates).
+// "--flag=<TAB>" and a short flag's attached value ("-fvalue<TAB>"), nothing while a flag name
+// is being typed (paths are not candidates).
 func inlineValueHint(chain []Command, partial string) Completion {
-	name, val, hasInline := splitFlag(partial)
-	if !hasInline {
-		return Completion{}
-	}
-	fd, idx, negated, found := findFlagMatch(chain, name)
-	if !found || negated || !takesValue(fd) || (fd.Local && idx != len(chain)-1) {
+	fd, _, prefix, val, ok := inlineFlagValue(chain, partial)
+	if !ok {
 		return Completion{}
 	}
 	if isMapType(fd.Type) && strings.Contains(val, "=") {
 		return mapValueHint(fd)
 	}
-	return fd.Complete
+	h := flagValueHint(fd, val)
+	if !strings.HasSuffix(prefix, "=") && shellCompletes(h.Kind) {
+		// The scripts complete a shell-supplied value after a "--flag=" prefix, but they can't
+		// tell where a value attached to a short flag starts ("-C/tm"), so offer nothing.
+		h.Kind, h.Extensions = "none", nil
+	}
+	return h
+}
+
+// shellCompletes reports whether the shell supplies the values of a hint kind.
+func shellCompletes(kind string) bool {
+	switch kind {
+	case "file", "directory", "executable", "user", "group", "host":
+		return true
+	}
+	return false
+}
+
+// inlineFlagValue reads a word that carries a flag's value: "--flag=value", "-f=value", or a
+// short cluster whose value-taking flag ends it ("-fvalue", "-vfvalue", "-vf=value"), as the
+// parser reads them. It returns the flag, the frame that declares it, the word up to the value,
+// and the value; ok is false for a flag name being typed, an unknown flag, or a flag that takes
+// no value there.
+func inlineFlagValue(chain []Command, partial string) (fd FlagDef, idx int, prefix, val string, ok bool) {
+	usable := func(f FlagDef, i int) bool { return takesValue(f) && (!f.Local || i == len(chain)-1) }
+	name, inline, hasInline := splitFlag(partial)
+	if hasInline {
+		if f, i, negated, found := findFlagMatch(chain, name); found {
+			if negated || !usable(f, i) {
+				return FlagDef{}, 0, "", "", false
+			}
+			return f, i, name + "=", inline, true
+		}
+	}
+	if strings.HasPrefix(partial, "--") || len(partial) < 3 || flagSpellingStarts(chain, partial) {
+		return FlagDef{}, 0, "", "", false
+	}
+	body, inline, hasInline := splitFlag(partial[1:])
+	for k := 0; k < len(body); {
+		_, w := utf8.DecodeRuneInString(body[k:])
+		f, i, _, found := findFlagRef(chain, "-"+body[k:k+w])
+		switch {
+		case !found:
+			return FlagDef{}, 0, "", "", false
+		case f.Type == "bool" || f.Type == "count":
+			k += w
+			continue
+		case !usable(*f, i):
+			return FlagDef{}, 0, "", "", false
+		}
+		rest := body[k+w:]
+		switch {
+		case rest != "" && hasInline:
+			val = rest + "=" + inline
+		case rest != "":
+			val = rest
+		case hasInline:
+			val = inline
+		default:
+			return FlagDef{}, 0, "", "", false // "-vf": the value is the next word
+		}
+		return *f, i, partial[:len(partial)-len(val)], val, true
+	}
+	return FlagDef{}, 0, "", "", false
+}
+
+// flagSpellingStarts reports whether a flag spelling of chain starts with partial, so the word
+// may still be that flag's name.
+func flagSpellingStarts(chain []Command, partial string) bool {
+	for _, c := range chain {
+		for _, f := range c.Flags {
+			for _, id := range f.Identifiers {
+				if strings.HasPrefix(id, partial) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // positionalAt returns the argument the next positional binds to, a variadic absorbing
@@ -1114,6 +1262,8 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 	}
 	rtx := p.newRunContext()
 	rtx.ctx = ctx
+	// The answer owns stdout: a completer's own writes go to stderr, which the scripts discard.
+	rtx.Stdout, rtx.bufOut = rtx.Stderr, nil
 	// Completion never reports a feature the program does not wire, which would corrupt the
 	// shell's output; the run it completes reports it.
 	fs := p.features()
@@ -1167,6 +1317,7 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 		result.Hint.Kind, result.Hint.Extensions = fb.Kind, fb.Extensions
 	}
 	rtx.mu.RUnlock()
+	result.Hint = resolveImplied(result.Hint, len(result.Candidates) > 0)
 	if p.def.CompletionMessages != nil && p.completionMessagesOn(rtx) {
 		result.Messages = completionMessages(added, result)
 	}

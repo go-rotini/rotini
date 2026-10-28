@@ -22,7 +22,7 @@ const carapaceSchemaHeader = "# yaml-language-server: $schema=https://carapace.s
 // renderCarapace writes <root>.yaml under the feature's `file` directory, or to `file` itself
 // when it names a .yaml or .yml file. carapace requires the file name to match the root name.
 func renderCarapace(p *program, f *Feature, _ *agentProgram, _ *template.Template) (map[string][]byte, []error, error) {
-	doc := p.carapaceCommand(p.rootName, nil, p.rootHelp, p.rootInputs, p.tree, p.rootPlugins, p.rootPassthrough, false)
+	doc := p.carapaceCommand(p.rootName, nil, p.rootHelp, p.rootInputs, p.tree, p.tree, p.rootPlugins, p.rootPassthrough, false)
 	var out strings.Builder
 	out.WriteString(carapaceSchemaHeader)
 	writeYAMLMap(&out, doc, "")
@@ -33,8 +33,10 @@ func renderCarapace(p *program, f *Feature, _ *agentProgram, _ *template.Templat
 	return map[string][]byte{rel: []byte(out.String())}, nil, nil
 }
 
-// carapaceCommand builds one command's carapace-spec mapping, its children included.
-func (p *program) carapaceCommand(name string, aliases []string, help cmdHelp, in *Inputs, children []rnode, plugins []PluginSpec, passthrough, hidden bool) yaml.MapSlice {
+// carapaceCommand builds one command's carapace-spec mapping, its children included. siblings are
+// the sub-commands of the command it sits under (the root's for the root), which a command path
+// argument names, as a help command's does.
+func (p *program) carapaceCommand(name string, aliases []string, help cmdHelp, in *Inputs, children, siblings []rnode, plugins []PluginSpec, passthrough, hidden bool) yaml.MapSlice {
 	cmd := yaml.MapSlice{{Key: "name", Value: name}}
 	add := func(key string, value any, when bool) {
 		if when {
@@ -63,12 +65,12 @@ func (p *program) carapaceCommand(name string, aliases []string, help cmdHelp, i
 		completion = append(completion, yaml.MapItem{Key: "flag", Value: flagValues})
 	}
 	if !passthrough {
-		completion = append(completion, p.carapacePositionals(in.Arguments)...)
+		completion = append(completion, p.carapacePositionals(in.Arguments, siblings)...)
 	}
 	add("completion", completion, len(completion) > 0)
 	subs := make([]yaml.MapSlice, 0, len(children)+len(plugins))
 	for _, n := range children {
-		subs = append(subs, p.carapaceCommand(n.name, visibleAliases(n), n.help, n.inputs, n.children, n.plugins, n.passthrough, n.hidden || n.deprecated != ""))
+		subs = append(subs, p.carapaceCommand(n.name, visibleAliases(n), n.help, n.inputs, n.children, children, n.plugins, n.passthrough, n.hidden || n.deprecated != ""))
 	}
 	for _, pl := range plugins {
 		subs = append(subs, carapacePlugin(pl))
@@ -120,11 +122,11 @@ func carapaceExclusive(groups []FlagGroup, names map[string]string) [][]string {
 
 // carapacePositionals lists each argument's completion values by position, and those of a
 // variadic or passthrough last argument as `positionalany`.
-func (p *program) carapacePositionals(args []ArgumentInput) yaml.MapSlice {
+func (p *program) carapacePositionals(args []ArgumentInput, siblings []rnode) yaml.MapSlice {
 	var positional [][]string
 	var rest []string
 	for i, a := range args {
-		values := p.carapaceValues(a.Schema)
+		values := p.carapaceValuesIn(a.Schema, siblings)
 		if a.Passthrough || (i == len(args)-1 && isListType(definitionType(a.Schema, nil))) {
 			rest = values
 			break
@@ -242,7 +244,10 @@ func isListType(t string) bool { return strings.HasPrefix(t, "[]") }
 // carapaceValues lists an input's static candidates: its enum values (with their summaries,
 // leaving out hidden and deprecated ones) and the macro for its completion hint, or else its
 // completion message, which the completion feature keeps only when its messages are on.
-func (p *program) carapaceValues(s *InputSchema) []string {
+func (p *program) carapaceValues(s *InputSchema) []string { return p.carapaceValuesIn(s, p.tree) }
+
+// carapaceValuesIn is carapaceValues with the commands a command path starts from.
+func (p *program) carapaceValuesIn(s *InputSchema, paths []rnode) []string {
 	if s == nil {
 		return nil
 	}
@@ -281,7 +286,7 @@ func (p *program) carapaceValues(s *InputSchema) []string {
 		case "host":
 			out = append(out, "$carapace.net.Hosts")
 		case completeKindCommandName:
-			for _, n := range p.tree {
+			for _, n := range paths {
 				if !n.hidden && n.deprecated == "" {
 					out = append(out, n.name)
 				}

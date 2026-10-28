@@ -11,6 +11,7 @@ json
 text	
 yaml	
 == file-extensions
+`sp ace.yaml`	
 a.yaml	
 b.yml	
 bin/	

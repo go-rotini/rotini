@@ -13,7 +13,7 @@ yaml
 == file-extensions
 <_files -g *.(yaml|yml)>
 == directory
-<_files -/>
+<_path_files -/>
 == none-with-message
 ! an API token, from your account page
 == completer
