@@ -1,0 +1,7 @@
+== sourced without compinit
+status=1
+stderr: app completion needs compinit: run autoload -Uz compinit && compinit first
+== command-prefix
+app remote 
+== negated
+app --no-color 

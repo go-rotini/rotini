@@ -15,11 +15,14 @@ remote
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == flag-set-left-out
 --color	colorize output
 --config	config file
@@ -28,9 +31,11 @@ remote
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 == negated
@@ -56,15 +61,16 @@ Safe
 == file-extensions
 a.yaml	
 b.yml	
-bin	
-drivers	
-src	
-sub	
+bin/	
+drivers/	
+sp ace.yaml	
+src/	
+sub/	
 == directory
-bin	
-drivers	
-src	
-sub	
+bin/	
+drivers/	
+src/	
+sub/	
 == none-with-message
 ! an API token, from your account page
 == executable
@@ -101,13 +107,16 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --quiet	say nothing
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 --verbose	say everything
+-l	log file
 == group-left-out
 --env	target environment
 --color	colorize output
@@ -118,27 +127,31 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == sub-command-enum
 dev	
 prod	
 == fallback-extensions
 ./a.yaml	
 ./b.yml	
-./bin	
-./drivers	
-./src	
-./sub	
+./bin/	
+./drivers/	
+./sp ace.yaml	
+./src/	
+./sub/	
 == fallback-directory
-src	
-sub	
+src/	
+sub/	
 == fallback-with-candidates
 db	
-drivers	
+drivers/	
 == fallback-none
 == fallback-file
 c.txt	
@@ -164,7 +177,7 @@ a\\:b
 C:\\Users\\me	a path: C:\Users\me
 a\!b	
 ends\'	
-\{a\,b\}	
+\{a,b\}	
 a\&b\|c\<d\>e	
 \#hash	
 true	
@@ -177,7 +190,7 @@ null
 x';'touch\ pwned	
 x\;touch\ pwnedz	
 x\ y	
-x\,y	
+x,y	
 == quote-typed-quote
 it'\''s $HOME	
 == quote-typed-quote-shared
@@ -193,3 +206,68 @@ it\'s\ \$HOME
 == quote-inline
 x\;touch\ pwned	
 == plain-value
+== file-one-extension
+sub/e.log	
+== file-short-inline
+sub/e.log	
+== file-inline
+a.yaml	
+b.yml	
+bin/	
+drivers/	
+sp ace.yaml	
+src/	
+sub/	
+== file-word-break
+y.yaml	
+== directory-inline
+bin/	
+drivers/	
+src/	
+sub/	
+== directory-no-subdirectories
+== user-inline
+rotiniuser	
+== group-inline
+rotinigroup	
+== at-file
+a.yaml	
+b.yml	
+bin/	
+c.txt	
+cases.txt	
+completion_bash.sh	
+completion_fish.fish	
+completion_nushell.nu	
+completion_powershell.ps1	
+completion_zsh.zsh	
+drivers/	
+sp ace.yaml	
+src/	
+sub/	
+== at-file-inline
+a.yaml	
+b.yml	
+bin/	
+c.txt	
+cases.txt	
+completion_bash.sh	
+completion_fish.fish	
+completion_nushell.nu	
+completion_powershell.ps1	
+completion_zsh.zsh	
+drivers/	
+sp ace.yaml	
+src/	
+sub/	
+== at-file-directory
+sub/d.yaml	
+sub/e.log	
+sub/x:y.yaml	
+== list-item
+blue,canary	
+blue,green	
+== program-path
+typed-path	
+== directory-unique
+src/	

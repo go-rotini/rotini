@@ -132,8 +132,10 @@ func TestCompletionScripts_readTheProtocol(t *testing.T) {
 			`[[ -z $1 || $1 == file* ]]`, `[[ $COMP_TYPE == 63 ]]`, `_PROG_describe`,
 		},
 		"zsh": {
-			`':rotini:option '*`, `opts+=(-S '')`, `_describe -V 'PROG' pairs`,
+			`':rotini:option '*`, `opts+=(-S '')`, `_wanted -V values expl 'PROG' compadd`,
 			`_command_names -e`, `_users`, `_groups`, `_hosts`, `"") (( $#pairs )) || _files ;;`,
+			`_path_files -/`, `compset -P 1 '*='`, `compset -P '@'`, `_files -g "*.$exts[1]"`,
+			`$zsh_eval_context[-1] == loadautofunc`, `(( $+functions[compdef] ))`,
 		},
 		"fish": {
 			`':rotini:option *'`, `complete -c PROG -f -k -a '(__PROG_complete)'`,

@@ -242,8 +242,9 @@ func helpDef() Definition {
 	}
 }
 
-// TestComplete_commandPaths pins `help <TAB>`: the words already given are a root-relative
-// path, and the candidates are its visible sub-commands, aliases included, plugins not.
+// TestComplete_commandPaths pins `help <TAB>`: the words already given are a path read from the
+// command the help command sits under, as rtx.HelpFor reads it, and the candidates are its
+// visible sub-commands, aliases included, plugins not.
 func TestComplete_commandPaths(t *testing.T) {
 	def := helpDef()
 	cases := []struct {
@@ -254,7 +255,10 @@ func TestComplete_commandPaths(t *testing.T) {
 		{[]string{"help", "remote", ""}, []string{"add", "rm"}},
 		{[]string{"help", "r", "a"}, []string{"add"}},
 		{[]string{"help", "nope", ""}, nil},
-		{[]string{"child", "help", ""}, []string{"child", "help", "r", "remote"}},
+		{[]string{"child", "help", ""}, []string{"help", "inner"}},
+		{[]string{"child", "help", "i"}, []string{"inner"}},
+		{[]string{"child", "help", "remote", ""}, nil},
+		{[]string{"child", "help", "inner", ""}, nil},
 	}
 	for _, c := range cases {
 		var got []string

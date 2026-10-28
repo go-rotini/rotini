@@ -721,18 +721,19 @@ func completionHintDef() Definition {
 	return Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
-			{Name: "config", Identifiers: []string{"--config"}, Type: "string",
+			{Name: "config", Identifiers: []string{"-c", "--config"}, Type: "string",
 				Complete: Completion{Kind: "file", Extensions: []string{"yaml", "yml"}}},
 			{Name: "out", Identifiers: []string{"--out"}, Type: "string",
 				Complete: Completion{Kind: "directory"}},
-			{Name: "id", Identifiers: []string{"--id"}, Type: "string",
+			{Name: "id", Identifiers: []string{"--id"}, Type: "string", From: []string{"file"},
 				Complete: Completion{Kind: "none"}},
 			{Name: "plain", Identifiers: []string{"--plain"}, Type: "string"},
 			{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
+			{Name: "mode", Identifiers: []string{"-m", "--mode"}, Type: "string", Enum: []string{"fast", "slow"}},
 		},
 		Commands: []CommandDef{{
 			Name: "open", Handler: "AppOpen",
-			Arguments: []ArgDef{{Name: "path", Type: "string", Complete: Completion{Kind: "file"}}},
+			Arguments: []ArgDef{{Name: "path", Type: "string", From: []string{"file"}, Complete: Completion{Kind: "file"}}},
 		}},
 	}
 }
@@ -749,11 +750,20 @@ func TestCompletionHint(t *testing.T) {
 		{"a directory flag", []string{"--out", ""}, ":rotini:directory"},
 		{"an opaque value suppresses the shell's default", []string{"--id", ""}, ":rotini:none"},
 		{"a flag with no hint leaves the shell alone", []string{"--plain", ""}, ""},
-		{"a bool takes no value", []string{"--force", ""}, ""},
+		{"after a bool, only a sub-command fits", []string{"--force", ""}, ":rotini:none"},
 		{"a flag NAME being typed is not a path", []string{"--con"}, ""},
 		{"a positional with a hint", []string{"open", ""}, ":rotini:file"},
-		{"a bare word that could still be a sub-command", []string{""}, ""},
-		{"nothing after the terminator", []string{"--", ""}, ""},
+		{"a bare word can only be a sub-command", []string{""}, ":rotini:none"},
+		{"nothing after the terminator", []string{"--", ""}, ":rotini:none"},
+		{"past the last argument", []string{"open", "x", ""}, ":rotini:none"},
+		{"an enum is the whole vocabulary", []string{"--mode", "x"}, ":rotini:none"},
+		{"an enum, inline", []string{"--mode=x"}, ":rotini:none"},
+		{"an enum attached to a short flag", []string{"-mx"}, ":rotini:none"},
+		{"@ on a from:file flag starts a path", []string{"--id", "@"}, ":rotini:file"},
+		{"@ on a from:file flag, inline", []string{"--id=@"}, ":rotini:file"},
+		{"@ on a from:file argument starts a path", []string{"open", "@"}, ":rotini:file"},
+		{"a shell-completed value attached to a short flag", []string{"-cx"}, ":rotini:none"},
+		{"a shell-completed value after -c=", []string{"-c=x"}, ":rotini:file yaml yml"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

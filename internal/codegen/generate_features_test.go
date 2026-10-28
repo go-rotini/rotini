@@ -492,7 +492,7 @@ command:
 	if page := read("help_kubectl-acme.txt"); !strings.Contains(page, `Use "kubectl-acme help" (verbatim`) {
 		t.Errorf("the verbatim footer was rewritten:\n%s", page)
 	}
-	if script := read("completion_bash.txt"); !strings.Contains(script, "kubectl-acme __complete") || strings.Contains(script, "kubectl acme") {
+	if script := read("completion_bash.txt"); !strings.Contains(script, "prog=kubectl-acme\n") || strings.Contains(script, "kubectl acme") {
 		t.Errorf("completion must target the binary, kubectl-acme:\n%s", script)
 	}
 	for _, f := range files {

@@ -15,11 +15,14 @@ remote	manage remotes
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == flag-set-left-out
 --color	colorize output
 --config	config file
@@ -28,9 +31,11 @@ remote	manage remotes
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 == negated
@@ -57,6 +62,7 @@ a.yaml
 b.yml	
 bin/	Directory
 drivers/	Directory
+sp\ ace.yaml	
 src/	Directory
 sub/	Directory
 == directory
@@ -99,13 +105,16 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --quiet	say nothing
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 --verbose	say everything
+-l	log file
 == group-left-out
 --env	target environment
 --color	colorize output
@@ -116,11 +125,14 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == sub-command-enum
 dev	
 prod	
@@ -129,6 +141,7 @@ prod
 ./b.yml	
 ./bin/	Directory
 ./drivers/	Directory
+./sp\ ace.yaml	
 ./src/	Directory
 ./sub/	Directory
 == fallback-directory
@@ -201,5 +214,71 @@ completion_nushell.nu
 completion_powershell.ps1	
 completion_zsh.zsh	
 drivers/	
+sp\ ace.yaml	
 src/	
 sub/	
+== file-one-extension
+sub/e.log	
+== file-short-inline
+-l=sub/e.log	
+== file-inline
+--config=a.yaml	
+--config=b.yml	
+--config=bin/	Directory
+--config=drivers/	Directory
+--config=sp\ ace.yaml	
+--config=src/	Directory
+--config=sub/	Directory
+== file-word-break
+sub/x:y.yaml	
+== directory-inline
+--dir=bin/	Directory
+--dir=drivers/	Directory
+--dir=src/	Directory
+--dir=sub/	Directory
+== directory-no-subdirectories
+== user-inline
+--user=rotiniuser	
+== group-inline
+--group=rotinigroup	rotiniuser
+== at-file
+@a.yaml	
+@b.yml	
+@bin/	
+@c.txt	
+@cases.txt	
+@completion_bash.sh	
+@completion_fish.fish	
+@completion_nushell.nu	
+@completion_powershell.ps1	
+@completion_zsh.zsh	
+@drivers/	
+@sp\ ace.yaml	
+@src/	
+@sub/	
+== at-file-inline
+--token=@a.yaml	
+--token=@b.yml	
+--token=@bin/	
+--token=@c.txt	
+--token=@cases.txt	
+--token=@completion_bash.sh	
+--token=@completion_fish.fish	
+--token=@completion_nushell.nu	
+--token=@completion_powershell.ps1	
+--token=@completion_zsh.zsh	
+--token=@drivers/	
+--token=@sp\ ace.yaml	
+--token=@src/	
+--token=@sub/	
+== at-file-directory
+@sub/d.yaml	
+@sub/e.log	
+@sub/x:y.yaml	
+== list-item
+blue,canary	
+blue,green	
+== program-path
+typed-path	the program typed
+== directory-unique
+src/	Directory

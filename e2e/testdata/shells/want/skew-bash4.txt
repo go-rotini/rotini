@@ -13,15 +13,16 @@ yaml
 == file-extensions
 a.yaml	
 b.yml	
-bin	
-drivers	
-src	
-sub	
+bin/	
+drivers/	
+sp ace.yaml	
+src/	
+sub/	
 == directory
-bin	
-drivers	
-src	
-sub	
+bin/	
+drivers/	
+src/	
+sub/	
 == none-with-message
 ! an API token, from your account page
 == completer

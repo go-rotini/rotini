@@ -41,18 +41,32 @@ func completionQuotingDir(t *testing.T) string {
 // candidate, the words the line then holds after the program (or INCOMPLETE when the shell
 // would wait for more), and the same for the text the candidates share.
 // Usage: bash driver.sh <script> <line file>, where the line file holds the kept text, the open
-// quote, COMP_LINE and then each of COMP_WORDS, one per line. They are read from a file because
-// on Windows a bash built on the MSYS or Cygwin runtime splits its command line on quotes again,
-// so an argument holding an unmatched ' can't reach the script intact.
+// quote, COMP_LINE, COMP_TYPE (empty to leave it unset, as bash 3.2 does) and then each of
+// COMP_WORDS, one per line. They are read from a file because on Windows a bash built on the
+// MSYS or Cygwin runtime splits its command line on quotes again, so an argument holding an
+// unmatched ' can't reach the script intact. It also prints each candidate as REPLY.
 const bashQuotingDriver = `source "$1"
 lines=$2
 set --
 while IFS= read -r arg; do set -- "$@" "$arg"; done < "$lines"
-keep=$1 quote=$2 COMP_LINE=$3
-shift 3
-COMP_POINT=${#COMP_LINE} COMP_WORDS=("$@") COMP_CWORD=$(( $# - 1 )) COMP_TYPE=9 COMPREPLY=()
+keep=$1 quote=$2 COMP_LINE=$3 COMP_TYPE=$4
+shift 4
+[[ -n $COMP_TYPE ]] || unset COMP_TYPE
+COMP_POINT=${#COMP_LINE} COMP_WORDS=("$@") COMP_CWORD=$(( $# - 1 )) COMPREPLY=()
 fn=$(complete -p my-prog | sed -n 's/.* -F \([^ ]*\) .*/\1/p')
 "$fn" >/dev/null 2>&1
+printf 'REPLY %s\n' "${COMPREPLY[@]}"
+if [[ -z ${COMP_TYPE+set} ]] && (( ${#COMPREPLY[@]} > 1 )); then
+    lcd=${COMPREPLY[0]}
+    for v in "${COMPREPLY[@]}"; do
+        while [[ $v != "$lcd"* ]]; do lcd=${lcd%?}; done
+    done
+    # The listing: the TAB that inserts leaves the line as it is.
+    if [[ $keep$lcd == "$COMP_LINE" ]]; then
+        echo LISTING
+        exit 0
+    fi
+fi
 parse() {
     local w
     if ! bash -n -c "w=($1)" 2>/dev/null; then
@@ -98,6 +112,11 @@ var bashQuotingCases = []quotingCase{
 		name: "shared prefix", line: "my-prog --v x", words: [][]string{{"my-prog", "--v", "x"}},
 		keep: "my-prog --v ", fixed: []string{"--v"}, sent: "x",
 		cands: []string{"x;touch pwned", "x;touch pwnedz", "x a", "x,b", "x’a", "x”b", "x$(touch pwned)", "x$HOME"},
+	},
+	{
+		name: "list item", line: "my-prog --v blue,", words: [][]string{{"my-prog", "--v", "blue,"}},
+		keep: "my-prog --v ", fixed: []string{"--v"}, sent: "blue,",
+		cands: []string{"blue,canary", "blue,green", "blue,x y"},
 	},
 	{
 		name: "after =", line: "my-prog --v=", words: [][]string{{"my-prog", "--v="}, {"my-prog", "--v", "="}},
@@ -157,7 +176,9 @@ func prefixed(prefix string, vals []string) []string {
 // TestCompletionScript_bashInsertsLiteralWords completes hostile candidates with the bash script,
 // one at a time and all together, and parses what readline would insert: each candidate must
 // come back as exactly one word holding its value, and the text several share must be a
-// complete word (or an open quote the user is already in) that runs nothing.
+// complete word (or an open quote the user is already in) that runs nothing. Without COMP_TYPE,
+// as in bash 3.2, several candidates may instead come back unquoted for the listing, but only
+// when the text they share is what was typed, so the TAB that inserts leaves the line as it is.
 func TestCompletionScript_bashInsertsLiteralWords(t *testing.T) {
 	t.Parallel()
 	bash, err := exec.LookPath("bash")
@@ -184,19 +205,42 @@ func TestCompletionScript_bashInsertsLiteralWords(t *testing.T) {
 			sets = append(sets, []string{c})
 		}
 		for _, words := range tc.words {
-			lines := append([]string{tc.keep, tc.quote, tc.line}, words...)
-			if err := os.WriteFile(linePath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			for _, cands := range sets {
-				out := runQuotingDriver(t, dir, cands, bash, driverPath, scriptPath, linePath)
-				checkInserted(t, tc, words, cands, out)
+			for _, compType := range []string{"9", ""} {
+				lines := append([]string{tc.keep, tc.quote, tc.line, compType}, words...)
+				if err := os.WriteFile(linePath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				for _, cands := range sets {
+					out := runQuotingDriver(t, dir, cands, bash, driverPath, scriptPath, linePath)
+					if compType == "" && len(cands) > 1 && tc.name == "bare" && !slices.Equal(replies(out.out), cands) {
+						t.Errorf("%s %q without COMP_TYPE: the listing is %q, want the candidates as they are", tc.name, words, replies(out.out))
+					}
+					// A comma needs no quoting, so TAB never rewrites one already typed.
+					if r := strings.Join(replies(out.out), "\n"); strings.Contains(r, `\,`) && !strings.Contains(r, `$'`) {
+						t.Errorf("%s %q: a comma is quoted in %q", tc.name, words, r)
+					}
+					if strings.Contains(out.out, "LISTING\n") {
+						continue
+					}
+					checkInserted(t, tc, words, cands, out)
+				}
 			}
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, "pwned")); err == nil {
 		t.Error("a candidate ran a command")
 	}
+}
+
+// replies returns the candidates a driver's report lists as REPLY.
+func replies(out string) []string {
+	var got []string
+	for line := range strings.Lines(out) {
+		if v, ok := strings.CutPrefix(strings.TrimSuffix(line, "\n"), "REPLY "); ok {
+			got = append(got, v)
+		}
+	}
+	return got
 }
 
 // runQuotingDriver runs a driver in dir with cands as the fake program's answer and returns its
@@ -414,6 +458,48 @@ foreach ($m in $c.CompletionMatches) {
 		run := runQuotingDriver(t, dir, []string{"a"}, pwsh, "-NoProfile", "-NonInteractive", "-File", driverPath, scriptPath, line)
 		if want := []string{"--%", ""}; !slices.Equal(run.sent, want) {
 			t.Errorf("%q: the program got %q to complete, want %q", line, run.sent, want)
+		}
+	}
+}
+
+// TestCompletionScript_pwshSendsWordsUpToTheCursor completes with the cursor before the end of
+// the line: the program gets the words up to the cursor, the one at it cut there.
+func TestCompletionScript_pwshSendsWordsUpToTheCursor(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake program is a shell script")
+	}
+	pwsh, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("pwsh is not installed")
+	}
+	script, err := completionScript("my-prog", "powershell", completionEnvs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := completionQuotingDir(t)
+	scriptPath := filepath.Join(dir, "completion.ps1")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	driver := "param($Script, $Line, $Cursor)\n. $Script\n$null = TabExpansion2 -inputScript $Line -cursorColumn ([int]$Cursor)\n"
+	driverPath := filepath.Join(dir, "cursor.ps1")
+	if err := os.WriteFile(driverPath, []byte(driver), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		line   string
+		cursor int
+		want   []string
+	}{
+		{"my-prog deploy --e prod", len("my-prog deploy --e"), []string{"deploy", "--e"}},
+		{"my-prog deploy --env  --force", len("my-prog deploy --env "), []string{"deploy", "--env", ""}},
+		{"my-prog deploy --env", len("my-prog deploy --e"), []string{"deploy", "--e"}},
+		{"my-prog deploy 'a b' x", len("my-prog deploy 'a"), []string{"deploy", "a"}},
+	} {
+		run := runQuotingDriver(t, dir, []string{"a"}, pwsh, "-NoProfile", "-NonInteractive", "-File", driverPath, scriptPath, tc.line, strconv.Itoa(tc.cursor))
+		if !slices.Equal(run.sent, tc.want) {
+			t.Errorf("%q with the cursor at %d: the program got %q, want %q", tc.line, tc.cursor, run.sent, tc.want)
 		}
 	}
 }

@@ -40,3 +40,17 @@ quote-typed-backslash	app quote --odd it\'|
 quote-colon	app quote --addr host:|
 quote-inline	app quote --odd=x|
 plain-value	app quote --note |	unordered
+file-one-extension	app --log sub/|	unordered
+file-short-inline	app -l=sub/|	unordered
+file-inline	app --config=|	unordered
+file-word-break	app --config sub/x:|	unordered
+directory-inline	app --dir=|	unordered
+directory-no-subdirectories	app --dir sub/|	unordered
+user-inline	app --user=rotini|
+group-inline	app --group=rotini|
+at-file	app --token @|	unordered
+at-file-inline	app --token=@|	unordered
+at-file-directory	app --token @sub/|	unordered
+list-item	app --tag blue,|
+program-path	./bin/old/app |
+directory-unique	app --dir sr|	unordered

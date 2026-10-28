@@ -1,6 +1,6 @@
 == commands
-deploy	
-status	
+deploy  (deploy a service)	
+status  (show status)	
 == flags
 --config	
 --dir	
@@ -13,20 +13,21 @@ yaml
 == file-extensions
 a.yaml	
 b.yml	
-bin	
-drivers	
-src	
-sub	
+bin/	
+drivers/	
+sp ace.yaml	
+src/	
+sub/	
 == directory
-bin	
-drivers	
-src	
-sub	
+bin/	
+drivers/	
+src/	
+sub/	
 == none-with-message
 == completer
-web	
-api	
-db	
+web  (the web tier)	
+api  (the public API)	
+db   (the database)	
 == sub-command-enum
 dev	
 prod	

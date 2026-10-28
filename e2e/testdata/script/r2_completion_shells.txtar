@@ -93,6 +93,8 @@ stdout '^:rotini:file yaml yml$'
 set -e
 export PATH="$PWD:$PATH"
 source ./completion_bash.sh
+# The TAB that inserts is COMP_TYPE 9; bash 3.2 sets no COMP_TYPE at all.
+COMP_TYPE=9
 
 COMP_WORDS=(app "")
 COMP_CWORD=1
@@ -138,7 +140,7 @@ printf 'INSERTED: '; printf '|%s' "${COMPREPLY[@]}"; echo '|'
 COMP_TYPE=63
 APP_DESCRIPTIONS=off _app_complete
 printf 'OFF: '; printf '|%s' "${COMPREPLY[@]}"; echo '|'
-unset COMP_TYPE
+COMP_TYPE=9
 
 # An enum keeps its declared order.
 COMP_WORDS=(app --level "")

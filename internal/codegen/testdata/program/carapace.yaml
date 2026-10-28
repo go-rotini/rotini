@@ -95,6 +95,17 @@ command:
         - name: argv
           summary: the command line
           schema: { type: '[]string' }
+    - name: remote
+      summary: manage remotes
+      commands:
+        - name: add
+          summary: add a remote
+        - name: help
+          summary: show help for a remote command
+          arguments:
+            - name: command
+              summary: the command
+              schema: { type: '[]string', complete: { kind: command } }
     - name: legacy
       summary: the old way
       deprecated: use build
