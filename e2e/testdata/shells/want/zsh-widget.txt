@@ -15,10 +15,13 @@ remote
 --group
 --host
 --level
+--log
 --set
 --speed
+--tag
 --token
 --user
+-l
 --no-color
 == enum
 json
@@ -34,11 +37,43 @@ Safe
 == enum-ignore-case-inline
 --speed=slow
 --speed=Safe
+== file-extensions
+a.yaml
+b.yml
+bin
+drivers
+sp\ ace.yaml
+src
+sub
+== directory
+bin
+drivers
+src
+sub
+== required-first
+--env
+--color
+--config
+--dir
+--exec
+--format
+--group
+--host
+--level
+--log
+--no-color
+--quiet
+--set
+--speed
+--tag
+--token
+--user
+--verbose
+-l
 == sub-command-enum
 dev
 prod
 == quote-all
-C:\Users\me
 a b
 it's $HOME
 say "hi"
@@ -51,6 +86,7 @@ o’neil;touch pwned
 “q”
 back\slash
 a\:b
+C:\Users\me
 a!b
 ends'
 {a,b}
@@ -62,3 +98,59 @@ null
 --%
 –a.b
 -a:
+== file-one-extension
+e.log
+== file-short-inline
+e.log
+== file-inline
+a.yaml
+b.yml
+bin
+drivers
+sp\ ace.yaml
+src
+sub
+== directory-inline
+bin
+drivers
+src
+sub
+== directory-no-subdirectories
+== user-inline
+rotiniuser
+== group-inline
+rotinigroup
+== at-file
+a.yaml
+b.yml
+bin
+c.txt
+cases.txt
+completion_bash.sh
+completion_fish.fish
+completion_nushell.nu
+completion_powershell.ps1
+completion_zsh.zsh
+drivers
+sp\ ace.yaml
+src
+sub
+== at-file-inline
+a.yaml
+b.yml
+bin
+c.txt
+cases.txt
+completion_bash.sh
+completion_fish.fish
+completion_nushell.nu
+completion_powershell.ps1
+completion_zsh.zsh
+drivers
+sp\ ace.yaml
+src
+sub
+== at-file-directory
+d.yaml
+e.log
+x:y.yaml

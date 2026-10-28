@@ -4,7 +4,8 @@
 # well as at spaces; bash 3.2 splits at spaces only. The first TAB (COMP_TYPE 9) gives the values
 # inserted, quoted as readline puts them on the line; the second (COMP_TYPE 63) gives the
 # listing, whose "value  (description)" form, against the bare listing with descriptions off,
-# supplies the descriptions, and prints any messages.
+# supplies the descriptions, and prints any messages. bash 3.2 sets no COMP_TYPE: there the
+# values are the one answer both TABs get, with descriptions off.
 # Prints "== <case>", then "<value><TAB><description>" per candidate, then "! <message>" per message.
 # Usage: bash bash.sh <completion script> <cases file>
 PS1=''
@@ -32,18 +33,28 @@ while IFS=$'\t' read -r name line _; do
     COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
     COMP_LINE=$line
     COMP_POINT=${#line}
-    fn=$(complete -p "${COMP_WORDS[0]}" | sed -n 's/.* -F \([^ ]*\) .*/\1/p')
+    # bash finds the compspec of a program typed as a path by its last part.
+    fn=$(complete -p "${COMP_WORDS[0]##*/}" | sed -n 's/.* -F \([^ ]*\) .*/\1/p')
     echo "== $name"
 
-    COMP_TYPE=9
-    COMPREPLY=()
-    "$fn" >/dev/null
-    values=("${COMPREPLY[@]}")
+    if ((BASH_VERSINFO[0] < 4)); then
+        # bash 3.2 sets no COMP_TYPE, so both TABs get the same answer.
+        unset COMP_TYPE
+        COMPREPLY=()
+        APP_DESCRIPTIONS=off "$fn" >/dev/null
+        values=("${COMPREPLY[@]}")
+        bare=("${COMPREPLY[@]}")
+    else
+        COMP_TYPE=9
+        COMPREPLY=()
+        "$fn" >/dev/null
+        values=("${COMPREPLY[@]}")
 
-    COMP_TYPE=63
-    COMPREPLY=()
-    APP_DESCRIPTIONS=off "$fn" >/dev/null
-    bare=("${COMPREPLY[@]}")
+        COMP_TYPE=63
+        COMPREPLY=()
+        APP_DESCRIPTIONS=off "$fn" >/dev/null
+        bare=("${COMPREPLY[@]}")
+    fi
     COMPREPLY=()
     "$fn" >"$out"
     listed=("${COMPREPLY[@]}")

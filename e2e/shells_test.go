@@ -35,11 +35,25 @@ var shells = []shell{
 }
 
 // zshWidget completes the cases in widgetCases in a live zsh completion widget, in the zsh image,
-// so zsh's own matching decides which candidates it keeps.
+// so zsh's own matching decides which candidates it keeps, and zsh's own path and name helpers
+// what they offer.
 var zshWidget = shell{"zsh-widget", []string{"zsh", "-f", "drivers/zsh_widget.zsh", "completion_zsh.zsh", "drivers/widget-cases.txt"}}
 
-// widgetCases are the cases zshWidget completes: those whose candidates zsh's matching filters.
-var widgetCases = []string{"commands", "command-prefix", "flags", "enum", "enum-inline", "enum-ignore-case", "enum-ignore-case-inline", "sub-command-enum", "quote-all"}
+// widgetCases are the cases zshWidget completes: those whose candidates zsh's matching filters,
+// whose order is kept, or that zsh's helpers complete.
+var widgetCases = []string{
+	"commands", "command-prefix", "flags", "enum", "enum-inline", "enum-ignore-case", "enum-ignore-case-inline",
+	"sub-command-enum", "quote-all", "required-first", "file-extensions", "file-one-extension", "file-short-inline",
+	"file-inline", "directory", "directory-inline", "directory-no-subdirectories", "user-inline", "group-inline",
+	"at-file", "at-file-inline", "at-file-directory",
+}
+
+// zshLoad loads the zsh script sourced without compinit, and from $fpath for the cases in
+// loadCases, in the zsh image.
+var zshLoad = shell{"zsh-load", []string{"zsh", "-f", "drivers/zsh_load.zsh", "completion_zsh.zsh", "app", "drivers/load-cases.txt"}}
+
+// loadCases are the cases zshLoad completes with the first TAB in a new shell.
+var loadCases = []string{"command-prefix", "negated"}
 
 // TestCompletionShells runs the same generated CLI and the same cases (testdata/shells/cases.txt)
 // in one pinned Docker image per shell. Each driver sources the completion script rotini
@@ -49,7 +63,8 @@ var widgetCases = []string{"commands", "command-prefix", "flags", "enum", "enum-
 // kinds have a known answer. A subset of the cases also runs the same scripts against a binary
 // built with the previous release, matching want/skew-<shell>.txt: a user who updates one side
 // and not the other still gets completions. zsh also completes a few cases in a live completion
-// widget (want/zsh-widget.txt), where its own matching filters the candidates. Run it with
+// widget (want/zsh-widget.txt), where its own matching filters the candidates, and loads the
+// script sourced without compinit and from $fpath (want/zsh-load.txt). Run it with
 // `make test-completion-shells`; -update-shells rewrites the want files.
 func TestCompletionShells(t *testing.T) {
 	if os.Getenv("ROTINI_COMPLETION_SHELLS") == "" {
@@ -75,6 +90,8 @@ func TestCompletionShells(t *testing.T) {
 	stageShells(t, work, src, scripts, string(cases))
 	widget := keepCases(string(cases), widgetCases...)
 	mustWrite(t, filepath.Join(work, "drivers", "widget-cases.txt"), widget, 0o644)
+	load := keepCases(string(cases), loadCases...)
+	mustWrite(t, filepath.Join(work, "drivers", "load-cases.txt"), load, 0o644)
 
 	// The same scripts against a binary built entirely with the previous release: its own code
 	// generation, its own runtime, and a fixture (testdata/shells/skew) written for it.
@@ -108,6 +125,7 @@ func TestCompletionShells(t *testing.T) {
 			runShell(t, sh, image, dashed, string(dashedCases), filepath.Join(src, "want", "dashed-"+sh.name+".txt"))
 			if sh.name == "zsh" {
 				runShell(t, zshWidget, image, work, widget, filepath.Join(src, "want", zshWidget.name+".txt"))
+				runShell(t, zshLoad, image, work, load, filepath.Join(src, "want", zshLoad.name+".txt"))
 			}
 		})
 	}
@@ -148,7 +166,9 @@ func buildShellsFixture(t *testing.T, src, fixture, name, dir string, goenv, lin
 const skewRelease = "v1.4.3"
 
 // stageShells lays out dir as /w in the container: the scripts, the drivers, the cases, files for
-// the path kinds to find, and beside the program in bin, an executable for the executable kind.
+// the path kinds to find, and beside the program in bin, an executable for the executable kind and
+// an older program in bin/old, which answers __complete with one candidate of its own: a case
+// typing that path must reach it, not the program on PATH.
 func stageShells(t *testing.T, dir, src string, scripts map[string]string, cases string) {
 	t.Helper()
 	for file, body := range scripts {
@@ -159,7 +179,8 @@ func stageShells(t *testing.T, dir, src string, scripts map[string]string, cases
 	}
 	mustWrite(t, filepath.Join(dir, "cases.txt"), cases, 0o644)
 	mustWrite(t, filepath.Join(dir, "bin", "rotini-exe-demo"), "#!/bin/sh\n", 0o755)
-	for _, f := range []string{"a.yaml", "b.yml", "c.txt", "sub/d.yaml"} {
+	mustWrite(t, filepath.Join(dir, "bin", "old", "app"), "#!/bin/sh\nprintf 'typed-path\\tthe program typed\\n:rotini:none\\n'\n", 0o755)
+	for _, f := range []string{"a.yaml", "b.yml", "c.txt", "sp ace.yaml", "sub/d.yaml", "sub/e.log", "sub/x:y.yaml"} {
 		mustWrite(t, filepath.Join(dir, f), "", 0o644)
 	}
 }

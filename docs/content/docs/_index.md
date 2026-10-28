@@ -3044,7 +3044,15 @@ still take:
 - **Deprecated** flags, identifiers, commands and aliases are left out. They still work when typed.
 - **Negatable flags** offer their `--no-` form, without the flag's summary, which describes
   setting it.
-- **Enum values** come in the order the spec declares them, each with its summary.
+- **Enum values** come in the order the spec declares them, each with its summary. They are the
+  whole vocabulary: when none matches the typed word, nothing else is offered, not even files.
+  The same goes for `values_from` values and a map's declared keys.
+- **Values attached to a flag** complete too: `--env=p`, `-ep` and `-vep` (a cluster ending in
+  a flag that takes a value) offer `prod`.
+- **`@file` values**: on an input with `from: [file]`, a word starting with `@` completes the
+  path after it.
+- **Nothing more** is offered where the command line can take no further word: on a command
+  that takes no arguments, past its last argument, or for an unknown command name.
 - **Map keys** (`--set image=`) are completed up to the `=`, with no space after it, so the user
   types the value straight on. macOS's bash 3.2 still adds the space.
 
@@ -3052,7 +3060,7 @@ still take:
 
 | Kind | Offers |
 |---|---|
-| `command` | command paths below the root, for a help command's argument: `help remote <TAB>` offers `remote`'s sub-commands. `rotini init` seeds it on `help`. |
+| `command` | command paths for a help command's argument, read from the command the help command sits under, as `rtx.HelpFor` reads them: `help remote <TAB>` offers `remote`'s sub-commands, and in a mounted cli `app kit help <TAB>` offers kit's. `rotini init` seeds it on `help`. |
 | `executable` | program names (bash offers every command name it knows) |
 | `user`, `group` | local account and group names |
 | `host` | the host names the shell knows (`/etc/hosts`, ssh known hosts) |
@@ -3081,10 +3089,10 @@ different rotini versions still work together.
 ### Completers
 
 A `CompleteFlagValue` or `CompleteArgValue` method on a handler supplies candidates at run time.
-Its candidates are offered in the order it returns them (bash before 4.4 sorts them). Each shell
-inserts a candidate as one literal word, quoting spaces and shell characters, except that fish
-leaves a leading `~` bare and then expands it. It runs as the command that declares the flag,
-and `rtx` gives it:
+Its candidates are offered in the order it returns them (bash before 4.4 sorts them), and those
+that don't start with the typed word are left out. Each shell inserts a candidate as one literal
+word, quoting spaces and shell characters, except that fish leaves a leading `~` bare and then
+expands it. It runs as the command that declares the flag, and `rtx` gives it:
 
 - `rtx.PartialInputs[T]()`: what has been typed so far, over the environment and the defaults.
   Nothing is validated or required, an unknown or half-typed flag is skipped, and stdin and

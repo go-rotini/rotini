@@ -15,11 +15,14 @@ remote	manage remotes
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == flag-set-left-out
 --color	colorize output
 --config	config file
@@ -28,9 +31,11 @@ remote	manage remotes
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 == negated
@@ -61,7 +66,7 @@ Safe
 == file-extensions
 <_files -g *.(yaml|yml)>
 == directory
-<_files -/>
+<_path_files -/>
 == none-with-message
 ! an API token, from your account page
 == executable
@@ -101,13 +106,16 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --quiet	say nothing
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
 --verbose	say everything
+-l	log file
 == group-left-out
 # keep-order
 --env	target environment
@@ -119,20 +127,23 @@ db	the database
 --group	group to run as
 --host	host to reach
 --level	how much to say
+--log	log file
 --no-color	
 --set	override a setting
 --speed	how fast to go
+--tag	tags to apply
 --token	API token
 --user	account to run as
+-l	log file
 == sub-command-enum
 dev	
 prod	
 == fallback-extensions
 <_files -g *.(yaml|yml)>
 == fallback-directory
-<_files -/>
+<_path_files -/>
 == fallback-with-candidates
-<_files -/>
+<_path_files -/>
 db	the database
 == fallback-none
 == fallback-file
@@ -186,3 +197,33 @@ host:9090
 --odd=x;touch pwned	
 == plain-value
 <_files>
+== file-one-extension
+<_files -g *.log>
+== file-short-inline
+<_files -g *.log> after -l=
+== file-inline
+<_files -g *.(yaml|yml)> after --config=
+== file-word-break
+<_files -g *.(yaml|yml)>
+== directory-inline
+<_path_files -/> after --dir=
+== directory-no-subdirectories
+<_path_files -/>
+== user-inline
+<_users> after --user=
+== group-inline
+<_groups> after --group=
+== at-file
+<_files> after @
+== at-file-inline
+<_files> after --token=@
+== at-file-directory
+<_files> after @
+== list-item
+# nospace
+blue,canary	
+blue,green	
+== program-path
+typed-path	the program typed
+== directory-unique
+<_path_files -/>

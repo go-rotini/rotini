@@ -387,11 +387,14 @@ type FlagDef struct {
 // fallback.
 type Completion struct {
 	// Kind is what the value is. Empty means no hint: the shell applies its own default, which
-	// for bash and zsh is file completion.
+	// for bash and zsh is file completion, except on an input with an enum or a map's declared
+	// keys, which completes nothing but those.
 	//   - "file" and "directory" complete paths; "none" completes nothing, suppressing that
 	//     default, for opaque values such as resource IDs.
-	//   - "command" completes command paths below the root: the words already given to the
-	//     argument are the path, and the candidates are that command's visible sub-commands.
+	//   - "command" completes command paths for a help command's argument, read from the
+	//     command the help command sits under, as [Context.HelpFor] reads them: the words already
+	//     given to the argument are the path, and the candidates are that command's visible
+	//     sub-commands.
 	//     Rotini answers it itself, and tells the shell "none".
 	//   - "executable", "user", "group" and "host" are completed by the shell's own completer:
 	//     program names (bash offers every command name it knows), local accounts and groups,
