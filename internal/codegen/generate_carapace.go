@@ -22,7 +22,7 @@ const carapaceSchemaHeader = "# yaml-language-server: $schema=https://carapace.s
 // renderCarapace writes <root>.yaml under the feature's `file` directory, or to `file` itself
 // when it names a .yaml or .yml file. carapace requires the file name to match the root name.
 func renderCarapace(p *program, f *Feature, _ *agentProgram, _ *template.Template) (map[string][]byte, []error, error) {
-	doc := p.carapaceCommand(p.rootName, nil, p.rootHelp, p.rootInputs, p.tree, p.tree, p.rootPlugins, p.rootPassthrough, false)
+	doc := p.carapaceCommand(p.rootName, nil, "", p.rootHelp, p.rootInputs, p.tree, p.tree, p.rootPlugins, p.rootPassthrough, false)
 	var out strings.Builder
 	out.WriteString(carapaceSchemaHeader)
 	writeYAMLMap(&out, doc, "")
@@ -36,7 +36,7 @@ func renderCarapace(p *program, f *Feature, _ *agentProgram, _ *template.Templat
 // carapaceCommand builds one command's carapace-spec mapping, its children included. siblings are
 // the sub-commands of the command it sits under (the root's for the root), which a command path
 // argument names, as a help command's does.
-func (p *program) carapaceCommand(name string, aliases []string, help cmdHelp, in *Inputs, children, siblings []rnode, plugins []PluginSpec, passthrough, hidden bool) yaml.MapSlice {
+func (p *program) carapaceCommand(name string, aliases []string, group string, help cmdHelp, in *Inputs, children, siblings []rnode, plugins []PluginSpec, passthrough, hidden bool) yaml.MapSlice {
 	cmd := yaml.MapSlice{{Key: "name", Value: name}}
 	add := func(key string, value any, when bool) {
 		if when {
@@ -45,6 +45,7 @@ func (p *program) carapaceCommand(name string, aliases []string, help cmdHelp, i
 	}
 	add("aliases", aliases, len(aliases) > 0)
 	add("description", help.Summary, help.Summary != "")
+	add("group", group, group != "")
 	add("hidden", true, hidden)
 	if in == nil {
 		in = &Inputs{}
@@ -70,7 +71,7 @@ func (p *program) carapaceCommand(name string, aliases []string, help cmdHelp, i
 	add("completion", completion, len(completion) > 0)
 	subs := make([]yaml.MapSlice, 0, len(children)+len(plugins))
 	for _, n := range children {
-		subs = append(subs, p.carapaceCommand(n.name, visibleAliases(n), n.help, n.inputs, n.children, children, n.plugins, n.passthrough, n.hidden || n.deprecated != ""))
+		subs = append(subs, p.carapaceCommand(n.name, visibleAliases(n), n.group, n.help, n.inputs, n.children, children, n.plugins, n.passthrough, n.hidden || n.deprecated != ""))
 	}
 	for _, pl := range plugins {
 		subs = append(subs, carapacePlugin(pl))

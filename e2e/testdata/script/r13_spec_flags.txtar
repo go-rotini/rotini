@@ -1,0 +1,306 @@
+# R13 — the flag keys of the spec, each as its description promises: derived identifiers,
+# hidden flags and identifiers, help groups, cascading scope, negatable and custom negated forms,
+# optional values, repeat refusal, count flags, digit options, deprecation, stability and the
+# flag's description.
+
+gomodinit example.com/fl
+
+exec rotini validate cmd/fl/.rotini.spec.yaml --config cmd/fl/.rotini.conf.yaml
+exec rotini generate cmd/fl/.rotini.spec.yaml --config cmd/fl/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o fl$exe ./cmd/fl
+
+# No identifiers: --<name>, with '_' written '-'.
+exec ./fl$exe show --dry-run
+stdout 'dry-run=true'
+! exec ./fl$exe show --dry_run
+stderr 'unknown flag "--dry_run"'
+
+# A hidden flag still parses, and help leaves it out.
+exec ./fl$exe show --internal x
+stdout 'internal=x'
+exec ./fl$exe show --help
+! stdout 'internal'
+exec ./fl$exe __complete show --in
+! stdout 'internal'
+! grep 'internal' internal/cmd/fl/renders/markdown_fl_show.md
+
+# A hidden identifier works, its --no- form too, and neither is listed.
+exec ./fl$exe show --colour
+stdout 'color=true'
+exec ./fl$exe show --color --no-colour
+stdout 'color=false'
+exec ./fl$exe show --help
+! stdout 'colour'
+exec ./fl$exe __complete show --c
+! stdout 'colour'
+
+# Negatable: --no-<name> for each long identifier, no value, no short form; help shows --[no-]color.
+exec ./fl$exe show -c --no-color
+stdout 'color=false'
+! exec ./fl$exe show --no-color=true
+stderr 'no-color'
+! exec ./fl$exe show --no-c
+stderr 'unknown flag'
+exec ./fl$exe show --help
+stdout '--\[no-\]color'
+
+# A named negated form replaces --no-<name>, and help shows it beside the flag's identifiers.
+exec ./fl$exe show --fancy --plain
+stdout 'fancy=false'
+! exec ./fl$exe show --no-fancy
+stderr 'unknown flag "--no-fancy"'
+exec ./fl$exe show --help
+stdout '--fancy, --plain'
+
+# implicit_value: bare takes it, an attached value sets one, a separate word is an argument,
+# a left-out flag takes its default.
+exec ./fl$exe show
+stdout 'mode=auto'
+exec ./fl$exe show --mode
+stdout 'mode=always'
+exec ./fl$exe show --mode=never
+stdout 'mode=never'
+exec ./fl$exe show -mnever
+stdout 'mode=never'
+exec ./fl$exe show -m=never
+stdout 'mode=never'
+exec ./fl$exe show --mode never
+stdout 'mode=always'
+stdout 'args=\[never\]'
+exec ./fl$exe show --help
+stdout '--mode\[=<?string>?\]'
+stdout '\(implicit: always\)'
+
+# repeatable: false refuses a second value, naming the first and last; the default lets the last win.
+! exec ./fl$exe show --level a --level b --level c
+stderr '--level was given more than once \("a", then "c"\)'
+exec ./fl$exe show --tier a --tier b
+stdout 'tier=b'
+
+# ... and a cascading flag given at two levels of the command path is a repeat too.
+! exec ./fl$exe --once show --once
+stderr 'more than once'
+exec ./fl$exe --once show
+stdout 'once=true'
+
+# A sub-command that redeclares the flag has its own.
+exec ./fl$exe --once again --once
+
+# count: each occurrence adds one, clusters included; an inline value is a parse error.
+exec ./fl$exe show -vvv
+stdout 'verbose=3'
+exec ./fl$exe -v show -v --verbose
+stdout 'verbose=3'
+! exec ./fl$exe show --verbose=3
+stderr 'counts occurrences and takes no value'
+
+# A digit option: -4 is the flag, while other negative numbers still parse as numbers.
+exec ./fl$exe show -4 --offset -5
+stdout 'ipv4=true offset=-5'
+
+# Cascading: a cascading flag may be written before or after a sub-command's name; a flag is
+# never accepted before its own command's name; descendants' help lists cascading flags under
+# Global Flags.
+exec ./fl$exe -v show
+stdout 'verbose=1'
+! exec ./fl$exe --dry-run show
+stderr 'dry-run'
+exec ./fl$exe show --help
+stdout 'Global Flags:'
+stdout '-v, --verbose'
+
+# Deprecation: only the deprecated spelling reports, and help leaves that spelling out instead
+# of marking the flag; a wholly deprecated flag is marked. Help shows stability too.
+exec ./fl$exe show --old x
+! stderr 'deprecated'
+exec ./fl$exe show --older x
+stderr 'deprecated: flag "--older" is deprecated: use --old'
+exec ./fl$exe show --legacy
+stderr 'deprecated: flag "--legacy" is deprecated: going away'
+exec ./fl$exe show --help
+stdout '--legacy.*\(deprecated: going away\)'
+stdout '--old string +old name$'
+! stdout '--older'
+stdout '--beta.*\(beta\)'
+
+# group: flags under their own heading, ungrouped first, then `groups` in its order, then others,
+# with the group's description.
+exec ./fl$exe show --help
+stdout 'Flags:(.|\n)*--dry-run(.|\n)*Output(.|\n)*how to print(.|\n)*--format(.|\n)*Tuning(.|\n)*--beta'
+
+# summary shows in help; description shows in markdown, not in help.
+exec ./fl$exe show --help
+stdout 'whether to print in color'
+! stdout 'Longer words about color'
+grep 'Longer words about color' internal/cmd/fl/renders/markdown_fl_show.md
+
+-- cmd/fl/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: fl
+  summary: flag keys
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: verbose
+      identifiers: [-v, --verbose]
+      cascading: true
+      schema: { type: count }
+    - name: once
+      cascading: true
+      schema: { type: bool, repeatable: false }
+  commands:
+    - name: again
+      summary: redeclares --once
+      flags:
+        - name: once
+          summary: its own
+          schema: { type: bool, repeatable: false }
+    - name: show
+      summary: show things
+      groups:
+        - name: Output
+          description: how to print
+      flags:
+        - name: dry_run
+          summary: preview
+          schema: { type: bool }
+        - name: internal
+          hidden: true
+          schema: { type: string }
+        - name: color
+          summary: whether to print in color
+          description: Longer words about color.
+          identifiers: [-c, --color]
+          hidden_identifiers: [--colour]
+          schema: { type: bool, negatable: true }
+        - name: fancy
+          summary: fancy output
+          schema: { type: bool, negatable: --plain }
+        - name: mode
+          summary: color mode
+          identifiers: [-m, --mode]
+          schema: { type: string, implicit_value: always, enum: [always, never, auto], default: auto }
+        - name: level
+          summary: one level
+          schema: { type: string, repeatable: false }
+        - name: tier
+          summary: last wins
+          schema: { type: string }
+        - name: ipv4
+          summary: IPv4 only
+          identifiers: ['-4', --ipv4]
+          schema: { type: bool }
+        - name: offset
+          summary: an offset
+          schema: { type: int }
+        - name: old
+          summary: old name
+          identifiers: [--old, --older]
+          deprecated: use --old
+          deprecated_identifiers: [--older]
+          schema: { type: string }
+        - name: legacy
+          summary: legacy switch
+          deprecated: going away
+          schema: { type: bool }
+        - name: beta
+          summary: a beta switch
+          group: Tuning
+          stability: beta
+          schema: { type: bool }
+        - name: format
+          summary: output format
+          group: Output
+          schema: { type: string }
+      arguments:
+        - name: rest
+          schema: { type: "[]string" }
+-- cmd/fl/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/fl/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/fl/zz_fl.go
+      package: fl
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+    - type: markdown
+      enabled: true
+      embed: true
+-- internal/cmd/fl/fl.go --
+package fl
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type flHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*flHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.ArgvInputs[FlInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Values.Fl.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.Halt()
+	}
+}
+
+func (*flHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/fl/fl_show.go --
+package fl
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type flShowHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*flShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FlShowInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	for _, d := range rotini.Deprecations(rtx) {
+		fmt.Fprintf(rtx.Stderr, "deprecated: %v\n", d)
+	}
+	f := in.FlShow.Flags
+	fmt.Fprintf(rtx.Stdout, "dry-run=%v internal=%s color=%v fancy=%v mode=%s level=%s tier=%s\n",
+		f.DryRun, f.Internal, f.Color, f.Fancy, f.Mode, f.Level, f.Tier)
+	fmt.Fprintf(rtx.Stdout, "ipv4=%v offset=%d verbose=%d once=%v args=%v\n",
+		f.Ipv4, f.Offset, in.Fl.Flags.Verbose, in.Fl.Flags.Once, in.FlShow.Arguments.Rest)
+}

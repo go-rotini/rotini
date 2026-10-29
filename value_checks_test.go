@@ -33,6 +33,48 @@ func TestCheckNumberBounds_nonFinite(t *testing.T) {
 	}
 }
 
+// TestConstraints_documentedSemantics pins what each Constraints field's comment promises:
+// lengths count runes, a pattern need only occur in the value, a zero maximum or minimum
+// pointer is an enforced bound, and a zero MinLength or MinItems is unset.
+func TestConstraints_documentedSemantics(t *testing.T) {
+	cases := []struct {
+		name   string
+		typ    string
+		c      Constraints
+		values []string
+		ok     bool
+	}{
+		{"min length in runes", "string", Constraints{MinLength: 2}, []string{"éé"}, true},
+		{"max length in runes", "string", Constraints{MaxLength: new(1)}, []string{"é"}, true},
+		{"max length exceeded", "string", Constraints{MaxLength: new(1)}, []string{"ab"}, false},
+		{"zero max length enforced", "string", Constraints{MaxLength: new(0)}, []string{"a"}, false},
+		{"zero min length unset", "string", Constraints{MinLength: 0}, []string{""}, true},
+		{"pattern is contained", "string", Constraints{Pattern: "b"}, []string{"abc"}, true},
+		{"pattern anchors when written so", "string", Constraints{Pattern: "^b"}, []string{"abc"}, false},
+		{"minimum: 0 enforced", "int", Constraints{Minimum: new(0.0)}, []string{"-1"}, false},
+		{"minimum inclusive", "int", Constraints{Minimum: new(0.0)}, []string{"0"}, true},
+		{"exclusive minimum strict", "int", Constraints{ExclusiveMinimum: new(0.0)}, []string{"0"}, false},
+		{"exclusive maximum strict", "int", Constraints{ExclusiveMaximum: new(3.0)}, []string{"3"}, false},
+		{"maximum inclusive", "int", Constraints{Maximum: new(3.0)}, []string{"3"}, true},
+		{"multiple of a fraction", "float64", Constraints{MultipleOf: new(0.1)}, []string{"0.3"}, true},
+		{"not a multiple", "int", Constraints{MultipleOf: new(4.0)}, []string{"6"}, false},
+		{"maxItems: 0 enforced", "[]string", Constraints{MaxItems: new(0)}, []string{"a"}, false},
+		{"minItems: 0 unset", "[]string", Constraints{MinItems: 0}, nil, true},
+		{"minItems counts items", "[]string", Constraints{MinItems: 2}, []string{"a"}, false},
+	}
+	for _, c := range cases {
+		err := checkConstraints(allFeatures(), "--x", c.typ, "", c.c, c.values, false, "")
+		if (err == nil) != c.ok {
+			t.Errorf("%s: err = %v, want ok=%v", c.name, err, c.ok)
+		}
+		if err != nil {
+			if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Kind != ParseKindConstraintViolation {
+				t.Errorf("%s: err = %#v, want a constraint-violation *ParseError", c.name, err)
+			}
+		}
+	}
+}
+
 // TestParse_nonFiniteAgainstBounds pins the rule end to end on the command line, the
 // environment and a typed value checked by CheckInputs.
 func TestParse_nonFiniteAgainstBounds(t *testing.T) {

@@ -74,16 +74,18 @@ Sets up a new CLI. It writes a starter spec and conf under `cmd/<name>/`, then r
 build. The `name` argument becomes the root command's name and the expected binary name.
 
 `main.go` is created once and never overwritten, since it carries your build metadata. `--force`
-replaces an existing spec and conf with the starter ones and nothing else: `init` never deletes a
-file. Handlers for commands the starter spec does not have stay until your next `generate`, which
-disables them with `//go:build ignore`; the one after deletes them. Each step is reported.
+replaces an existing spec and conf with the starter ones: `init` never deletes a file. Handlers for
+commands the starter spec does not have are disabled with `//go:build ignore`, so the project
+builds right after `init`, and your next `generate` deletes them. A disabled handler whose command
+the starter spec has is turned back on.
 
 If `cmd/<name>/` already holds a spec or conf in another format (say `.rotini.spec.json` when
 you asked for YAML), `init` stops and names it. With `--force` it writes the new pair beside the
 old one and keeps both.
 
 On success `init` reports the way `generate` and `validate` do: the spec and conf it wrote, then
-the time and how long it took. In a module that does not yet require the rotini package, it also
+the time and how long it took. It prints the warnings `generate` prints, such as each handler it
+disabled or turned back on. In a module that does not yet require the rotini package, it also
 warns, since the first build would fail without it:
 
 {{< code title="init output" language="text" open="true" collapsible="false" copy="false" >}}
@@ -97,7 +99,8 @@ A module that added the tool with `go get -tool` already requires the package, s
 does not appear there.
 
 `--dry-run` (`-n`) shows what `init` would write and writes nothing. It prints the spec and conf
-lines, lists each file it would create (or, with `--force`, replace) on stderr, and exits 2.
+lines, lists each file it would create (or, with `--force`, update) on stderr, and exits 2. With
+`--force` over files that already hold what `init` would write, it lists nothing and exits 0.
 `--no-dry-run` runs a real init; given after `--dry-run`, the last one wins.
 
 {{< code title="help initialize" language="text" open="true" collapsible="false" copy="false" >}}
@@ -170,7 +173,8 @@ the grammar, for Kong), evaluated in the package, so it can name an unexported i
 import refuses to write over an existing spec, into an `internal/cmd/<dir>` it didn't generate,
 or beside the program's own `cmd/<dir>/main.go`; pass
 `--dir` to write the rotini CLI beside it. `--dry-run` reports what it would write, as `init`
-does. The import runs with `GOWORK=off`, so the package must build from its own module.
+does. In a module that doesn't yet require the rotini package, it warns as `init` does. The
+import runs with `GOWORK=off`, so the package must build from its own module.
 
 `--importer-version` picks the importer release to run, or the path of a local checkout of
 `github.com/go-rotini/import`.
@@ -225,8 +229,8 @@ Flags:
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
-      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout, absolute or starting with .
+      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate or beside an existing cmd/<dir>/main.go, which is kept
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
@@ -270,8 +274,8 @@ Flags:
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
-      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout, absolute or starting with .
+      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate or beside an existing cmd/<dir>/main.go, which is kept
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
@@ -313,8 +317,8 @@ Flags:
       --format string              the created rotini spec file format (default yaml) [yaml|yml|json|jsonc|toml]
       --tags string                build tags for go test, comma separated
       --timeout duration           how long the import's go test may run (default 2m)
-      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
-      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
+      --importer-version string    the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout, absolute or starting with .
+      --force                      replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate or beside an existing cmd/<dir>/main.go, which is kept
   -n, --[no-]dry-run               show what the import would write, and change nothing
 
 Global Flags:
@@ -635,8 +639,9 @@ scalar text are untouched. A mapping whose order matters to the author, such as 
 whose reordering would put an alias before its anchor, keeps its order.
 
 With no file it formats the spec in the working directory and the conf beside it, found the way
-`validate` finds them. A file's kind comes from its keys (`command:` for a spec, `generate:` or
-`validate:` for a conf, `name:` for a composed command), then from its name; `--kind` settles a
+`validate` finds them. A file's kind comes from its keys (`command:` for a spec, `generate:`,
+`validate:` or `diff:` for a conf, `name:` or `$ref:` for a composed command), then from its name
+(`.rotini.spec.*` or `.rotini.conf.*`); `--kind` settles a
 file that has neither. `--check` writes nothing and exits 2 when a file isn't formatted, 0 when
 all are, and 1 on an error. Only YAML files can be formatted for now; JSON, JSONC and TOML files
 are reported as not supported yet.
@@ -782,7 +787,9 @@ Use "rotini help <command>" for more information about a command.
 ## rotini completion
 
 Prints the shell completion script for bash, zsh, fish, PowerShell or Nushell, using the same generated
-`Completion(shell)` function any rotini CLI gets with the `completion` feature on.
+`Completion(shell)` function any rotini CLI gets with the `completion` feature on. While a value
+with nothing to offer is being completed, such as the name `init` takes, zsh and bash 4.4 or later show a line
+saying what it is; set `ROTINI_COMPLETION_MESSAGES=off` to hide those lines.
 
 {{< code title="help completion" language="text" open="true" collapsible="false" copy="false" >}}
 Print the completion script for a shell. Load it once per session, or install it so

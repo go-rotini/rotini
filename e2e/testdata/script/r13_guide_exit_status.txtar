@@ -1,0 +1,251 @@
+# R13 — the guide's exit_status claims: what generate's audit reports and skips, the pages and
+# help that show the codes, the stub that prints help with exit 1, and the guide's
+# report_links.go reporter, byte for byte, printing a code's docs_url.
+
+gomodinit example.com/todo
+
+# The audit reports 5, which push's list leaves out, with its file and line. It reads the
+# named constant get uses like its number, ignores push's rtx.Exit(0), and skips stat, whose
+# handler lives in another package.
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+stderr '^Warning: internal[/\\]cmd[/\\]todo[/\\]todo_push\.go:\d+: "todo push" exits with 5, which its exit_status doesn''t list$'
+! stderr 'exits with 0'
+! stderr 'todo get'
+! stderr 'todo stat'
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+exec go build -o plain$exe ./cmd/plain
+
+# A root or group command called without a sub-command prints its help on stderr and exits 1.
+wantexit 1 ./todo$exe
+stderr '^Usage:$'
+! stdout .
+wantexit 1 ./todo$exe admin
+stderr '^  todo admin <command>$'
+! stdout .
+
+# The codes are in the man and markdown pages, with names, retryable and docs_url; --help
+# leaves them out.
+grep '"todo get": not_found' internal/cmd/todo/zz_todo.go
+grep '- `3` \(`not_found`\) — no such task \(\[docs\]\(https://todo.example/errors/not-found\)\)' internal/cmd/todo/zz_todo.go
+grep '- `4` \(`busy`\) — the store is locked \(retryable\)' internal/cmd/todo/zz_todo.go
+grep 'EXIT STATUS' internal/cmd/todo/zz_todo.go
+exec ./todo$exe get --help
+! stdout 'not_found|no such task|EXIT|Exit'
+
+# The guide's reporter prints the link the exiting code declares, and exits with that code.
+wantexit 3 ./todo$exe get 7
+cmp stderr links.txt
+! stdout .
+
+# The default reporter never prints the link.
+wantexit 1 ./plain$exe get 7
+stderr '^Error: no such task 7$'
+! stderr 'See'
+
+# Another failure exits 1, with no link.
+wantexit 1 ./todo$exe get
+stderr '^Error: missing required input: <id>$'
+! stderr 'See'
+
+-- links.txt --
+Error: no such task 7
+See https://todo.example/errors/not-found
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  exit_status:
+    - { code: 1, summary: no command given }
+  commands:
+    - name: get
+      summary: show a task
+      arguments:
+        - name: id
+          schema: { type: string, required: true }
+      exit_status:
+        - { code: 3, name: not_found, summary: no such task, docs_url: "https://todo.example/errors/not-found" }
+        - { code: 4, name: busy, summary: the store is locked, retryable: true }
+    - name: push
+      summary: push tasks
+      exit_status:
+        - { code: 2, summary: rejected }
+    - name: admin
+      summary: admin tasks
+      exit_status:
+        - { code: 1, summary: no command given }
+      commands:
+        - name: ping
+          summary: ping the store
+    - name: stat
+      summary: task stats
+      exit_status:
+        - { code: 1, summary: failed }
+      handler:
+        import: example.com/todo/handlers/stat
+        convention: Stat
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+  features:
+    - type: help
+      enabled: true
+    - type: man
+      enabled: true
+    - type: markdown
+      enabled: true
+-- cmd/todo/main.go --
+package main
+
+import cmd "example.com/todo/internal/cmd/todo"
+
+func main() {
+	p := cmd.NewProgram()
+	p.WithReporter(cmd.ReportWithLinks(p.Definition())).Execute()
+}
+-- cmd/plain/main.go --
+package main
+
+import cmd "example.com/todo/internal/cmd/todo"
+
+func main() { cmd.NewProgram().Execute() }
+-- handlers/stat/stat.go --
+package stat
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+func Stat() rotini.Handler { return &handlers{} }
+
+type handlers struct{ rotini.NoHooks }
+
+func (*handlers) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.HaltWithCode(9)
+}
+-- internal/cmd/todo/todo_get.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoGetHandler)(nil)
+
+type todoGetHandler struct{ rotini.NoHooks }
+
+func (*todoGetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoGetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	err = fmt.Errorf("no such task %s", in.TodoGet.Arguments.ID)
+	rtx.HaltWith(&ExitError{Code: TodoGetExitNotFound, Err: err})
+}
+-- internal/cmd/todo/todo_push.go --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoPushHandler)(nil)
+
+type todoPushHandler struct{ rotini.NoHooks }
+
+func (*todoPushHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if len(rtx.Argv) > 0 {
+		rtx.Exit(0)
+	}
+	rtx.HaltWithCode(5)
+}
+-- internal/cmd/todo/report_links.go --
+package todo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+// ExitError ends a command with one of its documented exit codes:
+// rtx.HaltWith(&ExitError{Code: TodoGetExitNotFound, Err: err}).
+type ExitError struct {
+	Code int
+	Err  error
+}
+
+func (e *ExitError) Error() string { return e.Err.Error() }
+func (e *ExitError) Unwrap() error { return e.Err }
+
+// ReportWithLinks prints warnings and errors to stderr, and after an ExitError the link its
+// code declares, then exits with that code (1 for any other failure).
+func ReportWithLinks(def rotini.Definition) rotini.Reporter {
+	return func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+		for _, w := range out.Warnings {
+			fmt.Fprintln(rtx.Stderr, "Warning:", w)
+		}
+		code := 0
+		for _, err := range out.Errors {
+			fmt.Fprintln(rtx.Stderr, "Error:", err)
+			var exit *ExitError
+			if errors.As(err, &exit) && code == 0 {
+				code = exit.Code
+				if url := docsURL(def, rtx.CommandChain(), code); url != "" {
+					fmt.Fprintln(rtx.Stderr, "See", url)
+				}
+			}
+		}
+		for _, p := range out.Panics {
+			fmt.Fprintln(rtx.Stderr, "Error:", p)
+		}
+		switch {
+		case !out.Failed() || ctx.Err() != nil:
+		case code != 0:
+			rtx.Exit(code)
+		default:
+			rtx.Exit(1)
+		}
+	}
+}
+
+// docsURL returns the docs_url the invoked command declares for code, or "".
+func docsURL(def rotini.Definition, chain []rotini.Command, code int) string {
+	exits, cmds := def.ExitStatus, def.Commands
+	for _, c := range chain[1:] {
+		for _, d := range cmds {
+			if d.Name == c.Name {
+				exits, cmds = d.ExitStatus, d.Commands
+				break
+			}
+		}
+	}
+	for _, e := range exits {
+		if e.Code == code {
+			return e.DocsURL
+		}
+	}
+	return ""
+}

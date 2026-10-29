@@ -1,0 +1,154 @@
+# R13 — what the spec reference promises for named schemas and `output:`: a reference to a
+# named scalar schema brings its enum, pattern and bounds wherever the input leaves them unset;
+# an output that is a `$ref` gets a named type on the schema's; and a schema block refuses an
+# unknown key or a keyword rotini doesn't implement, at its position.
+
+gomodinit example.com/sch
+
+exec rotini generate cmd/sch/.rotini.spec.yaml --config cmd/sch/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o sch$exe ./cmd/sch
+
+grep 'type SchShowOutput Task' internal/cmd/sch/zz_sch.go
+
+# The named scalar's enum, pattern (with its message) and minimum apply to the flag.
+exec ./sch$exe show --level high --name ab --port 5
+stdout '^high ab 5$'
+! exec ./sch$exe show --level mid
+stderr 'mid'
+! exec ./sch$exe show --name AB
+stderr 'must be lowercase letters'
+! exec ./sch$exe show --port 0
+stderr '>= 1'
+# The input's own bound is kept beside the inherited one.
+! exec ./sch$exe show --port 100
+stderr '<= 10'
+# A list of the named scalar checks each element.
+! exec ./sch$exe show --levels low,mid
+stderr 'mid'
+
+# Unknown keys and unimplemented keywords in a schema block are refused, positioned.
+! exec rotini validate cmd/bad/.rotini.spec.yaml --config cmd/sch/.rotini.conf.yaml
+stderr 'bad[/\\]\.rotini\.spec\.yaml:8:\d+: .*bogus'
+stderr 'bad[/\\]\.rotini\.spec\.yaml:9:\d+: .*format'
+# Schema names are PascalCase, and schemas are declared on the root only.
+stderr 'bad[/\\]\.rotini\.spec\.yaml:11:\d+: .*"lower" must look like'
+! exec rotini validate cmd/sub/.rotini.spec.yaml --config cmd/sch/.rotini.conf.yaml
+stderr 'sub[/\\]\.rotini\.spec\.yaml:8:\d+: .*`schemas`.*root'
+
+-- cmd/sch/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: sch
+  summary: named schemas
+  schemas:
+    Level:
+      type: string
+      enum: [low, high]
+    Name:
+      type: string
+      pattern: '^[a-z]+$'
+      pattern_message: must be lowercase letters
+    Port:
+      type: integer
+      minimum: 1
+    Task:
+      type: object
+      properties:
+        id: {type: string}
+  commands:
+    - name: show
+      summary: show things
+      output: {$ref: Task}
+      flags:
+        - name: level
+          schema: {$ref: Level}
+        - name: levels
+          schema: {type: array, items: {$ref: Level}, separator: ','}
+        - name: name
+          schema: {$ref: '#/schemas/Name'}
+        - name: port
+          schema: {$ref: Port, maximum: 10}
+-- cmd/sch/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/sch/main.go
+    - type: cmd
+      file: internal/cmd/sch/zz_sch.go
+      package: sch
+-- cmd/bad/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  schemas:
+    Thing:
+      type: object
+      properties:
+        a: {type: string, bogus: 1}
+        b: {type: string, format: email}
+    lower:
+      type: string
+-- cmd/sub/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: sub
+  commands:
+    - name: inner
+      summary: a sub-command
+      schemas:
+        Other: {type: string}
+-- cmd/sch/main.go --
+package main
+
+import (
+	sch "example.com/sch/internal/cmd/sch"
+)
+
+func main() {
+	sch.NewProgram().Execute()
+}
+-- internal/cmd/sch/sch.go --
+package sch
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type schHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*schHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/sch/sch_show.go --
+package sch
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type schShowHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*schShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[SchShowInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := in.SchShow.Flags
+	fmt.Fprintln(rtx.Stdout, f.Level, f.Name, f.Port)
+}

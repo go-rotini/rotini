@@ -48,6 +48,7 @@ exec ./rules$exe __complete ''
 exec ./rules$exe __complete export --f
 ! stdout 'fmt'
 exec ./rules$exe export --help
+stdout '--format'
 ! stdout 'fmt'
 
 # Help says what replaces a deprecated command or flag, and Deprecations carries it.
@@ -159,7 +160,12 @@ func (*rulesHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 	if in.Rules.Flags.Help {
-		fmt.Fprint(rtx.Stdout, rtx.Help())
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprint(rtx.Stdout, page)
 		rtx.Halt()
 	}
 }

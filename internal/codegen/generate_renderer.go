@@ -544,6 +544,7 @@ type templateDocCommandRow struct {
 
 type templateDocArgumentRow struct {
 	Name        string
+	Placeholder string // the declared display name for the value, shown in place of Name; "" for none
 	Summary     string
 	Description string // the input's longer text, paragraphs separated by blank lines; "" for none
 	Stability   string // see templateDocCommandRow
@@ -747,6 +748,13 @@ func renderManText(tmpl *template.Template, data templateHelpData) (string, erro
 			fill = true
 		}
 		if fill && !strings.HasPrefix(l, ".") && prev != ".TP" {
+			// A leading space breaks the line in roff; it is left by an empty summary.
+			if t := strings.TrimLeft(l, " "); t != l {
+				if strings.HasPrefix(t, ".") || strings.HasPrefix(t, "'") {
+					t = `\&` + t
+				}
+				l = t
+			}
 			lines = append(lines, wrapRoffText(l, manLineWidth)...)
 		} else {
 			lines = append(lines, l)

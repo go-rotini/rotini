@@ -77,8 +77,10 @@ type ExitStatusDef struct {
 
 // ResponseFilesDef is how a program reads response files (the spec's root `response_files`).
 // Before the first "--", a word starting with Prefix (`@args.rsp`) is replaced by the file's
-// lines, one word per line; a doubled prefix (`@@x`) stands for the literal word with one
-// prefix (`@x`). Expansion happens once, before command resolution, so every parse sees the
+// lines, one word per line, kept exactly; blank lines and lines whose first non-blank character is `#` are skipped,
+// a word in the file is never expanded again, and a `--` line ends expansion as one on the
+// command line does. A file over 1 MiB, or one that can't be read, is a usage error. A doubled
+// prefix (`@@x`) stands for the literal word with one prefix (`@x`). Expansion happens once, before command resolution, so every parse sees the
 // expanded words, and [Context.Argv] holds them. [NewContextFor] doesn't expand.
 type ResponseFilesDef struct {
 	Prefix string // one character, such as "@"

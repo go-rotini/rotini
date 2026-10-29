@@ -1,0 +1,492 @@
+# R13 — the guide's "Commands, flags and arguments" section, run as an author would: empty
+# values, where flags stop, response files, repeated values, deprecation notes and
+# replacements, time layouts and relative times, numbers from a config file, enum aliases,
+# flag dependencies on bool values, and hidden aliases. Each assertion is a sentence of the
+# guide; messages the guide prints are matched whole.
+
+gomodinit github.com/me/todo
+exec rotini init todo
+cp spec.yaml cmd/todo/.rotini.spec.yaml
+cp conf.yaml cmd/todo/.rotini.conf.yaml
+exec rotini generate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+
+# The root man and markdown pages tell users about the response-file prefix and the doubled
+# form; a sub-command's man page lists cascading flags under GLOBAL OPTIONS; man and markdown
+# list each enum value with its aliases and deprecation, while help keeps the short list.
+grep '^A word starting with \\fB@\\fR names a response file' internal/cmd/todo/renders/todo.1
+grep 'double it \(\\fB@@x\\fR\)\.$' internal/cmd/todo/renders/todo.1
+grep 'double it \(`@@x`\)\.$' internal/cmd/todo/renders/markdown_todo.md
+grep '^\.SH "GLOBAL OPTIONS"$' internal/cmd/todo/renders/todo-cfg.1
+grep '^\\fByaml\\fR \(also yml\)$' internal/cmd/todo/renders/todo-cfg.1
+grep '^\\fBini\\fR \(deprecated since 1\.4\.0, removed in 2\.0\.0: INI output is going away;$' internal/cmd/todo/renders/todo-cfg.1
+grep '^  - `yaml` \(also yml\)$' internal/cmd/todo/renders/markdown_todo_cfg.md
+grep '^  - `ini` \(deprecated since 1\.4\.0, removed in 2\.0\.0: INI output is going away; use json instead\)$' internal/cmd/todo/renders/markdown_todo_cfg.md
+
+cp todo.go.txt internal/cmd/todo/todo.go
+cp echo.go.txt internal/cmd/todo/todo_echo.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# The guide's mistakes, reported before the handler's code runs.
+wantexit 1 ./todo$exe add 'buy milk' -p urgent
+stderr '^Error: invalid value "urgent" for -p \(one of: low, normal, high\)$'
+wantexit 1 ./todo$exe add
+stderr '^Error: missing required input: <title>$'
+wantexit 1 ./todo$exe add 'buy milk' --loud
+stderr '^Error: unknown flag "--loud"$'
+# A mistyped command is reported before the flags after it; a flag before it is checked first.
+wantexit 1 ./todo$exe ad 'buy milk' --loud
+stderr '^Error: unknown command "ad" for "todo"$'
+wantexit 1 ./todo$exe --loud ad
+stderr '^Error: unknown flag "--loud"$'
+
+# An empty value counts as given; minLength: 1 refuses it.
+exec ./todo$exe empty --name '' --label x
+stdout 'Name: Label:x'
+wantexit 1 ./todo$exe empty --name x --label=
+stderr '^Error: --label must be at least 1 character long \(got 0\)$'
+
+# options_first stops flags at the first argument; a sub-command doesn't inherit it.
+exec ./todo$exe remote host -x ls
+stdout 'Host:host Rest:\[-x ls\]'
+exec ./todo$exe remote exec h -x ls
+stdout 'X:true\} Arguments:\{Rest:\[h ls\]'
+
+# passthrough on the command takes every word after its name raw, with no flags at all.
+exec ./todo$exe raw --region x -- y
+stdout 'Words:\[--region x -- y\]'
+
+# Response files: one argument per line, blank and # lines skipped, words read from a file not
+# expanded again, @@x the literal @x, the command's name allowed in a file, and rtx.Argv holding
+# the expanded words.
+exec ./todo$exe echo @args.rsp z
+stdout '^argv=\["echo" "a" "@b" "z"\] words=\["a" "@b" "z"\]$'
+exec ./todo$exe @cmd.rsp
+stdout '^argv=\["echo" "from-file"\] words=\["from-file"\]$'
+exec ./todo$exe echo @@x
+stdout '^argv=\["echo" "@x"\] words=\["@x"\]$'
+
+# repeatable: false: -vv, --color --no-color and a root flag before and after a sub-command's
+# name are repeats; an environment value never is.
+wantexit 1 ./todo$exe -vv echo
+stderr '^Error: -v was given more than once \("true", then "true"\); it takes one value$'
+wantexit 1 ./todo$exe --color --no-color echo
+stderr 'was given more than once \("true", then "false"\); it takes one value$'
+wantexit 1 ./todo$exe --region a echo --region b
+stderr '^Error: --region was given more than once \("a", then "b"\); it takes one value$'
+env TODO_REGION=a
+exec ./todo$exe --region b echo
+! stderr .
+env TODO_REGION=
+
+# uniqueItems compares values as their type reads them: 1h and 60m are the same duration.
+wantexit 1 ./todo$exe uniq --wait 1h --wait 60m
+stderr '^Error: --wait must not repeat a value \(got "60m" twice\)$'
+
+# A sub-command's help lists cascading flags under "Global Flags", renamed by headings.cascading
+# on the command whose page it is.
+exec ./todo$exe uniq --help
+stdout '^Inherited:$'
+! stdout 'Global Flags'
+exec ./todo$exe echo --help
+stdout '^Global Flags:$'
+
+# Deprecation notes on the pages, with a planned removal and a replacement.
+exec ./todo$exe purge --help
+stdout '^      --legacy            \(deprecated since 1\.4\.0, removed in 2\.0\.0: use --config\)$'
+stdout '\(deprecated: renamed; use --output instead\)$'
+exec ./todo$exe --help
+stdout '^  clear         clear tasks \(deprecated: renamed; use todo purge instead\)$'
+
+# Rotini prints nothing for a deprecated spelling; the guide's loop in the root's
+# CascadingPreRun says it, with ReplacedBy written as the user types it.
+exec ./todo$exe clear
+stderr '^Warning: command "clear" is deprecated: renamed; use todo purge instead$'
+exec ./todo$exe purge --out x
+stderr '^Warning: flag "--out" is deprecated: renamed; use --output instead$'
+
+# validate --release fails for a removal that is due; generate never runs that check, even
+# with the conf's release variable set.
+wantexit 1 rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml --release 2.0.0
+stderr '"--conf" is planned for removal in 2\.0\.0'
+env TODO_RELEASE=2.0.0
+exec rotini generate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+! stderr 'planned for removal'
+env TODO_RELEASE=
+
+# Several layouts: help shows the first, an error names them all.
+exec ./todo$exe when --help
+stdout '--at datetime +\(accepts 2006-01-02 15:04\)$'
+wantexit 1 ./todo$exe when --at nope
+stderr '^Error: --at: "nope" is not a valid time \(write it as 2006-01-02 15:04, 2006-01-02 or a Unix timestamp in seconds\)$'
+
+# Relative times: future takes 2h or +2h, both needs a sign, and a date moves in whole days.
+exec ./todo$exe when --due 2h --both -2h --day 3d
+wantexit 1 ./todo$exe when --both 2h
+stderr '^Error: --both: "2h" is not a valid time \(write -2h for 2h ago or \+2h for 2h from now\)$'
+wantexit 1 ./todo$exe when --day 2h
+stderr '^Error: --day: "2h" is not a valid date \(a date moves in whole days, such as 1d or 2w\)$'
+
+# A whole number written as a float fills an integer from a config file, and 1 fills a bool.
+exec ./todo$exe cfg
+stdout 'Count:450 Big:1000 On:true Bytes:\[1 255\]'
+
+# A null list item is refused.
+wantexit 1 ./todo$exe nulls
+stderr '^Error: --nulls: list item 2 is null \(from configuration file .*cfg\.yaml, key nulls\)$'
+
+# type: regexp is compiled when parsed, so a bad expression is a usage error naming the flag.
+wantexit 1 ./todo$exe cfg --re '('
+stderr '^Error: --re: "\(" is not a valid regular expression'
+
+# An enum alias is bound as its value on every channel; a hidden value is accepted but left out
+# of the error message; a deprecated value is reported by Deprecations with its Value.
+exec ./todo$exe cfg --mode yml
+stdout 'Mode:yaml'
+env TODO_MODE=yml
+exec ./todo$exe cfg
+stdout 'Mode:yaml'
+env TODO_MODE=
+exec ./todo$exe cfg --mode xml
+stdout 'Mode:xml'
+exec ./todo$exe cfg --help
+stdout '--mode string +\[json\|yaml\]'
+! stdout 'ini'
+wantexit 1 ./todo$exe cfg --mode toml
+stderr '^Error: invalid value "toml" for --mode \(one of: json, yaml\)$'
+exec ./todo$exe cfg --mode ini
+stderr '^Warning: flag "--mode" value "ini" is deprecated: INI output is going away; use json instead$'
+
+# A bool dependency compares true or false (--no-x is false); only the command line triggers a
+# rule, so the default of --mode doesn't; --help waives the rules.
+wantexit 1 ./todo$exe ship --no-dry
+stderr '^Error: flag --reason is required when --dry is false$'
+exec ./todo$exe ship --no-dry --reason r
+wantexit 1 ./todo$exe ship --no-dry --reason r --mode fast
+stderr '^Error: flag --reason can''t be used when --mode is fast$'
+exec ./todo$exe ship --no-dry --help
+stdout 'Usage:'
+
+# A hidden alias runs the command and the help resolvers accept it, but no list shows it.
+exec ./todo$exe del
+stdout 'todo remove:'
+exec ./todo$exe help del
+stdout '^  todo remove$'
+exec ./todo$exe --help
+stdout '^  remove, rm    remove a task$'
+! stdout 'del'
+
+-- args.rsp --
+# a comment
+
+a
+@b
+-- cmd.rsp --
+echo
+from-file
+-- cfg.yaml --
+count: 450.0
+big: 1e3
+on: 1
+bytes: [1, 255]
+nulls: [a, null]
+-- conf.yaml --
+$schema: ./.rotini-schema.conf.json
+version: 0.0.0
+generate:
+  schemas:
+    conf:
+      file: cmd/todo/.rotini-schema.conf.json
+    spec:
+      file: cmd/todo/.rotini-schema.spec.json
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+    - type: man
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+      embed: true
+validate:
+  fail: collect
+  release_env: TODO_RELEASE
+-- echo.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoEchoHandler)(nil)
+
+type todoEchoHandler struct{ rotini.NoHooks }
+
+func (*todoEchoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoEchoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "argv=%q words=%q\n", rtx.Argv, in.TodoEcho.Arguments.Words)
+}
+-- todo.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoHandler)(nil)
+
+type todoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	for _, d := range rotini.Deprecations(rtx) {
+		if d.ReplacedBy != "" {
+			rtx.RecordWarning(fmt.Errorf("%w; use %s instead", d, d.ReplacedBy))
+			continue
+		}
+		rtx.RecordWarning(d)
+	}
+
+	argv, err := rtx.ArgvInputs[TodoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if argv.Values.Todo.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+	}
+}
+
+func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[TodoInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+-- spec.yaml --
+$schema: ./.rotini-schema.spec.json
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  description: A task list.
+  env_prefix: TODO
+  response_files: { prefix: "@" }
+  config_files:
+    - name: cfg
+      path: ./cfg.yaml
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: verbose
+      identifiers: [-v, --verbose]
+      summary: say more
+      cascading: true
+      schema: { type: bool, repeatable: false }
+    - name: color
+      identifiers: [--color]
+      summary: colorize
+      cascading: true
+      schema: { type: bool, negatable: true, repeatable: false }
+    - name: region
+      identifiers: [--region]
+      summary: the region
+      cascading: true
+      schema: { type: string, repeatable: false }
+  commands:
+    - name: add
+      summary: add a task
+      aliases: [a]
+      arguments:
+        - name: title
+          summary: the task title
+          schema: { type: string, required: true, minLength: 1 }
+      flags:
+        - name: priority
+          summary: how urgent
+          identifiers: [-p, --priority]
+          schema: { type: string, default: normal, enum: [low, normal, high] }
+        - name: tag
+          summary: a label
+          identifiers: [--tag]
+          schema: { type: '[]string' }
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: empty
+      summary: empty values
+      flags:
+        - name: name
+          identifiers: [--name]
+          schema: { type: string, required: true }
+        - name: label
+          identifiers: [--label]
+          schema: { type: string, minLength: 1 }
+    - name: echo
+      summary: echo words
+      arguments:
+        - name: words
+          schema: { type: '[]string' }
+    - name: remote
+      summary: options first
+      options_first: true
+      arguments:
+        - name: host
+          schema: { type: string }
+        - name: rest
+          schema: { type: '[]string' }
+      commands:
+        - name: exec
+          summary: no options first
+          flags:
+            - name: x
+              identifiers: [-x, --ex]
+              schema: { type: bool }
+          arguments:
+            - name: rest
+              schema: { type: '[]string' }
+    - name: raw
+      summary: raw words
+      passthrough: true
+      arguments:
+        - name: words
+          schema: { type: '[]string' }
+    - name: uniq
+      summary: unique items
+      headings: { cascading: 'Inherited:' }
+      flags:
+        - name: wait
+          identifiers: [--wait]
+          schema: { type: '[]duration', uniqueItems: true }
+    - name: clear
+      summary: clear tasks
+      deprecated: renamed
+      replaced_by: purge
+    - name: purge
+      summary: purge tasks
+      flags:
+        - name: config
+          identifiers: [--config, --conf]
+          deprecated_identifiers: [--conf]
+          deprecated_identifiers_removed_in: { --conf: 2.0.0 }
+          schema: { type: string }
+        - name: legacy
+          identifiers: [--legacy]
+          deprecated: use --config
+          deprecated_since: 1.4.0
+          removed_in: 2.0.0
+          schema: { type: bool }
+        - name: output
+          identifiers: [--output]
+          schema: { type: string }
+        - name: out
+          identifiers: [--out]
+          deprecated: renamed
+          replaced_by: --output
+          schema: { type: string }
+    - name: when
+      summary: times
+      flags:
+        - name: at
+          identifiers: [--at]
+          schema: { type: datetime, layout: ['2006-01-02 15:04', '2006-01-02', unix] }
+        - name: due
+          identifiers: [--due]
+          schema: { type: datetime, relative: future }
+        - name: both
+          identifiers: [--both]
+          schema: { type: datetime, relative: both }
+        - name: day
+          identifiers: [--day]
+          schema: { type: date, relative: past }
+    - name: ship
+      summary: dependencies
+      flag_dependencies:
+        - when: dry
+          equals: [false]
+          requires: [reason]
+        - when: mode
+          equals: [fast]
+          forbids: [reason]
+      flags:
+        - name: dry
+          identifiers: [--dry]
+          schema: { type: bool, negatable: true, default: true }
+        - name: reason
+          identifiers: [--reason]
+          schema: { type: string }
+        - name: mode
+          identifiers: [--mode]
+          schema: { type: string, default: fast }
+    - name: remove
+      summary: remove a task
+      aliases: [rm]
+      hidden_aliases: [del]
+    - name: cfg
+      summary: config numbers
+      flags:
+        - name: count
+          identifiers: [--count]
+          schema: { type: int, key: count }
+        - name: big
+          identifiers: [--big]
+          schema: { type: int, key: big }
+        - name: on
+          identifiers: [--on]
+          schema: { type: bool, key: on }
+        - name: bytes
+          identifiers: [--bytes]
+          schema: { type: '[]uint8', key: bytes }
+        - name: re
+          identifiers: [--re]
+          schema: { type: regexp }
+        - name: mode
+          identifiers: [--mode]
+          schema:
+            type: string
+            variable: TODO_MODE
+            enum:
+              - json
+              - { value: yaml, aliases: [yml] }
+              - { value: xml, hidden: true }
+              - { value: ini, deprecated: INI output is going away, deprecated_since: 1.4.0, removed_in: 2.0.0, replaced_by: json }
+    - name: nulls
+      summary: a null list item
+      flags:
+        - name: nulls
+          identifiers: [--nulls]
+          schema: { type: '[]string', key: nulls }

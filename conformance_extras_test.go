@@ -147,8 +147,13 @@ func confEnumValueForms(t *testing.T, _ *Context, _ InputSettings) {
 	if _, deps, err := parse("ini"); err != nil || len(deps) != 1 || deps[0].Value != "ini" {
 		t.Errorf("ini: %v, %v", deps, err)
 	}
-	if _, _, err := parse("toml"); err == nil || !strings.Contains(err.Error(), "(one of: json, yaml)") {
+	_, _, err := parse("toml")
+	if err == nil || !strings.Contains(err.Error(), "(one of: json, yaml)") {
 		t.Errorf("toml: %v", err)
+	}
+	// The candidates a suggestion ranks against leave out hidden and deprecated values too.
+	if _, candidates, ok := SuggestionFacts(err); !ok || slices.Contains(candidates, "xml") || slices.Contains(candidates, "ini") {
+		t.Errorf("toml: candidates = %q, want no hidden or deprecated value", candidates)
 	}
 }
 

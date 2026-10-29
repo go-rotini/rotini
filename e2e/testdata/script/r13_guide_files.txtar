@@ -1,0 +1,238 @@
+# R13 — the guide's Files and the standard streams and Buffered output, built from its own
+# blocks: cat reads files with "-" for stdin, export writes a file atomically with "-" for
+# stdout, and the program buffers stdout.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+concat cmd/todo/main.go main_head.go.txt main.go.txt main_tail.go.txt
+concat internal/cmd/todo/todo_cat.go cat_head.go.txt cat.go.txt cat_tail.go.txt
+concat internal/cmd/todo/todo_export.go export_head.go.txt export.go.txt
+concat internal/cmd/todo/todo_hash.go hash_head.go.txt hash.go.txt cat_tail.go.txt
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# Help marks each kind's "-".
+exec ./todo$exe cat --help
+stdout '\(- for stdin\)'
+exec ./todo$exe export --help
+stdout '\(- for stdout\)'
+
+# cat: no files reads stdin, "-" reads it in place, byte for byte; only one "-" per run.
+stdin piped.txt
+exec ./todo$exe cat
+cmp stdout piped.txt
+stdin piped.txt
+exec ./todo$exe cat a.txt -
+cmp stdout want_cat.txt
+stdin piped.txt
+! exec ./todo$exe cat - -
+stderr '"-" \(stdin\) can be given only once'
+
+# export: "-" is stdout; a file is written whole and replaced only with the force flag.
+exec ./todo$exe export --to -
+cmp stdout want.json
+exec ./todo$exe export --to out.json
+cmp out.json want.json
+! exec ./todo$exe export --to out.json
+stderr 'output file "out\.json" already exists'
+exec ./todo$exe export --to out.json --force
+cmp out.json want.json
+grep '"role": "force"' cli-contract.json
+
+# A device is written directly, not replaced.
+[!windows] exec ./todo$exe export --to /dev/null
+[!windows] exists /dev/null
+
+# A binary filter opens "-" itself and reads stdin byte for byte.
+stdin piped.txt
+exec ./todo$exe hash
+stdout '^6e6c7a6fbb477a6073df1eb4a3d66a72c357b85c7209a4e3aeb9cb2333c7c676$'
+
+-- piped.txt --
+from stdin
+-- a.txt --
+from a
+-- want_cat.txt --
+from a
+from stdin
+-- want.json --
+{
+  "tasks": [
+    {
+      "id": 1,
+      "status": "open",
+      "title": "write docs"
+    }
+  ]
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: track tasks
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  schemas:
+    Task:
+      type: object
+      required: [id, title, status]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        status: { type: string, enum: [open, done] }
+  commands:
+    - name: cat
+      summary: print files
+      arguments:
+        - name: files
+          summary: files to print
+          schema: { type: '[]inputfile' }
+    - name: hash
+      summary: print the SHA-256 of stdin
+    - name: export
+      summary: write every task as json
+      output:
+        type: object
+        properties:
+          tasks: { type: array, items: { $ref: "#/schemas/Task" } }
+      flags:
+        - name: to
+          summary: the file to write
+          schema: { type: outputfile, default: "-" }
+        - name: force
+          summary: replace an existing file
+          role: force
+          schema: { type: bool }
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+  features:
+    - type: help
+      enabled: true
+-- main_head.go.txt --
+package main
+
+import (
+	cmd "example.com/todo/internal/cmd/todo"
+)
+
+func main() {
+-- main_tail.go.txt --
+}
+-- main.go.txt --
+cmd.NewProgram().WithBufferedOutput(true).Execute()
+-- cat_head.go.txt --
+package todo
+
+import (
+	"context"
+	"io"
+
+	"github.com/go-rotini/rotini"
+)
+
+type todoCatHandler struct{ rotini.NoHooks }
+
+func (*todoCatHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoCatInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+-- cat_tail.go.txt --
+}
+-- cat.go.txt --
+files := in.TodoCat.Arguments.Files // type: '[]inputfile'
+if len(files) == 0 {
+	files = []string{"-"}
+}
+for _, name := range files {
+	f, err := rotini.OpenInput(rtx, name)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	_, err = io.Copy(rtx.Stdout, f)
+	f.Close()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+}
+-- hash_head.go.txt --
+package todo
+
+import (
+	"context"
+	"crypto/sha256"
+	"fmt"
+	"io"
+
+	"github.com/go-rotini/rotini"
+)
+
+type todoHashHandler struct{ rotini.NoHooks }
+
+func (*todoHashHandler) Run(ctx context.Context, rtx *rotini.Context) {
+-- hash.go.txt --
+f, err := rotini.OpenInput(rtx, "-")
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+defer f.Close()
+h := sha256.New()
+if _, err := io.Copy(h, f); err != nil {
+	rtx.HaltWith(err)
+	return
+}
+if _, err := fmt.Fprintf(rtx.Stdout, "%x\n", h.Sum(nil)); err != nil {
+	rtx.HaltWith(err)
+}
+-- export_head.go.txt --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type todoExportHandler struct{ rotini.NoHooks }
+
+func (*todoExportHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoExportInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	rtx.HaltWith(export(rtx, in.TodoExport.Flags.To, in.TodoExport.Flags.Force))
+}
+
+func load() []Task { return []Task{{ID: 1, Title: "write docs", Status: "open"}} }
+
+-- export.go.txt --
+func export(rtx *rotini.Context, path string, force bool) error {
+	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
+	if err != nil {
+		return err
+	}
+	defer out.Abort() // discards the file unless Close commits it
+	if err := rtx.WriteOutputTo(out, TodoExportOutput{Tasks: load()}, "json", nil); err != nil {
+		return err
+	}
+	return out.Close()
+}

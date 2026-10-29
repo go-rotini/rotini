@@ -1,0 +1,84 @@
+# R13 — env_prefix in a composed CLI: a parent that declares none uses its child's prefix for its
+# own inputs, and children with different prefixes make the parent declare its own.
+
+gomodinit example.com/envcompose
+
+exec rotini generate cmd/one/.rotini.spec.yaml --config cmd/one/.rotini.conf.yaml
+exec rotini generate cmd/two/.rotini.spec.yaml --config cmd/two/.rotini.conf.yaml
+
+# One child: the parent's own env input is derived under the child's prefix.
+exec rotini generate cmd/adopt/.rotini.spec.yaml --config cmd/adopt/.rotini.conf.yaml
+grep 'env:"ONE_TOKEN"' internal/cmd/adopt/zz_adopt.go
+! grep 'env:"TOKEN"' internal/cmd/adopt/zz_adopt.go
+
+# Two children with different prefixes: the parent must declare one.
+! exec rotini validate cmd/clash/.rotini.spec.yaml --config cmd/clash/.rotini.conf.yaml
+stderr 'clash[/\\]\.rotini\.spec\.yaml:\d+:\d+: .*composed children declare different env_prefix values'
+! exec rotini generate cmd/clash/.rotini.spec.yaml --config cmd/clash/.rotini.conf.yaml
+stderr 'composed children declare different env_prefix values'
+stderr '"ONE"'
+stderr '"TWO"'
+
+-- cmd/one/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: one
+  env_prefix: ONE
+  env:
+    - name: home
+      schema: {type: string}
+-- cmd/one/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/one/zz_one.go
+      package: one
+-- cmd/two/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: two
+  env_prefix: TWO
+  env:
+    - name: home
+      schema: {type: string}
+-- cmd/two/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/two/zz_two.go
+      package: two
+-- cmd/adopt/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: adopt
+  env:
+    - name: token
+      schema: {type: string}
+  commands:
+    - $ref: ../one/.rotini.spec.yaml
+-- cmd/adopt/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/adopt/zz_adopt.go
+      package: adopt
+-- cmd/clash/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: clash
+  env:
+    - name: token
+      schema: {type: string}
+  commands:
+    - $ref: ../one/.rotini.spec.yaml
+    - $ref: ../two/.rotini.spec.yaml
+-- cmd/clash/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/clash/zz_clash.go
+      package: clash

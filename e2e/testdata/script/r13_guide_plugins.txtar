@@ -1,0 +1,220 @@
+# R13 — the guide's "Run other programs as sub-commands": declared plugins with aliases, discovery,
+# the search order and its not-found message, what a plugin token may be, and listing discovered
+# plugins. plugins.go.txt is the block the guide shows, inside a handler.
+
+gomodinit example.com/plug
+
+exec rotini generate cmd/plug/.rotini.spec.yaml --config cmd/plug/.rotini.conf.yaml
+concat internal/cmd/plug/plug_plugins.go plugins-head.go.txt plugins.go.txt plugins-tail.go.txt
+exec go mod tidy
+mkdir bin
+mkdir plugins/bin
+mkdir pathbin
+exec go build -o bin/plug$exe ./cmd/plug
+exec go build -o echobin$exe ./echo
+cp echobin$exe bin/plug-sync$exe
+cp echobin$exe plugins/bin/plug-hello$exe
+cp echobin$exe bin/plug-dup$exe
+cp echobin$exe plugins/bin/plug-dup$exe
+cp echobin$exe pathbin/plug-dup$exe
+cp echobin$exe plugins/bin/plug-mid$exe
+cp echobin$exe pathbin/plug-mid$exe
+cp echobin$exe pathbin/plug-far$exe
+env PATH=$WORK${/}pathbin${:}$PATH
+
+# A declared plugin runs <program>-<name>, under its alias too.
+exec bin/plug$exe sync a b
+stdout '^plug-sync(\.exe)? got \[a b\]$'
+exec bin/plug$exe sy a
+stdout '^plug-sync(\.exe)? got \[a\]$'
+
+# Help lists declared plugins whether or not they are installed, and no discovered one.
+exec bin/plug$exe
+stdout '^  sync, sy +synchronize with the remote store$'
+stdout '^  report +render a report$'
+! stdout 'hello'
+
+# Discovery: any executable named <prefix><word> is a sub-command, found in plugin_path,
+# relative to the working directory.
+exec bin/plug$exe hello there
+stdout '^plug-hello(\.exe)? got \[there\]$'
+
+# Search order: next to the binary, then plugin_path, then PATH.
+exec bin/plug$exe dup
+stdout '[/\\]bin[/\\]plug-dup'
+! stdout '[/\\]plugins[/\\]bin'
+! stdout 'pathbin'
+exec bin/plug$exe mid
+stdout '(^|[/\\])plugins[/\\]bin[/\\]plug-mid'
+exec bin/plug$exe far
+stdout 'pathbin[/\\]plug-far'
+
+# A binary that isn't found is reported with the places searched, declared or discovered.
+wantexit 1 bin/plug$exe absent
+stderr '^Error: "plug-absent" not found; searched next to the binary .*bin, then the plugin path \./plugins/bin, then PATH$'
+wantexit 1 bin/plug$exe report
+stderr '^Error: "plug-report" not found; searched next to the binary .*bin, then the plugin path \./plugins/bin, then PATH$'
+
+# A token holding a path separator, or . or .., is never a discovered plugin.
+mkdir plugins/bin/plug-sub
+cp echobin$exe plugins/bin/plug-sub/run$exe
+exec bin/plug$exe sub/run
+! stdout 'got'
+exec bin/plug$exe ..
+! stdout 'got'
+
+# A word that differs only in case from a declared plugin is an unknown command, never looked up.
+cp echobin$exe bin/plug-SYNC$exe
+wantexit 1 bin/plug$exe SYNC
+stderr 'unknown command "SYNC"'
+! stdout 'got'
+
+# Completion offers discovered plugins with the declared ones.
+exec bin/plug$exe __complete ''
+stdout '^hello$'
+stdout '^sync\tsynchronize with the remote store$'
+
+# DiscoveredPlugins lists each discovered name with the binary dispatch would run;
+# PluginBinary searches where dispatch searches.
+exec bin/plug$exe plugins
+stdout '^  hello\tplugins[/\\]bin[/\\]plug-hello'
+stdout '^  dup\t.*[/\\]bin[/\\]plug-dup'
+! stdout 'pathbin[/\\]plug-dup'
+! stdout '^  sync\t'
+exec bin/plug$exe which mid
+stdout '(^|[/\\])plugins[/\\]bin[/\\]plug-mid'
+! exec bin/plug$exe which absent
+stdout '^not found$'
+
+-- cmd/plug/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: plug
+  summary: a plugin host
+  plugin_path: ./plugins/bin
+  plugins:
+    - name: sync
+      summary: synchronize with the remote store
+      aliases: [sy]
+    - name: report
+      summary: render a report
+      timeout: 5s
+  plugin_discovery:
+    prefix: plug-
+  commands:
+    - name: plugins
+      summary: list the discovered plugins
+    - name: which
+      summary: show the binary a plugin runs
+      arguments:
+        - name: name
+          summary: the plugin
+          schema: {type: string, required: true}
+-- cmd/plug/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/plug/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/plug/zz_plug.go
+      package: plug
+  features:
+    - type: help
+      enabled: true
+-- echo/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+func main() {
+	fmt.Printf("%s got %v\n", filepath.Base(os.Args[0]), os.Args[1:])
+	exe, _ := os.Executable()
+	fmt.Println(exe)
+}
+-- internal/cmd/plug/plug.go --
+package plug
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*plugHandler)(nil)
+
+type plugHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*plugHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, rtx.Help())
+}
+-- internal/cmd/plug/plug_which.go --
+package plug
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*plugWhichHandler)(nil)
+
+type plugWhichHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*plugWhichHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[PlugWhichInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	path, ok := rtx.CommandChain()[0].PluginBinary(in.PlugWhich.Arguments.Name)
+	if !ok {
+		fmt.Fprintln(rtx.Stdout, "not found")
+		rtx.HaltWithCode(1)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, path)
+}
+-- plugins-head.go.txt --
+package plug
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*plugPluginsHandler)(nil)
+
+type plugPluginsHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*plugPluginsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+-- plugins.go.txt --
+for _, p := range rtx.CommandChain()[0].DiscoveredPlugins() {
+	fmt.Fprintf(rtx.Stdout, "  %s\t%s\n", p.Name, p.Path)
+}
+-- plugins-tail.go.txt --
+}

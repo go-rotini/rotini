@@ -174,6 +174,10 @@ func TestDefaultResolver_flagsBeforePlugin(t *testing.T) {
 	if want := `-v can't come before plugin "sig": a plugin receives only the words after its name`; err == nil || err.Error() != want {
 		t.Errorf("message = %v, want %q", err, want)
 	}
+	// The failed resolution still carries the commands before the plugin name.
+	if res, err := DefaultResolver(def, []string{"grp", "-v", "found"}); err == nil || !slices.Equal(chainNames(res.Chain), []string{"demo", "grp"}) {
+		t.Errorf("chain = %v, err %v; want [demo grp] with the error", chainNames(res.Chain), err)
+	}
 }
 
 // TestRun_flagBeforePluginIsUsageError pins that the run reports the misplaced flag as an
@@ -222,5 +226,46 @@ func TestParse_subCommandAfterDoubleDash(t *testing.T) {
 	err = NewParser().Parse(NewContextFor(def, []string{"--", "rnu"}), &in)
 	if err == nil || err.Error() != `unknown command "rnu" for "app"` {
 		t.Errorf("-- rnu: err = %v, want the unknown-command message", err)
+	}
+}
+
+// A mistyped sub-command is reported before a flag after it, which was checked against the wrong
+// command; a flag before it is reported as it is, and words after "--" are never flags.
+func TestParse_unknownCommandBeforeLaterFlags(t *testing.T) {
+	def := Definition{
+		Name: "todo", Handler: "Todo",
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"--verbose"}, Type: "bool"}},
+		Commands: []CommandDef{
+			{Name: "list", Handler: "TodoList", Flags: []FlagDef{{Name: "all", Identifiers: []string{"--all"}, Type: "bool"}}},
+			{Name: "add", Handler: "TodoAdd"},
+		},
+	}
+	var in struct{}
+	for _, argv := range [][]string{
+		{"lst", "--all"},
+		{"lst", "--verbose", "--all"},
+		{"--verbose", "lst", "--all=x", "-z"},
+		{"lst", "--verbose=maybe"},
+	} {
+		err := NewParser().Parse(NewContextFor(def, argv), &in)
+		pe, ok := errors.AsType[*ParseError](err)
+		if !ok || pe.Kind != ParseKindUnknownCommand || CategoryOf(err) != CategoryUsage {
+			t.Fatalf("%q: err = %v, want an unknown-command usage error", argv, err)
+		}
+		if want := `unknown command "lst" for "todo"`; pe.Msg != want || pe.Token != "lst" {
+			t.Errorf("%q: message = %q, token = %q; want %q", argv, pe.Msg, pe.Token, want)
+		}
+		if want := []string{"list", "add"}; !slices.Equal(pe.Candidates, want) {
+			t.Errorf("%q: candidates = %v, want %v", argv, pe.Candidates, want)
+		}
+	}
+
+	err := NewParser().Parse(NewContextFor(def, []string{"--bogus", "lst"}), &in)
+	if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Kind != ParseKindUnknownFlag || pe.Msg != `unknown flag "--bogus"` {
+		t.Errorf("--bogus lst: err = %v, want the unknown flag before the word", err)
+	}
+	err = NewParser().Parse(NewContextFor(def, []string{"lst", "--", "--all"}), &in)
+	if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Kind != ParseKindUnknownCommand || pe.Msg != `unknown command "lst" for "todo"` {
+		t.Errorf("lst -- --all: err = %v, want the unknown command", err)
 	}
 }

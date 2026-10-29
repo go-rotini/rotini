@@ -1,0 +1,142 @@
+# R13 — what the spec reference promises for `$ref` and `handler:`: the presentation keys a
+# parent may set where it mounts a child (lifecycle and stability included), `commands:` added
+# beside it, the keys it may not set, a child's problems reported in the child's file, and a
+# `handler:` on a `$ref` delegating the child's sub-commands by convention.
+
+gomodinit example.com/c
+
+exec rotini generate cmd/kid/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+exec rotini generate cmd/root/.rotini.spec.yaml --config cmd/root/.rotini.conf.yaml
+
+# The overlay replaces the child's presentation for this mount only.
+grep 'tools as the root describes it' internal/cmd/root/zz_root.go
+! grep 'the kid on its own' internal/cmd/root/zz_root.go
+grep 'tools.*\(beta\)' internal/cmd/root/zz_root.go
+grep 'DeprecatedSince: +"1\.4\.0"' internal/cmd/root/zz_root.go
+grep 'RemovedIn: +"2\.0\.0"' internal/cmd/root/zz_root.go
+grep '"team": +"platform"' internal/cmd/root/zz_root.go
+# The child's own sub-commands keep theirs, and a command added beside the $ref is the parent's.
+grep 'work the kid does' internal/cmd/root/zz_root.go
+grep 'added by the root' internal/cmd/root/zz_root.go
+exists internal/cmd/root/root_tools_extra.go
+! exists internal/cmd/root/root_tools_work.go
+
+# handler: on a $ref points the mount and the child's sub-commands at another package.
+grep 'kh\.Kit\(\)' internal/cmd/root/zz_root.go
+grep 'kh\.KitWork\(\)' internal/cmd/root/zz_root.go
+
+# Keys the handler depends on can't be set beside a $ref, `use` and `effects` included.
+! exec rotini validate cmd/bad/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+stderr 'bad[/\\]\.rotini\.spec\.yaml:\d+:\d+: .*`use`'
+stderr 'bad[/\\]\.rotini\.spec\.yaml:\d+:\d+: .*`effects`'
+stderr 'bad[/\\]\.rotini\.spec\.yaml:\d+:\d+: .*`stdin`'
+
+# A problem in a spec composed by a relative path is reported at its place in that file.
+! exec rotini validate cmd/wrap/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+stderr 'broken[/\\]\.rotini\.spec\.yaml:8:7: .*unknown flag "nope"'
+
+# mod:// needs a version, and an https URL is not accepted; each is placed at its $ref.
+wantexit 1 rotini validate cmd/modref/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+stderr 'modref[/\\]\.rotini\.spec\.yaml:5:13: command modref: invalid module ref "mod://example\.com/other/cmd/x/\.rotini\.spec\.yaml"; want mod://<module>@<version>/<path>$'
+! stderr 'composition:'
+wantexit 1 rotini validate cmd/webref/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+stderr 'webref[/\\]\.rotini\.spec\.yaml:5:13: command webref: \$ref "https://example\.com/x\.yaml" is a remote source, which is not supported'
+! stderr 'composition:'
+
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: the kid on its own
+  commands:
+    - name: work
+      summary: work the kid does
+      flags:
+        - name: loud
+          schema: {type: bool}
+-- cmd/kid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kid/main.go
+    - type: cmd
+      file: internal/cmd/kid/zz_kid.go
+      package: kid
+-- cmd/root/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: root
+  summary: the root
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+      name: tools
+      summary: tools as the root describes it
+      stability: beta
+      deprecated: use deleg
+      deprecated_since: 1.4.0
+      removed_in: 2.0.0
+      metadata: {team: platform}
+      commands:
+        - name: extra
+          summary: added by the root
+    - $ref: ../kid/.rotini.spec.yaml
+      name: deleg
+      summary: delegated
+      handler:
+        import: kh example.com/c/handlers/kit
+        convention: Kit
+-- cmd/root/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/root/main.go
+    - type: cmd
+      file: internal/cmd/root/zz_root.go
+      package: root
+  features:
+    - type: help
+      enabled: true
+-- cmd/bad/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  flag_sets:
+    Out:
+      flags:
+        - name: json
+          schema: {type: bool}
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+      use: [Out]
+      effects: {kind: read}
+      stdin: {format: text}
+-- cmd/wrap/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: wrap
+  commands:
+    - $ref: ../broken/.rotini.spec.yaml
+-- cmd/broken/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: broken
+  flags:
+    - name: a
+      schema: {type: bool}
+  flag_groups:
+    - kind: mutually_exclusive
+      flags: [a, nope]
+-- cmd/webref/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: webref
+  commands:
+    - $ref: https://example.com/x.yaml
+-- cmd/modref/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: modref
+  commands:
+    - $ref: mod://example.com/other/cmd/x/.rotini.spec.yaml

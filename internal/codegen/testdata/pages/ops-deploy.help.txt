@@ -7,11 +7,11 @@ ship a service
 This command is in beta: it may change in a minor release.
 
 Usage:
-  ops deploy [flags] <service> [replicas]
+  ops deploy [flags] <service> [COUNT]
 
 Arguments:
-  <service>     the service to ship (length 2..63)
-  [replicas]    how many copies (>= 1)
+  <service>    the service to ship (length 2..63)
+  [COUNT]      how many copies (>= 1)
 
 Flags:
   -p, --port int                 listen port (default 8080) (1..65535)

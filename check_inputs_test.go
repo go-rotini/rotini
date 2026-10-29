@@ -150,6 +150,12 @@ func TestCheckInputs_wrongTypeIsInternal(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Kind != ParseKindInternal {
 		t.Fatalf("CheckInputs(foreign type) = %v, want ParseKindInternal", err)
 	}
+	// A pointer to the right struct is not the struct: T is the inputs type itself.
+	in, set := ciValid()
+	err = NewContextFor(ciDef(), nil).CheckInputs(&in, set)
+	if !errors.As(err, &pe) || pe.Kind != ParseKindInternal || CategoryOf(err) != CategoryInternal {
+		t.Fatalf("CheckInputs(pointer) = %v, want an internal ParseKindInternal error", err)
+	}
 }
 
 func TestCheckInputs_neverChangesValue(t *testing.T) {

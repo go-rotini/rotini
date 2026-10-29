@@ -1,0 +1,72 @@
+# R13 — what the CLI reference says about `rotini fmt` (how it tells a file's kind, the formats
+# it can't format yet) and `rotini mount` (the formats it mounts and mounts into, and --prune in
+# a dry run).
+gomodinit example.com/acme
+
+# ── fmt: a file's kind comes from its keys, then its name, else --kind ──────
+# diff: is a conf's own key, as generate: and validate: are.
+exec rotini fmt release.yaml
+stdout '^formatted release\.yaml$'
+cmp release.yaml want.release.yaml
+# A file with neither tells by its name.
+exec rotini fmt --check app.rotini.conf.yaml
+! stderr .
+wantexit 1 rotini fmt bare.yaml
+stderr 'can''t tell whether this is a spec, a conf or a composed command; pass --kind'
+exec rotini fmt bare.yaml --kind conf
+# --check is quiet and exits 0 when every file is formatted.
+exec rotini fmt --check release.yaml app.rotini.conf.yaml
+! stdout .
+! stderr .
+# JSON, JSONC and TOML files are reported as not supported yet.
+wantexit 1 rotini fmt app.jsonc app.toml
+stderr 'app\.jsonc: formatting JSONC files isn''t supported yet'
+stderr 'app\.toml: formatting TOML files isn''t supported yet'
+
+# ── mount: any format can be mounted, only YAML mounted into ────────────────
+exec rotini init acme
+mkdir cmd/jay
+cp jay.json cmd/jay/.rotini.spec.json
+exec rotini mount cmd/jay/.rotini.spec.json --into cmd/acme/.rotini.spec.yaml
+stdout '^mounted jay from \.\./jay/\.rotini\.spec\.json$'
+grep '^    - \$ref: \.\./jay/\.rotini\.spec\.json$' cmd/acme/.rotini.spec.yaml
+exec rotini init other --format json
+wantexit 1 rotini mount cmd/jay/.rotini.spec.json --into cmd/other/.rotini.spec.json
+stderr 'rotini mount edits YAML specs only'
+
+# ── --prune in a dry run: exit 2 while something would be removed ───────────
+rm cmd/jay
+cp cmd/acme/.rotini.spec.yaml before.yaml
+wantexit 2 rotini mount --prune --dry-run --into cmd/acme/.rotini.spec.yaml
+stdout '^would remove \.\./jay/\.rotini\.spec\.json: the file no longer exists$'
+stdout ': 0 would mount, 0 already mounted, 1 would remove$'
+cmp cmd/acme/.rotini.spec.yaml before.yaml
+exec rotini mount --prune --into cmd/acme/.rotini.spec.yaml
+! grep 'jay' cmd/acme/.rotini.spec.yaml
+exec rotini mount --prune --dry-run --into cmd/acme/.rotini.spec.yaml
+stdout ': 0 would mount, 0 already mounted, 0 would remove$'
+
+-- release.yaml --
+diff:
+  accept:
+    - reason: merged into list
+      where: app compact
+      rule: COMMAND_NO_DELETE
+version: 0.0.0
+-- want.release.yaml --
+version: 0.0.0
+diff:
+  accept:
+    - rule: COMMAND_NO_DELETE
+      where: app compact
+      reason: merged into list
+-- app.rotini.conf.yaml --
+version: 0.0.0
+-- bare.yaml --
+version: 0.0.0
+-- app.jsonc --
+{"version": "0.0.0"}
+-- app.toml --
+version = "0.0.0"
+-- jay.json --
+{"version": "0.0.0", "command": {"name": "jay", "summary": "a json cli"}}

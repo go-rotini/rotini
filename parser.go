@@ -217,7 +217,7 @@ const (
 	ParseKindNeedsValue                    // a value-taking flag was given no value
 	ParseKindInvalidValue                  // a value could not be coerced/resolved (bad type, unreadable @file, malformed map, value on a no-value flag)
 	ParseKindEnumViolation                 // a value was not one of a declared enum's members
-	ParseKindConstraintViolation           // a declared bound or flag-group/dependency rule was violated
+	ParseKindConstraintViolation           // a declared bound, a no-repeat flag or a flag-group/dependency rule was violated
 	ParseKindMissingRequired               // a required flag or argument was absent
 	ParseKindNoArguments                   // a positional was given to a command that accepts none
 	ParseKindTooManyArguments              // more positionals than the command's declared (non-variadic) arity
@@ -619,7 +619,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 			// name belongs to one of its ancestors, never to it.
 			extra, err := consumeFlagToken(chain[:depth], tok, argv, i, addFlag)
 			if err != nil {
-				return nil, withRunCandidates(err, chain[:depth], leaf)
+				return nil, argvFlagError(err, chain, depth, store)
 			}
 			i += extra
 			noteDetached(store, chain[:depth], tok, argv, i)
@@ -658,6 +658,19 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 
 	store.expandGlobs(chain[leaf].Arguments, leaf, acq.goos)
 	return store, nil
+}
+
+// argvFlagError is the error for a flag token that failed to parse with the first depth
+// commands of chain reached. After a mistyped sub-command, flags are checked against the wrong
+// command, so the mistyped word is what is reported; a flag before it is reported as it is.
+func argvFlagError(err error, chain []Command, depth int, store *parsedInputs) error {
+	leaf := len(chain) - 1
+	if depth == len(chain) {
+		if stray := strayCommand(&chain[leaf], &store.scopes[leaf], store); stray != nil {
+			return stray
+		}
+	}
+	return withRunCandidates(err, chain[:depth], leaf)
 }
 
 // withRunCandidates narrows an unknown-flag error's candidates to the flags the run accepts,

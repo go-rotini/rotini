@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,18 +70,77 @@ func initDemo(t *testing.T) string {
 	return dir
 }
 
-// TestInitialize_forceNeverDeletes pins that `init --force` does not prune handlers for
-// commands the seed lacks.
+// TestInitialize_forceNeverDeletes pins that `init --force` disables, and never deletes, a
+// handler for a command the seed lacks, reporting it as generate does; a second init leaves
+// the disabled handler as it is.
 func TestInitialize_forceNeverDeletes(t *testing.T) {
 	dir := initDemo(t)
 	handler := filepath.Join(dir, "internal", "cmd", "demo", "demo_extra.go")
-	writeTestFile(t, filepath.Dir(handler), "demo_extra.go", "package demo\n\n"+stubMarker+"*demoExtraHandler)(nil)\n\n// edited by hand\n")
+	const src = "package demo\n\n" + stubMarker + "*demoExtraHandler)(nil)\n\n// edited by hand\n"
+	writeTestFile(t, filepath.Dir(handler), "demo_extra.go", src)
 
-	if _, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{Force: true}); err != nil {
+	got, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{Force: true})
+	if err != nil {
 		t.Fatalf("Initialize --force: %v", err)
 	}
-	if _, err := os.Stat(handler); err != nil {
-		t.Errorf("init --force deleted a handler: %v", err)
+	body, err := os.ReadFile(handler)
+	if err != nil {
+		t.Fatalf("init --force deleted a handler: %v", err)
+	}
+	if string(body) != disabledHeader+src {
+		t.Errorf("handler after init --force =\n%s\nwant it disabled, the author's code kept", body)
+	}
+	want := "pruned demo_extra.go (disabled; removed by the next generate); its command is no longer in the spec"
+	if !slices.ContainsFunc(got.Notices, func(e error) bool { return e.Error() == want }) {
+		t.Errorf("notices = %v, want %q", got.Notices, want)
+	}
+
+	again, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{Force: true})
+	if err != nil {
+		t.Fatalf("second Initialize --force: %v", err)
+	}
+	if after, err := os.ReadFile(handler); err != nil || string(after) != string(body) {
+		t.Errorf("second init --force changed the disabled handler: %v\n%s", err, after)
+	}
+	if len(again.Notices) != 0 {
+		t.Errorf("second init notices = %v, want none", again.Notices)
+	}
+}
+
+// TestInitialize_restoresAndDryRuns pins that init re-enables a disabled handler whose command
+// the seed has, reporting it, and that a dry run lists a handler it would disable as a change
+// rather than a notice.
+func TestInitialize_restoresAndDryRuns(t *testing.T) {
+	dir := initDemo(t)
+	cmdDir := filepath.Join(dir, "internal", "cmd", "demo")
+	help, err := os.ReadFile(filepath.Join(cmdDir, "demo_help.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, cmdDir, "demo_help.go", string(disableStub(help)))
+	writeTestFile(t, cmdDir, "demo_extra.go", "package demo\n\n"+stubMarker+"*demoExtraHandler)(nil)\n")
+
+	planned, err := NewProcessor("0.0.0").InitializeDryRun("demo", InitOptions{Force: true})
+	if err != nil {
+		t.Fatalf("InitializeDryRun: %v", err)
+	}
+	if !slices.ContainsFunc(planned.Changes, func(c string) bool { return strings.Contains(c, "update internal/cmd/demo/demo_extra.go") }) {
+		t.Errorf("dry-run changes = %q, want the extra handler's update", planned.Changes)
+	}
+	if slices.ContainsFunc(planned.Notices, func(e error) bool { return strings.Contains(e.Error(), "pruned") }) {
+		t.Errorf("dry-run notices = %v, want the disabling only as a change", planned.Notices)
+	}
+
+	got, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{Force: true})
+	if err != nil {
+		t.Fatalf("Initialize --force: %v", err)
+	}
+	if restored, err := os.ReadFile(filepath.Join(cmdDir, "demo_help.go")); err != nil || string(restored) != string(help) {
+		t.Errorf("demo_help.go after init = %v\n%s\nwant it re-enabled", err, restored)
+	}
+	want := "restored demo_help.go; its command is back in the spec"
+	if !slices.ContainsFunc(got.Notices, func(e error) bool { return e.Error() == want }) {
+		t.Errorf("notices = %v, want %q", got.Notices, want)
 	}
 }
 

@@ -1,0 +1,459 @@
+# R13 — the guide's completion sections: what completion offers, completers, messages and the
+# description switch, through the binary's __complete answer.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+concat internal/cmd/todo/todo_import.go import-head.go.txt import.go.txt
+concat internal/cmd/todo/todo_done.go done-head.go.txt done.go.txt
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# Flags already set are left out, read the way the parser reads them: -vx sets both.
+exec ./todo$exe __complete -vx --
+! stdout '^--verbose'
+! stdout '^--extra'
+stdout '^--tag\t'
+
+# --no-color sets --color, so neither is offered again.
+exec ./todo$exe __complete --no-color --
+! stdout '^--color'
+! stdout '^--no-color'
+
+# A list flag stays, since it repeats.
+exec ./todo$exe __complete --tag a --
+stdout '^--tag\t'
+
+# Once one flag of a mutually_exclusive group is set, the other is left out.
+exec ./todo$exe __complete --json --
+! stdout '^--yaml'
+exec ./todo$exe __complete --
+stdout '^--yaml\t'
+
+# A flag a set flag requires through flag_dependencies comes first.
+exec ./todo$exe __complete -v --
+stdout '\A--token\t'
+
+# Deprecated flags and commands are left out, and still work when typed.
+exec ./todo$exe __complete --
+! stdout '^--old'
+exec ./todo$exe __complete ''
+! stdout '^legacy'
+stdout '^ping\t'
+exec ./todo$exe legacy
+
+# A negatable flag offers its --no- form, without the flag's summary.
+exec ./todo$exe __complete --
+stdout '^--color\tcolor the output$'
+stdout '^--no-color$'
+
+# Enum values come in the declared order, each with its summary, and are the whole vocabulary.
+exec ./todo$exe __complete --env ''
+cmp stdout want-env.txt
+exec ./todo$exe __complete --env z
+stdout '\A:rotini:message --env string: where to deploy\n:rotini:none\n\z'
+
+# Values attached to a flag complete too.
+exec ./todo$exe __complete --env=p
+stdout '^--env=prod\tthe live site$'
+exec ./todo$exe __complete -ep
+stdout '^-eprod\tthe live site$'
+exec ./todo$exe __complete -vep
+stdout '^-veprod\tthe live site$'
+
+# A word starting with @ on a from: [file] input completes the path after it.
+exec ./todo$exe __complete --token @
+stdout '^:rotini:file'
+
+# Nothing more where the command line takes no further word.
+exec ./todo$exe __complete ping ''
+stdout '\A:rotini:none\n\z'
+exec ./todo$exe __complete nosuch ''
+stdout '\A:rotini:none\n\z'
+
+# Completers: candidates in the order returned, those not starting with the typed word left
+# out, and PartialInputs reads what has been typed so far.
+exec ./todo$exe __complete --list work done ''
+cmp stdout want-done.txt
+exec ./todo$exe __complete --list work done b
+stdout '^beta-work$'
+! stdout 'zeta'
+
+# A completer's fallback: remote names when one matches, json files otherwise.
+exec ./todo$exe __complete import or
+cmp stdout want-import-remote.txt
+exec ./todo$exe __complete import ./
+cmp stdout want-import-file.txt
+
+# Completion options ride the answer as an option line.
+exec ./todo$exe __complete tag ''
+stdout '^:rotini:option nospace$'
+
+# A completer message is shown beside candidates, in the order added.
+exec ./todo$exe __complete rm ''
+cmp stdout want-rm.txt
+
+# A declared message, under messages: all; the switch hides it for 0, false and off.
+exec ./todo$exe __complete add ''
+cmp stdout want-add.txt
+env TODO_COMPLETION_MESSAGES=0
+exec ./todo$exe __complete add ''
+! stdout message
+env TODO_COMPLETION_MESSAGES=false
+exec ./todo$exe __complete add ''
+! stdout message
+env TODO_COMPLETION_MESSAGES=yes
+exec ./todo$exe __complete add ''
+stdout message
+env TODO_COMPLETION_MESSAGES=
+
+# The variable is listed at the top of each script, in the root man page and in the contract.
+exec ./todo$exe completion bash
+stdout 'TODO_COMPLETION_MESSAGES'
+exec ./todo$exe completion zsh
+stdout 'TODO_COMPLETION_MESSAGES'
+grep 'TODO_COMPLETION_MESSAGES' share/man/man1/todo.1
+grep 'TODO_COMPLETION_MESSAGES' contract.json
+
+# descriptions_env hides descriptions in the answer.
+env TODO_COMPLETION_DESCRIPTIONS=off
+exec ./todo$exe __complete --env ''
+cmp stdout want-env-bare.txt
+env TODO_COMPLETION_DESCRIPTIONS=
+
+# install_dir writes Nushell's script too, holding exactly what Completion returns.
+exists share/completions/todo.nu
+exec ./todo$exe completion nushell
+cmp stdout share/completions/todo.nu
+
+# messages: declared shows only the lines the spec writes.
+exec rotini generate cmd/todo/.rotini.spec.yaml --config declared.conf.yaml
+exec go build -o todo$exe ./cmd/todo
+exec ./todo$exe __complete add ''
+cmp stdout want-add.txt
+exec ./todo$exe __complete --env z
+! stdout message
+
+-- want-env.txt --
+staging	the test site
+prod	the live site
+:rotini:option keep-order
+-- want-env-bare.txt --
+staging
+prod
+:rotini:option keep-order
+-- want-done.txt --
+zeta-work
+alpha-work
+beta-work
+:rotini:option keep-order
+-- want-import-remote.txt --
+origin
+-- want-import-file.txt --
+:rotini:message <source>: a remote name or a file
+:rotini:file json
+-- want-rm.txt --
+one
+two
+:rotini:message showing 2 tasks
+:rotini:message the second message
+:rotini:option keep-order
+-- want-add.txt --
+:rotini:message a short title; quote it if it has spaces
+:rotini:none
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  flags:
+    - name: verbose
+      summary: say more
+      identifiers: [-v, --verbose]
+      schema: {type: bool}
+    - name: extra
+      summary: extra things
+      identifiers: [-x, --extra]
+      schema: {type: bool}
+    - name: color
+      summary: color the output
+      identifiers: [--color]
+      schema: {type: bool, negatable: true}
+    - name: tag
+      summary: a label
+      identifiers: [-t, --tag]
+      schema: {type: '[]string'}
+    - name: env
+      summary: where to deploy
+      identifiers: [-e, --env]
+      schema:
+        type: string
+        enum:
+          - {value: staging, summary: the test site}
+          - {value: prod, summary: the live site}
+    - name: json
+      summary: write json
+      schema: {type: bool}
+    - name: yaml
+      summary: write yaml
+      schema: {type: bool}
+    - name: old
+      summary: an old flag
+      deprecated: use --extra
+      schema: {type: bool}
+    - name: token
+      summary: the token
+      schema: {type: string, from: [file]}
+    - name: list
+      summary: the task list
+      cascading: true
+      schema: {type: string}
+  flag_groups:
+    - kind: mutually_exclusive
+      flags: [json, yaml]
+  flag_dependencies:
+    - when: verbose
+      requires: [token]
+  commands:
+    - name: completion
+      summary: print a completion script
+      arguments:
+        - name: shell
+          summary: the shell
+          schema: {type: string, required: true}
+    - name: ping
+      summary: takes nothing
+    - name: legacy
+      summary: an old command
+      deprecated: use ping
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          summary: the task title
+          schema:
+            type: string
+            complete: { kind: none, message: "a short title; quote it if it has spaces" }
+    - name: done
+      summary: finish a task
+      arguments:
+        - name: task
+          summary: the task
+          schema: {type: string}
+    - name: import
+      summary: import a list
+      arguments:
+        - name: source
+          summary: a remote name or a file
+          schema: {type: string}
+    - name: tag
+      summary: tag a task
+      arguments:
+        - name: label
+          summary: the label
+          schema: {type: string}
+    - name: rm
+      summary: remove a task
+      arguments:
+        - name: task
+          summary: the task
+          schema: {type: string, complete: {message: the static line}}
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: contract.json
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+  features:
+    - type: man
+      enabled: true
+      install_dir: share
+    - type: completion
+      enabled: true
+      install_dir: share
+      messages: all
+      messages_env: TODO_COMPLETION_MESSAGES
+      descriptions_env: TODO_COMPLETION_DESCRIPTIONS
+-- declared.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: contract.json
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+  features:
+    - type: man
+      enabled: true
+      install_dir: share
+    - type: completion
+      enabled: true
+      install_dir: share
+      messages: declared
+      messages_env: TODO_COMPLETION_MESSAGES
+      descriptions_env: TODO_COMPLETION_DESCRIPTIONS
+-- internal/cmd/todo/todo_completion.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoCompletionHandler)(nil)
+
+type todoCompletionHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoCompletionHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoCompletionInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	script, err := rtx.CompletionScript(in.TodoCompletion.Arguments.Shell)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprint(rtx.Stdout, script)
+}
+-- done-head.go.txt --
+package todo
+
+import (
+	"context"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoDoneHandler)(nil)
+
+type todoDoneHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoDoneHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+func listTasks(ctx context.Context, list string) []string {
+	if _, ok := ctx.Deadline(); !ok {
+		return nil
+	}
+	return []string{"zeta-" + list, "alpha-" + list, "beta-" + list}
+}
+
+-- done.go.txt --
+func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
+	in, _, _ := rtx.PartialInputs[TodoDoneInputs]()
+	ctx, cancel := context.WithTimeout(rtx.Context(), 2*time.Second)
+	defer cancel()
+	return listTasks(ctx, in.Todo.Flags.List)
+}
+-- import-head.go.txt --
+package todo
+
+import (
+	"context"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoImportHandler)(nil)
+
+type todoImportHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoImportHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+func remoteListsMatching(ctx context.Context, partial string) []string {
+	var out []string
+	for _, name := range []string{"origin", "upstream"} {
+		if strings.HasPrefix(name, partial) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+-- import.go.txt --
+func (*todoImportHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
+	if names := remoteListsMatching(rtx.Context(), partial); len(names) > 0 {
+		return names
+	}
+	rtx.SetCompletionFallback(rotini.Completion{Kind: "file", Extensions: []string{"json"}})
+	return []string{}
+}
+-- internal/cmd/todo/todo_tag.go --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoTagHandler)(nil)
+
+type todoTagHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoTagHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+func (*todoTagHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
+	rtx.SetCompletionOptions(rotini.CompletionOptions{NoSpace: true})
+	return []string{"key="}
+}
+-- internal/cmd/todo/todo_rm.go --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoRmHandler)(nil)
+
+type todoRmHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoRmHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+func (*todoRmHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
+	rtx.AddCompletionMessage("showing 2 tasks")
+	rtx.AddCompletionMessage("the second message")
+	return []string{"one", "two"}
+}

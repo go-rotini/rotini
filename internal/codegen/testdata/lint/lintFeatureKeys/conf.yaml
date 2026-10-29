@@ -25,6 +25,16 @@ generate:
     - type: llms
       enabled: true
       file: ../llms.txt
+    # Every other whole-program key on a per-command feature.
+    - type: man
+      enabled: true
+      file: man.txt
+      mcp_revision: 2026-07-28
+      go: true
+      name: demo
+      description: Use when the user asks for a demo.
+      base_url: https://example.com/
+      harnesses: [claude]
     # Built from the contract: no template.
     - type: permissions
       enabled: true

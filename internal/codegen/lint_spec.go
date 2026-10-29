@@ -42,6 +42,7 @@ var specLints = []func(*Spec) []error{
 	lintRootAliases,
 	lintDocLevelKeys,
 	lintRefNodeKeys,
+	lintRefLocators,
 	lintHandlerSource,
 	lintImportConsistency,
 	lintLocalTimeout,
@@ -936,6 +937,7 @@ func lintCountFlags(spec *Spec) []error {
 			var bad []string
 			for key, set := range map[string]bool{
 				"default":         schema.Default != nil,
+				"base":            intBase(schema) != "",
 				"enum":            len(schema.Enum) > 0,
 				"required":        schema.Required,
 				"nullable":        schema.Nullable,
@@ -1109,8 +1111,8 @@ func lintComplete(spec *Spec) []error {
 				add("sets `complete`, which describes a value typed on the command line; only flags and arguments are, so here it would be silently ignored")
 				return
 			}
-			if t := getSchemaType(schema); channel == "flag" && (t == "bool" || t == "boolean" || t == "count") {
-				add(fmt.Sprintf("sets `complete` but its type is %s, which takes no value; there is nothing to complete", t))
+			if t := getSchemaType(schema); channel == "flag" && (t == "bool" || schema.Type == "count") {
+				add(fmt.Sprintf("sets `complete` but its type is %s, which takes no value; there is nothing to complete", schema.Type))
 				return
 			}
 			if len(schema.Complete.Extensions) > 0 && schema.Complete.Kind != "file" {

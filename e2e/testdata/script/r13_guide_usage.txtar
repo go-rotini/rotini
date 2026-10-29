@@ -1,0 +1,114 @@
+# R13 — the guide's "Printing the usage line": a command with a verbatim help page still has the
+# spec's usage line, and in a composed command rtx.Usage reports the line of the program it runs
+# in, while the generated Usage function keeps the child's own.
+
+gomodinit example.com/usage
+
+exec rotini generate cmd/kid/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+exec rotini generate cmd/umbrella/.rotini.spec.yaml --config cmd/umbrella/.rotini.conf.yaml
+cp work.go.txt internal/cmd/kid/kid_work.go
+exec go mod tidy
+exec go build -o kid$exe ./cmd/kid
+exec go build -o umbrella$exe ./cmd/umbrella
+
+exec ./kid$exe work --help
+stdout '^a page written by hand$'
+! stdout 'Usage'
+
+exec ./kid$exe work x
+cmp stdout kid.txt
+
+exec ./umbrella$exe kid work x
+stdout '^rtx: umbrella kid work .*<target>$'
+stdout '^generated: kid work <target>$'
+
+-- kid.txt --
+rtx: kid work <target>
+generated: kid work <target>
+-- work.go.txt --
+package kid
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*kidWorkHandler)(nil)
+
+type kidWorkHandler struct{ rotini.NoHooks }
+
+func (*kidWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.ArgvInputs[KidWorkInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Values.Kid.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	line, err := Usage("work")
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, "rtx:", rtx.Usage())
+	fmt.Fprintln(rtx.Stdout, "generated:", line)
+}
+-- cmd/umbrella/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: umbrella
+  summary: mounts a child CLI
+  flags:
+    - name: verbose
+      summary: the umbrella's global flag
+      identifiers: [--verbose]
+      schema: { type: bool }
+      cascading: true
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/umbrella/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/umbrella/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/umbrella/zz_umbrella.go
+      package: umbrella
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: a child CLI
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      schema: { type: bool }
+      cascading: true
+  commands:
+    - name: work
+      summary: needs a target
+      help: a page written by hand
+      arguments:
+        - name: target
+          summary: what to work on
+          schema: { type: string, required: true }
+-- cmd/kid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kid/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/kid/zz_kid.go
+      package: kid
+  features:
+    - type: help
+      enabled: true

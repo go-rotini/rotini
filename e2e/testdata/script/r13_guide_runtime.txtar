@@ -1,0 +1,225 @@
+# R13 — the guide's "Runtime control", from a real process: the four panic settings, a missing
+# dependency arriving as a panic, ExitCause setting the exit code, and the guide's root handler
+# that hands a deadline to later hooks (timeout.go.txt, byte for byte).
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+concat internal/cmd/todo/todo.go root_head.go.txt timeout.go.txt root_tail.go.txt
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+exec go build -o limit$exe ./cmd/limit
+
+# The defaults: teardown runs, then the reporter prints the panic's value, and the run exits 1.
+wantexit 1 ./todo$exe boom
+stdout '^teardown$'
+cmp stderr fatal.txt
+
+# Teardown skipped, then the reporter.
+env TODO_PANIC=no-teardown
+wantexit 1 ./todo$exe boom
+! stdout teardown
+cmp stderr fatal.txt
+
+# Teardown, then the panic raised again from the runtime, so the stack no longer shows the hook.
+env TODO_PANIC=no-recover
+wantexit 2 ./todo$exe boom
+stdout '^teardown$'
+stderr '^panic: boom'
+! stderr 'todoBoomHandler\)\.Run'
+
+# Never caught: no teardown, and the original stack.
+env TODO_PANIC=no-recover-no-teardown
+wantexit 2 ./todo$exe boom
+! stdout teardown
+stderr '^panic: boom'
+stderr 'todoBoomHandler\)\.Run'
+env TODO_PANIC=
+
+# A dependency MustGetDependency can't find reaches the reporter as a panic.
+wantexit 1 ./todo$exe dep
+stderr '^Fatal Error: .*todo\.store'
+
+# The root's CascadingPreRun hands its deadline to Run.
+exec ./todo$exe deadline
+stdout '^deadline: true$'
+
+# A context canceled with ExitCause stops the run with that code.
+wantexit 124 ./limit$exe wait
+stdout '^canceled$'
+! stderr .
+
+-- fatal.txt --
+Fatal Error: boom
+-- root_head.go.txt --
+package todo
+
+import (
+	"context"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoHandler)(nil)
+
+-- timeout.go.txt --
+type todoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	cancel context.CancelFunc
+}
+
+func (h *todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	ctx, h.cancel = context.WithTimeout(ctx, 30*time.Second)
+	rtx.SetContext(ctx)
+}
+
+func (h *todoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	h.cancel()
+}
+-- root_tail.go.txt --
+
+func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  commands:
+    - name: boom
+      summary: panics
+    - name: dep
+      summary: reads a dependency nobody set
+    - name: deadline
+      summary: reports whether Run has a deadline
+    - name: wait
+      summary: waits for the run to be canceled
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+-- cmd/todo/main.go --
+package main
+
+import (
+	"os"
+
+	cmd "example.com/todo/internal/cmd/todo"
+)
+
+func main() {
+	p := cmd.NewProgram()
+	switch os.Getenv("TODO_PANIC") {
+	case "no-teardown":
+		p.WithTeardownOnPanic(false)
+	case "no-recover":
+		p.WithPanicRecover(false)
+	case "no-recover-no-teardown":
+		p.WithPanicRecover(false).WithTeardownOnPanic(false)
+	}
+	p.Execute()
+}
+-- cmd/limit/main.go --
+package main
+
+import (
+	"context"
+	"time"
+
+	"github.com/go-rotini/rotini"
+	cmd "example.com/todo/internal/cmd/todo"
+)
+
+func main() {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	time.AfterFunc(100*time.Millisecond, func() { cancel(rotini.ExitCause(124)) })
+	cmd.NewProgram().WithContext(ctx).Execute()
+}
+-- internal/cmd/todo/todo_boom.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoBoomHandler)(nil)
+
+type todoBoomHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoBoomHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	panic("boom")
+}
+
+func (*todoBoomHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "teardown")
+}
+-- internal/cmd/todo/todo_dep.go --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoDepHandler)(nil)
+
+var storeDep = rotini.NewDependency[string]("todo.store")
+
+type todoDepHandler struct{ rotini.NoHooks }
+
+func (*todoDepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	_ = rtx.MustGetDependency(storeDep)
+}
+-- internal/cmd/todo/todo_deadline.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoDeadlineHandler)(nil)
+
+type todoDeadlineHandler struct{ rotini.NoHooks }
+
+func (*todoDeadlineHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	_, ok := ctx.Deadline()
+	fmt.Fprintln(rtx.Stdout, "deadline:", ok)
+}
+-- internal/cmd/todo/todo_wait.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoWaitHandler)(nil)
+
+type todoWaitHandler struct{ rotini.NoHooks }
+
+func (*todoWaitHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	select {
+	case <-ctx.Done():
+		fmt.Fprintln(rtx.Stdout, "canceled")
+	case <-time.After(10 * time.Second):
+		fmt.Fprintln(rtx.Stdout, "not canceled")
+	}
+}

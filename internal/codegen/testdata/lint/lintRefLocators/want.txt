@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:7:13: command demo: invalid module ref "mod://example.com/db/.rotini.spec.yaml"; want mod://<module>@<version>/<path>
+spec: .rotini.spec.yaml:9:13: command demo/web: $ref "https://example.com/web/.rotini.spec.yaml" is a remote source, which is not supported; use a relative path or mod://<module>@<version>/<path>
+spec: .rotini.spec.yaml:10:13: command demo: $ref "git::https://example.com/repo.git//cli/.rotini.spec.yaml" is a remote source, which is not supported; use a relative path or mod://<module>@<version>/<path>

@@ -20,6 +20,7 @@ env ORIGINDEMO_REGION=us-2
 exec ./origindemo$exe config list --show-origin
 stdout '^Region = us-2\t\(env:ORIGINDEMO_REGION\)$'
 stdout '^Timeout = 5s\t\(config:user#timeout\)$'
+cmp stdout show-origin.txt
 
 exec ./origindemo$exe config list -o json --region ap-3
 stdout '"source": "argv:--region"'
@@ -30,6 +31,9 @@ exec ./origindemo$exe config list
 stdout '^Region = us-2$'
 ! stdout 'env:'
 
+-- show-origin.txt --
+Region = us-2	(env:ORIGINDEMO_REGION)
+Timeout = 5s	(config:user#timeout)
 -- settings.yaml --
 timeout: 5s
 -- list.go.txt --

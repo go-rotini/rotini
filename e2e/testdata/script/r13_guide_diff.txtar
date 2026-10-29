@@ -1,0 +1,149 @@
+# R13 — the guide's "Checking for breaking changes": the CI steps against a project `rotini init`
+# wrote, the JSON report's fields, acknowledgements, and an expected rename.
+
+[!exec:git] skip 'needs git'
+
+gomodinit github.com/me/taskr
+exec rotini init taskr
+cp v1.spec.yaml cmd/taskr/.rotini.spec.yaml
+cp conf.yaml cmd/taskr/.rotini.conf.yaml
+exec rotini generate cmd/taskr/.rotini.spec.yaml
+exec rotini generate cmd/taskr/.rotini.spec.yaml
+exists cli-contract.json
+
+env GIT_CONFIG_NOSYSTEM=1
+env GIT_CONFIG_GLOBAL=$WORK/.gitconfig
+exec git init -q
+exec git add -A
+exec git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -q -m v1
+exec git tag v1.0.0
+
+# The committed contract is the spec's: the dry run passes, and nothing changed since the tag.
+exec rotini generate --dry-run cmd/taskr/.rotini.spec.yaml
+exec rotini diff git:v1.0.0 --spec cmd/taskr/.rotini.spec.yaml
+stdout '^no changes$'
+
+# The spec changes but the contract isn't regenerated: the dry run fails on the stale contract.
+cp v2.spec.yaml cmd/taskr/.rotini.spec.yaml
+wantexit 2 rotini generate --dry-run cmd/taskr/.rotini.spec.yaml
+stderr 'update cli-contract\.json'
+
+# Against the tag: compact removed is breaking; list's replacement, ls, is an expected rename.
+wantexit 2 rotini diff git:v1.0.0 --spec cmd/taskr/.rotini.spec.yaml
+stdout 'COMMAND_NO_DELETE +taskr compact'
+stdout '^Expected:'
+stdout 'COMMAND_REPLACED +taskr list'
+
+# --format json writes one document with the fields the guide names.
+wantexit 2 rotini diff git:v1.0.0 --spec cmd/taskr/.rotini.spec.yaml --format json
+stdout '"findings": \['
+stdout '"severity": "breaking"'
+stdout '"rule": "COMMAND_NO_DELETE"'
+stdout '"where": "taskr compact"'
+stdout '"message": '
+stdout '"note": '
+stdout '"unmatched_accepts": '
+stdout '"summary": \{'
+
+# An acknowledged break is reported as accepted, with its reason, and doesn't fail.
+cp ack.conf.yaml cmd/taskr/.rotini.conf.yaml
+exec rotini diff git:v1.0.0 --spec cmd/taskr/.rotini.spec.yaml
+stdout '^Accepted:'
+stdout 'COMMAND_NO_DELETE +taskr compact .*replaced by purge'
+exec rotini diff git:v1.0.0 --spec cmd/taskr/.rotini.spec.yaml --format json
+stdout '"accepted": '
+
+# An entry that matches nothing fails the run, naming it, unless --fail-on never.
+cp stale.conf.yaml cmd/taskr/.rotini.conf.yaml
+wantexit 2 rotini diff git:v1.0.0 --spec cmd/taskr/.rotini.spec.yaml
+stderr 'diff\.accept entry FLAG_NO_DELETE at "taskr --gone" matched no change'
+exec rotini diff git:v1.0.0 --spec cmd/taskr/.rotini.spec.yaml --fail-on never
+
+# There is no way to ignore a rule everywhere: an entry needs its where.
+cp everywhere.conf.yaml cmd/taskr/.rotini.conf.yaml
+wantexit 1 rotini diff git:v1.0.0 --spec cmd/taskr/.rotini.spec.yaml
+stderr 'diff/accept/0: missing required property "where"'
+
+-- conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+    - type: cmd
+      file: internal/cmd/taskr/zz_rotini.go
+-- ack.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+    - type: cmd
+      file: internal/cmd/taskr/zz_rotini.go
+diff:
+  accept:
+    - rule: COMMAND_NO_DELETE
+      where: taskr compact
+      reason: replaced by purge
+-- stale.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+    - type: cmd
+      file: internal/cmd/taskr/zz_rotini.go
+diff:
+  accept:
+    - rule: COMMAND_NO_DELETE
+      where: taskr compact
+      reason: replaced by purge
+    - rule: FLAG_NO_DELETE
+      where: taskr --gone
+      reason: left over
+-- everywhere.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+    - type: cmd
+      file: internal/cmd/taskr/zz_rotini.go
+diff:
+  accept:
+    - rule: COMMAND_NO_DELETE
+      reason: every removal is fine
+-- v1.spec.yaml --
+version: 0.0.0
+command:
+  name: taskr
+  summary: track tasks
+  commands:
+    - name: list
+      summary: list tasks
+      deprecated: use ls
+      replaced_by: ls
+    - name: ls
+      summary: list tasks
+    - name: compact
+      summary: compact the store
+      deprecated: use purge
+      removed_in: 2.0.0
+-- v2.spec.yaml --
+version: 0.0.0
+command:
+  name: taskr
+  summary: track tasks
+  commands:
+    - name: ls
+      summary: list tasks
+    - name: purge
+      summary: purge the store

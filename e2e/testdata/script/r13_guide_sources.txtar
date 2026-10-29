@@ -1,0 +1,176 @@
+# R13 — the guide's sources: a .env file under the real environment and over config files, its
+# values literal and never rotini's own variables; path expansion's messages, $$ and its one
+# pass; and the directory flag's last-wins rule and validate's narrow shape.
+
+gomodinit github.com/me/todo
+exec rotini init todo
+cp spec.yaml cmd/todo/.rotini.spec.yaml
+exec rotini generate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+cp show.go.txt internal/cmd/todo/todo_show.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+env HOME=$WORK/home
+env USERPROFILE=$WORK/home
+env XDG_CONFIG_HOME=$WORK/xdg
+
+# command line, environment, .env file, configuration files, default.
+exec ./todo$exe show
+stdout '^region=config$'
+cp env-region.txt .env
+exec ./todo$exe show
+stdout '^region=dotenv$'
+env TODO_REGION=real
+exec ./todo$exe show
+stdout '^region=real$'
+exec ./todo$exe show --region argv
+stdout '^region=argv$'
+env TODO_REGION=
+
+# .env values are literal, and HOME and XDG_* never come from the file.
+cp env-full.txt .env
+exec ./todo$exe show --file '~/notes.txt'
+stdout '^greeting=\$\{OTHER\}$'
+stdout '^zone=none$'
+stdout '^file=.*notes\.txt$'
+
+# The guide's expansion error, and the path shown as expanded and as written.
+! exec ./todo$exe show --file '$NOTES/today.txt'
+cmp stderr want-unset.txt
+! exec ./todo$exe show --file '~/x'
+stderr '^Error: --file: no such file: ".*x" \(written as "~/x"\)$'
+
+# $$ is a literal $, and text a variable supplies is never expanded again.
+env TODO_X='$HOME'
+exec ./todo$exe show --note 'a$$b' --file '~/notes.txt'
+stdout '^note=a\$b$'
+exec ./todo$exe show --note '$TODO_X' --file '~/notes.txt'
+stdout '^note=\$HOME$'
+env TODO_X=
+
+# The directory flag: the last one given wins.
+mkdir a b
+exec ./todo$exe -C a show -C b
+stdout '^dir=.*[/\\]b$'
+
+# validate keeps the directory flag to one per program, read from the command line only.
+! exec rotini validate chdir-bad.yaml
+stderr 'flag "dir": has role chdir and sets `key`'
+stderr 'flag "dir": has role chdir and sets `from`'
+stderr 'flag "work": has role chdir, which flag "dir" already has'
+
+-- want-unset.txt --
+Error: --file: $NOTES is not set (in "$NOTES/today.txt")
+-- home/notes.txt --
+notes
+-- todo.yaml --
+region: config
+-- env-region.txt --
+TODO_REGION=dotenv
+-- env-full.txt --
+TODO_GREETING=${OTHER}
+OTHER=x
+XDG_CONFIG_HOME=evil
+HOME=evil
+-- evil/todo/config.yaml --
+zone: evil
+-- chdir-bad.yaml --
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: dir
+      identifiers: [-C, --dir]
+      role: chdir
+      cascading: true
+      schema: { type: existingdir, key: dir, from: [value, file] }
+    - name: work
+      identifiers: [-w, --workdir]
+      role: chdir
+      cascading: true
+      schema: { type: existingdir }
+  config_files:
+    - name: user
+      path: demo.yaml
+-- spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  env_prefix: TODO
+  config_files:
+    - name: dotenv
+      path: .env
+      format: dotenv
+      as: env
+    - name: user
+      path: todo.yaml
+    - name: xdg
+      discover: { strategy: xdg, app: todo, file: config.yaml }
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [--version]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: dir
+      summary: run as if started in this directory
+      identifiers: [-C, --dir]
+      role: chdir
+      cascading: true
+      schema: { type: existingdir }
+  commands:
+    - name: show
+      summary: show values
+      flags:
+        - name: region
+          identifiers: [--region]
+          schema: { type: string, default: none, key: region }
+        - name: file
+          identifiers: [--file]
+          schema: { type: existingfile, expand: [home, env] }
+        - name: note
+          identifiers: [--note]
+          schema: { type: string, expand: [env] }
+      env:
+        - name: greeting
+          schema: { type: string, variable: TODO_GREETING }
+      config:
+        - name: zone
+          schema: { type: string, default: none, key: zone }
+-- show.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoShowHandler)(nil)
+
+type todoShowHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoShowInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	s := in.TodoShow
+	fmt.Fprintf(rtx.Stdout, "region=%s\nfile=%s\nnote=%s\ngreeting=%s\nzone=%s\ndir=%s\n",
+		s.Flags.Region, s.Flags.File, s.Flags.Note, s.Env.Greeting, s.Config.Zone, rtx.Dir())
+}

@@ -1,9 +1,9 @@
 # R12 — what agents are offered, derived from the spec: which commands become tools (a hidden
-# group's children only with `agent: true`, a mounted child's commands included), which inputs
-# become parameters, the input schemas (enums of numbers as numbers, bounds, defaults exactly
-# as declared), the JSON flag added to calls, the MCP annotations from effects, the server's
-# environment, and the skill page naming only the preview, confirm and JSON flags and the
-# variables agents are offered.
+# group's children only with `agent: true`, a mounted child's commands included, a command with
+# sub-commands only when it declares arguments), which inputs become parameters, the input
+# schemas (enums of numbers as numbers, bounds, defaults exactly as declared), the JSON flag
+# added to calls, the MCP annotations from effects, the server's environment, and the skill
+# page naming only the preview, confirm and JSON flags and the variables agents are offered.
 
 gomodinit example.com/ops
 
@@ -16,7 +16,7 @@ stderr 'tools: "ops get" is left out of openai.json: it has a map or free-form o
 stderr 'command ops/wipe: is destructive but agents are offered none of its `role: dry-run` or `role: confirm` flags'
 ! stderr 'command ops/apply: is destructive'
 
-# Tools: leaf commands, the mounted child's, and the hidden ones that say `agent: true`.
+# Tools: commands that run, the mounted child's, and the hidden ones that say `agent: true`.
 grep '"name": "ops_get"' tools/mcp.json
 grep '"name": "ops_kid_ping"' tools/mcp.json
 grep '"path": \[\n\s+"kid",\n\s+"ping"\n\s+\]' tools/mcp.json
@@ -30,6 +30,23 @@ grep '"name": "ops_hush"' tools/mcp.json
 ! grep '"name": "ops_mcp"' tools/mcp.json
 ! grep '"name": "ops_login"' tools/mcp.json
 grep 'Requires OPS_TOKEN in the server''s environment' tools/mcp.json
+
+# A command with sub-commands that declares arguments runs, so it is a tool beside its
+# sub-commands, and is on the skill page and in llms.txt; `agent: false` still keeps one out,
+# and the root, with sub-commands and no arguments, only prints help.
+grep '"name": "ops_repo"' tools/mcp.json
+grep '"name": "ops_repo_list"' tools/mcp.json
+grep '"path": \[\n\s+"repo"\n\s+\],\n\s+"arguments": \[\n\s+\{\n\s+"name": "name"' tools/mcp.json
+grep '"name": "ops_repo"' tools/openai.json
+grep '"name": "ops_repo"' tools/gemini.json
+! grep '"name": "ops_team' tools/mcp.json
+! grep '"name": "ops",' tools/mcp.json
+grep '^- `ops repo`: show a repository \(read\)$' skills/ops/SKILL.md
+grep '^## `ops repo`$' skills/ops/SKILL.md
+exists skills/ops/references/ops-repo.md
+! grep 'ops team' skills/ops/SKILL.md
+grep '^- \[ops repo\]\(https://ops.example.com/ops-repo.md\): show a repository$' llms.txt
+! grep 'ops team' llms.txt
 
 # Parameters: the hidden, `agent: false` and `from:` flags, and hidden and deprecated enum
 # values, are left out; the JSON flag is added to every call.
@@ -83,11 +100,16 @@ grep '^- `OPS_TOKEN`: the API token \(sets `--token`\) \(required\) \(secret: se
 ! grep 'OPS_VERBOSE|OPS_SHY' skills/ops/SKILL.md
 grep 'Requires OPS_ENDPOINT, OPS_TOKEN in the server''s environment' tools/mcp.json
 ! grep '[-]-(preview|sure)' skills/ops/SKILL.md
-grep '^allowed-tools: "Bash\(ops get \*\) Bash\(ops stats \*\) Bash\(ops tally \*\) Bash\(ops hush \*\) Bash\(ops kid ping \*\)"$' skills/ops/SKILL.md
+grep '^allowed-tools: "Bash\(ops get \*\) Bash\(ops stats \*\) Bash\(ops tally \*\) Bash\(ops hush \*\) Bash\(ops repo list \*\) Bash\(ops kid ping \*\)"$' skills/ops/SKILL.md
 
-# Permissions: the destructive flag asks, and the hidden group gets no rule.
+# Permissions: the destructive flag asks, and the hidden group gets no rule. A command with
+# sub-commands gets none even when it is offered, since its rule would match them too.
 grep '"Bash\(ops apply \*--force\*\)"' agents/claude-settings.json
 ! grep 'internal' agents/claude-settings.json
+grep '"Bash\(ops repo list \*\)"' agents/claude-settings.json
+! grep '"Bash\(ops repo \*\)"' agents/claude-settings.json
+grep 'match = \["ops repo list"\]' agents/ops.rules
+! grep '^    match = \["ops repo"\]' agents/ops.rules
 
 # A second generate writes nothing.
 exec rotini generate --dry-run cmd/ops/.rotini.spec.yaml --config cmd/ops/.rotini.conf.yaml
@@ -301,6 +323,25 @@ command:
       hidden: true
       agent: true
       effects: {kind: read}
+    - name: repo
+      summary: show a repository
+      effects: {kind: read}
+      arguments:
+        - name: name
+          summary: the repository
+          schema: {type: string, required: true}
+      commands:
+        - name: list
+          summary: list repositories
+          effects: {kind: read}
+    - name: team
+      summary: show a team
+      agent: false
+      arguments:
+        - {name: name, schema: {type: string}}
+      commands:
+        - name: list
+          summary: list teams
     - $ref: ../kid/.rotini.spec.yaml
 -- cmd/ops/.rotini.conf.yaml --
 version: 0.0.0

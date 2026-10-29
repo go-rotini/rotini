@@ -1,0 +1,290 @@
+# R13 — the guide's "Help, completion and docs" section: man sections and install files, long
+# descriptions, stability markers and how they inherit, help topics under a renamed heading, and
+# the environment topic built from the spec.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# section: 8 puts every page, topics included, in section 8, and ManSection says so.
+exists share/man/man8/todo.8
+exists share/man/man8/todo-add.8
+exists share/man/man8/todo-filters.8
+! exists share/man/man8/todo-secret.8
+! exists share/man/man1
+grep '^\.TH "TODO\\-ADD" 8 "" "todo"' share/man/man8/todo-add.8
+exists share/completions/todo.bash
+exists share/completions/_todo
+exists share/completions/todo.fish
+exists share/completions/todo.ps1
+exists share/completions/todo.nu
+
+# ManPages and MarkdownPages list the topics after the commands, with Topic set.
+exec ./todo$exe pages
+cmp stdout want-pages.txt
+
+# A long description: man and markdown show it under the input, paragraphs apart; help keeps
+# the summary only; the contract uses it as the description.
+exec ./todo$exe add --help
+stdout '^  +--retries int +how often to retry'
+! stdout 'waiting twice'
+grep '^How many times a failed request is sent again, waiting twice as long each time\.$' share/man/man8/todo-add.8
+grep '^0 sends each request once\.$' share/man/man8/todo-add.8
+grep 'How many times a failed request is sent again' md-todo-add.md
+grep '"description": "How many times a failed request is sent again, waiting twice as long each time.\\n\\n0 sends each request once."' contract.json
+
+# Stability: help, man and markdown show the marker, and a command's own page says what it
+# promises. Everything under an experimental command is experimental.
+exec ./todo$exe --help
+stdout '^  add +add a task \(beta\)$'
+stdout '^  lab +try new things \(experimental\)$'
+exec ./todo$exe add --help
+stdout '^This command is in beta: it may change in a minor release\.$'
+exec ./todo$exe lab try --help
+stdout '^This command is experimental: it may change or be removed in any release\.$'
+grep '(beta)' share/man/man8/todo.8
+grep 'This command is in beta' md-todo-add.md
+grep '"stability": "beta"' contract.json
+
+# Topics are listed under the heading headings.topics names.
+exec ./todo$exe --help
+stdout '^Guides:$'
+! stdout '^Help Topics:$'
+stdout '^  filters +how filter expressions work$'
+exec ./todo$exe help filters
+stdout '^Several filters must all match\.$'
+
+# The environment topic lists every variable the program reads, each with its commands: env
+# inputs, flag fallbacks, variable_file names, the completion switches and the XDG variables.
+exec ./todo$exe help environment
+stdout 'TODO_TOKEN '
+stdout 'TODO_TOKEN_FILE'
+stdout 'TODO_LEVEL'
+stdout 'TODO_COMPLETION_MESSAGES'
+stdout 'TODO_COMPLETION_DESCRIPTIONS'
+stdout 'XDG_CONFIG_HOME'
+
+-- want-pages.txt --
+section 8
+man todo
+man todo-help
+man todo-pages
+man todo-add
+man todo-lab
+man todo-lab-try
+man todo-filters topic
+man todo-environment topic
+markdown todo
+markdown todo-help
+markdown todo-pages
+markdown todo-add
+markdown todo-lab
+markdown todo-lab-try
+markdown todo-filters topic
+markdown todo-environment topic
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  env_prefix: TODO
+  headings: {topics: 'Guides:'}
+  topics:
+    - name: filters
+      summary: how filter expressions work
+      body: |-
+        A filter is a word that narrows a list: todo list urgent.
+
+        Several filters must all match.
+    - name: environment
+      summary: the environment variables todo reads
+      generate: environment
+  config_files:
+    - name: user
+      discover: {strategy: xdg, app: todo, file: config.yaml}
+  env:
+    - name: token
+      summary: the API token
+      schema: {type: string, variable: TODO_TOKEN, variable_file: TODO_TOKEN_FILE}
+  flags:
+    - name: help
+      summary: show help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+    - name: level
+      summary: how loud
+      cascading: true
+      schema: {type: int, variable: TODO_LEVEL}
+  commands:
+    - name: help
+      summary: show help for a command or topic
+      arguments:
+        - name: command
+          summary: the command or topic
+          schema: {type: "[]string", complete: {kind: command}}
+    - name: pages
+      summary: list the pages
+    - name: secret
+      summary: an internal command
+      hidden: true
+    - name: add
+      summary: add a task
+      stability: beta
+      flags:
+        - name: retries
+          summary: how often to retry
+          description: |-
+            How many times a failed request is sent again, waiting twice as long each time.
+
+            0 sends each request once.
+          schema: { type: int, default: 3 }
+    - name: lab
+      summary: try new things
+      stability: experimental
+      flags:
+        - name: loud
+          summary: shout
+          schema: {type: bool}
+      commands:
+        - name: try
+          summary: try one thing
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: contract.json
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+  features:
+    - type: help
+      enabled: true
+    - type: markdown
+      enabled: true
+    - type: man
+      enabled: true
+      section: 8
+      install_dir: share
+    - type: completion
+      enabled: true
+      install_dir: share
+      messages: all
+      messages_env: TODO_COMPLETION_MESSAGES
+      descriptions_env: TODO_COMPLETION_DESCRIPTIONS
+-- internal/cmd/todo/todo_pages.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoPagesHandler)(nil)
+
+type todoPagesHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoPagesHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "section", ManSection)
+	print := func(kind string, pages []rotini.Page) {
+		for _, p := range pages {
+			if p.Topic {
+				fmt.Fprintln(rtx.Stdout, kind, p.Name, "topic")
+				continue
+			}
+			fmt.Fprintln(rtx.Stdout, kind, p.Name)
+		}
+	}
+	print("man", ManPages())
+	print("markdown", MarkdownPages())
+	for _, p := range MarkdownPages() {
+		if err := os.WriteFile("md-"+p.Name+".md", []byte(p.Content), 0o644); err != nil {
+			rtx.HaltWith(err)
+		}
+	}
+}
+-- internal/cmd/todo/todo.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoHandler)(nil)
+
+type todoHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Todo.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+	}
+}
+
+func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, rtx.Help())
+}
+-- internal/cmd/todo/todo_help.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoHelpHandler)(nil)
+
+type todoHelpHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoHelpInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	page, err := rtx.HelpFor(in.TodoHelp.Arguments.Command...)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, page)
+}

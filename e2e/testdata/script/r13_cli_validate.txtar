@@ -1,0 +1,145 @@
+# R13 — what the CLI reference says about `rotini validate`: --fail and the conf's
+# validate.fail, --release and validate.release_env, and --format json.
+
+# ── --fail collect is the default; fast stops at the first problem ──────────
+wantexit 1 rotini validate many.yaml
+stderr 'flag "x"'
+stderr 'flag "y"'
+wantexit 1 rotini validate many.yaml --fail fast
+stderr 'flag "x"'
+! stderr 'flag "y"'
+# The conf's validate.fail sets the default, and --fail overrides it.
+wantexit 1 rotini validate many.yaml --config fast.conf.yaml
+! stderr 'flag "y"'
+wantexit 1 rotini validate many.yaml --config fast.conf.yaml --fail collect
+stderr 'flag "y"'
+
+# ── --release fails for a planned removal at or below it ─────────────────────
+exec rotini validate rel.yaml --release 1.9.0
+wantexit 1 rotini validate rel.yaml --release 2.0.0
+stderr 'is planned for removal in 2\.0\.0; remove it before releasing 2\.0\.0$'
+# A prerelease counts as its release, so the check fails early.
+wantexit 1 rotini validate rel.yaml --release 2.0.0-rc.1
+stderr 'remove it before releasing 2\.0\.0-rc\.1$'
+wantexit 1 rotini validate rel.yaml --release 2.0
+stderr '^Error: --release "2\.0": want a release as X\.Y\.Z, such as 2\.0\.0$'
+# Without the flag, the variable validate.release_env names; unset, nothing is checked.
+exec rotini validate rel.yaml --config rel.conf.yaml
+env APP_RELEASE=2.0.0
+wantexit 1 rotini validate rel.yaml --config rel.conf.yaml
+stderr 'remove it before releasing 2\.0\.0$'
+exec rotini validate rel.yaml --config rel.conf.yaml --release 1.0.0
+env APP_RELEASE=next
+wantexit 1 rotini validate rel.yaml --config rel.conf.yaml
+stderr '^Error: \$APP_RELEASE \(validate\.release_env\) "next": want a release as X\.Y\.Z'
+env APP_RELEASE=
+
+# ── --format json: one object on stdout, the same exit code ──────────────────
+wantexit 1 rotini validate many.yaml --format json
+! stdout '^spec:'
+stdout '^  "problems": \[$'
+stdout '"severity": "error"'
+stdout '"document": "spec"'
+stdout '"file": "many\.yaml"'
+stdout '"line": 5'
+stdout '"col": 7'
+stdout '"pointer": "/command/flags/0"'
+stdout '"hint": '
+! stderr .
+# Warnings only: exit 0.
+exec rotini validate loud.yaml --config posix.conf.yaml --format json
+stdout '"severity": "warning"'
+! stderr .
+exec rotini validate rel.yaml --format json
+stdout '"problems": \[\]'
+wantexit 1 rotini validate rel.yaml --format json --watch
+stderr '--format json can''t be combined with --watch'
+
+# ── the skill's description limit is validate's, positioned, as well as generate's ──
+gomodinit example.com/skill
+wantexit 1 rotini validate skill.yaml --config skill-long.conf.yaml
+stderr '^Error: conf: skill-long\.conf\.yaml:8:20: generate\.features\.skill\.description: the skill''s description, the root''s summary followed by this `description`, is 1100 characters; the Agent Skills format allows 1024, so shorten it$'
+wantexit 1 rotini generate skill.yaml --config skill-long.conf.yaml
+stderr 'is 1100 characters; the Agent Skills format allows 1024'
+! exists skills/skill/SKILL.md
+wantexit 1 rotini validate nosummary.yaml --config skill-ok.conf.yaml
+stderr 'generate\.features\.skill\.description: the skill needs a description'
+exec rotini validate skill.yaml --config skill-ok.conf.yaml
+! stderr .
+exec rotini generate skill.yaml --config skill-ok.conf.yaml
+grep '^description: ' skills/skill/SKILL.md
+
+-- many.yaml --
+version: 0.0.0
+command:
+  name: many
+  flags:
+    - name: x
+      identifiers: [--x]
+      schema: { type: nosuchtype }
+    - name: y
+      identifiers: [--y]
+      schema: { type: nosuchtype }
+-- fast.conf.yaml --
+version: 0.0.0
+validate:
+  fail: fast
+-- rel.yaml --
+version: 0.0.0
+command:
+  name: rel
+  commands:
+    - name: old
+      summary: on its way out
+      deprecated: use new
+      removed_in: 2.0.0
+-- rel.conf.yaml --
+version: 0.0.0
+validate:
+  release_env: APP_RELEASE
+-- loud.yaml --
+version: 0.0.0
+command:
+  name: LoudApp
+-- posix.conf.yaml --
+version: 0.0.0
+validate:
+  posix_names: true
+-- skill.yaml --
+version: 0.0.0
+command:
+  name: skill
+  summary: manage demo records
+-- nosummary.yaml --
+version: 0.0.0
+command:
+  name: skill
+-- skill-ok.conf.yaml --
+version: 0.0.0
+generate:
+  features:
+    - type: markdown
+      enabled: true
+    - type: skill
+      enabled: true
+-- skill-long.conf.yaml --
+version: 0.0.0
+generate:
+  features:
+    - type: markdown
+      enabled: true
+    - type: skill
+      enabled: true
+      description: >-
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.

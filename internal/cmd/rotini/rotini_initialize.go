@@ -46,6 +46,7 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 			rtx.HaltWith(err)
 			return
 		}
+		printWarnings(rtx)(planned.Notices)
 		if _, err := fmt.Fprint(rtx.Stdout, seedLines(planned)); err != nil {
 			haltWithWriteError(rtx, err)
 			return
@@ -63,6 +64,8 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
+	// The notices are generate's: validation warnings, and each handler disabled or restored.
+	printWarnings(rtx)(written.Notices)
 	if _, err := fmt.Fprintf(rtx.Stdout, "%s%s\n", seedLines(written), written.Result); err != nil {
 		haltWithWriteError(rtx, err)
 		return

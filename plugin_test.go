@@ -217,6 +217,34 @@ func TestRun_pluginTimeout(t *testing.T) {
 	}
 }
 
+// A plugin binary that exists but cannot start is an internal *PluginError of kind spawn-failed,
+// declared or discovered, with the OS cause reachable and no Timeout.
+func TestRun_pluginStartFailedIsInternal(t *testing.T) {
+	writeFakeBinary(t, "acme-broken", "#!/no/such/interpreter\n")
+	def := Definition{
+		Name: "acme", Handler: "App",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"},
+		Plugins:         []PluginDef{{Name: "declared", Binary: "acme-broken"}},
+	}
+	for _, word := range []string{"declared", "broken"} {
+		p, _, _ := pluginProgram(def, []string{word})
+		code, err := p.Run(p.args)
+		var pe *PluginError
+		if !errors.As(err, &pe) || pe.Kind != PluginStartFailed {
+			t.Fatalf("%s: err = %v, want a spawn-failed *PluginError", word, err)
+		}
+		if CategoryOf(err) != CategoryInternal {
+			t.Errorf("%s: CategoryOf = %v, want internal", word, CategoryOf(err))
+		}
+		if pe.Cause == nil || !errors.Is(err, pe.Cause) || pe.Timeout != 0 {
+			t.Errorf("%s: Cause = %v, Timeout = %s; want a reachable cause and no timeout", word, pe.Cause, pe.Timeout)
+		}
+		if code != 1 {
+			t.Errorf("%s: exit = %d, want 1", word, code)
+		}
+	}
+}
+
 // TestPluginBinary pins that Command.PluginBinary resolves declared plugins, aliases and
 // discovered tokens through the same plugin path dispatch uses.
 func TestPluginBinary(t *testing.T) {

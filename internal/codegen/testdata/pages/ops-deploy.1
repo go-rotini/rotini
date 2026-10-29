@@ -2,7 +2,7 @@
 .SH NAME
 ops\-deploy \- ship a service
 .SH SYNOPSIS
-\fBops deploy\fR [flags] <service> [replicas]
+\fBops deploy\fR [flags] <service> [COUNT]
 .SH DESCRIPTION
 \&.ship is not reversible.
 .PP
@@ -20,7 +20,7 @@ Names are lowercase.
 .br
 2 to 63 characters; matches \(ga^[a\-z][a\-z0\-9\-]*$\(ga
 .TP
-\fI[replicas]\fR
+\fI[COUNT]\fR
 how many copies
 .br
 at least 1

@@ -1,0 +1,1 @@
+conf: .rotini.conf.yaml:14:20: generate.features.skill.description: the skill's description, the root's summary followed by this `description`, is 1100 characters; the Agent Skills format allows 1024, so shorten it

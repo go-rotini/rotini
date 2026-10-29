@@ -616,3 +616,44 @@ func TestImport_valueShapes(t *testing.T) {
 		t.Errorf("a second import wrote\n%s\nwant\n%s", again, spec)
 	}
 }
+
+// TestImportForce pins that an existing spec or conf alone stops an import, and that --force
+// replaces both; a dry run of an import that would write the same files plans no change.
+func TestImportForce(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/acme\n\ngo 1.26\n")
+	writeTestFile(t, dir, "cmd/acme/.rotini.conf.yaml", "old conf\n")
+	t.Chdir(dir)
+	fakeImporter(t)
+	p := NewProcessor("1.4.0")
+	if _, err := p.Import(context.Background(), ImportOptions{Package: "."}); err == nil || !strings.Contains(err.Error(), "cmd/acme/.rotini.conf.yaml already exists (use --force to overwrite)") {
+		t.Fatalf("err = %v, want the existing conf refused", err)
+	}
+	writeTestFile(t, dir, "cmd/acme/.rotini.spec.yaml", "old spec\n")
+	if _, err := p.Import(context.Background(), ImportOptions{Package: ".", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if spec := readTestFile(t, filepath.Join(dir, "cmd", "acme", ".rotini.spec.yaml")); !strings.Contains(spec, "name: acme") {
+		t.Errorf("spec =\n%s\nwant it replaced", spec)
+	}
+	if conf := readTestFile(t, filepath.Join(dir, "cmd", "acme", ".rotini.conf.yaml")); !strings.Contains(conf, "generate:") {
+		t.Errorf("conf =\n%s\nwant it replaced", conf)
+	}
+	planned, err := p.ImportDryRun(context.Background(), ImportOptions{Package: ".", Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(planned.Changes) != 0 {
+		t.Errorf("changes = %q, want none", planned.Changes)
+	}
+}
+
+// TestImportTestArgs_timeoutAndTags pins that --timeout bounds the import's go test and that
+// --tags reach it.
+func TestImportTestArgs_timeoutAndTags(t *testing.T) {
+	r := &importRun{modfile: "go.mod", opts: ImportOptions{Package: ".", Tags: "dev,e2e"}}
+	args := strings.Join(r.testArgs("overlay.json", "TestRotiniImport_1", 30*time.Second), " ")
+	if !strings.Contains(args, "-timeout 30s") || !strings.Contains(args, "-tags dev,e2e") {
+		t.Errorf("go test args = %q", args)
+	}
+}

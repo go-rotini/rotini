@@ -1,0 +1,172 @@
+# R13 — the guide's signals Rotini doesn't trap keep Go's behaviour: SIGHUP ends the process at
+# once with no teardown (129) unless WithSignals adds it, and a write to a closed pipe ends the
+# program quietly by SIGPIPE (141 in a shell).
+
+[!unix] skip 'SIGHUP and SIGPIPE are Unix signals'
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+exec go build -o pipe$exe ./cmd/pipe
+
+# Untrapped SIGHUP: killed by the signal, no teardown, nothing reported.
+exec ./pipe$exe hup ./todo$exe hup
+stdout '^killed by hangup$'
+! stdout teardown
+
+# WithSignals adds SIGHUP: the run stops, teardown runs, and it exits 128+1.
+env TODO_TRAP_HUP=1
+exec ./pipe$exe hup ./todo$exe hup
+stdout '^teardown$'
+stdout '^exit 129$'
+env TODO_TRAP_HUP=
+
+# A reader that goes away: the next write ends the program by SIGPIPE, with nothing on stderr.
+exec ./pipe$exe head ./todo$exe spew
+stdout '^line 0$'
+stdout '^killed by broken pipe$'
+stdout '^stderr ""$'
+
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  commands:
+    - name: hup
+      summary: waits to be stopped
+    - name: spew
+      summary: writes lines until it can't
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+-- cmd/todo/main.go --
+package main
+
+import (
+	"os"
+	"syscall"
+
+	cmd "example.com/todo/internal/cmd/todo"
+)
+
+func main() {
+	p := cmd.NewProgram()
+	if os.Getenv("TODO_TRAP_HUP") != "" {
+		p.WithSignals(os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	}
+	p.Execute()
+}
+-- cmd/pipe/main.go --
+// pipe runs a program and reports how it ended. "hup" sends it SIGHUP once it prints "ready";
+// "head" reads one line of its stdout and closes the pipe.
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"syscall"
+)
+
+func main() {
+	cmd := exec.Command(os.Args[2], os.Args[3:]...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		panic(err)
+	}
+	if err := cmd.Start(); err != nil {
+		panic(err)
+	}
+	lines := bufio.NewScanner(out)
+	lines.Scan()
+	switch os.Args[1] {
+	case "hup":
+		if lines.Text() != "ready" {
+			panic("not ready: " + lines.Text())
+		}
+		_ = cmd.Process.Signal(syscall.SIGHUP)
+		for lines.Scan() {
+			fmt.Println(lines.Text())
+		}
+	case "head":
+		fmt.Println(lines.Text())
+		out.Close()
+	}
+	err = cmd.Wait()
+	var ee *exec.ExitError
+	switch {
+	case errors.As(err, &ee) && ee.Sys().(syscall.WaitStatus).Signaled():
+		fmt.Println("killed by", ee.Sys().(syscall.WaitStatus).Signal())
+	case errors.As(err, &ee):
+		fmt.Println("exit", ee.ExitCode())
+	case err != nil:
+		panic(err)
+	default:
+		fmt.Println("exit 0")
+	}
+	fmt.Printf("stderr %q\n", stderr.String())
+}
+-- internal/cmd/todo/todo_hup.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoHupHandler)(nil)
+
+type todoHupHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoHupHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "ready")
+	select {
+	case <-ctx.Done():
+	case <-time.After(10 * time.Second):
+		fmt.Fprintln(rtx.Stdout, "not stopped")
+	}
+}
+
+func (*todoHupHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "teardown")
+}
+-- internal/cmd/todo/todo_spew.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoSpewHandler)(nil)
+
+type todoSpewHandler struct{ rotini.NoHooks }
+
+func (*todoSpewHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	for i := range 1000 {
+		fmt.Fprintf(rtx.Stdout, "line %d\n", i)
+		time.Sleep(10 * time.Millisecond)
+	}
+}

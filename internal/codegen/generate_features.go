@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"cmp"
 	"fmt"
 	"iter"
 	"os"
@@ -448,6 +449,7 @@ func argumentRow(a ArgumentInput, envPrefix string, readsConfig bool) templateDo
 	}
 	row := templateDocArgumentRow{
 		Name:        a.Name,
+		Placeholder: argPlaceholder(a),
 		Summary:     withStreamNote(a.Summary, a.Schema),
 		Description: a.Description,
 		Stability:   a.Stability,
@@ -880,10 +882,7 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 			if a.Hidden {
 				continue
 			}
-			name := a.Name
-			if a.Schema != nil && a.Schema.Placeholder != "" {
-				name = a.Schema.Placeholder
-			}
+			name := cmp.Or(argPlaceholder(a), a.Name)
 			if isVariadicSchema(a.Schema) {
 				name += "..."
 			}
@@ -902,6 +901,14 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 		}
 	}
 	return b.String()
+}
+
+// argPlaceholder returns the argument's declared placeholder, or "" when it declares none.
+func argPlaceholder(a ArgumentInput) string {
+	if a.Schema == nil {
+		return ""
+	}
+	return a.Schema.Placeholder
 }
 
 func isVariadicSchema(schema *InputSchema) bool {

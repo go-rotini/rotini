@@ -226,6 +226,8 @@ func NewContextFor(def Definition, argv []string) *Context {
 // command's Flags, Arguments and Commands are the [Definition]'s own slices, shared by every
 // run, and must be treated as read-only.
 func (rtx *Context) CommandChain() []Command {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
 	return slices.Clone(rtx.chain)
 }
 

@@ -6,7 +6,8 @@ package codegen
 //   - "mod://<module>@<version>/<path>", a spec inside a dependency module, read from the
 //     module cache and verified by go.sum.
 //
-// git:: and raw https:// refs are refused, since rotini neither fetches nor pins them.
+// Remote refs (https://, git::, any other URL scheme) are refused, since rotini neither
+// fetches nor pins them.
 
 import (
 	"encoding/json"
@@ -15,20 +16,41 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
-const (
-	modScheme   = "mod://"   // module-resolved ref / locator
-	gitScheme   = "git::"    // recognized only to be refused
-	httpsScheme = "https://" // recognized only to be refused
-)
+const modScheme = "mod://" // module-resolved ref / locator
 
-// isExternalLocator reports whether a locator names an unsupported external source (git:: or
-// a raw https:// URL), which loadRef refuses.
+// remoteLocatorRe matches a URL scheme (https://, ssh://) or a forced-getter prefix (git::).
+var remoteLocatorRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*(://|::)`)
+
+// isExternalLocator reports whether a locator names an unsupported remote source: anything
+// with a URL scheme or getter prefix other than mod://. loadRef refuses it.
 func isExternalLocator(locator string) bool {
-	return strings.HasPrefix(locator, gitScheme) || strings.HasPrefix(locator, httpsScheme)
+	return !strings.HasPrefix(locator, modScheme) && remoteLocatorRe.MatchString(locator)
 }
+
+// refLocatorError reports what is wrong with how a $ref is written, without I/O: a mod://
+// locator that doesn't parse, or a remote source. A relative path always passes.
+func refLocatorError(ref string) error {
+	switch {
+	case strings.HasPrefix(ref, modScheme):
+		_, _, _, err := parseModLocator(ref)
+		return err
+	case isExternalLocator(ref):
+		return fmt.Errorf("$ref %q is a remote source, which is not supported; use a relative path or mod://<module>@<version>/<path>", ref)
+	}
+	return nil
+}
+
+// refEntryError is a composition error about how a $ref entry in a local spec file is
+// written. That file's own validation reports it at the entry, so the composer's copy of it,
+// which has no position, is dropped.
+type refEntryError struct{ err error }
+
+func (e *refEntryError) Error() string { return e.err.Error() }
+func (e *refEntryError) Unwrap() error { return e.err }
 
 // moduleDirFunc resolves a Go module@version to its directory in the module cache. Tests
 // override it.
@@ -80,6 +102,13 @@ func loadRef(locator, consumingModule string) (resolvedRef, error) {
 		if err != nil {
 			return resolvedRef{}, err
 		}
+		build, err := goModBuildFunc()
+		if err != nil {
+			return resolvedRef{}, err
+		}
+		if err := build.check(module, version); err != nil {
+			return resolvedRef{}, err
+		}
 		cacheDir, err := moduleDirFunc(module, version)
 		if err != nil {
 			return resolvedRef{}, err
@@ -96,7 +125,7 @@ func loadRef(locator, consumingModule string) (resolvedRef, error) {
 			childBase: modLocator(module, version, path.Dir(sub)),
 		}, nil
 	case isExternalLocator(locator):
-		return resolvedRef{}, errors.New("external (git/raw) $ref composition is not supported; use a local path or a mod://<module> $ref")
+		return resolvedRef{}, refLocatorError(locator)
 	default:
 		spec, err := readSpec(locator)
 		if err != nil {
@@ -169,6 +198,12 @@ func goModDownloadDir(module, version string) (string, error) {
 		Error string `json:"Error"`
 	}
 	if jsonErr := json.Unmarshal(out, &res); jsonErr != nil {
+		// A module that fails verification against go.sum gets no JSON, only Go's stderr.
+		if ee, ok := errors.AsType[*exec.ExitError](runErr); ok {
+			if msg, _, _ := strings.Cut(strings.TrimSpace(string(ee.Stderr)), "\n"); msg != "" {
+				return "", fmt.Errorf("go mod download %s@%s: %s", module, version, msg)
+			}
+		}
 		if runErr != nil {
 			return "", fmt.Errorf("go mod download %s@%s: %w", module, version, runErr)
 		}
@@ -181,4 +216,104 @@ func goModDownloadDir(module, version string) (string, error) {
 		return "", fmt.Errorf("module %s@%s resolved to no directory", module, version)
 	}
 	return res.Dir, nil
+}
+
+// goModBuildFunc reads the main module's requirements and replacements. Tests override it.
+var goModBuildFunc = readGoModBuild
+
+// goModBuild is what the main module's go.mod says about the modules it builds.
+type goModBuild struct {
+	Require []struct {
+		Path    string `json:"Path"`
+		Version string `json:"Version"`
+	} `json:"Require"`
+	Replace []struct {
+		Old goModVersion `json:"Old"`
+		New goModVersion `json:"New"`
+	} `json:"Replace"`
+}
+
+type goModVersion struct {
+	Path    string `json:"Path"`
+	Version string `json:"Version,omitempty"`
+}
+
+// readGoModBuild parses the main module's go.mod (or vendor.mod) with `go mod edit -json`.
+func readGoModBuild() (*goModBuild, error) {
+	_, _, file, err := findModuleFile()
+	if err != nil {
+		return nil, err
+	}
+	out, err := exec.Command("go", "mod", "edit", "-json", file).Output()
+	if err != nil {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
+			if msg, _, _ := strings.Cut(strings.TrimSpace(string(ee.Stderr)), "\n"); msg != "" {
+				return nil, fmt.Errorf("read %s: %s", file, msg)
+			}
+		}
+		return nil, fmt.Errorf("read %s: %w", file, err)
+	}
+	var b goModBuild
+	if err := json.Unmarshal(out, &b); err != nil {
+		return nil, fmt.Errorf("read %s: %w", file, err)
+	}
+	return &b, nil
+}
+
+// builds returns what go.mod builds module from: the required version, or the replacement
+// that applies to it (one naming that version wins over one naming none, as in Go). required
+// is false when go.mod doesn't require the module, which Go then doesn't replace either.
+func (b *goModBuild) builds(module string) (built goModVersion, required bool) {
+	for _, r := range b.Require {
+		if r.Path == module {
+			built, required = goModVersion{Path: module, Version: r.Version}, true
+		}
+	}
+	if !required {
+		return built, false
+	}
+	var general *goModVersion
+	for i := range b.Replace {
+		old := b.Replace[i].Old
+		switch {
+		case old.Path != module:
+		case old.Version == built.Version:
+			return b.Replace[i].New, true
+		case old.Version == "":
+			general = &b.Replace[i].New
+		}
+	}
+	if general != nil {
+		return *general, true
+	}
+	return built, true
+}
+
+// modVersionError is a mod:// $ref naming another version of its module than go.mod builds.
+type modVersionError struct{ msg string }
+
+func (e *modVersionError) Error() string { return e.msg }
+
+// check refuses a mod:// $ref unless go.mod builds module at exactly version, so the spec
+// composed is the one released with the code that is compiled.
+func (b *goModBuild) check(module, version string) error {
+	built, required := b.builds(module)
+	var msg string
+	switch {
+	case !required:
+		msg = fmt.Sprintf("it names %s %s, but go.mod does not require %s; add it with go get %s@%s",
+			module, version, module, module, version)
+	case built.Version == "":
+		msg = fmt.Sprintf("it names %s %s, but go.mod replaces %s with the directory %s, which is what builds; remove the replace, or align the $ref or go.mod",
+			module, version, module, built.Path)
+	case built.Path != module:
+		msg = fmt.Sprintf("it names %s %s, but go.mod replaces %s with %s %s, which is what builds; remove the replace, or align the $ref or go.mod",
+			module, version, module, built.Path, built.Version)
+	case built.Version != version:
+		msg = fmt.Sprintf("it names %s %s, but go.mod builds %s at %s; align the $ref or go.mod",
+			module, version, module, built.Version)
+	default:
+		return nil
+	}
+	return &modVersionError{msg}
 }

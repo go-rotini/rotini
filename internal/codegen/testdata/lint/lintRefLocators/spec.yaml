@@ -1,0 +1,10 @@
+# How a $ref is written is checked without fetching anything: a mod:// locator needs a version,
+# and a remote source is not accepted.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - $ref: mod://example.com/db/.rotini.spec.yaml
+    - name: web
+      $ref: https://example.com/web/.rotini.spec.yaml
+    - $ref: git::https://example.com/repo.git//cli/.rotini.spec.yaml

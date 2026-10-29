@@ -47,7 +47,8 @@ type program struct {
 	// spec, and back in the build now that it has returned. Reported as notices.
 	restored []string
 
-	// skipPrune leaves orphaned files in place. `rotini init` sets it: init never deletes a file.
+	// skipPrune deletes no orphaned file, and only disables orphaned stubs. `rotini init` sets
+	// it: init never deletes a file, but leaves a package that builds.
 	skipPrune bool
 
 	// auditWarnings are auditHooks findings in user-owned handler files: a method that
@@ -345,18 +346,20 @@ func (p *program) staleProgramVar() error {
 }
 
 // prune deletes generated stubs and feature pages the spec and conf no longer produce, sparing
-// each package's `keep` paths.
+// each package's `keep` paths. With skipPrune it deletes nothing and only disables orphaned
+// stubs, so the package still builds.
 func (p *program) prune() error {
-	if p.skipPrune {
-		return nil
-	}
 	var mainKeep []string
 	if m := p.conf.Generate.mainPkg(); m != nil {
 		mainKeep = m.Keep
 	}
 	note := func(name string) { p.pruned = append(p.pruned, name) }
-	if err := pruneStubs(p, p.layout, p.conf.Generate.cmdTarget().Keep, note); err != nil {
+	remove := !p.skipPrune
+	if err := pruneStubs(p, p.layout, p.conf.Generate.cmdTarget().Keep, remove, note); err != nil {
 		return err
+	}
+	if !remove {
+		return pruneEntrypoint(p.plan, p.layout, mainKeep, false, note)
 	}
 	pageKeep := p.conf.Generate.cmdTarget().Keep
 	if err := pruneFeatureOutputs(p.plan, p.layout, pageKeep, slices.Concat(p.featureOutputs, p.disabledFeatureOutputs())); err != nil {
@@ -365,7 +368,7 @@ func (p *program) prune() error {
 	if err := pruneUnproducedPages(p.plan, p.layout, pageKeep, p.featureOutputs, p.prior.embedded); err != nil {
 		return err
 	}
-	return pruneEntrypoint(p.plan, p.layout, mainKeep, note)
+	return pruneEntrypoint(p.plan, p.layout, mainKeep, true, note)
 }
 
 // resolveFeatures resolves the enabled doc/completion features into the blocks embedded

@@ -252,7 +252,9 @@ func (p *program) agentProgram() (*agentProgram, error) {
 		}
 		passthrough := c.Passthrough || slices.ContainsFunc(c.Arguments, func(in agentInput) bool { return in.Passthrough })
 		optIn := c.Agent != nil && *c.Agent
-		ac.offered = !underOff && (optIn || (!c.Hidden && c.Deprecated == "" && ac.leaf && !passthrough))
+		// A command with sub-commands and no arguments only prints help.
+		runnable := ac.leaf || len(c.Arguments) > 0
+		ac.offered = !underOff && (optIn || (!c.Hidden && c.Deprecated == "" && runnable && !passthrough))
 		ac.readFlags()
 		a.commands = append(a.commands, ac)
 	}

@@ -1,0 +1,73 @@
+# R13 — what the CLI reference says about `rotini generate`: how it finds and names the files
+# it reads, the files it reports as created, the warnings it shares with validate, and the flags
+# that can't be combined.
+gomodinit example.com/app
+
+# ── with no conf beside the spec, the defaults apply and are named ──────────
+mkdir plain
+cp app.yaml plain/.rotini.spec.yaml
+exec rotini generate plain/.rotini.spec.yaml
+stdout '^spec: plain[/\\]\.rotini\.spec\.yaml$'
+stdout '^conf: none \(defaults\)$'
+exists internal/cmd/app/zz_rotini.go
+
+# ── a --config path that doesn't exist is an error ──────────────────────────
+wantexit 1 rotini generate plain/.rotini.spec.yaml --config nope.yaml
+stderr '^Error: conf nope\.yaml: file does not exist$'
+
+# ── created: lines name each file that is the author's from then on ─────────
+mkdir app
+cp app.yaml app/.rotini.spec.yaml
+cp app.conf.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+stdout '^created: internal[/\\]cmd[/\\]web[/\\]templates[/\\]help\.txt\.tmpl$'
+stdout '^created: internal[/\\]cmd[/\\]web[/\\]app\.go$'
+stdout '^created: app[/\\]main\.go$'
+! stdout 'zz_rotini\.go'
+# Files rewritten on every run are never listed; nothing new, nothing created.
+exec rotini generate app/.rotini.spec.yaml
+! stdout 'created:'
+
+# ── the same warnings as validate ───────────────────────────────────────────
+mkdir loud
+cp loud.yaml loud/.rotini.spec.yaml
+cp loud.conf.yaml loud/.rotini.conf.yaml
+exec rotini validate loud/.rotini.spec.yaml
+stderr '^Warning: .*POSIX utility names'
+exec rotini generate loud/.rotini.spec.yaml
+stderr '^Warning: .*POSIX utility names'
+
+# ── --dry-run and --watch can't be used together ────────────────────────────
+wantexit 1 rotini generate app/.rotini.spec.yaml --dry-run --watch
+stderr '^Error: --dry-run and --watch can''t be used together$'
+
+-- app.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: an app
+-- app.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: app/main.go
+    - type: cmd
+      file: internal/cmd/web/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+      template: true
+-- loud.yaml --
+version: 0.0.0
+command:
+  name: LoudApp
+  summary: a name that isn't a POSIX utility name
+-- loud.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/loud/zz_rotini.go
+validate:
+  posix_names: true

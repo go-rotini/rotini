@@ -949,6 +949,12 @@ func TestDiff_stdinOutputExitRules(t *testing.T) {
 			want: []string{"breaking INPUT_PROPERTY_REQUIRED_ADDED definitions.In.a"},
 		},
 		{
+			name: "stdin field inside a list",
+			old:  sub("      stdin: {format: json, schema: {type: object, properties: {items: {type: array, items: {type: string}}}}}\n"),
+			new:  sub("      stdin: {format: json, schema: {type: object, properties: {items: {type: array, items: {type: integer}}}}}\n"),
+			want: []string{"breaking INPUT_TYPE_CHANGED app run stdin.items[]"},
+		},
+		{
 			name: "output removed", old: schemas + out("        $ref: \"#/schemas/Task\"\n"), new: schemas + sub(""),
 			want: []string{"breaking OUTPUT_NO_DELETE app run output"},
 		},

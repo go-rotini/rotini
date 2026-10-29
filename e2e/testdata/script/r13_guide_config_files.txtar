@@ -1,0 +1,113 @@
+# R13 — the guide's config schemas and example files: a schema never carries a secret's default
+# and allows keys rotini ignores; an example leaves a secret blank, comments with // and ///
+# in JSONC, holds only defaulted keys in JSON, points YAML and TOML at their schemas, and is
+# never removed when its file leaves the spec.
+
+gomodinit example.com/todo
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+
+# The schema: a secret's default is left out, other keys are allowed, the file's own schema: is
+# included.
+grep '"default": "5m"' schemas/config/todo.app.config.json
+! grep 's3cr3t-default' schemas/config/todo.app.config.json
+! grep 'additionalProperties' schemas/config/todo.app.config.json
+grep '"required": \[' schemas/config/todo.app.config.json
+
+# The examples: a secret's value blank, editors pointed at the schema, JSONC notes and keys.
+cmp examples/config/app.example.yaml want-app.yaml
+grep '^#:schema \.\./\.\./schemas/config/todo\.tuning\.config\.json$' examples/config/tuning.example.toml
+grep '^///  the color theme \(string; default dark\)$' examples/config/editor.example.jsonc
+grep '^//   "theme": "dark"$' examples/config/editor.example.jsonc
+# JSON has no comments: only the keys with a default, set.
+cmp examples/config/plain.example.json want-plain.json
+
+# A file that leaves the spec keeps its example; its schema goes.
+cp no-plain.spec.yaml .rotini.spec.yaml
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+exists examples/config/plain.example.json
+! exists schemas/config/todo.plain.config.json
+
+-- want-app.yaml --
+# yaml-language-server: $schema=../../schemas/config/todo.app.config.json
+## app: ./todo.yaml, read by todo and its sub-commands.
+## Each line starting with "# " is a key: remove the "# " to set it.
+
+# deploy:
+##   how long a deploy may take (duration; default 5m)
+#   timeout: 5m
+##   the API token (string; secret)
+#   token: ""
+-- want-plain.json --
+{
+  "level": "info"
+}
+-- no-plain.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  config_files:
+    - name: app
+      path: ./todo.yaml
+  commands:
+    - name: deploy
+      flags:
+        - name: timeout
+          summary: how long a deploy may take
+          identifiers: [--timeout]
+          schema: { type: duration, key: deploy.timeout, default: 5m }
+
+-- .rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  config_files:
+    - name: app
+      path: ./todo.yaml
+      schema: { type: object, required: [deploy] }
+    - name: tuning
+      path: ./tuning.toml
+    - name: editor
+      path: ./editor.jsonc
+    - name: plain
+      path: ./plain.json
+  commands:
+    - name: deploy
+      flags:
+        - name: timeout
+          summary: how long a deploy may take
+          identifiers: [--timeout]
+          schema: { type: duration, key: deploy.timeout, default: 5m }
+        - name: token
+          summary: the API token
+          identifiers: [--token]
+          schema: { type: string, key: deploy.token, default: s3cr3t-default, secret: true, from: [file] }
+      config:
+        - name: workers
+          summary: worker threads
+          schema: { type: int, key: pool.workers, file: tuning, default: 4 }
+        - name: theme
+          summary: the color theme
+          schema: { type: string, key: theme, file: editor, default: dark }
+        - name: level
+          summary: the log level
+          schema: { type: string, key: level, file: plain, default: info }
+        - name: owner
+          summary: who owns it
+          schema: { type: string, key: owner, file: plain }
+-- .rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_rotini.go
+      package: todo
+  schemas:
+    config:
+      dir: schemas/config
+  features:
+    - type: config_example
+      enabled: true
+    - type: env_example
+      enabled: true

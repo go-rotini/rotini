@@ -42,6 +42,32 @@ func TestDependencyCanonical_integers(t *testing.T) {
 
 // A bound, length, pattern, group or dependency violation and a missing required input say
 // which command (and, where there is one, which flag) they concern.
+// ParseKind's labels are stable: each kind has its own, and an unknown value reads as the zero
+// kind's. ParseKindInternal alone unwraps to ErrInternal.
+func TestParseKind_labels(t *testing.T) {
+	want := map[ParseKind]string{
+		ParseKindUnspecified: "unspecified", ParseKindUnknownFlag: "unknown-flag",
+		ParseKindUnknownCommand: "unknown-command", ParseKindNeedsValue: "needs-value",
+		ParseKindInvalidValue: "invalid-value", ParseKindEnumViolation: "enum-violation",
+		ParseKindConstraintViolation: "constraint-violation", ParseKindMissingRequired: "missing-required",
+		ParseKindNoArguments: "no-arguments", ParseKindTooManyArguments: "too-many-arguments",
+		ParseKindInternal: "internal", ParseKindMisplacedFlag: "misplaced-flag",
+		ParseKind(99): "unspecified",
+	}
+	for k, label := range want {
+		if k.String() != label {
+			t.Errorf("%d.String() = %q, want %q", int(k), k.String(), label)
+		}
+		cat := CategoryOf(&ParseError{Kind: k})
+		if (k == ParseKindInternal) != (cat == CategoryInternal) || cat == CategoryNone {
+			t.Errorf("kind %s is category %v", k, cat)
+		}
+	}
+	if PluginErrorKind(99).String() != "unknown" {
+		t.Errorf("an unknown PluginErrorKind = %q", PluginErrorKind(99).String())
+	}
+}
+
 func TestParseError_flagAndCommand(t *testing.T) {
 	maxN, maxLen := 5.0, 3
 	def := Definition{Name: "app", Flags: []FlagDef{

@@ -1,0 +1,86 @@
+# R13 — the guide's shipping recipes: the CI template's rotini steps pass on a freshly initialized
+# project and fail on a stale one, and a git subcommand's man page is named after its root.
+
+gomodinit github.com/me/todo
+exec rotini init todo
+exec go mod tidy
+
+# ── the CI template's checks, as the guide writes them ─────────────────────────
+# ci.yaml.txt is the guide's block; these are its rotini steps, run below.
+grep '^      - run: go tool rotini validate \./cmd/todo/\.rotini\.spec\.yaml --config \./cmd/todo/\.rotini\.conf\.yaml$' ci.yaml.txt
+grep '^      - run: go tool rotini fmt --check \./cmd/todo/\.rotini\.spec\.yaml \./cmd/todo/\.rotini\.conf\.yaml$' ci.yaml.txt
+grep '^      - run: go tool rotini generate --dry-run \./cmd/todo/\.rotini\.spec\.yaml$' ci.yaml.txt
+exec rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+exec rotini fmt --check ./cmd/todo/.rotini.spec.yaml ./cmd/todo/.rotini.conf.yaml
+! stderr .
+exec rotini generate --dry-run ./cmd/todo/.rotini.spec.yaml
+! stderr .
+exec go vet ./...
+
+# A spec change the generated code doesn't have yet fails the dry run with 2.
+cp spec-with-add.yaml cmd/todo/.rotini.spec.yaml
+wantexit 2 rotini generate --dry-run ./cmd/todo/.rotini.spec.yaml
+stderr '^dry run: \d+ changes? not written$'
+
+# ── a git subcommand: the root's man page is git-hello.1 ───────────────────────
+mkdir hello
+cd hello
+gomodinit example.com/git-hello
+exec rotini generate cmd/git-hello/.rotini.spec.yaml --config cmd/git-hello/.rotini.conf.yaml
+exists share/man/man1/git-hello.1
+exists share/man/man1/git-hello-greet.1
+grep 'git hello' share/man/man1/git-hello.1
+
+-- ci.yaml.txt --
+name: ci
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # rotini diff reads the last release tag
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go tool rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+      - run: go tool rotini fmt --check ./cmd/todo/.rotini.spec.yaml ./cmd/todo/.rotini.conf.yaml
+      - run: go tool rotini generate --dry-run ./cmd/todo/.rotini.spec.yaml
+      - run: go vet ./...
+      - run: go test -race ./...
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+      - run: go tool rotini diff "git:$(git describe --tags --abbrev=0)" --spec ./cmd/todo/.rotini.spec.yaml
+-- spec-with-add.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a small task CLI
+  commands:
+    - name: add
+      summary: add a task
+-- hello/cmd/git-hello/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: git-hello
+  display_name: git hello
+  summary: say hello from a git subcommand
+  commands:
+    - name: greet
+      summary: print a greeting
+-- hello/cmd/git-hello/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/git-hello/main.go
+    - type: cmd
+      file: internal/cmd/git-hello/zz_git_hello.go
+      package: githello
+  features:
+    - type: man
+      enabled: true
+      install_dir: share

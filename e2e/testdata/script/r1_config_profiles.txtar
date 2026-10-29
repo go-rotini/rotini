@@ -42,6 +42,16 @@ exec ./app$exe __complete --profile ''
 stdout '^default$'
 stdout '^prod$'
 
+# A file that doesn't exist yet, or can't be read, offers nothing and no error.
+rm app.yaml
+exec ./app$exe __complete --profile ''
+! stdout .
+! stderr .
+mkdir app.yaml
+exec ./app$exe __complete --profile ''
+! stdout .
+! stderr .
+
 -- complete.go.txt --
 package app
 

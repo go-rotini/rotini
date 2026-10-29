@@ -11,7 +11,7 @@ This command is in beta: it may change in a minor release.
 ## Usage
 
 ```
-ops deploy [flags] <service> [replicas]
+ops deploy [flags] <service> [COUNT]
 ```
 
 ## Arguments
@@ -22,7 +22,7 @@ ops deploy [flags] <service> [replicas]
 
   Names are lowercase.
 
-- `[replicas]` — how many copies; at least 1
+- `[COUNT]` — how many copies; at least 1
 
 ## Flags
 

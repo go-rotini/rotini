@@ -49,7 +49,7 @@ type templateProgramData struct {
 	BaseURL          string // llms: where the markdown pages are published, "" for none
 
 	Commands []templateProgramCommand // the commands offered to agents, root first
-	Optional []templateProgramCommand // llms: the other visible commands (groups, deprecated, passthrough)
+	Optional []templateProgramCommand // llms: the other visible commands (help-only groups, deprecated, passthrough)
 	Env      []templateProgramInput   // environment variables the offered commands read
 	Config   []templateProgramInput   // config values the offered commands read
 	JSON     bool                     // some command has a machine-output flag
@@ -206,15 +206,12 @@ func renderSkill(p *program, f *Feature, a *agentProgram, tmpl *template.Templat
 		return ""
 	})
 	d.SkillName = name
-	d.SkillDescription = sentence(p.rootHelp.Summary)
-	if f.Description != "" {
-		d.SkillDescription = strings.TrimSpace(d.SkillDescription + " " + f.Description)
-	}
+	d.SkillDescription = skillDescription(p.rootHelp.Summary, f.Description)
 	switch n := len([]rune(d.SkillDescription)); {
 	case n == 0:
 		return nil, nil, errors.New("the skill needs a description: give the root command a summary, or set the feature's `description`")
-	case n > 1024:
-		return nil, nil, fmt.Errorf("the skill's description (the root's summary and the feature's `description`) is %d characters; the Agent Skills format allows 1024", n)
+	case n > skillDescriptionLimit:
+		return nil, nil, fmt.Errorf("the skill's description (the root's summary and the feature's `description`) is %d characters; the Agent Skills format allows %d", n, skillDescriptionLimit)
 	}
 	d.AllowedTools = allowedTools(a)
 	page, err := renderProgramPage(tmpl, d)
@@ -310,6 +307,19 @@ func renderLLMS(p *program, f *Feature, a *agentProgram, tmpl *template.Template
 		return nil, nil, err
 	}
 	return map[string][]byte{"": page}, nil, nil
+}
+
+// skillDescriptionLimit is the most characters SKILL.md's `description` may hold.
+const skillDescriptionLimit = 1024
+
+// skillDescription is SKILL.md's `description`: the root's summary as a sentence, then the skill
+// feature's own description.
+func skillDescription(summary, description string) string {
+	d := sentence(summary)
+	if description != "" {
+		d = strings.TrimSpace(d + " " + description)
+	}
+	return d
 }
 
 // sentence ends s with a full stop unless it ends a sentence already; "" stays "".

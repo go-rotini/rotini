@@ -20,7 +20,7 @@ func TestPruneGoDir_twoSteps(t *testing.T) {
 	var notes []string
 	prune := func() {
 		t.Helper()
-		if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, func(n string) { notes = append(notes, n) }); err != nil {
+		if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, true, func(n string) { notes = append(notes, n) }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -42,6 +42,30 @@ func TestPruneGoDir_twoSteps(t *testing.T) {
 		t.Error("the disabled stub survived the second prune")
 	}
 	if want := []string{"demo_ship.go (disabled; removed by the next generate)", "demo_ship.go"}; !slices.Equal(notes, want) {
+		t.Errorf("notes = %q, want %q", notes, want)
+	}
+}
+
+// TestPruneGoDir_disableOnly pins init's half of the cycle: a live orphan is disabled, and one
+// already disabled is left in place, unreported.
+func TestPruneGoDir_disableOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "demo_ship.go", orphanStub)
+	writeTestFile(t, dir, "demo_old.go", string(disableStub([]byte(orphanStub))))
+	var notes []string
+	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, false, func(n string) { notes = append(notes, n) }); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"demo_ship.go", "demo_old.go"} {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !stubDisabled(body) {
+			t.Errorf("%s =\n%s\nwant it disabled", name, body)
+		}
+	}
+	if want := []string{"demo_ship.go (disabled; removed by the next generate)"}; !slices.Equal(notes, want) {
 		t.Errorf("notes = %q, want %q", notes, want)
 	}
 }
@@ -84,7 +108,7 @@ func TestPruneGoDir_legacyMarker(t *testing.T) {
 	dir := t.TempDir()
 	legacy := strings.Replace(orphanStub, stubMarker, legacyStubMarker, 1)
 	writeTestFile(t, dir, "demo_ship.go", legacy)
-	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, nil); err != nil {
+	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, "demo_ship.go"))
@@ -112,7 +136,7 @@ func TestPruneGoDir_leavesClaimedFilesAlone(t *testing.T) {
 	for name, body := range files {
 		writeTestFile(t, dir, name, body)
 	}
-	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{"kept.go": true, "current.go": true}, nil); err != nil {
+	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{"kept.go": true, "current.go": true}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range files {

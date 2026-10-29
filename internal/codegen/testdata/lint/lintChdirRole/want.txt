@@ -1,6 +1,13 @@
+spec: .rotini.spec.yaml:16:7: command demo: flag "workdir": sets `short_circuit` but its type is string; a short-circuit flag is a bool switch
+spec: .rotini.spec.yaml:16:7: command demo: flag "workdir": sets `short_circuit` and reads an environment variable or config key (`key` / `variable`); only the command line sets a short-circuit flag, or every run with that value set would be short-circuited
+spec: .rotini.spec.yaml:19:13: command demo: flag "workdir": has role chdir, which flag "dir" already has; a command gives each role to one flag
 spec: .rotini.spec.yaml:8:13: command demo: flag "dir": has role chdir but is not cascading; set `cascading: true`, so every command accepts it and documents it
 spec: .rotini.spec.yaml:8:13: command demo: flag "dir": has role chdir but is named by flag group 0; the directory flag is read before any rule is checked, so leave it out of flag groups and dependencies
 spec: .rotini.spec.yaml:10:15: command demo: flag "dir": has role chdir, so its type must be existingdir or string, one directory
 spec: .rotini.spec.yaml:11:18: command demo: flag "dir": has role chdir and sets `default`; the directory comes from the command line only
 spec: .rotini.spec.yaml:12:19: command demo: flag "dir": has role chdir and sets `variable`; the directory comes from the command line only
-spec: .rotini.spec.yaml:23:17: command demo/run: flag "work": has role chdir but is not on the root command; the run's directory is set once, before any command is chosen, so declare it on the root with `cascading: true`
+spec: .rotini.spec.yaml:18:22: command demo: flag "workdir": has role chdir and is short_circuit; a directory flag doesn't replace the command's run
+spec: .rotini.spec.yaml:24:21: command demo: flag "workdir": has role chdir and is repeatable; the last directory given wins, so leave `repeatable` unset
+spec: .rotini.spec.yaml:22:14: command demo: flag "workdir": has role chdir and sets `key`; the directory comes from the command line only
+spec: .rotini.spec.yaml:23:15: command demo: flag "workdir": has role chdir and sets `from`; the directory comes from the command line only
+spec: .rotini.spec.yaml:32:17: command demo/run: flag "work": has role chdir but is not on the root command; the run's directory is set once, before any command is chosen, so declare it on the root with `cascading: true`

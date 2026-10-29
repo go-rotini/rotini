@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -210,6 +211,37 @@ func TestContext_RecordSuccess_api(t *testing.T) {
 	}
 	if rtx.copyErrors() != nil || rtx.copyWarnings() != nil {
 		t.Error("RecordSuccess leaked into Errors()/Warnings()")
+	}
+}
+
+// TestContext_RecordInfo_api: infos keep their order, an empty one is ignored, and neither
+// counts as a failure.
+func TestContext_RecordInfo_api(t *testing.T) {
+	rtx := NewContextFor(testDef(), nil)
+	rtx.RecordInfo("one")
+	rtx.RecordInfo("")
+	rtx.RecordInfo("two")
+	if got := rtx.copyInfos(); !slices.Equal(got, []string{"one", "two"}) {
+		t.Errorf("Infos = %q, want [one two] with empty skipped", got)
+	}
+	if rtx.Failed() {
+		t.Error("an info marked the run failed")
+	}
+}
+
+// TestContext_helpPageThatFailsIsEmpty: Help reports "" when the pages have none for the
+// command, while HelpFor and InvokedHelp hand back the pages' error.
+func TestContext_helpPageThatFailsIsEmpty(t *testing.T) {
+	missing := errors.New("no such page")
+	rtx := NewContextFor(testDef(), nil).WithHelp(func(...string) (string, error) { return "", missing })
+	if got := rtx.Help(); got != "" {
+		t.Errorf("Help() = %q, want empty", got)
+	}
+	if _, err := rtx.HelpFor("nope"); !errors.Is(err, missing) {
+		t.Errorf("HelpFor = %v, want the pages' error", err)
+	}
+	if _, err := rtx.InvokedHelp(); !errors.Is(err, missing) {
+		t.Errorf("InvokedHelp = %v, want the pages' error", err)
 	}
 }
 
@@ -782,6 +814,39 @@ func TestHaltWith_inTheReporterDoesNotReenter(t *testing.T) {
 	}
 }
 
+// In the reporter, HaltWithCode and HaltWith change nothing, and Command, CommandPath and
+// Usage describe the invoked command.
+func TestReporterStage_stopsAreInertAndCommandIsTheInvokedOne(t *testing.T) {
+	h := fgProg{
+		cascading: func(rtx *Context) { rtx.SetContext(context.WithValue(rtx.Context(), fgKey{}, "derived")) },
+		onRun:     func(rtx *Context) { rtx.RecordError(errors.New("original")) },
+	}
+	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "run", Handler: "AppRun", Usage: "app run"}}}
+	var seen []string
+	var errs int
+	p := NewProgram(def, h).WithExit(func(int) {}).WithReporter(func(ctx context.Context, rtx *Context, out Outcome) {
+		rtx.HaltWithCode(9)
+		rtx.HaltWith(errors.New("while reporting"))
+		seen = append(seen, rtx.Command().Name, rtx.CommandPath(), rtx.Usage())
+		if ctx.Value(fgKey{}) != nil || rtx.Context().Value(fgKey{}) != nil {
+			seen = append(seen, "a hook's derived context reached the reporter")
+		}
+		errs = len(out.Errors)
+	})
+	code, _ := p.Run([]string{"run"})
+	if code != 0 {
+		t.Errorf("code = %d, want 0: HaltWithCode is a no-op inside the reporter", code)
+	}
+	if want := []string{"run", "app run", "app run"}; !slices.Equal(seen, want) {
+		t.Errorf("reporter saw %q, want %q", seen, want)
+	}
+	if errs != 1 {
+		t.Errorf("reporter got %d errors, want only the original", errs)
+	}
+}
+
+type fgKey struct{}
+
 // ── Command from goroutines ─────────────────────────────────────────────────.
 //
 // A goroutine the hook waits for sees its spawner's command; one that outlives the hook sees
@@ -1074,3 +1139,23 @@ func (rootOnlyRun) PreRun(context.Context, *Context)           {}
 func (rootOnlyRun) PostRun(context.Context, *Context)          {}
 func (rootOnlyRun) CascadingPostRun(context.Context, *Context) {}
 func (h rootOnlyRun) Run(_ context.Context, rtx *Context)      { h.capture(rtx) }
+
+// A Context is safe for the goroutines a hook starts, so one goroutine may read the chain while
+// another changes the run's environment or directory (run with -race).
+func TestCommandChain_concurrentWithEnviron(t *testing.T) {
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "run", Handler: "Run"}}}, []string{"run"})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 100 {
+			rtx.WithEnviron([]string{"A=1"}).WithDir(t.TempDir())
+		}
+	})
+	wg.Go(func() {
+		for range 100 {
+			if chain := rtx.CommandChain(); len(chain) != 2 {
+				t.Errorf("chain = %d commands, want 2", len(chain))
+			}
+		}
+	})
+	wg.Wait()
+}

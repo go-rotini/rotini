@@ -308,7 +308,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 		srcs = append(srcs, files...)
 		r, err := newRegistry(fs, recon.WithoutWatch(), recon.WithSources(srcs...))
 		if err != nil {
-			return internalBind(channelFlag, "", "could not build the flag-fallback registry", err)
+			return registryError(channelFlag, "", "the flag-fallback registry", srcs, err)
 		}
 		defer r.Close()
 		reg = fallbackLookup{reg: r}
@@ -904,9 +904,70 @@ func (b *InputReader) configRegistry(files []ConfigFile, boot fileBootstrap, key
 	}
 	reg, err := newRegistry(view.clockRef().features(), recon.WithoutWatch(), recon.WithSources(srcs...))
 	if err != nil {
-		return nil, nil, internalBind(channelConfig, "", "could not build the configuration registry", err)
+		return nil, nil, registryError(channelConfig, "", "the configuration registry", srcs, err)
 	}
 	return reg, paths, nil
+}
+
+// registryError is the error for a registry over srcs that could not be built, what naming the
+// registry and input the input it was built for. Sources whose names collide are named, and
+// so is what each one is; a configuration registry's error then names the colliding source as
+// its input.
+func registryError(channel, input, what string, srcs []recon.Source, err error) *InputError {
+	msg := "could not build " + what
+	if errors.Is(err, recon.ErrSourceConflict) {
+		if name, first, second := sourceConflict(srcs); first != nil {
+			switch d := sourceDesc(first); {
+			case second == nil:
+				msg += fmt.Sprintf(": %s is named %q, which is reserved", d, name)
+			case sourceDesc(second) == d:
+				msg += fmt.Sprintf(": two sources are named %q, each %s", name, d)
+			default:
+				msg += fmt.Sprintf(": %s and %s are both named %q", d, sourceDesc(second), name)
+			}
+			if input == "" && channel == channelConfig {
+				input = name
+			}
+		}
+	}
+	return internalBind(channel, input, msg, err)
+}
+
+// sourceConflict finds the first source in srcs whose name a registry refuses: one recon
+// reserves (second is nil), or one an earlier source already has (first is that source).
+func sourceConflict(srcs []recon.Source) (name string, first, second recon.Source) {
+	seen := map[string]recon.Source{}
+	for _, s := range srcs {
+		n := s.Name()
+		if n == "explicit" || n == "default" {
+			return n, s, nil
+		}
+		if prev, ok := seen[n]; ok {
+			return n, prev, s
+		}
+		seen[n] = s
+	}
+	return "", nil, nil
+}
+
+// sourceDesc says what a registry source is, in the user's terms.
+func sourceDesc(s recon.Source) string {
+	if sp, ok := s.(spellings); ok {
+		s = sp.Source
+	}
+	if ns, ok := s.(namedSource); ok {
+		if ns.path != "" {
+			return "configuration file " + ns.path
+		}
+		return fmt.Sprintf("configuration file %q", ns.name)
+	}
+	switch s.Name() {
+	case "flags":
+		return "the command-line source"
+	case osEnvSourceName:
+		return "the environment source"
+	}
+	return "a custom source"
 }
 
 // cfgRegs is the config channel's registries for one bind: the merged precedence chain plus
@@ -1001,12 +1062,36 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		}
 		reg, err := newRegistry(c.view.clockRef().features(), recon.WithoutWatch(), recon.WithSources(srcs...))
 		if err != nil {
-			return nil, internalBind(channelConfig, name, fmt.Sprintf("could not build the registry for configuration file %q", name), err)
+			return nil, registryError(channelConfig, name, fmt.Sprintf("the registry for configuration file %q", name), srcs, err)
 		}
 		c.perFile[name] = reg
 		return reg, nil
 	}
 	return nil, internalBind(channelConfig, name, fmt.Sprintf("input pinned to unknown configuration file %q", name), nil)
+}
+
+// filePath names the config_files entry name as the user knows it: the file it was read from,
+// else its declared path or, for a search that found nowhere to look, the file name it
+// searches for.
+func (c *cfgRegs) filePath(name string) string {
+	if p := c.paths[name]; p != "" {
+		return p
+	}
+	for source, p := range c.paths {
+		if strings.HasPrefix(source, name+"#") {
+			return p // a profiled file: every profile's source reads the one file
+		}
+	}
+	for _, f := range c.files {
+		if f.Name != name {
+			continue
+		}
+		if f.Discover != nil {
+			return f.Discover.File
+		}
+		return f.Path
+	}
+	return name
 }
 
 // labels names this channel's inputs and files for messages.
@@ -1235,7 +1320,9 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 		}
 		tmp := reflect.New(reflect.StructOf(fields))
 		if err := bindConfigWaived(reg, tmp.Interface(), regs.waived); err != nil {
-			return regs.labels().bindStruct(channelConfig, err, reg, tmp.Elem())
+			labels := regs.labels()
+			labels.pinned = regs.filePath(file)
+			return labels.bindStruct(channelConfig, err, reg, tmp.Elem())
 		}
 		for i, j := range idxs {
 			cs.Field(j).Set(tmp.Elem().Field(i))

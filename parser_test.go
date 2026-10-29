@@ -1867,13 +1867,67 @@ func TestParseError_internalKind(t *testing.T) {
 	}
 }
 
+// Every misuse of Parse's arguments is an internal *ParseError, never a panic.
+func TestParse_misuseIsInternal(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App"}
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+		}
+	}
+	cases := map[string]func() error{
+		"nil parser":      func() error { return (*Parser)(nil).Parse(NewContextFor(def, nil), &inputs{}) },
+		"nil context":     func() error { return NewParser().Parse(nil, &inputs{}) },
+		"nil out":         func() error { return NewParser().Parse(NewContextFor(def, nil), nil) },
+		"typed nil out":   func() error { return NewParser().Parse(NewContextFor(def, nil), (*inputs)(nil)) },
+		"non-pointer out": func() error { return NewParser().Parse(NewContextFor(def, nil), inputs{}) },
+	}
+	for name, parse := range cases {
+		var err error
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s: panicked: %v", name, r)
+				}
+			}()
+			err = parse()
+		}()
+		pe, ok := errors.AsType[*ParseError](err)
+		if !ok || pe.Kind != ParseKindInternal || CategoryOf(err) != CategoryInternal {
+			t.Errorf("%s: err = %v, want an internal *ParseError", name, err)
+		}
+	}
+}
+
 // TestParseKind_String pins the stable labels (and the zero-value default).
 func TestParseKind_String(t *testing.T) {
-	if got := ParseKindUnspecified.String(); got != "unspecified" {
-		t.Errorf("ParseKindUnspecified = %q, want unspecified", got)
+	want := map[ParseKind]string{
+		ParseKindUnspecified:         "unspecified",
+		ParseKindUnknownFlag:         "unknown-flag",
+		ParseKindUnknownCommand:      "unknown-command",
+		ParseKindNeedsValue:          "needs-value",
+		ParseKindInvalidValue:        "invalid-value",
+		ParseKindEnumViolation:       "enum-violation",
+		ParseKindConstraintViolation: "constraint-violation",
+		ParseKindMissingRequired:     "missing-required",
+		ParseKindNoArguments:         "no-arguments",
+		ParseKindTooManyArguments:    "too-many-arguments",
+		ParseKindInternal:            "internal",
+		ParseKindMisplacedFlag:       "misplaced-flag",
 	}
-	if got := ParseKindEnumViolation.String(); got != "enum-violation" {
-		t.Errorf("ParseKindEnumViolation = %q, want enum-violation", got)
+	for kind, label := range want {
+		if got := kind.String(); got != label {
+			t.Errorf("ParseKind(%d) = %q, want %q", int(kind), got, label)
+		}
+		// Every kind is the user's to fix except ParseKindInternal.
+		wantCat := CategoryUsage
+		if kind == ParseKindInternal {
+			wantCat = CategoryInternal
+		}
+		if got := CategoryOf(&ParseError{Kind: kind}); got != wantCat {
+			t.Errorf("CategoryOf(%s) = %v, want %v", kind, got, wantCat)
+		}
 	}
 }
 

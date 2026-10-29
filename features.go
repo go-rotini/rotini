@@ -20,7 +20,7 @@ import (
 //
 //   - program — [Plugins], [ResponseFiles], [Chdir], [Multicall]
 //   - input channels — [Stdin], [Env], [ConfigFiles], [Profiles], [EnvFiles],
-//     [Fallbacks], [PathExpansion], [ObjectFlags], [Schemas]
+//     [Fallbacks], [PathExpansion], [UserHomes], [ObjectFlags], [Schemas]
 //   - document formats — [JSON], [YAML], [TOML], [JSONC], [Dotenv]
 //   - validation — [Bounds], [UniqueItems], [Patterns], [FlagGroups], [FlagDependencies],
 //     [StreamPaths]

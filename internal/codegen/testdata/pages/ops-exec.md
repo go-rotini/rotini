@@ -5,14 +5,14 @@ run a command
 ## Usage
 
 ```
-ops exec <argv...>
+ops exec <WORD...>
 ```
 
 Every word after `exec` is passed through as written, so flags go before `exec`.
 
 ## Arguments
 
-- `<argv...>` — the command and its arguments
+- `<WORD...>` — the command and its arguments
 
 ## Global Flags
 

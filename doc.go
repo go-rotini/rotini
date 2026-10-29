@@ -201,7 +201,8 @@
 // stdout carries only what handlers write, then applies the exit floor: a recorded error or
 // fault exits 1 unless a handler already set a non-zero code. It leaves out an error the run's
 // own signal trap caused, since that run exits 128+n anyway. A custom reporter receives every
-// record and owns the exit code entirely.
+// record and applies no floor: the run exits with the code a handler set, or with the one the
+// reporter sets with [Context.Exit], which replaces it.
 //
 // Every failure class is errors.Is-able against the [ErrUsage] or [ErrInternal] sentinel, so
 // [CategoryOf] classifies it (except a plugin timeout, which is [CategoryNone]), and

@@ -1,8 +1,8 @@
 # R2 — what a generated help page shows from the spec alone: the usage line with flags first,
 # group headings with their descriptions in the declared order, long-only flags lined up with
-# the long column, declared constraints, the stdin a command reads, the note on a passthrough
-# command that its flags go before its name, the `[--]` before a passthrough argument, and enum
-# values listed with their summaries.
+# the long column, declared constraints, argument placeholders, the stdin a command reads, the
+# note on a passthrough command that its flags go before its name, the `[--]` before a
+# passthrough argument, and enum values listed with their summaries.
 
 gomodinit example.com/ops
 
@@ -16,7 +16,8 @@ exec ./ops$exe --help
 stdout '^  ops \[flags\] <command>$'
 cmp stdout root.txt
 
-# Each constraint is a short note on its row; a long-only flag lines up with the long forms.
+# Each constraint is a short note on its row; a long-only flag lines up with the long forms; an
+# argument's placeholder names it on the usage line and in its row.
 exec ./ops$exe deploy --help
 cmp stdout deploy.txt
 
@@ -66,10 +67,11 @@ Output:
 ship a service
 
 Usage:
-  ops deploy [flags] <service>
+  ops deploy [flags] <service> [COUNT]
 
 Arguments:
   <service>    the service to ship (length 2..63)
+  [COUNT]      how many copies (>= 1)
 
 Flags:
   -p, --port int        listen port (default 8080) (1..65535)
@@ -142,6 +144,9 @@ command:
         - name: service
           summary: the service to ship
           schema: {type: string, required: true, minLength: 2, maxLength: 63}
+        - name: replicas
+          summary: how many copies
+          schema: {type: int, minimum: 1, placeholder: COUNT}
       flags:
         - name: port
           summary: listen port

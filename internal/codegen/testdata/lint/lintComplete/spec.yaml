@@ -12,6 +12,14 @@ command:
         type: bool
         complete:
           kind: file
+    # Nor does a count flag.
+    - name: verbose
+      identifiers:
+        - --verbose
+      schema:
+        type: count
+        complete:
+          kind: file
     # extensions narrow FILES; with kind directory they mean nothing.
     - name: out
       identifiers:

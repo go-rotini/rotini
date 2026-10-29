@@ -1,0 +1,144 @@
+# R13 — the guide's "The files and the loop" section: the files `rotini init` writes, the
+# flags and commands its spec declares, the CI checks the guide lists, and the mistyped-key
+# report it shows, matched whole.
+
+gomodinit github.com/me/todo
+exec rotini init todo
+exec go mod tidy
+
+# The guide's table of files.
+exists cmd/todo/.rotini.spec.yaml
+exists cmd/todo/.rotini.conf.yaml
+exists cmd/todo/.rotini-schema.spec.json
+exists cmd/todo/.rotini-schema.conf.json
+exists cmd/todo/main.go
+exists internal/cmd/todo/zz_rotini.go
+exists internal/cmd/todo/todo.go
+exists internal/cmd/todo/todo_help.go
+exists internal/cmd/todo/todo_version.go
+
+# The seed declares --help, a long-only --version (so -v stays free), and help and version
+# commands; both flags cascade, so a sub-command's help lists them.
+grep '^      identifiers: \[--version\]$' cmd/todo/.rotini.spec.yaml
+exec go build -o todo$exe ./cmd/todo
+wantexit 1 ./todo$exe -v
+stderr '^Error: unknown flag "-v"$'
+exec ./todo$exe version
+stdout '^todo 0\.0\.0$'
+exec ./todo$exe help version
+stdout 'Print the todo version\.'
+exec ./todo$exe version --help
+stdout '^Global Flags:$'
+stdout '^  -h, --help +print help$'
+stdout '^      --version +print version$'
+
+# The guide's CI checks pass on what init wrote; validate and generate find the conf beside
+# the spec when --config is left out.
+exec rotini validate ./cmd/todo/.rotini.spec.yaml
+! stderr .
+exec rotini fmt --check ./cmd/todo/.rotini.spec.yaml ./cmd/todo/.rotini.conf.yaml
+! stderr .
+exec rotini generate --dry-run ./cmd/todo/.rotini.spec.yaml
+! stderr .
+
+# A mistyped key, reported at its file:line:col, by validate and by generate.
+cp typo.yaml cmd/todo/.rotini.spec.yaml
+wantexit 1 rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+cp stdout validate.stdout
+cp stderr validate.stderr
+concat got.txt validate.cmd validate.stdout validate.stderr
+cmp got.txt mistyped.txt
+wantexit 1 rotini generate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+cmp stderr validate.stderr
+
+# Examples that run the program are parsed against the spec. Prose is skipped, each command of
+# a pipeline is checked, and a $ word, a glob or a <placeholder> stands for any value.
+cp examples.yaml cmd/todo/.rotini.spec.yaml
+wantexit 1 rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+cmp stderr stale.txt
+
+-- stale.txt --
+Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst" does not parse: unknown command "lst" for "todo"
+-- examples.yaml --
+$schema: ./.rotini-schema.spec.json
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  description: A task list.
+  examples:
+    - Run todo with a command.
+    - todo help <command> | less && todo help "$TOPIC"
+    - todo help *.md; todo --help
+    - echo x | todo help version
+    - todo lst
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+-- validate.cmd --
+$ go tool rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+-- mistyped.txt --
+$ go tool rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+spec: ./cmd/todo/.rotini.spec.yaml
+conf: ./cmd/todo/.rotini.conf.yaml
+Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sumary: unknown key "sumary" on a flag input
+-- typo.yaml --
+$schema: ./.rotini-schema.spec.json
+version: 0.0.0
+command:
+  name: todo
+  summary: what todo does, in one line (replace this)
+  description: Describe todo here; this paragraph opens todo --help.
+  footer: Use the help command for more information about a command.
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: add
+      summary: add a task
+      aliases: [a]
+      arguments:
+        - name: title
+          summary: the task title
+          schema: { type: string, required: true, minLength: 1 }
+      flags:
+        - name: priority
+          sumary: how urgent
+          identifiers: [-p, --priority]
+          schema: { type: string, default: normal, enum: [low, normal, high] }
+        - name: tag
+          summary: a label
+          identifiers: [--tag]
+          schema: { type: '[]string' }
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+      description: Print the todo version.

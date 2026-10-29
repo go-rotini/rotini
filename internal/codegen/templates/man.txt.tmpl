@@ -33,7 +33,7 @@
          .ReplacedBy .Note}, nil when no value declares more than its spelling (.Enum always
          holds the values alone, hidden ones left out); listed .Enum .EnumValues leaves out the
          deprecated ones too. An argument row carries .Passthrough when it and every word after it are
-         passed on as typed. An output carries .Stream when the command writes a stream of
+         passed on as typed, and .Placeholder, its declared display name ("" for none). An output carries .Stream when the command writes a stream of
          .Type, one item at a time. An exit status row carries .Name (its snake_case name, or
          "") and .Retryable. Command, argument, flag, env and config rows carry
          .DeprecatedSince and .RemovedIn; deprecation .Deprecated .DeprecatedSince .RemovedIn
@@ -111,7 +111,7 @@ A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\f
 {{end}}{{end}}
 {{with .Arguments}}.SH ARGUMENTS
 {{range .}}.TP
-\fI{{if .Required}}<{{roff .Name}}{{if .Variadic}}...{{end}}>{{else}}[{{roff .Name}}{{if .Variadic}}...{{end}}]{{end}}\fR
+\fI{{if .Required}}<{{roff (or .Placeholder .Name)}}{{if .Variadic}}...{{end}}>{{else}}[{{roff (or .Placeholder .Name)}}{{if .Variadic}}...{{end}}]{{end}}\fR
 {{roff .Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
 {{template "description" .}}{{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}

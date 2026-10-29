@@ -3,6 +3,8 @@ package rotini
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"runtime/debug"
@@ -172,6 +174,40 @@ func TestCLI_importCobraDryRunAndFailure(t *testing.T) {
 	}
 	if got := errb.String(); !strings.HasPrefix(got, "[info] acme: a note\n") || !strings.Contains(got, "Error: spec is broken") {
 		t.Errorf("stderr = %q, want the note, then the error", got)
+	}
+}
+
+// An import in a module that doesn't require the runtime yet warns, naming the go get, and
+// still succeeds; a dry run that would change nothing exits 0 with the timing line.
+func TestCLI_importWarnsWithoutRuntime(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/acme\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	imported := codegen.ImportFn(func(context.Context, codegen.ImportOptions) (codegen.Imported, error) {
+		return codegen.Imported{Spec: "s", Conf: "c", Result: "done"}, nil
+	})
+
+	p, out, errb := newTestCLI(t)
+	p.WithDependency(importDep, imported)
+	if code, _ := p.Run([]string{"import", "urfave", "."}); code != 0 {
+		t.Fatalf("exit = %d, stderr %q", code, errb.String())
+	}
+	if out.String() != "spec: s\nconf: c\ndone\n" {
+		t.Errorf("stdout = %q", out.String())
+	}
+	if want := "Warning: go.mod does not require github.com/go-rotini/rotini yet; run `go get github.com/go-rotini/rotini` before building the imported CLI"; !strings.Contains(errb.String(), want) {
+		t.Errorf("stderr = %q, want %q", errb.String(), want)
+	}
+
+	p, out, errb = newTestCLI(t)
+	p.WithDependency(importDryRunDep, imported)
+	if code, _ := p.Run([]string{"import", "kong", ".", "--dry-run"}); code != 0 {
+		t.Fatalf("dry run exit = %d, stderr %q", code, errb.String())
+	}
+	if out.String() != "spec: s\nconf: c\ndone\n" || errb.Len() != 0 {
+		t.Errorf("dry run: stdout %q, stderr %q", out.String(), errb.String())
 	}
 }
 

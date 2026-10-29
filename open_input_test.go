@@ -28,6 +28,43 @@ func TestOpenInput_dashIsStdinByteForByte(t *testing.T) {
 	}
 }
 
+// Closing a "-" leaves the run's stdin open, and a second "-" reads on where the first stopped.
+func TestOpenInput_dashSharesOneStdinAndLeavesItOpen(t *testing.T) {
+	t.Parallel()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	go func() {
+		_, _ = pw.WriteString("one\ntwo\n")
+		pw.Close()
+	}()
+	rtx := newContext().WithStdin(pr)
+	first, err := OpenInput(rtx, "-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := make([]byte, 4)
+	if _, err := io.ReadFull(first, head); err != nil || string(head) != "one\n" {
+		t.Fatalf("first read %q, %v", head, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := OpenInput(rtx, "-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rest, err := io.ReadAll(second)
+	if err != nil || string(rest) != "two\n" {
+		t.Errorf("second read %q, %v; want the rest of the one stream", rest, err)
+	}
+	if _, err := pr.Stat(); err != nil {
+		t.Errorf("closing a \"-\" closed stdin: %v", err)
+	}
+}
+
 func TestOpenInput_interleavesFilesAndStdin(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

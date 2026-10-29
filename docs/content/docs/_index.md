@@ -132,7 +132,7 @@ that runs the program is checked. A word with `$`, a backtick or a glob, and a `
 stands for any value. Words after a composed command or a plugin aren't checked.
 
 {{< code title="a stale example" language="text" open="true" collapsible="false" copy="false" >}}
-Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst --all" does not parse: unknown command "lst" for "todo"
+Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst" does not parse: unknown command "lst" for "todo"
 {{< /code >}}
 
 ### Importing a Cobra CLI
@@ -328,7 +328,12 @@ $ ./todo add
 Error: missing required input: <title>
 $ ./todo add "buy milk" --loud
 Error: unknown flag "--loud"
+$ ./todo ad "buy milk" --loud
+Error: unknown command "ad" for "todo"
 {{< /code >}}
+
+A mistyped command is reported before any flag after it, because those flags were checked
+against the wrong command. A flag before the mistyped word is checked first.
 
 ### Where flags stop
 
@@ -1421,8 +1426,8 @@ func exitCode(out rotini.Outcome) int {
 {{< /code >}}
 
 - **Check `ctx.Err()` first.** After Ctrl-C or SIGTERM the run has already set 128+n (130 or
-  143), and the canceled context's error is in `out.Errors`; without the check, the reporter
-  would replace that code. The same goes for a cancellation with
+  143), and `out.Errors` holds the cancellation's error when a handler stopped with it; without
+  the check, the reporter would replace that code. The same goes for a cancellation with
   [`ExitCause`](#signals-and-cancellation).
 - **A reporter can't read the code a handler set.** `rtx.Exit` replaces any code from
   `rtx.HaltWithCode`, so map only the errors you mean to, or carry a handler's code in an error
@@ -1604,10 +1609,11 @@ The kinds are `ParseKindUnknownFlag`, `ParseKindUnknownCommand`, `ParseKindNeeds
 `ParseKindInvalidValue`, `ParseKindEnumViolation`, `ParseKindConstraintViolation`,
 `ParseKindMissingRequired`, `ParseKindNoArguments`, `ParseKindTooManyArguments`,
 `ParseKindMisplacedFlag` and `ParseKindInternal`. `ParseKindMisplacedFlag` is a flag typed
-where it can't apply: before a plugin's name, where the plugin would never see it
-(`todo --verbose sync` is refused; `todo sync --verbose` passes `--verbose` to the plugin). A
-short-circuit flag such as `--help` and a [directory flag](#a-directory-flag) are the exceptions:
-the program answers or applies them itself. This error reaches the reporter, not a handler.
+where it can't apply: a `local` flag given to a command below its own, or a flag before a
+plugin's name, where the plugin would never see it (`todo --verbose sync` is refused;
+`todo sync --verbose` passes `--verbose` to the plugin). Before a plugin's name, a short-circuit
+flag such as `--help` and a [directory flag](#a-directory-flag) are the exceptions: the program
+answers or applies them itself, and the error reaches the reporter, not a handler.
 
 Each response is one call:
 
@@ -1788,7 +1794,7 @@ Every hook receives the run's `context.Context`. A hook that derives one, to add
 tracing span, hands it to the hooks after it with `rtx.SetContext`, so a root `--timeout` can
 limit the command's `Run`:
 
-{{< code title="todo.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo.go (timeout)" language="golang" open="true" collapsible="false" copy="true" >}}
 type todoHandler struct {
 	rotini.NoPreRun
 	rotini.NoPostRun
@@ -2146,7 +2152,7 @@ command:
 
 When the flag is set, pass `shape.Render` to `WriteOutput` or `WriteOutputItem` as the renderer:
 
-{{< code title="todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_list.go (template)" language="go" open="true" collapsible="false" copy="true" >}}
 list := TodoListOutput{Tasks: load()}
 if format := in.Todo.Flags.Format; !format.IsZero() {
 	rtx.HaltWith(rtx.WriteOutput(list, "template", shape.Render[TodoListOutput](format)))
@@ -2222,7 +2228,7 @@ output field and the flag follows. Only the item's own fields are listed, not ne
 chose. Fields are named by their JSON names, the names `-o json` shows. Sort first, since the
 sort field need not be selected:
 
-{{< code title="todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_list.go (fields)" language="go" open="true" collapsible="false" copy="true" >}}
 list := TodoListOutput{Tasks: load()}
 flags := in.TodoList.Flags
 if flags.SortBy != "" {
@@ -2318,15 +2324,15 @@ The reporter runs after the command, and the run may have failed because parsing
 rule reads the command line itself rather than validated inputs. For a program that declares a
 `--json` flag:
 
-{{< code title="main.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go (structured errors)" language="go" open="true" collapsible="false" copy="true" >}}
 cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 	return slices.Contains(rtx.Argv, "--json")
 })).Execute()
 {{< /code >}}
 
 ```console
-$ todo list --json --bogus
-{"schema_version":1,"error":{"candidates":["--json","--all"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
+$ todo list --bogus --json id
+{"schema_version":1,"error":{"candidates":["--json","--sort-by","--reverse","-h","--help","--version","-o","--output","--format"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
 ```
 
 Exit codes are decided exactly as the default reporter decides them. Each line's shape is
@@ -2346,8 +2352,8 @@ token nor candidates.
 ### What gets generated
 
 - **An OUTPUT section** in help, man and markdown pages: the shape's description, its type, and
-  its top-level fields with their types and descriptions. An exit status that writes output
-  says so. Its help heading is `headings.output`.
+  its top-level fields with their types and descriptions. In man and markdown, an exit status
+  that writes output says so under EXIT STATUS. Its help heading is `headings.output`.
 - **A STDIN section** in help, man and markdown pages for a command that declares `stdin:`: the
   format, whether it is required, and for a document its type, description and top-level
   fields. Its help heading is `headings.stdin`.
@@ -2706,10 +2712,12 @@ agents are offered.
 ### Keeping things from agents
 
 Some commands and inputs are left out of everything below by default: hidden and deprecated
-ones; a command with sub-commands (it prints help) or a passthrough command (it would run
-whatever it is given); and inputs that are secret (a value an agent types lands in the model's
-context), read `from:` a file or stdin (an agent could read the host's files), short-circuit
-(`--help`), or the [directory flag](#a-directory-flag). `agent: true` brings one back;
+ones; a command with sub-commands and no arguments (it only prints help) or a passthrough
+command (it would run whatever it is given); and inputs that are secret (a value an agent types
+lands in the model's context), read `from:` a file or stdin (an agent could read the host's
+files), short-circuit (`--help`), or the [directory flag](#a-directory-flag). A command with
+sub-commands that declares arguments runs like any other, so it is offered. `agent: true`
+brings one back;
 `agent: false` keeps a command, with its sub-commands, or an input out while it stays in help.
 On env and config inputs, which are never tool parameters, `agent` only decides whether the
 skill page lists them. The machine-output flag is never a parameter either: tool exports add it
@@ -2804,8 +2812,9 @@ generate:
 
 `claude-settings.json` is a fragment to merge into Claude Code's `.claude/settings.json`,
 `<name>.rules` holds Codex prefix rules, and `<name>-policy.toml` is a Gemini CLI policy. Rules
-name leaf commands and all their aliases, never the root or a group, since harnesses match the
-start of the command text and a rule for `todo remote` would also allow every command under it.
+name leaf commands and all their aliases, never the root or a command with sub-commands (even one
+offered as a tool), since harnesses match the start of the command text and a rule for
+`todo remote` would also allow every command under it.
 That also means a flag written before the command defeats a rule; it fails safe, since the
 harness then asks. A flag that makes a command destructive gets its own ask rule where the
 harness can match it. Gemini CLI treats `ask_user` as deny when it runs non-interactively.
@@ -3137,7 +3146,7 @@ expands it. It runs as the command that declares the flag, and `rtx` gives it:
   `Extensions` for files; the zero value leaves it to the shell's own default. It combines with
   candidates the way `complete:` does.
 
-{{< code title="todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_done.go (partial inputs)" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
 	in, _, _ := rtx.PartialInputs[TodoDoneInputs]()
 	ctx, cancel := context.WithTimeout(rtx.Context(), 2*time.Second)
@@ -3664,7 +3673,7 @@ it is a `*rotini.PluginError` of kind `PluginStartFailed`.
 Build a fresh `Program` per test and run it with arguments, in-process: no subprocess and no
 `os.Exit`. `Run` returns the exit code and the error the run recorded:
 
-{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go (in-process)" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAdd(t *testing.T) {
 	var out bytes.Buffer
 	code, err := NewProgram().WithStdout(&out).Run([]string{"add", "buy milk"})
@@ -3697,7 +3706,7 @@ Keep two things in mind:
   directory walk-up discovery, relative config paths and `@file` values start from. A test that
   sets both doesn't touch the process, so it can run in parallel:
 
-{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go (environ)" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAddDefaultPriority(t *testing.T) {
 	t.Parallel()
 	code, err := NewProgram().
@@ -3720,7 +3729,7 @@ The `rotinitest` package (`github.com/go-rotini/rotini/rotinitest`) runs a comma
 inputs type `rotini generate` wrote for it, so a test sets fields instead of spelling out
 arguments:
 
-{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go (typed inputs)" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAddHigh(t *testing.T) {
 	t.Parallel()
 	var in TodoAddInputs
@@ -3812,8 +3821,8 @@ generate:
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0 # git:<ref> reads the tag locally and never fetches
-- run: go tool rotini generate --dry-run
-- run: go tool rotini diff "git:$(git describe --tags --abbrev=0)"
+- run: go tool rotini generate --dry-run ./cmd/todo/.rotini.spec.yaml
+- run: go tool rotini diff "git:$(git describe --tags --abbrev=0)" --spec ./cmd/todo/.rotini.spec.yaml
 {{< /code >}}
 
 Compare against the last release tag rather than the main branch: an intended break you
@@ -3829,8 +3838,8 @@ contract built from your current spec and conf.
 The exit status is 0 when nothing is at or above `--fail-on`, 2 when something is, and 1 on an
 error. `--fail-on possibly` also fails on possibly breaking changes; `--fail-on never` only
 reports. `--format json` writes one document: `findings` (each with `severity`, `rule`,
-`where`, `message`, `note` and, when acknowledged, `accepted`), `unmatched_accepts` and
-`summary`.
+`where`, `message`, a `note` when there is one and, when acknowledged, `accepted`),
+`unmatched_accepts` and `summary`.
 
 Commit a baseline contract written by rotini 1.4 or later. An older contract records fewer facts,
 so the new one is compared only on what the old one states; it can still show a few false
@@ -3978,7 +3987,7 @@ or on what the old contract planned.
 | `CONFIG_ADDED`, `CONFIG_REQUIRED_REMOVED` | a config key added, or no longer required | safe |
 | `INPUT_TYPE_CHANGED`, `INPUT_TYPE_WIDENED`, `INPUT_TYPE_NOW_DESCRIBED` | an input's type narrowed or changed (`int` → `int8`, `[]int` → `int`), widened, or newly stated where it was open | breaking (possibly breaking for a 64-bit integer → `float64`, which rounds beyond 2^53), safe, safe |
 | `INPUT_KIND_CHANGED`, `INPUT_SEPARATOR_CHANGED` | how the value is supplied or split | breaking |
-| `INPUT_FROM_NO_DELETE`, `INPUT_FROM_ADDED` | where a typed value may come from (`@file`, `-`) | breaking, possibly breaking |
+| `INPUT_FROM_NO_DELETE`, `INPUT_FROM_ADDED` | where a typed value may come from (`@file`, `-`) | breaking, possibly breaking (safe for a secret now accepted on the command line) |
 | `INPUT_IMPLICIT_VALUE_ADDED`, `INPUT_IMPLICIT_VALUE_REMOVED`, `INPUT_IMPLICIT_VALUE_CHANGED` | an optional value | breaking, breaking, possibly breaking |
 | `INPUT_IGNORE_CASE_REMOVED`, `INPUT_IGNORE_CASE_ADDED` | enum case matching | breaking, safe |
 | `INPUT_LAYOUT_NO_DELETE`, `INPUT_LAYOUT_ADDED`, `INPUT_LAYOUT_FIRST_CHANGED` | time layouts | breaking, safe, possibly breaking |
@@ -4035,9 +4044,18 @@ A mounted child reads the environment variables it reads on its own, named under
 `env_prefix` (or none), whatever the parent declares, and the parent's help, man and markdown
 pages and contract list those names.
 
-A `mod://` child stays at the version `go.sum` pins, so upgrading rotini doesn't move it. Upgrade
-the child's module on its own, then regenerate; its own `version:` check reports it if it needs
-a newer rotini than you have. A local `$ref` is rebuilt whenever you regenerate the parent.
+A `mod://` child is read at the version its `$ref` names, so upgrading rotini doesn't move it.
+That must be the version `go.mod` builds the module at, since the child's code is compiled at that
+one: `rotini validate` and `generate` refuse a `$ref` naming another version, a module `go.mod`
+doesn't require, and a module a `replace` points at a directory or another module, at the `$ref`.
+A `replace` to the same module at another version counts as that version. To upgrade the child,
+`go get` the new version, change the `$ref` to match, then regenerate; its own `version:` check
+reports it if it needs a newer rotini than you have. A local `$ref` is rebuilt whenever you
+regenerate the parent.
+
+How a `$ref` is written is checked even outside a Go module: a `mod://` locator must parse, and
+remote sources such as `https://` or `git::` URLs are refused. Fetching a `mod://` child, and
+checking its version, needs the module.
 
 ## Recipes
 
@@ -4372,7 +4390,7 @@ then the kind line (`:rotini:file`, `:rotini:directory`, `:rotini:none` or anoth
 from different rotini releases work together.
 
 When this output is right but the shell shows something else, the problem is in the shell's
-setup: reload the script (`source <(taskr completion bash)`) or start a new shell.
+setup: reload the completion script your program prints or start a new shell.
 
 #### End-to-end tests with testscript
 
@@ -4916,7 +4934,7 @@ func main() {
 
 {{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
 $ CRASHDEMO_CRASH_DIR=/tmp crashdemo boom
-Error: runtime error: index out of range [3] with length 0
+Error: runtime error: index out of range [1] with length 0
 crash report written to /tmp/crashdemo-2290116467.txt
 {{< /code >}}
 

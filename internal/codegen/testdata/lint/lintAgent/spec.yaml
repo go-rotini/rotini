@@ -77,3 +77,16 @@ command:
         - name: password
           agent: true
           schema: { type: string, secret: true, from: [file] }
+    # Correct: a command with sub-commands and no arguments only prints help. No problem.
+    - name: remote
+      agent: true
+      commands:
+        - name: add
+    # A command with sub-commands that declares arguments runs, so it is offered already.
+    - name: tag
+      agent: true
+      arguments:
+        - name: label
+          schema: { type: string }
+      commands:
+        - name: list

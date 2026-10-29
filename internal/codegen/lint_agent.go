@@ -200,7 +200,7 @@ func agentCommandWarning(chain []*Command, cmdPath, ptr string) error {
 	case offAt != "":
 		msg = fmt.Sprintf("has `agent: true`, which has no effect: command %q has `agent: false`, which keeps its whole subtree from agents", offAt)
 	case !commandOutByDefault(c, hiddenAbove):
-		msg = "has `agent: true`, which has no effect: the command is offered to agents already; `agent: true` brings back a hidden, deprecated, passthrough or group command"
+		msg = "has `agent: true`, which has no effect: the command is offered to agents already; `agent: true` brings back a hidden, deprecated or passthrough command, or one with sub-commands and no arguments"
 	default:
 		return nil
 	}
@@ -260,9 +260,10 @@ func agentInputWarnings(c *Command, cmdPath, ptr string) []error {
 }
 
 // commandOutByDefault reports whether a command is left out of agent outputs unless it says
-// `agent: true`: hidden (itself or an ancestor), deprecated, a group command, or passthrough.
+// `agent: true`: hidden (itself or an ancestor), deprecated, passthrough, or with sub-commands and
+// no arguments (it prints help when run bare).
 func commandOutByDefault(c *Command, hiddenAbove bool) bool {
-	if hiddenAbove || c.Hidden || c.Deprecated != "" || len(c.Commands) > 0 || c.Passthrough {
+	if hiddenAbove || c.Hidden || c.Deprecated != "" || (len(c.Commands) > 0 && len(c.Arguments) == 0) || c.Passthrough {
 		return true
 	}
 	return slices.ContainsFunc(c.Arguments, func(a ArgumentInput) bool { return a.Passthrough })
@@ -357,6 +358,36 @@ func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []e
 	return problems
 }
 
+// lintSkillDescription checks the enabled skill feature's SKILL.md `description`, the root's
+// summary followed by the feature's `description`: it must be set, and at most 1024
+// characters. The problem is positioned at the feature's `description` when it has one, else
+// at the root's summary.
+func lintSkillDescription(spec *Spec, conf *Conf) []error {
+	if spec == nil || conf == nil || conf.Generate == nil {
+		return nil
+	}
+	i := slices.IndexFunc(conf.Generate.Features, func(f Feature) bool { return f.Type == "skill" && f.Enabled })
+	if i < 0 {
+		return nil
+	}
+	f := conf.Generate.Features[i]
+	const loc = "generate.features.skill.description"
+	n := len([]rune(skillDescription(spec.Command.Summary, f.Description)))
+	switch {
+	case n == 0:
+		return []error{&problem{kind: "conf", ptr: featurePointer(i), loc: loc,
+			msg: "the skill needs a description, and the root command has no summary to start it; give the root a summary, or set `description`"}}
+	case n <= skillDescriptionLimit:
+		return nil
+	}
+	msg := fmt.Sprintf("the skill's description, the root's summary followed by this `description`, is %d characters; the Agent Skills format allows %d, so shorten it", n, skillDescriptionLimit)
+	if f.Description == "" {
+		return []error{&problem{kind: "spec", ptr: "/command/summary", loc: "command " + spec.Command.Name + " summary",
+			msg: fmt.Sprintf("is the skill's description, and is %d characters; the Agent Skills format allows %d, so shorten it", n, skillDescriptionLimit)}}
+	}
+	return []error{&problem{kind: "conf", ptr: featurePointer(i) + "/description", loc: loc, msg: msg}}
+}
+
 // embedKnobProblems checks `embed` and `embed_dir` on a whole-program feature: only
 // config_example and env_example put text in the binary, so only they take them.
 func embedKnobProblems(i int, f Feature, pf programFeature) []error {
@@ -367,7 +398,7 @@ func embedKnobProblems(i int, f Feature, pf programFeature) []error {
 	case pf.accessor && f.EmbedDir != "" && !f.Embed:
 		return []error{at("embed_dir", severityWarning, "is set but `embed` is false; `embed_dir` is used only in embed mode (//go:embed); inline content writes no file, so it is ignored")}
 	case !pf.accessor && (f.Embed || f.EmbedDir != ""):
-		return []error{at("embed", severityError, f.Type+" writes files for agents into the repository, not into the binary; `embed` and `embed_dir` don't apply, so remove them (use `file` to choose where they go)")}
+		return []error{at("embed", severityError, f.Type+" writes its files into the repository, not into the binary; `embed` and `embed_dir` don't apply, so remove them (use `file` to choose where they go)")}
 	}
 	return nil
 }

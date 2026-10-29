@@ -48,13 +48,13 @@ command:
         - name: importer_version
           identifiers:
             - --importer-version
-          summary: the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout
+          summary: the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout, absolute or starting with .
           schema:
             type: string
         - name: force
           identifiers:
             - --force
-          summary: replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate
+          summary: replace an existing spec and conf, and write into an internal/cmd/<dir> rotini didn't generate or beside an existing cmd/<dir>/main.go, which is kept
           schema:
             type: bool
         - name: dry-run

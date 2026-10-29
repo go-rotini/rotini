@@ -316,6 +316,66 @@ func TestToolExports_selection(t *testing.T) {
 	}
 }
 
+// TestAgentProgram_commandsWithSubCommands pins which commands with sub-commands are offered to
+// agents: one that declares arguments runs, so it is offered unless it says `agent: false`; one
+// without only prints help, so it is offered only with `agent: true`. Validate's "no effect"
+// warning agrees with each.
+func TestAgentProgram_commandsWithSubCommands(t *testing.T) {
+	t.Parallel()
+	const body = `version: 0.0.0
+command:
+  name: app
+  commands:
+    - name: repo
+      arguments:
+        - {name: name, schema: {type: string, required: true}}
+      commands:
+        - name: list
+    - name: team
+      agent: false
+      arguments:
+        - {name: name, schema: {type: string}}
+      commands:
+        - name: list
+    - name: db
+      commands:
+        - name: migrate
+    - name: cache
+      agent: true
+      commands:
+        - name: clear
+    - name: old
+      deprecated: use repo
+      arguments:
+        - {name: name, schema: {type: string}}
+      commands:
+        - name: list
+`
+	gp := runtimeLaneProgram(t, body)
+	a, err := gp.agentProgram()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range a.offered() {
+		got = append(got, strings.Join(c.c.Path, " "))
+	}
+	want := []string{"repo", "repo list", "db migrate", "cache", "cache clear", "old list"}
+	if !slices.Equal(got, want) {
+		t.Errorf("offered %q, want %q", got, want)
+	}
+	spec := decodeSpecYAML(t, body)
+	for i := range spec.Command.Commands {
+		c := &spec.Command.Commands[i]
+		if out := commandOutByDefault(c, false); c.Agent == nil && out == slices.Contains(want, c.Name) {
+			t.Errorf("%s: commandOutByDefault %v disagrees with the agent outputs", c.Name, out)
+		}
+	}
+	if rules := permissionRules(a); slices.ContainsFunc(rules, func(r permissionRule) bool { return !r.cmd.leaf }) {
+		t.Error("a permission rule names a command with sub-commands")
+	}
+}
+
 // TestReadFlags_offered pins which role flags reach agents: a JSON flag unless `agent: false`
 // (a hidden one still does), and preview and confirm flags only when they are parameters.
 func TestReadFlags_offered(t *testing.T) {

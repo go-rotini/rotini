@@ -454,6 +454,10 @@ func overlayMetadata(m *Command, parent Command) {
 // it in seen so a cycle back to it is reported. The caller defers release, which unmarks
 // it: a spec may appear twice in a tree, but not inside itself.
 func loadComposedSpec(base, ref, moduleName string, seen map[string]bool) (rr resolvedRef, release func(), err error) {
+	// A local spec's own validation reports how its $ref entries are written, at the entry.
+	if err := refLocatorError(ref); err != nil && !strings.HasPrefix(base, modScheme) {
+		return rr, nil, &refEntryError{fmt.Errorf("compose %q: %w", ref, err)}
+	}
 	locator, err := locateRef(base, ref)
 	if err != nil {
 		return rr, nil, fmt.Errorf("compose %q: %w", ref, err)
@@ -465,7 +469,11 @@ func loadComposedSpec(base, ref, moduleName string, seen map[string]bool) (rr re
 	release = func() { delete(seen, locator) }
 	if rr, err = loadRef(locator, moduleName); err != nil {
 		release()
-		return rr, nil, fmt.Errorf("compose %q: %w", ref, err)
+		err = fmt.Errorf("compose %q: %w", ref, err)
+		if _, ok := errors.AsType[*modVersionError](err); ok && !strings.HasPrefix(base, modScheme) {
+			err = &refEntryError{err}
+		}
+		return rr, nil, err
 	}
 	if rr.spec.Command.Name == "" {
 		release()

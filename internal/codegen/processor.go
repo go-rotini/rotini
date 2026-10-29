@@ -140,7 +140,7 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode, re
 // Initialize scaffolds a new CLI named name: it writes the seed spec and conf in opt.Format
 // (or, with opt.Template, every CLI that template declares), then validates and generates a
 // ready-to-build program. opt.Force replaces an existing seed spec and conf. It never deletes
-// files; stale handlers are pruned by the next generate.
+// files: a handler whose command the seed lacks is disabled, and the next generate removes it.
 func (p *Processor) Initialize(name string, opt InitOptions) (Initialized, error) {
 	// Plan the whole init first, so a seed that fails to validate or generate writes nothing.
 	if _, err := p.initializeWith(name, opt, newPlanner(true)); err != nil {
@@ -158,14 +158,15 @@ func (p *Processor) InitializeDryRun(name string, opt InitOptions) (Initialized,
 // initializeWith runs init through pl and reports what it wrote, or in a dry run would write.
 func (p *Processor) initializeWith(name string, opt InitOptions, pl *planner) (Initialized, error) {
 	start := time.Now()
-	seeds, err := p.initialize(name, opt, pl)
+	seeds, notices, err := p.initialize(name, opt, pl)
 	if err != nil {
 		return Initialized{}, err
 	}
 	out := Initialized{
-		Spec:   displayPath(seeds[0].Spec),
-		Conf:   displayPath(seeds[0].Conf),
-		Result: reportTiming(start),
+		Spec:    displayPath(seeds[0].Spec),
+		Conf:    displayPath(seeds[0].Conf),
+		Result:  reportTiming(start),
+		Notices: notices,
 	}
 	for _, s := range seeds[1:] {
 		out.Also = append(out.Also, SeedFiles{Spec: displayPath(s.Spec), Conf: displayPath(s.Conf)})
@@ -330,7 +331,8 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 }
 
 // validateAndEmit validates both documents and, only if they pass, applies conf defaults and
-// emits the program. prune controls whether orphaned stubs are removed (init passes false).
+// emits the program. prune controls whether orphaned files are removed; init passes false, and
+// orphaned stubs are then only disabled.
 // It returns notices: validation warnings, pruned and restored stubs, hook-audit warnings and
 // whole-program feature warnings.
 func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prune bool, pl *planner) ([]error, error) {

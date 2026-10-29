@@ -14,8 +14,9 @@ import (
 
 // pruneStubs removes handler stubs in the cmd package that no longer correspond to an own
 // command. The generated file, keep-listed files, test files and a co-located models file are
-// protected. Only files stubLooksGenerated accepts are candidates.
-func pruneStubs(gp *program, lay layout, keepList []string, onPrune func(string)) error {
+// protected. Only files stubLooksGenerated accepts are candidates. With remove false an
+// orphan is only disabled (see pruneGoDir).
+func pruneStubs(gp *program, lay layout, keepList []string, remove bool, onPrune func(string)) error {
 	protected := map[string]bool{lay.cmdFile: true}
 	if lay.splitModels && lay.modelsDir == lay.cmdDir {
 		protected[lay.modelsFile] = true
@@ -31,13 +32,13 @@ func pruneStubs(gp *program, lay layout, keepList []string, onPrune func(string)
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
-	return pruneGoDir(gp.plan, lay.cmdDir, protected, onPrune)
+	return pruneGoDir(gp.plan, lay.cmdDir, protected, remove, onPrune)
 }
 
 // pruneEntrypoint removes orphaned .go files in the entrypoint directory, honoring its `keep`
 // list; main.go itself is create-once and always protected. It is a no-op when no entrypoint
 // is declared. validate rejects an entrypoint in the cmd package's directory.
-func pruneEntrypoint(pl *planner, lay layout, keepList []string, onPrune func(string)) error {
+func pruneEntrypoint(pl *planner, lay layout, keepList []string, remove bool, onPrune func(string)) error {
 	if lay.entrypointDir == "" {
 		return nil
 	}
@@ -45,7 +46,7 @@ func pruneEntrypoint(pl *planner, lay layout, keepList []string, onPrune func(st
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
-	return pruneGoDir(pl, lay.entrypointDir, protected, onPrune)
+	return pruneGoDir(pl, lay.entrypointDir, protected, remove, onPrune)
 }
 
 // pruneGoDir retires the orphaned generated stubs in dir: non-test .go files that are not
@@ -54,9 +55,10 @@ func pruneEntrypoint(pl *planner, lay layout, keepList []string, onPrune func(st
 // go generate lists every package's files before running any directive, so deleting a file
 // another package's directive is about to be handed would fail the run; a build-ignored file is
 // not on that list. Sub-directories, *_test.go files and hand-written files are never touched.
-// Every step is reported through onPrune. A directory that doesn't exist yet, as in a dry run
-// before anything is written, has nothing to prune.
-func pruneGoDir(pl *planner, dir string, protected map[string]bool, onPrune func(string)) error {
+// Every step is reported through onPrune. With remove false (init, which never deletes a file)
+// only the first step runs, and a stub already disabled is left as it is. A directory that
+// doesn't exist yet, as in a dry run before anything is written, has nothing to prune.
+func pruneGoDir(pl *planner, dir string, protected map[string]bool, remove bool, onPrune func(string)) error {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
@@ -88,6 +90,9 @@ func pruneGoDir(pl *planner, dir string, protected map[string]bool, onPrune func
 			continue // out of the build without rotini's note: the author's to keep
 		}
 		if stubDisabled(body) {
+			if !remove {
+				continue
+			}
 			if err := pl.remove(path); err != nil {
 				return fmt.Errorf("prune %s: %w", name, err)
 			}

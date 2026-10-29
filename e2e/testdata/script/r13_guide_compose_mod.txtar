@@ -1,0 +1,140 @@
+# R13 — the guide's "Composing CLIs", from another module: `$ref: mod://<module>@<version>/<path>`
+# mounts a spec that a dependency module ships, read from the module cache and verified by
+# go.sum. The module is served from a proxy on disk, so the script needs no network; the
+# ambient cache's download directory serves rotini's own dependencies.
+
+goproxy proxy $GOMODCACHE/cache/download
+env GOMODCACHE=$WORK/modcache
+env GOFLAGS=-mod=mod -modcacherw
+env GOSUMDB=off
+
+# The child module: a spec, its generated package, and its handlers.
+cd db
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+cp migrate.go.txt dbcli/db_migrate.go
+cd $WORK
+proxymodule proxy example.com/db v1.0.0 db
+rm db
+
+gomodinit example.com/acme
+exec go mod edit -require=example.com/db@v1.0.0
+exec go mod download example.com/db
+grep '^example\.com/db v1\.0\.0 h1:' go.sum
+
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o acme$exe ./cmd/acme
+! exec ./acme$exe
+stdout '^  db +manage the database$'
+exec ./acme$exe db migrate
+stdout '^migrated$'
+
+# A $ref at another version than go.mod builds is refused at the $ref, naming both versions.
+wantexit 1 rotini validate cmd/skew/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'skew[/\\]\.rotini\.spec\.yaml:5:13: command skew: \$ref "mod://example\.com/db@v1\.1\.0/\.rotini\.spec\.yaml": it names example\.com/db v1\.1\.0, but go\.mod builds example\.com/db at v1\.0\.0; align the \$ref or go\.mod$'
+! stderr 'composition:'
+wantexit 1 rotini generate cmd/skew/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'skew[/\\]\.rotini\.spec\.yaml:5:13: .*go\.mod builds example\.com/db at v1\.0\.0'
+
+# A replace decides what builds: the version it names, or a directory, which has none.
+exec go mod edit -replace=example.com/db=example.com/db@v1.1.0
+wantexit 1 rotini validate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'acme[/\\]\.rotini\.spec\.yaml:6:13: .*it names example\.com/db v1\.0\.0, but go\.mod builds example\.com/db at v1\.1\.0'
+exec go mod edit -replace=example.com/db=../db
+wantexit 1 rotini validate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'acme[/\\]\.rotini\.spec\.yaml:6:13: .*go\.mod replaces example\.com/db with the directory \.\./db, which is what builds'
+exec go mod edit -dropreplace=example.com/db
+
+# A module go.mod doesn't require isn't built at any version.
+exec go mod edit -droprequire=example.com/db
+wantexit 1 rotini validate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'acme[/\\]\.rotini\.spec\.yaml:6:13: .*go\.mod does not require example\.com/db; add it with go get example\.com/db@v1\.0\.0$'
+exec go mod edit -require=example.com/db@v1.0.0
+exec rotini validate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+
+# The same version with other content doesn't match go.sum, and generate refuses it.
+rm modcache
+mkdir db
+cp tampered.spec.yaml db/.rotini.spec.yaml
+cp db.go.mod db/go.mod
+proxymodule proxy example.com/db v1.0.0 db
+wantexit 1 rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'go mod download example\.com/db@v1\.0\.0: verifying example\.com/db@v1\.0\.0: checksum mismatch$'
+
+-- db/go.mod --
+module example.com/db
+
+go 1.27
+
+require github.com/go-rotini/rotini v0.0.0
+-- db.go.mod --
+module example.com/db
+
+go 1.27
+
+require github.com/go-rotini/rotini v0.0.0
+-- db/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: manage the database
+  commands:
+    - name: migrate
+      summary: run migrations
+-- tampered.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: something else
+-- db/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: dbcli/zz_rotini.go
+-- db/migrate.go.txt --
+package dbcli
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dbMigrateHandler)(nil)
+
+type dbMigrateHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dbMigrateHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "migrated")
+}
+-- cmd/acme/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: the umbrella
+  commands:
+    - $ref: mod://example.com/db@v1.0.0/.rotini.spec.yaml
+-- cmd/skew/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: skew
+  commands:
+    - $ref: mod://example.com/db@v1.1.0/.rotini.spec.yaml
+-- cmd/acme/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_rotini.go
+  features:
+    - type: help
+      enabled: true

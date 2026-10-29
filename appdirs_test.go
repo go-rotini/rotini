@@ -2,6 +2,8 @@ package rotini
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -115,5 +117,10 @@ func TestAppDirs_injected(t *testing.T) {
 	}
 	if d, err := AppDirs(nil, "demo", "xdg"); err != nil || d.Cache != filepath.Join(home, "process", "demo") {
 		t.Errorf("nil rtx reads the process environment: %+v, %v", d, err)
+	}
+	for _, dir := range []string{d.Config, d.Data, d.Cache, d.State} {
+		if _, err := os.Lstat(dir); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("AppDirs created %s (%v); it creates nothing", dir, err)
+		}
 	}
 }

@@ -328,12 +328,14 @@ func (r InputReport) Winner(path FieldPath) (InputSource, bool) {
 }
 
 // History returns every layer that set path, low → high precedence; the last element is the
-// winner.
+// winner, unless [InputReport.Winner] reports none: an argument value supplied past a position
+// no layer filled is not placed, as [Context.Inputs] would not place it.
 func (r InputReport) History(path FieldPath) []InputSource {
-	return r.history[path]
+	return slices.Clone(r.history[path])
 }
 
-// Fields returns every field any layer set, sorted.
+// Fields returns every field that has a final value, sorted: the paths [InputReport.Winner]
+// reports.
 func (r InputReport) Fields() []FieldPath {
 	return sortedPaths(r.set)
 }

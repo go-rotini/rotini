@@ -704,6 +704,15 @@ func TestArgvOfFindsTheCommand(t *testing.T) {
 
 func second(_, _ []string, err error) error { return err }
 
+func TestArgvError_Error(t *testing.T) {
+	in, set := argvRun(func(c *argvRunCI) { c.Config.Region = "eu" }, "Run.Config.Region")
+	_, _, err := ArgvOf(argvDef(), in, set)
+	want := "rotini: Run.Config.Region: a config input comes only from a configuration file; write one"
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+}
+
 func TestProgramDefinition(t *testing.T) {
 	def := argvDef()
 	if got := NewProgram(def, nil).Definition(); got.Name != "app" || got.Inputs != reflect.TypeFor[argvAppInputs]() {

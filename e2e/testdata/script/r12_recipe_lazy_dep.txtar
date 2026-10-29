@@ -23,6 +23,35 @@ cp data.txt store.txt
 exec ./lazydemo$exe get region
 stdout '^eu-1$'
 
+# A test's double, registered with Program.WithDependency, is kept: SetDependencyIfAbsent
+# leaves it in place, and the real store is never opened.
+cp double_test.go.txt internal/cmd/lazydemo/double_test.go
+exec go test ./internal/cmd/lazydemo
+stdout '^ok'
+
+-- double_test.go.txt --
+package lazydemo
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestGetUsesTheDouble(t *testing.T) {
+	opened := 0
+	double := func() (*Store, error) {
+		opened++
+		return &Store{values: map[string]string{"region": "test-1"}}, nil
+	}
+	var out strings.Builder
+	p := NewProgram().WithDependency(storeDep, double).WithDir(t.TempDir()).WithStdout(&out)
+	if code, err := p.Run([]string{"get", "region"}); code != 0 || err != nil {
+		t.Fatalf("get: exit %d, %v", code, err)
+	}
+	if out.String() != "test-1\n" || opened != 1 {
+		t.Fatalf("get printed %q and called the double %d times", out.String(), opened)
+	}
+}
 -- data.txt --
 region=eu-1
 -- store.go.txt --

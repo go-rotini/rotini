@@ -1,0 +1,297 @@
+# R13 — what the spec's page keys promise: summary, description, usage, header, footer,
+# headings, examples, help, man, markdown, display_name, hidden, group, groups, see_also,
+# exit_status, topics and filename, checked on the generated help, man and markdown pages, the
+# contract, the output schemas and the built program.
+
+gomodinit example.com/pg
+
+# $schema is any URI and is never fetched: this host doesn't exist.
+exec rotini validate cmd/pg/.rotini.spec.yaml --config cmd/pg/.rotini.conf.yaml
+! stderr .
+exec rotini generate cmd/pg/.rotini.spec.yaml --config cmd/pg/.rotini.conf.yaml
+
+# Root help: the description leads and the summary doesn't show; the usage line is derived with
+# display_name; every heading the root overrides is written as given.
+grep '\ARoot description\.\n\nUSAGE\n  pg tool \[flags\] <command>\n\nCOMMANDS:\n' internal/cmd/pg/renders/help_pg.txt
+! grep 'the pages demo' internal/cmd/pg/renders/help_pg.txt
+grep '^TOPICS:\n  guide +how to use pg\n  env +the variables pg reads$' internal/cmd/pg/renders/help_pg.txt
+grep '^FLAGS:\n  --quiet +say less$' internal/cmd/pg/renders/help_pg.txt
+grep '^ENV:\n  PG_TOKEN string +the token$' internal/cmd/pg/renders/help_pg.txt
+grep '^CONF:\n  region \(region\) string +the region$' internal/cmd/pg/renders/help_pg.txt
+grep '^EXAMPLES:\n  pg Ship web\n  pg list\z' internal/cmd/pg/renders/help_pg.txt
+
+# Groups: ungrouped commands first, then the groups `groups` lists, in its order, each with its
+# description, then any others. A flag of the same label shares the entry. A hidden command is
+# left out; a command with a verbatim help page is listed with its summary.
+grep '(?s)COMMANDS:\n  zeta +an ungrouped command\n  raw +raw summary shown in parent\n.*\n\nManage:\n  Commands that change things\.\n  Ship +ship a service\n\nInspect:\n  Commands that only look\.\n  list +list things\n\nOther:\n  cache +cache commands\n' internal/cmd/pg/renders/help_pg.txt
+grep '^Inspect:\n  Commands that only look\.\n  --verbose +say more$' internal/cmd/pg/renders/help_pg.txt
+! grep 'secret' internal/cmd/pg/renders/help_pg.txt
+grep '^## Manage Commands\n\nCommands that change things\.\n\n- `Ship`' internal/cmd/pg/renders/markdown_pg.md
+grep '^\.SH "MANAGE"\nCommands that change things\.$' internal/cmd/pg/renders/pg.1
+
+# A sub-command: its description leads, its usage override is written as given, and the
+# headings it overrides apply to its page only; unset ones keep their defaults.
+grep '\AShip long description\.\n\nUsage:\n  pg Ship \[opts\] SERVICE\n\nARGS:\n' internal/cmd/pg/renders/help_pg_Ship.txt
+grep '^INHERITED:\n  --verbose' internal/cmd/pg/renders/help_pg_Ship.txt
+grep '^IN:\n  text string$' internal/cmd/pg/renders/help_pg_Ship.txt
+grep '^OUT:\n  object$' internal/cmd/pg/renders/help_pg_Ship.txt
+grep '^Commands:\n  clear-all +clear the cache\n\nGlobal Flags:\n  --verbose' internal/cmd/pg/renders/help_pg_cache.txt
+# With no description, the summary leads; the derived usage names the display name.
+grep '\Aan ungrouped command\n\nUsage:\n  pg tool zeta\n' internal/cmd/pg/renders/help_pg_zeta.txt
+
+# Summary: the man page's NAME line and the markdown page's opening line.
+grep '^pg\\-zeta \\- an ungrouped command$' internal/cmd/pg/renders/pg-zeta.1
+grep '\A# pg tool zeta\n\nan ungrouped command\n' internal/cmd/pg/renders/markdown_pg_zeta.md
+grep '\A# pg tool\n\nthe pages demo\n\nRoot description\.\n' internal/cmd/pg/renders/markdown_pg.md
+
+# display_name shows on the pages; the page files keep the command's name, lowercased for man.
+grep '^\.TH "PG" 1 "" "pg tool" "User Commands"$' internal/cmd/pg/renders/pg.1
+grep '^\\fBpg tool\\fR \[flags\] <command>$' internal/cmd/pg/renders/pg.1
+grep 'go:embed renders/pg-ship\.1$' internal/cmd/pg/zz_pg.go
+grep 'complete -o default -F _pg_complete pg\\n' internal/cmd/pg/zz_pg.go
+
+# exit_status and see_also: man and markdown pages, with the name, retryable, the output still
+# written and the docs link; help shows neither.
+grep '^\.SH "EXIT STATUS"\n\.TP\n\\fB0\\fR\nshipped\n\.TP\n\\fB3\\fR \(partial\)\nsome failed \(retryable\) \(writes \\fBobject\\fR to standard output\)\n\.br\nSee \\fIhttps://example\.com/e/3\\fR\.$' internal/cmd/pg/renders/pg-ship.1
+grep '^\.SH "SEE ALSO"\n\\fBpg\\fR\(1\), pg\\-list\(1\), https://example\.com/ship$' internal/cmd/pg/renders/pg-ship.1
+grep '^- `3` \(`partial`\) — some failed \(retryable\) \(writes `object` to stdout\) \(\[docs\]\(https://example\.com/e/3\)\)$' internal/cmd/pg/renders/markdown_pg_Ship.md
+grep '^## See Also\n\n- pg-list\(1\)\n- https://example\.com/ship' internal/cmd/pg/renders/markdown_pg_Ship.md
+! grep 'shipped|example\.com/e/3|See Also|SEE ALSO' internal/cmd/pg/renders/help_pg_Ship.txt
+grep 'PgShipExitPartial = 3' internal/cmd/pg/zz_pg.go
+grep '"name": "partial"' cli-contract.json
+grep '"retryable": true' cli-contract.json
+grep '"docs_url": "https://example.com/e/3"' cli-contract.json
+grep '"done"' schemas/output/pg-ship.exit-3.output.json
+
+# A verbatim page replaces that page only. help: is byte for byte, and man and markdown still
+# render description, usage, header, footer, examples, exit_status and see_also. man: and
+# markdown: drop ANSI styling, and each leaves the other two pages generated.
+cmp internal/cmd/pg/renders/help_pg_raw.txt want-raw-help.txt
+cmp internal/cmd/pg/renders/pg-raw.1 want-raw-man.txt
+cmp internal/cmd/pg/renders/markdown_pg_raw.md want-raw-md.txt
+cmp internal/cmd/pg/renders/help_pg_helponly.txt want-helponly.txt
+grep '(?s)^pg helponly CUSTOM\n.*^Helponly header\.\n\.PP\nHelponly description\.\n.*^\\fB4\\fR\nhelponly code\n\.SH NOTES\nHelponly footer\.\n\.SH EXAMPLES\n.*^pg helponly\n.*helponly\\-see\(1\)' internal/cmd/pg/renders/pg-helponly.1
+grep '(?s)Helponly header\..*Helponly description\..*pg helponly CUSTOM.*## Examples.*## Exit Status\n\n- `4` — helponly code.*helponly-see\(1\).*Helponly footer\.\z' internal/cmd/pg/renders/markdown_pg_helponly.md
+cmp internal/cmd/pg/renders/pg-manonly.1 want-manonly.txt
+grep '(?s)\A# pg tool manonly\n\nManonly header\..*## Exit Status\n\n- `5` — manonly code.*manonly-see\(1\).*Manonly footer\.\z' internal/cmd/pg/renders/markdown_pg_manonly.md
+grep '(?s)\AManonly header\..*Manonly footer\.\z' internal/cmd/pg/renders/help_pg_manonly.txt
+cmp internal/cmd/pg/renders/markdown_pg_mdonly.md want-mdonly.txt
+grep '(?s)Mdonly header\..*\\fB6\\fR\nmdonly code\n\.SH NOTES\nMdonly footer\..*mdonly\\-see\(1\)' internal/cmd/pg/renders/pg-mdonly.1
+
+# Topics: help shows the body, man names the page <program>-<name> in the Miscellaneous
+# section with the summary as its NAME line, and markdown opens with the summary.
+grep '\AFirst paragraph\.\n\nSecond paragraph\.\z' internal/cmd/pg/renders/help_pg.topic.guide.txt
+grep '^\.TH "PG\\-GUIDE" 1 "" "pg tool" "Miscellaneous"\n\.SH NAME\npg\\-guide \\- how to use pg$' internal/cmd/pg/renders/pg-guide.1
+grep '\A# pg tool help guide\n\nhow to use pg\n\nFirst paragraph\.' internal/cmd/pg/renders/markdown_pg.topic.guide.md
+grep '^  PG_TOKEN string +the token \(used by: pg tool\)$' internal/cmd/pg/renders/help_pg.topic.env.txt
+
+# filename: an override, and the derived <root>_<path>.go with '-' written '_'.
+exists internal/cmd/pg/rawfile.go
+! exists internal/cmd/pg/pg_raw.go
+exists internal/cmd/pg/pg_cache_clear_all.go
+exists internal/cmd/pg/pg_Ship.go
+
+# The built program: a hidden command still runs, a command that prints its help when run
+# without a sub-command exits 1, and display_name leaves CommandPath alone.
+exec go mod tidy
+exec go build -o pg$exe ./cmd/pg
+exec ./pg$exe secret
+stdout '^pg secret: '
+wantexit 1 ./pg$exe cache
+stdout '^  clear-all +clear the cache$'
+exec ./pg$exe Ship web
+stdout '^path=pg Ship$'
+exec ./pg$exe __complete ''
+stdout '^zeta\t'
+! stdout '^secret'
+
+-- want-raw-help.txt --
+RAW HELP
+-- want-raw-man.txt --
+.TH RAW 1
+RAW MAN bold
+-- want-raw-md.txt --
+# RAW MD bold
+-- want-helponly.txt --
+HELPONLY
+-- want-manonly.txt --
+.TH MANONLY 1
+-- want-mdonly.txt --
+# MDONLY
+-- internal/cmd/pg/pg_Ship.go --
+package pg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*pgShipHandler)(nil)
+
+type pgShipHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*pgShipHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintf(rtx.Stdout, "path=%s\n", rtx.CommandPath())
+}
+
+-- cmd/pg/.rotini.spec.yaml --
+version: 0.0.0
+$schema: https://example.invalid/never-fetched/schema-spec.json
+command:
+  name: pg
+  display_name: "pg tool"
+  summary: the pages demo
+  description: Root description.
+  headings:
+    usage: "USAGE"
+    commands: "COMMANDS:"
+    flags: "FLAGS:"
+    topics: "TOPICS:"
+    examples: "EXAMPLES:"
+    environment: "ENV:"
+    configuration: "CONF:"
+  examples:
+    - pg Ship web
+    - pg list
+  topics:
+    - name: guide
+      summary: how to use pg
+      body: |-
+        First paragraph.
+
+        Second paragraph.
+    - name: env
+      summary: the variables pg reads
+      generate: environment
+  groups:
+    - name: Manage
+      description: Commands that change things.
+    - name: Inspect
+      description: Commands that only look.
+  env_prefix: PG
+  env:
+    - name: token
+      summary: the token
+      schema: {type: string}
+  config_files:
+    - name: conf
+      path: pg.yaml
+  config:
+    - name: region
+      summary: the region
+      schema: {type: string, key: region}
+  flags:
+    - name: verbose
+      summary: say more
+      cascading: true
+      group: Inspect
+      schema: {type: bool}
+    - name: quiet
+      summary: say less
+      schema: {type: bool}
+  commands:
+    - name: zeta
+      summary: an ungrouped command
+    - name: list
+      summary: list things
+      group: Inspect
+    - name: Ship
+      summary: ship a service
+      description: Ship long description.
+      group: Manage
+      usage: "pg Ship [opts] SERVICE"
+      see_also: ["pg-list(1)", "https://example.com/ship"]
+      exit_status:
+        - {code: 0, summary: shipped}
+        - {code: 3, name: partial, summary: some failed, retryable: true, docs_url: "https://example.com/e/3", output: {type: object, properties: {done: {type: array, items: {type: string}}}}}
+      headings:
+        arguments: "ARGS:"
+        cascading: "INHERITED:"
+        output: "OUT:"
+        stdin: "IN:"
+      arguments:
+        - name: service
+          summary: the service
+          schema: {type: string}
+      stdin:
+        format: text
+      output:
+        type: object
+        properties:
+          id: {type: string}
+    - name: cache
+      summary: cache commands
+      group: Other
+      commands:
+        - name: clear-all
+          summary: clear the cache
+    - name: secret
+      summary: a hidden command
+      hidden: true
+    - name: raw
+      summary: raw summary shown in parent
+      help: "RAW HELP\n"
+      man: ".TH RAW 1\nRAW MAN \u001b[1mbold\u001b[0m\n"
+      markdown: "# RAW MD \u001b[1mbold\u001b[0m\n"
+      filename: rawfile.go
+    - name: helponly
+      summary: verbatim help only
+      help: "HELPONLY\n"
+      description: Helponly description.
+      usage: "pg helponly CUSTOM"
+      header: Helponly header.
+      footer: Helponly footer.
+      examples: [pg helponly]
+      see_also: [helponly-see(1)]
+      exit_status:
+        - {code: 4, summary: helponly code}
+    - name: manonly
+      summary: verbatim man only
+      man: ".TH MANONLY 1\n"
+      description: Manonly description.
+      header: Manonly header.
+      footer: Manonly footer.
+      see_also: [manonly-see(1)]
+      exit_status:
+        - {code: 5, summary: manonly code}
+    - name: mdonly
+      summary: verbatim markdown only
+      markdown: "# MDONLY\n"
+      header: Mdonly header.
+      footer: Mdonly footer.
+      see_also: [mdonly-see(1)]
+      exit_status:
+        - {code: 6, summary: mdonly code}
+-- cmd/pg/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  schemas:
+    output:
+      dir: schemas/output
+  packages:
+    - type: main
+      file: cmd/pg/main.go
+    - type: cmd
+      file: internal/cmd/pg/zz_pg.go
+      package: pg
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: man
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+      embed: true
+    - type: completion
+      enabled: true

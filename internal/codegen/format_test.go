@@ -190,6 +190,10 @@ func TestFormatYAMLErrors(t *testing.T) {
 	if kind := detectFormatKind(mustRoot(t, "version: 1.0.0\n"), "app/.rotini.spec.yml"); kind != FormatKindSpec {
 		t.Errorf("spec by name: %q", kind)
 	}
+	// diff: is a conf's own key, so a conf holding only it is known by its keys.
+	if kind := detectFormatKind(mustRoot(t, "version: 1.0.0\ndiff:\n  accept: []\n"), "release.yaml"); kind != FormatKindConf {
+		t.Errorf("conf by its diff key: %q", kind)
+	}
 }
 
 func TestFormatFiles(t *testing.T) {

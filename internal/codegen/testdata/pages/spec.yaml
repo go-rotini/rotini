@@ -107,7 +107,7 @@ command:
           schema: {type: string, required: true, minLength: 2, maxLength: 63, pattern: '^[a-z][a-z0-9-]*$'}
         - name: replicas
           summary: how many copies
-          schema: {type: int, minimum: 1}
+          schema: {type: int, minimum: 1, placeholder: COUNT}
       flags:
         - name: port
           summary: listen port
@@ -160,7 +160,7 @@ command:
       arguments:
         - name: argv
           summary: the command and its arguments
-          schema: {type: '[]string', required: true}
+          schema: {type: '[]string', required: true, placeholder: WORD}
     - name: run
       summary: run a command on a host
       options_first: true

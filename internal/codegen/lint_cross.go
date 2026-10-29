@@ -44,6 +44,7 @@ var crossLints = []func(*Spec, *Conf) []error{
 	lintGeneratedNames,
 	lintHandlerFileTargets,
 	lintMainDir,
+	lintSkillDescription,
 }
 
 // lintManPageNames rejects two commands whose man pages would share a name when the man

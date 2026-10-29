@@ -171,7 +171,8 @@ func createTemp(target string, perm fs.FileMode) (*os.File, string, error) {
 	return nil, "", errors.New("could not find a free temporary name")
 }
 
-// Write writes p to the file, or to stdout for "-".
+// Write writes p to the file, or to stdout for "-". After Close or Abort it returns
+// [fs.ErrClosed].
 func (f *OutputFile) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

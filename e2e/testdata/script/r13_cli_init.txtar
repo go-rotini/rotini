@@ -1,0 +1,116 @@
+# R13 — what the CLI reference says about `rotini init`: the go.mod warning, what --force
+# replaces and keeps, what a dry run reports, the handlers a forced init disables so the project
+# builds, and the notices it prints the way generate does.
+
+# ── a module that doesn't require the runtime gets the warning, and init still succeeds ──
+mkdir bare
+cd bare
+exec go mod init example.com/bare
+exec rotini init demo
+stdout '^spec: cmd/demo/\.rotini\.spec\.yaml$'
+stdout '^conf: cmd/demo/\.rotini\.conf\.yaml$'
+stdout '^\[\d\d:\d\d:\d\d\] \S+$'
+stderr '^Warning: go\.mod does not require github\.com/go-rotini/rotini yet; run `go get github\.com/go-rotini/rotini` before building \./cmd/demo$'
+cd ..
+
+# ── a module that requires it gets no warning ───────────────────────────────
+gomodinit example.com/demo
+exec rotini init demo
+! stderr .
+exists cmd/demo/main.go
+exists cmd/demo/.rotini-schema.spec.json
+exists cmd/demo/.rotini-schema.conf.json
+exists internal/cmd/demo/zz_rotini.go
+exists internal/cmd/demo/demo.go
+exists internal/cmd/demo/demo_help.go
+exists internal/cmd/demo/demo_version.go
+
+# ── without --force, init refuses an existing spec, writes nothing, and exits 1 ──
+wantexit 1 rotini init demo
+stderr 'cmd/demo/\.rotini\.spec\.yaml already exists \(use --force to overwrite\)'
+! stdout .
+
+# ── a dry run of --force lists what it would update, or exits 0 when nothing would change ──
+exec rotini init demo --force --dry-run
+stdout '^\[\d\d:\d\d:\d\d\] \S+$'
+! stderr .
+cp greet.yaml cmd/demo/.rotini.spec.yaml
+wantexit 2 rotini init demo --force --dry-run
+stderr '^1\. update cmd/demo/\.rotini\.spec\.yaml \(\d+ bytes, mode 0644\)$'
+stderr '^dry run: 1 change not written$'
+cmp cmd/demo/.rotini.spec.yaml greet.yaml
+
+# ── --force replaces the spec and conf, keeps main.go, and deletes nothing ────
+# greet.yaml has no help or version command, so this generate disables their handlers.
+exec rotini generate cmd/demo/.rotini.spec.yaml
+exists internal/cmd/demo/demo_greet.go
+grep '^//go:build ignore$' internal/cmd/demo/demo_help.go
+cp mine.go.txt internal/cmd/demo/mine.go
+cp main-edited.go.txt cmd/demo/main.go
+# A dry run lists the greet handler it would disable as a change, not a warning.
+wantexit 2 rotini init demo --force --dry-run
+stderr '^\d+\. update internal[/\\]cmd[/\\]demo[/\\]demo_greet\.go \(\d+ bytes, mode 0644\)$'
+! stderr 'Warning: pruned'
+! grep '^//go:build ignore$' internal/cmd/demo/demo_greet.go
+exec rotini init demo --force
+! grep greet cmd/demo/.rotini.spec.yaml
+cmp cmd/demo/main.go main-edited.go.txt
+cmp internal/cmd/demo/mine.go mine.go.txt
+# init disables the greet handler and re-enables help and version, each reported as generate
+# reports it, so the project builds; the next generate deletes the greet handler.
+stderr '^Warning: pruned demo_greet\.go \(disabled; removed by the next generate\); its command is no longer in the spec$'
+stderr '^Warning: restored demo_help\.go; its command is back in the spec$'
+stderr '^Warning: restored demo_version\.go; its command is back in the spec$'
+grep '^//go:build ignore$' internal/cmd/demo/demo_greet.go
+grep 'demoGreetHandler' internal/cmd/demo/demo_greet.go
+! grep '^//go:build ignore$' internal/cmd/demo/demo_help.go
+exec go build ./...
+# Another forced init leaves the disabled handler alone.
+exec rotini init demo --force
+! stderr .
+grep '^//go:build ignore$' internal/cmd/demo/demo_greet.go
+exec rotini generate cmd/demo/.rotini.spec.yaml
+stderr '^Warning: pruned demo_greet\.go; its command is no longer in the spec$'
+! exists internal/cmd/demo/demo_greet.go
+exists internal/cmd/demo/mine.go
+exec go build ./...
+
+# ── init prints the handler audit's warnings too, and still exits 0 ─────────
+cp hook.go.txt internal/cmd/demo/hook.go
+exec rotini init demo --force
+stderr '^Warning: internal[/\\]cmd[/\\]demo[/\\]hook\.go:\d+: .*method "CascadingPrerun" on demoHandler is not a lifecycle hook'
+stdout '^spec: cmd/demo/\.rotini\.spec\.yaml$'
+
+-- greet.yaml --
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: greet
+      summary: say hello
+-- mine.go.txt --
+package demo
+
+func helper() string { return "mine" }
+-- hook.go.txt --
+package demo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+func (*demoHandler) CascadingPrerun(context.Context, *rotini.Context) {}
+-- main-edited.go.txt --
+package main
+
+// edited by the author
+
+import (
+	cmd "example.com/demo/internal/cmd/demo"
+)
+
+func main() {
+	cmd.NewProgram().Execute()
+}

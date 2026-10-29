@@ -454,8 +454,8 @@ func (p *Program) newRunContext() *Context {
 
 // WithResolver overrides the resolve phase: argv to invocation target, plus the argv the
 // parsers later see. A resolver that rewrites tokens should rewrite argv and delegate to
-// [DefaultResolver], so routing and parsing agree. A resolver error is reported as a fault
-// ([CategoryInternal] unless the error carries a category) and fails the run.
+// [DefaultResolver], so routing and parsing agree. A resolver error fails the run: a usage error
+// is recorded as an error, anything else as a fault ([CategoryInternal]).
 //
 // Completion walks the [Definition], so an alias known only to the resolver is dispatchable
 // but not completed. A nil resolver restores [DefaultResolver].
@@ -507,7 +507,9 @@ func (p *Program) Execute() error {
 // Run dispatches one invocation of argv and returns its exit code and error (see
 // [Program.Execute]). It resolves the invoked command, executes a declared or discovered
 // plugin if one was selected, and otherwise runs the lifecycle; inputs are parsed only when a
-// handler calls [Context.Inputs]. Run never ends the process.
+// handler calls [Context.Inputs]. Run never ends the process. A plugin that exits non-zero
+// returns its exit code and its *exec.ExitError; it records nothing, so the reporter is not
+// called.
 //
 // Each call gets a fresh [Context]. Dependencies registered with [Program.WithDependency] are
 // seeded into every run; one set with [Context.SetDependency] stays local to its run.

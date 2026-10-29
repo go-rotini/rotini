@@ -1,0 +1,587 @@
+# R13 — what the spec's configuration keys promise: config_files paths, formats, cascading and
+# their order, `file:` pins, load-time schemas, discovery, `as: env` files, `relative_to` and
+# config_source, plus the rules `rotini validate` enforces on them.
+
+gomodinit example.com/cfg
+
+exec rotini validate cmd/cfg/.rotini.spec.yaml --config cmd/cfg/.rotini.conf.yaml
+exec rotini generate cmd/cfg/.rotini.spec.yaml --config cmd/cfg/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o cfg$exe ./cmd/cfg
+
+env HOME=$WORK/home
+env USERPROFILE=$WORK/home
+env CFG_DIR=$WORK/etc
+
+# Within one command's list the first declared file wins. A path expands ~, $VAR and the shell
+# forms, and a relative one is read from the run's directory. The format follows the extension,
+# and a dotenv file's keys are used as written.
+exec ./cfg$exe
+stdout '^region=proj$'
+stdout '^toml=from-toml$'
+stdout '^home=from-home$'
+stdout '^def=from-default$'
+stdout '^api=https://api.example$'
+
+# Files cascade: the nearest command's file wins, and a pin reads an ancestor's file only.
+exec ./cfg$exe sub
+stdout '^region=sub$'
+stdout '^pinned=user$'
+
+# Only the files along the invoked path are read: the runs above never touch this branch's
+# broken file, which fails its own command.
+! exec ./cfg$exe other
+stderr 'broken\.yaml'
+
+# A pinned input is not satisfied by a key another file holds, even when required; the error
+# names the pinned file.
+! exec ./cfg$exe pin
+stderr '^Error: config key onlyproj is required in configuration file .*[/\\]user\.yaml$'
+
+# A load-time schema rejects a non-conforming file, naming it; an absent file passes.
+! exec ./cfg$exe schemed
+stderr 's\.yaml'
+stderr 'port'
+exec ./cfg$exe schemeless
+
+# Help lists config inputs with their summaries.
+exec ./cfg$exe --help
+stdout 'Configuration:'
+stdout 'the region to use'
+
+# walk-up searches from the run's directory upward; the nearest directory wins.
+cd a/b
+exec ../../cfg$exe walk
+stdout '^walk=a$'
+cd $WORK
+exec ./cfg$exe walk
+stdout '^walk=top$'
+
+# xdg reads $XDG_CONFIG_HOME/<app>, and ~/.config/<app> when the variable is relative, on every
+# platform.
+env XDG_CONFIG_HOME=$WORK/xdg
+exec ./cfg$exe xdg
+stdout '^xdg=xdg-home$'
+env XDG_CONFIG_HOME=relative
+exec ./cfg$exe xdg
+stdout '^xdg=dot-config$'
+env XDG_CONFIG_HOME=
+
+# An `as: env` file is literal, and never supplies rotini's own HOME.
+exec ./cfg$exe envfile
+stdout '^lit=\$\{OTHER\}x$'
+stdout '^h2=real-home$'
+
+# relative_to: config resolves a file's relative path against that file's directory; a value
+# from the command line stays as typed.
+exec ./cfg$exe rel
+stdout '^cache=.*sub[/\\]dir[/\\]cache$'
+exec ./cfg$exe rel --cache ./x
+stdout '^cache=\./x$'
+
+# config_source: an empty value on the command line is a usage error.
+! exec ./cfg$exe src --conf=
+stderr '--conf was given an empty path'
+exec ./cfg$exe src --conf alt.yaml
+stdout '^val=alt$'
+
+# Validation.
+! exec rotini validate bad.spec.yaml --config cmd/cfg/.rotini.conf.yaml --fail collect
+stderr 'bad\.spec\.yaml:\d+:\d+'
+stderr 'config_files "walker": .*does not use .app.'
+stderr 'config_files "dot": .*"." is not a file name'
+stderr 'flag "count": sets .config_source. but its type is int'
+stderr 'flag "first": claims .config_source. "src", already claimed'
+exec rotini validate warn.spec.yaml --config cmd/cfg/.rotini.conf.yaml
+stderr 'Warning: .*config_files "below": resolves to the same file as "top"'
+
+-- proj.yaml --
+region: proj
+onlyproj: here
+-- user.yaml --
+region: user
+-- etc/settings.toml --
+[t]
+v = "from-toml"
+-- home/home.yaml --
+homekey: from-home
+-- home/h2.yaml --
+h2: real-home
+-- dflt.yaml --
+defkey: from-default
+-- app.env --
+API_ENDPOINT=https://api.example
+-- sub.yaml --
+region: sub
+-- broken.yaml --
+region: [unclosed
+-- s.yaml --
+port: abc
+-- .walk.yaml --
+walk: top
+-- a/.walk.yaml --
+walk: a
+-- a/b/keep.txt --
+-- xdg/cfg/config.yaml --
+xdg: xdg-home
+-- home/.config/cfg/config.yaml --
+xdg: dot-config
+-- .env --
+LIT=${OTHER}x
+HOME=/nowhere
+-- sub/dir/rel.yaml --
+cache: ./cache
+-- sf.yaml --
+val: declared
+-- alt.yaml --
+val: alt
+-- bad.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  config_files:
+    - name: walker
+      discover: {strategy: walk-up, file: x.yaml, app: bad}
+    - name: dot
+      discover: {strategy: walk-up, file: .}
+    - name: src
+      path: src.yaml
+      format: yaml
+  flags:
+    - name: count
+      schema: {type: int, config_source: src}
+    - name: first
+      schema: {type: string, config_source: src}
+    - name: second
+      schema: {type: string, config_source: src}
+-- warn.spec.yaml --
+version: 0.0.0
+command:
+  name: warn
+  config_files:
+    - name: top
+      path: same.yaml
+  commands:
+    - name: sub
+      config_files:
+        - name: below
+          path: same.yaml
+-- cmd/cfg/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: cfg
+  summary: configuration rules
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+  config_files:
+    - name: proj
+      path: proj.yaml
+    - name: user
+      path: user.yaml
+    - name: tomlf
+      path: $CFG_DIR/settings.toml
+    - name: homef
+      path: ~/home.yaml
+    - name: deff
+      path: ${CFG_MISSING:-dflt.yaml}
+    - name: dotf
+      path: app.env
+      format: dotenv
+  config:
+    - name: region
+      summary: the region to use
+      schema: {type: string}
+    - name: toml
+      schema: {type: string, key: t.v}
+    - name: home
+      schema: {type: string, key: homekey}
+    - name: def
+      schema: {type: string, key: defkey}
+    - name: api
+      schema: {type: string, key: API_ENDPOINT}
+  commands:
+    - name: sub
+      summary: nearer files
+      config_files:
+        - name: subf
+          path: sub.yaml
+      config:
+        - name: region
+          schema: {type: string}
+        - name: pinned
+          schema: {type: string, key: region, file: user}
+    - name: other
+      summary: a branch with a broken file
+      config_files:
+        - name: broken
+          path: broken.yaml
+      config:
+        - name: region
+          schema: {type: string}
+    - name: pin
+      summary: a pinned required input
+      config:
+        - name: need
+          schema: {type: string, key: onlyproj, file: user, required: true}
+    - name: schemed
+      summary: a file with a schema
+      config_files:
+        - name: s
+          path: s.yaml
+          schema:
+            type: object
+            properties:
+              port: {type: integer}
+      config:
+        - name: port
+          schema: {type: int}
+    - name: schemeless
+      summary: an absent file with a schema
+      config_files:
+        - name: gone
+          path: gone.yaml
+          schema:
+            type: object
+            properties:
+              port: {type: integer}
+      config:
+        - name: port
+          schema: {type: int, file: gone}
+    - name: walk
+      summary: walk-up discovery
+      config_files:
+        - name: w
+          discover: {strategy: walk-up, file: .walk.yaml}
+      config:
+        - name: walk
+          schema: {type: string}
+    - name: xdg
+      summary: xdg discovery
+      config_files:
+        - name: x
+          discover: {strategy: xdg, app: cfg, file: config.yaml}
+      config:
+        - name: xdg
+          schema: {type: string}
+    - name: envfile
+      summary: an env file
+      config_files:
+        - name: dotenv
+          path: .env
+          as: env
+        - name: h2f
+          path: ~/h2.yaml
+      env:
+        - name: lit
+          schema: {type: string, variable: LIT}
+      config:
+        - name: h2
+          schema: {type: string}
+    - name: rel
+      summary: relative paths
+      config_files:
+        - name: rc
+          path: sub/dir/rel.yaml
+      flags:
+        - name: cache
+          schema: {type: string, key: cache, relative_to: config}
+    - name: src
+      summary: a user-named file
+      config_files:
+        - name: sf
+          path: sf.yaml
+          format: yaml
+      flags:
+        - name: conf
+          schema: {type: string, config_source: sf}
+      config:
+        - name: val
+          schema: {type: string}
+-- cmd/cfg/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/cfg/main.go
+    - type: cmd
+      file: internal/cmd/cfg/zz_cfg.go
+      package: cfg
+  features:
+    - type: help
+      enabled: true
+-- cmd/cfg/main.go --
+package main
+
+import (
+	cfg "example.com/cfg/internal/cmd/cfg"
+)
+
+func main() {
+	cfg.NewProgram().
+		Execute()
+}
+-- internal/cmd/cfg/print.go --
+package cfg
+
+import (
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+func show[T any](rtx *rotini.Context, f func(T) string) {
+	in, err := rtx.Inputs[T]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprint(rtx.Stdout, f(in))
+}
+-- internal/cmd/cfg/cfg.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[CfgInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if !in.Cfg.Flags.Help {
+		return
+	}
+	page, err := rtx.InvokedHelp()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprint(rtx.Stdout, page)
+	rtx.Halt()
+}
+
+func (*cfgHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgInputs) string {
+		c := in.Cfg.Config
+		return fmt.Sprintf("region=%s\ntoml=%s\nhome=%s\ndef=%s\napi=%s\n", c.Region, c.Toml, c.Home, c.Def, c.API)
+	})
+}
+-- internal/cmd/cfg/cfg_sub.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgSubHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgSubHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgSubInputs) string {
+		return fmt.Sprintf("region=%s\npinned=%s\n", in.CfgSub.Config.Region, in.CfgSub.Config.Pinned)
+	})
+}
+-- internal/cmd/cfg/cfg_other.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgOtherHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgOtherHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgOtherInputs) string { return fmt.Sprintf("region=%s\n", in.CfgOther.Config.Region) })
+}
+-- internal/cmd/cfg/cfg_pin.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgPinHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgPinHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgPinInputs) string { return fmt.Sprintf("need=%s\n", in.CfgPin.Config.Need) })
+}
+-- internal/cmd/cfg/cfg_schemed.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgSchemedHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgSchemedHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgSchemedInputs) string { return fmt.Sprintf("port=%d\n", in.CfgSchemed.Config.Port) })
+}
+-- internal/cmd/cfg/cfg_schemeless.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgSchemelessHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgSchemelessHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgSchemelessInputs) string { return fmt.Sprintf("port=%d\n", in.CfgSchemeless.Config.Port) })
+}
+-- internal/cmd/cfg/cfg_walk.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgWalkHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgWalkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgWalkInputs) string { return fmt.Sprintf("walk=%s\n", in.CfgWalk.Config.Walk) })
+}
+-- internal/cmd/cfg/cfg_xdg.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgXdgHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgXdgHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgXdgInputs) string { return fmt.Sprintf("xdg=%s\n", in.CfgXdg.Config.Xdg) })
+}
+-- internal/cmd/cfg/cfg_envfile.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgEnvfileHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgEnvfileHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgEnvfileInputs) string {
+		return fmt.Sprintf("lit=%s\nh2=%s\n", in.CfgEnvfile.Env.Lit, in.CfgEnvfile.Config.H2)
+	})
+}
+-- internal/cmd/cfg/cfg_rel.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgRelHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgRelHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgRelInputs) string { return fmt.Sprintf("cache=%s\n", in.CfgRel.Flags.Cache) })
+}
+-- internal/cmd/cfg/cfg_src.go --
+package cfg
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type cfgSrcHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cfgSrcHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	show(rtx, func(in CfgSrcInputs) string { return fmt.Sprintf("val=%s\n", in.CfgSrc.Config.Val) })
+}

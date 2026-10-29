@@ -311,8 +311,10 @@ func SortBy[E any](items []E, field string, desc bool) error {
 		k := jsonKind(keys[i])
 		switch {
 		case k == "null":
-		case k == "list" || k == "object":
-			return fmt.Errorf("SortBy: field %q holds a %s, which does not sort", field, k)
+		case k == "list":
+			return fmt.Errorf("SortBy: field %q holds a list, which does not sort", field)
+		case k == "object":
+			return fmt.Errorf("SortBy: field %q holds an object, which does not sort", field)
 		case kind == "":
 			kind = k
 		case kind != k:

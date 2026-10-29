@@ -11,8 +11,8 @@
                           {.Invocation .Summary .Description .Aliases .Effects .Kind .Stability
                           .Deprecated .JSON .DryRun .Confirm .Examples .ExitStatus .Link};
                           .Link is its markdown page, "" when there is none
-         .Optional[]      the other visible commands (groups, deprecated and passthrough
-                          commands), same shape
+         .Optional[]      the other visible commands (those with sub-commands and no
+                          arguments, deprecated and passthrough commands), same shape
          .Env[] .Config[] {.Name .Flag .Summary .Required .Secret .Commands}; .Flag is the
                           flag an environment variable sets, "" for an env input
        HELPERS: quote, join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,

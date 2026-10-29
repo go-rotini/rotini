@@ -23,8 +23,9 @@
                           .Description is the paragraph the command's `groups` gives it
          .FlagGroups[]    {.Title .Description .Flags[]} — the same, for .Flags
          .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .EnumValues
-                          .Deprecated .Constraints .Rules .Passthrough .Env .ConfigKey} — .Passthrough:
-                          the argument and every word after it are passed on as typed; .Env and
+                          .Deprecated .Constraints .Rules .Passthrough .Placeholder .Env .ConfigKey} —
+                          .Passthrough: the argument and every word after it are passed on as
+                          typed; .Placeholder: its declared display name, "" for none; .Env and
                           .ConfigKey as on a flag row
          .Flags[]         {.Identifiers .Label .Summary .Type .Required .Default .Implicit .Enum
                           .EnumValues .Deprecated .Env .ConfigKey .Constraints .Rules} —
@@ -115,7 +116,7 @@
 {{end}}
 {{end -}}
 {{- with .Arguments}}{{$.Headings.Arguments}}
-{{range .}}  {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
+{{range .}}  {{if .Required}}<{{or .Placeholder .Name}}{{if .Variadic}}...{{end}}>{{else}}[{{or .Placeholder .Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
 {{end}}{{template "values" .}}{{end}}
 {{end -}}

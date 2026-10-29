@@ -21,9 +21,10 @@ exec ./logdemo$exe run -v
 stderr 'level=INFO'
 ! stderr 'level=DEBUG'
 
+# The guide's -vv output, but for the time.
 exec ./logdemo$exe -vv run
-stderr 'level=DEBUG msg="loading tasks"'
-stdout '^done$'
+stderr '\Atime=\S+ level=DEBUG msg="loading tasks" file=tasks\.json\ntime=\S+ level=INFO msg="3 tasks to run"\ntime=\S+ level=WARN msg="the cache is stale"\n\z'
+stdout '\Adone\n\z'
 
 -- root.go.txt --
 package logdemo

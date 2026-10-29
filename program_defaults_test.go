@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestProgram_nilRestoresDefault pins that a nil argument to each With option undoes an earlier
@@ -154,6 +155,55 @@ func TestContext_streamSetters(t *testing.T) {
 		nilCtx.WithParser(nil) != nil ||
 		nilCtx.WithInputReader(nil) != nil {
 		t.Error("a With setter on a nil Context returned non-nil")
+	}
+}
+
+// TestContext_nilReceiverExceptions pins the nil-receiver exceptions the Context doc lists:
+// every With setter does nothing and returns nil, and every inputs method returns an internal
+// *ParseError rather than panicking.
+func TestContext_nilReceiverExceptions(t *testing.T) {
+	t.Parallel()
+	var nilCtx *Context
+	if nilCtx.WithVersion("1") != nil || nilCtx.WithInputSettings(InputSettings{}) != nil ||
+		nilCtx.WithEnviron(nil) != nil || nilCtx.WithDir("x") != nil || nilCtx.WithClock(time.Now) != nil {
+		t.Error("a With setter on a nil Context returned non-nil")
+	}
+	type in struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+		}
+	}
+	for name, call := range map[string]func() error{
+		"Inputs":           func() error { _, err := nilCtx.Inputs[in](); return err },
+		"InputsWithReport": func() error { _, _, err := nilCtx.InputsWithReport[in](); return err },
+		"PartialInputs":    func() error { _, _, err := nilCtx.PartialInputs[in](); return err },
+		"ArgvInputs":       func() error { _, err := nilCtx.ArgvInputs[in](); return err },
+		"EnvInputs":        func() error { _, err := nilCtx.EnvInputs[in](); return err },
+		"FileInputs":       func() error { _, err := nilCtx.FileInputs[in](); return err },
+		"StdinInputs":      func() error { _, err := nilCtx.StdinInputs[in](); return err },
+		"DefaultInputs":    func() error { _, err := nilCtx.DefaultInputs[in](); return err },
+		"CheckInputs":      func() error { return nilCtx.CheckInputs(in{}, nil) },
+	} {
+		err := call()
+		if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Kind != ParseKindInternal || CategoryOf(err) != CategoryInternal {
+			t.Errorf("%s on a nil Context = %v, want an internal *ParseError", name, err)
+		}
+	}
+}
+
+// TestContext_withEnvironNilRestoresTheProcess: a nil environment reads the process one again.
+func TestContext_withEnvironNilRestoresTheProcess(t *testing.T) {
+	t.Setenv("ROTINI_PROBE_VAR", "process")
+	rtx := NewContextFor(testDef(), nil).WithEnviron([]string{"ROTINI_PROBE_VAR=injected"})
+	if v, _ := rtx.LookupEnv("ROTINI_PROBE_VAR"); v != "injected" {
+		t.Fatalf("LookupEnv = %q, want the injected value", v)
+	}
+	if v, _ := rtx.WithEnviron(nil).LookupEnv("ROTINI_PROBE_VAR"); v != "process" {
+		t.Errorf("after WithEnviron(nil) LookupEnv = %q, want the process value", v)
+	}
+	if empty := NewContextFor(testDef(), nil).WithEnviron([]string{}); len(empty.Environ()) != 0 {
+		t.Errorf("an empty, non-nil environment is not empty: %q", empty.Environ())
 	}
 }
 

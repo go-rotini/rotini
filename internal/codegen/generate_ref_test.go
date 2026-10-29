@@ -83,12 +83,12 @@ func TestJoinModLocator(t *testing.T) {
 }
 
 func TestIsExternalLocator(t *testing.T) {
-	for _, loc := range []string{"git::https://example.com/r@v1/spec.yaml", "https://example.com/spec.yaml"} {
+	for _, loc := range []string{"git::https://example.com/r@v1/spec.yaml", "https://example.com/spec.yaml", "http://example.com/spec.yaml", "ssh://git@example.com/r.git", "s3::bucket/spec.yaml", "file:///tmp/spec.yaml"} {
 		if !isExternalLocator(loc) {
 			t.Errorf("isExternalLocator(%q) = false, want true", loc)
 		}
 	}
-	for _, loc := range []string{"mod://example.com/m@v1.0.0/spec.yaml", "../sibling/spec.yaml", "spec.yaml"} {
+	for _, loc := range []string{"mod://example.com/m@v1.0.0/spec.yaml", "../sibling/spec.yaml", "spec.yaml", `C:\specs\spec.yaml`, "a:b/spec.yaml"} {
 		if isExternalLocator(loc) {
 			t.Errorf("isExternalLocator(%q) = true, want false", loc)
 		}

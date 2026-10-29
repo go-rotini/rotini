@@ -1,0 +1,236 @@
+# R13 — the guide's Testing section: its in-process tests, the typed-inputs test, the reporter's
+# exit code 2, where a run's environment comes from, and ArgvOf. The test-*.go.txt files are the
+# blocks the guide shows, joined under one package clause.
+
+gomodinit github.com/me/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+concat internal/cmd/todo/todo_test.go test-head.go.txt test-inprocess.go.txt test-newline.txt test-environ.go.txt test-newline.txt test-typed.go.txt
+exec go mod tidy
+
+# The process's variables reach a plain Run, never a rotinitest run, nor a run with WithEnviron.
+env TODO_DEFAULTS_PRIORITY=low
+exec go test -count=1 ./internal/cmd/todo/
+stdout '^ok '
+
+-- test-newline.txt --
+
+-- test-head.go.txt --
+package todo
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/go-rotini/rotini/rotinitest"
+)
+
+-- test-inprocess.go.txt --
+func TestAdd(t *testing.T) {
+	var out bytes.Buffer
+	code, err := NewProgram().WithStdout(&out).Run([]string{"add", "buy milk"})
+	if err != nil || code != 0 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+	if !strings.Contains(out.String(), `added "buy milk"`) {
+		t.Errorf("stdout = %q", out.String())
+	}
+}
+
+func TestAddRejectsUnknownPriority(t *testing.T) {
+	var stderr bytes.Buffer
+	code, err := NewProgram().WithStderr(&stderr).Run([]string{"add", "buy milk", "-p", "urgent"})
+	if err == nil || code != 1 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+}
+-- test-environ.go.txt --
+func TestAddDefaultPriority(t *testing.T) {
+	t.Parallel()
+	code, err := NewProgram().
+		WithEnviron([]string{"HOME=" + t.TempDir(), "TODO_DEFAULTS_PRIORITY=high"}).
+		WithDir(t.TempDir()).
+		Run([]string{"add", "buy milk"})
+	if err != nil || code != 0 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+}
+-- test-typed.go.txt --
+func TestAddHigh(t *testing.T) {
+	t.Parallel()
+	var in TodoAddInputs
+	in.TodoAdd.Arguments.Title = "buy milk"
+	in.TodoAdd.Flags.Priority = "high"
+	res := rotinitest.Run(t, NewProgram(), in)
+	if res.Code != 0 {
+		t.Fatalf("code %d, err %v", res.Code, res.Err)
+	}
+	if got := string(res.Stdout); got != "added \"buy milk\" (priority high)\n" {
+		t.Errorf("stdout = %q", got)
+	}
+}
+-- internal/cmd/todo/claims_test.go --
+package todo
+
+import (
+	"bytes"
+	"slices"
+	"testing"
+
+	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/rotinitest"
+)
+
+// With the guide's exit-code reporter, a usage error exits 2.
+func TestAddRejectsUnknownPriorityWithReporter(t *testing.T) {
+	var stderr bytes.Buffer
+	code, err := NewProgram().WithReporter(Report).WithStderr(&stderr).Run([]string{"add", "buy milk", "-p", "urgent"})
+	if err == nil || code != 2 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+}
+
+// A plain Run reads the process's environment.
+func TestPlainRunReadsTheProcess(t *testing.T) {
+	var out bytes.Buffer
+	if code, err := NewProgram().WithStdout(&out).Run([]string{"add", "buy milk"}); err != nil || code != 0 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+	if got := out.String(); got != "added \"buy milk\" (priority low)\n" {
+		t.Errorf("stdout = %q", got)
+	}
+}
+
+// WithEnviron replaces the whole environment the run reads.
+func TestWithEnvironReplacesTheProcess(t *testing.T) {
+	var out bytes.Buffer
+	code, err := NewProgram().WithStdout(&out).
+		WithEnviron([]string{"HOME=" + t.TempDir(), "TODO_DEFAULTS_PRIORITY=high"}).
+		WithDir(t.TempDir()).
+		Run([]string{"add", "buy milk"})
+	if err != nil || code != 0 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+	if got := out.String(); got != "added \"buy milk\" (priority high)\n" {
+		t.Errorf("stdout = %q", got)
+	}
+}
+
+// A rotinitest run never sees the process's variables, and adds its own with Env.
+func TestRotinitestIsolates(t *testing.T) {
+	t.Parallel()
+	var in TodoAddInputs
+	in.TodoAdd.Arguments.Title = "buy milk"
+	res := rotinitest.Run(t, NewProgram(), in)
+	if got := string(res.Stdout); got != "added \"buy milk\" (priority normal)\n" {
+		t.Errorf("stdout = %q", got)
+	}
+	if want := []string{"add", "--", "buy milk"}; !slices.Equal(res.Argv, want) {
+		t.Errorf("argv = %q, want %q", res.Argv, want)
+	}
+}
+
+// ArgvOf writes flags attached, after their command's name, and -- before the positionals.
+func TestArgvOf(t *testing.T) {
+	var in TodoAddInputs
+	in.TodoAdd.Arguments.Title = "--buy milk"
+	in.TodoAdd.Flags.Priority = "high"
+	p := NewProgram()
+	argv, env, err := rotini.ArgvOf(p.Definition(), in, rotini.PresenceOf(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"add", "--priority=high", "--", "--buy milk"}; !slices.Equal(argv, want) {
+		t.Errorf("argv = %q, want %q", argv, want)
+	}
+	var out bytes.Buffer
+	if code, err := p.WithStdout(&out).WithEnviron(env).Run(argv); err != nil || code != 0 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+	if got := out.String(); got != "added \"--buy milk\" (priority high)\n" {
+		t.Errorf("stdout = %q", got)
+	}
+}
+-- internal/cmd/todo/report.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+	}
+	if !out.Failed() {
+		return
+	}
+	if len(out.Errors) > 0 && rotini.CategoryOf(out.Errors[0]) == rotini.CategoryUsage {
+		rtx.Exit(2)
+		return
+	}
+	rtx.Exit(1)
+}
+-- internal/cmd/todo/todo_add.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoAddHandler)(nil)
+
+type todoAddHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[TodoAddInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	add := inputs.TodoAdd
+	fmt.Fprintf(rtx.Stdout, "added %q (priority %s)\n", add.Arguments.Title, add.Flags.Priority)
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  env_prefix: TODO
+  config_files:
+    - name: user
+      discover: { strategy: xdg, app: todo, file: config.yaml }
+  commands:
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          summary: the task title
+          schema: { type: string, required: true, minLength: 1 }
+      flags:
+        - name: priority
+          summary: how urgent
+          identifiers: [-p, --priority]
+          schema: { type: string, default: normal, enum: [low, normal, high], key: defaults.priority }
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo

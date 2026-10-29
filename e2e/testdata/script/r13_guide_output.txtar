@@ -1,0 +1,404 @@
+# R13 — the guide's Structured output section, built from its own blocks: the todo spec, the
+# three list handlers, the output checks and the structured reporter, each console sample
+# compared byte for byte.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+concat cmd/todo/main.go main_head.go.txt main.go.txt main_tail.go.txt
+concat internal/cmd/todo/todo_list.go list_head.go.txt list_write.go.txt
+cp data.go.txt internal/cmd/todo/data.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# Write it: the table and the indented json.
+exec ./todo$exe list
+cmp stdout list.table
+exec ./todo$exe list -o json
+cmp stdout list.json
+
+# The schema files: one per output, one per exit status that writes output; none for a hidden
+# command. The contract lists the hidden one.
+exists schemas/output/todo-list.output.json
+exists schemas/output/todo.exit-3.output.json
+! exists schemas/output/todo-secret.output.json
+grep '"\$schema": "http://json-schema.org/draft-07/schema#"' schemas/output/todo-list.output.json
+grep '"hidden": true' cli-contract.json
+
+# Help's Output section; in markdown and man, an exit status that writes output says so.
+exec ./todo$exe list --help
+stdout '^Output:$'
+stdout '^  Every task, oldest first\.$'
+grep '- `3` — some tasks failed; stdout lists the ones that succeeded \(writes `\[\]Task` to stdout\)' internal/cmd/todo/zz_todo.go
+grep '\(writes \\\\fB\[\]Task\\\\fR to' internal/cmd/todo/zz_todo.go
+
+# A default template is checked when the flag is read, not by rotini validate.
+exec rotini validate cmd/todo/.rotini.spec.yaml
+cp brief.go.txt internal/cmd/todo/todo_brief.go
+exec go build -o todo$exe ./cmd/todo
+! exec ./todo$exe brief
+! stdout .
+stderr '^Error: .*--line'
+
+# Check it: with checks on, an output off its shape is an internal error naming the field,
+# and stdout stays empty.
+env TODO_CHECKS=1 TODO_BAD=1
+! exec ./todo$exe list -o json
+! stdout .
+cmp stderr check.txt
+env TODO_CHECKS= TODO_BAD=
+
+# Errors scripts can read: with --json typed, a failure is one JSON line on stderr, its
+# candidates every spelling of the command's flags.
+! exec ./todo$exe list --bogus --json id
+! stdout .
+cmp stderr structured.txt
+
+# The output checks and DecodeOutput in a test.
+cp todo_test.go.txt internal/cmd/todo/todo_test.go
+exec go test ./internal/cmd/todo
+
+# Templates: the guide's command line and its usage error for a Go field name.
+concat internal/cmd/todo/todo_list.go list_head_template.go.txt list_run_head.go.txt list_template.go.txt list_run_tail.go.txt
+cp render.go.txt internal/cmd/todo/render.go
+exec go build -o todo$exe ./cmd/todo
+exec ./todo$exe list --format '{{range .tasks}}{{.id}} {{.title}}{{"\n"}}{{end}}{{len .tasks}} tasks'
+cmp stdout template.txt
+! exec ./todo$exe list --format '{{.Title}}'
+! stdout .
+cmp stderr template_error.txt
+
+# Choosing fields and order.
+concat internal/cmd/todo/todo_list.go list_head_select.go.txt list_run_head.go.txt list_select.go.txt list_run_tail.go.txt
+exec go build -o todo$exe ./cmd/todo
+exec ./todo$exe list --json id,title --sort-by title
+cmp stdout select.json
+exec ./todo$exe list --help
+stdout '--json \[\]string .*\[id\|status\|title\]'
+
+-- list.table --
+ID  STATUS  TITLE
+1   open    write docs
+2   done    ship
+-- list.json --
+{
+  "tasks": [
+    {
+      "id": 1,
+      "status": "open",
+      "title": "write docs"
+    },
+    {
+      "id": 2,
+      "status": "done",
+      "title": "ship"
+    }
+  ]
+}
+-- check.txt --
+Error: todo list: output does not match its contract: output.tasks[2].status: value is not in enum
+-- structured.txt --
+{"schema_version":1,"error":{"candidates":["--json","--sort-by","--reverse","-h","--help","--version","-o","--output","--format"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
+-- template.txt --
+1 write docs
+2 ship
+2 tasks
+-- template_error.txt --
+Error: template:1:2: executing "template" at <.Title>: map has no entry for key "Title"
+-- select.json --
+{
+  "tasks": [
+    {
+      "id": 2,
+      "title": "ship"
+    },
+    {
+      "id": 1,
+      "title": "write docs"
+    }
+  ]
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: track tasks
+  schemas:
+    Task:
+      type: object
+      required: [id, title, status]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        status: { type: string, enum: [open, done] }
+    TaskList:
+      type: object
+      description: Every task, oldest first.
+      properties:
+        tasks: { type: array, items: { $ref: "#/schemas/Task" } }
+  exit_status:
+    - code: 3
+      summary: some tasks failed; stdout lists the ones that succeeded
+      output: { type: array, items: { $ref: "#/schemas/Task" } }
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: output
+      summary: how to write the result
+      identifiers: [-o, --output]
+      cascading: true
+      schema: { type: string, default: table, enum: [table, json, yaml, toml] }
+    - name: format
+      summary: format the output with a Go template
+      cascading: true
+      schema: { type: shape.Template, import: github.com/go-rotini/rotini/shape, placeholder: TEMPLATE }
+  commands:
+    - name: list
+      summary: list tasks
+      output: { $ref: "#/schemas/TaskList" }
+      flags:
+        - name: json
+          summary: write these fields as json
+          role: fields
+          schema: { type: '[]string', separator: ',', values_from: output.tasks }
+        - name: sort-by
+          summary: sort by this field
+          role: sort
+          schema: { type: string, values_from: output.tasks }
+        - name: reverse
+          summary: sort in descending order
+          schema: { type: bool }
+    - name: secret
+      summary: a hidden command
+      hidden: true
+      output: { $ref: "#/schemas/TaskList" }
+    - name: brief
+      summary: one line per task
+      output: { $ref: "#/schemas/TaskList" }
+      flags:
+        - name: line
+          summary: the template for each line
+          schema: { type: shape.Template, import: github.com/go-rotini/rotini/shape, default: '{{.tasks' }
+-- brief.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type todoBriefHandler struct{ rotini.NoHooks }
+
+func (*todoBriefHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[TodoBriefInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, "ran")
+}
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  schemas:
+    output:
+      dir: schemas/output
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+  features:
+    - type: help
+      enabled: true
+    - type: markdown
+      enabled: true
+    - type: man
+      enabled: true
+-- data.go.txt --
+package todo
+
+import "os"
+
+func load() []Task {
+	tasks := []Task{{ID: 1, Title: "write docs", Status: "open"}, {ID: 2, Title: "ship", Status: "done"}}
+	if os.Getenv("TODO_BAD") == "1" {
+		tasks = append(tasks, Task{ID: 3, Title: "argue", Status: "doing"})
+	}
+	return tasks
+}
+-- main_head.go.txt --
+package main
+
+import (
+	"os"
+	"slices"
+
+	"github.com/go-rotini/rotini"
+
+	cmd "example.com/todo/internal/cmd/todo"
+)
+
+func main() {
+	if os.Getenv("TODO_CHECKS") == "1" {
+		cmd.NewProgram().WithOutputChecks(true).Execute()
+		return
+	}
+-- main_tail.go.txt --
+}
+-- main.go.txt --
+cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
+	return slices.Contains(rtx.Argv, "--json")
+})).Execute()
+-- list_head.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"github.com/go-rotini/rotini"
+)
+
+type todoListHandler struct{ rotini.NoHooks }
+
+-- list_write.go.txt --
+func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoListInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if err := rtx.WriteOutput(TodoListOutput{Tasks: load()}, in.Todo.Flags.Output, renderTable); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+
+func renderTable(w io.Writer, format string, v TodoListOutput) error {
+	fmt.Fprintln(w, "ID  STATUS  TITLE")
+	for _, t := range v.Tasks {
+		fmt.Fprintf(w, "%-3d %-7s %s\n", t.ID, t.Status, t.Title)
+	}
+	return nil
+}
+-- render.go.txt --
+package todo
+
+import (
+	"fmt"
+	"io"
+)
+
+func renderTable(w io.Writer, format string, v TodoListOutput) error {
+	fmt.Fprintln(w, "ID  STATUS  TITLE")
+	for _, t := range v.Tasks {
+		fmt.Fprintf(w, "%-3d %-7s %s\n", t.ID, t.Status, t.Title)
+	}
+	return nil
+}
+-- list_head_template.go.txt --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/shape"
+)
+
+type todoListHandler struct{ rotini.NoHooks }
+
+-- list_head_select.go.txt --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type todoListHandler struct{ rotini.NoHooks }
+
+-- list_run_head.go.txt --
+func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoListInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+-- list_run_tail.go.txt --
+}
+-- list_template.go.txt --
+list := TodoListOutput{Tasks: load()}
+if format := in.Todo.Flags.Format; !format.IsZero() {
+	rtx.HaltWith(rtx.WriteOutput(list, "template", shape.Render[TodoListOutput](format)))
+	return
+}
+rtx.HaltWith(rtx.WriteOutput(list, in.Todo.Flags.Output, renderTable))
+-- list_select.go.txt --
+list := TodoListOutput{Tasks: load()}
+flags := in.TodoList.Flags
+if flags.SortBy != "" {
+	if err := rotini.SortBy(list.Tasks, flags.SortBy, flags.Reverse); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+}
+if len(flags.JSON) > 0 {
+	sel, err := rotini.SelectFields(list, "tasks", flags.JSON)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	rtx.HaltWith(rtx.WriteOutput(sel, "json", nil))
+	return
+}
+rtx.HaltWith(rtx.WriteOutput(list, in.Todo.Flags.Output, renderTable))
+-- todo_test.go.txt --
+package todo
+
+import (
+	"bytes"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/go-rotini/rotini"
+)
+
+func TestChecks(t *testing.T) {
+	os.Setenv("TODO_BAD", "1")
+	defer os.Unsetenv("TODO_BAD")
+	var stdout bytes.Buffer
+	p := NewProgram().WithOutputChecks(true).WithStdout(&stdout)
+	_, err := p.Run([]string{"list", "-o", "json"})
+	if err == nil || !strings.Contains(err.Error(), "output.tasks[2].status: value is not in enum") || stdout.Len() != 0 {
+		t.Fatalf("err %v, stdout %q", err, stdout.String())
+	}
+}
+
+func TestDecode(t *testing.T) {
+	var stdout bytes.Buffer
+	p := NewProgram().WithStdout(&stdout)
+	p.Run([]string{"list", "-o", "yaml"})
+	list, err := rotini.DecodeOutput[TodoListOutput](p, stdout.Bytes(), "yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Tasks) != 2 || list.Tasks[1].Title != "ship" {
+		t.Fatalf("decoded %+v", list)
+	}
+}
