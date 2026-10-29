@@ -13,13 +13,10 @@ import (
 // removed.
 
 // pruneStubs removes handler stubs in the cmd package that no longer correspond to an own
-// command. The generated file, keep-listed files, test files, a co-located main.go and a
-// co-located models file are protected. Only files stubLooksGenerated accepts are candidates.
+// command. The generated file, keep-listed files, test files and a co-located models file are
+// protected. Only files stubLooksGenerated accepts are candidates.
 func pruneStubs(gp *program, lay layout, keepList []string, onPrune func(string)) error {
 	protected := map[string]bool{lay.cmdFile: true}
-	if lay.entrypointDir == lay.cmdDir && lay.entrypointFile != "" {
-		protected[lay.entrypointFile] = true
-	}
 	if lay.splitModels && lay.modelsDir == lay.cmdDir {
 		protected[lay.modelsFile] = true
 	}
@@ -39,9 +36,9 @@ func pruneStubs(gp *program, lay layout, keepList []string, onPrune func(string)
 
 // pruneEntrypoint removes orphaned .go files in the entrypoint directory, honoring its `keep`
 // list; main.go itself is create-once and always protected. It is a no-op when no entrypoint
-// is declared, or when it shares the cmd package directory, which pruneStubs already covers.
+// is declared. validate rejects an entrypoint in the cmd package's directory.
 func pruneEntrypoint(pl *planner, lay layout, keepList []string, onPrune func(string)) error {
-	if lay.entrypointDir == "" || lay.entrypointDir == lay.cmdDir {
+	if lay.entrypointDir == "" {
 		return nil
 	}
 	protected := map[string]bool{lay.entrypointFile: true}
@@ -201,31 +198,67 @@ func stubLooksGenerated(path string) (bool, error) {
 // (taskr.1, taskr-add.8), which also catches pages left by a section change, plus the
 // pre-v1.2.0 man_<root>*.txt files.
 func (o featureOutput) owns(name string) bool {
-	if o.desc.manPages {
-		if len(o.nodes) == 0 {
-			return false
-		}
-		root := o.nodes[0].data.PageName
+	if !o.desc.namesPage(name) {
+		return false
+	}
+	if !o.desc.manPages {
+		return true
+	}
+	root := o.rootPage
+	if root == "" {
+		return false
+	}
+	lower := strings.ToLower(name)
+	if strings.HasPrefix(lower, "man_") {
+		return strings.HasPrefix(lower, "man_"+root)
+	}
+	base, _, _ := strings.Cut(name, ".")
+	return base == root || strings.HasPrefix(base, root+"-")
+}
+
+// namesPage reports whether name is shaped like one of the feature's page files, whatever
+// command it is for: help_*.txt, markdown_*.md, completion_*.txt, or for man
+// <page-name>.<section> with a single-digit section and the pre-v1.2.0 man_*.txt. An editable
+// template (*.tmpl) never is.
+func (d docFeature) namesPage(name string) bool {
+	if strings.HasSuffix(name, ".tmpl") {
+		return false
+	}
+	if d.manPages {
 		lower := strings.ToLower(name)
-		if strings.HasPrefix(lower, "man_"+root) && strings.HasSuffix(lower, ".txt") {
+		if strings.HasPrefix(lower, "man_") && strings.HasSuffix(lower, ".txt") {
 			return true
 		}
 		base, section, ok := strings.Cut(name, ".")
-		if !ok || len(section) != 1 || section[0] < '1' || section[0] > '9' {
-			return false
-		}
-		return base == root || strings.HasPrefix(base, root+"-")
+		return ok && base != "" && len(section) == 1 && section[0] >= '1' && section[0] <= '9'
 	}
-	if !strings.HasSuffix(name, o.desc.ext) || strings.HasSuffix(name, "_test"+o.desc.ext) {
+	if !strings.HasSuffix(name, d.ext) || strings.HasSuffix(name, "_test"+d.ext) {
 		return false
 	}
-	return o.desc.filePrefix == "" || strings.HasPrefix(name, o.desc.filePrefix)
+	return d.filePrefix == "" || strings.HasPrefix(name, d.filePrefix)
 }
 
-// pruneFeatureOutputs removes each enabled feature's orphaned pages. Only files the feature
-// owns are candidates, so features sharing an embed_dir never prune each other's files.
-// Keep-listed paths are preserved, and the editable template lives in template_dir, outside
-// the scan.
+// disabledFeatureOutputs returns a page-less output for each doc feature the conf lists but
+// turns off, so pruning removes every page it left in its embed_dir.
+func (p *program) disabledFeatureOutputs() []featureOutput {
+	var out []featureOutput
+	for _, f := range featureConfigs(p.conf) {
+		if f.cfg == nil || f.cfg.Enabled || f.cfg.EmbedDir == "" {
+			continue
+		}
+		out = append(out, featureOutput{
+			desc:        f.desc,
+			absEmbedDir: filepath.Join(p.module.root, filepath.FromSlash(f.cfg.EmbedDir)),
+			rootPage:    manPageName(p.rootName, nil),
+		})
+	}
+	return out
+}
+
+// pruneFeatureOutputs removes each feature's orphaned pages: for an enabled feature the pages
+// it no longer writes, for a disabled one every page. Only files the feature owns are
+// candidates, so features sharing an embed_dir never prune each other's files. Keep-listed
+// paths are preserved, and an editable template is never a candidate.
 func pruneFeatureOutputs(pl *planner, lay layout, keepList []string, outputs []featureOutput) error {
 	keep := make(map[string]bool, len(keepList))
 	for _, k := range keepList {
@@ -233,11 +266,12 @@ func pruneFeatureOutputs(pl *planner, lay layout, keepList []string, outputs []f
 	}
 	for _, o := range outputs {
 		// Current pages are protected only in embed mode: an inline feature writes no
-		// pages, so any on disk are stale.
+		// pages, so any on disk are stale. Names compare case-insensitively, so a case-only
+		// rename never removes a page just written on a file system that ignores case.
 		protected := map[string]bool{}
 		if o.embed {
 			for _, n := range o.nodes {
-				protected[n.file] = true
+				protected[strings.ToLower(n.file)] = true
 			}
 		}
 
@@ -253,7 +287,7 @@ func pruneFeatureOutputs(pl *planner, lay layout, keepList []string, outputs []f
 			if e.IsDir() || !o.owns(name) {
 				continue
 			}
-			if protected[name] {
+			if protected[strings.ToLower(name)] {
 				continue
 			}
 			// keep entries are relative to the cmd package.

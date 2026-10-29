@@ -1,0 +1,223 @@
+# R6 — a mounted child reads its own environment variables, and the parent's pages say so.
+#
+# The child's package is the same code standalone or mounted, so its commands read the names
+# derived under the child's own env_prefix (KID_HOME), or under none (SPOT), whatever prefix the
+# parent declares. Every page generated through the parent lists those names, and the one help
+# lists is the one that works.
+
+gomodinit example.com/envnames
+
+exec rotini generate cmd/kid/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+exec rotini generate cmd/plain/.rotini.spec.yaml --config cmd/plain/.rotini.conf.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o kid$exe ./cmd/kid
+exec go build -o acme$exe ./cmd/acme
+
+# ── help through the parent lists the child's names, under the child's prefix ──
+exec ./acme$exe kid show --help
+stdout 'KID_HOME'
+stdout 'KID_REGION'
+! stdout 'ACME_HOME'
+! stdout 'ACME_REGION'
+exec ./acme$exe plain --help
+stdout '\bSPOT\b'
+! stdout 'ACME_SPOT'
+
+# The parent's own inputs keep the parent's prefix.
+exec ./acme$exe --help
+stdout 'ACME_TOKEN'
+
+# ── man, markdown and the contract say the same ──
+grep 'KID_HOME' internal/cmd/acme/zz_acme.go
+grep 'KID_REGION' internal/cmd/acme/zz_acme.go
+! grep 'ACME_HOME' internal/cmd/acme/zz_acme.go
+! grep 'ACME_REGION' internal/cmd/acme/zz_acme.go
+! grep 'ACME_SPOT' internal/cmd/acme/zz_acme.go
+grep '"KID_HOME"' acme-contract.json
+grep '"KID_REGION"' acme-contract.json
+grep '"SPOT"' acme-contract.json
+! grep 'ACME_HOME|ACME_REGION|ACME_SPOT' acme-contract.json
+
+# ── the variable help lists is the one the program reads, mounted or standalone ──
+env KID_HOME=from-kid
+env KID_REGION=kid-region
+env SPOT=from-spot
+exec ./acme$exe kid show
+stdout '^home=from-kid region=kid-region$'
+exec ./kid$exe show
+stdout '^home=from-kid region=kid-region$'
+exec ./acme$exe plain
+stdout '^spot=from-spot$'
+
+# ── the parent's prefix is not read for the child's inputs ──
+env KID_HOME=
+env KID_REGION=
+env SPOT=
+env ACME_HOME=from-acme
+env ACME_REGION=acme-region
+env ACME_SPOT=from-acme
+exec ./acme$exe kid show
+stdout '^home= region=default-region$'
+exec ./acme$exe plain
+stdout '^spot=$'
+
+-- cmd/acme/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: mounts two children
+  env_prefix: ACME
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      schema: { type: bool }
+  env:
+    - name: token
+      summary: the acme token
+      schema: { type: string }
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+    - $ref: ../plain/.rotini.spec.yaml
+-- cmd/acme/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: acme-contract.json
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_acme.go
+      package: acme
+  features:
+    - type: help
+      enabled: true
+    - type: man
+      enabled: true
+    - type: markdown
+      enabled: true
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: a child with its own prefix
+  env_prefix: KID
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      schema: { type: bool }
+  commands:
+    - name: show
+      summary: print what resolved
+      flags:
+        - name: region
+          summary: the region
+          identifiers: [--region]
+          schema: { type: string, key: region, default: default-region }
+      env:
+        - name: home
+          summary: the kid's home
+          schema: { type: string }
+-- cmd/kid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kid/main.go
+    - type: cmd
+      file: internal/cmd/kid/zz_kid.go
+      package: kid
+  features:
+    - type: help
+      enabled: true
+-- cmd/plain/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: plain
+  summary: a child with no prefix
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      schema: { type: bool }
+  env:
+    - name: spot
+      summary: the spot
+      schema: { type: string }
+-- cmd/plain/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/plain/zz_plain.go
+      package: plain
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/kid/kid_show.go --
+package kid
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*kidShowHandler)(nil)
+
+type kidShowHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*kidShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KidShowInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Kid.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "home=%s region=%s\n", in.KidShow.Env.Home, in.KidShow.Flags.Region)
+}
+-- internal/cmd/plain/plain.go --
+package plain
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*plainHandler)(nil)
+
+type plainHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*plainHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[PlainInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Plain.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "spot=%s\n", in.Plain.Env.Spot)
+}

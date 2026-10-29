@@ -242,3 +242,46 @@ func TestInitialize_failureWritesNothing(t *testing.T) {
 		t.Errorf("the failed init wrote cmd/: %v", err)
 	}
 }
+
+// TestInitialize_otherFormatBeside pins that init refuses to seed a spec or conf beside one of
+// another format, naming it, and that --force seeds anyway and keeps both.
+func TestInitialize_otherFormatBeside(t *testing.T) {
+	for _, existing := range []string{".rotini.spec.json", ".rotini.conf.toml", ".rotini.spec.yml"} {
+		t.Run(existing, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
+			writeTestFile(t, filepath.Join(dir, "cmd", "demo"), existing, "{}\n")
+			t.Chdir(dir)
+
+			p := NewProcessor("0.0.0")
+			for _, run := range []func(string, InitOptions) (Initialized, error){p.InitializeDryRun, p.Initialize} {
+				_, err := run("demo", InitOptions{})
+				if err == nil || !strings.Contains(err.Error(), "cmd/demo/"+existing+" already exists in another format") {
+					t.Fatalf("Initialize beside %s: err = %v, want it named as another format", existing, err)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(dir, "cmd", "demo", ".rotini.spec.yaml")); !os.IsNotExist(err) {
+				t.Fatalf("the refused init wrote the seed spec: %v", err)
+			}
+
+			if _, err := p.Initialize("demo", InitOptions{Force: true}); err != nil {
+				t.Fatalf("Initialize --force: %v", err)
+			}
+			for _, want := range []string{existing, ".rotini.spec.yaml", ".rotini.conf.yaml"} {
+				if _, err := os.Stat(filepath.Join(dir, "cmd", "demo", want)); err != nil {
+					t.Errorf("after init --force, %s: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// TestInitialize_sameFormatStillAsksForForce pins that a seed of the requested format is
+// reported as existing, not as another format.
+func TestInitialize_sameFormatStillAsksForForce(t *testing.T) {
+	initDemo(t)
+	_, err := NewProcessor("0.0.0").Initialize("demo", InitOptions{})
+	if err == nil || !strings.Contains(err.Error(), "cmd/demo/.rotini.spec.yaml already exists (use --force to overwrite)") {
+		t.Fatalf("second init: err = %v", err)
+	}
+}

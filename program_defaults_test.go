@@ -24,13 +24,14 @@ func TestProgram_nilRestoresDefault(t *testing.T) {
 		WithContext(context.Background()).
 		WithInputReader(NewInputReader).
 		WithHelp(func(...string) (string, error) { return "page", nil }).
+		WithCompletionScript(func(string) (string, error) { return "script", nil }).
 		WithParser(NewParser()).
 		WithResolver(DefaultResolver).
 		WithLifecycle(DefaultLifecycle)
 
 	var noCtx context.Context // a nil context, the argument under test
 	p.WithStdin(nil).WithStdout(nil).WithStderr(nil).WithExit(nil).WithArgs(nil).WithContext(noCtx).
-		WithInputReader(nil).WithHelp(nil).WithParser(nil).WithResolver(nil).WithLifecycle(nil)
+		WithInputReader(nil).WithHelp(nil).WithCompletionScript(nil).WithParser(nil).WithResolver(nil).WithLifecycle(nil)
 
 	if p.stdin != os.Stdin || p.stdout != os.Stdout || p.stderr != os.Stderr {
 		t.Error("a nil stream did not restore the os stream")
@@ -44,7 +45,7 @@ func TestProgram_nilRestoresDefault(t *testing.T) {
 	if p.ctx != nil {
 		t.Error("WithContext(nil) kept the supplied context")
 	}
-	if p.readerFn != nil || p.help != nil || p.parser != nil || p.resolver != nil || p.lifecycle != nil {
+	if p.readerFn != nil || p.help != nil || p.scripts != nil || p.parser != nil || p.resolver != nil || p.lifecycle != nil {
 		t.Error("a nil setting kept the earlier value")
 	}
 }
@@ -72,6 +73,51 @@ func TestProgram_withHelpNilRemovesThePages(t *testing.T) {
 	p.WithHelp(func(...string) (string, error) { return "page", nil }).WithHelp(nil)
 	if _, err := p.Run(p.args); err != nil || page != "" {
 		t.Errorf("Help() = %q (err %v), want no page", page, err)
+	}
+}
+
+// TestProgram_withCompletionScriptReachesTheRun: a handler's Context.CompletionScript is the
+// program's, given the shell, and its error comes back as is.
+func TestProgram_withCompletionScriptReachesTheRun(t *testing.T) {
+	t.Parallel()
+	errNoShell := errors.New("no such shell")
+	scripts := func(shell string) (string, error) {
+		if shell != "zsh" {
+			return "", errNoShell
+		}
+		return "#compdef app\n", nil
+	}
+	var got string
+	var gotErr error
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		got, _ = rtx.CompletionScript("zsh")
+		_, gotErr = rtx.CompletionScript("tcsh")
+	}}
+	p, _, _ := newTestProgram(h, []string{"run"})
+	if _, err := p.WithCompletionScript(scripts).Run(p.args); err != nil {
+		t.Fatal(err)
+	}
+	if got != "#compdef app\n" || !errors.Is(gotErr, errNoShell) {
+		t.Errorf("CompletionScript = %q, %v; want the program's script, then its error", got, gotErr)
+	}
+}
+
+// TestProgram_withCompletionScriptNilIsAWiringError: with no scripts set, CompletionScript
+// reports the missing wiring, an internal error, rather than printing nothing.
+func TestProgram_withCompletionScriptNilIsAWiringError(t *testing.T) {
+	t.Parallel()
+	var script string
+	var err error
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { script, err = rtx.CompletionScript("zsh") }}
+	p, _, _ := newTestProgram(h, []string{"run"})
+	p.WithCompletionScript(func(string) (string, error) { return "script", nil }).WithCompletionScript(nil)
+	if _, runErr := p.Run(p.args); runErr != nil {
+		t.Fatal(runErr)
+	}
+	var we *WiringError
+	if script != "" || !errors.As(err, &we) || !errors.Is(err, ErrInternal) ||
+		!strings.Contains(err.Error(), "WithCompletionScript") {
+		t.Errorf("CompletionScript = %q, %v; want a WiringError naming WithCompletionScript", script, err)
 	}
 }
 
@@ -104,7 +150,8 @@ func TestContext_streamSetters(t *testing.T) {
 
 	var nilCtx *Context
 	if nilCtx.WithStdin(in) != nil || nilCtx.WithStdout(&out) != nil || nilCtx.WithStderr(&errs) != nil ||
-		nilCtx.WithOutputChecks(true) != nil || nilCtx.WithHelp(nil) != nil || nilCtx.WithParser(nil) != nil ||
+		nilCtx.WithOutputChecks(true) != nil || nilCtx.WithHelp(nil) != nil || nilCtx.WithCompletionScript(nil) != nil ||
+		nilCtx.WithParser(nil) != nil ||
 		nilCtx.WithInputReader(nil) != nil {
 		t.Error("a With setter on a nil Context returned non-nil")
 	}
@@ -115,11 +162,15 @@ func TestContext_settingsNilRestoreDefault(t *testing.T) {
 	t.Parallel()
 	rtx := NewContextFor(testDef(), nil).
 		WithHelp(func(...string) (string, error) { return "page", nil }).
+		WithCompletionScript(func(string) (string, error) { return "script", nil }).
 		WithParser(NewParser()).
 		WithInputReader(NewInputReader).
 		WithOutputChecks(true)
-	rtx.WithHelp(nil).WithParser(nil).WithInputReader(nil).WithOutputChecks(false)
-	if rtx.help != nil || rtx.parser != nil || rtx.readerFn != nil || rtx.outputChecks != nil {
+	if s, err := rtx.CompletionScript("zsh"); s != "script" || err != nil {
+		t.Errorf("CompletionScript = %q, %v; want the standalone Context's script", s, err)
+	}
+	rtx.WithHelp(nil).WithCompletionScript(nil).WithParser(nil).WithInputReader(nil).WithOutputChecks(false)
+	if rtx.help != nil || rtx.scripts != nil || rtx.parser != nil || rtx.readerFn != nil || rtx.outputChecks != nil {
 		t.Error("a nil or false setting kept the earlier value")
 	}
 }

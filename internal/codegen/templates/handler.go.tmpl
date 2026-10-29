@@ -152,7 +152,7 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.HaltWith(err)
 	}
 {{- else if .CompletionArg}}
-	script, err := {{.CompletionFunc}}(inputs.{{.Prefix}}.Arguments.{{.CompletionArg}})
+	script, err := rtx.CompletionScript(inputs.{{.Prefix}}.Arguments.{{.CompletionArg}})
 	if err != nil {
 		rtx.HaltWith(err)
 		return

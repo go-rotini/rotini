@@ -62,6 +62,40 @@ func TestDisableStub_replacesABuildConstraint(t *testing.T) {
 	}
 }
 
+// TestEnableStub_undoesDisableStub pins that a stub whose command comes back returns to the
+// build byte for byte, and that an author's build constraint, which disabling replaced, stays
+// gone.
+func TestEnableStub_undoesDisableStub(t *testing.T) {
+	if got := string(enableStub(disableStub([]byte(orphanStub)))); got != orphanStub {
+		t.Errorf("enableStub(disableStub(stub)) =\n%s\nwant the stub unchanged:\n%s", got, orphanStub)
+	}
+	constrained := "//go:build linux\n\n" + orphanStub
+	if got := string(enableStub(disableStub([]byte(constrained)))); got != orphanStub {
+		t.Errorf("re-enabled constrained stub =\n%s\nwant the stub without its constraint", got)
+	}
+	if got := string(enableStub([]byte(orphanStub))); got != orphanStub {
+		t.Errorf("enableStub changed a live stub:\n%s", got)
+	}
+}
+
+// TestPruneGoDir_legacyMarker pins that a stub written before v1.2.0, whose marker names
+// rotini.Handlers, is still recognized and retired.
+func TestPruneGoDir_legacyMarker(t *testing.T) {
+	dir := t.TempDir()
+	legacy := strings.Replace(orphanStub, stubMarker, legacyStubMarker, 1)
+	writeTestFile(t, dir, "demo_ship.go", legacy)
+	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "demo_ship.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stubDisabled(body) {
+		t.Errorf("a legacy stub was not disabled:\n%s", body)
+	}
+}
+
 // TestPruneGoDir_leavesClaimedFilesAlone pins the files pruning never touches.
 func TestPruneGoDir_leavesClaimedFilesAlone(t *testing.T) {
 	dir := t.TempDir()

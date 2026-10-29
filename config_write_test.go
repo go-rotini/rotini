@@ -562,6 +562,36 @@ func TestSetConfigValue_bigIntegers(t *testing.T) {
 	}
 }
 
+// A program whose only file is a .env file wires no configuration files, and still writes it.
+func TestSetConfigValue_envFileOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	def := Definition{Name: "app", Handler: "App"}
+	meta := pfSettings(ConfigFile{Name: "dotenv", As: "env", Format: "dotenv", Path: path, Keys: []ConfigKey{{Key: "APP_PORT", Type: "int"}}})
+	rtx := wiredFor(NewContextFor(def, nil).WithDir(dir).WithInputSettings(meta), def, meta)
+	if rtx.features().config != nil {
+		t.Fatal("the fixture wires configuration files")
+	}
+	if err := SetConfigValue(rtx, "dotenv", "APP_PORT", "80"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetConfigValue(rtx, "dotenv", "APP_PORT", "x"); !errors.Is(err, ErrUsage) {
+		t.Errorf("invalid value: %v", err)
+	}
+	if got := cwRead(t, path); got != "APP_PORT=80\n" {
+		t.Errorf("file:\n%s", got)
+	}
+	if p, exists, err := ConfigFilePath(rtx, "dotenv"); err != nil || p != path || !exists {
+		t.Errorf("ConfigFilePath = %q, %v, %v", p, exists, err)
+	}
+	if err := UnsetConfigValue(rtx, "dotenv", "APP_PORT"); err != nil || cwRead(t, path) != "" {
+		t.Errorf("unset: %v, file %q", err, cwRead(t, path))
+	}
+	if _, _, err := ConfigFilePath(wired(NewContextFor(def, nil).WithInputSettings(meta)), "dotenv"); !isWiringError(err) {
+		t.Errorf("no .env files wired: %v", err)
+	}
+}
+
 func TestSetConfigValue_unknownFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := SetConfigValue(cwContext(dir, nil, cwFile(filepath.Join(dir, "a.yaml"))), "nosuch", "region", "x"); !errors.Is(err, ErrInternal) {

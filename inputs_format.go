@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -59,6 +60,30 @@ func fallbackValueOrigin(reg *recon.Registry, view *osView, tag reflect.StructTa
 		source = leafSource
 	}
 	return valueOrigin(view, source, tag.Get("env"), key)
+}
+
+// rawText is a value recon read as [InputSource.Raw] gives it: a list's items joined with ", ",
+// a map's entries as sorted key=value pairs (nested maps as dotted keys), anything else as its
+// text.
+func rawText(val recon.Value) string {
+	switch val.Kind() {
+	case recon.SliceKind:
+		if items, err := val.AsSlice(); err == nil {
+			texts := make([]string, len(items))
+			for i, it := range items {
+				texts[i] = valueText(it)
+			}
+			return strings.Join(texts, ", ")
+		}
+	case recon.MapKind:
+		if m, err := val.AsMap(); err == nil {
+			var entries []string
+			flattenMap("", m, &entries)
+			slices.Sort(entries)
+			return strings.Join(entries, ", ")
+		}
+	}
+	return val.String()
 }
 
 // nestedEnvOrigin names a nested env family by its variables' shared prefix: "env:APP_HTTP__*".

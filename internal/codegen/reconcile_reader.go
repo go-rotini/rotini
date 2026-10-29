@@ -187,6 +187,13 @@ func decodeJSONNumbers(data []byte, out any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	if err := dec.Decode(out); err != nil {
+		// A syntax error carries only a byte offset; say where it is, as YAML and TOML do.
+		if se := (*json.SyntaxError)(nil); errors.As(err, &se) {
+			before := data[:min(max(se.Offset, 1), int64(len(data)))]
+			line := bytes.Count(before, []byte("\n")) + 1
+			col := len(before) - bytes.LastIndexByte(before, '\n') - 1
+			return fmt.Errorf("json: line %d, column %d: %w", line, col, err)
+		}
 		return fmt.Errorf("%w", err)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
@@ -217,6 +224,9 @@ func bytesToJSON(format fileFormat, data []byte) ([]byte, error) {
 	)
 	switch format {
 	case formatJSON:
+		if !json.Valid(data) {
+			return nil, errors.New("not valid JSON")
+		}
 		return data, nil
 	case formatJSONC:
 		out, err = jsonc.ToJSON(data)

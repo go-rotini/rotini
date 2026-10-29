@@ -1,0 +1,498 @@
+# R6 — the lifecycle across a composition boundary.
+#
+# `acme kid work` runs the hooks `kid work` runs, with acme's around them: every frame's
+# CascadingPreRun root to leaf, the leaf's PreRun, Run and PostRun, then every
+# CascadingPostRun leaf to root. Each handler below traces its hooks with the path of the
+# command whose hook it is. Both CLIs answer -h/--help and --version the way `rotini init`
+# seeds them: cascading, short_circuit flags read in the root's CascadingPreRun.
+
+gomodinit example.com/lifecycle
+
+exec rotini generate cmd/kid/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o kid$exe ./cmd/kid
+exec go build -o acme$exe ./cmd/acme
+
+# ── a full run: the parent's frame wraps the child's, which wraps the leaf's ──
+exec ./kid$exe work
+cmp stderr want/kid-work.txt
+stdout '^work: loud=false$'
+exec ./acme$exe kid work
+cmp stderr want/acme-kid-work.txt
+stdout '^work: loud=false$'
+
+# An alias and the child's own cascading flag cross the graft untouched.
+exec ./acme$exe kid --loud w
+cmp stderr want/acme-kid-work.txt
+stdout '^work: loud=true$'
+
+# ── a Halt in PreRun: no Run, and every hook that began still unwinds ──
+exec ./acme$exe kid work --halt
+cmp stderr want/acme-kid-work-halt.txt
+! stdout .
+
+# ── an error in Run: the whole teardown runs before the error is reported ──
+wantexit 1 ./acme$exe kid work --fail
+cmp stderr want/acme-kid-work-fail.txt
+
+# ── short-circuit flags ──
+# After `kid`, -h is the child's flag: the child's root answers, with the program's page for
+# the invoked command, and the leaf's hooks never begin.
+exec ./acme$exe kid work -h
+cmp stderr want/acme-kid-answers.txt
+stdout '^  acme kid work \[flags\]$'
+stdout '^      --loud +the child''s cascading flag$'
+stdout '^      --verbose +the parent''s cascading flag$'
+exec ./kid$exe work -h
+cmp stderr want/kid-answers.txt
+stdout '^  kid work \[flags\]$'
+! stdout 'verbose'
+
+# Before `kid`, --help is the parent's: the parent answers, for the same command.
+exec ./acme$exe --help kid work
+cmp stderr want/acme-answers.txt
+stdout '^  acme kid work \[flags\]$'
+
+# --version is answered by whichever root reads it, and names the program that runs.
+exec ./acme$exe kid work --version
+stdout '^acme \S+$'
+cmp stderr want/acme-kid-answers.txt
+exec ./kid$exe work --version
+stdout '^kid \S+$'
+
+# ── the help command: the child's, through the parent, scoped to the child ──
+exec ./acme$exe kid help work
+stdout '^  acme kid work \[flags\]$'
+cmp stderr want/acme-kid-help.txt
+exec ./acme$exe help kid work
+stdout '^  acme kid work \[flags\]$'
+exec ./kid$exe help work
+stdout '^  kid work \[flags\]$'
+wantexit 1 ./acme$exe kid help nope
+stderr 'no help for command "kid nope"'
+
+# ── usage errors ──
+# An unknown flag is reported by the first root that reads argv: the parent, through the
+# parent, so the child's hooks never begin.
+wantexit 1 ./acme$exe kid work --bogus
+cmp stderr want/acme-bogus.txt
+wantexit 1 ./kid$exe work --bogus
+cmp stderr want/kid-bogus.txt
+
+# An unknown command is the child's, reported the same both ways.
+wantexit 1 ./acme$exe kid nope
+stderr 'unknown command "nope" for "kid"'
+wantexit 1 ./kid$exe nope
+stderr 'unknown command "nope" for "kid"'
+
+# The child's flags are local by default, through the parent too: accepted only when the
+# child's root is the command run, wherever they are written.
+wantexit 1 ./acme$exe kid work --klocal
+stderr '^Error: --klocal belongs to "acme kid", not "acme kid work"$'
+wantexit 1 ./acme$exe kid --klocal work
+stderr '^Error: --klocal belongs to "acme kid", not "acme kid work"$'
+wantexit 1 ./kid$exe --klocal work
+stderr '^Error: --klocal belongs to "kid", not "kid work"$'
+exec ./acme$exe kid --klocal --help
+
+# ── hidden: not listed, still runs ──
+exec ./acme$exe kid --help
+! stdout 'secret'
+stdout '^jobs:$'
+stdout '^  work, w    does work$'
+exec ./acme$exe kid secret
+stdout '^secret ran$'
+
+-- want/kid-work.txt --
+hook: kid CascadingPreRun
+hook: kid work CascadingPreRun
+hook: kid work PreRun
+hook: kid work Run
+hook: kid work PostRun
+hook: kid work CascadingPostRun
+hook: kid CascadingPostRun
+-- want/acme-kid-work.txt --
+hook: acme CascadingPreRun
+hook: acme kid CascadingPreRun
+hook: acme kid work CascadingPreRun
+hook: acme kid work PreRun
+hook: acme kid work Run
+hook: acme kid work PostRun
+hook: acme kid work CascadingPostRun
+hook: acme kid CascadingPostRun
+hook: acme CascadingPostRun
+-- want/acme-kid-work-halt.txt --
+hook: acme CascadingPreRun
+hook: acme kid CascadingPreRun
+hook: acme kid work CascadingPreRun
+hook: acme kid work PreRun
+hook: acme kid work PostRun
+hook: acme kid work CascadingPostRun
+hook: acme kid CascadingPostRun
+hook: acme CascadingPostRun
+-- want/acme-kid-work-fail.txt --
+hook: acme CascadingPreRun
+hook: acme kid CascadingPreRun
+hook: acme kid work CascadingPreRun
+hook: acme kid work PreRun
+hook: acme kid work Run
+hook: acme kid work PostRun
+hook: acme kid work CascadingPostRun
+hook: acme kid CascadingPostRun
+hook: acme CascadingPostRun
+Error: work failed
+-- want/acme-kid-answers.txt --
+hook: acme CascadingPreRun
+hook: acme kid CascadingPreRun
+hook: acme kid CascadingPostRun
+hook: acme CascadingPostRun
+-- want/kid-answers.txt --
+hook: kid CascadingPreRun
+hook: kid CascadingPostRun
+-- want/acme-answers.txt --
+hook: acme CascadingPreRun
+hook: acme CascadingPostRun
+-- want/acme-kid-help.txt --
+hook: acme CascadingPreRun
+hook: acme kid CascadingPreRun
+hook: acme kid help CascadingPreRun
+hook: acme kid help PreRun
+hook: acme kid help Run
+hook: acme kid help PostRun
+hook: acme kid help CascadingPostRun
+hook: acme kid CascadingPostRun
+hook: acme CascadingPostRun
+-- want/acme-bogus.txt --
+hook: acme CascadingPreRun
+hook: acme CascadingPostRun
+Error: unknown flag "--bogus"
+-- want/kid-bogus.txt --
+hook: kid CascadingPreRun
+hook: kid CascadingPostRun
+Error: unknown flag "--bogus"
+-- cmd/acme/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: the parent
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: verbose
+      identifiers: [--verbose]
+      summary: the parent's cascading flag
+      cascading: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/acme/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: the child
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: loud
+      identifiers: [--loud]
+      summary: the child's cascading flag
+      cascading: true
+      schema: { type: bool }
+    - name: klocal
+      identifiers: [--klocal]
+      summary: the child's local flag
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: work
+      aliases: [w]
+      summary: does work
+      group: jobs
+      flags:
+        - name: halt
+          identifiers: [--halt]
+          summary: halt in PreRun
+          schema: { type: bool }
+        - name: fail
+          identifiers: [--fail]
+          summary: fail in Run
+          schema: { type: bool }
+    - name: secret
+      summary: not listed
+      hidden: true
+-- cmd/kid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kid/main.go
+    - type: cmd
+      file: internal/cmd/kid/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+-- internal/trace/trace.go --
+// Package trace prints each lifecycle hook as it runs, with the path of the command it
+// belongs to.
+package trace
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type Hooks struct{}
+
+func Say(rtx *rotini.Context, hook string) {
+	fmt.Fprintf(rtx.Stderr, "hook: %s %s\n", rtx.CommandPath(), hook)
+}
+
+func (Hooks) CascadingPreRun(_ context.Context, rtx *rotini.Context) { Say(rtx, "CascadingPreRun") }
+
+func (Hooks) PreRun(_ context.Context, rtx *rotini.Context) { Say(rtx, "PreRun") }
+
+func (Hooks) PostRun(_ context.Context, rtx *rotini.Context) { Say(rtx, "PostRun") }
+
+func (Hooks) CascadingPostRun(_ context.Context, rtx *rotini.Context) { Say(rtx, "CascadingPostRun") }
+
+// Answer is the seeded root's CascadingPreRun: it prints the help page or the version when
+// the root's short-circuit flag is set, and halts.
+func Answer(rtx *rotini.Context, help, version bool) {
+	Say(rtx, "CascadingPreRun")
+	switch {
+	case help:
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+	case version:
+		fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, rtx.Version())
+		rtx.HaltWithCode(0)
+	}
+}
+
+// Help is the help command's Run.
+func Help(rtx *rotini.Context, path []string) {
+	Say(rtx, "Run")
+	page, err := rtx.HelpFor(path...)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, page)
+}
+-- internal/cmd/acme/acme.go --
+package acme
+
+import (
+	"context"
+
+	"example.com/lifecycle/internal/trace"
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*acmeHandler)(nil)
+
+type acmeHandler struct{ trace.Hooks }
+
+func (*acmeHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	argv, err := rtx.ArgvInputs[AcmeInputs]()
+	if err != nil {
+		trace.Say(rtx, "CascadingPreRun")
+		rtx.HaltWith(err)
+		return
+	}
+	trace.Answer(rtx, argv.Values.Acme.Flags.Help, argv.Values.Acme.Flags.Version)
+}
+
+func (*acmeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	trace.Say(rtx, "Run")
+	if _, err := rtx.Inputs[AcmeInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	rtx.HaltWithCode(1)
+}
+-- internal/cmd/acme/acme_help.go --
+package acme
+
+import (
+	"context"
+
+	"example.com/lifecycle/internal/trace"
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*acmeHelpHandler)(nil)
+
+type acmeHelpHandler struct{ trace.Hooks }
+
+func (*acmeHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AcmeHelpInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	trace.Help(rtx, in.AcmeHelp.Arguments.Command)
+}
+-- internal/cmd/kid/kid.go --
+package kid
+
+import (
+	"context"
+
+	"example.com/lifecycle/internal/trace"
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*kidHandler)(nil)
+
+type kidHandler struct{ trace.Hooks }
+
+func (*kidHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	argv, err := rtx.ArgvInputs[KidInputs]()
+	if err != nil {
+		trace.Say(rtx, "CascadingPreRun")
+		rtx.HaltWith(err)
+		return
+	}
+	trace.Answer(rtx, argv.Values.Kid.Flags.Help, argv.Values.Kid.Flags.Version)
+}
+
+func (*kidHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	trace.Say(rtx, "Run")
+	if _, err := rtx.Inputs[KidInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	rtx.HaltWithCode(1)
+}
+-- internal/cmd/kid/kid_help.go --
+package kid
+
+import (
+	"context"
+
+	"example.com/lifecycle/internal/trace"
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*kidHelpHandler)(nil)
+
+type kidHelpHandler struct{ trace.Hooks }
+
+func (*kidHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KidHelpInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	trace.Help(rtx, in.KidHelp.Arguments.Command)
+}
+-- internal/cmd/kid/kid_work.go --
+package kid
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"example.com/lifecycle/internal/trace"
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*kidWorkHandler)(nil)
+
+type kidWorkHandler struct{ trace.Hooks }
+
+func (*kidWorkHandler) PreRun(ctx context.Context, rtx *rotini.Context) {
+	trace.Say(rtx, "PreRun")
+	in, err := rtx.Inputs[KidWorkInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.KidWork.Flags.Halt {
+		rtx.Halt()
+	}
+}
+
+func (*kidWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	trace.Say(rtx, "Run")
+	in, err := rtx.Inputs[KidWorkInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.KidWork.Flags.Fail {
+		rtx.HaltWith(errors.New("work failed"))
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "work: loud=%v\n", in.Kid.Flags.Loud)
+}
+-- internal/cmd/kid/kid_secret.go --
+package kid
+
+import (
+	"context"
+	"fmt"
+
+	"example.com/lifecycle/internal/trace"
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*kidSecretHandler)(nil)
+
+type kidSecretHandler struct{ trace.Hooks }
+
+func (*kidSecretHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "secret ran")
+}

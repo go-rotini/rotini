@@ -14,8 +14,8 @@
        After rendering, rotini drops blank lines (in roff they are stray space, not
        paragraph breaks) and trailing whitespace, and ends the page with a newline.
 
-       DATA: .PageName .Section .Source .Date .RelatedPages .Summary
-         .Description .Invocation .Usage/.UsageDerived .Passthrough .CommandGroups[]
+       DATA: .PageName .Section .Source .Date .RelatedPages .Header .Summary
+         .Description .Footer .Invocation .Usage/.UsageDerived .Passthrough .CommandGroups[]
          .Arguments[] .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Stdin
          .Output .ExitStatus[] .Examples[] .SeeAlso[]   (.Stdin and .Output are nil when the
          command declares none). .Passthrough is the command's name when every word after it
@@ -56,7 +56,7 @@
                 trim, trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
                 hasPrefix, hasSuffix, first, last, alsoSetBy, deprecation, stabilityNote, listed,
                 described. */ -}}
-{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}{{end -}}
+{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}{{end -}}
 {{- define "rules"}}{{with .Rules}}.br
 {{roff (join . "; ")}}
 {{end}}{{end -}}
@@ -89,11 +89,13 @@ Every word after \fB{{roff .}}\fR is passed through as written, so options go be
 {{end}}{{with .ResponseFiles}}.PP
 A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\fR), whose lines are read as arguments, one per line, until \fB\-\-\fR; to pass a word starting with \fB{{roff .}}\fR, double it (\fB{{roff .}}{{roff .}}x\fR).
 {{end}}
-{{if or .Description .Stability .Effects}}.SH DESCRIPTION
-{{with .Description}}{{roffBlock .}}
-{{end}}{{with .Stability}}{{if $.Description}}.PP
+{{if or .Header .Description .Stability .Effects}}.SH DESCRIPTION
+{{with .Header}}{{roffBlock .}}
+{{end}}{{with .Description}}{{if $.Header}}.PP
+{{end}}{{roffBlock .}}
+{{end}}{{with .Stability}}{{if or $.Header $.Description}}.PP
 {{end}}{{roff (stabilityNote .)}}
-{{end}}{{with .Effects}}{{if or $.Description $.Stability}}.PP
+{{end}}{{with .Effects}}{{if or $.Header $.Description $.Stability}}.PP
 {{end}}Effects: {{.}}
 {{end}}{{end}}
 {{range .CommandGroups}}.SH {{roffArg (upper (default "Commands" .Title))}}
@@ -110,7 +112,7 @@ A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\f
 {{with .Arguments}}.SH ARGUMENTS
 {{range .}}.TP
 \fI{{if .Required}}<{{roff .Name}}{{if .Variadic}}...{{end}}>{{else}}[{{roff .Name}}{{if .Variadic}}...{{end}}]{{end}}\fR
-{{roff .Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Constraints}} ({{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
+{{roff .Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}
 {{template "description" .}}{{template "rules" .}}{{if or .Env .ConfigKey}}.br
 {{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
 {{end}}{{template "values" .}}{{end}}{{end}}
@@ -157,6 +159,9 @@ A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\f
 {{with .DocsURL}}.br
 See \fI{{roff .}}\fR.
 {{end}}{{end}}{{end}}
+{{with .Footer}}.SH NOTES
+{{roffBlock .}}
+{{end}}
 {{with .Examples}}.SH EXAMPLES
 .RS 4
 .nf

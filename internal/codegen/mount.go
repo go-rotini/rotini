@@ -127,12 +127,17 @@ func planMounts(into, parentAbs string, specs []string, existing []mountedComman
 	for _, n := range own {
 		taken[n] = fmt.Sprintf("%s's own command %q", t.ref, n)
 	}
+	for name, tokens := range pluginTokens(t.cmd) {
+		for _, n := range tokens {
+			taken[n] = fmt.Sprintf("the plugin %q", name)
+		}
+	}
 	for _, c := range existing {
 		if c.gone && prune {
 			continue
 		}
 		for _, n := range c.names {
-			taken[n] = takenBy(c.ref, n)
+			taken[n] = takenBy(c.ref, c.names[0])
 		}
 	}
 	var errs []error
@@ -278,8 +283,37 @@ func refCommandNames(abs string) ([]string, error) {
 			}
 		}
 		names = append(names, c.Aliases...)
+		names = append(names, c.HiddenAliases...)
 	}
 	return names, nil
+}
+
+// pluginTokens maps each plugin written on cmd to the name and aliases it dispatches as.
+func pluginTokens(cmd *cfgedit.YAMLNode) map[string][]string {
+	p := specKey(cmd, "plugins")
+	if p == nil || p.Value.Kind != cfgedit.YAMLSequence {
+		return nil
+	}
+	out := map[string][]string{}
+	for _, item := range p.Value.Items {
+		if item.Value.Kind != cfgedit.YAMLMapping {
+			continue
+		}
+		name := specKey(item.Value, "name")
+		if name == nil || name.Value.Kind != cfgedit.YAMLScalar {
+			continue
+		}
+		tokens := []string{name.Value.Value}
+		if a := specKey(item.Value, "aliases"); a != nil && a.Value.Kind == cfgedit.YAMLSequence {
+			for _, v := range a.Value.Items {
+				if v.Value.Kind == cfgedit.YAMLScalar {
+					tokens = append(tokens, v.Value.Value)
+				}
+			}
+		}
+		out[name.Value.Value] = tokens
+	}
+	return out
 }
 
 func specKey(m *cfgedit.YAMLNode, key string) *cfgedit.YAMLPair {
@@ -307,10 +341,12 @@ func mountedCommands(list *cfgedit.YAMLPair, dir string) ([]mountedCommand, erro
 			if p := specKey(item.Value, "name"); p != nil && p.Value.Kind == cfgedit.YAMLScalar {
 				c.names = append(c.names, p.Value.Value)
 			}
-			if p := specKey(item.Value, "aliases"); p != nil && p.Value.Kind == cfgedit.YAMLSequence {
-				for _, a := range p.Value.Items {
-					if a.Value.Kind == cfgedit.YAMLScalar {
-						c.names = append(c.names, a.Value.Value)
+			for _, key := range []string{"aliases", "hidden_aliases"} {
+				if p := specKey(item.Value, key); p != nil && p.Value.Kind == cfgedit.YAMLSequence {
+					for _, a := range p.Value.Items {
+						if a.Value.Kind == cfgedit.YAMLScalar {
+							c.names = append(c.names, a.Value.Value)
+						}
 					}
 				}
 			}

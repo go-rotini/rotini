@@ -47,7 +47,10 @@
                 alsoSetBy, deprecation, stabilityNote, listed, described. */ -}}
 # {{.Invocation}}
 
-{{with .Summary}}{{.}}
+{{with .Header}}{{.}}
+
+{{end -}}
+{{- with .Summary}}{{.}}
 
 {{end -}}
 {{- with .Description}}{{.}}
@@ -107,7 +110,7 @@
 {{end -}}
 {{- with .Cascading}}## Global Flags
 
-{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Effects}} ({{.}}){{end}}{{with .Default}} (default {{code .}}){{end}}{{with .Implicit}} (implicit {{code .}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Effects}} ({{.}}){{end}}{{if .Required}} (required){{end}}{{with .Default}} (default {{code .}}){{end}}{{with .Implicit}} (implicit {{code .}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 

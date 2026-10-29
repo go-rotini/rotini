@@ -83,6 +83,7 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.HaltWith(err)` | fail: record the error and stop |
 | `rtx.Failed()` | whether anything has failed so far, for a teardown hook deciding to commit or roll back |
 | `rtx.Help()` / `rtx.Version()` | the command's help page and the program's version |
+| `rtx.CompletionScript(shell)` | the running program's completion script for a shell, which a generated `completion` handler prints |
 | `rtx.Usage()` | the command's usage line, for a reporter to print after a usage error; see [printing the usage line](/docs#printing-the-usage-line) |
 | `rtx.InputsWithReport[T]()` | the inputs plus where each value came from; `report.Format(w)` prints it; see [explaining where values came from](/docs#explaining-where-values-came-from) |
 | `rtx.WriteOutput(v, format, render)` | write a command's [structured output](/docs#structured-output) |
@@ -226,6 +227,7 @@ Generated code and most programs never need these, but they are supported:
 | `Program.WithParser` / `rotini.NewParser`, `rtx.Parser()` | parse the command line into a struct yourself |
 | `Program.WithInputReader` / `rotini.NewInputReader`, `Program.WithInputSettings` | replace how environment, config and stdin are read |
 | `Program.WithHelp` | replace where `rtx.Help()` finds a command's page |
+| `Program.WithCompletionScript` | replace where `rtx.CompletionScript(shell)` finds a shell's script |
 | `rotini.MergeInputs` / `rotini.MergeInputsWithReport` | merge input layers, your own included, in precedence order |
 | `rotini.ArgvOf` with `rotini.ArgvPath`, `rotini.ArgvSecrets` | turn an inputs value into a command line; see [turning inputs back into a command line](/docs#turning-inputs-back-into-a-command-line) |
 | `rotini.StripANSI(text)` | remove ANSI escapes, as Rotini does for man and markdown pages |

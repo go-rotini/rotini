@@ -1,3 +1,7 @@
+.ship is not reversible.
+
+Read the runbook first.
+
 ship a service
 
 This command is in beta: it may change in a minor release.
@@ -21,3 +25,5 @@ Global Flags:
   -h, --help            print help
   -v, --verbose         say more (repeatable)
       --color string    when to color (default auto) [auto|always|never]
+
+Report problems at https://example.com/ops/issues.

@@ -1,0 +1,279 @@
+# R2 — every way of producing help, man and markdown pages gives the binary the same pages.
+#
+# `embed` decides where a page is stored (a //go:embed file or a string literal) and `template`
+# who renders it (rotini's built-in or an editable *.tmpl). The four combinations, walked in
+# turn over one spec with verbatim pages, an alias, a hidden command and a help topic:
+#
+#   1. inline, built-in: the baseline.
+#   2. embed, built-in: the same pages, now also files the binary embeds.
+#   3. embed, template: an unedited seed renders the baseline; an edited one renders the edit,
+#      verbatim pages still win, and regenerating changes nothing.
+#   4. inline, template: the edited template's pages, and the stale embedded files are removed.
+#   5. back to inline, built-in: the baseline again, with the edited template left in place.
+
+gomodinit example.com/app
+
+# 1. inline, built-in.
+cp conf-inline.yaml cmd/app/.rotini.conf.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+! exists internal/cmd/app/renders
+! exists tmpl
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+exec ./app$exe
+stdout '^help app "APP VERBATIM HELP\\n"$'
+stdout '^help app-deploy "deploy a service\\n\\nUsage:\\n  app deploy \[flags\]'
+stdout '^help dep "deploy a service\\n'
+stdout '^help secret "hidden helper\\n'
+stdout '^man app-deploy "DEPLOY VERBATIM MAN\\n"$'
+stdout '^markdown app-status "# status verbatim\\n"$'
+stdout '^help app-filters "Filters narrow lists\.'
+! stdout 'mismatch'
+cp stdout base.txt
+
+# 2. embed, built-in: identical pages, and each embedded file is exactly what the binary serves.
+cp conf-embed.yaml cmd/app/.rotini.conf.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+grep '//go:embed renders/help_app_deploy.txt' internal/cmd/app/zz_app.go
+cmp internal/cmd/app/renders/app-deploy.1 want-deploy.1
+cmp internal/cmd/app/renders/markdown_app_status.md want-status.md
+exists internal/cmd/app/renders/help_app.topic.filters.txt
+exists internal/cmd/app/renders/help_app_secret.txt
+! exists tmpl
+exec go build -o app$exe ./cmd/app
+exec ./app$exe
+cmp stdout base.txt
+
+# 3. embed, template: the seed is the built-in, so nothing changes until it is edited.
+cp conf-both.yaml cmd/app/.rotini.conf.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exists tmpl/help.txt.tmpl
+exists tmpl/man.txt.tmpl
+exists tmpl/markdown.md.tmpl
+exec go build -o app$exe ./cmd/app
+exec ./app$exe
+cmp stdout base.txt
+
+cp custom-help.tmpl tmpl/help.txt.tmpl
+cp custom-man.tmpl tmpl/man.txt.tmpl
+cp custom-markdown.tmpl tmpl/markdown.md.tmpl
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go build -o app$exe ./cmd/app
+exec ./app$exe
+cmp stdout custom.txt
+
+# Regenerating is byte-for-byte a no-op, and the edited templates are the author's.
+cp internal/cmd/app/zz_app.go zz-before.txt
+cp internal/cmd/app/renders/help_app_deploy.txt help-before.txt
+cp internal/cmd/app/renders/app-status.1 man-before.txt
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+cmp internal/cmd/app/zz_app.go zz-before.txt
+cmp internal/cmd/app/renders/help_app_deploy.txt help-before.txt
+cmp internal/cmd/app/renders/app-status.1 man-before.txt
+cmp tmpl/help.txt.tmpl custom-help.tmpl
+cmp tmpl/man.txt.tmpl custom-man.tmpl
+cmp tmpl/markdown.md.tmpl custom-markdown.tmpl
+
+# 4. inline, template: the same edited pages as literals; the embedded files are stale and go.
+cp conf-tmpl.yaml cmd/app/.rotini.conf.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+! grep 'go:embed' internal/cmd/app/zz_app.go
+! exists internal/cmd/app/renders/help_app_deploy.txt
+! exists internal/cmd/app/renders/app-deploy.1
+! exists internal/cmd/app/renders/markdown_app.md
+exec go build -o app$exe ./cmd/app
+exec ./app$exe
+cmp stdout custom.txt
+
+# 5. template off: the built-in renders again, and the edited templates stay where they are.
+cp conf-inline.yaml cmd/app/.rotini.conf.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+cmp tmpl/help.txt.tmpl custom-help.tmpl
+exec go build -o app$exe ./cmd/app
+exec ./app$exe
+cmp stdout base.txt
+
+-- want-deploy.1 --
+DEPLOY VERBATIM MAN
+-- want-status.md --
+# status verbatim
+-- custom.txt --
+help app "APP VERBATIM HELP\n"
+help app-deploy "CUSTOM HELP app deploy"
+help app-status "CUSTOM HELP app status"
+help app-filters "CUSTOM HELP app help filters"
+help dep "CUSTOM HELP app deploy"
+help secret "CUSTOM HELP app secret"
+markdown app "CUSTOM MD app"
+markdown app-deploy "CUSTOM MD app deploy"
+markdown app-status "# status verbatim\n"
+markdown app-filters "CUSTOM MD app help filters"
+man app "CUSTOM MAN app\n"
+man app-deploy "DEPLOY VERBATIM MAN\n"
+man app-status "CUSTOM MAN app-status\n"
+man app-filters "CUSTOM MAN app-filters\n"
+-- custom-help.tmpl --
+CUSTOM HELP {{.Invocation}}
+-- custom-man.tmpl --
+CUSTOM MAN {{.PageName}}
+-- custom-markdown.tmpl --
+CUSTOM MD {{.Invocation}}
+-- conf-inline.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+    - type: man
+      enabled: true
+    - type: markdown
+      enabled: true
+-- conf-embed.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: man
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+      embed: true
+-- conf-both.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+      embed: true
+      template: true
+      template_dir: tmpl
+    - type: man
+      enabled: true
+      embed: true
+      template: true
+      template_dir: tmpl
+    - type: markdown
+      enabled: true
+      embed: true
+      template: true
+      template_dir: tmpl
+-- conf-tmpl.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+      template: true
+      template_dir: tmpl
+    - type: man
+      enabled: true
+      template: true
+      template_dir: tmpl
+    - type: markdown
+      enabled: true
+      template: true
+      template_dir: tmpl
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: the app
+  help: "APP VERBATIM HELP\n"
+  topics:
+    - name: filters
+      summary: how filters work
+      body: Filters narrow lists.
+  commands:
+    - name: deploy
+      summary: deploy a service
+      aliases: [dep]
+      man: "DEPLOY \u001b[1mVERBATIM\u001b[0m MAN\n"
+      flags:
+        - name: replicas
+          summary: how many
+          identifiers: [--replicas, -r]
+          schema: {type: int, default: 1}
+    - name: status
+      summary: show status
+      markdown: "# status verbatim\n"
+    - name: secret
+      summary: hidden helper
+      hidden: true
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+// Run prints every page each resolver serves, and flags a page list entry whose content is not
+// what the resolver returns for its path.
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	w := rtx.Stdout
+	for _, p := range MarkdownPages() {
+		page, err := Help(p.Path...)
+		fmt.Fprintf(w, "help %s %q%s\n", p.Name, page, errNote(err))
+	}
+	for _, path := range [][]string{{"dep"}, {"secret"}} {
+		page, err := Help(path...)
+		fmt.Fprintf(w, "help %s %q%s\n", path[0], page, errNote(err))
+	}
+	for _, p := range MarkdownPages() {
+		if page, err := Markdown(p.Path...); err != nil || page != p.Content {
+			fmt.Fprintf(w, "markdown %s mismatch\n", p.Name)
+		}
+		fmt.Fprintf(w, "markdown %s %q\n", p.Name, p.Content)
+	}
+	for _, p := range ManPages() {
+		if page, err := Man(p.Path...); err != nil || page != p.Content {
+			fmt.Fprintf(w, "man %s mismatch\n", p.Name)
+		}
+		fmt.Fprintf(w, "man %s %q\n", p.Name, p.Content)
+	}
+}
+
+func errNote(err error) string {
+	if err != nil {
+		return " error: " + err.Error()
+	}
+	return ""
+}

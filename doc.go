@@ -119,8 +119,9 @@
 //     A list of uint8 (or byte) is a list of integers on every channel, not raw bytes.
 //   - A typed configuration format (YAML, TOML, JSON, JSONC) holds numbers, not text: a whole
 //     number written as a float (450.0, 1e3) fills an integer input, and 1 or 0 fills a bool.
-//     A null list item is refused. Text (the command line, the environment, .env files) spells
-//     an integer as one.
+//     A null list item is refused, and so is a list or map for an input that takes one value,
+//     or among the entries of a map of single values. Text (the command line, the
+//     environment, .env files) spells an integer as one.
 //   - A value a configuration file puts in an untyped input (any, or a map or list of any)
 //     takes the shape JSON and YAML give it, whatever the format: a time, such as a TOML
 //     date-time, is its RFC 3339 text.

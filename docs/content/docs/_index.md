@@ -74,9 +74,10 @@ Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sum
 Beyond the schemas, `validate` catches specs that can never work: bounds or lengths that leave no
 value, enum values that aren't the declared type, `required` with a `default`, contradictory flag
 groups, config keys read with two types, an identifier that hides every identifier of a parent's
-cascading flag, `-ab` beside `-a` and `-b`, names that make the same Go identifier (two commands,
+cascading flag (also when the parent mounts the command's spec with `$ref`), `-ab` beside `-a` and `-b`, names that make the same Go identifier (two commands,
 inputs or schema properties, or a schema and a generated type), a Windows device name (`aux`,
-`con`, `com1`) in a generated package's path, and a Go keyword or `main` as a package name. It
+`con`, `com1`) in a generated package's path, a Go keyword or `main` as a package name, and a
+`main.go` in the cmd package's directory. It
 warns, without failing, about an identifier that hides only some of them, one-dash multi-letter
 identifiers, flags with no long form, a literal default on a secret input, an environment
 variable two inputs read differently, a summary of more than one line, a required flag that
@@ -679,6 +680,12 @@ Flags:
 A key set to null in a config file (`priority:` or `priority: null`) counts as not set, so the
 next file or the default applies.
 
+A list or map in a config file for an input that takes one value is a usage error naming the
+input, the file and the key, as is a list among a map input's entries:
+`--priority takes one value, not a list (from configuration file /home/ada/.config/todo/config.yaml, key defaults.priority)`.
+A list flag reads a list item by item, and a map flag reads a map's entries, nested maps as
+dotted keys. Given more than once on the command line, a single-value flag keeps the last value.
+
 Use `variable:` to name the environment variable exactly instead of deriving it. Config files can
 also be found by walking up from the working directory (`strategy: walk-up`) or read from a fixed
 `path:`; see [`config_files`](/specification#config_files).
@@ -798,7 +805,8 @@ $ TODO_TOKEN_FILE=/run/secrets/todo ./todo sync
 A `config_files` entry with `format: dotenv` and `as: env` supplies environment variables
 instead of configuration. Env inputs and flag fallbacks read it, and the real environment wins
 variable by variable, so the order is: command line, environment, `.env` file, configuration
-files, default. Its values are literal (`${OTHER}` is not expanded), and rotini's own variables
+files, default. A variable set to the empty string counts as unset when the `.env` file sets it,
+so `TODO_PORT= ./todo` keeps the file's `TODO_PORT`. Its values are literal (`${OTHER}` is not expanded), and rotini's own variables
 (`HOME`, `XDG_*`, `PATH`) never come from it. Prefer a fixed `path: .env` to discovery:
 
 {{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
@@ -890,12 +898,14 @@ list, and a map's entries merge.
   lists the defined ones, and carries them as `SuggestionFacts` candidates:
   `--profile: profile "lcoal" is not defined in configuration file /home/ada/.config/todo/config.yaml (profiles: default, local)`.
   A default that a file doesn't define just leaves the shared keys, and `--help` never fails on a
-  bad choice.
+  bad choice. It is reported before any other input error, such as a missing required flag the
+  profile might have set, and after a command line that doesn't parse.
 - **Several files** may share a selector: a profile is unknown only when none of them defines it.
 - **The file's `schema:`** checks the shared keys merged with the chosen profile, without the
   `profiles` key. Profiles that aren't chosen aren't read or checked.
 - **Provenance** names the profile: `config:user#profiles.local.server.host` for a key the
-  profile set, `config:user#server.port` for a shared one.
+  profile set, `config:user#server.port` for a shared one. A merged map names each entry's key,
+  and its shared entries the profile replaced are in the history.
 
 Profiles are a single top-level key of named maps; a kubeconfig-style list of contexts isn't
 supported. The generated [config schema](#editor-support-for-your-users-config) describes the
@@ -1060,7 +1070,12 @@ Each `InputSource` names its origin: `argv:<identifier as typed>`, `argv:<argume
 `env:<VARIABLE>` (`env:TODO_HTTP__*` for a nested family; the `variable_file` variable, such as
 `env:TODO_TOKEN_FILE`, for a value read from its file), `config:<file name>#<key>`, `default` or
 `stdin`. A hand-built layer's origin is empty, and the line names its layer. A streamed stdin
-prints `(stream)` and is never read.
+prints `(stream)` and is never read. A map merged from a [profile](#profiles) and the file's
+shared keys names each entry's own key, and lists the shared entries the profile replaced:
+
+```console
+App.Flags.Labels = "team=core, tier=api" from config:user#labels.team, config:user#profiles.prod.labels.tier; overrides config:user#labels.tier "web"
+```
 
 To offer this to users, declare a hidden short-circuit flag on the command and print the report
 in its handler, before checking the error, since the run may be the one being explained:
@@ -2811,8 +2826,13 @@ generated package:
 | `config_example` | an example of each config file in the repository, and `ConfigExample(name)` (see [Example config and .env files](#example-config-and-env-files)) |
 | `env_example` | a `.env.example` in the repository, and `EnvExample()` (see [Example config and .env files](#example-config-and-env-files)) |
 
-To expose one, add a command for it to the spec and call the function from its handler; for
-example, a `completion` command whose handler prints the script `Completion(shell)` returns.
+To expose one, add a command for it to the spec and call the function from its handler. A
+`completion` command's handler prints `rtx.CompletionScript(shell)`, the script of the program
+that is running, which the generated `NewProgram` sets to `Completion`.
+
+Generate removes the help, completion, man and markdown files it no longer writes: a removed
+command's pages, the old root's after a rename, and every file of a feature turned off
+(`enabled: false`), installed files included. Files it didn't write and editable templates stay.
 
 Pages show what the spec declares, so they stay accurate without editing:
 
@@ -2949,7 +2969,8 @@ share/man/man1/todo-add.1
 ```
 
 Each file holds exactly what `Completion(shell)` or `Man(path...)` returns. A man page whose
-command or topic is gone is removed on the next generate, and hidden commands get none. Don't use
+command or topic is gone, or that carries the root's old name, is removed on the next generate,
+as is every file of a feature turned off; hidden commands get none. Don't use
 GoReleaser's `dist/` directory, which it empties. Commit the files and let `rotini generate
 --dry-run` in CI keep them current, or generate them in the release job. A GoReleaser
 configuration then ships them:
@@ -3982,7 +4003,13 @@ the `$ref` entries for you, and can be re-run as CLIs are added or removed.
 Help inside a mounted child is the parent's: `acme db --help`, `acme db help migrate` and
 `acme help db migrate` all show the full path, through the handlers `rotini init` writes. Text the
 child's spec spells out, such as a footer naming its own program, is shown as written; set
-`footer` next to the `$ref` to word it for the parent.
+`footer` next to the `$ref` to word it for the parent. The generated `completion` and `version`
+handlers answer for the running program the same way: `acme db completion zsh` prints acme's
+script, and `acme db version` prints acme's version.
+
+A mounted child reads the environment variables it reads on its own, named under its own
+`env_prefix` (or none), whatever the parent declares, and the parent's help, man and markdown
+pages and contract list those names.
 
 A `mod://` child stays at the version `go.sum` pins, so upgrading rotini doesn't move it. Upgrade
 the child's module on its own, then regenerate; its own `version:` check reports it if it needs

@@ -1,0 +1,202 @@
+# R6 — the names a composed parent gives its children, and keeping it in step with them.
+#
+#   1. Two children whose specs share a root name mount under different names, and the parent
+#      builds: each is imported under its own alias and runs its own handlers.
+#   2. A name a child would take from a sibling's hidden alias, or from a plugin beside it, is
+#      refused, as it is between inline commands: dispatch would never reach one of the two.
+#   3. The help follows the spec as it is now: a group mount wrote and was then removed, a
+#      command added to a child, a child pruned once its spec is gone.
+
+gomodinit example.com/names
+
+exec rotini generate cmd/db/.rotini.spec.yaml --config cmd/db/.rotini.conf.yaml
+exec rotini generate cmd/olddb/.rotini.spec.yaml --config cmd/olddb/.rotini.conf.yaml
+
+# ── 1. two children named db ─────────────────────────────────────────────────
+exec rotini mount cmd/db/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --group data
+grep '^      group: data$' cmd/acme/.rotini.spec.yaml
+wantexit 1 rotini mount cmd/olddb/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml
+stderr 'the command name "db" is already taken by \.\./db/\.rotini\.spec\.yaml'
+
+# Mounted by hand under another name, the parent builds and each child runs its own code.
+cp acme-legacy.spec.yaml cmd/acme/.rotini.spec.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o acme$exe ./cmd/acme
+exec ./acme$exe db dump
+stdout '^db dump: '
+exec ./acme$exe legacy load
+stdout '^db load: '
+exec ./acme$exe --help
+stdout '^data:$'
+stdout '^  db +the current database$'
+stdout '^  legacy +the old database$'
+
+# ── 2. names a child can't take ──────────────────────────────────────────────
+cp clash-hidden.spec.yaml cmd/acme/.rotini.spec.yaml
+! exec rotini validate cmd/acme/.rotini.spec.yaml
+stderr 'duplicate command name or alias "db" among siblings'
+cp clash-plugin.spec.yaml cmd/acme/.rotini.spec.yaml
+! exec rotini validate cmd/acme/.rotini.spec.yaml
+stderr 'plugin "dbtool" is shadowed by a sibling command that also dispatches as "db"'
+! exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'also dispatches as "db"'
+
+# ── 3. the help follows the spec ─────────────────────────────────────────────
+# The group mount wrote is gone: db is listed with the other commands.
+cp acme-nogroup.spec.yaml cmd/acme/.rotini.spec.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go build -o acme$exe ./cmd/acme
+exec ./acme$exe --help
+! stdout 'data:'
+stdout '^Commands:$'
+stdout '^  db +the current database$'
+
+# A command added to the child shows up through the parent once both are regenerated.
+cp db-v2.spec.yaml cmd/db/.rotini.spec.yaml
+exec rotini generate cmd/db/.rotini.spec.yaml --config cmd/db/.rotini.conf.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go build -o acme$exe ./cmd/acme
+exec ./acme$exe db --help
+stdout '^  restore +restore a dump$'
+exec ./acme$exe db restore
+stdout '^db restore: '
+
+# The old child's spec is gone: the parent no longer validates until it is pruned.
+rm cmd/olddb
+! exec rotini validate cmd/acme/.rotini.spec.yaml
+stderr 'olddb'
+exec rotini mount --prune --into cmd/acme/.rotini.spec.yaml
+stdout '^removed \.\./olddb/\.rotini\.spec\.yaml: the file no longer exists$'
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go build -o acme$exe ./cmd/acme
+wantexit 1 ./acme$exe legacy load
+stderr 'legacy'
+exec ./acme$exe --help
+! stdout 'legacy'
+
+-- cmd/acme/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: the parent
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: old
+      summary: an inline command
+-- acme-legacy.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: the parent
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: old
+      summary: an inline command
+    - $ref: ../db/.rotini.spec.yaml
+      group: data
+    - $ref: ../olddb/.rotini.spec.yaml
+      name: legacy
+      summary: the old database
+      group: data
+-- acme-nogroup.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: the parent
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: old
+      summary: an inline command
+    - $ref: ../db/.rotini.spec.yaml
+    - $ref: ../olddb/.rotini.spec.yaml
+      name: legacy
+      summary: the old database
+-- clash-hidden.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  commands:
+    - name: old
+      hidden_aliases: [db]
+    - $ref: ../db/.rotini.spec.yaml
+-- clash-plugin.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  plugins:
+    - name: dbtool
+      aliases: [db]
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+-- cmd/acme/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+-- cmd/db/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the current database
+  commands:
+    - name: dump
+      summary: write a dump
+-- db-v2.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the current database
+  commands:
+    - name: dump
+      summary: write a dump
+    - name: restore
+      summary: restore a dump
+-- cmd/db/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/db/main.go
+    - type: cmd
+      file: internal/cmd/db/zz_rotini.go
+-- cmd/olddb/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database before the current one
+  commands:
+    - name: load
+      summary: read a dump
+-- cmd/olddb/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/olddb/main.go
+    - type: cmd
+      file: internal/cmd/olddb/zz_rotini.go

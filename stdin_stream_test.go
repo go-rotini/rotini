@@ -334,6 +334,25 @@ func TestStdinStream_jsonlSlice(t *testing.T) {
 	}
 }
 
+// CheckInputs checks each record of JSON Lines a handler collected itself against the record
+// schema, naming the record.
+func TestStdinStream_jsonlSliceCheckInputs(t *testing.T) {
+	rtx := stRTX(nil).WithInputSettings(ssRecMeta)
+	var in ssJSONLSliceInputs
+	in.App.Stdin = &[]ssRec{{Name: "a"}, {Name: "b", ID: 2}}
+	if err := rtx.CheckInputs(in, PresenceOf(in)); err != nil {
+		t.Fatalf("good records: %v", err)
+	}
+	in.App.Stdin = &[]ssRec{{Name: "a"}, {Name: ""}}
+	err := rtx.CheckInputs(in, PresenceOf(in))
+	if err == nil || !strings.HasPrefix(err.Error(), "stdin record 2: ") || !errors.Is(err, ErrUsage) {
+		t.Errorf("a bad record = %v, want a usage error naming record 2", err)
+	}
+	if err := wired(stRTX(nil).WithInputSettings(ssRecMeta)).CheckInputs(in, PresenceOf(in)); !isWiringError(err) {
+		t.Errorf("no schemas wired = %v, want a wiring error", err)
+	}
+}
+
 // ── bytes ────────────────────────────────────────────────────────────────────
 
 type ssBytesCmd struct {

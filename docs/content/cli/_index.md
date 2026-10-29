@@ -78,6 +78,10 @@ replaces an existing spec and conf with the starter ones and nothing else: `init
 file. Handlers for commands the starter spec does not have stay until your next `generate`, which
 disables them with `//go:build ignore`; the one after deletes them. Each step is reported.
 
+If `cmd/<name>/` already holds a spec or conf in another format (say `.rotini.spec.json` when
+you asked for YAML), `init` stops and names it. With `--force` it writes the new pair beside the
+old one and keeps both.
+
 On success `init` reports the way `generate` and `validate` do: the spec and conf it wrote, then
 the time and how long it took. In a module that does not yet require the rotini package, it also
 warns, since the first build would fail without it:
@@ -111,7 +115,7 @@ Flags:
                              plugin    a kubectl-style plugin named <host>-<plugin>, with completion through the host
                              daemon    a long-running serve command that stops cleanly on a signal
                              suite     two binaries composing one shared command from its own spec
-      --force              replace an existing spec and conf with the seed (never deletes a file)
+      --force              replace an existing spec and conf, or seed beside one in another format (never deletes a file)
   -n, --[no-]dry-run       show what init would write, and change nothing
 
 Global Flags:
@@ -337,6 +341,10 @@ With no arguments, `generate` reads the `.rotini.spec.*` in the working director
 `.rotini.conf.*` beside it; with no conf there, the conf defaults apply. It prints the two paths
 it read first. A `--config` path that does not exist is an error. It runs the same checks as
 `validate` first and prints the same warnings.
+
+`generate` never rewrites a handler file, so after you change the cmd target's `package:` in the
+conf it stops before writing anything and lists each file in the package's directory that still
+declares another package. Change those files' `package` lines (or the conf back) and run it again.
 
 Before its timing line, `generate` lists each file it created that is yours from then on: a
 handler for a new command, `main.go`, or an editable feature template. Files it rewrites on every

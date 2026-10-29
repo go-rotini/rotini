@@ -1,0 +1,181 @@
+# R2 — generate removes the pages the spec and conf no longer produce.
+#
+# Turning a feature off removes every page it wrote, embedded and installed; renaming the root
+# removes the man pages and installed completion scripts named after the old root, as it does
+# the help and markdown pages. A dry run lists each removal and exits 2. Seeded templates and
+# the author's own files stay.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exists internal/cmd/app/pages/app-deploy.1
+exists internal/cmd/app/pages/markdown_app_deploy.md
+exists internal/cmd/app/pages/man.txt.tmpl
+exists share/man/man1/app-deploy.1
+exists share/completions/app.bash
+
+# Man, markdown and completion off: a dry run lists every page as a deletion and removes none.
+cp conf-help-only.yaml cmd/app/.rotini.conf.yaml
+wantexit 2 rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml --dry-run
+stderr 'delete internal/cmd/app/pages/app-deploy\.1'
+stderr 'delete internal/cmd/app/pages/markdown_app\.md'
+stderr 'delete share/man/man1/app\.1'
+stderr 'delete share/completions/app\.bash'
+! stderr 'delete .*\.tmpl'
+! stderr 'notes\.txt|other\.1'
+exists internal/cmd/app/pages/app-deploy.1
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+! exists internal/cmd/app/pages/app.1
+! exists internal/cmd/app/pages/app-deploy.1
+! exists internal/cmd/app/pages/markdown_app_deploy.md
+! exists share/man/man1/app-deploy.1
+! exists share/completions/app.bash
+exists internal/cmd/app/pages/help_app_deploy.txt
+exists internal/cmd/app/pages/man.txt.tmpl
+exists internal/cmd/app/pages/markdown.md.tmpl
+exists internal/cmd/app/pages/notes.txt
+exists internal/cmd/app/pages/other.1
+exists share/man/man1/other.1
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# Nothing is left to remove.
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml --dry-run
+! stderr .
+
+# Everything back on, then the root renamed: the old root's pages and scripts go, embedded and
+# installed.
+cp conf-all.yaml cmd/app/.rotini.conf.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exists share/man/man1/app-deploy.1
+cp tool.spec.yaml cmd/app/.rotini.spec.yaml
+wantexit 2 rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml --dry-run
+stderr 'delete internal/cmd/app/pages/app-deploy\.1'
+stderr 'delete share/man/man1/app-deploy\.1'
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+! exists internal/cmd/app/pages/app.1
+! exists internal/cmd/app/pages/app-deploy.1
+! exists internal/cmd/app/pages/help_app_deploy.txt
+! exists share/man/man1/app.1
+! exists share/man/man1/app-deploy.1
+! exists share/completions/app.bash
+exists internal/cmd/app/pages/tool-deploy.1
+exists share/man/man1/tool-deploy.1
+exists share/completions/tool.bash
+exists internal/cmd/app/pages/other.1
+exists share/man/man1/other.1
+exists internal/cmd/app/pages/man.txt.tmpl
+
+-- internal/cmd/app/pages/notes.txt --
+the author's notes
+-- internal/cmd/app/pages/other.1 --
+the author's own page
+-- share/man/man1/other.1 --
+the author's own page
+-- tool.spec.yaml --
+version: 0.0.0
+command:
+  name: tool
+  summary: the app
+  commands:
+    - name: deploy
+      summary: deploy a service
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: the app
+  commands:
+    - name: deploy
+      summary: deploy a service
+-- conf-help-only.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/pages
+    - type: man
+      enabled: false
+      embed: true
+      embed_dir: internal/cmd/app/pages
+      template: true
+      template_dir: internal/cmd/app/pages
+      install_dir: share
+    - type: completion
+      enabled: false
+      install_dir: share
+    - type: markdown
+      enabled: false
+      embed: true
+      embed_dir: internal/cmd/app/pages
+      template: true
+      template_dir: internal/cmd/app/pages
+-- conf-all.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/pages
+    - type: man
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/pages
+      template: true
+      template_dir: internal/cmd/app/pages
+      install_dir: share
+    - type: completion
+      enabled: true
+      install_dir: share
+    - type: markdown
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/pages
+      template: true
+      template_dir: internal/cmd/app/pages
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/pages
+    - type: man
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/pages
+      template: true
+      template_dir: internal/cmd/app/pages
+      install_dir: share
+    - type: completion
+      enabled: true
+      install_dir: share
+    - type: markdown
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/pages
+      template: true
+      template_dir: internal/cmd/app/pages

@@ -50,6 +50,11 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 		lay.modelsHeader = m.Header
 		// Pointing models at the cmd file is a no-op split: same file, same package.
 		lay.splitModels = lay.modelsDir != lay.cmdDir || lay.modelsFile != lay.cmdFile
+		// A models file beside the cmd file is a second file of the cmd package.
+		lay.modelsInCmd = lay.splitModels && lay.modelsDir == lay.cmdDir
+		if lay.modelsInCmd && m.Package == "" {
+			lay.modelsPkgName = cmdPkgName
+		}
 	}
 
 	return lay
@@ -136,4 +141,5 @@ type layout struct {
 	modelsPkgName string // models package name
 	modelsImport  string // models import path
 	splitModels   bool   // true when models resolves somewhere other than the cmd file
+	modelsInCmd   bool   // true when the models file is in the cmd package's directory
 }

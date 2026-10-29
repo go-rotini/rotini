@@ -1,5 +1,9 @@
 # ops deploy
 
+.ship is not reversible.
+
+Read the runbook first.
+
 ship a service
 
 This command is in beta: it may change in a minor release.
@@ -42,3 +46,5 @@ ops deploy [flags] <service> [replicas]
 
 - `0` — shipped
 - `4` (`rejected`) — the cluster refused it ([docs](https://example.com/ops/rejected))
+
+Report problems at https://example.com/ops/issues.

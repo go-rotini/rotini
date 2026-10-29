@@ -4,11 +4,15 @@ ops\-deploy \- ship a service
 .SH SYNOPSIS
 \fBops deploy\fR [flags] <service> [replicas]
 .SH DESCRIPTION
+\&.ship is not reversible.
+.PP
+Read the runbook first.
+.PP
 This command is in beta: it may change in a minor release.
 .SH ARGUMENTS
 .TP
 \fI<service>\fR
-the service to ship (length 2..63)
+the service to ship
 .sp
 The service to ship, by its registry name.
 .sp
@@ -17,41 +21,41 @@ Names are lowercase.
 2 to 63 characters; matches \(ga^[a\-z][a\-z0\-9\-]*$\(ga
 .TP
 \fI[replicas]\fR
-how many copies (>= 1)
+how many copies
 .br
 at least 1
 .SH "OPTIONS"
 .TP
 \fB\-p\fR, \fB\-\-port\fR \fIint\fR
-listen port (default 8080) (1..65535)
+listen port (default 8080)
 .sp
 The port the service listens on.
 .br
 between 1 and 65535
 .TP
 \fB\-\-ratio\fR \fIfloat64\fR
-traffic share (> 0, <= 1) (experimental)
+traffic share (experimental)
 .br
 greater than 0 and at most 1
 .TP
 \fB\-\-step\fR \fIint\fR
-rollout step (multiple of 5)
+rollout step
 .br
 a multiple of 5
 .TP
 \fB\-\-tag\fR \fI[]string\fR
-a label (1..5 values, length <= 10, repeatable)
+a label
 .br
 1 to 5 values; each value at most 10 characters; several values per occurrence,
 separated by ","; repeatable
 .TP
 \fB\-\-timeout\fR \fIduration\fR
-how long to wait (>= 1s, < 1h)
+how long to wait
 .br
 at least 1s and less than 1h
 .TP
 \fB\-e\fR, \fB\-\-env\fR \fImap[string]string\fR
-extra environment (<= 8 values, repeatable)
+extra environment
 .br
 at most 8 values; repeatable
 .SH "GLOBAL OPTIONS"
@@ -60,7 +64,7 @@ at most 8 values; repeatable
 print help
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
-say more (repeatable)
+say more
 .br
 repeat to count: \-vvv
 .TP
@@ -75,5 +79,7 @@ shipped
 the cluster refused it
 .br
 See \fIhttps://example.com/ops/rejected\fR.
+.SH NOTES
+Report problems at https://example.com/ops/issues.
 .SH "SEE ALSO"
 \fBops\fR(1)

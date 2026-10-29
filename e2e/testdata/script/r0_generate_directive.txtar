@@ -1,0 +1,108 @@
+# R0 — the //go:generate line generate writes into main.go regenerates that program, wherever
+# its spec and conf live and whatever they are called.
+#
+# go generate runs a directive in its file's directory, so the line names the spec and conf
+# relative to main.go: a spec kept apart from the entrypoint, a conf in another format than
+# the spec, and files with their own names must all be reachable from it.
+
+gomodinit example.com/dirs
+
+# ── the spec and conf in a directory of their own ────────────────────────────
+mkdir specs/app
+cp app.spec.yaml specs/app/.rotini.spec.yaml
+cp app.conf.yaml specs/app/.rotini.conf.yaml
+exec rotini generate specs/app/.rotini.spec.yaml
+grep '^//go:generate go tool rotini generate \.\./\.\./specs/app/\.rotini\.spec\.yaml --config \.\./\.\./specs/app/\.rotini\.conf\.yaml$' cmd/app/main.go
+
+# ── a YAML spec beside a JSON conf ───────────────────────────────────────────
+mkdir cmd/mixed
+cp mixed.spec.yaml cmd/mixed/.rotini.spec.yaml
+cp mixed.conf.json cmd/mixed/.rotini.conf.json
+exec rotini generate cmd/mixed/.rotini.spec.yaml
+grep '^//go:generate go tool rotini generate \./\.rotini\.spec\.yaml --config \./\.rotini\.conf\.json$' cmd/mixed/main.go
+
+# ── files with names of their own, passed explicitly ─────────────────────────
+mkdir cmd/named
+cp named.spec.yaml cmd/named/spec.yaml
+cp named.conf.yaml cmd/named/conf.yaml
+exec rotini generate cmd/named/spec.yaml --config cmd/named/conf.yaml
+grep '^//go:generate go tool rotini generate \./spec\.yaml --config \./conf\.yaml$' cmd/named/main.go
+
+exec go mod tidy
+exec go build ./...
+
+# Every directive finds its files: a new command reaches all three programs.
+cp app-ship.spec.yaml specs/app/.rotini.spec.yaml
+cp mixed-ship.spec.yaml cmd/mixed/.rotini.spec.yaml
+cp named-ship.spec.yaml cmd/named/spec.yaml
+exec go generate ./...
+exists internal/cmd/app/app_ship.go
+exists internal/cmd/mixed/mixed_ship.go
+exists internal/cmd/named/named_ship.go
+exec go build ./...
+
+-- app.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+-- app-ship.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+  commands:
+    - name: ship
+      summary: ship it
+-- app.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+-- mixed.spec.yaml --
+version: 0.0.0
+command:
+  name: mixed
+  summary: a demo
+-- mixed-ship.spec.yaml --
+version: 0.0.0
+command:
+  name: mixed
+  summary: a demo
+  commands:
+    - name: ship
+      summary: ship it
+-- mixed.conf.json --
+{
+  "version": "0.0.0",
+  "generate": {
+    "packages": [
+      {"type": "main", "file": "cmd/mixed/main.go"},
+      {"type": "cmd", "file": "internal/cmd/mixed/zz_mixed.go"}
+    ]
+  }
+}
+-- named.spec.yaml --
+version: 0.0.0
+command:
+  name: named
+  summary: a demo
+-- named-ship.spec.yaml --
+version: 0.0.0
+command:
+  name: named
+  summary: a demo
+  commands:
+    - name: ship
+      summary: ship it
+-- named.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/named/main.go
+    - type: cmd
+      file: internal/cmd/named/zz_named.go

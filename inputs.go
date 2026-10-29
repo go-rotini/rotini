@@ -35,8 +35,11 @@ type InputSource struct {
 	// typed), "argv:<target>" (an argument), "env:TASKR_PORT", "env:TASKR_TOKEN_FILE" (read
 	// from the file a variable_file variable names), "env:TASKR_HTTP__*" (a nested env family),
 	// "config:user#deploy.port" (a configuration file's name and key),
-	// "config:user#profiles.prod.port" (a key of the selected profile), "default" or "stdin". It
-	// is "" for a hand-built layer, which names itself by Layer.
+	// "config:user#profiles.prod.port" (a key of the selected profile), "default" or "stdin". A
+	// map merged from the selected profile and the file's shared keys lists each entry's own
+	// origin, by key ("config:user#labels.team, config:user#profiles.prod.labels.tier"), and
+	// each shared entry the profile replaced is in the field's history below it. It is "" for a
+	// hand-built layer, which names itself by Layer.
 	Origin string
 }
 
@@ -82,6 +85,9 @@ type layerCore struct {
 	// view is the run's environment and directory, which a merged report checks hand-built
 	// values against.
 	view *osView
+	// shadowed is what a field's value overrode within the layer, low → high: the shared
+	// entries a profile's map replaced, which the report lists under the layer's own entry.
+	shadowed map[FieldPath][]InputSource
 }
 
 // ── the one-liner ────────────────────────────────────────────────────────────.
@@ -132,15 +138,25 @@ func (rtx *Context) InputsWithReport[T any]() (T, InputReport, error) {
 	if err != nil {
 		return zero, InputReport{}, err
 	}
-	files, err := rtx.FileInputs[T]()
-	if err != nil {
-		return zero, InputReport{}, err
-	}
-	env, err := rtx.EnvInputs[T]()
-	if err != nil {
-		return zero, InputReport{}, err
-	}
 	argv, err := rtx.ArgvInputs[T]()
+	if err != nil {
+		return zero, InputReport{}, err
+	}
+	if err := checkProfileLayer(readerFor(rtx), rtx, reflect.ValueOf(&zero).Elem()); err != nil {
+		return zero, InputReport{}, err
+	}
+	// Each fallback layer skips a value it can't use for an input a higher layer supplies, as
+	// Inputs never reads it.
+	var above layerShadow
+	above.add(argv.core)
+	env := InputLayer[T]{Name: "env"}
+	env.Set, env.core, err = envLayer(readerFor(rtx), rtx, reflect.ValueOf(&env.Values).Elem(), above)
+	if err != nil {
+		return zero, InputReport{}, err
+	}
+	above.add(env.core)
+	files := InputLayer[T]{Name: "files"}
+	files.Set, files.core, err = filesLayer(readerFor(rtx), rtx, reflect.ValueOf(&files.Values).Elem(), above)
 	if err != nil {
 		return zero, InputReport{}, err
 	}
@@ -173,7 +189,7 @@ func (rtx *Context) ArgvInputs[T any]() (InputLayer[T], error) {
 // one. A missing required input or a constraint violation is this call's error.
 func (rtx *Context) EnvInputs[T any]() (InputLayer[T], error) {
 	var t T
-	set, core, err := envLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())
+	set, core, err := envLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem(), layerShadow{})
 	return InputLayer[T]{Name: "env", Values: t, Set: set, core: core}, err
 }
 
@@ -183,7 +199,7 @@ func (rtx *Context) EnvInputs[T any]() (InputLayer[T], error) {
 // that declares one. Required and constraint failures are this call's errors.
 func (rtx *Context) FileInputs[T any]() (InputLayer[T], error) {
 	var t T
-	set, core, err := filesLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())
+	set, core, err := filesLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem(), layerShadow{})
 	return InputLayer[T]{Name: "files", Values: t, Set: set, core: core}, err
 }
 
@@ -239,6 +255,7 @@ func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport) {
 				rep.handBuilt[path] = true
 			} else {
 				delete(rep.handBuilt, path)
+				rep.history[path] = append(rep.history[path], l.core.shadowed[path]...)
 			}
 			rep.set[path] = prov
 			rep.history[path] = append(rep.history[path], prov)
@@ -660,7 +677,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 
 // envLayer acquires the env channel (Env structs + flag env-fallbacks) into v. A registry is
 // built only for the inputs v describes.
-func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
+func envLayer(b *InputReader, rtx *Context, v reflect.Value, above layerShadow) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
 	if err != nil {
 		return nil, nil, err
@@ -684,7 +701,7 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 		return nil, nil, err
 	}
 	labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
-	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), labels)
+	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), labels, above)
 }
 
 // envRegistries builds the environment channel's registries for the inputs v describes: the
@@ -734,31 +751,12 @@ func argvWaived(rtx *Context, chain []Command) bool {
 // too: argv and env are re-read best-effort to learn where the files channel should look, and
 // a malformed argv contributes nothing — [Context.ArgvInputs] owns reporting it. No file is
 // read when v describes no config inputs and no flag with a fallback.
-func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
-	chain, err := layerChain(rtx)
+func filesLayer(b *InputReader, rtx *Context, v reflect.Value, above layerShadow) (Presence, *layerCore, error) {
+	chain, view, boot, waived, err := filesBootstrap(b, rtx, v)
 	if err != nil {
 		return nil, nil, err
 	}
-	view := rtx.osView().withFileCache()
-	boot := fileBootstrap{paths: map[string]pathOverride{}}
-	waived := false
-	store, perr := parseInto(chain, rtx.Argv, rtx.argvAcq())
-	if perr == nil {
-		boot.paths = b.pathOverrides(chain, store, view)
-		waived = shortCircuited(chain, store)
-	}
 	fs := rtx.features()
-	if view, err = b.envFileView(fs, chain, v, boot.paths, waived, view); err != nil {
-		return nil, nil, err
-	}
-	if perr == nil {
-		if view.hasInputEnv() {
-			boot.paths = b.pathOverrides(chain, store, view)
-		}
-		if boot.profiles, err = b.selectProfiles(fs, chain, store, view); err != nil {
-			return nil, nil, err
-		}
-	}
 	var reg *recon.Registry
 	var cfg *cfgRegs
 	// Without configuration files wired, flag fallbacks with no file to read find nothing here.
@@ -784,18 +782,103 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 	}
 	labels := cfg.labels()
 	labels.view = view
-	return channelLayer(v, chain, anchor, "files", "Config", reg, reg, cfg, waived, labels)
+	return channelLayer(v, chain, anchor, "files", "Config", reg, reg, cfg, waived, labels, above)
+}
+
+// filesBootstrap is what the files channel reads before any configuration file: the chain, the
+// run's view with its .env files, the config_source paths and selected profiles, and whether
+// the command line short-circuits the run.
+func filesBootstrap(b *InputReader, rtx *Context, v reflect.Value) (chain []Command, view *osView, boot fileBootstrap, waived bool, err error) {
+	if chain, err = layerChain(rtx); err != nil {
+		return nil, nil, boot, false, err
+	}
+	view = rtx.osView().withFileCache()
+	boot.paths = map[string]pathOverride{}
+	store, perr := parseInto(chain, rtx.Argv, rtx.argvAcq())
+	if perr == nil {
+		boot.paths = b.pathOverrides(chain, store, view)
+		waived = shortCircuited(chain, store)
+	}
+	fs := rtx.features()
+	if view, err = b.envFileView(fs, chain, v, boot.paths, waived, view); err != nil {
+		return nil, nil, boot, false, err
+	}
+	if perr == nil {
+		if view.hasInputEnv() {
+			boot.paths = b.pathOverrides(chain, store, view)
+		}
+		if boot.profiles, err = b.selectProfiles(fs, chain, store, view); err != nil {
+			return nil, nil, boot, false, err
+		}
+	}
+	return chain, view, boot, waived, nil
+}
+
+// checkProfileLayer reports an unknown profile for the inputs v describes, as [Context.Inputs]
+// does before it reads any value.
+func checkProfileLayer(b *InputReader, rtx *Context, v reflect.Value) error {
+	fs := rtx.features()
+	if fs.profiles == nil || !slices.ContainsFunc(b.configFiles, func(f ConfigFile) bool { return f.Profiles != nil }) {
+		return nil
+	}
+	chain, view, boot, waived, err := filesBootstrap(b, rtx, v)
+	if err != nil {
+		return err
+	}
+	return fs.profiles.check(b, v, chain, boot, waived, view)
+}
+
+// layerShadow is what the layers above a fallback layer supply: the flags each scope sets and
+// the leaf's arguments, by index. A fallback for one of them is never the value Inputs binds.
+type layerShadow struct {
+	flags []map[string]bool
+	args  map[int]bool
+}
+
+// add records what core's layer supplied.
+func (s *layerShadow) add(core *layerCore) {
+	if core == nil || core.store == nil {
+		return
+	}
+	if len(s.flags) < len(core.store.scopes) {
+		s.flags = append(s.flags, make([]map[string]bool, len(core.store.scopes)-len(s.flags))...)
+	}
+	for i, sc := range core.store.scopes {
+		for name := range sc.flags {
+			if s.flags[i] == nil {
+				s.flags[i] = map[string]bool{}
+			}
+			s.flags[i][name] = true
+		}
+	}
+	if s.args == nil {
+		s.args = map[int]bool{}
+	}
+	if n := len(core.store.scopes); n > 0 {
+		for i := range core.store.scopes[n-1].argvArgs {
+			s.args[i] = true
+		}
+	}
+	for i := range core.argOrigins {
+		s.args[i] = true
+	}
+}
+
+func (s layerShadow) flag(scope int, name string) bool {
+	return scope < len(s.flags) && s.flags[scope][name]
 }
 
 // channelLayer is the shared env/files core: recon-bind each command's channel struct,
 // constraint-check the provided values, fill flag fallbacks, and record presence for
 // everything the channel supplied. A short-circuited run (waived) skips the requirement checks
 // and a configuration value of the wrong type. A nil registry reads nothing. labels names the
-// channel's inputs and files in errors.
-func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs, waived bool, labels channelLabels) (Presence, *layerCore, error) {
+// channel's inputs and files in errors. A fallback value of the wrong type for a flag or
+// argument that above supplies is skipped.
+func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs, waived bool, labels channelLabels, above layerShadow) (Presence, *layerCore, error) {
 	view := labels.view
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
+	shadowed := map[FieldPath][]InputSource{} // what a map merged from a profile and the shared keys overrode
 	var bindErr error
 	var placed, origins map[int]string // the leaf's argument fallbacks, by position, and where each came from, by argument
 
@@ -804,18 +887,18 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 			return
 		}
 		if reg != nil {
-			if err := fillChannelStruct(set, ci, topName, structName, layerName, reg, cfg, waived, labels); err != nil {
+			if err := fillChannelStruct(set, shadowed, ci, topName, structName, layerName, reg, cfg, waived, labels); err != nil {
 				bindErr = err
 				return
 			}
 		}
 		if flagReg != nil {
-			rd := fallbackRead{view: view, waiveFiles: waived, files: labels.files}
+			rd := fallbackRead{view: view, waiveFiles: waived, files: labels.files, above: above}
 			if cfg != nil {
 				rd.selectors = cfg.boot.selectorFlags(cfg.files)
 				rd.pathFlags = pathFlags(cfg.files)
 			}
-			if err := recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg, rd); err != nil {
+			if err := recordFlagFallbacks(set, shadowed, store, ci, chain, scope, topName, layerName, flagReg, rd); err != nil {
 				bindErr = err
 				return
 			}
@@ -827,12 +910,12 @@ func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, struc
 	if bindErr != nil {
 		return nil, nil, bindErr
 	}
-	return set, &layerCore{chain: chain, store: store, argDefaults: placed, argOrigins: origins, anchor: anchor, anchored: true, view: view}, nil
+	return set, &layerCore{chain: chain, store: store, argDefaults: placed, argOrigins: origins, anchor: anchor, anchored: true, view: view, shadowed: shadowed}, nil
 }
 
 // fillChannelStruct binds one command's channel struct from the registry, validates it, and
 // records where each field's value came from.
-func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs, waived bool, labels channelLabels) error {
+func fillChannelStruct(set Presence, shadowed map[FieldPath][]InputSource, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs, waived bool, labels channelLabels) error {
 	view := labels.view
 	cs := ci.FieldByName(structName)
 	if !cs.IsValid() || cs.Kind() != reflect.Struct {
@@ -872,7 +955,7 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 	}
 
 	eachTaggedField(ci, structName, func(fieldName, _ string, tag reflect.StructTag, _ reflect.Value) {
-		recordChannelField(set, tag, topName, structName, layerName, fieldName, reg, cfg, nested, view)
+		recordChannelField(set, shadowed, tag, topName, structName, layerName, fieldName, reg, cfg, nested, view)
 		if x, ok := expanded[reconKey(tag.Get("recon"))]; ok {
 			src := set[fieldPath(topName, structName, fieldName)]
 			src.Raw = x
@@ -884,7 +967,7 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 
 // recordChannelField records which layer supplied one channel field and its raw value,
 // redacted when the input is secret. A pinned field is read from its own file's registry alone.
-func recordChannelField(set Presence, tag reflect.StructTag, topName, structName, layerName, fieldName string, reg *recon.Registry, cfg *cfgRegs, nested map[string]bool, view *osView) {
+func recordChannelField(set Presence, shadowed map[FieldPath][]InputSource, tag reflect.StructTag, topName, structName, layerName, fieldName string, reg *recon.Registry, cfg *cfgRegs, nested map[string]bool, view *osView) {
 	body := tag.Get("recon")
 	key := reconKey(body)
 	if key == "" {
@@ -908,17 +991,24 @@ func recordChannelField(set Presence, tag reflect.StructTag, topName, structName
 		return
 	}
 	if val, found, err := fieldReg.Get(key); err == nil && found {
-		set[fieldPath(topName, structName, fieldName)] = InputSource{
+		path := fieldPath(topName, structName, fieldName)
+		secret := reconHasSecret(body)
+		origin := valueOrigin(view, val.Source(), tag.Get("env"), key)
+		if credit, overridden, ok := profileMapCredits(fieldReg, view, key, val, layerName, secret); ok {
+			origin = credit
+			shadowed[path] = overridden
+		}
+		set[path] = InputSource{
 			Layer:  layerName,
-			Raw:    redactValue(val.String(), reconHasSecret(body)),
-			Origin: valueOrigin(view, val.Source(), tag.Get("env"), key),
+			Raw:    redactValue(rawText(val), secret),
+			Origin: origin,
 		}
 	}
 }
 
 // recordFlagFallbacks fills the flags that declare a recon key and records their provenance
 // and raw text, so a later argv layer can still override them.
-func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []Command, scope int, topName, layerName string, flagReg *recon.Registry, rd fallbackRead) error {
+func recordFlagFallbacks(set Presence, shadowed map[FieldPath][]InputSource, store *parsedInputs, ci reflect.Value, chain []Command, scope int, topName, layerName string, flagReg *recon.Registry, rd fallbackRead) error {
 	var bindErr error
 	eachTaggedField(ci, "Flags", func(fieldName, logical string, tag reflect.StructTag, f reflect.Value) {
 		if bindErr != nil {
@@ -930,15 +1020,26 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 		}
 		fd, _ := findFlagDef(chain[scope].Flags, logical)
 		vals, origin, err := bindFlagFallback(fallbackLookup{reg: flagReg}, f, tag, key, fd, chain, scope, rd)
+		if err != nil && rd.above.flag(scope, logical) && !isWiringError(err) {
+			return
+		}
 		if err != nil || vals == nil {
 			bindErr = err
 			return
 		}
 		recordOrigin(store, scope, logical, origin)
-		set[fieldPath(topName, "Flags", fieldName)] = InputSource{
+		path := fieldPath(topName, "Flags", fieldName)
+		valueFrom := fallbackValueOrigin(flagReg, rd.view, tag, key)
+		if val, found, err := flagReg.Get(key); err == nil && found {
+			if credit, overridden, ok := profileMapCredits(flagReg, rd.view, key, val, layerName, fd.Secret); ok {
+				valueFrom = credit
+				shadowed[path] = overridden
+			}
+		}
+		set[path] = InputSource{
 			Layer:  layerName,
 			Raw:    redactValue(strings.Join(vals, ", "), fd.Secret),
-			Origin: fallbackValueOrigin(flagReg, rd.view, tag, key),
+			Origin: valueFrom,
 		}
 		if store.scopes[scope].flags == nil {
 			store.scopes[scope].flags = map[string][]string{}

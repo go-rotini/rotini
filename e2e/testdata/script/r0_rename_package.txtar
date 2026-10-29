@@ -1,0 +1,111 @@
+# R0 — renaming the cmd package in the conf. Handlers are the author's, so generate never
+# rewrites their package clauses: it stops before writing anything, a dry run too, and names
+# each file still declaring the old package. Once the author moves them, it generates again.
+
+gomodinit example.com/ren
+
+mkdir app
+cp spec.yaml app/.rotini.spec.yaml
+cp conf.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+exec go mod tidy
+exec go build ./...
+grep '^package app$' internal/cmd/app/app_greet.go
+
+# ── the new name stops generate, which writes nothing ───────────────────────
+cp conf-renamed.yaml app/.rotini.conf.yaml
+cp internal/cmd/app/zz_app.go zz-before.txt
+cp internal/cmd/app/app_greet.go greet-before.txt
+wantexit 1 rotini generate app/.rotini.spec.yaml --dry-run
+stderr 'the conf names the cmd package "appcli", but these files in internal/cmd/app declare another package: app\.go \(package app\), app_greet\.go \(package app\); rotini never rewrites them, so change each one''s package clause to `package appcli`'
+! stderr 'dry run:'
+wantexit 1 rotini generate app/.rotini.spec.yaml
+stderr 'app_greet\.go \(package app\)'
+cmp internal/cmd/app/zz_app.go zz-before.txt
+cmp internal/cmd/app/app_greet.go greet-before.txt
+
+# ── setting the package back is a no-op ─────────────────────────────────────
+cp conf.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml --dry-run
+! stderr .
+
+# ── moving the handlers lets it through, and the program builds ─────────────
+cp conf-renamed.yaml app/.rotini.conf.yaml
+cp app-moved.go internal/cmd/app/app.go
+cp greet-moved.go internal/cmd/app/app_greet.go
+exec rotini generate app/.rotini.spec.yaml
+grep '^package appcli$' internal/cmd/app/zz_app.go
+exec go build -o appbin$exe ./cmd/app
+exec ./appbin$exe greet
+stdout 'hello'
+exec rotini generate app/.rotini.spec.yaml --dry-run
+! stderr .
+
+-- spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+  commands:
+    - name: greet
+      summary: say hello
+-- conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+-- conf-renamed.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: appcli
+-- app-moved.go --
+package appcli
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- greet-moved.go --
+package appcli
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appGreetHandler)(nil)
+
+type appGreetHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appGreetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := fmt.Fprintln(rtx.Stdout, "hello"); err != nil {
+		rtx.HaltWith(err)
+	}
+}

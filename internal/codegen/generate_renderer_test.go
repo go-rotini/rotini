@@ -3,7 +3,7 @@ package codegen
 import (
 	"errors"
 	"fmt"
-
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -19,8 +19,32 @@ func TestSmokeRenderSeedFiles(t *testing.T) {
 	}
 }
 
+// TestGenerateArgs pins the //go:generate directive's arguments: the spec and conf relative to
+// main.go's directory, quoted when a path holds a space, and no --config without a conf.
+func TestGenerateArgs(t *testing.T) {
+	root := t.TempDir()
+	at := func(p string) string { return filepath.Join(root, filepath.FromSlash(p)) }
+	cases := []struct{ dir, spec, conf, want string }{
+		{"cmd/app", "cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", "./.rotini.spec.yaml --config ./.rotini.conf.yaml"},
+		{"cmd/app", "specs/app.yaml", "cmd/app/conf.toml", "../../specs/app.yaml --config ./conf.toml"},
+		{"cmd/app", "cmd/app/my specs/s.yaml", "", `"./my specs/s.yaml"`},
+	}
+	for _, tc := range cases {
+		conf := ""
+		if tc.conf != "" {
+			conf = at(tc.conf)
+		}
+		if got := generateArgs(at(tc.dir), at(tc.spec), conf); got != tc.want {
+			t.Errorf("generateArgs(%s, %s, %s) = %s, want %s", tc.dir, tc.spec, tc.conf, got, tc.want)
+		}
+	}
+	if got, want := seedGenerateArgs("toml"), "./.rotini.spec.toml --config ./.rotini.conf.toml"; got != want {
+		t.Errorf("seedGenerateArgs(toml) = %s, want %s", got, want)
+	}
+}
+
 func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
-	if _, err := renderMainFile("", "example.com/app/internal/cmd/app", "cli", "yaml"); err != nil {
+	if _, err := renderMainFile("", "example.com/app/internal/cmd/app", "cli", seedGenerateArgs("yaml")); err != nil {
 		t.Errorf("main: %v", err)
 	}
 	// Every body stubBody can select must render and gofmt.

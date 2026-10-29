@@ -171,12 +171,12 @@
             "file": {
               "type": "string",
               "pattern": "^[^/\\\\].*\\.go$", "examples": ["internal/cmd/app/zz_app.go"],
-              "description": "Module-root-relative path (no leading slash) ending in '.go' for the file rotini writes for this target. Its parent directory is the package directory. 'cmd' defaults to 'internal/cmd/<root-command>/zz_rotini.go'; 'main' has no default and is written only when 'file' is set."
+              "description": "Module-root-relative path (no leading slash) ending in '.go' for the file rotini writes for this target. Its parent directory is the package directory. 'cmd' defaults to 'internal/cmd/<root-command>/zz_rotini.go'; 'main' has no default and is written only when 'file' is set, in a directory of its own: one shared with the cmd or models package can't build, so validate rejects it."
             },
             "package": {
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]*$", "examples": ["app"],
-              "description": "Go package name written at the top of 'file'. Defaults to the file's parent-directory name, sanitized to a valid Go identifier (a Go keyword or 'main' gets a 'cli' suffix: 'internal/cmd/go' is package 'gocli'). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'."
+              "description": "Go package name written at the top of 'file'. Defaults to the file's parent-directory name, sanitized to a valid Go identifier (a Go keyword or 'main' gets a 'cli' suffix: 'internal/cmd/go' is package 'gocli'). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'. Changing the cmd package's name doesn't rename the handler files you own: generate stops, writing nothing, and lists each file in the package's directory that still declares the old name, until you change their package clauses."
             },
             "header": {
               "type": "string",
@@ -206,7 +206,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["type"],
-      "description": "One generated feature, chosen by 'type' (see 'type' for what each writes): an on/off switch ('enabled') plus options. For help, completion, man and markdown, two of them are independent: 'embed' chooses how the content is stored: a rendered file in 'embed_dir' loaded with //go:embed, or a string literal in the generated code. 'template' chooses how it is rendered: from an editable template seeded into 'template_dir', or from rotini's built-in one. The directories default to '<cmd-package>/renders' and '<cmd-package>/templates'. With embed on, embed_dir must be inside the cmd package, since //go:embed cannot reach outside it; template_dir may be anywhere. Output files never collide: help pages are 'help_*.txt', man pages '<page-name>.<section>' (taskr-add.1), markdown pages 'markdown_*.md' and completion scripts 'completion_<shell>.txt', and each feature removes only its own files.",
+      "description": "One generated feature, chosen by 'type' (see 'type' for what each writes): an on/off switch ('enabled') plus options. For help, completion, man and markdown, two of them are independent: 'embed' chooses how the content is stored: a rendered file in 'embed_dir' loaded with //go:embed, or a string literal in the generated code. 'template' chooses how it is rendered: from an editable template seeded into 'template_dir', or from rotini's built-in one. The directories default to '<cmd-package>/renders' and '<cmd-package>/templates'. With embed on, embed_dir must be inside the cmd package, since //go:embed cannot reach outside it; template_dir may be anywhere. Output files never collide: help pages are 'help_*.txt', man pages '<page-name>.<section>' (taskr-add.1), markdown pages 'markdown_*.md' and completion scripts 'completion_<shell>.txt'. Generate removes a feature's pages it no longer writes, and all of them once the feature is turned off; it never removes another feature's files or a template.",
       "properties": {
         "type": {
           "type": "string",
@@ -231,7 +231,7 @@
         "template": {
           "type": "boolean",
           "default": false,
-          "description": "Whether the editable template (help.txt.tmpl, man.txt.tmpl, markdown.md.tmpl, skill.md.tmpl or llms.txt.tmpl) is seeded into 'template_dir' for you to customize. true: the template is written when missing, and pages render from it. false (the default): no template is written, and pages render from rotini's built-in one. Has no effect on the features built in Go, which have no template (completion, tools, permissions, carapace, config_example, env_example); rotini validation warns if you set it there. A template you have edited is never removed: setting this back to false leaves it in place, unused."
+          "description": "Whether the editable template (help.txt.tmpl, man.txt.tmpl, markdown.md.tmpl, skill.md.tmpl or llms.txt.tmpl) is seeded into 'template_dir' for you to customize. true: the template is written when a generated page needs it and none is there yet, and pages render from it. false (the default): no template is written, and pages render from rotini's built-in one. Has no effect on the features built in Go, which have no template (completion, tools, permissions, carapace, config_example, env_example); rotini validation warns if you set it there. A template you have edited is never removed: setting this back to false leaves it in place, unused."
         },
         "template_dir": {
           "type": "string",
@@ -263,7 +263,7 @@
         "install_dir": {
           "type": "string",
           "pattern": "^(\\.|[a-zA-Z0-9_][a-zA-Z0-9_./-]*)$", "examples": ["share", "."],
-          "description": "completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/<name>.bash, completions/_<name> (zsh), completions/<name>.fish, completions/<name>.ps1 and completions/<name>.nu, and man/man<section>/<page>.<section>, where <name> is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone is removed. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error."
+          "description": "completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/<name>.bash, completions/_<name> (zsh), completions/<name>.fish, completions/<name>.ps1 and completions/<name>.nu, and man/man<section>/<page>.<section>, where <name> is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone, or whose name is the old root's after a rename, is removed, and turning the feature off removes its files. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error."
         },
         "file": {
           "type": "string",

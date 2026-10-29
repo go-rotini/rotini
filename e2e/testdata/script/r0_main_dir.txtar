@@ -1,0 +1,61 @@
+# R0 — the conf's main `file` in the cmd package's directory can never build: main.go is
+# package main beside the cmd package. validate and generate both reject it at the conf key,
+# and generate writes nothing.
+
+gomodinit example.com/md
+
+mkdir app
+cp spec.yaml app/.rotini.spec.yaml
+
+# ── beside the default cmd file ──────────────────────────────────────────────
+cp conf-default-dir.yaml app/.rotini.conf.yaml
+wantexit 1 rotini validate app/.rotini.spec.yaml
+stderr 'conf: app[/\\]\.rotini\.conf\.yaml:5:13: generate\.packages\.main: file "internal/cmd/app/main\.go" is in "internal/cmd/app", the cmd package''s directory, but the entrypoint is package main'
+wantexit 1 rotini generate app/.rotini.spec.yaml
+stderr 'the cmd package''s directory'
+wantexit 1 rotini generate app/.rotini.spec.yaml --dry-run
+! stderr 'dry run:'
+! exists internal
+
+# ── beside a cmd file the conf places ────────────────────────────────────────
+cp conf-set-dir.yaml app/.rotini.conf.yaml
+wantexit 1 rotini validate app/.rotini.spec.yaml
+stderr 'file "pkg/app/main\.go" is in "pkg/app", the cmd package''s directory'
+! exists pkg
+
+# ── in a directory of its own it builds ──────────────────────────────────────
+cp conf-ok.yaml app/.rotini.conf.yaml
+exec rotini validate app/.rotini.spec.yaml
+! stderr .
+exec rotini generate app/.rotini.spec.yaml
+exists cmd/app/main.go
+exec go mod tidy
+exec go build ./...
+
+-- spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+-- conf-default-dir.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: internal/cmd/app/main.go
+-- conf-set-dir.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: pkg/app/main.go
+    - type: cmd
+      file: pkg/app/zz_app.go
+-- conf-ok.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: pkg/app/zz_app.go

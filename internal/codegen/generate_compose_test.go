@@ -298,6 +298,151 @@ generate:
 	}
 }
 
+// envNamesTree is a root with its own prefix mounting a child with another, which mounts a
+// grandchild with none; a command written beside the child's $ref belongs to the root.
+func envNamesTree(childPrefix string) map[string]string {
+	conf := func(name string) string {
+		return "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/" + name +
+			"/zz_" + name + ".go\n      package: " + name + "\n  features:\n    - type: help\n      enabled: true\n"
+	}
+	return map[string]string{
+		"cmd/grand/.rotini.spec.yaml": `version: 0.0.0
+command:
+  name: grand
+  summary: the grandchild
+  env:
+    - name: deep
+      schema: { type: string }
+`,
+		"cmd/grand/.rotini.conf.yaml": conf("grand"),
+		"cmd/child/.rotini.spec.yaml": `version: 0.0.0
+command:
+  name: child
+  summary: the child
+` + childPrefix + `  flags:
+    - name: region
+      identifiers: [--region]
+      cascading: true
+      schema: { type: string, key: region }
+  env:
+    - name: home
+      schema: { type: string }
+  commands:
+    - $ref: ../grand/.rotini.spec.yaml
+`,
+		"cmd/child/.rotini.conf.yaml": conf("child"),
+		"cmd/root/.rotini.spec.yaml": `version: 0.0.0
+command:
+  name: root
+  summary: the root
+  env_prefix: ROOT
+  env:
+    - name: token
+      schema: { type: string }
+  commands:
+    - $ref: ../child/.rotini.spec.yaml
+      commands:
+        - name: extra
+          summary: written beside the $ref
+`,
+		"cmd/root/.rotini.conf.yaml": conf("root"),
+	}
+}
+
+// TestCompose_childKeepsItsEnvNames pins that the parent's pages and types name the variables a
+// mounted child's own code reads, derived under the child's prefix, and a grandchild's under
+// none, while the parent's own inputs keep the parent's prefix.
+func TestCompose_childKeepsItsEnvNames(t *testing.T) {
+	emitted := composeModuleStaged(t, envNamesTree("  env_prefix: KID\n"))
+	root := emitted["internal/cmd/root/zz_root.go"]
+	for _, want := range []string{"KID_HOME", "KID_REGION", "DEEP", "ROOT_TOKEN",
+		`env:"KID_REGION"`} { // the child's frame in the inputs of the command beside the $ref
+		if !strings.Contains(root, want) {
+			t.Errorf("the root's generated code does not name %s", want)
+		}
+	}
+	for _, unwanted := range []string{"ROOT_HOME", "ROOT_REGION", "ROOT_DEEP", "KID_DEEP"} {
+		if strings.Contains(root, unwanted) {
+			t.Errorf("the root's generated code names %s, which no command reads", unwanted)
+		}
+	}
+	if !strings.Contains(emitted["internal/cmd/child/zz_child.go"], `env:"KID_HOME"`) ||
+		!strings.Contains(emitted["internal/cmd/grand/zz_grand.go"], `env:"DEEP"`) {
+		t.Error("the child's and grandchild's own types do not read KID_HOME and DEEP, the names the root's pages list")
+	}
+}
+
+// TestCompose_childsAdoptedPrefixIsItsOwn pins that a child declaring no env_prefix, whose own
+// generate run adopts its grandchild's, is listed under that adopted prefix by the parent.
+func TestCompose_childsAdoptedPrefixIsItsOwn(t *testing.T) {
+	files := envNamesTree("")
+	files["cmd/grand/.rotini.spec.yaml"] = strings.Replace(files["cmd/grand/.rotini.spec.yaml"],
+		"  summary: the grandchild\n", "  summary: the grandchild\n  env_prefix: GR\n", 1)
+	emitted := composeModuleStaged(t, files)
+	child, root := emitted["internal/cmd/child/zz_child.go"], emitted["internal/cmd/root/zz_root.go"]
+	if !strings.Contains(child, `env:"GR_HOME"`) {
+		t.Fatalf("the child did not adopt its grandchild's prefix:\n%s", child)
+	}
+	for _, want := range []string{"GR_HOME", "GR_REGION", "GR_DEEP"} {
+		if !strings.Contains(root, want) {
+			t.Errorf("the root's generated code does not name %s", want)
+		}
+	}
+	if strings.Contains(root, "ROOT_HOME") || strings.Contains(root, "ROOT_DEEP") {
+		t.Error("the root named the child's inputs under its own prefix")
+	}
+}
+
+// TestPinEnvNames pins which inputs get their variable written out: derived names under the
+// prefix, an explicit variable kept as written, an argv-only flag and a nested $ref untouched.
+func TestPinEnvNames(t *testing.T) {
+	explicit := &InputSchema{Variable: "GITHUB_TOKEN"}
+	c := pinEnvNames(Command{
+		Name: "kid",
+		Flags: []FlagInput{
+			{Name: "region", Schema: &InputSchema{Key: "api.region"}},
+			{Name: "token", Schema: explicit},
+			{Name: "verbose", Schema: &InputSchema{Type: "bool"}},
+		},
+		Env: []EnvInput{{Name: "home"}},
+		Commands: []Command{
+			{Name: "show", Arguments: []ArgumentInput{{Name: "target", Schema: &InputSchema{Key: "target"}}}},
+			{Ref: "../grand/.rotini.spec.yaml"},
+		},
+	}, "KID")
+	got := []string{
+		envVarOf(c.Flags[0].Schema), envVarOf(c.Flags[1].Schema), envVarOf(c.Flags[2].Schema),
+		envVarOf(c.Env[0].Schema), envVarOf(c.Commands[0].Arguments[0].Schema),
+	}
+	want := []string{"KID_API_REGION", "GITHUB_TOKEN", "", "KID_HOME", "KID_TARGET"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("pinned variables = %q, want %q", got, want)
+	}
+	if c.Flags[1].Schema != explicit || c.Commands[1].Ref == "" {
+		t.Error("an explicit variable or a nested $ref was rewritten")
+	}
+}
+
+// TestCompose_prefixedParentTakesChildrenWithDifferentPrefixes pins that two children with
+// different env_prefix values compose under a parent that declares its own, each keeping its
+// names.
+func TestCompose_prefixedParentTakesChildrenWithDifferentPrefixes(t *testing.T) {
+	files := map[string]string{}
+	for _, c := range []struct{ name, prefix string }{{"grand", "ONE"}, {"child", "TWO"}} {
+		files["cmd/"+c.name+"/.rotini.spec.yaml"] = "version: 0.0.0\ncommand:\n  name: " + c.name +
+			"\n  summary: a child\n  env_prefix: " + c.prefix + "\n  env:\n    - name: token\n      schema: { type: string }\n"
+		files["cmd/"+c.name+"/.rotini.conf.yaml"] = "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/" +
+			c.name + "/zz_" + c.name + ".go\n      package: " + c.name + "\n  features:\n    - type: help\n      enabled: true\n"
+	}
+	files["cmd/root/.rotini.spec.yaml"] = "version: 0.0.0\ncommand:\n  name: root\n  summary: the root\n  env_prefix: ROOT\n" +
+		"  commands:\n    - $ref: ../grand/.rotini.spec.yaml\n    - $ref: ../child/.rotini.spec.yaml\n"
+	files["cmd/root/.rotini.conf.yaml"] = strings.ReplaceAll(files["cmd/child/.rotini.conf.yaml"], "child", "root")
+	root := composeModuleStaged(t, files)["internal/cmd/root/zz_root.go"]
+	if !strings.Contains(root, "ONE_TOKEN") || !strings.Contains(root, "TWO_TOKEN") || strings.Contains(root, "ROOT_TOKEN") {
+		t.Errorf("want ONE_TOKEN and TWO_TOKEN, and no ROOT_TOKEN, in:\n%s", root)
+	}
+}
+
 // inputSettingsTree is a child that declares both channels, plus whichever root spec the caller
 // wants composed on top of it.
 func inputSettingsTree(rootSpec string) map[string]string {
@@ -420,6 +565,84 @@ command:
 	})
 	if root := emitted["internal/cmd/root/zz_root.go"]; !strings.Contains(root, "Passthrough: true") {
 		t.Errorf("the composed passthrough root lost Passthrough:\n%s", root)
+	}
+}
+
+// TestCompose_childrenSharingARootName pins that two composed children whose specs share a root
+// name, mounted under different names, import under different aliases and each delegate to
+// their own package.
+func TestCompose_childrenSharingARootName(t *testing.T) {
+	childConf := func(dir string) string {
+		return "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/" + dir + "/zz_db.go\n      package: db\n"
+	}
+	emitted := composeModuleStaged(t, map[string]string{
+		"cmd/grand/.rotini.spec.yaml": "version: 0.0.0\ncommand:\n  name: db\n  commands:\n    - name: dump\n",
+		"cmd/grand/.rotini.conf.yaml": childConf("grand"),
+		"cmd/child/.rotini.spec.yaml": "version: 0.0.0\ncommand:\n  name: db\n  commands:\n    - name: load\n",
+		"cmd/child/.rotini.conf.yaml": childConf("child"),
+		"cmd/root/.rotini.spec.yaml": "version: 0.0.0\ncommand:\n  name: root\n  commands:\n" +
+			"    - $ref: ../grand/.rotini.spec.yaml\n    - $ref: ../child/.rotini.spec.yaml\n      name: legacy\n",
+		"cmd/root/.rotini.conf.yaml": "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/root/zz_root.go\n      package: root\n",
+	})
+	root := emitted["internal/cmd/root/zz_root.go"]
+	for _, want := range []string{
+		`dbcli "example.com/compose/internal/cmd/grand"`,
+		`dbcli2 "example.com/compose/internal/cmd/child"`,
+		"dbcli.Handlers().DbDump()",
+		"dbcli2.Handlers().DbLoad()",
+		"(*dbcli2.DbLoadInputs)(nil)",
+	} {
+		if !strings.Contains(root, want) {
+			t.Errorf("root does not contain %s:\n%s", want, root)
+		}
+	}
+}
+
+// TestCompose_hiddenAliasClaimsAComposedName pins that a sibling's hidden alias taking a composed
+// child's name is a collision, as it is between inline commands: dispatch would never reach the
+// child.
+func TestCompose_hiddenAliasClaimsAComposedName(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/compose\n\ngo 1.26\n")
+	writeTestFile(t, dir, "kid/.rotini.spec.yaml", "version: 0.0.0\ncommand:\n  name: kid\n")
+	writeTestFile(t, dir, "app/.rotini.spec.yaml", "version: 0.0.0\ncommand:\n  name: app\n  commands:\n"+
+		"    - name: old\n      hidden_aliases: [kid]\n    - $ref: ../kid/.rotini.spec.yaml\n")
+	t.Chdir(dir)
+
+	spec, err := readSpec("app/.rotini.spec.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveTree(spec, "app/.rotini.spec.yaml", "example.com/compose"); err == nil ||
+		!strings.Contains(err.Error(), `duplicate command name or alias "kid"`) {
+		t.Fatalf("err = %v, want the hidden alias reported", err)
+	}
+}
+
+// TestCompose_pluginShadowedByAComposedChild pins that a composed child taking the name of a
+// plugin declared beside it is reported, at the root and below an inline command, as it is
+// for an inline command: sub-commands dispatch first, so the plugin could never run.
+func TestCompose_pluginShadowedByAComposedChild(t *testing.T) {
+	for name, parent := range map[string]string{
+		"root":   "  plugins:\n    - name: kid\n  commands:\n    - $ref: ../kid/.rotini.spec.yaml\n",
+		"inline": "  commands:\n    - name: tools\n      plugins:\n        - name: other\n          aliases: [kid]\n      commands:\n        - $ref: ../kid/.rotini.spec.yaml\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTestFile(t, dir, "go.mod", "module example.com/compose\n\ngo 1.26\n")
+			writeTestFile(t, dir, "kid/.rotini.spec.yaml", "version: 0.0.0\ncommand:\n  name: kid\n")
+			writeTestFile(t, dir, "app/.rotini.spec.yaml", "version: 0.0.0\ncommand:\n  name: app\n"+parent)
+			t.Chdir(dir)
+
+			spec, err := readSpec("app/.rotini.spec.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := resolveTree(spec, "app/.rotini.spec.yaml", "example.com/compose"); err == nil ||
+				!strings.Contains(err.Error(), `also dispatches as "kid"`) {
+				t.Fatalf("err = %v, want the shadowed plugin reported", err)
+			}
+		})
 	}
 }
 

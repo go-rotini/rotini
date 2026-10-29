@@ -62,8 +62,7 @@ func composedTypeName(ctx composeCtx, path, suffix string) string {
 
 // nestedTypeAlias imports the generated package of a spec `$ref`'d inside a composed child, for
 // its commands' types, and returns its alias; "" when the parent can't name them: the `$ref`
-// (or the composed child above it) delegates to a hand-written package, Go forbids the import,
-// or the alias is taken by another package.
+// (or the composed child above it) delegates to a hand-written package, or Go forbids the import.
 func (gp *program) nestedTypeAlias(rr resolvedRef, c Command, ctx composeCtx, moduleName string) string {
 	if ctx.typeAlias == "" || c.Handler != nil {
 		return ""
@@ -72,12 +71,5 @@ func (gp *program) nestedTypeAlias(rr resolvedRef, c Command, ctx composeCtx, mo
 	if checkImportableAcrossModules(imp, rr.module, moduleName, c.Ref) != nil {
 		return ""
 	}
-	alias := identAlias(rr.spec.Command.Name)
-	for _, ci := range gp.childImports {
-		if ci.Alias == alias && ci.Path != imp {
-			return ""
-		}
-	}
-	gp.addImport(alias, imp)
-	return alias
+	return gp.addImport(identAlias(rr.spec.Command.Name), imp)
 }

@@ -64,7 +64,8 @@ const (
 //   - the program's dependencies — [Program.WithDependency], or [Program.With] with the
 //     [WithDependency] option to register several at once
 //   - rotini's own settings — [Program.WithVersion], [Program.WithParser], [Program.WithInputReader],
-//     and the two the generated code sets, [Program.WithInputSettings] and [Program.WithHelp];
+//     and the ones the generated code sets, [Program.WithInputSettings], [Program.WithHelp] and
+//     [Program.WithCompletionScript];
 //     [Program.WithFeatures] adds runtime features to a program built with [NewWiredProgram]
 //   - phase replacement — [Program.WithResolver], [Program.WithLifecycle]
 //
@@ -125,6 +126,7 @@ type Program struct {
 	readerFn func(InputSettings) *InputReader // WithInputReader: nil → NewInputReader
 	version  string                           // WithVersion
 	help     HelpFunc                         // WithHelp: nil → no pages
+	scripts  CompletionScriptFunc             // WithCompletionScript: nil → no scripts
 	parser   *Parser                          // WithParser: nil → a default, built per run
 	view     *osView                          // WithEnviron, WithDir: nil → the process environment and directory
 	clock    func() time.Time                 // WithClock: nil → time.Now
@@ -405,6 +407,22 @@ func (p *Program) WithHelp(help HelpFunc) *Program {
 	return p
 }
 
+// CompletionScriptFunc returns the completion script for shell, or an error when there is none
+// for it. Codegen generates a Completion function of this type.
+type CompletionScriptFunc func(shell string) (string, error)
+
+// WithCompletionScript sets where [Context.CompletionScript] finds a shell's completion script.
+// The generated NewProgram passes its own Completion function.
+//
+// It is a program-level setting so that a completion command composed from another spec prints
+// the script of the program it runs in, which completes that program's name and commands.
+//
+// A nil fn restores the default, no scripts.
+func (p *Program) WithCompletionScript(fn CompletionScriptFunc) *Program {
+	p.scripts = fn
+	return p
+}
+
 // WithParser sets the [Parser] that [Context.Parser] returns. [Parser] has no options, so every
 // Parser behaves like [NewParser]'s and this setting changes nothing today; [Context.Inputs] and
 // the [InputReader] always use the default parser. A nil parser restores the default.
@@ -422,7 +440,7 @@ func (p *Program) newRunContext() *Context {
 	}
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
 	rtx.meta, rtx.readerFn = p.meta, p.readerFn
-	rtx.version, rtx.parser, rtx.help = p.version, p.parser, p.help
+	rtx.version, rtx.parser, rtx.help, rtx.scripts = p.version, p.parser, p.help, p.scripts
 	rtx.outputChecks = p.outputChecks
 	rtx.clock.fn = p.clock
 	rtx.clock.feats = p.feats

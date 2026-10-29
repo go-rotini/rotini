@@ -160,7 +160,7 @@ Configuration files this command reads values from, each at a fixed 'path' or fo
 
 Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, the unprefixed name does not bind: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
 
-In a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a parent that declares none adopts the child's, a parent that declares one wins, and two children with different prefixes are rejected.
+In a composed CLI, each spec's prefix names its own inputs: a `$ref`'d child's commands read the variables they read on their own, whatever the parent declares, and the parent's pages list those names. A parent that declares no env_prefix uses its child's for its own inputs; if its children declare different ones, it must declare its own.
 
 #### `flag_groups`
 
@@ -334,13 +334,13 @@ Describes the group headings on this command's own pages: the groups its sub-com
 
 `string`
 
-Text rendered above the description block. Ignored when 'help' is set.
+Text shown above the description on the command's generated pages: first on the help page, under the title of the markdown page, and as the first paragraph of the man page's DESCRIPTION. A page given verbatim ('help', 'man' or 'markdown') leaves it out.
 
 #### `footer`
 
 `string`
 
-Text rendered at the bottom of the page. Ignored when 'help' is set.
+Text shown at the end of the command's generated pages: last on the help and markdown pages, and in a NOTES section of the man page, before its EXAMPLES. A page given verbatim ('help', 'man' or 'markdown') leaves it out.
 
 #### `headings`
 
@@ -1406,7 +1406,7 @@ On a single-value flag: `repeatable: false` makes giving the flag more than once
 
 `boolean` · default `false`
 
-When true, the input must be provided (or stdin must not be empty for stdin inputs). On the command line an empty value (`--name ""`, `--name=`, or `''` as an argument) is provided; add `minLength: 1` to refuse it. An env input set to the empty string is provided too, while a flag's environment fallback set to the empty string counts as unset. Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
+When true, the input must be provided (or stdin must not be empty for stdin inputs). On the command line an empty value (`--name ""`, `--name=`, or `''` as an argument) is provided; add `minLength: 1` to refuse it. An env input set to the empty string is provided too, while a flag's environment fallback set to the empty string counts as unset; either way, a `.env` file that sets the variable supplies the value instead. Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
 
 ### `secret`
 

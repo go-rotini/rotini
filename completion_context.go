@@ -242,5 +242,5 @@ func partialEnvLayer(b *InputReader, rtx *Context, v reflect.Value, chain []Comm
 		return nil, nil, err
 	}
 	labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
-	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, true, labels)
+	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, true, labels, layerShadow{})
 }

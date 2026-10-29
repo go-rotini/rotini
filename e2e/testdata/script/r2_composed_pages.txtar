@@ -1,0 +1,162 @@
+# R2 — the pages of a mounted child, in help, man and markdown alike.
+#
+# A child spec mounted with `$ref` is part of the parent's page set: its pages show the parent's
+# path and the flags the parent passes down; a presentation key beside the `$ref` (here, footer)
+# replaces the child's on the mounted command only; a hidden mount and the child's own hidden
+# command are left out of ManPages and MarkdownPages but still answer Help; and the child's
+# topics are not the parent's.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/kid/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+exec ./app$exe
+cmp stdout want.txt
+
+-- want.txt --
+man pages: app app-kid app-kid-work
+markdown pages: app app-kid app-kid-work
+root help lists ghostkid: false
+help kid: path=true footer="MOUNTED FOOTER" globals=true
+markdown kid: path=true footer="MOUNTED FOOTER" globals=true
+man kid: path=true globals=true
+help kid work: path=true footer="WORK FOOTER" globals=true
+markdown kid work: path=true footer="WORK FOOTER" globals=true
+man kid work: path=true globals=true
+help ghostkid work: found=true
+help kid sneaky: found=true
+help kidtopic: no help for command "kidtopic"
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: the kid
+  footer: KID FOOTER
+  topics:
+    - name: kidtopic
+      summary: a kid topic
+      body: kid body
+  flags:
+    - name: color
+      summary: kid color
+      identifiers: [--color]
+      cascading: true
+      schema: {type: string, default: auto}
+  commands:
+    - name: work
+      summary: do work
+      footer: WORK FOOTER
+    - name: sneaky
+      summary: kid hidden
+      hidden: true
+-- cmd/kid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/kid/zz_kid.go
+      package: kid
+  features:
+    - type: help
+      enabled: true
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: the app
+  flags:
+    - name: verbose
+      summary: say more
+      identifiers: [--verbose]
+      cascading: true
+      schema: {type: bool}
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+      footer: MOUNTED FOOTER
+    - $ref: ../kid/.rotini.spec.yaml
+      name: ghostkid
+      hidden: true
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+    - type: man
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	w := rtx.Stdout
+	names := func(pages []rotini.Page) string {
+		var out []string
+		for _, p := range pages {
+			out = append(out, p.Name)
+		}
+		return strings.Join(out, " ")
+	}
+	fmt.Fprintf(w, "man pages: %s\n", names(ManPages()))
+	fmt.Fprintf(w, "markdown pages: %s\n", names(MarkdownPages()))
+	root, _ := Help()
+	fmt.Fprintf(w, "root help lists ghostkid: %v\n", strings.Contains(root, "ghostkid"))
+	for _, path := range [][]string{{"kid"}, {"kid", "work"}} {
+		help, _ := Help(path...)
+		markdown, _ := Markdown(path...)
+		man, _ := Man(path...)
+		describe(w, "help", path, help, `--color`)
+		describe(w, "markdown", path, markdown, "`--color`")
+		fmt.Fprintf(w, "man %s: path=%v globals=%v\n", strings.Join(path, " "),
+			strings.Contains(man, `\fBapp `+strings.Join(path, " ")+`\fR`),
+			strings.Contains(man, `\-\-verbose`) && strings.Contains(man, `\-\-color`))
+	}
+	_, err := Help("ghostkid", "work")
+	fmt.Fprintf(w, "help ghostkid work: found=%v\n", err == nil)
+	_, err = Help("kid", "sneaky")
+	fmt.Fprintf(w, "help kid sneaky: found=%v\n", err == nil)
+	_, err = Help("kidtopic")
+	fmt.Fprintf(w, "help kidtopic: %v\n", err)
+}
+
+// describe reports whether a page shows the parent's path, which footer it ends with, and both
+// the parent's and the child's cascading flags.
+func describe(w io.Writer, kind string, path []string, page, color string) {
+	footer := ""
+	for _, f := range []string{"MOUNTED FOOTER", "WORK FOOTER", "KID FOOTER"} {
+		if strings.Contains(page, f) {
+			footer = f
+		}
+	}
+	fmt.Fprintf(w, "%s %s: path=%v footer=%q globals=%v\n", kind, strings.Join(path, " "),
+		strings.Contains(page, "app "+strings.Join(path, " ")), footer,
+		strings.Contains(page, "verbose") && strings.Contains(page, color))
+}

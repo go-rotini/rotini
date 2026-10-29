@@ -1,0 +1,77 @@
+# R0 — a spec or conf that doesn't parse is reported in its file, at a line and column, in
+# every format; validate, generate and a dry run all exit 1, and nothing is written.
+
+gomodinit example.com/broken
+
+# ── a syntax error, in each format ───────────────────────────────────────────
+wantexit 1 rotini validate bad.yaml --config ok.conf.yaml
+stderr '^Error: decode bad\.yaml: yaml: line 3, column \d+: tab character used for indentation$'
+wantexit 1 rotini validate bad.json --config ok.conf.yaml
+stderr '^Error: decode bad\.json: json: line 5, column 3: invalid character ''}'' looking for beginning of object key string$'
+! stderr 'jsonschema'
+wantexit 1 rotini validate bad.toml --config ok.conf.yaml
+stderr '^Error: decode bad\.toml: toml: line 4, column \d+: '
+
+# The conf is held to the same standard.
+wantexit 1 rotini validate ok.yaml --config bad.json
+stderr '^Error: decode bad\.json: json: line 5, column 3: '
+
+# ── generate refuses the same documents, and a dry run says error, not stale ─
+wantexit 1 rotini generate bad.json --config ok.conf.yaml
+stderr 'bad\.json: json: line 5, column 3'
+wantexit 1 rotini generate bad.json --config ok.conf.yaml --dry-run
+! stderr 'dry run:'
+! exists internal
+
+# ── a $ref to a file that isn't there: the error is at the $ref ─────────────
+wantexit 1 rotini validate badref.yaml --config ok.conf.yaml
+stderr '^Error: spec: badref\.yaml:3:3: command app: composition: compose "\./nope\.yaml": .*nope\.yaml: file does not exist$'
+wantexit 1 rotini generate badref.yaml --config ok.conf.yaml --dry-run
+stderr 'nope\.yaml: file does not exist'
+! exists internal
+
+# ── a schema violation in a TOML spec is positioned too ──────────────────────
+wantexit 1 rotini validate unknown.toml --config ok.conf.yaml
+stderr '^Error: spec: unknown\.toml:6:\d+: /command/bogus: unknown key "bogus" on a command$'
+
+-- ok.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+-- ok.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+-- bad.yaml --
+version: 0.0.0
+command:
+	name: app
+-- bad.json --
+{
+  "version": "0.0.0",
+  "command": {
+    "name": "app",
+  }
+}
+-- bad.toml --
+version = "0.0.0"
+[command]
+name = "app"
+summary =
+-- badref.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+  commands:
+    - $ref: ./nope.yaml
+-- unknown.toml --
+version = "0.0.0"
+
+[command]
+name = "app"
+summary = "a demo"
+bogus = 3

@@ -23,7 +23,7 @@ func (*demoCompletionHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	script, err := Completion(inputs.DemoCompletion.Arguments.Shell)
+	script, err := rtx.CompletionScript(inputs.DemoCompletion.Arguments.Shell)
 	if err != nil {
 		rtx.HaltWith(err)
 		return

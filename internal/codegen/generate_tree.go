@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -203,11 +204,41 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 	if err != nil {
 		return nil, err
 	}
+	if err := checkCollisions(tree, root.Plugins); err != nil {
+		return nil, err
+	}
 	gp.tree = tree
+	if err := composedTopicClash(root, tree); err != nil {
+		return nil, err
+	}
 
 	sort.Slice(gp.own, func(i, j int) bool { return gp.own[i].prefix < gp.own[j].prefix })
 	sort.Slice(gp.composed, func(i, j int) bool { return gp.composed[i].prefix < gp.composed[j].prefix })
 	return gp, nil
+}
+
+// composedTopicClash rejects a root topic named like a command mounted with `$ref` below the
+// root, by a name or alias that comes from the child spec: `help <name>` would be ambiguous, and
+// the page resolvers would have the name twice. Names the root spec spells out itself are
+// lintTopics' to report.
+func composedTopicClash(root Command, tree []rnode) error {
+	declared := map[string]bool{}
+	for _, c := range root.Commands {
+		for _, n := range slices.Concat([]string{c.Name}, c.Aliases, c.HiddenAliases) {
+			declared[n] = true
+		}
+	}
+	for _, t := range root.Topics {
+		if declared[t.Name] {
+			continue
+		}
+		for _, n := range tree {
+			if n.ref != "" && (n.name == t.Name || slices.Contains(n.aliases, t.Name) || slices.Contains(n.hiddenAliases, t.Name)) {
+				return fmt.Errorf("topic %q has the name of the command %q mounted from %s, so `help %s` would be ambiguous; rename the topic", t.Name, n.name, n.ref, t.Name)
+			}
+		}
+	}
+	return nil
 }
 
 // walk resolves cmds beneath parentPath (an underscore-joined command path) into rnodes,
@@ -274,7 +305,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				// package (this node only, not its subtree). Clearing the stub filename
 				// lets prune remove a stub left from before the conversion.
 				alias, importPath := parseAliasPath(c.Handler.Import)
-				gp.addImport(alias, importPath)
+				alias = gp.addImport(alias, importPath)
 				gp.noteHandlerImport(importPath)
 				gc.passthrough = true
 				gc.delegateAlias = alias
@@ -287,6 +318,9 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 
 		children, err := gp.walk(c.Commands, path, base, moduleName, seen, ctx)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkCollisions(children, c.Plugins); err != nil {
 			return nil, err
 		}
 		out = append(out, rnode{
@@ -317,7 +351,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			children:              children,
 		})
 	}
-	if err := checkCollisions(out); err != nil {
+	if err := checkCollisions(out, nil); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -460,7 +494,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		return rnode{}, err
 	}
 	defer release()
-	childRoot := rr.spec.Command
+	childRoot := gp.ownEnvNames(rr, moduleName)
 
 	// An explicit `handler:` delegates to alias.<Convention>() in the declared package;
 	// otherwise the child's generated package is used via alias.Handlers().<Name>().
@@ -469,8 +503,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	switch {
 	case c.Handler != nil:
 		a, p := parseAliasPath(c.Handler.Import)
-		alias, delegateRoot, passthrough = a, c.Handler.Convention, true
-		gp.addImport(a, p)
+		alias, delegateRoot, passthrough = gp.addImport(a, p), c.Handler.Convention, true
 		gp.noteHandlerImport(p)
 	default:
 		alias = identAlias(childRoot.Name)
@@ -479,7 +512,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		if err := checkImportableAcrossModules(imp, rr.module, moduleName, c.Ref); err != nil {
 			return rnode{}, err
 		}
-		gp.addImport(alias, imp)
+		alias = gp.addImport(alias, imp)
 	}
 
 	// A name override changes only the parent-side name and path, never the delegation target.
@@ -515,7 +548,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 			return rnode{}, err
 		}
 		children = append(children, authored...)
-		if err := checkCollisions(children); err != nil {
+		if err := checkCollisions(children, childRoot.Plugins); err != nil {
 			return rnode{}, err
 		}
 	}
@@ -578,6 +611,88 @@ func (gp *program) resolveEnvPrefix() (string, error) {
 	return "", nil
 }
 
+// ownEnvNames returns the root command of the composed spec rr with the environment variables
+// its own generated code reads: a mounted spec's commands read the same variables standalone or
+// mounted, so where its env_prefix differs from this program's, every name derived under it is
+// written out on the copy, for the pages and the types this program emits for the subtree.
+func (gp *program) ownEnvNames(rr resolvedRef, moduleName string) Command {
+	prefix := specEnvPrefix(rr.spec, rr.childBase, moduleName)
+	if prefix == gp.envPrefix {
+		return rr.spec.Command
+	}
+	return pinEnvNames(rr.spec.Command, prefix)
+}
+
+// specEnvPrefix is the env_prefix a spec's own generate run derives variable names under: its
+// own, else the one it adopts from the specs it mounts (see resolveEnvPrefix). base resolves
+// the spec's relative $refs.
+func specEnvPrefix(spec *Spec, base, moduleName string) string {
+	if spec.Command.EnvPrefix != "" {
+		return spec.Command.EnvPrefix
+	}
+	adopted := map[string]bool{}
+	var visit func(cmds []Command)
+	visit = func(cmds []Command) {
+		for i := range cmds {
+			if cmds[i].Ref != "" {
+				if locator, err := locateRef(base, cmds[i].Ref); err == nil {
+					if rr, err := loadRef(locator, moduleName); err == nil && rr.spec.Command.EnvPrefix != "" {
+						adopted[rr.spec.Command.EnvPrefix] = true
+					}
+				}
+			}
+			visit(cmds[i].Commands)
+		}
+	}
+	visit(spec.Command.Commands)
+	if len(adopted) != 1 {
+		return ""
+	}
+	for p := range adopted {
+		return p
+	}
+	return ""
+}
+
+// pinEnvNames returns a copy of c in which every input of c, and of the commands written below
+// it, that reads a derived environment variable names it with `variable:`, derived under
+// prefix. A nested $ref's spec is left to its own prefix.
+func pinEnvNames(c Command, prefix string) Command {
+	c.Flags = slices.Clone(c.Flags)
+	for i := range c.Flags {
+		f := &c.Flags[i]
+		f.Schema = pinVariable(f.Schema, flagEnvVar(f.Schema, flagReconKey(f.Name, f.Schema), prefix))
+	}
+	c.Arguments = slices.Clone(c.Arguments)
+	for i := range c.Arguments {
+		a := &c.Arguments[i]
+		a.Schema = pinVariable(a.Schema, flagEnvVar(a.Schema, flagReconKey(a.Name, a.Schema), prefix))
+	}
+	c.Env = slices.Clone(c.Env)
+	for i := range c.Env {
+		c.Env[i].Schema = pinVariable(c.Env[i].Schema, envVarName(c.Env[i], prefix))
+	}
+	c.Commands = slices.Clone(c.Commands)
+	for i := range c.Commands {
+		c.Commands[i] = pinEnvNames(c.Commands[i], prefix)
+	}
+	return c
+}
+
+// pinVariable returns a copy of s whose `variable:` is name, or s itself when it names its
+// variables already or reads none.
+func pinVariable(s *InputSchema, name string) *InputSchema {
+	if name == "" || len(variables(s)) > 0 {
+		return s
+	}
+	var cp InputSchema
+	if s != nil {
+		cp = *s
+	}
+	cp.Variable = name
+	return &cp
+}
+
 // composeNestedRef handles a `$ref` inside an already-composed subtree (parent → child →
 // grandchild). The direct child already exposes handler methods for the grandchild, so the
 // grandchild's tree is grafted here and the composed walk delegates each node back to the
@@ -588,7 +703,7 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 		return nil, err
 	}
 	defer release()
-	gc := rr.spec.Command
+	gc := gp.ownEnvNames(rr, moduleName)
 
 	// Walk the overlaid grandchild in the current composed context so its nodes delegate
 	// to the direct child. Its subtree resolves against the grandchild's directory.
@@ -619,20 +734,28 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 			return nil, err
 		}
 		nodes[0].children = append(nodes[0].children, authored...)
-		if err := checkCollisions(nodes[0].children); err != nil {
+		if err := checkCollisions(nodes[0].children, nodes[0].plugins); err != nil {
 			return nil, err
 		}
 	}
 	return nodes, nil
 }
 
-func (gp *program) addImport(alias, path string) {
+// addImport imports path for the rollup and returns the alias the generated code names it by:
+// the alias it was imported under already, else alias, numbered when another package holds it
+// (two composed children whose specs share a root name).
+func (gp *program) addImport(alias, path string) string {
 	for _, ci := range gp.childImports {
 		if ci.Path == path {
-			return
+			return ci.Alias
 		}
 	}
+	base := alias
+	for n := 2; slices.ContainsFunc(gp.childImports, func(ci templateHandlersImport) bool { return ci.Alias == alias }); n++ {
+		alias = base + strconv.Itoa(n)
+	}
 	gp.childImports = append(gp.childImports, templateHandlersImport{Alias: alias, Path: path})
+	return alias
 }
 
 // childCmdImport resolves the import path of a composed child's cmd package (the one
@@ -676,15 +799,24 @@ func identAlias(name string) string {
 	return lowerFirst(toPascalCase(name)) + "cli"
 }
 
-// checkCollisions errors when sibling commands share a name or alias.
-func checkCollisions(nodes []rnode) error {
+// checkCollisions errors when sibling commands share a name or alias, hidden aliases included,
+// since those dispatch too, or take one of the plugins declared beside them, which they would
+// shadow.
+func checkCollisions(nodes []rnode, plugins []PluginSpec) error {
 	seen := map[string]bool{}
 	for _, n := range nodes {
-		for _, id := range append([]string{n.name}, n.aliases...) {
+		for _, id := range dispatchTokens(&Command{Name: n.name, Aliases: n.aliases, HiddenAliases: n.hiddenAliases}) {
 			if seen[id] {
 				return fmt.Errorf("duplicate command name or alias %q among siblings", id)
 			}
 			seen[id] = true
+		}
+	}
+	for _, p := range plugins {
+		for _, id := range append([]string{p.Name}, p.Aliases...) {
+			if seen[id] {
+				return fmt.Errorf("plugin %q is shadowed by a sibling command that also dispatches as %q", p.Name, id)
+			}
 		}
 	}
 	return nil

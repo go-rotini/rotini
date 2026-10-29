@@ -1,0 +1,370 @@
+# R0 — a long editing session: every spec edit an author makes regenerates to code that builds,
+# never touches a handler they wrote, and settles to a no-op.
+#
+# Adding, renaming, moving and removing commands, flags and arguments, changing a type, and
+# commands named after a Go test file or a platform, in the order a real session might. After
+# each edit `go generate ./...` must leave a module that builds, and a second pass must change
+# nothing.
+
+gomodinit example.com/demo
+
+exec rotini init demo
+exec go mod tidy
+exec go build ./...
+
+# ── add a command with a flag, and implement its handler ────────────────────
+cp greet.yaml cmd/demo/.rotini.spec.yaml
+exec go generate ./...
+stdout 'created: \.\./\.\./internal/cmd/demo/demo_greet\.go'
+cp greet-handler.go.txt internal/cmd/demo/demo_greet.go
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe greet --name ada
+stdout '^hello, ada$'
+
+# ── add a flag and an argument: the handler is left alone and still builds ──
+cp greet-more.yaml cmd/demo/.rotini.spec.yaml
+exec go generate ./...
+! stdout 'created:'
+cmp internal/cmd/demo/demo_greet.go greet-handler.go.txt
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe greet --name ada --times 2 extra
+stdout '^hello, ada$'
+
+# ── change a flag's type: the same ──────────────────────────────────────────
+cp greet-retyped.yaml cmd/demo/.rotini.spec.yaml
+exec go generate ./...
+cmp internal/cmd/demo/demo_greet.go greet-handler.go.txt
+grep 'Times +\[\]string' internal/cmd/demo/zz_rotini.go
+exec go build ./...
+
+# A second pass over the same spec is a no-op, and a dry run says so.
+cp internal/cmd/demo/zz_rotini.go zz-before.txt
+exec go generate ./...
+! stderr .
+cmp internal/cmd/demo/zz_rotini.go zz-before.txt
+exec rotini generate cmd/demo/.rotini.spec.yaml --dry-run
+! stderr .
+
+# ── rename the command: the old handler leaves the build, a new one is seeded ─
+cp hello.yaml cmd/demo/.rotini.spec.yaml
+exec go generate ./...
+stdout 'created: \.\./\.\./internal/cmd/demo/demo_hello\.go'
+stderr 'pruned demo_greet\.go \(disabled; removed by the next generate\)'
+grep 'hello, ' internal/cmd/demo/demo_greet.go
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe hello --name ada
+stdout '^demo hello: '
+
+# ── move it under a group ───────────────────────────────────────────────────
+cp say-hello.yaml cmd/demo/.rotini.spec.yaml
+exec go generate ./...
+stdout 'created: \.\./\.\./internal/cmd/demo/demo_say\.go'
+stdout 'created: \.\./\.\./internal/cmd/demo/demo_say_hello\.go'
+stderr 'pruned demo_greet\.go;'
+stderr 'pruned demo_hello\.go \(disabled'
+! exists internal/cmd/demo/demo_greet.go
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe say hello --name ada
+stdout '^demo say hello: '
+
+# ── commands named like a test file and like platforms ──────────────────────
+cp reserved.yaml cmd/demo/.rotini.spec.yaml
+exec go generate ./...
+exists internal/cmd/demo/demo_test_.go
+exists internal/cmd/demo/demo_windows_.go
+exists internal/cmd/demo/demo_linux_.go
+exists internal/cmd/demo/demo_linux_amd64_.go
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe test
+stdout '^demo test: '
+exec ./demo$exe linux amd64
+stdout '^demo linux amd64: '
+env GOOS=windows
+exec go build ./...
+env GOOS=linux
+env GOARCH=amd64
+exec go build ./...
+env GOOS=
+env GOARCH=
+exec go vet ./...
+
+# ── and remove them again: both steps of the prune build ────────────────────
+cp say-hello.yaml cmd/demo/.rotini.spec.yaml
+exec go generate ./...
+stderr 'pruned demo_test_\.go \(disabled'
+stderr 'pruned demo_linux_amd64_\.go \(disabled'
+exec go build ./...
+exec go generate ./...
+stderr 'pruned demo_windows_\.go;'
+! exists internal/cmd/demo/demo_test_.go
+! exists internal/cmd/demo/demo_linux_.go
+exec go build ./...
+
+# The session settles: nothing left to prune, and a dry run finds nothing to do.
+exec go generate ./...
+! stderr .
+exec rotini generate cmd/demo/.rotini.spec.yaml --dry-run
+! stderr .
+
+-- greet-handler.go.txt --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*demoGreetHandler)(nil)
+
+type demoGreetHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*demoGreetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[DemoGreetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "hello, %s\n", inputs.DemoGreet.Flags.Name)
+}
+-- greet.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+    - name: greet
+      summary: greet someone
+      flags:
+        - name: name
+          identifiers: [--name]
+          summary: who to greet
+          schema: { type: string, default: world }
+-- greet-more.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+    - name: greet
+      summary: greet someone
+      flags:
+        - name: name
+          identifiers: [--name]
+          summary: who to greet
+          schema: { type: string, default: world }
+        - name: times
+          identifiers: [--times]
+          summary: how many times
+          schema: { type: int, default: 1 }
+      arguments:
+        - name: rest
+          summary: anything else
+          schema: { type: '[]string' }
+-- greet-retyped.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+    - name: greet
+      summary: greet someone
+      flags:
+        - name: name
+          identifiers: [--name]
+          summary: who to greet
+          schema: { type: string, default: world }
+        - name: times
+          identifiers: [--times]
+          summary: when to greet
+          schema: { type: '[]string' }
+      arguments:
+        - name: rest
+          summary: anything else
+          schema: { type: '[]string' }
+-- hello.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+    - name: hello
+      summary: greet someone
+      flags:
+        - name: name
+          identifiers: [--name]
+          summary: who to greet
+          schema: { type: string, default: world }
+-- say-hello.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+    - name: say
+      summary: say things
+      commands:
+        - name: hello
+          summary: greet someone
+          flags:
+            - name: name
+              identifiers: [--name]
+              summary: who to greet
+              schema: { type: string, default: world }
+-- reserved.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version
+    - name: say
+      summary: say things
+      commands:
+        - name: hello
+          summary: greet someone
+          flags:
+            - name: name
+              identifiers: [--name]
+              summary: who to greet
+              schema: { type: string, default: world }
+    - name: test
+      summary: run the checks
+    - name: windows
+      summary: windows things
+    - name: linux
+      summary: linux things
+      commands:
+        - name: amd64
+          summary: amd64 things
