@@ -1,4 +1,4 @@
-//go:generate go tool rotini generate ./.rotini.spec.{{.Extension}} --config ./.rotini.conf.{{.Extension}}
+//go:generate go tool rotini generate {{.GenerateArgs}}
 package main
 
 import (

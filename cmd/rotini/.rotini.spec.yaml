@@ -126,7 +126,7 @@ command:
         - name: force
           identifiers:
             - --force
-          summary: replace an existing spec and conf with the seed (never deletes a file)
+          summary: replace an existing spec and conf, or seed beside one in another format (never deletes a file)
           schema:
             type: bool
         - name: dry-run

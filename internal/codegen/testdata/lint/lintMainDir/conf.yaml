@@ -1,0 +1,7 @@
+# main.go beside the cmd package's default file, internal/cmd/demo/zz_rotini.go: package main
+# and package demo in one directory can't build.
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: internal/cmd/demo/main.go

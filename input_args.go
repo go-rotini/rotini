@@ -104,14 +104,21 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 	origin = fallbackOrigin(rd, source, sf.Tag.Get("env"), key)
 	waivable := rd.waiveFiles && source != osEnvSourceName
 	label := "<" + ad.Name + ">"
+	problem := flagShapeProblem(val, field.Type(), false)
+	if problem == "" && !ad.Variadic && val.Kind() == recon.SliceKind {
+		problem = "takes one value, not a list"
+	}
+	if problem != "" {
+		if waivable {
+			return nil, "", nil
+		}
+		return nil, "", usageBind(channelArgument, ad.Name, label+" "+problem+fromSource(origin), nil)
+	}
 	if vals, err = fallbackValues(val, ad.Separator); err != nil {
 		if waivable {
 			return nil, "", nil
 		}
 		return nil, "", usageBind(channelArgument, ad.Name, fmt.Sprintf("%s: %v", label, err)+fromSource(origin), err)
-	}
-	if !ad.Variadic && len(vals) > 1 {
-		vals = vals[len(vals)-1:] // one value, the last, as a scalar flag's fallback reads
 	}
 	vals = argEnum(&ad).canonical(vals)
 	if vals, err = expandFallbackWired(vals, sf.Tag, source, label, rd); err != nil {
@@ -156,15 +163,15 @@ func recordArgFallbacks(set Presence, ci reflect.Value, frame Command, topName, 
 	for i := range min(len(frame.Arguments), at.NumField()) {
 		ad := frame.Arguments[i]
 		vals, origin, err := argFallback(fallbackLookup{reg: reg}, args.Field(i), at.Field(i), ad, rd)
-		if err != nil {
+		if err == nil && vals != nil {
+			err = coerceTime(args.Field(i), vals, argTimeSpec(&ad, rd.view.clockRef()))
+		}
+		if err != nil && (!rd.above.args[i] || isWiringError(err)) {
 			return nil, nil, err
 		}
-		if vals == nil {
+		if err != nil || vals == nil {
 			pos++
 			continue
-		}
-		if err := coerceTime(args.Field(i), vals, argTimeSpec(&ad, rd.view.clockRef())); err != nil {
-			return nil, nil, err
 		}
 		if origins == nil {
 			origins = map[int]string{}

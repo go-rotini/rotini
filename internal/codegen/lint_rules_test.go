@@ -118,6 +118,35 @@ func TestZeroMaxBoundsAreKept(t *testing.T) {
 	}
 }
 
+// TestLintMainDir pins which entrypoint directories the rule rejects: the cmd package's, by
+// default or as set, and a models package's of its own.
+func TestLintMainDir(t *testing.T) {
+	t.Parallel()
+	spec := &Spec{Command: Command{Name: "demo"}}
+	pkgs := func(p ...PackageConfig) *Conf { return &Conf{Generate: &GenerateConfig{Packages: p}} }
+	entry := func(file string) PackageConfig { return PackageConfig{Type: typeMain, File: file} }
+	for name, tc := range map[string]struct {
+		conf *Conf
+		want string
+	}{
+		"default cmd dir":    {pkgs(entry("internal/cmd/demo/main.go")), "the cmd package's directory"},
+		"set cmd dir":        {pkgs(entry(`app\main.go`), PackageConfig{Type: typeCmd, File: "app/zz.go"}), "the cmd package's directory"},
+		"models dir":         {pkgs(entry("internal/models/main.go"), PackageConfig{Type: typeModels, File: "internal/models/zz.go"}), "the models package's directory"},
+		"own dir":            {pkgs(entry("cmd/demo/main.go")), ""},
+		"cmd moved away":     {pkgs(entry("internal/cmd/demo/main.go"), PackageConfig{Type: typeCmd, File: "internal/app/zz.go"}), ""},
+		"no main file":       {pkgs(PackageConfig{Type: typeMain}), ""},
+		"no generate at all": {&Conf{}, ""},
+	} {
+		got := lintMainDir(spec, tc.conf)
+		switch {
+		case tc.want == "" && len(got) != 0:
+			t.Errorf("%s: %v, want nothing", name, got)
+		case tc.want != "" && (len(got) != 1 || !strings.Contains(got[0].Error(), tc.want)):
+			t.Errorf("%s: %v, want one problem naming %s", name, got, tc.want)
+		}
+	}
+}
+
 // TestWindowsDeviceElement pins the device names the go tool refuses in a path: CON, PRN, AUX,
 // NUL, COM1-9 and LPT1-9 in any case and before any dot. COM0 and LPT0 build.
 func TestWindowsDeviceElement(t *testing.T) {

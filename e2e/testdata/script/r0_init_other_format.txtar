@@ -1,0 +1,42 @@
+# R0 — init into a directory that already holds a spec or conf in another format refuses and
+# names the file, a dry run too. --force seeds the new pair beside it and keeps both: init
+# never deletes. A seed in the same format still only asks for --force.
+
+gomodinit example.com/fmt
+
+# ── a JSON spec already there ───────────────────────────────────────────────
+mkdir cmd/demo
+cp old.json cmd/demo/.rotini.spec.json
+wantexit 1 rotini init demo --dry-run
+stderr 'cmd/demo/\.rotini\.spec\.json already exists in another format; init would write \.rotini\.spec\.yaml beside it \(use --force to write it anyway; the existing file is kept\)'
+! stderr 'dry run:'
+wantexit 1 rotini init demo
+stderr 'cmd/demo/\.rotini\.spec\.json already exists in another format'
+! exists cmd/demo/.rotini.spec.yaml
+! exists internal
+
+exec rotini init demo --force
+exists cmd/demo/.rotini.spec.yaml
+exists cmd/demo/.rotini.conf.yaml
+cmp cmd/demo/.rotini.spec.json old.json
+exec go mod tidy
+exec go build ./...
+
+# ── a TOML conf beside a requested JSON seed ────────────────────────────────
+mkdir cmd/other
+cp old.toml cmd/other/.rotini.conf.toml
+wantexit 1 rotini init other --format json
+stderr 'cmd/other/\.rotini\.conf\.toml already exists in another format; init would write \.rotini\.conf\.json beside it'
+! exists cmd/other/.rotini.spec.json
+
+# ── the same format still only asks for --force ─────────────────────────────
+wantexit 1 rotini init demo
+stderr 'cmd/demo/\.rotini\.spec\.yaml already exists \(use --force to overwrite\)'
+! stderr 'another format'
+exec rotini init demo --force
+cmp cmd/demo/.rotini.spec.json old.json
+
+-- old.json --
+{"version": "0.0.0", "command": {"name": "demo"}}
+-- old.toml --
+version = "0.0.0"

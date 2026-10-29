@@ -34,6 +34,7 @@ func longForm(f FlagInput) string {
 type ancestorFlag struct {
 	flag FlagInput
 	path string // the declaring command's path
+	at   int    // the declaring command's index in the chain
 }
 
 // lintShadowedIdentifiers reports a flag that reuses an identifier of a cascading or
@@ -49,7 +50,7 @@ func lintShadowedIdentifiers(spec *Spec) []error {
 		if len(chain) < 2 {
 			return
 		}
-		owners := ancestorOwners(chain)
+		owners := ancestorOwners(chain, chainPaths(chain))
 		if len(owners) == 0 {
 			return
 		}
@@ -63,16 +64,16 @@ func lintShadowedIdentifiers(spec *Spec) []error {
 }
 
 // ancestorOwners maps each identifier of a cascading ancestor flag in chain,
-// negated forms included, to the nearest ancestor flag declaring it.
-func ancestorOwners(chain []*Command) map[string]*ancestorFlag {
+// negated forms included, to the nearest ancestor flag declaring it. paths are the chain's
+// display paths.
+func ancestorOwners(chain []*Command, paths []string) map[string]*ancestorFlag {
 	owners := map[string]*ancestorFlag{}
-	paths := chainPaths(chain)
 	for i, a := range chain[:len(chain)-1] {
 		for _, f := range commandFlags(a) {
 			if !f.Cascading {
 				continue
 			}
-			owner := &ancestorFlag{flag: f, path: paths[i]}
+			owner := &ancestorFlag{flag: f, path: paths[i], at: i}
 			for _, id := range matchIdentifiers(f) {
 				owners[id] = owner
 			}

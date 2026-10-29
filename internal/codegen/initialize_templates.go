@@ -117,7 +117,7 @@ func initCLIs(template string, d templateInitData) ([]initCLI, error) {
 		}
 		// The first binary's go:generate regenerates the shared child before itself, and the
 		// second binary sorts after it, so `go generate ./...` keeps all three in step.
-		main, err := renderMainFile("", d.Module+"/internal/cmd/"+d.Name, "cmd", d.Ext)
+		main, err := renderMainFile("", d.Module+"/internal/cmd/"+d.Name, "cmd", seedGenerateArgs(d.Ext))
 		if err != nil {
 			return nil, err
 		}

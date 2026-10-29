@@ -1,0 +1,61 @@
+# R2 — `generate --dry-run` sees the pages an editable template renders.
+#
+# A dry run is how CI checks that committed pages are current, so it must treat an edited
+# template as a change to the pages it renders, and must never seed or rewrite the template.
+
+gomodinit example.com/app
+
+# A first dry run would seed the template and write the pages, and writes neither.
+wantexit 2 rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml --dry-run
+stderr 'create tmpl/markdown\.md\.tmpl'
+stderr 'create internal/cmd/app/renders/markdown_app_deploy\.md'
+! exists tmpl
+! exists internal/cmd/app/renders
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml --dry-run
+! stderr .
+
+# Editing the template makes every page it renders stale, and only those: a verbatim page is
+# not rendered from it.
+cp custom.tmpl tmpl/markdown.md.tmpl
+cp internal/cmd/app/renders/markdown_app_deploy.md deploy-before.txt
+wantexit 2 rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml --dry-run
+stderr 'update internal/cmd/app/renders/markdown_app_deploy\.md'
+stderr 'update internal/cmd/app/renders/markdown_app\.md'
+! stderr 'markdown_app_status\.md'
+! stderr 'tmpl/markdown\.md\.tmpl'
+cmp internal/cmd/app/renders/markdown_app_deploy.md deploy-before.txt
+cmp tmpl/markdown.md.tmpl custom.tmpl
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+grep '^EDITED app deploy$' internal/cmd/app/renders/markdown_app_deploy.md
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml --dry-run
+! stderr .
+
+-- custom.tmpl --
+EDITED {{.Invocation}}
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: the app
+  commands:
+    - name: deploy
+      summary: deploy a service
+    - name: status
+      summary: show status
+      markdown: "# status, written by hand\n"
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: markdown
+      enabled: true
+      embed: true
+      template: true
+      template_dir: tmpl

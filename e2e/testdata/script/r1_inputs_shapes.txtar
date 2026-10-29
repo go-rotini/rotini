@@ -1,0 +1,221 @@
+# R1 — a configuration value of the wrong shape, an empty variable over a .env file, an unknown
+# profile beside a missing flag, and where a merged map's entries came from, in a generated CLI.
+# rtx.Inputs and rtx.InputsWithReport (--plain picks the first) agree on each.
+
+gomodinit example.com/shapes
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+exec ./app$exe --need x --conf good.yaml
+stdout '^name=n host=h target=t labels=map\[team:core\] owner=map\[team:core\] region=$'
+
+# ── a list or map where an input takes one value ─────────────────────────────
+
+# Each is a usage error naming the input, the file and the key, through both readers.
+! exec ./app$exe --need x --conf flaglist.yaml
+stderr '^Error: --name takes one value, not a list \(from configuration file .*flaglist.yaml, key name\)$'
+! exec ./app$exe --need x --conf flaglist.yaml --plain
+stderr '^Error: --name takes one value, not a list \(from configuration file .*flaglist.yaml, key name\)$'
+! exec ./app$exe --need x --conf argmap.yaml
+stderr '^Error: <target> takes one value, not a map \(from configuration file .*argmap.yaml, key target\)$'
+! exec ./app$exe --need x --conf argmap.yaml --plain
+stderr '^Error: <target> takes one value, not a map \(from configuration file .*argmap.yaml, key target\)$'
+! exec ./app$exe --need x --conf configlist.yaml
+stderr '^Error: config key host takes one value, not a list \(from configuration file .*configlist.yaml\)$'
+! exec ./app$exe --need x --conf configlist.yaml --plain
+stderr '^Error: config key host takes one value, not a list \(from configuration file .*configlist.yaml\)$'
+! exec ./app$exe --need x --conf mapleaf.yaml
+stderr '^Error: --label takes one value per key, not a list \(key team\) \(from configuration file .*mapleaf.yaml, key labels\)$'
+! exec ./app$exe --need x --conf mapleaf.yaml --plain
+stderr '^Error: --label takes one value per key, not a list \(key team\) \(from configuration file .*mapleaf.yaml, key labels\)$'
+! exec ./app$exe --need x --conf configmapleaf.yaml
+stderr '^Error: config key owner takes one value per key, not a list \(key team\) \(from configuration file .*configmapleaf.yaml\)$'
+
+# The command line overrides the value, which is then never read, and a repeated flag keeps
+# its last value.
+exec ./app$exe --need x --conf flaglist.yaml --name a --name b
+stdout '^name=b '
+exec ./app$exe --need x --conf flaglist.yaml --name a --name b --plain
+stdout '^name=b '
+exec ./app$exe --need x --conf argmap.yaml typed
+stdout ' target=typed '
+
+# ── an empty variable leaves the .env file's value ───────────────────────────
+
+cp dotenv.txt .env
+env APP_NAME=
+env APP_REGION=
+exec ./app$exe --need x
+stdout '^name=from-dotenv .* region=eu$'
+exec ./app$exe --need x --plain
+stdout '^name=from-dotenv .* region=eu$'
+exec ./app$exe --need x --explain-inputs
+stdout '^App.Flags.Name = "from-dotenv" from env:APP_NAME$'
+stdout '^App.Env.Region = "eu" from env:APP_REGION$'
+env APP_NAME=real
+exec ./app$exe --need x
+stdout '^name=real '
+rm .env
+env APP_NAME=
+env APP_REGION=
+
+# ── an unknown profile beside a missing required flag ────────────────────────
+
+! exec ./app$exe --conf prof.yaml --profile nope
+stderr '^Error: --profile: profile "nope" is not defined in configuration file .*prof.yaml \(profiles: broken, prod\)$'
+! stderr need
+! exec ./app$exe --conf prof.yaml --profile nope --plain
+stderr '^Error: --profile: profile "nope" is not defined in configuration file .*prof.yaml \(profiles: broken, prod\)$'
+! stderr need
+! exec ./app$exe --conf prof.yaml --profile prod
+stderr '--need'
+
+# ── a map merged from a profile and the shared keys ──────────────────────────
+
+exec ./app$exe --need x --conf prof.yaml --profile prod
+stdout 'labels=map\[team:core tier:api\] owner=map\[team:core tier:api\]'
+exec ./app$exe --need x --conf prof.yaml --profile prod --explain-inputs
+stdout '^App.Flags.Labels = "team=core, tier=api" from config:main#labels.team, config:main#profiles.prod.labels.tier; overrides config:main#labels.tier "web"$'
+stdout '^App.Config.Owner = "team=core, tier=api" from config:main#owner.team, config:main#profiles.prod.owner.tier; overrides config:main#owner.tier "web"$'
+# A list in the chosen profile for a flag that takes one value names the profile.
+! exec ./app$exe --need x --conf prof.yaml --profile broken
+stderr '^Error: --name takes one value, not a list \(from configuration file .*prof.yaml \(profile broken\), key name\)$'
+
+-- good.yaml --
+name: n
+host: h
+target: t
+labels: {team: core}
+owner: {team: core}
+-- flaglist.yaml --
+name: [a, b]
+-- argmap.yaml --
+target: {a: b}
+-- configlist.yaml --
+host: [a, b]
+-- mapleaf.yaml --
+labels: {team: [a, b]}
+-- configmapleaf.yaml --
+owner: {team: [a, b]}
+-- dotenv.txt --
+APP_NAME=from-dotenv
+APP_REGION=eu
+-- prof.yaml --
+labels: {team: core, tier: web}
+owner: {team: core, tier: web}
+profiles:
+  prod:
+    labels: {tier: api}
+    owner: {tier: api}
+  broken:
+    name: [a, b]
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: values of the wrong shape
+  env_prefix: APP
+  config_files:
+    - name: main
+      path: ./absent.yaml
+      format: yaml
+      profiles: { under: profiles, select: profile }
+    - name: dotenv
+      path: ./.env
+      format: dotenv
+      as: env
+  flags:
+    - name: conf
+      summary: the config file
+      identifiers: [--conf]
+      schema: { type: string, config_source: main }
+    - name: profile
+      summary: the profile
+      identifiers: [--profile]
+      schema: { type: string, variable: APP_PROFILE }
+    - name: plain
+      summary: read with rtx.Inputs
+      identifiers: [--plain]
+      hidden: true
+      schema: { type: bool }
+    - name: need
+      summary: a required flag
+      identifiers: [--need]
+      schema: { type: string, required: true }
+    - name: name
+      summary: a name
+      identifiers: [--name]
+      schema: { type: string, key: name }
+    - name: labels
+      summary: labels
+      identifiers: [--label]
+      schema: { type: 'map[string]string', key: labels }
+    - name: explain-inputs
+      summary: explain where values came from
+      identifiers: [--explain-inputs]
+      short_circuit: true
+      hidden: true
+      schema: { type: bool }
+  arguments:
+    - name: target
+      summary: the target
+      schema: { type: string, key: target, default: none }
+  env:
+    - name: region
+      summary: the region
+      schema: { type: string, variable: APP_REGION }
+  config:
+    - name: host
+      summary: the host
+      schema: { type: string, key: host }
+    - name: owner
+      summary: owner labels
+      schema: { type: 'map[string]string', key: owner }
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+	"slices"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, rep, err := rtx.InputsWithReport[AppInputs]()
+	if slices.Contains(rtx.Argv, "--plain") {
+		in, err = rtx.Inputs[AppInputs]()
+	}
+	if in.App.Flags.ExplainInputs {
+		_ = rep.Format(rtx.Stdout)
+		return
+	}
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	a := in.App
+	fmt.Fprintf(rtx.Stdout, "name=%s host=%s target=%s labels=%v owner=%v region=%s\n",
+		a.Flags.Name, a.Config.Host, a.Arguments.Target, a.Flags.Labels, a.Config.Owner, a.Env.Region)
+}

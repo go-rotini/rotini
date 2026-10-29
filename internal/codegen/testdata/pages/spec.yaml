@@ -2,7 +2,7 @@
 # long-only flags aligned with the long column, constraints on each input kind, a stdin
 # section for each format, and a passthrough command, described enum values, a passthrough
 # argument, long input descriptions, stability markers, exit-code links, help topics and
-# response files.
+# response files, and a header and footer on each page kind.
 version: 0.0.0
 command:
   name: ops
@@ -87,6 +87,11 @@ command:
   commands:
     - name: deploy
       summary: ship a service
+      header: |-
+        .ship is not reversible.
+
+        Read the runbook first.
+      footer: Report problems at https://example.com/ops/issues.
       group: Deploying
       stability: beta
       exit_status:

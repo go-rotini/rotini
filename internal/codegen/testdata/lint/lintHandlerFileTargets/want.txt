@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:5:3: command app: generates handler file "app.go", the file the conf's generate.packages.cmd target writes; set this command's `filename`, or choose another `file` for that target
+spec: .rotini.spec.yaml:8:17: command app/greet: generates handler file "ZZ_models.go", the file the conf's generate.packages.models target writes; set this command's `filename`, or choose another `file` for that target

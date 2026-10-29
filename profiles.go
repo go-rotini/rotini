@@ -194,6 +194,52 @@ func mergeValues(base, over recon.Value) recon.Value {
 	return recon.NewValue(out)
 }
 
+// profileMapCredits says where each entry of val, the map at key in reg, came from when the
+// selected profile's map was merged over the shared one: origin lists each entry's own origin
+// ("config:app#labels.team, config:app#profiles.prod.labels.tier"), and overridden holds the
+// shared entries the profile replaced, each as layerName supplied it with its own key as the
+// origin. ok is false for any other value.
+func profileMapCredits(reg *recon.Registry, view *osView, key string, val recon.Value, layerName string, secret bool) (origin string, overridden []InputSource, ok bool) {
+	profile := val.Source()
+	file, _, merged := strings.Cut(profile, "#")
+	if !merged || val.Kind() != recon.MapKind || reg == nil {
+		return "", nil, false
+	}
+	if per, err := recon.PerSourceFor[recon.Value](reg, key); err != nil || per.BySource(file).Value.Kind() != recon.MapKind {
+		return "", nil, false // the profile's map stands alone
+	}
+	m, err := val.AsMap()
+	if err != nil {
+		return "", nil, false
+	}
+	var leaves []string
+	flattenMap("", m, &leaves)
+	slices.Sort(leaves)
+	credits := make([]string, 0, len(leaves))
+	for _, leaf := range leaves {
+		sub, _, _ := strings.Cut(leaf, "=")
+		full := key + "." + sub
+		per, err := recon.PerSourceFor[recon.Value](reg, full)
+		if err != nil {
+			return "", nil, false
+		}
+		shared := per.BySource(file)
+		if !per.BySource(profile).IsSet {
+			credits = append(credits, valueOrigin(view, file, "", full))
+			continue
+		}
+		credits = append(credits, valueOrigin(view, profile, "", full))
+		if shared.IsSet {
+			overridden = append(overridden, InputSource{
+				Layer:  layerName,
+				Raw:    redactValue(valueText(shared.Value), secret),
+				Origin: valueOrigin(view, file, "", full),
+			})
+		}
+	}
+	return strings.Join(credits, ", "), overridden, true
+}
+
 func (s profileSource) Keys() []recon.Path {
 	var out []recon.Path
 	for _, k := range s.src.Keys() {

@@ -1,0 +1,83 @@
+# R6 — a mounted child's flag hiding a short form of a parent's cascading flag is reported as it
+# is for an inline child: the same message, placed at the flag in the child's file.
+
+gomodinit example.com/shadowing
+
+# ── a short form still reachable by its long one: a warning ──
+exec rotini validate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'cmd[/\\]kid[/\\]\.rotini\.spec\.yaml:6:7: command acme/kid: flag "owner": identifier "-o" is also flag "output" on command acme, which cascades; after "kid" it means this flag instead, and only "--output" still reaches flag "output" there. Use another identifier for --owner'
+
+# The inline child says the same.
+exec rotini validate inline.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'command acme/kid: flag "owner": identifier "-o" is also flag "output" on command acme, which cascades; after "kid" it means this flag instead, and only "--output" still reaches flag "output" there. Use another identifier for --owner'
+
+# The child on its own has no parent flag to hide.
+exec rotini validate cmd/kid/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+! stderr 'also flag'
+
+# ── the parent's only identifier taken: an error ──
+! exec rotini validate cmd/strict/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+stderr 'cmd[/\\]kid[/\\]\.rotini\.spec\.yaml:6:7: command strict/kid: flag "owner": identifier "-o" is also flag "only" on command strict, which cascades; after "kid" it means this flag instead, so flag "only" can''t be given there at all, only before "kid". Use another identifier for --owner'
+
+-- cmd/acme/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: mounts the kid
+  flags:
+    - name: output
+      summary: where to write
+      identifiers: [-o, --output]
+      cascading: true
+      schema: { type: string }
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/acme/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/acme/zz_acme.go
+      package: acme
+-- cmd/strict/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: strict
+  summary: mounts the kid under a short-only flag
+  flags:
+    - name: only
+      summary: a flag with one identifier
+      identifiers: [-o]
+      cascading: true
+      schema: { type: string }
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: the kid
+  flags:
+    - name: owner
+      summary: who owns it
+      identifiers: [-o, --owner]
+      schema: { type: string }
+-- inline.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: the kid written inline
+  flags:
+    - name: output
+      summary: where to write
+      identifiers: [-o, --output]
+      cascading: true
+      schema: { type: string }
+  commands:
+    - name: kid
+      summary: the kid
+      flags:
+        - name: owner
+          summary: who owns it
+          identifiers: [-o, --owner]
+          schema: { type: string }

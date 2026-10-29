@@ -1,0 +1,54 @@
+# R0 — the plain seed works in every spec and conf format, not only YAML.
+#
+# init transcodes its seed to json, jsonc or toml. Each must validate cleanly, build, answer
+# --help and --version, carry a //go:generate line naming its own files, and regenerate to
+# exactly what init wrote.
+
+gomodinit example.com/demo
+
+exec rotini init tj --format json
+exec rotini init tc --format jsonc
+exec rotini init tt --format toml
+exec rotini init ty --format yml
+exists cmd/tj/.rotini.spec.json
+exists cmd/tc/.rotini.conf.jsonc
+exists cmd/tt/.rotini.spec.toml
+exists cmd/ty/.rotini.spec.yaml
+grep '^//go:generate go tool rotini generate \./\.rotini\.spec\.json --config \./\.rotini\.conf\.json$' cmd/tj/main.go
+grep '^//go:generate go tool rotini generate \./\.rotini\.spec\.jsonc --config \./\.rotini\.conf\.jsonc$' cmd/tc/main.go
+grep '^//go:generate go tool rotini generate \./\.rotini\.spec\.toml --config \./\.rotini\.conf\.toml$' cmd/tt/main.go
+
+exec go mod tidy
+exec go vet ./...
+
+# Each seed passes rotini's own gate with nothing to say.
+exec rotini validate cmd/tj/.rotini.spec.json
+! stderr .
+exec rotini validate cmd/tc/.rotini.spec.jsonc
+! stderr .
+exec rotini validate cmd/tt/.rotini.spec.toml
+! stderr .
+
+exec go build -o tt$exe ./cmd/tt
+exec ./tt$exe --help
+stdout '^Usage:'
+stdout '--version'
+exec ./tt$exe --version
+stdout '^tt 0\.0\.0$'
+exec go build -o tc$exe ./cmd/tc
+exec ./tc$exe version
+stdout '^tc 0\.0\.0$'
+
+# Regenerating through the seeded directives changes nothing, and a dry run agrees.
+cp internal/cmd/tj/zz_rotini.go tj-before.txt
+cp internal/cmd/tc/zz_rotini.go tc-before.txt
+cp internal/cmd/tt/zz_rotini.go tt-before.txt
+exec go generate ./...
+! stderr .
+cmp internal/cmd/tj/zz_rotini.go tj-before.txt
+cmp internal/cmd/tc/zz_rotini.go tc-before.txt
+cmp internal/cmd/tt/zz_rotini.go tt-before.txt
+exec rotini generate cmd/tt/.rotini.spec.toml --dry-run
+! stderr .
+exec rotini generate cmd/tj/.rotini.spec.json --dry-run
+! stderr .

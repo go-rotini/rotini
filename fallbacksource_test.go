@@ -248,3 +248,118 @@ func TestFallbackSource_timeAgreesWithConfigInput(t *testing.T) {
 		}
 	}
 }
+
+type fsArgInputs struct {
+	App struct {
+		Flags struct {
+			Explain bool `rotini:"explain"`
+		}
+		Arguments struct {
+			Dir string `rotini:"dir" recon:"dir" env:"DIR" expand:"env"`
+			N   int    `rotini:"n" recon:"n" env:"N"`
+		}
+	}
+}
+
+// An argument's fallback that can't be read or expanded is a usage error naming where it came
+// from. A short-circuit flag skips a configuration file's, not the environment's.
+func TestFallbackSource_argumentValueErrors(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags:     []FlagDef{{Name: "explain", Identifiers: []string{"--explain"}, Type: "bool", ShortCircuit: true}},
+		Arguments: []ArgDef{{Name: "dir", Type: "string", Default: "."}, {Name: "n", Type: "int", Default: "1"}},
+	}
+	tests := []struct {
+		name, config string
+		env          []string
+		want         string // a substring of the error; "" = none
+		waived       bool   // whether --explain skips it
+	}{
+		{"list", "n: [1, null]\n", nil, "<n> takes one value, not a list (from configuration file ", true},
+		{"map", "dir: {a: b}\n", nil, "<dir> takes one value, not a map (from configuration file ", true},
+		{"config expansion", "dir: $NOPE/x\n", nil, `<dir>: $NOPE is not set (in "$NOPE/x") (from configuration file `, true},
+		{"env expansion", "", []string{"DIR=$NOPE"}, `<dir>: $NOPE is not set (in "$NOPE") (from environment variable DIR)`, false},
+		{"env type", "", []string{"N=x"}, `<n>: "x" is not a valid integer (from environment variable N)`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, layer := InputSettings{}, "env"
+			if tt.config != "" {
+				set.ConfigFiles = []ConfigFile{{Name: "app", Path: writeConfig(t, tt.config), Format: "yaml"}}
+				layer = "files"
+			}
+			for _, argv := range [][]string{nil, {"--explain"}} {
+				want := tt.want
+				if len(argv) > 0 && tt.waived {
+					want = ""
+				}
+				for reader, err := range readerErrors[fsArgInputs](NewContextFor(def, argv).WithEnviron(tt.env).WithInputSettings(set), layer) {
+					if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want) || !errors.Is(err, ErrUsage)) {
+						t.Errorf("%v: %s = %v, want %q", argv, reader, err, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+type fsShadowInputs struct {
+	App struct {
+		Flags struct {
+			Port int `rotini:"port" recon:"port" env:"PORT"`
+		}
+		Arguments struct {
+			N int `rotini:"n" recon:"n" env:"N"`
+		}
+	}
+}
+
+// A fallback that a higher source overrides is never read, so a value there that its type
+// can't hold is no error, for Inputs and InputsWithReport alike; one that wins still is.
+func TestFallbackSource_overriddenBadValueIsNotRead(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags:     []FlagDef{{Name: "port", Identifiers: []string{"--port"}, Type: "int"}},
+		Arguments: []ArgDef{{Name: "n", Type: "int"}},
+	}
+	tests := []struct {
+		name     string
+		config   string
+		env      []string
+		argv     []string
+		port, n  int
+		wantFrom string // "" = no error
+	}{
+		{"argv over env", "", []string{"PORT=abc", "N=abc"}, []string{"--port", "1", "2"}, 1, 2, ""},
+		{"argv over config", "port: abc\nn: abc\n", nil, []string{"--port", "1", "2"}, 1, 2, ""},
+		{"env over config", "port: abc\nn: abc\n", []string{"PORT=3", "N=4"}, nil, 3, 4, ""},
+		{"config wins", "port: abc\n", nil, nil, 0, 0, "configuration file"},
+		{"env wins over config", "port: 5\n", []string{"PORT=abc"}, nil, 0, 0, "environment variable PORT"},
+		{"argument env wins", "", []string{"N=abc"}, []string{"--port", "1"}, 0, 0, "environment variable N"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := InputSettings{}
+			if tt.config != "" {
+				set.ConfigFiles = []ConfigFile{{Name: "app", Path: writeConfig(t, tt.config), Format: "yaml"}}
+			}
+			rtx := NewContextFor(def, tt.argv).WithEnviron(tt.env).WithInputSettings(set)
+			in, err := rtx.Inputs[fsShadowInputs]()
+			merged, _, rerr := rtx.InputsWithReport[fsShadowInputs]()
+			for name, got := range map[string]struct {
+				in  fsShadowInputs
+				err error
+			}{"Inputs": {in, err}, "InputsWithReport": {merged, rerr}} {
+				if tt.wantFrom != "" {
+					if got.err == nil || !strings.Contains(got.err.Error(), "(from "+tt.wantFrom) {
+						t.Errorf("%s = %v, want an error from %s", name, got.err, tt.wantFrom)
+					}
+					continue
+				}
+				if got.err != nil || got.in.App.Flags.Port != tt.port || got.in.App.Arguments.N != tt.n {
+					t.Errorf("%s: port %d, n %d, err %v; want %d, %d", name, got.in.App.Flags.Port, got.in.App.Arguments.N, got.err, tt.port, tt.n)
+				}
+			}
+		})
+	}
+}

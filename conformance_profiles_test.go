@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -75,6 +76,45 @@ func profileConformanceCases() []dataCase {
 			in, err := read(t, nil, "--profile", "prod")
 			if err != nil || in.App.Config.Pinned != "prod-pin" {
 				t.Errorf("pinned = %q, %v", in.App.Config.Pinned, err)
+			}
+		}},
+		{"PROF-10", func(t *testing.T) { // an unknown profile is reported before a missing required flag, by both readers
+			dir := t.TempDir()
+			meta := pfSettings(pfFileAt(pfWrite(t, dir, "app.yaml", pfFile)))
+			def := pfDef()
+			def.Flags = append(def.Flags, FlagDef{Name: "need", Identifiers: []string{"--need"}, Type: "string", Required: true})
+			for _, argv := range [][]string{{"--profile", "nope"}, {"--profile", "prod"}} {
+				rtx := NewContextFor(def, argv).WithDir(dir).WithInputSettings(meta)
+				_, err := rtx.Inputs[pfInputs]()
+				_, _, rerr := rtx.InputsWithReport[pfInputs]()
+				want := `--profile: profile "nope" is not defined in configuration file `
+				if argv[1] == "prod" {
+					want = "missing required input: --need"
+				}
+				for reader, e := range map[string]error{"Inputs": err, "InputsWithReport": rerr} {
+					if e == nil || !strings.HasPrefix(e.Error(), want) || !errors.Is(e, ErrUsage) {
+						t.Errorf("%v: %s = %v, want %q", argv, reader, e, want)
+					}
+				}
+			}
+		}},
+		{"PROF-11", func(t *testing.T) { // a map merged from the profile and the shared keys credits each entry to its source
+			path := pfWrite(t, t.TempDir(), "app.yaml", pfFile)
+			_, rep, err := pfContext(t.TempDir(), nil, pfSettings(pfFileAt(path)), "--profile", "prod").InputsWithReport[pfInputs]()
+			w, _ := rep.Winner("App.Config.Labels")
+			if err != nil || w.Raw != "team=core, tier=api" || w.Origin != "config:app#labels.team, config:app#profiles.prod.labels.tier" {
+				t.Fatalf("winner = %+v, %v", w, err)
+			}
+			h := rep.History("App.Config.Labels")
+			if len(h) < 2 || h[len(h)-2] != (InputSource{Layer: "files", Raw: "web", Origin: "config:app#labels.tier"}) {
+				t.Errorf("history = %+v, want the shared tier the profile overrode below the winner", h)
+			}
+		}},
+		{"PROF-12", func(t *testing.T) { // a list in the chosen profile for a single-value flag is an error naming the profile
+			path := pfWrite(t, t.TempDir(), "app.yaml", "profiles:\n  prod:\n    region: [a, b]\n")
+			_, err := pfRead(t, nil, pfSettings(pfFileAt(path)), "--profile", "prod")
+			if err == nil || !strings.HasSuffix(err.Error(), "--region takes one value, not a list (from configuration file "+path+" (profile prod), key region)") {
+				t.Errorf("err = %v", err)
 			}
 		}},
 	}

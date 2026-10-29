@@ -1,0 +1,85 @@
+# R0 — the conf's `keep:` protects a handler file and a rendered page from pruning.
+#
+# Without it, a handler whose command has left the spec is disabled and then deleted, and a
+# page for a command that is gone is removed. Listed paths, relative to the cmd package, stay
+# exactly as they are.
+
+gomodinit example.com/kept
+
+mkdir app
+cp with-old.yaml app/.rotini.spec.yaml
+cp conf.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+exec go mod tidy
+exists internal/cmd/app/renders/help_app_old.txt
+exists internal/cmd/app/renders/help_app_older.txt
+
+# The author keeps the old command's file as a helper, marker and all.
+cp old-helper.go.txt internal/cmd/app/app_old.go
+
+cp without-old.yaml app/.rotini.spec.yaml
+exec rotini generate app/.rotini.spec.yaml
+! stderr 'app_old\.go'
+stderr 'pruned app_older\.go \(disabled'
+exec rotini generate app/.rotini.spec.yaml
+stderr 'pruned app_older\.go;'
+! exists internal/cmd/app/app_older.go
+! exists internal/cmd/app/renders/help_app_older.txt
+
+# Both kept files are untouched, and the helper is still in the build.
+cmp internal/cmd/app/app_old.go old-helper.go.txt
+exists internal/cmd/app/renders/help_app_old.txt
+exec go build -o appbin$exe ./cmd/app
+! exec ./appbin$exe
+stdout 'kept: yes'
+
+-- conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      keep: [app_old.go, renders/help_app_old.txt]
+  features:
+    - type: help
+      enabled: true
+      embed: true
+-- with-old.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+  commands:
+    - name: old
+      summary: going away
+    - name: older
+      summary: going away too
+-- without-old.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+-- old-helper.go.txt --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appOldHandler)(nil)
+
+type appOldHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appOldHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+func init() { fmt.Println("kept: yes") }

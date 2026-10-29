@@ -76,6 +76,38 @@ func TestExitConstants_models(t *testing.T) {
 	}
 }
 
+// TestModels_inTheCmdDirectory pins that a models file beside the cmd file is a second file of
+// the cmd package: the structs and constants are declared there once, the cmd file neither
+// imports its own package nor re-exports them, and the module builds.
+func TestModels_inTheCmdDirectory(t *testing.T) {
+	dir, _ := emitModule(t, namedExitSpec, `version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_acme.go
+    - type: models
+      file: internal/cmd/acme/zz_models.go
+`)
+	models := squash(readEmitted(t, dir, "internal/cmd/acme/zz_models.go"))
+	cmd := squash(readEmitted(t, dir, "internal/cmd/acme/zz_acme.go"))
+	for _, want := range []string{"package acme", "AcmeGetExitNotFound = 3", "type AcmeGetInputs struct"} {
+		if !strings.Contains(models, want) {
+			t.Errorf("the models file lacks %q:\n%s", want, models)
+		}
+	}
+	for _, unwanted := range []string{"models.", "AcmeGetExitNotFound", "type AcmeGetInputs"} {
+		if strings.Contains(cmd, unwanted) {
+			t.Errorf("the cmd file has %q, which the models file in its package declares:\n%s", unwanted, cmd)
+		}
+	}
+	skipUnlessCompiling(t)
+	if out, err := goBuild(t, dir); err != nil {
+		t.Fatalf("the generated module does not build:\n%s", out)
+	}
+}
+
 // TestExitConstants_none pins that a spec naming no code renders no const block.
 func TestExitConstants_none(t *testing.T) {
 	files := emitInModule(t, `version: 0.0.0

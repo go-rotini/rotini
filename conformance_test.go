@@ -1213,6 +1213,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"FLAG-26", "ENV-12", "ENV-13", "CFG-11", "CFG-12", "ARG-20",
 		"OUT-01", "OUT-02", "OUT-03", "OUT-04",
 		"PROF-01", "PROF-02", "PROF-03", "PROF-04", "PROF-05", "PROF-06", "PROF-07", "PROF-08", "PROF-09",
+		"PROF-10", "PROF-11", "PROF-12", "CFG-13", "FLAG-29", "ARG-21", "ENV-14",
 		"WRITE-01", "WRITE-02", "WRITE-03", "WRITE-04", "WRITE-05", "WRITE-06", "WRITE-07", "WRITE-08",
 		"FLAG-27", "FLAG-28",
 		"WIRE-01", "WIRE-02", "WIRE-03", "WIRE-04", "WIRE-05",
@@ -1231,6 +1232,9 @@ func TestConformance_matrixComplete(t *testing.T) {
 		seen[c.id]++
 	}
 	for _, c := range profileConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range shapeConformanceCases() {
 		seen[c.id]++
 	}
 	for _, c := range writeConformanceCases() {

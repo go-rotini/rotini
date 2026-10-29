@@ -1,0 +1,9 @@
+# The root's handler file is app.go, which the conf names as the generated file; `greet`
+# names its own handler file after the models file in the same directory, in another case.
+version: 0.0.0
+command:
+  name: app
+  commands:
+    - name: greet
+      filename: ZZ_models.go
+    - name: other

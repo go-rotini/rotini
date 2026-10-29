@@ -1,0 +1,183 @@
+# R0 — editing the conf: turning features on and off, switching embed, moving the models,
+# adding a header. Each edit regenerates to a module that builds, and settles to a no-op.
+
+gomodinit example.com/lay
+
+mkdir app
+cp spec.yaml app/.rotini.spec.yaml
+cp base.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+exec go mod tidy
+exec go build ./...
+
+# ── every page feature on, embedded: pages are written under renders/ ───────
+cp all-embedded.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+exists internal/cmd/app/renders/help_app.txt
+exists internal/cmd/app/renders/app-greet.1
+exists internal/cmd/app/renders/markdown_app_greet.md
+exists internal/cmd/app/renders/completion_bash.txt
+grep 'go:embed renders/help_app_greet.txt' internal/cmd/app/zz_app.go
+exec go build -o appbin$exe ./cmd/app
+exec ./appbin$exe greet --help
+stdout 'say hello'
+exec rotini generate app/.rotini.spec.yaml --dry-run
+! stderr .
+
+# ── man inline, markdown off: the pages of both are pruned ─────────────────
+cp man-inline.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+! exists internal/cmd/app/renders/app.1
+! exists internal/cmd/app/renders/app-greet.1
+exists internal/cmd/app/renders/help_app.txt
+! exists internal/cmd/app/renders/markdown_app.md
+! grep 'renders/markdown' internal/cmd/app/zz_app.go
+exec go build ./...
+exec rotini generate app/.rotini.spec.yaml --dry-run
+! stderr .
+
+# ── the typed structs in a models package of their own ──────────────────────
+cp models.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+grep 'type AppGreetInputs struct' internal/models/zz_models.go
+grep 'type AppGreetInputs = models\.AppGreetInputs' internal/cmd/app/zz_app.go
+exec go vet ./...
+exec rotini generate app/.rotini.spec.yaml --dry-run
+! stderr .
+
+# ── and in a second file of the cmd package ─────────────────────────────────
+cp models-beside.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+grep '^package app$' internal/cmd/app/zz_models.go
+grep 'type AppGreetInputs struct' internal/cmd/app/zz_models.go
+! grep 'models\.' internal/cmd/app/zz_app.go
+exec go vet ./...
+exec go build -o appbin$exe ./cmd/app
+exec ./appbin$exe greet --name ada
+stdout 'Name:ada'
+exec rotini generate app/.rotini.spec.yaml --dry-run
+! stderr .
+
+# ── a license header reaches the generated files ────────────────────────────
+# Dropping the models target leaves its file behind, which would declare every struct twice.
+rm internal/cmd/app/zz_models.go
+cp header.yaml app/.rotini.conf.yaml
+exec rotini generate app/.rotini.spec.yaml
+exec go build ./...
+grep '^// Copyright 2026 Example\.$' internal/cmd/app/zz_app.go
+# The handlers were already written, so they keep the code they have.
+! grep 'Copyright' internal/cmd/app/app_greet.go
+cp internal/cmd/app/zz_app.go zz-before.txt
+exec rotini generate app/.rotini.spec.yaml
+cmp internal/cmd/app/zz_app.go zz-before.txt
+
+-- spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: greet
+      summary: say hello
+      flags:
+        - name: name
+          identifiers: [--name]
+          summary: who to greet
+          schema: { type: string, default: world }
+-- base.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+  features:
+    - type: help
+      enabled: true
+-- all-embedded.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: completion
+      enabled: true
+      embed: true
+    - type: man
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+      embed: true
+-- man-inline.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: completion
+      enabled: true
+      embed: true
+    - type: man
+      enabled: true
+    - type: markdown
+      enabled: false
+-- models.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+    - type: models
+      file: internal/models/zz_models.go
+  features:
+    - type: help
+      enabled: true
+-- models-beside.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+    - type: models
+      file: internal/cmd/app/zz_models.go
+  features:
+    - type: help
+      enabled: true
+-- header.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      header: |
+        // Copyright 2026 Example.
+  features:
+    - type: help
+      enabled: true

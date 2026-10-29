@@ -45,8 +45,8 @@ import (
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
 //   - rotini's own settings — [Context.Version], [Context.Help], [Context.InvokedHelp],
-//     [Context.HelpFor] and [Context.Parser] read them;
-//     [Context.WithVersion], [Context.WithHelp], [Context.WithParser],
+//     [Context.HelpFor], [Context.CompletionScript] and [Context.Parser] read them;
+//     [Context.WithVersion], [Context.WithHelp], [Context.WithCompletionScript], [Context.WithParser],
 //     [Context.WithInputSettings], [Context.WithInputReader], [Context.WithEnviron],
 //     [Context.WithDir], [Context.WithClock], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
 //     [Context.WithOutputChecks] set them on a standalone Context
@@ -109,6 +109,7 @@ type Context struct {
 	readerFn func(InputSettings) *InputReader
 	version  string
 	help     HelpFunc
+	scripts  CompletionScriptFunc
 	parser   *Parser
 
 	// view is the environment and directory this run reads; see [Program.WithEnviron] and
@@ -658,6 +659,18 @@ func (rtx *Context) WithHelp(help HelpFunc) *Context {
 	return rtx
 }
 
+// WithCompletionScript sets where [Context.CompletionScript] finds scripts. See
+// [Program.WithCompletionScript]. It is for a Context built with [NewContextFor]; during a run,
+// the change lasts for the rest of that run. A nil fn restores the default, no scripts.
+func (rtx *Context) WithCompletionScript(fn CompletionScriptFunc) *Context {
+	if rtx != nil {
+		rtx.mu.Lock()
+		rtx.scripts = fn
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
 // WithParser sets the parser [Context.Parser] returns. [Parser] has no options, so every parser
 // behaves alike; see [Program.WithParser]. It is for a Context built with [NewContextFor];
 // during a run, the change lasts for the rest of that run. A nil parser restores the default.
@@ -796,6 +809,21 @@ func helpPath(chain []Command, from, to int) []string {
 		names = append(names, c.Name)
 	}
 	return names
+}
+
+// CompletionScript returns the completion script for shell from
+// [Program.WithCompletionScript], as a generated completion command prints it. The script is
+// the running program's, so a completion command composed from another spec completes the
+// program it runs in. It returns a [*WiringError] when the program sets no scripts.
+func (rtx *Context) CompletionScript(shell string) (string, error) {
+	rtx.mu.RLock()
+	scripts := rtx.scripts
+	rtx.mu.RUnlock()
+	if scripts == nil {
+		return "", &WiringError{Msg: "the program has no completion scripts; call Program.WithCompletionScript " +
+			"(the generated NewProgram does when the completion feature is on)"}
+	}
+	return scripts(shell)
 }
 
 // Version returns the version set by [Program.WithVersion], or "" if none was set.

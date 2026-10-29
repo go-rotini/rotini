@@ -1,23 +1,33 @@
 package codegen
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 )
 
-// lintAcross runs the rules that need both documents: spec problems that arise from how the
-// conf configures generation. Problems are positioned in the spec.
+// lintAcross runs the rules that need both documents: problems that arise from how the conf
+// configures generation for this spec. A problem of kind "conf" is positioned in the conf,
+// any other in the spec.
 func (p *Processor) lintAcross(rs *reconciledSpec, rc *reconciledConf) []error {
 	if rs == nil || rc == nil {
 		return nil
 	}
-	var problems []error
+	var problems, inSpec, inConf []error
 	for _, rule := range crossLints {
-		problems = append(problems, rule(rs.spec, rc.conf)...)
+		for _, e := range rule(rs.spec, rc.conf) {
+			problems = append(problems, e)
+			if pr := (*problem)(nil); errors.As(e, &pr) && pr.kind == "conf" {
+				inConf = append(inConf, e)
+			} else {
+				inSpec = append(inSpec, e)
+			}
+		}
 	}
-	locateProblems(problems, rs.path, rs.locate)
+	locateProblems(inSpec, rs.path, rs.locate)
+	locateProblems(inConf, rc.path, rc.locate)
 	return problems
 }
 
@@ -32,6 +42,8 @@ var crossLints = []func(*Spec, *Conf) []error{
 	lintPackagePaths,
 	lintCarapaceValues,
 	lintGeneratedNames,
+	lintHandlerFileTargets,
+	lintMainDir,
 }
 
 // lintManPageNames rejects two commands whose man pages would share a name when the man

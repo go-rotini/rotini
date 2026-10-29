@@ -174,7 +174,7 @@ type Command struct {
 	Env []EnvInput `json:"env,omitempty"`
 	// Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, the unprefixed name does not bind: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section. Help also shows each flag's environment fallback, and its configuration key when the command reads configuration files, on a line under the flag.
 	//
-	// In a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a parent that declares none adopts the child's, a parent that declares one wins, and two children with different prefixes are rejected.
+	// In a composed CLI, each spec's prefix names its own inputs: a `$ref`'d child's commands read the variables they read on their own, whatever the parent declares, and the parent's pages list those names. A parent that declares no env_prefix uses its child's for its own inputs; if its children declare different ones, it must declare its own.
 	EnvPrefix string `json:"env_prefix,omitempty"`
 	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
 	Examples []string `json:"examples,omitempty"`
@@ -192,7 +192,7 @@ type Command struct {
 	FlagSets map[string]FlagSet `json:"flag_sets,omitempty"`
 	// Flag inputs for this command. Each applies only when this command is the one run, unless it is `cascading`.
 	Flags []FlagInput `json:"flags,omitempty"`
-	// Text rendered at the bottom of the page. Ignored when 'help' is set.
+	// Text shown at the end of the command's generated pages: last on the help and markdown pages, and in a NOTES section of the man page, before its EXAMPLES. A page given verbatim ('help', 'man' or 'markdown') leaves it out.
 	Footer string `json:"footer,omitempty"`
 	// Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together, and ungrouped commands fall under the default Commands heading. Groups appear in the order their first member is declared, unless the parent declares `groups`: then the ungrouped commands come first, then the groups it lists, in its order, then any others. Presentation-only.
 	Group string `json:"group,omitempty"`
@@ -204,7 +204,7 @@ type Command struct {
 	//
 	// The package must export a constructor '<convention>() rotini.Handler' for each command it serves (the usual five-hook handler; hooks it does not implement default to no-ops), and the generated code calls 'pkg.<Convention>()'. The compiler enforces this, since rotini cannot type-check another package.
 	Handler *HandlerSource `json:"handler,omitempty"`
-	// Text rendered above the description block. Ignored when 'help' is set.
+	// Text shown above the description on the command's generated pages: first on the help page, under the title of the markdown page, and as the first paragraph of the man page's DESCRIPTION. A page given verbatim ('help', 'man' or 'markdown') leaves it out.
 	Header string `json:"header,omitempty"`
 	// Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set.
 	Headings *HelpHeadings `json:"headings,omitempty"`
@@ -599,7 +599,7 @@ type InputSchema struct {
 	RelativeTo string `json:"relative_to,omitempty"`
 	// On a single-value flag: `repeatable: false` makes giving the flag more than once on the command line an error naming the first and last values, instead of the last value winning, which is the default. `-vv` and `--color --no-color` are repeats, and so is a cascading flag given at two levels of the command path; a sub-command that redeclares the flag has its own. Environment and configuration values are unaffected. Rejected on list, map, count and object flags, which repeat by nature, and on arguments, env and config inputs.
 	Repeatable *bool `json:"repeatable,omitempty"`
-	// When true, the input must be provided (or stdin must not be empty for stdin inputs). On the command line an empty value (`--name ""`, `--name=`, or `''` as an argument) is provided; add `minLength: 1` to refuse it. An env input set to the empty string is provided too, while a flag's environment fallback set to the empty string counts as unset. Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
+	// When true, the input must be provided (or stdin must not be empty for stdin inputs). On the command line an empty value (`--name ""`, `--name=`, or `''` as an argument) is provided; add `minLength: 1` to refuse it. An env input set to the empty string is provided too, while a flag's environment fallback set to the empty string counts as unset; either way, a `.env` file that sets the variable supplies the value instead. Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
 	Required bool `json:"required,omitempty"`
 	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input. A secret flag or argument whose from: list leaves out value refuses a value typed on the command line, which would show in the process list and shell history; `rotini validate` warns about a secret flag that accepts one. Help, man and markdown pages leave out a secret input's default unless `default_text` sets what to show.
 	Secret bool `json:"secret,omitempty"`

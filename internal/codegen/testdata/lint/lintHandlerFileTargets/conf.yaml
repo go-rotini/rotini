@@ -1,0 +1,7 @@
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/app/app.go
+    - type: models
+      file: internal/cmd/app/zz_models.go

@@ -221,7 +221,11 @@ func (p *Processor) explainDecodeFailure(kind string, err error) error {
 // validateAndLintSpec validates and lints the spec and every local spec it composes.
 func (p *Processor) validateAndLintSpec(rs *reconciledSpec) []error {
 	problems := p.validateAndLintOne(rs)
-	return append(problems, p.validateComposedSpecs(rs, map[string]bool{})...)
+	problems = append(problems, p.validateComposedSpecs(rs, map[string]bool{})...)
+	if errs, _ := splitProblems(problems); len(errs) > 0 {
+		return problems // a spec that doesn't validate isn't linted
+	}
+	return append(problems, lintComposedShadowing(rs)...)
 }
 
 // validateAndLintOne validates one spec document and, only if it is schema-valid, lints it.
@@ -340,6 +344,7 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prun
 		return warnings, err
 	}
 	prog.skipPrune = !prune
+	prog.confPath = rc.path
 	err = prog.generate()
 	notices := slices.Clone(warnings)
 	if !pl.dry { // a dry run lists the removal as a change instead

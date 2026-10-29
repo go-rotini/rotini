@@ -285,16 +285,16 @@ func renderConfFile(version, pkg string, target fileFormat) ([]byte, error) {
 type templateMainData struct {
 	Package      string
 	PackageAlias string
-	Extension    string // spec/conf file extension for the //go:generate directive, e.g. "yaml"
+	GenerateArgs string // the //go:generate directive's arguments, e.g. "./.rotini.spec.yaml --config ./.rotini.conf.yaml"
 	Header       string // the target's conf `header:`; "" for none
 }
 
-func renderMainFile(header, pkg, pkgAlias, extension string) ([]byte, error) {
+func renderMainFile(header, pkg, pkgAlias, generateArgs string) ([]byte, error) {
 	return renderGoFileWithHeader(header, "main", templateMain, templateMainData{
 		Header:       header,
 		Package:      pkg,
 		PackageAlias: pkgAlias,
-		Extension:    extension,
+		GenerateArgs: generateArgs,
 	})
 }
 
@@ -318,7 +318,6 @@ type templateHandlerData struct {
 	HelpPathArg       string // Go field of the variadic path argument on a command named `help`; "" otherwise
 	VersionOnly       bool   // a command named `version` whose whole job is to print it
 	CompletionArg     string // Go field of a `completion` command's shell argument; "" otherwise
-	CompletionFunc    string // the generated function returning a shell's completion script
 	PrintHelpWhenBare bool   // a dispatcher root or group: sub-commands, no own arguments, help feature on
 	NeedsInputs       bool   // the body calls Inputs (for its result or its validation)
 	Redact            bool   // the inputs chain holds a secret, so the default body prints only the command path
@@ -469,6 +468,10 @@ type templateRotiniData struct {
 	// HelpResolver is "Help" when the help feature is on, else "". NewProgram passes it to
 	// WithHelp so [rotini.Context.Help] can find the running command's page.
 	HelpResolver string
+	// CompletionResolver is "Completion" when the completion feature is on, else "". NewProgram
+	// passes it to WithCompletionScript so [rotini.Context.CompletionScript] prints the running
+	// program's script.
+	CompletionResolver string
 	// WiredFeatures are the feature constructors NewProgram passes to rotini.NewWiredProgram,
 	// e.g. "rotini.YAML()"; see [wiredFeatures].
 	WiredFeatures []string

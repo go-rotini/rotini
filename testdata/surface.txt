@@ -433,6 +433,7 @@ method Context.CheckOutput(v any) error
 method Context.Command() Command
 method Context.CommandChain() []Command
 method Context.CommandPath() string
+method Context.CompletionScript(shell string) (string, error)
 method Context.Context() context.Context
 method Context.DashIndex() (int, bool)
 method Context.DefaultInputs[T any]() (InputLayer[T], error)
@@ -469,6 +470,7 @@ method Context.StdinInputs[T any]() (InputLayer[T], error)
 method Context.Usage() string
 method Context.Version() string
 method Context.WithClock(now func() time.Time) *Context
+method Context.WithCompletionScript(fn CompletionScriptFunc) *Context
 method Context.WithDir(dir string) *Context
 method Context.WithEnviron(env []string) *Context
 method Context.WithHelp(help HelpFunc) *Context
@@ -542,6 +544,7 @@ method Program.WithClock(now func() time.Time) *Program
 method Program.WithCompletion(format CompletionFormat) *Program
 method Program.WithCompletionDescriptions(fn func(rtx *Context) bool) *Program
 method Program.WithCompletionMessages(fn func(rtx *Context) bool) *Program
+method Program.WithCompletionScript(fn CompletionScriptFunc) *Program
 method Program.WithContext(ctx context.Context) *Program
 method Program.WithDependency[T any](dep Dependency[T], value T) *Program
 method Program.WithDir(dir string) *Program
@@ -592,6 +595,7 @@ type CompletionFormat
 type CompletionMessagesDef
 type CompletionOptions
 type CompletionResult
+type CompletionScriptFunc
 type ConfigFile
 type ConfigKey
 type ConfigWriteOption

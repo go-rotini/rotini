@@ -1,0 +1,288 @@
+# R1 — two sources for one input, and values a source can't hold, in a generated CLI.
+#
+# A fallback that a higher source overrides is never read, so a value there the input's type
+# can't hold is no error; one that wins is reported with where it came from. rtx.Inputs and
+# rtx.InputsWithReport (--plain picks the first) agree on both. Profiles, a .env file, and the
+# typed reads of config values are checked the same way.
+
+gomodinit example.com/conflicts
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# ── an overridden value is never read ────────────────────────────────────────
+
+# A .env file's bad value, under the command line and the real environment.
+cp dotenv.txt .env
+! exec ./app$exe
+stderr '^Error: --port: "abc" is not a valid integer \(from environment variable APP_SERVER_PORT \(from .env\)\)$'
+exec ./app$exe --port 6
+stdout '^port=6 '
+exec ./app$exe --port 6 --plain
+stdout '^port=6 '
+env APP_SERVER_PORT=5
+exec ./app$exe
+stdout '^port=5 '
+rm .env
+
+# The command line over a bad variable, for a flag and an argument, through both readers.
+env APP_SERVER_PORT=abc
+env APP_N=abc
+exec ./app$exe --port 1 x 2
+stdout '^port=1 small=0 level=info tags=\[\] target=x n=2$'
+exec ./app$exe --plain --port 1 x 2
+stdout '^port=1 small=0 level=info tags=\[\] target=x n=2$'
+
+# ...and explaining that run works, without the value that was never read.
+exec ./app$exe --port 1 x 2 --explain-inputs
+stdout '^App.Flags.Port = "1" from argv:--port; overrides default "8080"$'
+! stdout abc
+
+# Left out on the command line, the bad variable wins and is reported, by both readers.
+! exec ./app$exe --port 1 x
+stderr '^Error: <n>: "abc" is not a valid integer \(from environment variable APP_N\)$'
+! exec ./app$exe --plain --port 1 x
+stderr '^Error: <n>: "abc" is not a valid integer \(from environment variable APP_N\)$'
+! exec ./app$exe x 2
+stderr '^Error: --port: "abc" is not a valid integer \(from environment variable APP_SERVER_PORT\)$'
+env APP_SERVER_PORT=
+env APP_N=
+
+# The environment over a bad configuration value.
+env APP_SERVER_PORT=3
+exec ./app$exe --conf bad.yaml
+stdout '^port=3 '
+exec ./app$exe --conf bad.yaml --plain
+stdout '^port=3 '
+env APP_SERVER_PORT=
+! exec ./app$exe --conf bad.yaml
+stderr '^Error: --port: "abc" is not a valid integer \(from configuration file .*bad.yaml, key server.port\)$'
+
+# An enum is checked on the value that wins, wherever it came from.
+env APP_LEVEL=loud
+exec ./app$exe --level warn
+stdout 'level=warn'
+! exec ./app$exe
+stderr '^Error: invalid value "loud" for --level \(one of: debug, info, warn\) \(from environment variable APP_LEVEL\)$'
+env APP_LEVEL=
+
+# ── profiles ─────────────────────────────────────────────────────────────────
+
+# The chosen profile wins over the shared keys, the environment over both, and the command line
+# over everything. A bad value in a profile nobody chose is never read.
+exec ./app$exe --conf prof.yaml
+stdout '^port=9090 small=1 '
+exec ./app$exe --conf prof.yaml --profile prod
+stdout '^port=443 small=1 '
+env APP_PROFILE=prod
+env APP_SERVER_PORT=444
+exec ./app$exe --conf prof.yaml
+stdout '^port=444 '
+exec ./app$exe --conf prof.yaml --port 445
+stdout '^port=445 '
+env APP_SERVER_PORT=
+exec ./app$exe --conf prof.yaml --explain-inputs
+stdout '^App.Flags.Port = "443" from config:main#profiles.prod.server.port; overrides default "8080"$'
+stdout '^App.Flags.Small = "1" from config:main#small$'
+
+# The chosen profile's bad value names the profile.
+! exec ./app$exe --conf prof.yaml --profile broken
+stderr '^Error: --small: "300" is not a valid int8 \(out of range: -128 to 127\) \(from configuration file .*prof.yaml \(profile broken\), key small\)$'
+env APP_PROFILE=
+
+# ── a configuration value the input's type can't hold ────────────────────────
+
+# Each is a usage error naming the file and the key, and the number that a config file writes
+# as a float but is whole fills an integer.
+! exec ./app$exe --conf types.yaml
+stderr '^Error: --small: "200" is not a valid int8 \(out of range: -128 to 127\) \(from configuration file .*types.yaml, key small\)$'
+! exec ./app$exe --conf uint.yaml
+stderr '^Error: --count: "-1" is not a valid uint'
+! exec ./app$exe --conf float.yaml
+stderr '^Error: --port: "1.5" is not a valid integer \(from configuration file .*float.yaml, key server.port\)$'
+exec ./app$exe --conf whole.yaml
+stdout '^port=1000 '
+! exec ./app$exe --conf duration.yaml
+stderr '^Error: --timeout: "30" is not a valid duration \(from configuration file .*duration.yaml, key timeout\)$'
+! exec ./app$exe --conf nullitem.yaml
+stderr '^Error: --tag: list item 2 is null \(from configuration file .*nullitem.yaml, key tags\)$'
+! exec ./app$exe --conf dup.yaml
+stderr 'duplicate key "port"'
+! exec ./app$exe --conf list.yaml
+stderr 'the top level must be a mapping'
+
+# A null key leaves the default, and a key no input reads is ignored.
+exec ./app$exe --conf null.yaml
+stdout '^port=8080 small=0 level=info '
+
+# A secret's bad value is never echoed, whichever source it came from.
+! exec ./app$exe --conf secret.yaml
+stderr '^Error: --token must be at least 8 characters long \(got \[redacted\]\) \(from configuration file .*secret.yaml, key token\)$'
+! stderr hunter
+env APP_TOKEN=hunter
+! exec ./app$exe
+stderr '\(got \[redacted\]\) \(from environment variable APP_TOKEN\)$'
+! stderr hunter
+exec ./app$exe --token hunter2hunter2
+stdout '^port=8080 '
+env APP_TOKEN=
+
+-- bad.yaml --
+server:
+  port: abc
+-- prof.yaml --
+server:
+  port: 9090
+small: 1
+profiles:
+  prod:
+    server:
+      port: 443
+  broken:
+    small: 300
+-- dotenv.txt --
+APP_SERVER_PORT=abc
+-- types.yaml --
+small: 200
+-- uint.yaml --
+count: -1
+-- float.yaml --
+server:
+  port: 1.5
+-- whole.yaml --
+server:
+  port: 1e3
+-- duration.yaml --
+timeout: 30
+-- nullitem.yaml --
+tags: [a, null]
+-- dup.yaml --
+server:
+  port: 1
+  port: 2
+-- list.yaml --
+- port
+-- null.yaml --
+server:
+  port:
+small: ~
+not_an_input: 5
+-- secret.yaml --
+token: hunter
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: conflicting sources
+  env_prefix: APP
+  config_files:
+    - name: main
+      path: ./absent.yaml
+      format: yaml
+      profiles: { under: profiles, select: profile }
+    - name: dotenv
+      path: ./.env
+      format: dotenv
+      as: env
+  flags:
+    - name: conf
+      summary: the config file
+      identifiers: [--conf]
+      schema: { type: string, config_source: main }
+    - name: profile
+      summary: the profile
+      identifiers: [--profile]
+      schema: { type: string, variable: APP_PROFILE }
+    - name: plain
+      summary: read with rtx.Inputs
+      identifiers: [--plain]
+      hidden: true
+      schema: { type: bool }
+    - name: port
+      summary: the port
+      identifiers: [--port]
+      schema: { type: int, key: server.port, default: 8080 }
+    - name: small
+      summary: a small number
+      identifiers: [--small]
+      schema: { type: int8, key: small }
+    - name: count
+      summary: an unsigned number
+      identifiers: [--count]
+      schema: { type: uint, key: count }
+    - name: timeout
+      summary: a duration
+      identifiers: [--timeout]
+      schema: { type: duration, key: timeout }
+    - name: level
+      summary: the level
+      identifiers: [--level]
+      schema: { type: string, key: level, default: info, enum: [debug, info, warn] }
+    - name: tags
+      summary: tags
+      identifiers: [--tag]
+      schema: { type: '[]string', key: tags }
+    - name: token
+      summary: a token
+      identifiers: [--token]
+      schema: { type: string, key: token, secret: true, minLength: 8, from: [value] }
+    - name: explain-inputs
+      summary: explain where values came from
+      identifiers: [--explain-inputs]
+      short_circuit: true
+      hidden: true
+      schema: { type: bool }
+  arguments:
+    - name: target
+      summary: the target
+      schema: { type: string, default: none }
+    - name: n
+      summary: a number
+      schema: { type: int, variable: APP_N, key: n, default: 1 }
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+	"slices"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, rep, err := rtx.InputsWithReport[AppInputs]()
+	if slices.Contains(rtx.Argv, "--plain") {
+		in, err = rtx.Inputs[AppInputs]()
+	}
+	if in.App.Flags.ExplainInputs {
+		_ = rep.Format(rtx.Stdout)
+		return
+	}
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := in.App.Flags
+	fmt.Fprintf(rtx.Stdout, "port=%d small=%d level=%s tags=%q target=%s n=%d\n",
+		f.Port, f.Small, f.Level, f.Tags, in.App.Arguments.Target, in.App.Arguments.N)
+}

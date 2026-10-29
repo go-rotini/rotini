@@ -226,7 +226,7 @@ func TestImportNewFields(t *testing.T) {
 		t.Errorf("conf =\n%s\nwant the completion feature on", conf)
 	}
 	stub := readTestFile(t, filepath.Join(dir, "internal", "cmd", "acme", "acme_completion.go"))
-	if !strings.Contains(stub, "Completion(inputs.AcmeCompletion.Arguments.Shell)") {
+	if !strings.Contains(stub, "rtx.CompletionScript(inputs.AcmeCompletion.Arguments.Shell)") {
 		t.Errorf("completion stub =\n%s\nwant it to print the shell's script", stub)
 	}
 }

@@ -1,0 +1,118 @@
+# R2 — a command's header and footer appear on its help, man and markdown pages, and man pages
+# give bounds once, as a sentence.
+#
+# Help puts the header first and the footer last. Markdown puts the header under the title and
+# the footer last. Man puts the header first in DESCRIPTION and the footer in a NOTES section
+# before EXAMPLES. A page given verbatim leaves both out.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+
+# Help: header first, footer last.
+grep '(?s)\A\.ship is final\.\n\nRead the runbook first\.\n\nship a service\n.*\n  app deploy -r 3\n\nReport problems upstream\.\z' internal/cmd/app/renders/help_app_deploy.txt
+
+# Markdown: the header under the title, the footer last.
+grep '(?s)\A# app deploy\n\n\.ship is final\.\n\nRead the runbook first\.\n\nship a service\n.*at least 1\n.*```\n\nReport problems upstream\.\z' internal/cmd/app/renders/markdown_app_deploy.md
+
+# Man: the header opens DESCRIPTION (a leading "." escaped), the footer is NOTES before
+# EXAMPLES, and the bound is a sentence with no short note beside the summary.
+grep -count=1 '^\.SH DESCRIPTION$' internal/cmd/app/renders/app-deploy.1
+grep '^\\&\.ship is final\.$' internal/cmd/app/renders/app-deploy.1
+grep '^\.SH NOTES$' internal/cmd/app/renders/app-deploy.1
+grep '^Report problems upstream\.$' internal/cmd/app/renders/app-deploy.1
+grep '^how many copies \(default 1\)$' internal/cmd/app/renders/app-deploy.1
+grep '^at least 1$' internal/cmd/app/renders/app-deploy.1
+! grep '>= 1' internal/cmd/app/renders/app-deploy.1
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml --dry-run
+! stderr .
+
+# Order on the man page: DESCRIPTION, then NOTES, then EXAMPLES, then SEE ALSO.
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+exec ./app$exe
+stdout '^DESCRIPTION NOTES EXAMPLES SEE-ALSO$'
+
+# A verbatim page shows neither; the other pages still do.
+! grep 'final|upstream' internal/cmd/app/renders/help_app_status.txt
+grep '^\.SH NOTES$' internal/cmd/app/renders/app-status.1
+grep '^Status is cached\.$' internal/cmd/app/renders/markdown_app_status.md
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: the app
+  commands:
+    - name: deploy
+      summary: ship a service
+      header: |-
+        .ship is final.
+
+        Read the runbook first.
+      footer: Report problems upstream.
+      examples: [app deploy -r 3]
+      flags:
+        - name: replicas
+          summary: how many copies
+          identifiers: [-r, --replicas]
+          schema: {type: int, default: 1, minimum: 1}
+    - name: status
+      summary: show status
+      help: "STATUS VERBATIM HELP\n"
+      footer: Status is cached.
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: man
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+      embed: true
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+// Run prints the deploy man page's section headings in order.
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	page, err := Man("deploy")
+	if err != nil {
+		fmt.Fprintln(rtx.Stderr, err)
+		return
+	}
+	var names []string
+	for _, m := range regexp.MustCompile(`(?m)^\.SH "?([A-Z ]+?)"?$`).FindAllStringSubmatch(page, -1) {
+		if m[1] != "NAME" && m[1] != "SYNOPSIS" && m[1] != "OPTIONS" && m[1] != "GLOBAL OPTIONS" {
+			names = append(names, strings.ReplaceAll(m[1], " ", "-"))
+		}
+	}
+	fmt.Fprintln(rtx.Stdout, strings.Join(names, " "))
+}

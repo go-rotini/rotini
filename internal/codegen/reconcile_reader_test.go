@@ -78,6 +78,27 @@ func TestReadFile_errors(t *testing.T) {
 	}
 }
 
+// TestValidate_jsonSyntaxErrorIsPositioned pins that a JSON spec or conf that doesn't parse is
+// reported in its file at a line and column, as YAML and TOML are, rather than as the schema
+// validator failing to decode an anonymous instance.
+func TestValidate_jsonSyntaxErrorIsPositioned(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeTestFile(t, dir, "bad.json", "{\n  \"version\": \"0.0.0\",\n  \"command\": {\n    \"name\": \"app\",\n  }\n}\n")
+	writeTestFile(t, dir, "ok.json", `{"version": "0.0.0", "command": {"name": "app", "summary": "a demo"}}`)
+	p := NewProcessor("0.0.0")
+	for _, tc := range []struct{ spec, conf string }{{"bad.json", ""}, {"ok.json", "bad.json"}} {
+		err := p.Validate(tc.spec, tc.conf, false, "", "", nil, nil)
+		if err == nil {
+			t.Fatalf("Validate(%s, %s) = nil, want a syntax error", tc.spec, tc.conf)
+		}
+		want := "decode bad.json: json: line 5, column 3: invalid character '}'"
+		if !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "jsonschema") {
+			t.Errorf("Validate(%s, %s) = %v, want it to contain %q", tc.spec, tc.conf, err, want)
+		}
+	}
+}
+
 // TestBytesToJSON pins conversion of each supported format to JSON.
 func TestBytesToJSON(t *testing.T) {
 	docs := map[string]string{

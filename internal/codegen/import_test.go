@@ -146,7 +146,7 @@ func TestImport(t *testing.T) {
 		t.Errorf("conf =\n%s\nwant the completion feature on", conf)
 	}
 	stub := readTestFile(t, filepath.Join(dir, "internal", "cmd", "acme", "acme_completion.go"))
-	if !strings.Contains(stub, "script, err := Completion(inputs.AcmeCompletion.Arguments.Shell)") {
+	if !strings.Contains(stub, "script, err := rtx.CompletionScript(inputs.AcmeCompletion.Arguments.Shell)") {
 		t.Errorf("completion stub =\n%s\nwant it to print the shell's script", stub)
 	}
 	for _, f := range []string{"acme_deploy.go", "acme_exec.go", "acme_help.go", "zz_rotini.go"} {

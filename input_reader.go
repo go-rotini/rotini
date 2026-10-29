@@ -150,6 +150,14 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		return err
 	}
 
+	// An unknown profile is reported before any value is read or checked: a value it would have
+	// supplied, a required one included, is otherwise reported in its place.
+	if fs.profiles != nil {
+		if err := fs.profiles.check(b, v, chain, boot, waived, view); err != nil {
+			return err
+		}
+	}
+
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
 	if v.Kind() == reflect.Struct && hasReconFlags(v) {
@@ -175,11 +183,6 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	// Checked after argv validation so a bad command line reports itself first.
 	if err := checkFrameFit(v, chain, rtx.frameIndex()); err != nil {
 		return err
-	}
-	if fs.profiles != nil {
-		if err := fs.profiles.check(b, v, chain, boot, waived, view); err != nil {
-			return err
-		}
 	}
 
 	if err := b.readChannels(fs, chain, boot, v, waived, view); err != nil {
@@ -346,7 +349,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 }
 
 // firstSetEnv returns the first of an env tag's comma-separated variable names that is set
-// (non-empty) in the run's environment, or "" when none is. `variable: [GH_TOKEN, GITHUB_TOKEN]`
+// (non-empty) as an input reads it ([osView.inputLookup]), or "" when none is. `variable: [GH_TOKEN, GITHUB_TOKEN]`
 // generates env:"GH_TOKEN,GITHUB_TOKEN": the first name is preferred, the rest are the
 // spellings other tools use for the same thing.
 func firstSetEnv(view *osView, names string) string {
@@ -377,6 +380,7 @@ type fallbackRead struct {
 	files      map[string]string
 	selectors  map[string]profileChoice // profile selector flags, which a configuration file never sets
 	pathFlags  map[string]bool          // config_source flags, which a configuration file never sets
+	above      layerShadow              // in a per-channel layer, what the layers above it supply
 }
 
 // reconcileFlag binds one fallback flag, at chain frame idx, from the registry: argv > env >
@@ -420,14 +424,11 @@ func bindFlagFallback(reg fallbackLookup, field reflect.Value, tag reflect.Struc
 	found = found && val.Kind() != recon.NullKind // a null (`mode:`) leaves the default in place
 	switch {
 	case found:
-		if vals, err = fallbackValues(val, def.Separator); err != nil {
+		if vals, err = flagFallbackValues(val, field.Type(), name, def, chain, idx, fallbackOrigin(rd, source, tag.Get("env"), key)); err != nil {
 			if rd.waiveFiles && source != osEnvSourceName {
 				return nil, "", nil
 			}
-			return nil, "", fallbackCoerceError(chain, idx, name, fallbackOrigin(rd, source, tag.Get("env"), key), err)
-		}
-		if val.Kind() == recon.MapKind && isObjectFlag(&def) {
-			quoteObjectPairs(vals) // an object's config block read as one map value
+			return nil, "", err
 		}
 	case field.Kind() == reflect.Map || (isObjectFlag(&def) && field.Kind() != reflect.Slice):
 		// recon keeps a config map — or an object flag's config block — as its leaves
@@ -478,6 +479,24 @@ func bindFlagFallback(reg fallbackLookup, field reflect.Value, tag reflect.Struc
 		vals = []string{} // supplied, and empty: still present
 	}
 	return vals, origin, nil
+}
+
+// flagFallbackValues renders the fallback value val, read for a flag of type t at chain frame
+// idx, as the flag's occurrences ([fallbackValues]; an object's block as [objectBlock]). A
+// value of the wrong shape ([flagShapeProblem]) or one that can't be read is an error naming
+// origin, where it came from.
+func flagFallbackValues(val recon.Value, t reflect.Type, name string, def FlagDef, chain []Command, idx int, origin string) ([]string, error) {
+	if problem := flagShapeProblem(val, t, isObjectFlag(&def)); problem != "" {
+		return nil, usageBind(channelFlag, name, fallbackLabel(chain, idx, name)+" "+problem+fromSource(origin), nil)
+	}
+	vals, err := fallbackValues(val, def.Separator)
+	if err != nil {
+		return nil, fallbackCoerceError(chain, idx, name, origin, err)
+	}
+	if val.Kind() == recon.MapKind && isObjectFlag(&def) {
+		vals = objectBlock(val, vals)
+	}
+	return vals, nil
 }
 
 // fallbackTimes reads the fallback values of a time flag that declares no layout or relative
@@ -589,15 +608,17 @@ func nullItem(i int) error {
 	return fmt.Errorf("list item %d is null", i+1)
 }
 
-// checkNullItems refuses a configuration list, read by a list field of the Config struct s,
-// that holds a null item. A field pinned to one file is read from that file's registry.
-func checkNullItems(s reflect.Value, cfg *cfgRegs) error {
+// checkConfigShapes refuses a configuration value that a field of the Config struct s can't
+// hold: a list or map for a field that holds one value ([configShapeProblem]), or a list, read
+// by a list field, that holds a null item. A field pinned to one file is read from that file's
+// registry.
+func checkConfigShapes(s reflect.Value, cfg *cfgRegs) error {
 	if s.Kind() != reflect.Struct {
 		return nil
 	}
 	for f := range s.Type().Fields() {
 		key := reconKey(f.Tag.Get("recon"))
-		if key == "" || derefType(f.Type).Kind() != reflect.Slice {
+		if key == "" {
 			continue
 		}
 		reg := cfg.merged
@@ -608,13 +629,19 @@ func checkNullItems(s reflect.Value, cfg *cfgRegs) error {
 			}
 		}
 		val, found, err := reg.Get(key)
-		if err != nil || !found || val.Kind() != recon.SliceKind {
+		if err != nil || !found {
+			continue
+		}
+		l := cfg.labels()
+		if problem := configShapeProblem(val, f.Type); problem != "" {
+			return usageBind(channelConfig, key, l.name(channelConfig, key)+" "+problem+l.origin(val.Source()), nil)
+		}
+		if derefType(f.Type).Kind() != reflect.Slice || val.Kind() != recon.SliceKind {
 			continue
 		}
 		items, _ := val.AsSlice()
 		for i, it := range items {
 			if it.Kind() == recon.NullKind {
-				l := cfg.labels()
 				return usageBind(channelConfig, key, l.name(channelConfig, key)+": "+nullItem(i).Error()+l.origin(val.Source()), nil)
 			}
 		}
@@ -2163,7 +2190,7 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 // fillConfig recon-binds one Config struct from cfg (see fillChannels).
 func fillConfig(s reflect.Value, cfg *cfgRegs, waived bool) error {
 	if !waived {
-		if err := checkNullItems(s, cfg); err != nil {
+		if err := checkConfigShapes(s, cfg); err != nil {
 			return err
 		}
 	}

@@ -1,0 +1,1 @@
+conf: .rotini.conf.yaml:7:13: generate.packages.main: file "internal/cmd/demo/main.go" is in "internal/cmd/demo", the cmd package's directory, but the entrypoint is package main and a directory holds one package, so it can't build; put it in a directory of its own, such as "cmd/demo/main.go"

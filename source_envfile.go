@@ -50,23 +50,38 @@ func (v *osView) withInputEnv(in *inputEnv) *osView {
 func foldCaseDefault() bool { return runtime.GOOS == "windows" }
 
 // inputLookup reads one variable as an input sees it: a value read through variable_file,
-// then the run's environment, then each .env file.
+// then the run's environment, then each .env file. An empty value counts as unset while a
+// lower layer sets the variable to something, so `APP_PORT=` in the environment leaves a .env
+// file's APP_PORT in place; a variable no layer sets to anything but "" is set and empty.
 func (v *osView) inputLookup(name string) (string, bool) {
+	val, _, ok := v.inputFind(name)
+	return val, ok
+}
+
+// inputFind is inputLookup plus the .env file the value came from ("" for the run's own
+// environment or a variable_file file).
+func (v *osView) inputFind(name string) (val, dotenv string, ok bool) {
 	if v == nil || v.input == nil {
-		return v.lookup(name)
+		val, ok = v.lookup(name)
+		return val, "", ok
 	}
 	if fv, ok := v.input.files[v.key(name)]; ok {
-		return fv.val, true
+		return fv.val, "", true
 	}
-	if val, ok := v.lookup(name); ok {
-		return val, true
+	val, ok = v.lookup(name)
+	if val != "" {
+		return val, "", true
 	}
 	for _, l := range v.input.layers {
-		if val, ok := l.vals[v.key(name)]; ok {
-			return val, true
+		lv, set := l.vals[v.key(name)]
+		switch {
+		case lv != "":
+			return lv, l.path, true
+		case set && !ok:
+			ok, dotenv = true, l.path
 		}
 	}
-	return "", false
+	return "", dotenv, ok
 }
 
 // inputGetenv is inputLookup without the presence report.
@@ -84,13 +99,8 @@ func (v *osView) inputOrigin(name string) string {
 	if fv, ok := v.input.files[v.key(name)]; ok {
 		return " (from " + fv.from + ")"
 	}
-	if _, ok := v.lookup(name); ok {
-		return ""
-	}
-	for _, l := range v.input.layers {
-		if _, ok := l.vals[v.key(name)]; ok {
-			return " (from " + filepath.Base(l.path) + ")"
-		}
+	if _, dotenv, _ := v.inputFind(name); dotenv != "" {
+		return " (from " + filepath.Base(dotenv) + ")"
 	}
 	return ""
 }
@@ -104,15 +114,20 @@ func (v *osView) fileVariable(name string) string {
 }
 
 // inputEnviron is the whole environment as an input sees it, KEY=value: the run's environment,
-// then each .env variable it does not set.
+// then each .env variable it does not set to a value, as [osView.inputLookup] reads them.
 func (v *osView) inputEnviron() []string {
 	env := v.environ()
 	if v == nil || v.input == nil || len(v.input.layers) == 0 {
 		return env
 	}
 	seen := make(map[string]bool, len(env))
-	for _, kv := range env {
-		name, _, _ := strings.Cut(kv, "=")
+	for i, kv := range env {
+		name, val, _ := strings.Cut(kv, "=")
+		if val == "" {
+			if lv, _ := v.inputLookup(name); lv != "" {
+				env[i] = name + "=" + lv
+			}
+		}
 		seen[v.key(name)] = true
 	}
 	for _, l := range v.input.layers {

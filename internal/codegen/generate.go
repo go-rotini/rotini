@@ -3,10 +3,14 @@ package codegen
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,10 +59,11 @@ type program struct {
 	// reads the ones inside this module.
 	handlerImports map[string]bool
 
-	// Inputs: the validated spec and conf, and the spec's path.
+	// Inputs: the validated spec and conf, and their paths (confPath is "" without a conf).
 	spec     *Spec
 	conf     *Conf
 	specPath string
+	confPath string
 
 	// Context: the owning module and the resolved output locations.
 	module module // the Go module the spec belongs to (root dir + import path)
@@ -94,6 +99,10 @@ type program struct {
 	// per-command pages written to disk (featureOutputs).
 	featureBlocks  []templateFeature
 	featureOutputs []featureOutput
+
+	// prior is what the previous generate wrote for the doc features, read from the cmd file it
+	// left, so pages it wrote that this run no longer produces can be removed.
+	prior priorPages
 
 	// contractGo is the contract document for the cmd file's Contract variable
 	// (generate.contract.go), set by emitContract; nil when that is off.
@@ -154,6 +163,8 @@ func (p *program) generate() error {
 		name string
 		do   func() error
 	}{
+		{"check cmd package", p.checkCmdPackage},
+		{"read previous pages", p.readPriorPages},
 		{"emit schemas", p.emitSchemas},
 		{"emit contract", p.emitContract},
 		{"emit program features", p.emitProgramFeatures},
@@ -176,6 +187,59 @@ func (p *program) generate() error {
 }
 
 // ─── the generate steps ─────────────────────────────────────────────────────────.
+
+// checkCmdPackage stops generate before it writes anything when a file in the cmd package's
+// directory declares another package, as every handler does once the conf's `package:`
+// changes. Handlers belong to the author, so generate never rewrites them; the error names
+// each one. Files rotini rewrites itself, build-ignored files and generated files are
+// skipped, as is a file that doesn't parse (the compiler reports it).
+func (p *program) checkCmdPackage() error {
+	dir := p.layout.cmdDir
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read dir %s: %w", dir, err)
+	}
+	want := p.layout.cmdPkgName
+	skip := map[string]bool{p.layout.cmdFile: true}
+	if p.layout.modelsInCmd {
+		skip[p.layout.modelsFile] = true
+	}
+	var stale []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || skip[name] {
+			continue
+		}
+		src, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+		if buildIgnored(src) {
+			continue
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), name, src, parser.PackageClauseOnly|parser.ParseComments)
+		if err != nil || ast.IsGenerated(f) {
+			continue
+		}
+		got := f.Name.Name
+		if got == want || (strings.HasSuffix(name, "_test.go") && got == want+"_test") {
+			continue
+		}
+		stale = append(stale, fmt.Sprintf("%s (package %s)", name, got))
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	rel, err := filepath.Rel(p.module.root, dir)
+	if err != nil {
+		rel = dir
+	}
+	return fmt.Errorf("the conf names the cmd package %q, but these files in %s declare another package: %s; rotini never rewrites them, so change each one's package clause to `package %s`, or set the cmd target's `package` back, then generate again",
+		want, filepath.ToSlash(rel), strings.Join(stale, ", "), want)
+}
 
 // emitSchemas writes rotini's embedded JSON Schemas when generate.schemas is set. It runs
 // first so an editor's $schema reference resolves even if a later step fails.
@@ -243,7 +307,7 @@ func (p *program) emitStubs() error { return writeHandlerStubs(p, p.layout) }
 // emitEntrypoint writes the binary's main.go, create-once, when the conf declares an
 // entrypoint, and notes an existing one that still uses the removed Program variable.
 func (p *program) emitEntrypoint() error {
-	if err := writeEntrypoint(p.plan, p.layout, string(detectFileFormat(p.specPath))); err != nil {
+	if err := writeEntrypoint(p.plan, p.layout, generateArgs(p.layout.entrypointDir, p.specPath, p.confPath)); err != nil {
 		return err
 	}
 	if w := p.staleProgramVar(); w != nil {
@@ -280,9 +344,8 @@ func (p *program) staleProgramVar() error {
 	return nil
 }
 
-// prune deletes generated stubs and feature pages the spec no longer declares, sparing
-// each package's `keep` paths. When the entrypoint shares the cmd directory, its keep
-// list is merged into the cmd pass.
+// prune deletes generated stubs and feature pages the spec and conf no longer produce, sparing
+// each package's `keep` paths.
 func (p *program) prune() error {
 	if p.skipPrune {
 		return nil
@@ -291,15 +354,15 @@ func (p *program) prune() error {
 	if m := p.conf.Generate.mainPkg(); m != nil {
 		mainKeep = m.Keep
 	}
-	cmdKeep := p.conf.Generate.cmdTarget().Keep
-	if p.layout.entrypointDir != "" && p.layout.entrypointDir == p.layout.cmdDir {
-		cmdKeep = append(append([]string{}, cmdKeep...), mainKeep...)
-	}
 	note := func(name string) { p.pruned = append(p.pruned, name) }
-	if err := pruneStubs(p, p.layout, cmdKeep, note); err != nil {
+	if err := pruneStubs(p, p.layout, p.conf.Generate.cmdTarget().Keep, note); err != nil {
 		return err
 	}
-	if err := pruneFeatureOutputs(p.plan, p.layout, p.conf.Generate.cmdTarget().Keep, p.featureOutputs); err != nil {
+	pageKeep := p.conf.Generate.cmdTarget().Keep
+	if err := pruneFeatureOutputs(p.plan, p.layout, pageKeep, slices.Concat(p.featureOutputs, p.disabledFeatureOutputs())); err != nil {
+		return err
+	}
+	if err := pruneUnproducedPages(p.plan, p.layout, pageKeep, p.featureOutputs, p.prior.embedded); err != nil {
 		return err
 	}
 	return pruneEntrypoint(p.plan, p.layout, mainKeep, note)
@@ -352,7 +415,7 @@ func (p *program) resolveFeatures() error {
 		}
 
 		p.featureBlocks = append(p.featureBlocks, buildFeatureBlock(nodes, embedRel, f.desc, f.cfg.Embed, contents, !f.desc.perShell && treeHasAliases(p.tree)))
-		p.featureOutputs = append(p.featureOutputs, featureOutput{desc: f.desc, absEmbedDir: absEmbedDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
+		p.featureOutputs = append(p.featureOutputs, featureOutput{desc: f.desc, absEmbedDir: absEmbedDir, rootPage: manPageName(p.rootName, nil), nodes: nodes, contents: contents, embed: f.cfg.Embed})
 	}
 	return nil
 }
@@ -396,6 +459,7 @@ type confFeature struct {
 type featureOutput struct {
 	desc        docFeature
 	absEmbedDir string // where rendered output files are written (embed mode)
+	rootPage    string // the root command's man page name, which names every man page file
 	nodes       []helpNode
 	contents    []string // final per-node content (parallel to nodes), rendered/verbatim/stripped
 	embed       bool     // true: write contents to files (//go:embed); false: inline in the .go, write no output files
@@ -435,14 +499,20 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 	blocks, imports := inputBlocks(gp)
 
 	// With a models target the typed structs live in their own package; this file carries
-	// only aliases re-exporting them, so handler code reads the same either way.
+	// only aliases re-exporting them, so handler code reads the same either way. A models file
+	// in the cmd package's own directory declares them in this package, so it needs neither.
 	var modelsImport string
 	var aliases []string
 	var flagSets []templateFlagSet
 	outputTypes := ""
+	exitCodes := exitConstantsDecl(gp.exitConstants(), lay.splitModels)
 	if lay.splitModels {
-		modelsImport = "models " + strconv.Quote(lay.modelsImport)
-		aliases = modelAliases(gp, blocks)
+		if lay.modelsInCmd {
+			exitCodes = ""
+		} else {
+			modelsImport = "models " + strconv.Quote(lay.modelsImport)
+			aliases = modelAliases(gp, blocks)
+		}
 		blocks, imports = nil, nil
 	} else {
 		flagSets = flagSetTemplates(gp)
@@ -457,30 +527,31 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 	imports["reflect"] = true // the Definition records each command's inputs type
 
 	return renderRotiniFile(templateRotiniData{
-		Package:       lay.cmdPkgName,
-		PathResolvers: hasPathResolver(features),
-		HelpResolver:  helpResolver(features),
-		WiredFeatures: wiredFeatures(gp),
-		Header:        lay.cmdHeader,
-		RuntimeImport: runtimeImport,
-		Imports:       renderImports(imports),
-		ChildImports:  gp.childImports,
-		Methods:       gp.methods(),
-		RollupMethods: rollupMethods(gp),
-		Definition:    renderDefinition(gp),
-		ModelsImport:  modelsImport,
-		ModelAliases:  aliases,
-		Blocks:        blocks,
-		FlagSets:      flagSets,
-		OutputTypes:   outputTypes,
-		InputSettings: renderInputSettings(gp),
-		Features:      features,
-		EmbedImport:   anyEmbed(features) || examplesEmbed(gp.examples),
-		NeedsFmt:      gp.examples.configOn,
-		ExitCodes:     exitConstantsDecl(gp.exitConstants(), lay.splitModels),
-		Contract:      contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo) + examplesDecl(gp.examples),
-		UsageFunc:     usageFuncDecl(gp),
-		CanonicalPath: canonicalPathDecl(gp.tree),
+		Package:            lay.cmdPkgName,
+		PathResolvers:      hasPathResolver(features),
+		HelpResolver:       featureResolver(features, helpFeatureDesc.noun),
+		CompletionResolver: featureResolver(features, completionFeatureDesc.noun),
+		WiredFeatures:      wiredFeatures(gp),
+		Header:             lay.cmdHeader,
+		RuntimeImport:      runtimeImport,
+		Imports:            renderImports(imports),
+		ChildImports:       gp.childImports,
+		Methods:            gp.methods(),
+		RollupMethods:      rollupMethods(gp),
+		Definition:         renderDefinition(gp),
+		ModelsImport:       modelsImport,
+		ModelAliases:       aliases,
+		Blocks:             blocks,
+		FlagSets:           flagSets,
+		OutputTypes:        outputTypes,
+		InputSettings:      renderInputSettings(gp),
+		Features:           features,
+		EmbedImport:        anyEmbed(features) || examplesEmbed(gp.examples),
+		NeedsFmt:           gp.examples.configOn,
+		ExitCodes:          exitCodes,
+		Contract:           contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo) + examplesDecl(gp.examples),
+		UsageFunc:          usageFuncDecl(gp),
+		CanonicalPath:      canonicalPathDecl(gp.tree),
 	})
 }
 
@@ -613,10 +684,10 @@ func writeHandlerStubs(gp *program, lay layout) error {
 	return nil
 }
 
-// helpResolver returns the help feature's resolver name, or "" when the help feature is off.
-func helpResolver(features []templateFeature) string {
+// featureResolver returns the resolver name of the feature called noun, or "" when it is off.
+func featureResolver(features []templateFeature, noun string) string {
 	for _, f := range features {
-		if f.Noun == "help" {
+		if f.Noun == noun {
 			return f.Resolver
 		}
 	}
@@ -767,7 +838,7 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 	case name == "version" && !isRoot && len(c.args) == 0:
 		d.VersionOnly = true
 	case !isRoot && completionStub(gp, c):
-		d.CompletionArg, d.CompletionFunc = c.args[0].Field, completionFeatureDesc.resolver
+		d.CompletionArg = c.args[0].Field
 	case helpOn && len(c.args) == 0 && ((isRoot && len(gp.own)+len(gp.composed) > 0) || (!isRoot && c.hasChildren)):
 		// A dispatch-only root or group shows its help when invoked bare.
 		d.PrintHelpWhenBare = true
@@ -812,9 +883,9 @@ func hasSecretInput(in *Inputs) bool {
 }
 
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint package. It
-// is create-once: an existing main.go is never overwritten. extension is the spec/conf
-// file extension used in the //go:generate directive.
-func writeEntrypoint(pl *planner, lay layout, extension string) error {
+// is create-once: an existing main.go is never overwritten. args are the //go:generate
+// directive's arguments to `rotini generate` (see generateArgs).
+func writeEntrypoint(pl *planner, lay layout, args string) error {
 	if lay.entrypointDir == "" {
 		return nil
 	}
@@ -823,11 +894,47 @@ func writeEntrypoint(pl *planner, lay layout, extension string) error {
 		return err
 	}
 	// Alias the generated package as "cmd" so it cannot collide with the rotini runtime.
-	content, err := renderMainFile(lay.mainHeader, lay.cmdImport, "cmd", extension)
+	content, err := renderMainFile(lay.mainHeader, lay.cmdImport, "cmd", args)
 	if err != nil {
 		return err
 	}
 	return pl.createOnce(path, content)
+}
+
+// generateArgs returns the arguments a //go:generate directive in dir passes to `rotini
+// generate` to read specPath and confPath, each relative to dir, since go generate runs a
+// directive in its file's directory. confPath "" passes no --config.
+func generateArgs(dir, specPath, confPath string) string {
+	rel := func(p string) string {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return p
+		}
+		r, err := filepath.Rel(dir, abs)
+		if err != nil {
+			return p
+		}
+		r = filepath.ToSlash(r)
+		if !strings.HasPrefix(r, "../") {
+			r = "./" + r
+		}
+		// go generate splits a directive on spaces; a quoted argument may hold them.
+		if strings.ContainsAny(r, " \t\"") {
+			r = strconv.Quote(r)
+		}
+		return r
+	}
+	args := rel(specPath)
+	if confPath != "" {
+		args += " --config " + rel(confPath)
+	}
+	return args
+}
+
+// seedGenerateArgs is generateArgs for a main.go beside a seed's .rotini.spec.<ext> and
+// .rotini.conf.<ext>.
+func seedGenerateArgs(ext string) string {
+	return "./.rotini.spec." + ext + " --config ./.rotini.conf." + ext
 }
 
 // rollupMethods builds the handlers struct's per-command methods, sorted by name: own

@@ -174,6 +174,20 @@ func TestMount_refuses(t *testing.T) {
 			errHas: `the command name "help" is already taken by the command "help"`,
 		},
 		{
+			name:   "a hidden alias of an inline command",
+			files:  map[string]string{"a/.rotini.spec.yaml": childSpec("db")},
+			into:   "command:\n  name: app\n  commands:\n    - name: data\n      hidden_aliases: [db]\n",
+			specs:  []string{"a/.rotini.spec.yaml"},
+			errHas: `the command name "db" is already taken by the command "data"`,
+		},
+		{
+			name:   "a plugin's alias",
+			files:  map[string]string{"a/.rotini.spec.yaml": childSpec("db")},
+			into:   "command:\n  name: app\n  plugins:\n    - name: database\n      aliases: [db]\n  commands:\n    - name: help\n",
+			specs:  []string{"a/.rotini.spec.yaml"},
+			errHas: `the command name "db" is already taken by the plugin "database"`,
+		},
+		{
 			name: "a name written beside an existing $ref",
 			files: map[string]string{
 				"cmd/old/.rotini.spec.yaml": childSpec("old"),

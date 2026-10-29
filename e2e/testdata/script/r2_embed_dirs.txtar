@@ -1,0 +1,134 @@
+# R2 — embed_dir and template_dir anywhere the docs allow: the cmd package directory itself,
+# a nested directory per feature, and a template beside the handler files.
+#
+# Each feature writes and prunes only its own files, so pages sharing the cmd package with the
+# Go sources leave those alone, and a removed command's pages go from every directory.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+
+# The cmd package directory embeds by bare name; a nested one by its relative path.
+exists internal/cmd/app/help_app.txt
+exists internal/cmd/app/help_app_deploy.txt
+grep '^//go:embed help_app_deploy.txt$' internal/cmd/app/zz_app.go
+exists internal/cmd/app/pages/man/app-deploy.1
+grep '^//go:embed pages/man/app-deploy.1$' internal/cmd/app/zz_app.go
+exists internal/cmd/app/renders/markdown_app_deploy.md
+exists internal/cmd/app/help.txt.tmpl
+
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+exec ./app$exe show-deploy-help
+cmp stdout internal/cmd/app/help_app_deploy.txt
+exec ./app$exe show-status-man
+cmp stdout internal/cmd/app/pages/man/app-status.1
+
+# Regenerating changes nothing.
+cp internal/cmd/app/zz_app.go zz-before.txt
+cp internal/cmd/app/help_app_deploy.txt help-before.txt
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+cmp internal/cmd/app/zz_app.go zz-before.txt
+cmp internal/cmd/app/help_app_deploy.txt help-before.txt
+
+# Remove deploy: its pages go from all three directories; the other files stay.
+cp no-deploy.spec.yaml cmd/app/.rotini.spec.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+! exists internal/cmd/app/help_app_deploy.txt
+! exists internal/cmd/app/pages/man/app-deploy.1
+! exists internal/cmd/app/renders/markdown_app_deploy.md
+exists internal/cmd/app/help_app.txt
+exists internal/cmd/app/help_app_status.txt
+exists internal/cmd/app/pages/man/app-status.1
+exists internal/cmd/app/help.txt.tmpl
+exists internal/cmd/app/notes.txt
+exists internal/cmd/app/app.go
+exec go build -o app$exe ./cmd/app
+
+-- internal/cmd/app/notes.txt --
+an author's own file in the cmd package
+-- no-deploy.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: the app
+  arguments:
+    - name: page
+      summary: the command whose page to print
+      schema: {type: string, required: true}
+  commands:
+    - name: status
+      summary: show status
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: the app
+  arguments:
+    - name: page
+      summary: the command whose page to print
+      schema: {type: string, required: true}
+  commands:
+    - name: deploy
+      summary: deploy a service
+    - name: status
+      summary: show status
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app
+      template: true
+      template_dir: internal/cmd/app
+    - type: man
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/pages/man
+    - type: markdown
+      enabled: true
+      embed: true
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+// Run prints deploy's help page or status's man page, exactly as the resolvers return them.
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AppInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	page, err := Help("deploy")
+	if in.App.Arguments.Page == "show-status-man" {
+		page, err = Man("status")
+	}
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprint(rtx.Stdout, page)
+}

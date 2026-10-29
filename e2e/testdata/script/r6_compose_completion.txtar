@@ -1,0 +1,99 @@
+# R6 — a mounted child's completion command prints the script of the program being run.
+#
+# Driven through the stub `rotini generate` seeds (no handler below is hand-written): it prints
+# rtx.CompletionScript, which the generated NewProgram sets to the running program's Completion.
+# So `acme kid completion zsh` registers acme, whose __complete knows the whole tree, and the
+# child built on its own still registers itself. A parent without the completion feature has no
+# script to give, and says so.
+
+gomodinit example.com/compscripts
+
+exec rotini generate cmd/kid/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec rotini generate cmd/bare/.rotini.spec.yaml --config cmd/bare/.rotini.conf.yaml
+grep 'rtx.CompletionScript\(inputs.KidCompletion.Arguments.Shell\)' internal/cmd/kid/kid_completion.go
+grep 'WithCompletionScript\(Completion\)' internal/cmd/kid/zz_kid.go
+! grep 'WithCompletionScript' internal/cmd/bare/zz_bare.go
+exec go mod tidy
+exec go build -o kid$exe ./cmd/kid
+exec go build -o acme$exe ./cmd/acme
+exec go build -o bare$exe ./cmd/bare
+
+# ── through the parent: the parent's script ──
+exec ./acme$exe kid completion zsh
+stdout '^#compdef acme'
+! stdout 'compdef kid'
+exec ./acme$exe kid completion bash
+stdout '^# bash completion for acme'
+! stdout 'for kid'
+
+# ── on its own: the child's script ──
+exec ./kid$exe completion zsh
+stdout '^#compdef kid'
+! stdout 'compdef acme'
+
+# ── a parent with no completion scripts: an error, not the child's script ──
+! exec ./bare$exe kid completion zsh
+! stdout .
+stderr 'no completion scripts'
+stderr 'WithCompletionScript'
+
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: a child CLI with a completion command
+  commands:
+    - name: completion
+      summary: print a shell completion script
+      arguments:
+        - name: shell
+          summary: the shell
+          schema: { type: string, required: true, enum: [bash, zsh, fish, powershell, nushell] }
+-- cmd/kid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kid/main.go
+    - type: cmd
+      file: internal/cmd/kid/zz_kid.go
+      package: kid
+  features:
+    - type: completion
+      enabled: true
+-- cmd/acme/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: mounts the child
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/acme/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_acme.go
+      package: acme
+  features:
+    - type: completion
+      enabled: true
+-- cmd/bare/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: bare
+  summary: mounts the child, with no completion feature
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/bare/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/bare/main.go
+    - type: cmd
+      file: internal/cmd/bare/zz_bare.go
+      package: bare

@@ -46,7 +46,8 @@ type InitOptions struct {
 	Format string
 	// Template is the shape to start from: plugin, daemon or suite; "" for the plain seed.
 	Template string
-	// Force replaces an existing seed spec and conf.
+	// Force replaces an existing seed spec and conf, and writes one beside a spec or conf of
+	// another format.
 	Force bool
 }
 
@@ -201,17 +202,37 @@ func normalizeFormat(format string) (fileFormat, error) {
 	}
 }
 
+// seedExtensions are the extensions a spec or conf may have, in the order init checks them.
+var seedExtensions = []string{"yaml", "yml", "json", "jsonc", "toml"}
+
 // existingSeed reports the first seed spec or conf that already exists, which init refuses to
-// overwrite without --force.
+// overwrite without --force, then the first spec or conf of another format beside a seed,
+// which init refuses to write a second one next to without --force.
 func existingSeed(seeds []SeedFiles, moduleRoot string) error {
+	display := func(pth string) string {
+		if rel, err := filepath.Rel(moduleRoot, pth); err == nil {
+			pth = rel
+		}
+		return filepath.ToSlash(pth)
+	}
 	for _, s := range seeds {
 		for _, pth := range []string{s.Spec, s.Conf} {
 			if _, err := os.Stat(pth); err == nil {
-				display := pth
-				if rel, relErr := filepath.Rel(moduleRoot, pth); relErr == nil {
-					display = rel
+				return fmt.Errorf("%s already exists (use --force to overwrite)", display(pth))
+			}
+		}
+	}
+	for _, s := range seeds {
+		for _, pth := range []string{s.Spec, s.Conf} {
+			stem := strings.TrimSuffix(pth, filepath.Ext(pth))
+			for _, ext := range seedExtensions {
+				other := stem + "." + ext
+				if other == pth {
+					continue
 				}
-				return fmt.Errorf("%s already exists (use --force to overwrite)", filepath.ToSlash(display))
+				if _, err := os.Stat(other); err == nil {
+					return fmt.Errorf("%s already exists in another format; init would write %s beside it (use --force to write it anyway; the existing file is kept)", display(other), filepath.Base(pth))
+				}
 			}
 		}
 	}
