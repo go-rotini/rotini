@@ -316,6 +316,31 @@ func TestToolExports_selection(t *testing.T) {
 	}
 }
 
+// TestReadFlags_offered pins which role flags reach agents: a JSON flag unless `agent: false`
+// (a hidden one still does), and preview and confirm flags only when they are parameters.
+func TestReadFlags_offered(t *testing.T) {
+	off, on := new(false), new(true)
+	cases := []struct {
+		name  string
+		flag  agentInput
+		check func(agentCommand) bool
+	}{
+		{"json", agentInput{Role: "machine-output", Identifiers: []string{"--json"}}, func(c agentCommand) bool { return len(c.machine) == 1 }},
+		{"hidden json", agentInput{Role: "machine-output", Identifiers: []string{"--json"}, Hidden: true}, func(c agentCommand) bool { return len(c.machine) == 1 }},
+		{"json kept from agents", agentInput{Role: "machine-output", Identifiers: []string{"--json"}, Agent: off}, func(c agentCommand) bool { return c.machine == nil }},
+		{"hidden dry-run", agentInput{Role: "dry-run", Identifiers: []string{"--dry-run"}, Hidden: true}, func(c agentCommand) bool { return c.dryRun == "" }},
+		{"hidden dry-run brought back", agentInput{Role: "dry-run", Identifiers: []string{"--dry-run"}, Hidden: true, Agent: on}, func(c agentCommand) bool { return c.dryRun == "--dry-run" }},
+		{"confirm kept from agents", agentInput{Role: "confirm", Identifiers: []string{"--yes"}, Agent: off}, func(c agentCommand) bool { return c.confirm == "" }},
+	}
+	for _, tc := range cases {
+		ac := agentCommand{c: agentContractCmd{Output: map[string]any{"type": "object"}, Flags: []agentInput{tc.flag}}}
+		ac.readFlags()
+		if !tc.check(ac) {
+			t.Errorf("%s: machine %v, dry-run %q, confirm %q", tc.name, ac.machine, ac.dryRun, ac.confirm)
+		}
+	}
+}
+
 // TestPermissions_rules checks the permission snippets: JSON and TOML parse, no rule names a
 // root or group command, each Codex rule's pattern matches its own match examples and not its
 // not_match ones, and the Gemini regexes compile and match the command.

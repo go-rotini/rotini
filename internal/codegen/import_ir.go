@@ -164,6 +164,6 @@ func (r *importResult) stats(extra []importNote) string {
 	for _, n := range append(slices.Clone(r.Notes), extra...) {
 		levels[n.Level]++
 	}
-	return fmt.Sprintf("imported %d commands, %d flags: %d lossy, %d unsupported, %d info",
-		commands, flags, levels["lossy"], levels["unsupported"], levels["info"])
+	return fmt.Sprintf("imported %d %s, %d %s: %d lossy, %d unsupported, %d info",
+		commands, plural(commands, "command"), flags, plural(flags, "flag"), levels["lossy"], levels["unsupported"], levels["info"])
 }

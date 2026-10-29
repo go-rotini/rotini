@@ -95,3 +95,29 @@ func TestStructuredReporter_text(t *testing.T) {
 		}
 	}
 }
+
+// Both reporters write to rtx.Stderr, so a handler that replaces it captures the report.
+func TestReporters_writeToTheRunsStderr(t *testing.T) {
+	t.Parallel()
+	for name, reporter := range map[string]Reporter{
+		"default":           nil,
+		"structured (text)": StructuredReporter(wantsJSON),
+		"structured (json)": StructuredReporter(func(*Context) bool { return true }),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var programErr, captured bytes.Buffer
+			p := NewProgram(Definition{Name: "app", Handler: "App"}, &funcHandlers{run: func(rtx *Context) {
+				rtx.Stderr = &captured
+				rtx.RecordError(errors.New("boom"))
+			}}).WithStdout(&bytes.Buffer{}).WithStderr(&programErr).WithReporter(reporter)
+			p.Run(nil)
+			if programErr.Len() != 0 {
+				t.Errorf("the program's stderr got %q", programErr.String())
+			}
+			if !strings.Contains(captured.String(), "boom") {
+				t.Errorf("rtx.Stderr got %q, want the error", captured.String())
+			}
+		})
+	}
+}

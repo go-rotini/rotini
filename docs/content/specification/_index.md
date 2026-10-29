@@ -427,7 +427,7 @@ Logical name for the flag
 
 `boolean` or `null`
 
-Whether this flag is a tool parameter for AI agents (tool exports and the MCP companion). `false` leaves it out, while it stays in help. `true` brings back a flag left out by default: a hidden, deprecated, secret or short-circuit flag, or one that reads `from:` a file or stdin (which would let an agent read the host's files, or put a secret in the model's context). Unset follows those defaults.
+Whether this flag is a tool parameter for AI agents (tool exports and the MCP companion). `false` leaves it out, while it stays in help. `true` brings back a flag left out by default: a hidden, deprecated, secret or short-circuit flag, or one that reads `from:` a file or stdin (which would let an agent read the host's files, or put a secret in the model's context). Unset follows those defaults. The machine-output flag is never a parameter: tool exports add it to every call, and `false` stops that.
 
 ### `cascading`
 

@@ -1,0 +1,181 @@
+# R9 — words handed on as typed: a passthrough command, a passthrough argument, DashIndex, and
+# how response files and completion treat them.
+
+gomodinit example.com/fwd
+
+exec rotini generate cmd/fwd/.rotini.spec.yaml --config cmd/fwd/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o fwd$exe ./cmd/fwd
+
+# ── a passthrough command ────────────────────────────────────────────────────
+# Every word after its name is an argument: flags it doesn't declare, a cascading root flag,
+# --help, and "--" itself. DashIndex counts no "--" there.
+exec ./fwd$exe raw --verbose -x --help -- y ''
+stdout '^raw args=\[--verbose -x --help -- y \] verbose=0 dash=false$'
+
+# A root flag before the name is still the root's.
+exec ./fwd$exe -v raw a
+stdout '^raw args=\[a\] verbose=1 dash=false$'
+
+# A sub-command's name after it is a word, not a command.
+exec ./fwd$exe raw run x
+stdout '^raw args=\[run x\] '
+
+# A short-circuit flag before the name is answered; after it, it is a word.
+exec ./fwd$exe --help raw
+stdout 'Usage:'
+! stdout 'raw args'
+
+# Response files are expanded before the passthrough starts, so a doubled prefix is how a raw
+# word keeps its "@", and a word after "--" is left alone.
+exec ./fwd$exe raw @words.rsp @@lit -- @words.rsp
+stdout '^raw args=\[one two words @lit -- @words.rsp\] '
+
+# ── a passthrough argument ───────────────────────────────────────────────────
+# Flags parse until the passthrough argument starts; from there every word is kept.
+exec ./fwd$exe run -v tgt ls -la -v
+stdout '^run target=tgt cmd=\[ls -la -v\] verbose=1 dash=-1$'
+
+# A "--" before the passthrough argument ends flags, and DashIndex says how many words came
+# before it.
+exec ./fwd$exe run tgt -- -la
+stdout '^run target=tgt cmd=\[-la\] verbose=0 dash=1$'
+exec ./fwd$exe run -- tgt -x
+stdout '^run target=tgt cmd=\[-x\] verbose=0 dash=0$'
+
+# A "--" after the passthrough argument started is one of its words.
+exec ./fwd$exe run tgt ls -- x
+stdout '^run target=tgt cmd=\[ls -- x\] verbose=0 dash=-1$'
+
+# A first word that starts with "-" is a flag, so an undeclared one is refused rather than
+# silently passed on.
+! exec ./fwd$exe run tgt -la
+stderr 'unknown flag "-l"'
+! stdout 'run target'
+
+# The passthrough argument may be empty.
+exec ./fwd$exe run tgt
+stdout '^run target=tgt cmd=\[\] verbose=0 dash=-1$'
+
+# ── completion ───────────────────────────────────────────────────────────────
+# After a passthrough command's name nothing is offered: its words aren't the program's.
+exec ./fwd$exe __complete raw -
+! stdout '--verbose'
+# Before the passthrough argument starts, the command's flags are offered.
+exec ./fwd$exe __complete run -
+stdout '--verbose'
+
+-- words.rsp --
+one
+two words
+-- cmd/fwd/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: fwd
+  summary: forwards words
+  response_files: { prefix: "@" }
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: verbose
+      summary: more output
+      identifiers: [-v, --verbose]
+      cascading: true
+      schema: { type: count }
+  commands:
+    - name: raw
+      summary: pass every word on
+      passthrough: true
+      arguments:
+        - name: args
+          schema: { type: '[]string' }
+    - name: run
+      summary: run a command on a target
+      arguments:
+        - name: target
+          schema: { type: string, required: true }
+        - name: cmd
+          passthrough: true
+          schema: { type: '[]string' }
+-- cmd/fwd/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/fwd/main.go
+    - type: cmd
+      file: internal/cmd/fwd/zz_fwd.go
+      package: fwd
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+-- internal/cmd/fwd/helpers.go --
+package fwd
+
+import (
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+func dash(rtx *rotini.Context) string {
+	if n, ok := rtx.DashIndex(); ok {
+		return fmt.Sprint(n)
+	}
+	return "-1"
+}
+-- internal/cmd/fwd/fwd_raw.go --
+package fwd
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type fwdRawHandler struct{ rotini.NoHooks }
+
+func (*fwdRawHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FwdRawInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	_, ok := rtx.DashIndex()
+	fmt.Fprintf(rtx.Stdout, "raw args=[%s] verbose=%d dash=%v\n", strings.Join(in.FwdRaw.Arguments.Args, " "), in.Fwd.Flags.Verbose, ok)
+}
+-- internal/cmd/fwd/fwd_run.go --
+package fwd
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type fwdRunHandler struct{ rotini.NoHooks }
+
+func (*fwdRunHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FwdRunInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	a := in.FwdRun.Arguments
+	fmt.Fprintf(rtx.Stdout, "run target=%s cmd=%v verbose=%d dash=%s\n", a.Target, a.Cmd, in.Fwd.Flags.Verbose, dash(rtx))
+}
+-- cmd/fwd/main.go --
+package main
+
+import fwd "example.com/fwd/internal/cmd/fwd"
+
+func main() { fwd.NewProgram().Execute() }

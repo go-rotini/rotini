@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // document compares the document-level facts, the shared definitions, then every command.
@@ -247,14 +248,19 @@ func (d *differ) aliasOwner(parent []string, name string) *command {
 	return nil
 }
 
-// command compares a command present in both contracts.
+// command compares a command present in both contracts. Its items inherit its hidden.
 func (d *differ) command(st stability, oc, nc *command) {
+	defer d.within(oc.Hidden)()
 	w := oc.Name
 	d.aliases(st, oc, nc)
 	d.lifecycle(st, w, lifecycleOf(oc), lifecycleOf(nc))
 	d.hidden(st, RuleCommandHidden, RuleCommandUnhidden, w, oc.Hidden, nc.Hidden)
 	d.agent(st, w, oc.Agent, nc.Agent)
 	d.metadata(st, w, oc.Metadata, nc.Metadata)
+	if oc.Plugin && nc.Plugin && !sameDuration(oc.Timeout, nc.Timeout) {
+		d.add(st, PossiblyBreaking, RulePluginTimeoutChanged, w, fmt.Sprintf("timeout %s → %s", orNone(oc.Timeout), orNone(nc.Timeout)),
+			"the host now stops a slow run at another time, or not at all")
+	}
 	if oc.Plugin || nc.Plugin {
 		return // a plugin's inputs and output are its own program's
 	}
@@ -280,6 +286,23 @@ func (d *differ) command(st stability, oc, nc *command) {
 	d.exits(st, oc, nc)
 	d.effects(st, w, oc.Effects, nc.Effects)
 	// Command facts that later contract fields add are compared here.
+}
+
+// sameDuration reports whether two Go durations, as written, are the same length; "" is none.
+func sameDuration(a, b string) bool {
+	if a == b {
+		return true
+	}
+	da, errA := time.ParseDuration(a)
+	db, errB := time.ParseDuration(b)
+	return errA == nil && errB == nil && da == db
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
 }
 
 func onOff(fact string, on bool) string {
@@ -443,6 +466,14 @@ func (d *differ) configFiles(st stability, oc, nc *command) {
 			d.add(st, Breaking, RuleConfigFileMoved, w, "configuration file moved: "+location(of)+" → "+location(nf), "config moved")
 		}
 		d.profiles(st, oc, nc, w, of.Profiles, nf.Profiles)
+		switch {
+		case of.Schema == nil && nf.Schema != nil:
+			d.add(st, PossiblyBreaking, RuleConfigFileSchemaAdded, w, "the file is now checked against a schema", "a file that doesn't match it is refused")
+		case of.Schema != nil && nf.Schema == nil:
+			d.add(st, Safe, RuleConfigFileSchemaRemoved, w, "the file is no longer checked against a schema", "")
+		default:
+			d.walk(st, in, w, of.Schema, nf.Schema, nil)
+		}
 	}
 	for _, nf := range nc.ConfigFiles {
 		if !slices.ContainsFunc(oc.ConfigFiles, func(f configFile) bool { return f.Name == nf.Name }) {
@@ -494,6 +525,10 @@ func (d *differ) stdin(st stability, oc, nc *command) {
 	}
 	if o.Separator != n.Separator {
 		d.add(st, Breaking, RuleStdinSeparatorChanged, w, fmt.Sprintf("stdin separator %q → %q", o.Separator, n.Separator), "")
+	}
+	if o.Stream != n.Stream {
+		d.add(st, PossiblyBreaking, RuleStdinStreamChanged, w, onOff("stdin is read one item at a time", n.Stream),
+			"the command acts on each item as it arrives, or only after stdin ends")
 	}
 	d.metadata(st, w, o.Metadata, n.Metadata)
 	d.walk(st, in, w, o.Schema, n.Schema, nil)

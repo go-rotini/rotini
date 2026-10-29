@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -127,6 +128,26 @@ func tagItem(name string, out *OutputDef, v any) (*OutputKind, any, error) {
 	return kind, filled.Elem().Interface(), nil
 }
 
+// tagSelection is tagItem for a Selection of one of out's kinds: a selected tag that is empty is
+// filled in, and one naming another kind is an internal error. A tag left out of the selection
+// stays out.
+func tagSelection(name, tag string, kind *OutputKind, sel Selection) (Selection, error) {
+	m, ok := sel.data.(map[string]any)
+	if !ok {
+		return sel, nil
+	}
+	switch value, has := m[tag]; {
+	case !has || value == kind.Value:
+		return sel, nil
+	case value != "":
+		text, _ := json.Marshal(value) //nolint:errcheck,errchkjson // a JSON-shaped value always encodes
+		return sel, InternalError(fmt.Errorf("%s: the item is a %s, the %q kind, but its %s is %s", name, sel.from, kind.Value, tag, text))
+	}
+	filled := maps.Clone(m)
+	filled[tag] = kind.Value
+	return Selection{from: sel.from, data: filled}, nil
+}
+
 // tagFieldIndex returns the index of t's field whose JSON name is tag, or -1.
 func tagFieldIndex(t reflect.Type, tag string) int {
 	if t.Kind() != reflect.Struct {
@@ -171,7 +192,8 @@ func (rtx *Context) WriteOutput[T any](v T, format string, render func(io.Writer
 // When the items come in several kinds (the spec's `oneOf`; see [OutputDef.Tag]), item is a value
 // of any kind's type. Its tag field is filled in from that type when it is empty; a tag naming
 // another kind, or a type that is none of the kinds, is an internal error, and the item is
-// checked against its own kind's shape.
+// checked against its own kind's shape. A [Selection] made from a kind's value is treated the
+// same way when it selects the tag field.
 func (rtx *Context) WriteOutputItem[T any](item T, format string, render func(io.Writer, string, T) error) error {
 	return writeOutput(rtx, rtx.Stdout, item, format, render, true)
 }
@@ -230,7 +252,11 @@ func (rtx *Context) CheckOutput(v any) error {
 		if kind == nil {
 			return InternalError(fmt.Errorf("%s: the output is a %s, which is not one of the kinds the command declares (%s)", name, t, cmd.Output.kindValues()))
 		}
-		schema = kind.Schema
+		tagged, err := tagSelection(name, cmd.Output.Tag, kind, sel)
+		if err != nil {
+			return err
+		}
+		v, schema = tagged, kind.Schema
 	case cmd.Output.Tag != "":
 		kind, tagged, err := tagItem(name, cmd.Output, v)
 		if err != nil {
@@ -281,7 +307,11 @@ func writeOutputValue(rtx *Context, w io.Writer, v any, t reflect.Type, format s
 		if kind == nil {
 			return InternalError(fmt.Errorf("%s: the item written is a %s, which is not one of the kinds the command declares (%s)", name, sel.from, out.kindValues()))
 		}
-		schema = kind.Schema
+		tagged, err := tagSelection(name, out.Tag, kind, sel)
+		if err != nil {
+			return err
+		}
+		v, schema = tagged, kind.Schema
 	case out.Tag != "":
 		kind, tagged, err := tagItem(name, out, v)
 		if err != nil {

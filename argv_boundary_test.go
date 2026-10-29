@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -526,6 +527,27 @@ func TestResponseFiles(t *testing.T) {
 	out.Reset()
 	if _, err := bdProgram(def, dir, &out, &seen).Complete([]string{"@ar"}, nil); err != nil || out.String() != "" {
 		t.Errorf("completing @ar = %q, %v; want nothing", out.String(), err)
+	}
+}
+
+// TestResponseFiles_unreadable pins the message for a response file the user may not read, and
+// that completion skips such a file rather than failing.
+func TestResponseFiles_unreadable(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a file mode that denies reading: not on Windows, and not as root")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "locked.rsp"), []byte("exec\n"), 0o200); err != nil {
+		t.Fatal(err)
+	}
+	view := (&osView{}).withDir(dir)
+	_, err := expandResponseFiles([]string{"@locked.rsp"}, "@", view, false)
+	if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Msg != `could not read response file "locked.rsp": permission denied` || pe.Token != "@locked.rsp" {
+		t.Errorf("err = %v, want a permission-denied *ParseError naming the word", err)
+	}
+	got, err := expandResponseFiles([]string{"@locked.rsp", "ls"}, "@", view, true)
+	if err != nil || !slices.Equal(got, []string{"ls"}) {
+		t.Errorf("skipping = %q, %v; want [ls]", got, err)
 	}
 }
 

@@ -83,7 +83,7 @@ func TestCLI_importCobra(t *testing.T) {
 		got = opts
 		return codegen.Imported{
 			Notes:   []string{"[lossy] acme: a note"},
-			Summary: "imported 1 commands, 0 flags: 1 lossy, 0 unsupported, 0 info",
+			Summary: "imported 1 command, 0 flags: 1 lossy, 0 unsupported, 0 info",
 			Spec:    "cmd/acme/.rotini.spec.yaml", Conf: "cmd/acme/.rotini.conf.yaml", Result: "[12:00:00] 1ms",
 		}, nil
 	}))
@@ -97,7 +97,7 @@ func TestCLI_importCobra(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("options = %+v, want %+v", got, want)
 	}
-	if !strings.HasPrefix(errb.String(), "[lossy] acme: a note\nimported 1 commands") {
+	if !strings.HasPrefix(errb.String(), "[lossy] acme: a note\nimported 1 command,") {
 		t.Errorf("stderr = %q, want the notes then the summary", errb.String())
 	}
 	if want := "spec: cmd/acme/.rotini.spec.yaml\nconf: cmd/acme/.rotini.conf.yaml\n[12:00:00] 1ms\n"; out.String() != want {

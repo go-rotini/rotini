@@ -59,7 +59,7 @@ var pageTypes = []string{"int", "int8", "int16", "int32", "int64", "uint", "uint
 // lintFlagRoles checks the roles a program driving the CLI reads (dry-run, confirm,
 // machine-output, page): their flag types, `role_value`, each at most once per command
 // counting the cascading flags it inherits, and a warning for a destructive command that
-// offers neither a preview nor a confirmation.
+// offers agents neither a preview nor a confirmation.
 func lintFlagRoles(spec *Spec) []error {
 	var problems []error
 	walkChainsAt(spec, func(chain []*Command, cmdPath, ptr string) {
@@ -69,16 +69,14 @@ func lintFlagRoles(spec *Spec) []error {
 			own[f.Name] = true
 		}
 		inherited := map[string]string{} // role → the inherited cascading flag that has it
+		var roleFlags []FlagInput        // the command's flags with an agent role, inherited ones too
 		for _, a := range chain[:len(chain)-1] {
 			for _, f := range a.Flags {
 				if f.Cascading && isAgentRole(f.Role) && !own[f.Name] {
 					inherited[f.Role] = f.Name
+					roleFlags = append(roleFlags, f)
 				}
 			}
-		}
-		has := map[string]bool{}
-		for r := range inherited {
-			has[r] = true
 		}
 		for i, f := range c.Flags {
 			fptr := fmt.Sprintf("%s/flags/%d", ptr, i)
@@ -91,7 +89,7 @@ func lintFlagRoles(spec *Spec) []error {
 			if !isAgentRole(f.Role) {
 				continue
 			}
-			has[f.Role] = true
+			roleFlags = append(roleFlags, f)
 			if prev, ok := inherited[f.Role]; ok {
 				add("/role", fmt.Sprintf("has role %s, which the cascading flag %q this command inherits already has; a command gives each role to one flag", f.Role, prev))
 			}
@@ -109,12 +107,25 @@ func lintFlagRoles(spec *Spec) []error {
 				}
 			}
 		}
-		if c.Effects != nil && c.Effects.Kind == "destructive" && !has["dry-run"] && !has["confirm"] {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/effects", loc: "command " + cmdPath, sev: severityWarning,
-				msg: "is destructive but has no flag with `role: dry-run` or `role: confirm`; an agent can neither preview it nor confirm it without a prompt"})
+		if p := unsafeDestructive(c, roleFlags, cmdPath, ptr); p != nil {
+			problems = append(problems, p)
 		}
 	})
 	return problems
+}
+
+// unsafeDestructive warns about a destructive command whose role flags offer agents neither a
+// preview nor a confirmation, or returns nil.
+func unsafeDestructive(c *Command, roleFlags []FlagInput, cmdPath, ptr string) error {
+	if c.Effects == nil || c.Effects.Kind != "destructive" || slices.ContainsFunc(roleFlags, previewOffered) {
+		return nil
+	}
+	msg := "is destructive but has no flag with `role: dry-run` or `role: confirm`"
+	if slices.ContainsFunc(roleFlags, func(f FlagInput) bool { return f.Role == "dry-run" || f.Role == "confirm" }) {
+		msg = "is destructive but agents are offered none of its `role: dry-run` or `role: confirm` flags (each is hidden, deprecated or `agent: false`)"
+	}
+	return &problem{kind: "spec", ptr: ptr + "/effects", loc: "command " + cmdPath, sev: severityWarning,
+		msg: msg + "; an agent can neither preview it nor confirm it without a prompt"}
 }
 
 // machineOutputProblems checks one `role: machine-output` flag: a bool flag, or a string flag
@@ -215,7 +226,7 @@ func agentInputWarnings(c *Command, cmdPath, ptr string) []error {
 		switch {
 		case !on(f.Agent):
 		case f.Role == "machine-output":
-			warn(at, "flag", f.Name, "tool exports select JSON with the machine-output flag themselves, so it is never a tool parameter")
+			warn(at, "flag", f.Name, "the machine-output flag is never a tool parameter; tool exports add it to every call themselves unless it has `agent: false`")
 		case f.Schema != nil && f.Schema.Secret:
 			secret(at, "flag", f.Name, f.Schema)
 		case !flagOutByDefault(f):
@@ -261,6 +272,12 @@ func commandOutByDefault(c *Command, hiddenAbove bool) bool {
 // `agent: true`.
 func flagOutByDefault(f FlagInput) bool {
 	return f.ShortCircuit || f.Role == "chdir" || inputOutByDefault(f.Hidden, f.Deprecated, f.Schema)
+}
+
+// previewOffered reports whether a flag is a dry-run or confirm flag agents are offered, as
+// the agent exports decide it.
+func previewOffered(f FlagInput) bool {
+	return (f.Role == "dry-run" || f.Role == "confirm") && flagParam(f)
 }
 
 // inputOutByDefault reports whether an input is left out of tool parameters unless it says

@@ -1,0 +1,186 @@
+# R9 — the names a multicall binary answers to: a prefix, aliases and hidden spellings, a
+# declared plugin, names that only look like a command, and Windows' .exe and case rules.
+#
+# Each name is its own build rather than a link, so the script runs on Windows too.
+
+gomodinit example.com/acme
+
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+mkdir bin
+exec go build -o bin/acme$exe ./cmd/acme
+exec go build -o bin/acme_ls$exe ./cmd/acme
+exec go build -o bin/acme_dir$exe ./cmd/acme
+exec go build -o bin/acme_hid$exe ./cmd/acme
+exec go build -o bin/acme_acme$exe ./cmd/acme
+exec go build -o bin/acme_$exe ./cmd/acme
+exec go build -o bin/ls$exe ./cmd/acme
+exec go build -o bin/acme_run$exe ./cmd/acme
+exec go build -o other/acme_cat$exe ./cmd/acme
+exec go build -o bin/acme_sync$exe ./cmd/acme
+exec go build -o bin/acme-sync$exe ./plugins/sync
+
+# The prefix is stripped, and the rest names a command; its words follow.
+exec bin/acme_ls$exe a b
+stdout '^ls ran: \[a b\]$'
+
+# An alias, and a hidden alias, route like the name.
+exec bin/acme_dir$exe x
+stdout '^ls ran: \[x\]$'
+exec bin/acme_hid$exe
+stdout '^ls ran: \[\]$'
+
+# Flags after the name are the command's, as if typed after `acme ls`.
+exec bin/acme_ls$exe --long y
+stdout '^ls ran: \[y\] long$'
+
+# The root's own name, with or without the prefix, a bare prefix, and a name without the
+# prefix all run the root.
+exec bin/acme$exe
+stdout '^root ran: \[\]$'
+exec bin/acme_acme$exe
+stdout '^root ran: \[\]$'
+exec bin/acme_$exe
+stdout '^root ran: \[\]$'
+exec bin/ls$exe q
+stdout '^root ran: \[q\]$'
+
+# A name that matches no command runs the root, whose argument gets the words.
+exec bin/acme_run$exe z
+stdout '^root ran: \[z\]$'
+
+# The routing reads the binary's own name, wherever it is run from.
+exec other/acme_cat$exe
+stdout '^cat ran$'
+
+# A name that is a declared plugin runs the plugin, with the words after the name.
+exec bin/acme_sync$exe one
+stdout '^sync plugin got: \[one\]$'
+
+# On Windows the .exe is dropped and the name matches without regard to case; elsewhere a name
+# differing in case is not the command.
+[windows] exec go build -o bin/ACME_CAT.EXE ./cmd/acme
+[windows] exec bin/ACME_CAT.EXE
+[windows] stdout '^cat ran$'
+[windows] exec go build -o bin/Acme.Exe ./cmd/acme
+[windows] exec bin/Acme.Exe ls k
+[windows] stdout '^ls ran: \[k\]$'
+[!windows] exec go build -o upper/ACME_CAT ./cmd/acme
+[!windows] exec upper/ACME_CAT w
+[!windows] stdout '^root ran: \[w\]$'
+[!windows] exec go build -o bin/acme_cat.exe ./cmd/acme
+[!windows] exec bin/acme_cat.exe
+[!windows] stdout '^root ran: \[\]$'
+
+-- cmd/acme/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: one binary, several names
+  multicall:
+    prefix: acme_
+  arguments:
+    - name: words
+      schema:
+        type: array
+        items: { type: string }
+  plugins:
+    - name: sync
+      summary: sync via a plugin
+  commands:
+    - name: ls
+      aliases: [dir]
+      hidden_aliases: [hid]
+      summary: list things
+      flags:
+        - name: long
+          identifiers: [--long]
+          schema: { type: bool }
+      arguments:
+        - name: args
+          schema:
+            type: array
+            items: { type: string }
+    - name: cat
+      summary: print things
+-- cmd/acme/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/acme/zz_acme.go
+      package: acme
+-- cmd/acme/main.go --
+package main
+
+import acme "example.com/acme/internal/cmd/acme"
+
+func main() { acme.NewProgram().Execute() }
+-- internal/cmd/acme/acme.go --
+package acme
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type acmeHandler struct{ rotini.NoHooks }
+
+func (*acmeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AcmeInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "root ran: %v\n", in.Acme.Arguments.Words)
+}
+-- internal/cmd/acme/acme_ls.go --
+package acme
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type acmeLsHandler struct{ rotini.NoHooks }
+
+func (*acmeLsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AcmeLsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	long := ""
+	if in.AcmeLs.Flags.Long {
+		long = " long"
+	}
+	fmt.Fprintf(rtx.Stdout, "ls ran: %v%s\n", in.AcmeLs.Arguments.Args, long)
+}
+-- internal/cmd/acme/acme_cat.go --
+package acme
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type acmeCatHandler struct{ rotini.NoHooks }
+
+func (*acmeCatHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "cat ran")
+}
+-- plugins/sync/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() { fmt.Printf("sync plugin got: %v\n", os.Args[1:]) }

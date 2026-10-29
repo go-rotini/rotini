@@ -133,6 +133,39 @@ func TestCreateOutput_refusesToOverwrite(t *testing.T) {
 	}
 }
 
+// TestCreateOutput_fileAppearedBeforeClose pins that, without Overwrite, a file created at the
+// path after CreateOutput is kept: Close returns CreateOutput's usage error and leaves no
+// temporary file, and the closed file takes no more writes.
+func TestCreateOutput_fileAppearedBeforeClose(t *testing.T) {
+	t.Parallel()
+	rtx, dir := outputDir(t)
+	f, err := CreateOutput(rtx, "out.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprint(f, "mine")
+	path := filepath.Join(dir, "out.txt")
+	if err := os.WriteFile(path, []byte("theirs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = f.Close()
+	if !errors.Is(err, fs.ErrExist) || CategoryOf(err) != CategoryUsage || err.Error() != `output file "out.txt" already exists` {
+		t.Fatalf("Close = %v (category %v), want the usage error CreateOutput gives", err, CategoryOf(err))
+	}
+	if data, _ := os.ReadFile(path); string(data) != "theirs" {
+		t.Errorf("the other file was replaced: %q", data)
+	}
+	if extra := leftovers(t, dir, "out.txt"); len(extra) > 0 {
+		t.Errorf("left behind %v", extra)
+	}
+	if _, err := f.Write([]byte("more")); !errors.Is(err, fs.ErrClosed) {
+		t.Errorf("Write after Close = %v, want fs.ErrClosed", err)
+	}
+	if err := f.Abort(); err != nil {
+		t.Errorf("Abort after Close = %v", err)
+	}
+}
+
 func TestCreateOutput_overwriteKeepsMode(t *testing.T) {
 	t.Parallel()
 	rtx, dir := outputDir(t)

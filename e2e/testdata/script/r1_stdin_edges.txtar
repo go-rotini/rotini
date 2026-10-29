@@ -1,0 +1,209 @@
+# R1 — stdin at its edges: a closed descriptor, a long JSON Lines stream with one bad record in
+# the middle, a stream of blank lines, and reading on after a bad record.
+#
+# Closing a descriptor and piping one program into another need a POSIX shell, so those steps
+# are left out on Windows.
+
+gomodinit example.com/filter
+
+exec rotini generate cmd/filter/.rotini.spec.yaml --config cmd/filter/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o filter$exe ./cmd/filter
+exec go build -o genrecs$exe ./gen
+
+# ── a closed stdin ───────────────────────────────────────────────────────────
+# With descriptor 0 closed there is nothing to read, so a declared stdin reads as nothing
+# piped, whole or streamed, rather than failing the run.
+[!windows] exec sh -c './filter count <&-'
+[!windows] stdout '^no stdin$'
+[!windows] exec sh -c './filter tasks <&-'
+[!windows] stdout '^0 records$'
+
+# ── one bad record in a long stream ──────────────────────────────────────────
+# The records before it were written as they were read, the error names its line, and nothing
+# after it is read into the output.
+[!windows] ! exec sh -c './genrecs 20000 12345 | ./filter tasks'
+[!windows] stdout -count=12344 '^ok \d+$'
+[!windows] ! stdout '^ok 12345$'
+[!windows] ! stdout 'records$'
+[!windows] stderr 'stdin line 12345: '
+
+# The iterator stops at a bad record, and a later range continues after it, so a handler can
+# skip bad records and still read the rest.
+[!windows] exec sh -c './genrecs 20000 12345 | ./filter tasks --skip-bad'
+[!windows] stdout -count=19999 '^ok \d+$'
+[!windows] stdout '^skipped line 12345$'
+[!windows] stdout '^19999 records$'
+
+# ── blank lines only ─────────────────────────────────────────────────────────
+# Blank lines are no records: a required stream that has nothing else is empty.
+stdin blank.txt
+! exec ./filter$exe need
+stderr 'required stdin payload is empty; pipe JSON Lines'
+
+-- blank.txt --
+
+
+
+-- gen/main.go --
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strconv"
+)
+
+// main writes n JSON Lines records, the one on line bad not a record.
+func main() {
+	n, _ := strconv.Atoi(os.Args[1])
+	bad, _ := strconv.Atoi(os.Args[2])
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+	for i := 1; i <= n; i++ {
+		if i == bad {
+			fmt.Fprintln(w, `{"n": "not a number"}`)
+			continue
+		}
+		fmt.Fprintf(w, "{\"n\": %d}\n", i)
+	}
+}
+-- cmd/filter/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: filter
+  summary: stdin filters
+  schemas:
+    Rec:
+      type: object
+      required: [n]
+      properties:
+        n: {type: integer}
+  commands:
+    - name: count
+      summary: count lines read whole
+      stdin:
+        format: lines
+    - name: tasks
+      summary: stream records
+      flags:
+        - name: skip-bad
+          identifiers: [--skip-bad]
+          schema: {type: bool}
+      stdin:
+        format: jsonl
+        stream: true
+        schema: {$ref: '#/schemas/Rec'}
+    - name: need
+      summary: a required stream
+      stdin:
+        format: jsonl
+        stream: true
+        schema: {$ref: '#/schemas/Rec', required: true}
+-- cmd/filter/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/filter/main.go
+    - type: cmd
+      file: internal/cmd/filter/zz_filter.go
+      package: filter
+-- internal/cmd/filter/filter_count.go --
+package filter
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterCountHandler struct{ rotini.NoHooks }
+
+func (*filterCountHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterCountInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.FilterCount.Stdin == nil {
+		fmt.Fprintln(rtx.Stdout, "no stdin")
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "%d lines\n", len(*in.FilterCount.Stdin))
+}
+-- internal/cmd/filter/filter_tasks.go --
+package filter
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterTasksHandler struct{ rotini.NoHooks }
+
+func (*filterTasksHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterTasksInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	n := 0
+	if in.FilterTasks.Stdin == nil {
+		fmt.Fprintf(rtx.Stdout, "%d records\n", n)
+		return
+	}
+	for {
+		failed := false
+		for rec, err := range in.FilterTasks.Stdin {
+			if err != nil {
+				if !in.FilterTasks.Flags.SkipBad {
+					rtx.HaltWith(err)
+					return
+				}
+				line, _, _ := strings.Cut(strings.TrimPrefix(err.Error(), "stdin line "), ":")
+				fmt.Fprintf(rtx.Stdout, "skipped line %s\n", line)
+				failed = true
+				break
+			}
+			n++
+			fmt.Fprintf(rtx.Stdout, "ok %d\n", rec.N)
+		}
+		if !failed {
+			break
+		}
+	}
+	fmt.Fprintf(rtx.Stdout, "%d records\n", n)
+}
+-- internal/cmd/filter/filter_need.go --
+package filter
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterNeedHandler struct{ rotini.NoHooks }
+
+func (*filterNeedHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterNeedInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.FilterNeed.Stdin == nil {
+		return
+	}
+	for _, err := range in.FilterNeed.Stdin {
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+}

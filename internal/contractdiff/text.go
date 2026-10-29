@@ -48,7 +48,7 @@ func (r Report) WriteText(w io.Writer) error {
 		group(h.title, func(f Finding) bool { return f.Accepted == nil && f.Severity == h.sev }, note)
 	}
 	group("Accepted", func(f Finding) bool { return f.Accepted != nil }, func(f Finding) string {
-		return " (" + string(f.Severity) + "; " + f.Accepted.Reason + ")"
+		return " (" + strings.ReplaceAll(string(f.Severity), "_", " ") + "; " + f.Accepted.Reason + ")"
 	})
 	fmt.Fprintln(tw, r.Summary.line())
 	if err := tw.Flush(); err != nil {

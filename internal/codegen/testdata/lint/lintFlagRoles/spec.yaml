@@ -70,3 +70,24 @@ command:
     # Destructive with neither a preview nor a confirmation.
     - name: wipe
       effects: { kind: destructive }
+    # Destructive with a preview and a confirmation agents aren't offered.
+    - name: erase
+      effects: { kind: destructive }
+      flags:
+        - name: preview
+          hidden: true
+          role: dry-run
+          schema: { type: bool }
+        - name: sure
+          agent: false
+          role: confirm
+          schema: { type: bool }
+    # Correct: a hidden preview brought back for agents. No problem.
+    - name: clear
+      effects: { kind: destructive }
+      flags:
+        - name: preview
+          hidden: true
+          agent: true
+          role: dry-run
+          schema: { type: bool }

@@ -226,11 +226,14 @@ func (t *tool) addInputs(cmd agentContractCmd) (serverEnv []string, skip string)
 		if !in.Required {
 			return ""
 		}
-		if in.Secret && (len(in.Env) > 0 || in.ConfigKey != "") {
-			serverEnv = append(serverEnv, in.Env...)
-			return ""
+		if in.Secret {
+			if len(in.Env) > 0 || in.ConfigKey != "" {
+				serverEnv = append(serverEnv, in.Env...)
+				return ""
+			}
+			return fmt.Sprintf("its required %s %q is a secret, which a tool never passes on the command line; declare `variable:` so the server's environment can supply it", inputChannel(in), in.Name)
 		}
-		return fmt.Sprintf("its required %s %q isn't a tool parameter (it is hidden, deprecated, secret or read from a file); give it `agent: true` or a fallback the server can supply", inputChannel(in), in.Name)
+		return fmt.Sprintf("its required %s %q isn't a tool parameter (it is hidden, deprecated, read from a file or `agent: false`); give it `agent: true`", inputChannel(in), in.Name)
 	}
 	// rotini.ArgvOf quotes a variadic's items for its separator unless its words are raw or fixed
 	// arguments follow it.

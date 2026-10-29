@@ -236,6 +236,18 @@ func TestReadImportResult(t *testing.T) {
 	}
 }
 
+// TestImportStatsPlural pins the summary's nouns to their counts.
+func TestImportStatsPlural(t *testing.T) {
+	one := &importResult{Command: &importCommand{Name: "a", Flags: []*importFlag{{}}}}
+	if got, want := one.stats(nil), "imported 1 command, 1 flag: 0 lossy, 0 unsupported, 0 info"; got != want {
+		t.Errorf("stats = %q, want %q", got, want)
+	}
+	two := &importResult{Command: &importCommand{Name: "a", Commands: []*importCommand{{Name: "b"}}}}
+	if got, want := two.stats(nil), "imported 2 commands, 0 flags: 0 lossy, 0 unsupported, 0 info"; got != want {
+		t.Errorf("stats = %q, want %q", got, want)
+	}
+}
+
 // TestYAMLString pins that every rendered scalar reads back as the string it came from.
 func TestYAMLString(t *testing.T) {
 	for _, s := range []string{
@@ -541,5 +553,66 @@ func TestRunImporter_vendorMod(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
 		t.Errorf("the run wrote into the module: %v", entries)
+	}
+}
+
+// TestImport_valueShapes pins how the value shapes an importer describes are written, on a
+// program with no sub-commands: a map default as a mapping with sorted keys, an empty list
+// default left out, a negated identifier, repeatable: false, several environment variables, a
+// file completion with extensions, an implicit value, an integer enum, and a bounded variadic
+// argument. The spec must validate and generate, and a second import over it must write it
+// byte for byte.
+func TestImport_valueShapes(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/acme\n\ngo 1.26\n")
+	t.Chdir(dir)
+	restore := importRunner
+	t.Cleanup(func() { importRunner = restore })
+	importRunner = func(context.Context, string, ImportOptions) (*importResult, []importNote, error) {
+		res, err := readImportResult(strings.NewReader(`{"format": "rotini-import/1", "source": {"framework": "kong"}, "command": {"name": "acme", "summary": "Acme",
+			"flags": [
+				{"name": "set", "identifiers": ["--set"], "schema": {"type": "map[string]string", "default": {"b": "2", "a": "1"}}},
+				{"name": "tags", "identifiers": ["--tags"], "schema": {"type": "[]string", "default": []}},
+				{"name": "color", "identifiers": ["--color"], "schema": {"type": "bool", "default": true, "negatable": "--plain"}},
+				{"name": "once", "identifiers": ["--once"], "schema": {"type": "string", "repeatable": false}},
+				{"name": "token", "identifiers": ["--token"], "schema": {"type": "string", "variable": ["ACME_TOKEN", "TOKEN"]}},
+				{"name": "config", "identifiers": ["--config"], "schema": {"type": "string", "placeholder": "FILE", "complete": {"kind": "file", "extensions": ["yaml", "yml"]}}},
+				{"name": "when", "identifiers": ["--when"], "schema": {"type": "string", "enum": [{"value": "auto"}, {"value": "always"}, {"value": "never"}], "default": "auto", "implicit_value": "always"}},
+				{"name": "level", "identifiers": ["-l", "--level"], "schema": {"type": "int", "enum": [{"value": "1", "summary": "low"}, {"value": "2"}], "default": 1}}
+			],
+			"arguments": [{"name": "files", "schema": {"type": "[]string", "required": true, "minItems": 1, "maxItems": 3}}]}}`))
+		return res, nil, err
+	}
+	p := NewProcessor("1.4.0")
+	if _, err := p.Import(context.Background(), ImportOptions{Package: "."}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "cmd", "acme", ".rotini.spec.yaml")
+	spec := readTestFile(t, path)
+	for _, want := range []string{
+		"        default:\n          a: \"1\"\n          b: \"2\"\n",
+		"        negatable: --plain\n",
+		"        repeatable: false\n",
+		"        variable:\n          - ACME_TOKEN\n          - TOKEN\n",
+		"        complete:\n          kind: file\n          extensions:\n            - yaml\n            - yml\n        placeholder: FILE\n",
+		"        implicit_value: always\n",
+		"          - value: \"1\"\n            summary: low\n          - \"2\"\n",
+		"        minItems: 1\n        maxItems: 3\n",
+	} {
+		if !strings.Contains(spec, want) {
+			t.Errorf("spec =\n%s\nwant it to contain\n%s", spec, want)
+		}
+	}
+	if strings.Contains(spec, "footer:") || strings.Contains(spec, "commands:") {
+		t.Errorf("a program with no sub-commands got a help footer or commands:\n%s", spec)
+	}
+	if _, tags, _ := strings.Cut(spec, "- name: tags\n"); strings.Contains(strings.SplitN(tags, "- name:", 2)[0], "default") {
+		t.Errorf("an empty list default was written:\n%s", spec)
+	}
+	if _, err := p.Import(context.Background(), ImportOptions{Package: ".", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if again := readTestFile(t, path); again != spec {
+		t.Errorf("a second import wrote\n%s\nwant\n%s", again, spec)
 	}
 }

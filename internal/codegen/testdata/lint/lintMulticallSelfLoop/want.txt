@@ -1,0 +1,1 @@
+warning: spec: .rotini.spec.yaml:7:13: command demo: uses the multicall prefix "demo-", which is also its plugins' binary prefix: a link named "demo-sync" routes to plugin "sync", whose binary is that link, so it would run itself; rotini refuses to start it, so choose another prefix

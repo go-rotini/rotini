@@ -1,0 +1,13 @@
+# A multicall prefix equal to the plugins' binary prefix makes a link named after a plugin's
+# binary route to that plugin, which would run the link itself.
+version: 0.0.0
+command:
+  name: demo
+  multicall:
+    prefix: demo-
+  plugins:
+    - name: sync
+      summary: sync via a plugin
+  commands:
+    - name: status
+      summary: show the status

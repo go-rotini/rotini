@@ -13,7 +13,8 @@
                           .Link is its markdown page, "" when there is none
          .Optional[]      the other visible commands (groups, deprecated and passthrough
                           commands), same shape
-         .Env[] .Config[] {.Name .Summary .Required .Secret .Commands}
+         .Env[] .Config[] {.Name .Flag .Summary .Required .Secret .Commands}; .Flag is the
+                          flag an environment variable sets, "" for an env input
        HELPERS: quote, join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
 # {{.Display}}

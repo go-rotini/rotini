@@ -55,6 +55,7 @@ type command struct {
 	DeprecatedIdentifiers []string          `json:"deprecated_identifiers"`
 	IdentifiersRemovedIn  map[string]string `json:"deprecated_identifiers_removed_in"`
 	Plugin                bool              `json:"plugin"`
+	Timeout               string            `json:"timeout"` // plugin
 	OptionsFirst          bool              `json:"options_first"`
 	Passthrough           bool              `json:"passthrough"`
 	Arguments             []input           `json:"arguments"`
@@ -161,6 +162,7 @@ type configFile struct {
 	As       string    `json:"as"`
 	Discover *discover `json:"discover"`
 	Profiles *profiles `json:"profiles"`
+	Schema   any       `json:"schema"`
 }
 
 // profiles is how a configuration file's named profiles are chosen.
@@ -191,6 +193,7 @@ type stdin struct {
 	Type           string            `json:"type"`
 	Required       bool              `json:"required"`
 	Schema         any               `json:"schema"`
+	Stream         bool              `json:"stream"`
 	Separator      string            `json:"separator"`
 	UnlessArgument string            `json:"unless_argument"`
 	Metadata       map[string]string `json:"metadata"`

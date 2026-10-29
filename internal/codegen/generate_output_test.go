@@ -255,6 +255,28 @@ func TestInputJSONSchema_secretDefault(t *testing.T) {
 	}
 }
 
+// TestInputJSONSchema_numericEnum pins that an integer or number input's enum, written as
+// strings in the spec, is written as numbers, so a value of the schema's type can match it; a
+// prefixed spelling stays a string, which a `base: prefixed` input's schema also accepts.
+func TestInputJSONSchema_numericEnum(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		in   *InputSchema
+		want string
+	}{
+		{&InputSchema{Type: "int", Enum: []any{"1", "2"}}, `{"enum":[1,2],"type":"integer"}`},
+		{&InputSchema{Type: "[]float64", Enum: []any{"0.5", map[string]any{"value": "1", "summary": "one"}}}, `{"items":{"enum":[0.5,1],"type":"number"},"type":"array"}`},
+		{&InputSchema{Type: "map[string]uint64", Enum: []any{"18446744073709551615"}}, `{"additionalProperties":{"enum":[18446744073709551615],"type":"integer"},"type":"object"}`},
+		{&InputSchema{Type: "int", Enum: []any{"0x10", "16"}, Base: "prefixed"}, `{"enum":["0x10",16],"pattern":"` + strings.ReplaceAll(prefixedPattern, `\`, `\\`) + `","type":["integer","string"]}`},
+		{&InputSchema{Type: "string", Enum: []any{"1", "2"}}, `{"enum":["1","2"],"type":"string"}`},
+	} {
+		got, _ := json.Marshal(inputJSONSchema(tc.in))
+		if string(got) != tc.want {
+			t.Errorf("inputJSONSchema(%s) =\n%s\nwant\n%s", tc.in.Type, got, tc.want)
+		}
+	}
+}
+
 func TestStandardSchema(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -19,8 +19,9 @@
                           .JSON is what to add for JSON output; .DryRun and .Confirm are flags;
                           .ExitStatus rows are {.Code .Name .Summary .Retryable .DocsURL};
                           .Link is its reference page, "" when the markdown feature is off
-         .Env[] .Config[] {.Name .Summary .Required .Secret .Commands} — what the commands read
-                          from the environment and config files
+         .Env[] .Config[] {.Name .Flag .Summary .Required .Secret .Commands} — what the
+                          commands read from the environment and config files; .Flag is
+                          the flag an environment variable sets, "" for an env input
          .JSON .Previews  some command has a JSON flag; some has a dry-run or confirm flag
        HELPERS: quote (a YAML/JSON string), join, upper, lower, title, trim, trimPrefix,
                 trimSuffix, replace, indent, repeat, default, contains, hasPrefix, hasSuffix,
@@ -63,7 +64,7 @@ allowed-tools: {{quote .}}
 
 ## Environment
 
-{{range .}}- `{{.Name}}`{{with .Summary}}: {{.}}{{end}}{{if .Required}} (required){{end}}{{if .Secret}} (secret: set it in the environment; never write it on the command line){{end}}
+{{range .}}- `{{.Name}}`{{with .Summary}}: {{.}}{{end}}{{with .Flag}} (sets `{{.}}`){{end}}{{if .Required}} (required){{end}}{{if .Secret}} (secret: set it in the environment; never write it on the command line){{end}}
 {{end}}
 {{- end}}
 {{- with .Config}}

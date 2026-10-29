@@ -200,7 +200,7 @@ func reportDefault(ctx context.Context, out Outcome, code int) (stdout, stderr s
 	rtx := p.newRunContext()
 	rtx.exitCode = code
 	rtx.setReporterStage(true)
-	p.defaultReporter(ctx, rtx, out)
+	defaultReporter(ctx, rtx, out)
 	return o.String(), e.String(), rtx.code()
 }
 

@@ -192,6 +192,9 @@ func pickField(node any, path []string) (any, bool) {
 		out := make([]any, len(n))
 		found := false
 		for i, e := range n {
+			if e == nil {
+				continue // a null element stays null
+			}
 			sub, ok := pickField(e, path)
 			if !ok {
 				sub = map[string]any{}

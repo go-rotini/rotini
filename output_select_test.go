@@ -57,6 +57,16 @@ func TestSelectFields(t *testing.T) {
 		{"null items", map[string]any{"tasks": nil}, "tasks", []string{"id"}, `{"tasks":null}`},
 		{"a null item", []any{nil, map[string]any{"id": 1}}, "", []string{"id"}, `[null,{"id":1}]`},
 		{"a nil slice", []selTask(nil), "", []string{"id"}, `null`},
+		{"a list inside an item", map[string]any{"tags": []any{map[string]any{"name": "a", "id": 1}, map[string]any{"id": 2}}}, "", []string{"tags.name"},
+			`{"tags":[{"name":"a"},{}]}`},
+		{"two fields of a list inside an item", map[string]any{"tags": []any{map[string]any{"name": "a", "id": 1, "x": 0}}}, "", []string{"tags.name", "tags.id"},
+			`{"tags":[{"id":1,"name":"a"}]}`},
+		{"a null element of a list inside an item", map[string]any{"tags": []any{nil, map[string]any{"name": "a"}}}, "", []string{"tags.name"},
+			`{"tags":[null,{"name":"a"}]}`},
+		{"a list inside an item lacking the field", map[string]any{"id": 1, "tags": []any{"a", "b"}}, "", []string{"id", "tags.name"}, `{"id":1}`},
+		{"a field through a scalar", map[string]any{"id": 1, "owner": "ann"}, "", []string{"id", "owner.login"}, `{"id":1}`},
+		{"a whole field and one inside it", map[string]any{"owner": map[string]any{"login": "ann", "id": 7}}, "", []string{"owner.login", "owner"},
+			`{"owner":{"id":7,"login":"ann"}}`},
 		{"big numbers stay exact", map[string]any{"n": uint64(18446744073709551615)}, "", []string{"n"}, `{"n":18446744073709551615}`},
 	}
 	for _, tt := range tests {

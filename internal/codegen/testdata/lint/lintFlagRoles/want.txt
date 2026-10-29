@@ -8,3 +8,4 @@ spec: .rotini.spec.yaml:62:17: command demo/odd: flag "format": has role machine
 spec: .rotini.spec.yaml:68:17: command demo/odder: flag "mode": has role machine-output but is a string flag without an `enum`; list the output formats and name the JSON one in `role_value`
 warning: spec: .rotini.spec.yaml:54:17: command demo/worse: flag "json": has role machine-output but its command declares no `output`, so there is no JSON to select
 warning: spec: .rotini.spec.yaml:72:16: command demo/wipe: is destructive but has no flag with `role: dry-run` or `role: confirm`; an agent can neither preview it nor confirm it without a prompt
+warning: spec: .rotini.spec.yaml:75:16: command demo/erase: is destructive but agents are offered none of its `role: dry-run` or `role: confirm` flags (each is hidden, deprecated or `agent: false`); an agent can neither preview it nor confirm it without a prompt

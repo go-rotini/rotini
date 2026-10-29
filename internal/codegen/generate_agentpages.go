@@ -77,6 +77,7 @@ type templateProgramCommand struct {
 // templateProgramInput is an environment variable or config value on a whole-program page.
 type templateProgramInput struct {
 	Name     string // the variable(s), or the config key
+	Flag     string // env: the flag the variable sets, "" for an env input
 	Summary  string
 	Required bool
 	Secret   bool
@@ -113,17 +114,24 @@ func programData(p *program, a *agentProgram, link func(page string) string) tem
 		d.Commands = append(d.Commands, row)
 		d.JSON = d.JSON || row.JSON != ""
 		d.Previews = d.Previews || row.DryRun != "" || row.Confirm != ""
-		for _, e := range cmd.Env {
-			if !listedForAgents(e) {
-				continue
-			}
-			name := strings.Join(e.Variables, ", ")
-			if i, ok := envAt[name]; ok {
+		addEnv := func(in templateProgramInput) {
+			if i, ok := envAt[in.Name]; ok {
 				d.Env[i].Commands = append(d.Env[i].Commands, c.invocation)
-				continue
+				return
 			}
-			envAt[name] = len(d.Env)
-			d.Env = append(d.Env, templateProgramInput{Name: name, Summary: e.Summary, Required: e.Required, Secret: e.Secret, Commands: []string{c.invocation}})
+			envAt[in.Name] = len(d.Env)
+			in.Commands = []string{c.invocation}
+			d.Env = append(d.Env, in)
+		}
+		for _, e := range cmd.Env {
+			if listedForAgents(e) {
+				addEnv(templateProgramInput{Name: strings.Join(e.Variables, ", "), Summary: e.Summary, Required: e.Required, Secret: e.Secret})
+			}
+		}
+		for _, f := range cmd.Flags {
+			if len(f.Env) > 0 && listedForAgents(f) {
+				addEnv(templateProgramInput{Name: strings.Join(f.Env, ", "), Flag: longIdentifier(f), Summary: f.Summary, Required: f.Required, Secret: f.Secret})
+			}
 		}
 		for _, cfg := range cmd.Config {
 			if !listedForAgents(cfg) {
@@ -141,8 +149,8 @@ func programData(p *program, a *agentProgram, link func(page string) string) tem
 	return d
 }
 
-// listedForAgents reports whether an env or config input is listed on the agent pages: a
-// visible one unless `agent: false`, a hidden one with `agent: true`.
+// listedForAgents reports whether an env or config input, or a flag's variable, is listed on
+// the agent pages: a visible one unless `agent: false`, a hidden one with `agent: true`.
 func listedForAgents(in agentInput) bool {
 	if in.Agent != nil {
 		return *in.Agent

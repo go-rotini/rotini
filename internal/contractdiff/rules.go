@@ -37,6 +37,7 @@ const (
 	RuleAliasMoved                = "ALIAS_MOVED"
 	RulePluginNoDelete            = "PLUGIN_NO_DELETE"
 	RulePluginAdded               = "PLUGIN_ADDED"
+	RulePluginTimeoutChanged      = "PLUGIN_TIMEOUT_CHANGED"
 	RuleOptionsFirstChanged       = "OPTIONS_FIRST_CHANGED"
 	RuleCommandPassthroughChanged = "COMMAND_PASSTHROUGH_CHANGED"
 	RuleDigitFlagAdded            = "DIGIT_FLAG_ADDED"
@@ -52,6 +53,8 @@ const (
 	RuleConfigFileMoved           = "CONFIG_FILE_MOVED"
 	RuleConfigFileAsChanged       = "CONFIG_FILE_AS_CHANGED"
 	RuleConfigFileAdded           = "CONFIG_FILE_ADDED"
+	RuleConfigFileSchemaAdded     = "CONFIG_FILE_SCHEMA_ADDED"
+	RuleConfigFileSchemaRemoved   = "CONFIG_FILE_SCHEMA_REMOVED"
 	RulePluginDiscoveryNoDelete   = "PLUGIN_DISCOVERY_NO_DELETE"
 	RulePluginDiscoveryChanged    = "PLUGIN_DISCOVERY_PREFIX_CHANGED"
 	RulePluginDiscoveryAdded      = "PLUGIN_DISCOVERY_ADDED"
@@ -63,6 +66,7 @@ const (
 	RuleStdinTypeChanged          = "STDIN_TYPE_CHANGED"
 	RuleStdinUnlessChanged        = "STDIN_UNLESS_ARGUMENT_CHANGED"
 	RuleStdinSeparatorChanged     = "STDIN_SEPARATOR_CHANGED"
+	RuleStdinStreamChanged        = "STDIN_STREAM_CHANGED"
 	RuleOutputNoDelete            = "OUTPUT_NO_DELETE"
 	RuleOutputAdded               = "OUTPUT_ADDED"
 	RuleOutputStreamChanged       = "OUTPUT_STREAM_CHANGED"
@@ -253,13 +257,14 @@ var catalog = []string{
 
 	RuleCommandNoDelete, RuleCommandReplaced, RuleCommandRenamedAliasKept, RuleCommandAdded, RuleCommandHidden,
 	RuleCommandUnhidden, RuleAliasNoDelete, RuleAliasAdded, RuleHiddenAliasNoDelete, RuleHiddenAliasAdded,
-	RuleAliasMoved, RulePluginNoDelete, RulePluginAdded, RuleOptionsFirstChanged, RuleCommandPassthroughChanged,
-	RuleDigitFlagAdded, RuleFlagGroupAdded, RuleFlagGroupRemoved, RuleFlagGroupTightened, RuleFlagGroupLoosened,
+	RuleAliasMoved, RulePluginNoDelete, RulePluginAdded, RulePluginTimeoutChanged, RuleOptionsFirstChanged,
+	RuleCommandPassthroughChanged, RuleDigitFlagAdded, RuleFlagGroupAdded, RuleFlagGroupRemoved, RuleFlagGroupTightened, RuleFlagGroupLoosened,
 	RuleFlagDependencyAdded, RuleFlagDependencyRemoved, RuleFlagDependencyTightened, RuleFlagDependencyLoosened,
 	RuleConfigFileNoDelete, RuleConfigFileMoved, RuleConfigFileAsChanged, RuleConfigFileAdded,
+	RuleConfigFileSchemaAdded, RuleConfigFileSchemaRemoved,
 	RulePluginDiscoveryNoDelete, RulePluginDiscoveryChanged, RulePluginDiscoveryAdded,
 	RuleStdinAdded, RuleStdinNoDelete, RuleStdinFormatChanged, RuleStdinRequiredAdded, RuleStdinRequiredRemoved,
-	RuleStdinTypeChanged, RuleStdinUnlessChanged, RuleStdinSeparatorChanged,
+	RuleStdinTypeChanged, RuleStdinUnlessChanged, RuleStdinSeparatorChanged, RuleStdinStreamChanged,
 	RuleOutputNoDelete, RuleOutputAdded, RuleOutputStreamChanged,
 	RuleExitStatusNoDelete, RuleExitStatusAdded, RuleExitSummaryChanged, RuleExitNameChanged, RuleExitNameAdded,
 	RuleExitRetryableRemoved, RuleExitRetryableAdded,

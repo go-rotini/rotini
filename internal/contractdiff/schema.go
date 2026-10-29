@@ -205,6 +205,9 @@ func (doc *document) definitionUse(level func(c *command, e *input) stability) m
 		if c.Stdin != nil {
 			mark(in, c, nil, stripLocal(c.Stdin.Schema))
 		}
+		for _, f := range c.ConfigFiles {
+			mark(in, c, nil, stripLocal(f.Schema))
+		}
 		mark(out, c, nil, stripLocal(c.Output))
 		for _, e := range c.ExitStatus {
 			mark(out, c, nil, stripLocal(e.Output))

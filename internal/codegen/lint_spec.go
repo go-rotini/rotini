@@ -131,6 +131,7 @@ var specLints = []func(*Spec) []error{
 	lintExpand,
 	lintUsageSchemaName,
 	lintMulticall,
+	lintMulticallSelfLoop,
 	lintChdirRole,
 	lintValuesFrom,
 	lintFieldRoles,

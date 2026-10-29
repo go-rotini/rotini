@@ -73,8 +73,8 @@ func FileMode(perm fs.FileMode) OutputOption {
 //   - A path is written atomically: to a temporary file beside it, renamed into place by
 //     Close. Abort, a failed write or a failed Close removes the temporary file and leaves an
 //     existing file untouched, and so does a run that ends with the file still open, by a
-//     return, a halt or a panic. A relative path is resolved against the run's directory
-//     ([Context.Dir]).
+//     return, a halt, a panic or a forced exit after a signal. A relative path is resolved
+//     against the run's directory ([Context.Dir]).
 //   - An existing file that is not a regular file, such as /dev/null, a named pipe or NUL on
 //     Windows, is written directly, not atomically.
 //
@@ -320,6 +320,22 @@ func (rtx *Context) abortOutputs() {
 		if err := f.Abort(); err != nil {
 			rtx.RecordWarning(err)
 		}
+	}
+}
+
+// discardOutputs removes the temporary files of the output files the run left open, ignoring
+// failures, for a forced exit. It takes no file's lock: a handler's goroutine may be blocked
+// in a write while holding one.
+func (rtx *Context) discardOutputs() {
+	rtx.mu.RLock()
+	open := slices.Clone(rtx.outputs)
+	rtx.mu.RUnlock()
+	for _, f := range open {
+		if f.tmp == "" {
+			continue
+		}
+		_ = f.file.Close() // Windows can't remove an open file
+		_ = os.Remove(f.tmp)
 	}
 }
 

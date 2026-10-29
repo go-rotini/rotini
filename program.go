@@ -583,9 +583,9 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 	}
 
 	rtx := p.newRunContext()
-	// Runs after settle, where it has nothing left to write, and while a panic is re-raised,
-	// where it writes out what the handlers wrote.
-	defer rtx.flushOutput()
+	// Runs after settle, where it has nothing left to do, and while a panic is re-raised, where
+	// it discards the output files left open and writes out what the handlers wrote.
+	defer rtx.endOutput()
 	if trap {
 		sigCh, done := p.installTrap(cancel, rtx)
 		defer removeTrap(sigCh, done, oneShot)
@@ -692,9 +692,9 @@ func (rtx *Context) adoptChain(chain []Command) []Command {
 // installTrap starts rotini's signal trap for one run; [removeTrap] with what it returns
 // removes it. The first signal cancels the run with the signal's exit code as the cause, so
 // dispatch halts and teardown runs; a second calls the exit action with forceExitCode, skipping
-// the remaining teardown after a best-effort flush of rtx's buffered stdout. With
-// WithTerminationTimeout, a run still going that long after the first signal exits the same
-// way, with the first signal's code.
+// the remaining teardown after a best-effort flush of rtx's buffered stdout and removal of the
+// temporary files of its open output files. With WithTerminationTimeout, a run still going that
+// long after the first signal exits the same way, with the first signal's code.
 //
 // The trap's state travels as values rather than in a closure, so arming it allocates only the
 // channels and the goroutine.
@@ -725,10 +725,10 @@ func (p *Program) installTrap(cancel context.CancelCauseFunc, rtx *Context) (cha
 		}
 		select {
 		case <-sigCh:
-			rtx.flushOutput()
+			rtx.forceEnd()
 			p.exit(forceExitCode)
 		case <-expired:
-			rtx.flushOutput()
+			rtx.forceEnd()
 			p.exit(code)
 		case <-done:
 		}

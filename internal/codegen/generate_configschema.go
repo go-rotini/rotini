@@ -349,4 +349,5 @@ func describeEnum(s map[string]any, input *InputSchema) {
 	}
 	target["enum"] = append(values, aliases...)
 	target["enumDescriptions"] = append(descriptions, aliasDescriptions...)
+	typedEnum(target)
 }

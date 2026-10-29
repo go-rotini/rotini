@@ -1,0 +1,303 @@
+# R9 — plugin dispatch at its edges: names that collide with the host's own spellings, exit
+# codes a shell gives meaning to, a host that declares stdin, the environment, response files,
+# and binaries that are found but can't be run.
+
+gomodinit example.com/host
+
+exec rotini generate cmd/host/.rotini.spec.yaml --config cmd/host/.rotini.conf.yaml
+exec go mod tidy
+
+mkdir bin
+exec go build -o bin/host$exe ./cmd/host
+exec go build -o bin/host-sync$exe ./plugins/echo
+exec go build -o bin/host-st$exe ./plugins/shadow
+exec go build -o bin/host-secret$exe ./plugins/shadow
+exec go build -o bin/host-exit$exe ./plugins/exit
+
+# ── names the host already answers ───────────────────────────────────────────
+# A declared plugin's alias runs it.
+exec bin/host$exe sy a
+stdout '^echo got: \[a\]$'
+
+# A hidden alias and a hidden command are the host's own, so a binary named after either never
+# takes them over, and completion offers neither.
+exec bin/host$exe st
+stdout '^own status$'
+! stdout SHADOWED
+exec bin/host$exe secret
+stdout '^own secret$'
+! stdout SHADOWED
+exec bin/host$exe __complete ''
+! stdout '^st\b'
+! stdout '^secret\b'
+stdout '^exit$'
+
+# A word that differs only in case from a hidden alias or a declared plugin is an unknown
+# command on every system, even with a binary of exactly that spelling next to the host (on a
+# case-insensitive filesystem it is the declared spelling's binary).
+exec go build -o bin/host-ST$exe ./plugins/shadow
+exec go build -o bin/host-SYNC$exe ./plugins/echo
+wantexit 1 bin/host$exe ST
+stderr '^host: error: unknown command "ST" for "host"$'
+! stdout .
+wantexit 1 bin/host$exe SYNC a
+stderr '^host: error: unknown command "SYNC" for "host"$'
+! stdout .
+wantexit 1 bin/host$exe Sy
+stderr '^host: error: unknown command "Sy" for "host"$'
+exec bin/host$exe st
+stdout '^own status$'
+
+# ── exit codes ───────────────────────────────────────────────────────────────
+# A plugin that exits 130 itself (its own Ctrl-C handling) is passed through like any other
+# code; rotini neither prints nor rewrites it.
+wantexit 130 bin/host$exe exit 130
+! stderr .
+wantexit 255 bin/host$exe exit 255
+! stderr .
+exec bin/host$exe exit 0
+! stderr .
+
+# ── stdin, environment and arguments ─────────────────────────────────────────
+# The root declares stdin, but a plugin run reads none of it: the plugin gets every byte.
+stdin payload.txt
+exec bin/host$exe sync --count
+stdout '^echo counted 3$'
+stdin payload.txt
+exec bin/host$exe
+stdout '^root read 3 lines$'
+
+# The plugin sees the host's environment.
+env HOST_TOKEN=abc
+exec bin/host$exe sync --env
+stdout '^HOST_TOKEN=abc$'
+
+# Words after the plugin's name reach it as typed: "--", empty words and spaces included.
+exec bin/host$exe sync -- '' 'a b' --x=1
+stdout '^echo got: \[-- "" "a b" --x=1\]$'
+
+# A response file is expanded before anything reads the command line, so it can name the plugin.
+exec bin/host$exe @to-sync.rsp tail
+stdout '^echo got: \["from file" tail\]$'
+
+# A "--" read from a response file stops expansion, and reaches the plugin.
+exec bin/host$exe sync @stop.rsp @to-sync.rsp
+stdout '^echo got: \[a -- @to-sync.rsp @to-sync.rsp\]$'
+
+# ── found but not runnable ───────────────────────────────────────────────────
+# A file next to the binary that can't be run is a start failure, not "not found"; the message
+# names the plugin and says why in rotini's words.
+# The files are written by another process: one this test process wrote could still be open in a
+# child forked meanwhile, and Linux refuses to run a file open for writing.
+[!windows] exec go run ./plugins/write bin/host-broken 0644
+[!windows] wantexit 126 bin/host$exe broken
+[!windows] stderr '^host: start-failed: broken: could not start ".*[/\\]bin[/\\]host-broken": permission denied$'
+[!windows] ! stderr 'fork/exec'
+[!windows] ! stdout .
+[!windows] exec go run ./plugins/write bin/host-garbage 0755
+[!windows] wantexit 126 bin/host$exe garbage
+[!windows] stderr '^host: start-failed: garbage: could not start ".*host-garbage": exec format error$'
+
+# A directory with a plugin's name is not a plugin, so a discovered token falls through to
+# not found.
+mkdir bin/host-adir$exe
+wantexit 127 bin/host$exe adir
+stderr '^host: not-found: "host-adir" not found; searched next to the binary'
+
+-- payload.txt --
+one
+two
+three
+-- to-sync.rsp --
+sync
+from file
+-- stop.rsp --
+a
+--
+@to-sync.rsp
+-- plugins/write/main.go --
+package main
+
+import (
+	"os"
+	"strconv"
+)
+
+// main writes a file that is not a program, with the mode given.
+func main() {
+	mode, err := strconv.ParseUint(os.Args[2], 8, 32)
+	if err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(os.Args[1], []byte("not a program\n"), os.FileMode(mode)); err != nil {
+		panic(err)
+	}
+}
+-- cmd/host/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: host
+  summary: a plugin host
+  response_files: { prefix: "@" }
+  stdin:
+    format: lines
+  plugin_discovery:
+    prefix: host-
+  plugins:
+    - name: sync
+      aliases: [sy]
+      summary: sync via a plugin
+  commands:
+    - name: status
+      summary: the host's own status
+      hidden_aliases: [st]
+    - name: secret
+      summary: a hidden command
+      hidden: true
+-- cmd/host/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/host/main.go
+    - type: cmd
+      file: internal/cmd/host/zz_host.go
+      package: host
+  features:
+    - type: completion
+      enabled: true
+-- internal/cmd/host/host.go --
+package host
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type hostHandler struct{ rotini.NoHooks }
+
+func (*hostHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[HostInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Host.Stdin != nil {
+		fmt.Fprintf(rtx.Stdout, "root read %d lines\n", len(*in.Host.Stdin))
+	}
+}
+
+// Reporter prints each error with the plugin failure's kind and maps the kinds to the shell's
+// codes.
+func Reporter(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	code := 0
+	for _, e := range out.Errors {
+		kind := "error"
+		code = 1
+		var pe *rotini.PluginError
+		if errors.As(e, &pe) {
+			switch pe.Kind {
+			case rotini.PluginNotFound:
+				kind, code = "not-found", 127
+			case rotini.PluginStartFailed:
+				kind, code = "start-failed", 126
+			}
+		}
+		fmt.Fprintf(rtx.Stderr, "host: %s: %v\n", kind, e)
+	}
+	if code != 0 {
+		rtx.Exit(code)
+	}
+}
+-- internal/cmd/host/host_status.go --
+package host
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type hostStatusHandler struct{ rotini.NoHooks }
+
+func (*hostStatusHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "own status")
+}
+-- internal/cmd/host/host_secret.go --
+package host
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type hostSecretHandler struct{ rotini.NoHooks }
+
+func (*hostSecretHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "own secret")
+}
+-- cmd/host/main.go --
+package main
+
+import host "example.com/host/internal/cmd/host"
+
+func main() { host.NewProgram().WithReporter(host.Reporter).Execute() }
+-- plugins/echo/main.go --
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
+
+func main() {
+	args := os.Args[1:]
+	if len(args) == 1 && args[0] == "--count" {
+		n := 0
+		sc := bufio.NewScanner(os.Stdin)
+		for sc.Scan() {
+			n++
+		}
+		fmt.Printf("echo counted %d\n", n)
+		return
+	}
+	if len(args) == 1 && args[0] == "--env" {
+		fmt.Printf("HOST_TOKEN=%s\n", os.Getenv("HOST_TOKEN"))
+		return
+	}
+	shown := make([]string, len(args))
+	for i, a := range args {
+		shown[i] = a
+		if a == "" || strings.Contains(a, " ") {
+			shown[i] = strconv.Quote(a)
+		}
+	}
+	fmt.Printf("echo got: [%s]\n", strings.Join(shown, " "))
+}
+-- plugins/shadow/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("SHADOWED") }
+-- plugins/exit/main.go --
+package main
+
+import (
+	"os"
+	"strconv"
+)
+
+func main() {
+	code, _ := strconv.Atoi(os.Args[1])
+	os.Exit(code)
+}

@@ -7,9 +7,11 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // This file emits the machine-readable contract: one JSON Schema file per declared output
@@ -60,6 +62,7 @@ type contractCommand struct {
 	DeprecatedIdentifiers []string                 `json:"deprecated_identifiers,omitempty"`            // deprecated aliases
 	IdentifiersRemovedIn  map[string]string        `json:"deprecated_identifiers_removed_in,omitempty"` // the release removing each deprecated alias
 	Plugin                bool                     `json:"plugin,omitempty"`
+	Timeout               string                   `json:"timeout,omitempty"`       // a plugin: how long the host lets it run, as a Go duration
 	OptionsFirst          bool                     `json:"options_first,omitempty"` // flags stop at the command's first argument
 	Passthrough           bool                     `json:"passthrough,omitempty"`   // every word after the command is an argument, as typed
 	Arguments             []contractArgument       `json:"arguments,omitempty"`
@@ -255,6 +258,7 @@ type contractConfigFile struct {
 	As       string                  `json:"as,omitempty"` // "env": the file supplies environment variables
 	Discover *contractConfigDiscover `json:"discover,omitempty"`
 	Profiles *contractProfiles       `json:"profiles,omitempty"`
+	Schema   any                     `json:"schema,omitempty"` // the document the file is checked against when read
 }
 
 type contractConfigDiscover struct {
@@ -640,6 +644,7 @@ func (p *program) contract(nodes []contractNode) ([]byte, error) {
 				Aliases: pl.Aliases,
 				Hidden:  n.hidden,
 				Plugin:  true,
+				Timeout: pl.Timeout,
 			})
 		}
 	}
@@ -675,7 +680,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 	if in == nil {
 		in = &Inputs{}
 	}
-	p.contractCommandRules(&c, n, in)
+	p.contractCommandRules(&c, n, in, defs)
 	schemas := p.schemasOf(n.scope)
 	schemaOf := func(s *InputSchema) any { return defs.rename(n.scope, inputJSONSchema(s)) }
 	params := map[string]any{}
@@ -782,7 +787,7 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 // contractCommandRules describes how a command reads its command line and where its values
 // come from, beyond its inputs: options_first, flag groups and dependencies, the config files
 // it declares, and plugin discovery.
-func (p *program) contractCommandRules(c *contractCommand, n contractNode, in *Inputs) {
+func (p *program) contractCommandRules(c *contractCommand, n contractNode, in *Inputs, defs *contractDefs) {
 	c.OptionsFirst = in.OptionsFirst
 	for _, g := range in.FlagGroups {
 		c.FlagGroups = append(c.FlagGroups, contractFlagGroup{Kind: g.Kind, Flags: g.Flags})
@@ -796,6 +801,9 @@ func (p *program) contractCommandRules(c *contractCommand, n contractNode, in *I
 			file.Discover = &contractConfigDiscover{Strategy: d.Strategy, App: d.App, File: d.File}
 		}
 		file.Profiles = p.contractProfilesOf(n.path, cf)
+		if cf.Schema != nil {
+			file.Schema = defs.schemaDoc(n.scope, *cf.Schema)
+		}
 		c.ConfigFiles = append(c.ConfigFiles, file)
 	}
 	if n.discovery != nil {
@@ -894,7 +902,37 @@ func inputJSONSchema(s *InputSchema) any {
 		allowPrefixedText(doc)
 	}
 	moveValueConstraints(doc, base.Type)
+	typedEnum(doc)
+	for _, k := range []string{"items", "additionalProperties"} {
+		if inner, ok := doc[k].(map[string]any); ok {
+			typedEnum(inner)
+		}
+	}
 	return doc
+}
+
+// jsonNumberRe matches a JSON number literal.
+var jsonNumberRe = sync.OnceValue(func() *regexp.Regexp {
+	return regexp.MustCompile(`^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$`)
+})
+
+// typedEnum writes the enum members of an integer or number schema, which the spec writes as
+// strings, as JSON numbers, so the values match the schema's type. A member that isn't a JSON
+// number literal (a `base: prefixed` spelling such as 0x10) stays a string, which such an
+// input's schema also accepts.
+func typedEnum(s map[string]any) {
+	members, ok := s["enum"].([]any)
+	if !ok || (!typeIs(s, "integer") && !typeIs(s, "number")) {
+		return
+	}
+	out := make([]any, len(members))
+	for i, m := range members {
+		out[i] = m
+		if str, ok := m.(string); ok && jsonNumberRe().MatchString(str) {
+			out[i] = json.Number(str)
+		}
+	}
+	s["enum"] = out
 }
 
 // prefixedPattern matches the text a `base: prefixed` input reads as an integer: an optional

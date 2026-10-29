@@ -1830,8 +1830,8 @@ cmd.NewProgram().WithTerminationTimeout(10 * time.Second).Execute()
 
 If the run hasn't returned 10 seconds after the first signal, the program exits with that
 signal's code (143 for SIGTERM, 130 for SIGINT), as a second signal would. The exit is abrupt:
-buffered stdout is flushed if it can be, but the remaining teardown doesn't run and the reporter
-may not have printed. The timeout covers the reporter too, and it has no effect when rotini
+buffered stdout is flushed if it can be and the temporary files of open `CreateOutput` files are
+removed, but the remaining teardown doesn't run and the reporter may not have printed. The timeout covers the reporter too, and it has no effect when rotini
 traps no signals (`WithoutSignalHandling`, or `WithContext` without `WithSignals`).
 
 ### Panics
@@ -2262,7 +2262,9 @@ $ todo list --json id,title --sort-by title
 `SelectFields`' second argument is where the items are: `values_from` without its `output`
 prefix, so `""` for the output itself. Everything outside it, such as an envelope's `total`, is
 kept, and a field an item lacks is left out of that item. A dotted field (`owner.login`) reaches
-into a nested object, for a flag that declares such names in its own `enum`.
+into a nested object, for a flag that declares such names in its own `enum`. The tag field of an
+output with several kinds is left out too when it isn't selected, so a reader of a multi-kind
+stream should include it in the selection to tell the items apart.
 
 `WriteOutput` and `WriteOutputItem` accept the `rotini.Selection` it returns in place of the
 output type. With output checks on, a selection is checked against the shape with every
@@ -2354,8 +2356,9 @@ token nor candidates.
   Each is standard JSON Schema (draft-07), with the named schemas it uses included. Hidden
   commands get none.
 - **The contract document**, with `generate.contract.file`: one JSON file describing every
-  command, including its arguments, flags, environment variables, configuration keys and files,
-  stdin, output shape and exit statuses. Beside each input's JSON Schema it states what a
+  command, including its arguments, flags, environment variables, configuration keys and files
+  (with the schema a file is checked against), stdin, output shape, exit statuses, and each
+  declared plugin's timeout. Beside each input's JSON Schema it states what a
   caller needs to build a command line: the rotini type (`int8`, `duration`), the kind of value
   (`count` means repeat the flag, never `=3`), negated forms, separators, time layouts, and
   which inputs are secret. Hidden commands and inputs are listed with `hidden: true`. Each
@@ -2697,7 +2700,8 @@ rules, the skill page), the worst case over the command and its flags is used. A
 - `page`: the flag that selects a page of results.
 
 A command has each role at most once, counting the cascading flags it inherits. `rotini
-validate` warns about a destructive command with neither a `dry-run` nor a `confirm` flag.
+validate` warns about a destructive command with neither a `dry-run` nor a `confirm` flag that
+agents are offered.
 
 ### Keeping things from agents
 
@@ -2708,7 +2712,8 @@ context), read `from:` a file or stdin (an agent could read the host's files), s
 (`--help`), or the [directory flag](#a-directory-flag). `agent: true` brings one back;
 `agent: false` keeps a command, with its sub-commands, or an input out while it stays in help.
 On env and config inputs, which are never tool parameters, `agent` only decides whether the
-skill page lists them. `rotini validate` warns about `agent: true` on a secret flag or argument:
+skill page lists them. The machine-output flag is never a parameter either: tool exports add it
+to every call, even when it is hidden, and `agent: false` stops that. `rotini validate` warns about `agent: true` on a secret flag or argument:
 tool servers never pass a secret on the command line, where other local users can see it, so
 supply it through its environment variable.
 
@@ -2771,7 +2776,8 @@ killed after `--grace` (5s by default). Windows has no SIGTERM, so there it is k
 
 - **`skill`** writes `skills/<name>/SKILL.md`, an [Agent Skills](https://agentskills.io) page:
   the commands with their effects, how to call them (command words first, the JSON flag, the
-  confirm flag instead of a prompt), the exit codes and error kinds, the environment, and each
+  confirm flag instead of a prompt), the exit codes and error kinds, the environment (env
+  inputs, and the variables that set flags, secrets named but never their values), and each
   command's details and examples. `allowed-tools` lists the read-only commands. With the
   markdown feature on, each command's page goes in `references/`. `name` sets the skill's name
   (the root's, lowercased, by default) and `description` adds when to use it.
@@ -3431,7 +3437,9 @@ command:
 - **Discovery** makes any executable named `<prefix><word>` a sub-command: `plug hello` runs
   `plug-hello` if one exists. The prefix defaults to the program's name followed by `-`. A word
   that matches nothing is a usage error, since it is most likely a typo. A discovered name that
-  collides with a declared command or plugin is skipped. Completion offers discovered plugins
+  collides with a declared command or plugin is skipped. A word that differs only in case from a
+  declared command, alias or plugin (`plug SYNC`) is never looked up, on any system: it is an
+  unknown command, a `*rotini.ParseError` with the declared names as `Candidates`. Completion offers discovered plugins
   unless `hidden: true` is set, but the generated help can't list them, since they aren't known
   when you generate.
 - **Both are searched for in the same order:** next to the program's own binary, then in
@@ -3646,6 +3654,11 @@ or plugin, the root's own name included, runs the root. Pages and `rtx.Usage()` 
 root's invocation (`busybox ls`), and shell completion scripts are registered for the root's
 name only. Tests set the invoked name with `Program.WithArgv0`.
 
+A prefix of `<root>-` collides with the plugins' binary names: a link `acme-sync` routes to the
+plugin `sync`, whose binary is `acme-sync`, the link itself. `rotini validate` warns about it,
+and at run time a plugin whose binary is the running program, through a link, is not started:
+it is a `*rotini.PluginError` of kind `PluginStartFailed`.
+
 ## Testing
 
 Build a fresh `Program` per test and run it with arguments, in-process: no subprocess and no
@@ -3852,8 +3865,11 @@ it also has `removed_in`, that release check applies.
 ### How changes are matched and rated
 
 Commands match by path, flags by identifier (so a lost short form is caught and a renamed
-logical name isn't a removal), arguments by name (by position when one is renamed in place),
-environment variables by variable, and config entries by key. A flag a command inherits is
+logical name isn't a removal; a flag of the same name that keeps one of its identifiers is
+matched first), arguments by name (by position when one is renamed in place), environment
+variables by variable (an input of the same name first), and config entries by key. An
+identifier or variable that moves to another flag or input is a removal at its old place, since
+the same command line now sets something else. A flag a command inherits is
 compared where it is declared, and on the command itself when the flag that takes an identifier
 there moves between the command's own flag and an ancestor's cascading flag. A command renamed
 with its old name kept as an alias is compared with the command that now runs it.
@@ -3868,8 +3884,13 @@ the input that uses it.
 
 Stability lowers the rating: on an item that is `experimental` in the old contract (or under an
 experimental command) every finding is safe, and on a `beta` one a breaking finding is possibly
-breaking. Removing a hidden item is possibly breaking, and adding a hidden one is not reported
-unless it is required, or is a command that takes over an argument.
+breaking. Removing a hidden item is possibly breaking, and so is removing anything inside a
+hidden command or input (an alias, flag, identifier, argument, variable or enum value); other
+changes there are rated as usual. Adding a hidden item is not reported unless it is required, or
+is a command that takes over an argument.
+
+A configuration file's `schema` is compared as an input's is: a newly required key, a narrower
+type, enum or bound breaks files that worked, and loosening it is safe.
 
 A finding's `where` names the item in the old contract, written as on the command line:
 
@@ -3882,7 +3903,7 @@ A finding's `where` names the item in the old contract, written as on the comman
 | an environment variable | `taskr list $TASKR_STORE` |
 | a config key | `taskr list config store.path` |
 | an enum value | `taskr add --priority value low` |
-| a field inside an input, stdin or output | `taskr add --meta.owner`, `taskr upper stdin.items[]`, `taskr list output.tasks[].status` |
+| a field inside an input, stdin, a config file or output | `taskr add --meta.owner`, `taskr upper stdin.items[]`, `taskr config_files user.store`, `taskr list output.tasks[].status` |
 | an exit status, or its output | `taskr get exit 3`, `taskr get exit 3 output.reason` |
 | a flag group or dependency | `taskr add group mutually_exclusive(json,yaml)`, `taskr add dependency force unless dry-run` |
 | a config file, plugin discovery, stdin | `taskr config_files user`, `taskr plugin_discovery`, `taskr upper stdin` |
@@ -3907,7 +3928,8 @@ or on what the old contract planned.
 | `COMMAND_REPLACED` | a command removed for the `replaced_by` it named | expected; breaking when its `removed_in` is later than the release (possibly breaking when it was hidden) |
 | `COMMAND_RENAMED_ALIAS_KEPT` | renamed, the old name kept as an alias | safe; possibly breaking under a command that takes arguments, where the new name used to be read as one |
 | `COMMAND_ADDED`, `PLUGIN_ADDED` | a command or plugin added | safe; possibly breaking under a command with arguments, since an argument spelling its name now runs it |
-| `PLUGIN_NO_DELETE` | a declared plugin removed | breaking |
+| `PLUGIN_NO_DELETE` | a declared plugin removed | breaking; possibly breaking when it was hidden |
+| `PLUGIN_TIMEOUT_CHANGED` | a declared plugin's `timeout` changed, added or removed (the same length written another way is no change) | possibly breaking |
 | `COMMAND_HIDDEN`, `COMMAND_UNHIDDEN` | a command hidden or shown | possibly breaking, safe |
 | `ALIAS_NO_DELETE`, `HIDDEN_ALIAS_NO_DELETE` | an alias removed | breaking; expected when planned |
 | `ALIAS_ADDED`, `HIDDEN_ALIAS_ADDED`, `ALIAS_MOVED` | an alias added, or moved between listed and hidden | safe; an alias added under a command with arguments is possibly breaking |
@@ -3919,11 +3941,13 @@ or on what the old contract planned.
 | `FLAG_DEPENDENCY_REMOVED`, `FLAG_DEPENDENCY_LOOSENED` | a dependency removed; `requires` or `forbids` shrunk, `equals` narrowed | safe |
 | `CONFIG_FILE_NO_DELETE`, `CONFIG_FILE_MOVED`, `CONFIG_FILE_AS_CHANGED` | a config file removed, moved (path, discovery, format), or read as variables | breaking |
 | `CONFIG_FILE_ADDED` | a config file added | safe |
+| `CONFIG_FILE_SCHEMA_ADDED`, `CONFIG_FILE_SCHEMA_REMOVED` | a config file now checked against a `schema`, or no longer | possibly breaking, safe |
 | `PLUGIN_DISCOVERY_NO_DELETE`, `PLUGIN_DISCOVERY_PREFIX_CHANGED`, `PLUGIN_DISCOVERY_ADDED` | plugin discovery | breaking, breaking, safe (breaking on a command with arguments) |
 | `STDIN_ADDED` | starts reading stdin | possibly breaking |
 | `STDIN_NO_DELETE`, `STDIN_FORMAT_CHANGED`, `STDIN_REQUIRED_ADDED`, `STDIN_TYPE_CHANGED`, `STDIN_SEPARATOR_CHANGED` | stdin removed, or read differently | breaking |
 | `STDIN_REQUIRED_REMOVED` | stdin no longer required | safe |
 | `STDIN_UNLESS_ARGUMENT_CHANGED` | the argument that replaces stdin | possibly breaking |
+| `STDIN_STREAM_CHANGED` | stdin read one item at a time (`stream`), or no longer | possibly breaking |
 | `OUTPUT_NO_DELETE`, `OUTPUT_STREAM_CHANGED` | an output removed, or a stream turned on or off | breaking |
 | `OUTPUT_ADDED` | an output declared | safe |
 | `EXIT_STATUS_NO_DELETE`, `EXIT_SUMMARY_CHANGED`, `EXIT_NAME_CHANGED`, `EXIT_RETRYABLE_REMOVED` | an exit status removed, reworded, renamed, or no longer retryable | possibly breaking |
@@ -3936,7 +3960,7 @@ or on what the old contract planned.
 | `FLAG_ADDED`, `FLAG_REQUIRED_ADDED` | a flag added, optional or required (a short-circuit flag is never required) | safe, breaking |
 | `FLAG_REQUIRED_REMOVED` | no longer required | safe |
 | `FLAG_NAME_CHANGED` | the logical name, same identifiers | possibly breaking |
-| `FLAG_IDENTIFIER_NO_DELETE`, `FLAG_HIDDEN_IDENTIFIER_NO_DELETE`, `FLAG_NEGATED_NO_DELETE` | an identifier or a negated form removed | breaking; expected when planned |
+| `FLAG_IDENTIFIER_NO_DELETE`, `FLAG_HIDDEN_IDENTIFIER_NO_DELETE`, `FLAG_NEGATED_NO_DELETE` | an identifier or a negated form removed, or an identifier moved to another flag | breaking; expected when planned |
 | `FLAG_IDENTIFIER_ADDED`, `FLAG_HIDDEN_IDENTIFIER_ADDED`, `FLAG_IDENTIFIER_MOVED`, `FLAG_NEGATED_ADDED` | an identifier or negated form added, or moved | safe |
 | `FLAG_NO_LONGER_CASCADES`, `FLAG_CASCADES` | sub-commands stop or start accepting it | breaking, safe |
 | `FLAG_SHORT_CIRCUIT_REMOVED`, `FLAG_SHORT_CIRCUIT_ADDED` | it waives the command's requirements | possibly breaking, safe |
@@ -3948,7 +3972,7 @@ or on what the old contract planned.
 | `ARGUMENT_MOVED` | an argument now at another position, so a word binds to another argument | breaking |
 | `ARGUMENT_NAME_CHANGED`, `ARGUMENT_VARIADIC_ADDED`, `ARGUMENT_GLOB_CHANGED` | renamed, now variadic, or patterns expanded on Windows | possibly breaking |
 | `ARGUMENT_VARIADIC_REMOVED`, `ARGUMENT_PASSTHROUGH_CHANGED` | no longer variadic, or raw words start elsewhere | breaking |
-| `ENV_NO_DELETE`, `ENV_VARIABLE_NO_DELETE`, `ENV_REQUIRED_ADDED`, `ENV_NESTING_CHANGED` | a variable removed or renamed, now required, or nested differently | breaking |
+| `ENV_NO_DELETE`, `ENV_VARIABLE_NO_DELETE`, `ENV_REQUIRED_ADDED`, `ENV_NESTING_CHANGED` | a variable removed, renamed or moved to another input, now required, or nested differently | breaking |
 | `ENV_ADDED`, `ENV_VARIABLE_ADDED`, `ENV_REQUIRED_REMOVED` | a variable added, or no longer required | safe |
 | `CONFIG_NO_DELETE`, `CONFIG_MOVED`, `CONFIG_REQUIRED_ADDED` | a config key removed, moved to another file, or now required | breaking |
 | `CONFIG_ADDED`, `CONFIG_REQUIRED_REMOVED` | a config key added, or no longer required | safe |

@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -104,5 +105,34 @@ func TestToolInvoke_argvQuoting(t *testing.T) {
 	}
 	if want := `{"flag":"--set","kind":"map","type":"map[string]any","dotted_keys":true}`; string(got) != want {
 		t.Errorf("set = %s, want %s", got, want)
+	}
+}
+
+// TestBuildTool_leftOutReasons pins why a command whose required input a tool can't pass is
+// left out, and the fix each message names: a secret needs a variable the server supplies
+// (`agent: true` on a secret is linted as having no use); any other input needs `agent: true`.
+func TestBuildTool_leftOutReasons(t *testing.T) {
+	no := false
+	for _, tc := range []struct {
+		in   agentInput
+		want string
+	}{
+		{agentInput{Name: "password", Identifiers: []string{"--password"}, Required: true, Secret: true},
+			`its required flag "password" is a secret, which a tool never passes on the command line; declare ` + "`variable:`"},
+		{agentInput{Name: "keyfile", Identifiers: []string{"--keyfile"}, Required: true, From: []string{"file"}},
+			`its required flag "keyfile" isn't a tool parameter (it is hidden, deprecated, read from a file or ` + "`agent: false`); give it `agent: true`"},
+		{agentInput{Name: "region", Identifiers: []string{"--region"}, Required: true, Agent: &no},
+			`its required flag "region" isn't a tool parameter`},
+	} {
+		_, skip, err := buildTool(&agentProgram{doc: agentDoc{Name: "app"}}, agentCommand{c: agentContractCmd{Path: []string{"run"}, Flags: []agentInput{tc.in}}, leaf: true, offered: true, invocation: "app run"}, false)
+		if err != nil || !strings.HasPrefix(skip, tc.want) {
+			t.Errorf("%s: skip = %q, %v; want it to start %q", tc.in.Name, skip, err, tc.want)
+		}
+	}
+	_, skip, _ := buildTool(&agentProgram{doc: agentDoc{Name: "app"}}, agentCommand{c: agentContractCmd{Path: []string{"run"}, Flags: []agentInput{
+		{Name: "token", Identifiers: []string{"--token"}, Required: true, Secret: true, Env: []string{"APP_TOKEN"}},
+	}}, leaf: true, offered: true, invocation: "app run"}, false)
+	if skip != "" {
+		t.Errorf("a required secret the server's environment supplies left the tool out: %s", skip)
 	}
 }

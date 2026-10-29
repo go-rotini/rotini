@@ -940,7 +940,12 @@ func extraPositionals(chain []Command, si *scopeInputs, store *parsedInputs) err
 	}
 	hint := store.detachedHint(si.args[n:]) + store.lateFlagHint(si.args[n:]) // only a word that is one too many
 	if n == 0 {
-		return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%s takes no arguments (got %d)", pathOf(chain), len(si.args)) + hint, Command: leaf.Name}
+		word := redactValue(si.args[0], store.secretWord(si.args[0]))
+		got := strconv.Quote(word)
+		if more := len(si.args) - 1; more > 0 {
+			got += fmt.Sprintf(" and %d more", more)
+		}
+		return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%s takes no arguments, got %s", pathOf(chain), got) + hint, Command: leaf.Name, Token: word}
 	}
 	return &ParseError{Kind: ParseKindTooManyArguments, Msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", pathOf(chain), n, plural("argument", n), len(si.args)) + hint, Command: leaf.Name}
 }

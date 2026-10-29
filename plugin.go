@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,7 +37,9 @@ const (
 	// PluginTimeout means the plugin ran past its declared timeout and was stopped.
 	PluginTimeout
 	// PluginStartFailed means the binary was found but could not be started (a fork, exec or
-	// pipe failure). The plugin's own non-zero exit is not an error kind.
+	// pipe failure), or was not started because it is the running program itself, as with a
+	// multicall link named after the plugin's binary. The plugin's own non-zero exit is not an
+	// error kind.
 	PluginStartFailed
 )
 
@@ -120,6 +123,18 @@ type PluginDispatch struct {
 // path; its last command is the one that dispatched, whose names are a discovered token's
 // candidates.
 func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command, r *PluginDispatch) (int, error) {
+	if r.Discovered && len(chain) > 0 {
+		if leaf := &chain[len(chain)-1]; foldsToDeclared(leaf, r.Def.Name) {
+			rtx.RecordError(&ParseError{
+				Kind:       ParseKindUnknownCommand,
+				Msg:        fmt.Sprintf("unknown command %q for %q", r.Def.Name, leaf.Name),
+				Command:    leaf.Name,
+				Token:      r.Def.Name,
+				Candidates: childCommandNames(leaf),
+			})
+			return p.settle(ctx, rtx)
+		}
+	}
 	path, err := resolvePluginBinary(r.Def.Binary, r.Dir, rtx.osView())
 	if err != nil {
 		cat := CategoryInternal
@@ -133,6 +148,13 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 		return p.pluginFailure(ctx, rtx, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginNotFound,
 			Cause: err, Msg: err.Error(), Candidates: candidates, cat: cat,
+		})
+	}
+	if isRunningBinary(path) {
+		return p.pluginFailure(ctx, rtx, &PluginError{
+			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginStartFailed,
+			Msg: fmt.Sprintf("%s: %s is this program itself, so running it as the plugin would start this program again; install the plugin's own binary there", r.Def.Name, quotePath(path)),
+			cat: CategoryInternal,
 		})
 	}
 
@@ -187,9 +209,37 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 		}
 		return p.pluginFailure(ctx, rtx, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginStartFailed,
-			Cause: err, Msg: fmt.Sprintf("%s: %v", r.Def.Name, err), cat: CategoryInternal,
+			Cause: err, Msg: fmt.Sprintf("%s: could not start %s: %s", r.Def.Name, quotePath(path), pluginStartProblem(err)),
+			cat: CategoryInternal,
 		})
 	}
+}
+
+// isRunningBinary reports whether path is the running executable, through a symbolic or hard
+// link included: a multicall link named after a plugin's binary would otherwise run itself.
+func isRunningBinary(path string) bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	self, err := os.Stat(exe)
+	if err != nil {
+		return false
+	}
+	found, err := os.Stat(path)
+	return err == nil && os.SameFile(self, found)
+}
+
+// pluginStartProblem says why a found plugin binary could not be started, without the
+// platform's "fork/exec <path>:" wrapping.
+func pluginStartProblem(err error) string {
+	if errors.Is(err, fs.ErrPermission) {
+		return "permission denied"
+	}
+	if pe, ok := asError[*fs.PathError](err); ok {
+		return pe.Err.Error()
+	}
+	return err.Error()
 }
 
 // pluginExitCode is the host's exit code for a plugin that ended unsuccessfully: the run's
@@ -222,14 +272,15 @@ func (p *Program) pluginFailure(ctx context.Context, rtx *Context, re *PluginErr
 // name may be a declared plugin's name or alias, or a discovered plugin's token. It returns
 // "", false when cmd declares no such plugin and has no discovery, when the binary is not
 // found, or for a discovery token that is not a plain file name (it holds a path separator, or
-// is "." or ".."). It reads the filesystem on every call.
+// is "." or "..") or that differs only in case from a name cmd declares. It reads the
+// filesystem on every call.
 func (cmd Command) PluginBinary(name string) (string, bool) {
 	dir := cmd.PluginPath
 	var binary string
 	switch rd, ok := findPlugin(&cmd, name); {
 	case ok:
 		binary = rd.Binary
-	case cmd.PluginDiscovery != nil && pluginToken(name):
+	case discoverable(&cmd, name):
 		binary = cmd.PluginDiscovery.Prefix + name
 	default:
 		return "", false
@@ -343,7 +394,8 @@ type DiscoveredPlugin struct {
 
 // DiscoveredPlugins returns each plugin discovered for cmd — an executable "<prefix>foo" found
 // next to the binary, in the plugin path, or on PATH — deduped and sorted by name, with any
-// name colliding with a declared sub-command, declared plugin or alias removed. It returns nil
+// name equal to a declared sub-command, declared plugin or alias, or differing from one only in
+// case, removed. It returns nil
 // when cmd has no discovery or discovery is hidden. Rotini renders nothing; a handler lists
 // the result itself:
 //
@@ -400,7 +452,7 @@ func discoveredWith(cmd Command, discover func(d *PluginDiscoveryDef, pluginPath
 	all, problems := discover(d, cmd.PluginPath, cmd.view)
 	var out []DiscoveredPlugin
 	for _, plugin := range all {
-		if !declared[plugin.Name] {
+		if !declared[plugin.Name] && !foldsToDeclared(&cmd, plugin.Name) {
 			out = append(out, plugin)
 		}
 	}

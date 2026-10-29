@@ -33,6 +33,10 @@ Taskr keeps a list of tasks in a file and syncs it with a server.
 - 128 + n: stopped by signal n (130 for Ctrl-C).
 - When the program writes structured errors, each is one JSON line on stderr, `{"schema_version":1,"error":{…}}`. Its `category` is `usage` (fix the command line and try again; `kind` says how: unknown-flag, unknown-command, needs-value, invalid-value, enum-violation, constraint-violation, missing-required, too-many-arguments, misplaced-flag), `internal` (a bug or misconfiguration; don't retry) or `none`. `candidates` lists the words a mistyped `token` was checked against.
 
+## Environment
+
+- `TASKR_KEY`: a server key (sets `--key`) (required) (secret: set it in the environment; never write it on the command line)
+
 ## `taskr add`
 
 add a task

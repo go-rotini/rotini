@@ -80,12 +80,19 @@ func runDiffCases(t *testing.T, cases []diffCase) {
 			if !slices.Equal(got, want) {
 				t.Errorf("findings:\n  got  %s\n  want %s", strings.Join(got, "\n       "), strings.Join(want, "\n       "))
 			}
+			seen := map[[2]string]bool{}
 			for _, f := range r.Findings {
 				if f.Message == "" {
 					t.Errorf("%s at %s has no message", f.Rule, f.Where)
 				}
 				if !contractdiff.KnownRule(f.Rule) {
 					t.Errorf("%s is not in the rule catalog", f.Rule)
+				}
+				// diff.accept takes one entry per rule and place, so no two findings may share both.
+				if key := [2]string{f.Rule, f.Where}; seen[key] {
+					t.Errorf("two %s findings at %s; one diff.accept entry can't acknowledge both", f.Rule, f.Where)
+				} else {
+					seen[key] = true
 				}
 			}
 		})

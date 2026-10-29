@@ -80,6 +80,7 @@
         "deprecated_identifiers": { "type": "array", "items": { "type": "string" }, "description": "The aliases that are deprecated. Running the command by one of them still works." },
         "deprecated_identifiers_removed_in": { "$ref": "#/definitions/Removals", "description": "The release that will remove each deprecated alias, by alias." },
         "plugin": { "type": "boolean", "description": "true for a plugin: a separate program the command runs, whose inputs and output this document does not describe." },
+        "timeout": { "type": "string", "description": "On a plugin: how long the host lets it run before stopping it, as a Go duration (`10s`, `1m30s`), as declared. Absent means no limit." },
         "options_first": { "type": "boolean", "description": "true when flags must come before the command's first argument: every word after that argument is an argument, flag-shaped words and `--` included." },
         "passthrough": { "type": "boolean", "description": "true when every word after the command's name is an argument, taken as typed: the command parses no flags of its own." },
         "arguments": { "type": "array", "items": { "$ref": "#/definitions/Argument" } },
@@ -388,7 +389,8 @@
             },
             "default": { "type": "string", "description": "The profile used when nothing chooses one; without it, only the shared keys apply." }
           }
-        }
+        },
+        "schema": { "$ref": "#/definitions/JSONSchema", "description": "The shape the file must have: it is checked against this when read, and a file that does not match is an error. Self-contained." }
       }
     },
     "PluginDiscovery": {

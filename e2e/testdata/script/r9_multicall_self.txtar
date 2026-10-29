@@ -1,0 +1,78 @@
+# R9 — a multicall prefix that is also the plugins' binary prefix: validate warns, and a link
+# named after a plugin's binary is refused at run time instead of running itself.
+
+gomodinit example.com/loop
+
+exec rotini validate cmd/loop/.rotini.spec.yaml --config cmd/loop/.rotini.conf.yaml
+stderr '^Warning: spec: cmd[/\\]loop[/\\]\.rotini\.spec\.yaml:6:13: command loop: uses the multicall prefix "loop-", which is also its plugins'' binary prefix: a link named "loop-sync" routes to plugin "sync"'
+
+exec rotini generate cmd/loop/.rotini.spec.yaml --config cmd/loop/.rotini.conf.yaml
+exec go mod tidy
+mkdir bin
+exec go build -o bin/loop$exe ./cmd/loop
+
+# A hard link works on every system, without privileges.
+exec go run ./link bin/loop$exe bin/loop-sync$exe
+! exec bin/loop-sync$exe one
+stderr '^Error: sync: ".*[/\\]bin[/\\]loop-sync(\.exe)?" is this program itself, so running it as the plugin would start this program again; install the plugin''s own binary there$'
+! stdout .
+
+# A symbolic link is the same file too.
+[!windows] rm bin/loop-sync
+[!windows] symlink bin/loop-sync -> loop
+[!windows] ! exec bin/loop-sync one
+[!windows] stderr 'is this program itself'
+
+# The program's own commands still route by name.
+exec go run ./link bin/loop$exe bin/loop-status$exe
+exec bin/loop-status$exe
+stdout '^own status$'
+
+-- link/main.go --
+package main
+
+import "os"
+
+// main hard-links os.Args[1] as os.Args[2].
+func main() {
+	if err := os.Link(os.Args[1], os.Args[2]); err != nil {
+		panic(err)
+	}
+}
+-- cmd/loop/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: loop
+  summary: a multicall host with plugins
+  multicall:
+    prefix: loop-
+  plugins:
+    - name: sync
+      summary: sync via a plugin
+  commands:
+    - name: status
+      summary: the host's own status
+-- cmd/loop/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/loop/main.go
+    - type: cmd
+      file: internal/cmd/loop/zz_loop.go
+      package: loop
+-- internal/cmd/loop/loop_status.go --
+package loop
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type loopStatusHandler struct{ rotini.NoHooks }
+
+func (*loopStatusHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "own status")
+}

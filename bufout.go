@@ -101,6 +101,20 @@ func (rtx *Context) flushOutput() {
 	}
 }
 
+// endOutput discards the output files the run left open and writes out its buffered stdout,
+// for a run that ends without settling (a re-raised panic).
+func (rtx *Context) endOutput() {
+	rtx.abortOutputs()
+	rtx.flushOutput()
+}
+
+// forceEnd is the best-effort cleanup before a forced exit: no hook runs, so it discards the
+// run's open output files and writes out its buffered stdout.
+func (rtx *Context) forceEnd() {
+	rtx.discardOutputs()
+	rtx.flushOutput()
+}
+
 func (rtx *Context) bufferedOut() *bufferedStdout {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
