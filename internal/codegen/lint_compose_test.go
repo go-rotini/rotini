@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -98,7 +99,7 @@ func TestComposedShadowing_sameAsInline(t *testing.T) {
 		}
 		want := []string{"warning: spec: " + tc.pos[0] + warn, "spec: " + tc.pos[1] + fail}
 		for _, w := range want {
-			if !contains(tc.got, w) {
+			if !slices.Contains(tc.got, w) {
 				t.Errorf("%s: problems = %q\nwant %q", tc.name, tc.got, w)
 			}
 		}
@@ -135,7 +136,7 @@ command:
 	})
 	const want = `warning: spec: .rotini.spec.yaml:10:15: command demo/kid/extra: flag "count": identifier "-c" is also flag "color" on command demo/kid, ` +
 		`which cascades; after "extra" it means this flag instead, and only "--color" still reaches flag "color" there. Use another identifier for --count`
-	if !contains(got, want) {
+	if !slices.Contains(got, want) {
 		t.Errorf("problems = %q\nwant %q", got, want)
 	}
 }
@@ -160,15 +161,6 @@ command:
 			t.Errorf("a redeclared switch was reported: %s", p)
 		}
 	}
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // indent prefixes every line of s but the empty last one with pad.
