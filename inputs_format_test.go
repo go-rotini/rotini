@@ -150,6 +150,34 @@ func TestInputReportFormat_writeError(t *testing.T) {
 	}
 }
 
+// An empty string prints "", a decoded stdin document (document), and a hand-built layer's
+// field is sourced by the layer's name.
+func TestInputReportFormat_valuesWithoutText(t *testing.T) {
+	t.Parallel()
+	rtx := NewContextFor(ovDef(), []string{"--out="})
+	argv, err := rtx.ArgvInputs[ovInputs]()
+	must(t, err)
+	var hand ovInputs
+	hand.App.Flags.Color = "teal"
+	_, rep := MergeInputsWithReport(argv, InputLayer[ovInputs]{Name: "wizard", Values: hand, Set: PresenceOf(hand)})
+	var b strings.Builder
+	must(t, rep.Format(&b))
+	if got, want := b.String(), "App.Flags.Color = \"teal\" from wizard\nApp.Flags.Out = \"\" from argv:--out\n"; got != want {
+		t.Errorf("Format = %q, want %q", got, want)
+	}
+
+	srtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	srtx.Stdin = strings.NewReader("kind: Widget\n")
+	stdin, err := srtx.StdinInputs[tbStdinInputs]()
+	must(t, err)
+	_, rep = MergeInputsWithReport(stdin)
+	b.Reset()
+	must(t, rep.Format(&b))
+	if got, want := b.String(), "App.Stdin = (document) from stdin\n"; got != want {
+		t.Errorf("Format = %q, want %q", got, want)
+	}
+}
+
 // A streamed stdin prints (stream) and is never read.
 func TestInputReportFormat_stream(t *testing.T) {
 	t.Parallel()

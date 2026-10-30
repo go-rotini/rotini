@@ -290,6 +290,72 @@ func TestDecodeOutput(t *testing.T) {
 	}
 }
 
+// TestDecodeOutput_malformed pins the errors for captured output that isn't one well-formed
+// document, or stream, of the format named, each naming the command and the format.
+func TestDecodeOutput_malformed(t *testing.T) {
+	t.Parallel()
+	p := NewProgram(outDef(), nil)
+	for _, tt := range []struct {
+		name string
+		err  func() error
+		want string
+	}{
+		{"two json documents", func() error {
+			_, err := DecodeOutput[outList](p, []byte(`{"tasks":[]} {}`), "json")
+			return err
+		}, "taskr list: decode the output as json: invalid character after top-level value"},
+		{"no json at all", func() error {
+			_, err := DecodeOutput[outList](p, nil, "json")
+			return err
+		}, "taskr list: decode the output as json: EOF"},
+		{"no yaml at all", func() error {
+			_, err := DecodeOutput[outList](p, nil, "yaml")
+			return err
+		}, "taskr list: output does not match its contract: output: "},
+		{"a json stream cut short", func() error {
+			_, err := DecodeOutput[[]outTask](p, []byte("{\"id\":1}\n{"), "json")
+			return err
+		}, "taskr watch: decode the output as json: "},
+		{"a yaml stream cut short", func() error {
+			_, err := DecodeOutput[[]outTask](p, []byte("---\nid: 1\n---\nid: [\n"), "yaml")
+			return err
+		}, "taskr watch: decode the output as yaml: "},
+		{"a toml stream", func() error {
+			_, err := DecodeOutput[[]outTask](p, []byte("id = 1\n"), "toml")
+			return err
+		}, "taskr watch: decode the output as toml: toml cannot hold a stream"},
+	} {
+		if err := tt.err(); err == nil || !strings.HasPrefix(err.Error(), tt.want) {
+			t.Errorf("%s: err = %v, want prefix %q", tt.name, err, tt.want)
+		}
+	}
+	// An empty stream is no items, not an error.
+	if items, err := DecodeOutput[[]outTask](p, nil, "json"); err != nil || len(items) != 0 {
+		t.Errorf("an empty stream: %v %v", items, err)
+	}
+}
+
+// TestWriteOutput_nilAndUnencodable pins a nil pointer of the declared type, written as null
+// and refused by the checks, and a value toml can't hold, which is an internal error.
+func TestWriteOutput_nilAndUnencodable(t *testing.T) {
+	t.Parallel()
+	var none *outList
+	rtx, out := outContext("list")
+	if err := rtx.WriteOutput(none, "json", nil); err != nil || out.String() != "null\n" {
+		t.Errorf("unchecked nil: %v %q", err, out)
+	}
+	rtx, out = outContext("list")
+	rtx.WithOutputChecks(true)
+	if err := rtx.WriteOutput(none, "json", nil); err == nil || !strings.HasPrefix(err.Error(), "taskr list: output does not match its contract: output: ") || out.Len() != 0 {
+		t.Errorf("checked nil: %v %q", err, out)
+	}
+	rtx, out = outContext("free")
+	err := rtx.WriteOutput(map[string]uint64{"n": 1 << 63}, "toml", nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "taskr free: write output as toml: ") || CategoryOf(err) != CategoryInternal || out.Len() != 0 {
+		t.Errorf("an integer toml can't hold: %v %q", err, out)
+	}
+}
+
 func TestOutputPath(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{

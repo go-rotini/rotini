@@ -58,7 +58,8 @@ func TestUsageErrorWording(t *testing.T) {
 		{"a map key must not be empty", []string{"--label", "=v"}, `--label needs a key before "=" (got "=v")`},
 		{"a map key must not be whitespace", []string{"--label", " =v"}, `--label needs a key before "=" (got " =v")`},
 		{"too many arguments name the command path", []string{"greet", "ann", "bob"}, "app greet accepts at most 1 argument (got 2)"},
-		{"no arguments name the command path", []string{"ping", "x"}, "app ping takes no arguments (got 1)"},
+		{"no arguments name the command path and quote the word", []string{"ping", "x"}, `app ping takes no arguments, got "x"`},
+		{"no arguments count the other words", []string{"ping", "x", "y", "z"}, `app ping takes no arguments, got "x" and 2 more`},
 		{"an unknown flag is quoted", []string{"--nope"}, `unknown flag "--nope"`},
 	}
 	for _, tc := range parse {

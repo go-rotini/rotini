@@ -122,6 +122,65 @@ func TestWriteOutputItem_kindsRefused(t *testing.T) {
 	}
 }
 
+// TestWriteOutputItem_kindsSelected pins that an item selected from one of the kinds is
+// checked against that kind, with a selected but empty tag filled in as WriteOutputItem fills
+// a whole item's, and a selected tag naming another kind refused, checks on or off.
+func TestWriteOutputItem_kindsSelected(t *testing.T) {
+	t.Parallel()
+	selected := func(v any, fields ...string) Selection {
+		s, err := SelectFields(v, "", fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	for _, checks := range []bool{false, true} {
+		rtx, out := evContext()
+		rtx.WithOutputChecks(checks)
+		for _, s := range []Selection{
+			selected(evProgress{Percent: 5}, "kind", "percent"),
+			selected(&evProgress{Kind: "progress", Percent: 6}, "kind"),
+			selected(evResult{OK: true}, "ok"),
+		} {
+			if err := rtx.WriteOutputItem(s, "", nil); err != nil {
+				t.Fatalf("checks %v: %v", checks, err)
+			}
+		}
+		want := `{"kind":"progress","percent":5}` + "\n" + `{"kind":"progress"}` + "\n" + `{"ok":true}` + "\n"
+		if out.String() != want {
+			t.Errorf("checks %v: stream = %q, want %q", checks, out, want)
+		}
+
+		rtx, out = evContext()
+		rtx.WithOutputChecks(checks)
+		err := rtx.WriteOutputItem(selected(evProgress{Kind: "result"}, "kind"), "", nil)
+		if want := `runr watch: the item is a rotini.evProgress, the "progress" kind, but its kind is "result"`; err == nil || err.Error() != want || CategoryOf(err) != CategoryInternal {
+			t.Errorf("checks %v: a selected tag naming another kind: %v", checks, err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("checks %v: wrote %q", checks, out)
+		}
+		if err := rtx.WriteOutputItem(selected(evStray{}, "kind"), "", nil); err == nil || !strings.Contains(err.Error(), "which is not one of the kinds") {
+			t.Errorf("checks %v: a selection of no kind: %v", checks, err)
+		}
+	}
+
+	rtx, out := evContext()
+	rtx.WithOutputChecks(true)
+	if err := rtx.WriteOutputItem(selected(evProgress{Percent: 101}, "percent"), "", nil); err == nil || !strings.Contains(err.Error(), "output.percent") || out.Len() != 0 {
+		t.Errorf("a selection off its kind's shape: %v, wrote %q", err, out)
+	}
+	if err := rtx.CheckOutput(selected(evProgress{Percent: 7}, "kind", "percent")); err != nil {
+		t.Errorf("CheckOutput(a selection with an empty tag) = %v", err)
+	}
+	if err := rtx.CheckOutput(selected(evResult{Kind: "progress"}, "kind")); err == nil || !strings.Contains(err.Error(), `the "result" kind, but its kind is "progress"`) {
+		t.Errorf("CheckOutput(a selection with a mismatched tag) = %v", err)
+	}
+	if err := rtx.CheckOutput(selected(evStray{}, "kind")); err == nil || !strings.Contains(err.Error(), "which is not one of the kinds") {
+		t.Errorf("CheckOutput(a selection of no kind) = %v", err)
+	}
+}
+
 // TestCheckOutput_kinds pins that CheckOutput checks an item against its own kind, its tag
 // filled in as WriteOutputItem fills it.
 func TestCheckOutput_kinds(t *testing.T) {

@@ -462,7 +462,7 @@ func walkContext(def Definition, before []string) completionContext {
 				cc.set = append(cc.set, nil)
 				continue
 			}
-			if _, ok := findPlugin(&cur, tok); ok || (cur.PluginDiscovery != nil && pluginToken(tok)) {
+			if _, ok := findPlugin(&cur, tok); ok || discoverable(&cur, tok) {
 				cc.plugin = true
 				return cc
 			}

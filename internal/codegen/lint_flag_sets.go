@@ -132,6 +132,9 @@ func remapFlagSetProblems(spec *Spec, problems []error) []error {
 		}
 		if at, ok := setPointer(cmds, sets, p.ptr); ok {
 			p.ptr = at
+			if alt, ok := setPointer(cmds, sets, p.alt); ok {
+				p.alt = alt
+			}
 			p.loc = "flag set " + strings.Split(strings.TrimPrefix(at, rootPointer+"/flag_sets/"), "/")[0]
 			key := p.ptr + "\x00" + p.msg
 			if seen[key] {

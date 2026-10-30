@@ -1,0 +1,487 @@
+# R13 — command keys as the spec reference describes them: aliases, hidden aliases, deprecation
+# and its releases, stability, effects, metadata, hidden inputs, passthrough and options_first.
+
+gomodinit example.com/cmds
+
+exec rotini generate cmd/cmds/.rotini.spec.yaml --config cmd/cmds/.rotini.conf.yaml
+stderr '^Warning: tools: "cmds fetch" is left out of the tool definitions: its required argument "url" isn''t a tool parameter \(it is hidden, deprecated, read from a file or `agent: false`\); give it `agent: true`$'
+exec go mod tidy
+exec go build -o cmds$exe ./cmd/cmds
+
+# The parent's Commands list: aliases beside the name, a hidden alias and a hidden command left
+# out, the deprecation with its releases and replacement, and each stability marker.
+exec ./cmds$exe --help
+stdout '^  remove, rm, del +remove things \(deprecated since 1\.2\.0, removed in 3\.0\.0: use purge; use cmds purge instead\)$'
+stdout '^  purge +purge things \(beta\)$'
+stdout '^  lab +experiments \(experimental\)$'
+! stdout 'zap'
+! stdout 'hush'
+grep 'remove things \(deprecated since 1\.2\.0, removed in 3\.0\.0: use purge; use cmds$' internal/cmd/cmds/renders/cmds.1
+grep '^- `remove` \(alias rm, del\) — remove things \*\(deprecated since 1\.2\.0, removed in 3\.0\.0: use purge; use cmds purge instead\)\*$' internal/cmd/cmds/renders/markdown_cmds.md
+! grep 'zap|hush' internal/cmd/cmds/renders/cmds.1
+! grep 'zap|hush' internal/cmd/cmds/renders/markdown_cmds.md
+
+# Completion offers neither hidden spellings nor hidden or deprecated commands.
+exec ./cmds$exe __complete ''
+stdout '^purge\tpurge things$'
+! stdout 'zap|hush|remove|^rm|^del'
+
+# Every name of a command deprecated as a whole reports, hidden aliases included, with its
+# releases and replacement; the command still runs. A hidden command dispatches.
+exec ./cmds$exe remove
+stderr '^dep command: command "remove" is deprecated: use purge since=1\.2\.0 removed=3\.0\.0 replaced=cmds purge$'
+exec ./cmds$exe rm
+stderr 'command "rm" is deprecated'
+exec ./cmds$exe del
+stderr 'command "del" is deprecated'
+exec ./cmds$exe zap
+stderr 'command "zap" is deprecated'
+stdout 'cmds remove'
+exec ./cmds$exe zap --help
+stdout '^remove things$'
+exec ./cmds$exe hush
+stdout 'cmds hush'
+
+# A deprecated argument reports when given, and not when left out.
+exec ./cmds$exe purge x
+stderr '^dep argument: argument "<target>" is deprecated: give no target since=1\.1\.0 removed=2\.0\.0 replaced=$'
+exec ./cmds$exe purge
+! stderr .
+
+# Metadata reaches the Definition, isn't inherited, and shows on no page.
+stdout '^meta owner=storage$'
+! stdout 'meta team'
+! grep 'storage|team' internal/cmd/cmds/renders/help_cmds_purge.txt
+! grep 'storage|team' internal/cmd/cmds/renders/cmds-purge.1
+! grep 'storage|team' internal/cmd/cmds/renders/markdown_cmds_purge.md
+grep '"owner": "storage"' cli-contract.json
+grep '"k": "v"' cli-contract.json
+
+# A command's own page: its stability line and its effects (unset fields say nothing), the
+# flag's effect beside it, input stability and deprecation, and hidden inputs left out.
+exec ./cmds$exe purge --help
+stdout '^This command is in beta: it may change in a minor release\.$'
+stdout '^Effects: write, not idempotent, open world$'
+stdout '^      --wipe +wipe more \(destructive\)$'
+stdout '^  \[target\] +what to purge \(experimental\) \(deprecated since 1\.1\.0, removed in 2\.0\.0: give no target\)$'
+stdout '^  CMDS_LEVEL int +how loud \(beta\) \(deprecated since 1\.0\.0, removed in 2\.5\.0: no longer read\)$'
+stdout '^  color \(color\) string +color mode \(experimental\) \(deprecated, removed in 2\.6\.0: ignored\)$'
+! stdout 'dir|secretarg|QUIET|secretcfg'
+grep '^This command is in beta: it may change in a minor release\.$' internal/cmd/cmds/renders/cmds-purge.1
+grep '^Effects: write, not idempotent, open world$' internal/cmd/cmds/renders/markdown_cmds_purge.md
+grep '^- `CMDS_LEVEL` `int` — how loud \(beta\) \*\(deprecated since 1\.0\.0, removed in 2\.5\.0: no longer read\)\*$' internal/cmd/cmds/renders/markdown_cmds_purge.md
+! grep 'secretarg|QUIET|secretcfg' internal/cmd/cmds/renders/cmds-purge.1
+exec ./cmds$exe lab --help
+stdout '^This command is experimental: it may change or be removed in any release\.$'
+stdout '^Effects: write, idempotent$'
+exec ./cmds$exe remove --help
+stdout '^Effects: destructive$'
+
+# Effects aren't inherited by sub-commands.
+exec ./cmds$exe ops tidy --help
+! stdout 'Effects'
+
+# The contract carries stability, effects and deprecation releases.
+grep '"stability": "beta"' cli-contract.json
+grep '"replaced_by": "purge"' cli-contract.json
+grep '"removed_in": "2\.6\.0"' cli-contract.json
+
+# Tool exports: hidden, deprecated, group and passthrough commands are left out unless they
+# say `agent: true`; `agent: false` leaves a command out. Hidden, deprecated and `from:`
+# inputs are no parameters unless they opt in.
+! grep '"name": "cmds_fetch"' tools/mcp.json
+grep '"name": "cmds_purge"' tools/mcp.json
+grep '"name": "cmds_hush"' tools/mcp.json
+grep '"name": "cmds_ops_tidy"' tools/mcp.json
+! grep '"name": "cmds_remove"' tools/mcp.json
+! grep '"name": "cmds_exec"' tools/mcp.json
+! grep '"name": "cmds_ops"' tools/mcp.json
+! grep '"name": "cmds_lab"' tools/mcp.json
+grep '"dir": \{' tools/mcp.json
+! grep '"src": \{' tools/mcp.json
+! grep '"target": \{' tools/mcp.json
+grep '"openWorldHint": true' tools/mcp.json
+
+# A passthrough command: ancestor flags before its name parse, everything after is raw, `--`
+# included, and completion offers nothing past the boundary.
+exec ./cmds$exe --trace exec ls -la -- --help
+stdout '^trace=true exec \["ls" "-la" "--" "--help"\]$'
+exec ./cmds$exe __complete exec --
+! stdout '--trace|--help'
+
+# options_first: flags stop at the first argument, `--help` included; a `--` typed before the
+# first argument ends flags as usual, and ancestor flags before the name parse.
+exec ./cmds$exe --trace ssh -v host -v --help -- y
+stdout '^trace=true ssh v=true host=host rest=\["-v" "--help" "--" "y"\]$'
+exec ./cmds$exe ssh -- -v
+stdout '^trace=false ssh v=false host=-v rest=\[\]$'
+exec ./cmds$exe ssh keys a -v
+stdout '^keys v=true names=\["a"\]$'
+exec ./cmds$exe exec --trace
+stdout '^trace=false exec \["--trace"\]$'
+
+# A cascading flag's effects raise whichever command it is given to.
+exec ./cmds$exe hush --help
+stdout '^      --force +overwrite anything \(destructive\)$'
+grep '"destructiveHint": true,\s+"readOnlyHint": false\s+\},\s+"description": "secret command\\n\\nEffects: destructive\."' tools/mcp.json
+
+
+# Env and config values are never tool parameters; on the skill page `agent: false` leaves one
+# out and `agent: true` lists a hidden one.
+! grep 'CMDS_|"zone"|"font"' tools/mcp.json
+grep '^- `CMDS_QUIET`: hidden env$' skills/cmds/SKILL.md
+grep '^- `CMDS_ZONE`: which zone$' skills/cmds/SKILL.md
+! grep 'CMDS_REGION' skills/cmds/SKILL.md
+grep '^- `s`: hidden config$' skills/cmds/SKILL.md
+grep '^- `font`: the font$' skills/cmds/SKILL.md
+! grep '`theme`' skills/cmds/SKILL.md
+! grep 'cmds lab' skills/cmds/SKILL.md
+
+# validate --release fails for every input or command due for removal.
+exec rotini validate cmd/cmds/.rotini.spec.yaml --config cmd/cmds/.rotini.conf.yaml --release 1.9.0
+! exec rotini validate cmd/cmds/.rotini.spec.yaml --config cmd/cmds/.rotini.conf.yaml --release 2.0.0
+stderr 'argument "target": is planned for removal in 2\.0\.0'
+! stderr 'removal in [^2]|removal in 2\.[56]'
+env CMDS_RELEASE=3.0.0
+! exec rotini validate cmd/cmds/.rotini.spec.yaml --config cmd/cmds/.rotini.conf.yaml
+stderr 'env "level": is planned for removal in 2\.5\.0'
+stderr 'config "color": is planned for removal in 2\.6\.0'
+stderr 'command cmds/remove: is planned for removal in 3\.0\.0'
+env CMDS_RELEASE=
+
+-- cmd/cmds/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: cmds
+  summary: command keys
+  env_prefix: CMDS
+  metadata: { team: core }
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: trace
+      cascading: true
+      schema: { type: bool }
+    - name: force
+      summary: overwrite anything
+      cascading: true
+      effects: { kind: destructive }
+      schema: { type: bool }
+  effects: { kind: read }
+  commands:
+    - name: ops
+      summary: operations
+      effects: { kind: write }
+      commands:
+        - name: tidy
+          summary: tidy up
+    - name: remove
+      summary: remove things
+      aliases: [rm, del]
+      hidden_aliases: [zap]
+      deprecated: use purge
+      deprecated_since: 1.2.0
+      removed_in: 3.0.0
+      replaced_by: purge
+      effects: { kind: destructive }
+    - name: purge
+      summary: purge things
+      stability: beta
+      effects: { kind: write, idempotent: false, open_world: true }
+      metadata: { owner: storage }
+      flags:
+        - name: wipe
+          summary: wipe more
+          effects: { kind: destructive }
+          schema: { type: bool }
+        - name: dir
+          summary: where to look
+          hidden: true
+          agent: true
+          schema: { type: string }
+        - name: src
+          summary: read from a file
+          schema: { type: string, from: [file] }
+      arguments:
+        - name: target
+          summary: what to purge
+          deprecated: give no target
+          deprecated_since: 1.1.0
+          removed_in: 2.0.0
+          stability: experimental
+          metadata: { k: v }
+          schema: { type: string }
+        - name: secretarg
+          summary: hidden arg
+          hidden: true
+          schema: { type: string }
+      env:
+        - name: level
+          summary: how loud
+          deprecated: no longer read
+          deprecated_since: 1.0.0
+          removed_in: 2.5.0
+          stability: beta
+          schema: { type: int }
+        - name: quiet
+          summary: hidden env
+          hidden: true
+          agent: true
+          schema: { type: bool }
+        - name: region
+          summary: where to run
+          agent: false
+          schema: { type: string }
+        - name: zone
+          summary: which zone
+          schema: { type: string }
+      config_files:
+        - name: app
+          path: app.yaml
+      config:
+        - name: color
+          summary: color mode
+          deprecated: ignored
+          removed_in: 2.6.0
+          stability: experimental
+          schema: { type: string, key: color }
+        - name: secretcfg
+          summary: hidden config
+          hidden: true
+          agent: true
+          schema: { type: string, key: s }
+        - name: theme
+          summary: the theme
+          agent: false
+          schema: { type: string, key: theme }
+        - name: font
+          summary: the font
+          schema: { type: string, key: font }
+    - name: fetch
+      summary: fetch a page
+      arguments:
+        - name: url
+          agent: false
+          schema: { type: string, required: true }
+    - name: hush
+      summary: secret command
+      hidden: true
+      agent: true
+      effects: { kind: read }
+    - name: lab
+      summary: experiments
+      stability: experimental
+      agent: false
+      effects: { kind: write, idempotent: true }
+    - name: exec
+      summary: run a program
+      passthrough: true
+      arguments:
+        - name: words
+          schema: { type: '[]string' }
+    - name: ssh
+      summary: connect
+      options_first: true
+      flags:
+        - name: verbose
+          identifiers: [-v, --verbose]
+          cascading: true
+          schema: { type: bool }
+      arguments:
+        - name: host
+          schema: { type: string }
+        - name: rest
+          schema: { type: '[]string' }
+      commands:
+        - name: keys
+          summary: list keys
+          arguments:
+            - name: names
+              schema: { type: '[]string' }
+-- cmd/cmds/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/cmds/main.go
+    - type: cmd
+      file: internal/cmd/cmds/zz_rotini.go
+  contract:
+    file: cli-contract.json
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: man
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+      embed: true
+    - type: completion
+      enabled: true
+    - type: tools
+      enabled: true
+      targets: [mcp]
+    - type: skill
+      enabled: true
+      description: Use for cmds.
+validate:
+  release_env: CMDS_RELEASE
+-- internal/cmd/cmds/cmds.go --
+package cmds
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"slices"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*cmdsHandler)(nil)
+
+type cmdsHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cmdsHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[CmdsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Cmds.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprint(rtx.Stdout, page)
+		rtx.Halt()
+		return
+	}
+	for _, d := range rotini.Deprecations(rtx) {
+		fmt.Fprintf(rtx.Stderr, "dep %s: %v since=%s removed=%s replaced=%s\n", d.Kind, d, d.Since, d.RemovedIn, d.ReplacedBy)
+	}
+}
+
+func (*cmdsHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+func printMetadata(rtx *rotini.Context) {
+	md := rtx.Command().Metadata
+	for _, k := range slices.Sorted(maps.Keys(md)) {
+		fmt.Fprintf(rtx.Stdout, "meta %s=%s\n", k, md[k])
+	}
+}
+-- internal/cmd/cmds/cmds_purge.go --
+package cmds
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*cmdsPurgeHandler)(nil)
+
+type cmdsPurgeHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cmdsPurgeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	printMetadata(rtx)
+	fmt.Fprintln(rtx.Stdout, "purged")
+}
+-- internal/cmd/cmds/cmds_exec.go --
+package cmds
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*cmdsExecHandler)(nil)
+
+type cmdsExecHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cmdsExecHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[CmdsExecInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "trace=%v exec %q\n", in.Cmds.Flags.Trace, in.CmdsExec.Arguments.Words)
+}
+-- internal/cmd/cmds/cmds_ssh.go --
+package cmds
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*cmdsSSHHandler)(nil)
+
+type cmdsSSHHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cmdsSSHHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[CmdsSSHInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	a := in.CmdsSSH
+	fmt.Fprintf(rtx.Stdout, "trace=%v ssh v=%v host=%s rest=%q\n", in.Cmds.Flags.Trace, a.Flags.Verbose, a.Arguments.Host, a.Arguments.Rest)
+}
+-- internal/cmd/cmds/cmds_ssh_keys.go --
+package cmds
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*cmdsSSHKeysHandler)(nil)
+
+type cmdsSSHKeysHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*cmdsSSHKeysHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[CmdsSSHKeysInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "keys v=%v names=%q\n", in.CmdsSSH.Flags.Verbose, in.CmdsSSHKeys.Arguments.Names)
+}

@@ -132,7 +132,7 @@ that runs the program is checked. A word with `$`, a backtick or a glob, and a `
 stands for any value. Words after a composed command or a plugin aren't checked.
 
 {{< code title="a stale example" language="text" open="true" collapsible="false" copy="false" >}}
-Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst --all" does not parse: unknown command "lst" for "todo"
+Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst" does not parse: unknown command "lst" for "todo"
 {{< /code >}}
 
 ### Importing a Cobra CLI
@@ -328,7 +328,12 @@ $ ./todo add
 Error: missing required input: <title>
 $ ./todo add "buy milk" --loud
 Error: unknown flag "--loud"
+$ ./todo ad "buy milk" --loud
+Error: unknown command "ad" for "todo"
 {{< /code >}}
+
+A mistyped command is reported before any flag after it, because those flags were checked
+against the wrong command. A flag before the mistyped word is checked first.
 
 ### Where flags stop
 
@@ -344,6 +349,10 @@ A command can move that point earlier:
   (`app exec -- -x`). `rtx.DashIndex()` says how many arguments came before a `--` the user typed,
   for a handler that forwards them. `passthrough: true` on the command itself takes every word
   after its name raw, with no flags at all.
+
+A flag that takes a value and has none attached takes the next word, whatever it is: `--out -x`
+sets `-x`, and `--out --` sets `--` rather than ending the flags. A bool, a count and an
+`implicit_value` flag never take the next word.
 
 Other argument shapes:
 
@@ -372,7 +381,9 @@ prefix and the doubled form.
 ### Repeated values
 
 A single-value flag given twice keeps the last value, so a script can override an alias's
-setting. Two schema keys make repeats an error instead:
+setting. Only that last value is checked: `--lim 99 --lim 4` and `--lim x --lim 4` both run with
+4, whatever the type, enum, bounds, pattern or length rules say about the value it replaced. Two
+schema keys make repeats an error instead:
 
 - **`repeatable: false`** on a single-value flag rejects a second occurrence, naming both values:
   `--name was given more than once ("a", then "b"); it takes one value`. `-vv` and
@@ -481,7 +492,9 @@ for _, d := range rotini.Deprecations(rtx) {
   `today` follows the clock's time zone, which is the process's unless the clock says otherwise.
 - **`base: prefixed`** on an integer also accepts `0x1F`, `0o17` and `0b101`, with a sign and `_`
   between digits, wherever the value comes from; a value without a prefix is still decimal, so
-  `010` is ten. Without `base`, every source is decimal-only: `PORT=0x10` is an invalid value.
+  `010` is ten. On a float it accepts those and hexadecimal floats (`0x1p4`, `1_000.5`). Without
+  `base`, every source is decimal-only: `PORT=0x10` and `RATIO=0x1p4` are invalid values. A
+  float always accepts `inf` and `nan` in any case, unless it declares a numeric bound.
 - **Numbers from a config file.** YAML, TOML, JSON and JSONC hold numbers, not text, so a whole
   number written as a float (`450.0`, `1e3`) fills an integer input, and `1` or `0` fills a
   bool. The command line, the environment and `.env` files spell an integer as one. A null list
@@ -588,6 +601,10 @@ Error: flag --delimiter is required when --format is csv
 $ ./todo export --all --limit 5
 Error: flag --limit can't be used when --all is set
 {{< /code >}}
+
+An error names each flag the user set as they typed it, so `-46` on a `mutually_exclusive` group
+of `-4, --ipv4` and `-6, --ipv6` reports `flags -4 and -6 are mutually exclusive`; a flag the user
+didn't set is named by its first long identifier.
 
 Only the command line counts, for groups and dependencies alike: a value from the environment,
 a config file or a default neither triggers a rule nor satisfies one. A short-circuit flag such
@@ -854,7 +871,8 @@ yourself.
 | `xdg-system` | each directory of `$XDG_CONFIG_DIRS` (default `/etc/xdg`), joined with `<app>` |
 
 Declare a system tier as its own entry after the user's: the first declared entry wins per key,
-so the user's file overrides the system one key by key.
+so the user's file overrides the system one key by key. A map both files hold merges entry by
+entry, the user's entries winning; a list is replaced whole.
 
 ### Profiles
 
@@ -1068,10 +1086,11 @@ TodoDeploy.Flags.Token = [redacted] from argv:--token
 
 Each `InputSource` names its origin: `argv:<identifier as typed>`, `argv:<argument>`,
 `env:<VARIABLE>` (`env:TODO_HTTP__*` for a nested family; the `variable_file` variable, such as
-`env:TODO_TOKEN_FILE`, for a value read from its file), `config:<file name>#<key>`, `default` or
-`stdin`. A hand-built layer's origin is empty, and the line names its layer. A streamed stdin
+`env:TODO_TOKEN_FILE`, for a value read from its file), `config:<file name>#<key>`,
+`config:<.env file name>#<VARIABLE>` for a variable a `.env` file set, `default` or `stdin`. A hand-built layer's origin is empty, and the line names its layer. A streamed stdin
 prints `(stream)` and is never read. A map merged from a [profile](#profiles) and the file's
-shared keys names each entry's own key, and lists the shared entries the profile replaced:
+shared keys, or from several config files, names each entry's own file and key, and lists the
+entries a higher source replaced:
 
 ```console
 App.Flags.Labels = "team=core, tier=api" from config:user#labels.team, config:user#profiles.prod.labels.tier; overrides config:user#labels.tier "web"
@@ -1344,7 +1363,10 @@ trapped signal) it leaves out the error the cancellation caused, and the run exi
 Every error carries a category, which `rotini.CategoryOf(err)` returns: `rotini.CategoryUsage`
 for a mistake the user can fix, `rotini.CategoryInternal` for a fault in the program, and
 `rotini.CategoryNone` for an error nobody classified. Parse and validation failures are already
-usage errors. Mark your own with `rotini.UsageError(err)` or `rotini.InternalError(err)`.
+usage errors. Mark your own with `rotini.UsageError(err)` or `rotini.InternalError(err)`. A few
+operational failures are left `CategoryNone` on purpose: a plugin timeout, a failed flush of
+buffered stdout, and an I/O failure `rotini.CreateOutput` meets other than a missing directory
+or a denied permission, which are usage errors.
 
 To give each kind of failure its own exit code, write a reporter. A reporter replaces the default
 entirely: it prints only what it prints, and it sets the exit code with `rtx.Exit`. If it
@@ -1421,8 +1443,8 @@ func exitCode(out rotini.Outcome) int {
 {{< /code >}}
 
 - **Check `ctx.Err()` first.** After Ctrl-C or SIGTERM the run has already set 128+n (130 or
-  143), and the canceled context's error is in `out.Errors`; without the check, the reporter
-  would replace that code. The same goes for a cancellation with
+  143), and `out.Errors` holds the cancellation's error when a handler stopped with it; without
+  the check, the reporter would replace that code. The same goes for a cancellation with
   [`ExitCause`](#signals-and-cancellation).
 - **A reporter can't read the code a handler set.** `rtx.Exit` replaces any code from
   `rtx.HaltWithCode`, so map only the errors you mean to, or carry a handler's code in an error
@@ -1441,18 +1463,20 @@ The `Outcome` also carries `Infos` and `Successes`, from `rtx.RecordInfo` and
 
 For errors that scripts parse, `rotini.StructuredReporter` writes them as JSON lines; see
 [errors scripts can read](#errors-scripts-can-read). Declare `exit_status:` in the spec to
-document a command's codes in its man and markdown pages.
+document a command's codes in its man and markdown pages. The root's list is program-wide: a
+command without its own documents the root's, on its pages, the skill page and its tool
+definitions, and a command's own list replaces it.
 
-Once a command declares `exit_status:`, `rotini generate` checks its handler against it: a code
-the handler passes to `rtx.HaltWithCode` or `rtx.Exit` as a number or a constant, but that the
-list leaves out, is reported as a warning with its file and line. Code 0 needs no entry. A
-command that prints its help when called without a sub-command exits 1, so list 1 for it. (The
-stub `rotini generate` writes for a root or a group command does this, printing the help on
-stderr.) The check reads only the methods of the command's handler type, so it can't see a code
-computed at run time, set in another function or package, or set by a reporter, and it skips a
-command whose handler lives in another package (`handler:`). `rotini validate` also reports a
-code listed twice, and warns about a code above 128, which a process stopped by a signal also
-exits with.
+Once a command declares `exit_status:`, or inherits the root's, `rotini generate` checks its
+handler against it: a code the handler passes to `rtx.HaltWithCode` or `rtx.Exit` as a number or
+a constant, but that the list leaves out, is reported as a warning with its file and line.
+Code 0 needs no entry. A command that prints its help when called without a sub-command exits
+1, so list 1 for it. (The stub `rotini generate` writes for a root or a group command does this,
+printing the help on stderr.) The check reads only the methods of the command's handler type, so
+it can't see a code computed at run time, set in another function or package, or set by a
+reporter, and it skips a command whose handler lives in another package (`handler:`). `rotini
+validate` also reports a code listed twice, and warns about a code above 128, which a process
+stopped by a signal also exits with.
 
 Give a code a `name` and `rotini generate` writes a constant for it, named after the command,
 so a handler doesn't repeat the number:
@@ -1604,10 +1628,11 @@ The kinds are `ParseKindUnknownFlag`, `ParseKindUnknownCommand`, `ParseKindNeeds
 `ParseKindInvalidValue`, `ParseKindEnumViolation`, `ParseKindConstraintViolation`,
 `ParseKindMissingRequired`, `ParseKindNoArguments`, `ParseKindTooManyArguments`,
 `ParseKindMisplacedFlag` and `ParseKindInternal`. `ParseKindMisplacedFlag` is a flag typed
-where it can't apply: before a plugin's name, where the plugin would never see it
-(`todo --verbose sync` is refused; `todo sync --verbose` passes `--verbose` to the plugin). A
-short-circuit flag such as `--help` and a [directory flag](#a-directory-flag) are the exceptions:
-the program answers or applies them itself. This error reaches the reporter, not a handler.
+where it can't apply: a `local` flag given to a command below its own, or a flag before a
+plugin's name, where the plugin would never see it (`todo --verbose sync` is refused;
+`todo sync --verbose` passes `--verbose` to the plugin). Before a plugin's name, a short-circuit
+flag such as `--help` and a [directory flag](#a-directory-flag) are the exceptions: the program
+answers or applies them itself, and the error reaches the reporter, not a handler.
 
 Each response is one call:
 
@@ -1788,7 +1813,7 @@ Every hook receives the run's `context.Context`. A hook that derives one, to add
 tracing span, hands it to the hooks after it with `rtx.SetContext`, so a root `--timeout` can
 limit the command's `Run`:
 
-{{< code title="todo.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo.go (timeout)" language="golang" open="true" collapsible="false" copy="true" >}}
 type todoHandler struct {
 	rotini.NoPreRun
 	rotini.NoPostRun
@@ -1830,8 +1855,8 @@ cmd.NewProgram().WithTerminationTimeout(10 * time.Second).Execute()
 
 If the run hasn't returned 10 seconds after the first signal, the program exits with that
 signal's code (143 for SIGTERM, 130 for SIGINT), as a second signal would. The exit is abrupt:
-buffered stdout is flushed if it can be, but the remaining teardown doesn't run and the reporter
-may not have printed. The timeout covers the reporter too, and it has no effect when rotini
+buffered stdout is flushed if it can be and the temporary files of open `CreateOutput` files are
+removed, but the remaining teardown doesn't run and the reporter may not have printed. The timeout covers the reporter too, and it has no effect when rotini
 traps no signals (`WithoutSignalHandling`, or `WithContext` without `WithSignals`).
 
 ### Panics
@@ -2146,7 +2171,7 @@ command:
 
 When the flag is set, pass `shape.Render` to `WriteOutput` or `WriteOutputItem` as the renderer:
 
-{{< code title="todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_list.go (template)" language="go" open="true" collapsible="false" copy="true" >}}
 list := TodoListOutput{Tasks: load()}
 if format := in.Todo.Flags.Format; !format.IsZero() {
 	rtx.HaltWith(rtx.WriteOutput(list, "template", shape.Render[TodoListOutput](format)))
@@ -2222,7 +2247,7 @@ output field and the flag follows. Only the item's own fields are listed, not ne
 chose. Fields are named by their JSON names, the names `-o json` shows. Sort first, since the
 sort field need not be selected:
 
-{{< code title="todo_list.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_list.go (fields)" language="go" open="true" collapsible="false" copy="true" >}}
 list := TodoListOutput{Tasks: load()}
 flags := in.TodoList.Flags
 if flags.SortBy != "" {
@@ -2262,7 +2287,9 @@ $ todo list --json id,title --sort-by title
 `SelectFields`' second argument is where the items are: `values_from` without its `output`
 prefix, so `""` for the output itself. Everything outside it, such as an envelope's `total`, is
 kept, and a field an item lacks is left out of that item. A dotted field (`owner.login`) reaches
-into a nested object, for a flag that declares such names in its own `enum`.
+into a nested object, for a flag that declares such names in its own `enum`. The tag field of an
+output with several kinds is left out too when it isn't selected, so a reader of a multi-kind
+stream should include it in the selection to tell the items apart.
 
 `WriteOutput` and `WriteOutputItem` accept the `rotini.Selection` it returns in place of the
 output type. With output checks on, a selection is checked against the shape with every
@@ -2316,15 +2343,15 @@ The reporter runs after the command, and the run may have failed because parsing
 rule reads the command line itself rather than validated inputs. For a program that declares a
 `--json` flag:
 
-{{< code title="main.go" language="go" open="true" collapsible="false" copy="true" >}}
+{{< code title="main.go (structured errors)" language="go" open="true" collapsible="false" copy="true" >}}
 cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 	return slices.Contains(rtx.Argv, "--json")
 })).Execute()
 {{< /code >}}
 
 ```console
-$ todo list --json --bogus
-{"schema_version":1,"error":{"candidates":["--json","--all"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
+$ todo list --bogus --json id
+{"schema_version":1,"error":{"candidates":["--json","--sort-by","--reverse","-h","--help","--version","-o","--output","--format"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
 ```
 
 Exit codes are decided exactly as the default reporter decides them. Each line's shape is
@@ -2344,8 +2371,8 @@ token nor candidates.
 ### What gets generated
 
 - **An OUTPUT section** in help, man and markdown pages: the shape's description, its type, and
-  its top-level fields with their types and descriptions. An exit status that writes output
-  says so. Its help heading is `headings.output`.
+  its top-level fields with their types and descriptions. In man and markdown, an exit status
+  that writes output says so under EXIT STATUS. Its help heading is `headings.output`.
 - **A STDIN section** in help, man and markdown pages for a command that declares `stdin:`: the
   format, whether it is required, and for a document its type, description and top-level
   fields. Its help heading is `headings.stdin`.
@@ -2354,8 +2381,9 @@ token nor candidates.
   Each is standard JSON Schema (draft-07), with the named schemas it uses included. Hidden
   commands get none.
 - **The contract document**, with `generate.contract.file`: one JSON file describing every
-  command, including its arguments, flags, environment variables, configuration keys and files,
-  stdin, output shape and exit statuses. Beside each input's JSON Schema it states what a
+  command, including its arguments, flags, environment variables, configuration keys and files
+  (with the schema a file is checked against), stdin, output shape, exit statuses, and each
+  declared plugin's timeout. Beside each input's JSON Schema it states what a
   caller needs to build a command line: the rotini type (`int8`, `duration`), the kind of value
   (`count` means repeat the flag, never `=3`), negated forms, separators, time layouts, and
   which inputs are secret. Hidden commands and inputs are listed with `hidden: true`. Each
@@ -2697,18 +2725,22 @@ rules, the skill page), the worst case over the command and its flags is used. A
 - `page`: the flag that selects a page of results.
 
 A command has each role at most once, counting the cascading flags it inherits. `rotini
-validate` warns about a destructive command with neither a `dry-run` nor a `confirm` flag.
+validate` warns about a destructive command with neither a `dry-run` nor a `confirm` flag that
+agents are offered, unless `agent: false` keeps the command from agents.
 
 ### Keeping things from agents
 
 Some commands and inputs are left out of everything below by default: hidden and deprecated
-ones; a command with sub-commands (it prints help) or a passthrough command (it would run
-whatever it is given); and inputs that are secret (a value an agent types lands in the model's
-context), read `from:` a file or stdin (an agent could read the host's files), short-circuit
-(`--help`), or the [directory flag](#a-directory-flag). `agent: true` brings one back;
+ones; a command with sub-commands and no arguments (it only prints help) or a passthrough
+command (it would run whatever it is given); and inputs that are secret (a value an agent types
+lands in the model's context), read `from:` a file or stdin (an agent could read the host's
+files), short-circuit (`--help`), or the [directory flag](#a-directory-flag). A command with
+sub-commands that declares arguments runs like any other, so it is offered. `agent: true`
+brings one back;
 `agent: false` keeps a command, with its sub-commands, or an input out while it stays in help.
 On env and config inputs, which are never tool parameters, `agent` only decides whether the
-skill page lists them. `rotini validate` warns about `agent: true` on a secret flag or argument:
+skill page lists them. The machine-output flag is never a parameter either: tool exports add it
+to every call, even when it is hidden, and `agent: false` stops that. `rotini validate` warns about `agent: true` on a secret flag or argument:
 tool servers never pass a secret on the command line, where other local users can see it, so
 supply it through its environment variable.
 
@@ -2771,10 +2803,13 @@ killed after `--grace` (5s by default). Windows has no SIGTERM, so there it is k
 
 - **`skill`** writes `skills/<name>/SKILL.md`, an [Agent Skills](https://agentskills.io) page:
   the commands with their effects, how to call them (command words first, the JSON flag, the
-  confirm flag instead of a prompt), the exit codes and error kinds, the environment, and each
+  confirm flag instead of a prompt), the exit codes and error kinds, the environment (env
+  inputs, and the variables that set flags, secrets named but never their values), and each
   command's details and examples. `allowed-tools` lists the read-only commands. With the
-  markdown feature on, each command's page goes in `references/`. `name` sets the skill's name
-  (the root's, lowercased, by default) and `description` adds when to use it.
+  markdown feature on, each command's page goes in `references/`; a page generate wrote there
+  is removed once its command leaves the spec or is no longer offered to agents, and files you put
+  there stay. `name` sets the skill's name (the root's, lowercased, by default) and
+  `description` adds when to use it.
 - **`llms`** writes an [llms.txt](https://llmstxt.org): the program's name and summary, then a
   link to each command's markdown page at `base_url`.
 
@@ -2798,8 +2833,9 @@ generate:
 
 `claude-settings.json` is a fragment to merge into Claude Code's `.claude/settings.json`,
 `<name>.rules` holds Codex prefix rules, and `<name>-policy.toml` is a Gemini CLI policy. Rules
-name leaf commands and all their aliases, never the root or a group, since harnesses match the
-start of the command text and a rule for `todo remote` would also allow every command under it.
+name leaf commands and all their aliases, never the root or a command with sub-commands (even one
+offered as a tool), since harnesses match the start of the command text and a rule for
+`todo remote` would also allow every command under it.
 That also means a flag written before the command defeats a rule; it fails safe, since the
 harness then asks. A flag that makes a command destructive gets its own ask rule where the
 harness can match it. Gemini CLI treats `ask_user` as deny when it runs non-interactively.
@@ -3061,7 +3097,8 @@ still take:
   `--no-color` sets `--color`). List, map, count and object flags stay, since they repeat.
 - **Flag groups**: once one flag of a `mutually_exclusive` or `one_of` group is set, the others
   are left out, and so are the flags a set flag forbids in `flag_dependencies`. Required flags not
-  yet set come first, including those a group or a `flag_dependencies` entry requires.
+  yet set come first, including those a group or a `flag_dependencies` entry requires. A
+  dependency narrowed by `equals` is left out of both, since completion doesn't read values.
 - **Deprecated** flags, identifiers, commands and aliases are left out. They still work when typed.
 - **Negatable flags** offer their `--no-` form, without the flag's summary, which describes
   setting it.
@@ -3131,7 +3168,7 @@ expands it. It runs as the command that declares the flag, and `rtx` gives it:
   `Extensions` for files; the zero value leaves it to the shell's own default. It combines with
   candidates the way `complete:` does.
 
-{{< code title="todo_done.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_done.go (partial inputs)" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*todoDoneHandler) CompleteArgValue(rtx *rotini.Context, arg, partial string) []string {
 	in, _, _ := rtx.PartialInputs[TodoDoneInputs]()
 	ctx, cancel := context.WithTimeout(rtx.Context(), 2*time.Second)
@@ -3431,7 +3468,9 @@ command:
 - **Discovery** makes any executable named `<prefix><word>` a sub-command: `plug hello` runs
   `plug-hello` if one exists. The prefix defaults to the program's name followed by `-`. A word
   that matches nothing is a usage error, since it is most likely a typo. A discovered name that
-  collides with a declared command or plugin is skipped. Completion offers discovered plugins
+  collides with a declared command or plugin is skipped. A word that differs only in case from a
+  declared command, alias or plugin (`plug SYNC`) is never looked up, on any system: it is an
+  unknown command, a `*rotini.ParseError` with the declared names as `Candidates`. Completion offers discovered plugins
   unless `hidden: true` is set, but the generated help can't list them, since they aren't known
   when you generate.
 - **Both are searched for in the same order:** next to the program's own binary, then in
@@ -3451,6 +3490,19 @@ command:
   (or after `WithTerminationTimeout`'s duration). On Windows, a plugin is killed at once, except
   after Ctrl+C, which the console has already delivered to it. A plugin token holding a path
   separator, or one that is `.` or `..`, is never a discovered plugin.
+
+`plug help sync` runs `plug-sync --help`, and `plug help sync push` runs `plug-sync push --help`:
+the help command `rotini init` writes calls `rtx.PluginHelp` before `rtx.HelpFor`, and the plugin
+runs as `plug sync` would run it, with the same search, timeout, environment and signal handling,
+its output and exit code passing through. A discovered plugin answers only when its binary is
+found, so `plug help typo` still says there is no such command. A help handler without the call
+answers for plugins with these lines before its `rtx.HelpFor`:
+
+{{< code title="plug_help.go" language="golang" open="true" collapsible="false" copy="true" >}}
+if rtx.PluginHelp(inputs.PlugHelp.Arguments.Command...) {
+	return
+}
+{{< /code >}}
 
 Rotini prints nothing about discovered plugins itself. To list them, in your own help or a
 `plugins` command, call `DiscoveredPlugins()` on the command that has discovery:
@@ -3646,12 +3698,17 @@ or plugin, the root's own name included, runs the root. Pages and `rtx.Usage()` 
 root's invocation (`busybox ls`), and shell completion scripts are registered for the root's
 name only. Tests set the invoked name with `Program.WithArgv0`.
 
+A prefix of `<root>-` collides with the plugins' binary names: a link `acme-sync` routes to the
+plugin `sync`, whose binary is `acme-sync`, the link itself. `rotini validate` warns about it,
+and at run time a plugin whose binary is the running program, through a link, is not started:
+it is a `*rotini.PluginError` of kind `PluginStartFailed`.
+
 ## Testing
 
 Build a fresh `Program` per test and run it with arguments, in-process: no subprocess and no
 `os.Exit`. `Run` returns the exit code and the error the run recorded:
 
-{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go (in-process)" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAdd(t *testing.T) {
 	var out bytes.Buffer
 	code, err := NewProgram().WithStdout(&out).Run([]string{"add", "buy milk"})
@@ -3680,15 +3737,16 @@ Keep two things in mind:
   `NewProgram().WithReporter(Report)` and expect exit code 2.
 - **Environment variables and config files come from the process,** unless the test gives the
   run its own. `WithEnviron` sets the whole environment a run reads (env inputs, flag fallbacks,
-  `HOME` and `XDG_CONFIG_HOME` for config discovery, plugin lookup), and `WithDir` sets the
-  directory walk-up discovery, relative config paths and `@file` values start from. A test that
-  sets both doesn't touch the process, so it can run in parallel:
+  `HOME` (`USERPROFILE` on Windows) and `XDG_CONFIG_HOME` for config discovery, plugin lookup),
+  and `WithDir` sets the directory walk-up discovery, relative config paths and `@file` values
+  start from. A test that sets both doesn't touch the process, so it can run in parallel:
 
-{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go (environ)" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAddDefaultPriority(t *testing.T) {
 	t.Parallel()
+	home := t.TempDir()
 	code, err := NewProgram().
-		WithEnviron([]string{"HOME=" + t.TempDir(), "TODO_DEFAULTS_PRIORITY=high"}).
+		WithEnviron([]string{"HOME=" + home, "USERPROFILE=" + home, "TODO_DEFAULTS_PRIORITY=high"}).
 		WithDir(t.TempDir()).
 		Run([]string{"add", "buy milk"})
 	if err != nil || code != 0 {
@@ -3707,7 +3765,7 @@ The `rotinitest` package (`github.com/go-rotini/rotini/rotinitest`) runs a comma
 inputs type `rotini generate` wrote for it, so a test sets fields instead of spelling out
 arguments:
 
-{{< code title="todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="todo_test.go (typed inputs)" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAddHigh(t *testing.T) {
 	t.Parallel()
 	var in TodoAddInputs
@@ -3741,7 +3799,7 @@ func TestAddHigh(t *testing.T) {
   on for the run, so a handler that writes a value off its schema fails it.
 - **`ExitDocumented`** fails the test when the exit code isn't one the command lists in its
   `exit_status`. 0 always passes; a command that lists none passes only 0.
-- **`Clock(t)`** fixes the run's clock, so relative times such as `2h` and `today` read the same
+- **`Clock(now)`** fixes the run's clock at `now`, so relative times such as `2h` and `today` read the same
   instant on every run.
 - **`Argv0(name)`** runs a `multicall` program as if invoked as `name`; pass the inputs of the
   command that name runs.
@@ -3799,8 +3857,8 @@ generate:
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0 # git:<ref> reads the tag locally and never fetches
-- run: go tool rotini generate --dry-run
-- run: go tool rotini diff "git:$(git describe --tags --abbrev=0)"
+- run: go tool rotini generate --dry-run ./cmd/todo/.rotini.spec.yaml
+- run: go tool rotini diff "git:$(git describe --tags --abbrev=0)" --spec ./cmd/todo/.rotini.spec.yaml
 {{< /code >}}
 
 Compare against the last release tag rather than the main branch: an intended break you
@@ -3816,8 +3874,8 @@ contract built from your current spec and conf.
 The exit status is 0 when nothing is at or above `--fail-on`, 2 when something is, and 1 on an
 error. `--fail-on possibly` also fails on possibly breaking changes; `--fail-on never` only
 reports. `--format json` writes one document: `findings` (each with `severity`, `rule`,
-`where`, `message`, `note` and, when acknowledged, `accepted`), `unmatched_accepts` and
-`summary`.
+`where`, `message`, a `note` when there is one and, when acknowledged, `accepted`),
+`unmatched_accepts` and `summary`.
 
 Commit a baseline contract written by rotini 1.4 or later. An older contract records fewer facts,
 so the new one is compared only on what the old one states; it can still show a few false
@@ -3852,8 +3910,11 @@ it also has `removed_in`, that release check applies.
 ### How changes are matched and rated
 
 Commands match by path, flags by identifier (so a lost short form is caught and a renamed
-logical name isn't a removal), arguments by name (by position when one is renamed in place),
-environment variables by variable, and config entries by key. A flag a command inherits is
+logical name isn't a removal; a flag of the same name that keeps one of its identifiers is
+matched first), arguments by name (by position when one is renamed in place), environment
+variables by variable (an input of the same name first), and config entries by key. An
+identifier or variable that moves to another flag or input is a removal at its old place, since
+the same command line now sets something else. A flag a command inherits is
 compared where it is declared, and on the command itself when the flag that takes an identifier
 there moves between the command's own flag and an ancestor's cascading flag. A command renamed
 with its old name kept as an alias is compared with the command that now runs it.
@@ -3868,8 +3929,13 @@ the input that uses it.
 
 Stability lowers the rating: on an item that is `experimental` in the old contract (or under an
 experimental command) every finding is safe, and on a `beta` one a breaking finding is possibly
-breaking. Removing a hidden item is possibly breaking, and adding a hidden one is not reported
-unless it is required, or is a command that takes over an argument.
+breaking. Removing a hidden item is possibly breaking, and so is removing anything inside a
+hidden command or input (an alias, flag, identifier, argument, variable or enum value); other
+changes there are rated as usual. Adding a hidden item is not reported unless it is required, or
+is a command that takes over an argument.
+
+A configuration file's `schema` is compared as an input's is: a newly required key, a narrower
+type, enum or bound breaks files that worked, and loosening it is safe.
 
 A finding's `where` names the item in the old contract, written as on the command line:
 
@@ -3882,7 +3948,7 @@ A finding's `where` names the item in the old contract, written as on the comman
 | an environment variable | `taskr list $TASKR_STORE` |
 | a config key | `taskr list config store.path` |
 | an enum value | `taskr add --priority value low` |
-| a field inside an input, stdin or output | `taskr add --meta.owner`, `taskr upper stdin.items[]`, `taskr list output.tasks[].status` |
+| a field inside an input, stdin, a config file or output | `taskr add --meta.owner`, `taskr upper stdin.items[]`, `taskr config_files user.store`, `taskr list output.tasks[].status` |
 | an exit status, or its output | `taskr get exit 3`, `taskr get exit 3 output.reason` |
 | a flag group or dependency | `taskr add group mutually_exclusive(json,yaml)`, `taskr add dependency force unless dry-run` |
 | a config file, plugin discovery, stdin | `taskr config_files user`, `taskr plugin_discovery`, `taskr upper stdin` |
@@ -3907,7 +3973,8 @@ or on what the old contract planned.
 | `COMMAND_REPLACED` | a command removed for the `replaced_by` it named | expected; breaking when its `removed_in` is later than the release (possibly breaking when it was hidden) |
 | `COMMAND_RENAMED_ALIAS_KEPT` | renamed, the old name kept as an alias | safe; possibly breaking under a command that takes arguments, where the new name used to be read as one |
 | `COMMAND_ADDED`, `PLUGIN_ADDED` | a command or plugin added | safe; possibly breaking under a command with arguments, since an argument spelling its name now runs it |
-| `PLUGIN_NO_DELETE` | a declared plugin removed | breaking |
+| `PLUGIN_NO_DELETE` | a declared plugin removed | breaking; possibly breaking when it was hidden |
+| `PLUGIN_TIMEOUT_CHANGED` | a declared plugin's `timeout` changed, added or removed (the same length written another way is no change) | possibly breaking |
 | `COMMAND_HIDDEN`, `COMMAND_UNHIDDEN` | a command hidden or shown | possibly breaking, safe |
 | `ALIAS_NO_DELETE`, `HIDDEN_ALIAS_NO_DELETE` | an alias removed | breaking; expected when planned |
 | `ALIAS_ADDED`, `HIDDEN_ALIAS_ADDED`, `ALIAS_MOVED` | an alias added, or moved between listed and hidden | safe; an alias added under a command with arguments is possibly breaking |
@@ -3919,11 +3986,13 @@ or on what the old contract planned.
 | `FLAG_DEPENDENCY_REMOVED`, `FLAG_DEPENDENCY_LOOSENED` | a dependency removed; `requires` or `forbids` shrunk, `equals` narrowed | safe |
 | `CONFIG_FILE_NO_DELETE`, `CONFIG_FILE_MOVED`, `CONFIG_FILE_AS_CHANGED` | a config file removed, moved (path, discovery, format), or read as variables | breaking |
 | `CONFIG_FILE_ADDED` | a config file added | safe |
+| `CONFIG_FILE_SCHEMA_ADDED`, `CONFIG_FILE_SCHEMA_REMOVED` | a config file now checked against a `schema`, or no longer | possibly breaking, safe |
 | `PLUGIN_DISCOVERY_NO_DELETE`, `PLUGIN_DISCOVERY_PREFIX_CHANGED`, `PLUGIN_DISCOVERY_ADDED` | plugin discovery | breaking, breaking, safe (breaking on a command with arguments) |
 | `STDIN_ADDED` | starts reading stdin | possibly breaking |
 | `STDIN_NO_DELETE`, `STDIN_FORMAT_CHANGED`, `STDIN_REQUIRED_ADDED`, `STDIN_TYPE_CHANGED`, `STDIN_SEPARATOR_CHANGED` | stdin removed, or read differently | breaking |
 | `STDIN_REQUIRED_REMOVED` | stdin no longer required | safe |
 | `STDIN_UNLESS_ARGUMENT_CHANGED` | the argument that replaces stdin | possibly breaking |
+| `STDIN_STREAM_CHANGED` | stdin read one item at a time (`stream`), or no longer | possibly breaking |
 | `OUTPUT_NO_DELETE`, `OUTPUT_STREAM_CHANGED` | an output removed, or a stream turned on or off | breaking |
 | `OUTPUT_ADDED` | an output declared | safe |
 | `EXIT_STATUS_NO_DELETE`, `EXIT_SUMMARY_CHANGED`, `EXIT_NAME_CHANGED`, `EXIT_RETRYABLE_REMOVED` | an exit status removed, reworded, renamed, or no longer retryable | possibly breaking |
@@ -3936,7 +4005,7 @@ or on what the old contract planned.
 | `FLAG_ADDED`, `FLAG_REQUIRED_ADDED` | a flag added, optional or required (a short-circuit flag is never required) | safe, breaking |
 | `FLAG_REQUIRED_REMOVED` | no longer required | safe |
 | `FLAG_NAME_CHANGED` | the logical name, same identifiers | possibly breaking |
-| `FLAG_IDENTIFIER_NO_DELETE`, `FLAG_HIDDEN_IDENTIFIER_NO_DELETE`, `FLAG_NEGATED_NO_DELETE` | an identifier or a negated form removed | breaking; expected when planned |
+| `FLAG_IDENTIFIER_NO_DELETE`, `FLAG_HIDDEN_IDENTIFIER_NO_DELETE`, `FLAG_NEGATED_NO_DELETE` | an identifier or a negated form removed, or an identifier moved to another flag | breaking; expected when planned |
 | `FLAG_IDENTIFIER_ADDED`, `FLAG_HIDDEN_IDENTIFIER_ADDED`, `FLAG_IDENTIFIER_MOVED`, `FLAG_NEGATED_ADDED` | an identifier or negated form added, or moved | safe |
 | `FLAG_NO_LONGER_CASCADES`, `FLAG_CASCADES` | sub-commands stop or start accepting it | breaking, safe |
 | `FLAG_SHORT_CIRCUIT_REMOVED`, `FLAG_SHORT_CIRCUIT_ADDED` | it waives the command's requirements | possibly breaking, safe |
@@ -3948,13 +4017,13 @@ or on what the old contract planned.
 | `ARGUMENT_MOVED` | an argument now at another position, so a word binds to another argument | breaking |
 | `ARGUMENT_NAME_CHANGED`, `ARGUMENT_VARIADIC_ADDED`, `ARGUMENT_GLOB_CHANGED` | renamed, now variadic, or patterns expanded on Windows | possibly breaking |
 | `ARGUMENT_VARIADIC_REMOVED`, `ARGUMENT_PASSTHROUGH_CHANGED` | no longer variadic, or raw words start elsewhere | breaking |
-| `ENV_NO_DELETE`, `ENV_VARIABLE_NO_DELETE`, `ENV_REQUIRED_ADDED`, `ENV_NESTING_CHANGED` | a variable removed or renamed, now required, or nested differently | breaking |
+| `ENV_NO_DELETE`, `ENV_VARIABLE_NO_DELETE`, `ENV_REQUIRED_ADDED`, `ENV_NESTING_CHANGED` | a variable removed, renamed or moved to another input, now required, or nested differently | breaking |
 | `ENV_ADDED`, `ENV_VARIABLE_ADDED`, `ENV_REQUIRED_REMOVED` | a variable added, or no longer required | safe |
 | `CONFIG_NO_DELETE`, `CONFIG_MOVED`, `CONFIG_REQUIRED_ADDED` | a config key removed, moved to another file, or now required | breaking |
 | `CONFIG_ADDED`, `CONFIG_REQUIRED_REMOVED` | a config key added, or no longer required | safe |
 | `INPUT_TYPE_CHANGED`, `INPUT_TYPE_WIDENED`, `INPUT_TYPE_NOW_DESCRIBED` | an input's type narrowed or changed (`int` → `int8`, `[]int` → `int`), widened, or newly stated where it was open | breaking (possibly breaking for a 64-bit integer → `float64`, which rounds beyond 2^53), safe, safe |
 | `INPUT_KIND_CHANGED`, `INPUT_SEPARATOR_CHANGED` | how the value is supplied or split | breaking |
-| `INPUT_FROM_NO_DELETE`, `INPUT_FROM_ADDED` | where a typed value may come from (`@file`, `-`) | breaking, possibly breaking |
+| `INPUT_FROM_NO_DELETE`, `INPUT_FROM_ADDED` | where a typed value may come from (`@file`, `-`) | breaking, possibly breaking (safe for a secret now accepted on the command line) |
 | `INPUT_IMPLICIT_VALUE_ADDED`, `INPUT_IMPLICIT_VALUE_REMOVED`, `INPUT_IMPLICIT_VALUE_CHANGED` | an optional value | breaking, breaking, possibly breaking |
 | `INPUT_IGNORE_CASE_REMOVED`, `INPUT_IGNORE_CASE_ADDED` | enum case matching | breaking, safe |
 | `INPUT_LAYOUT_NO_DELETE`, `INPUT_LAYOUT_ADDED`, `INPUT_LAYOUT_FIRST_CHANGED` | time layouts | breaking, safe, possibly breaking |
@@ -3996,9 +4065,37 @@ or on what the old contract planned.
 A command can be another CLI's spec: `- $ref: ../db/.rotini.spec.yaml` mounts it as a
 sub-command, and it still builds and ships on its own. To mount a spec from a module your project
 depends on, use `$ref: mod://<module>@<version>/<path>`; it is read from the module cache and
-verified by `go.sum`. Keys set next to the `$ref`, such as a new `name`, `summary` or `group`, adjust
-it for its new parent; see [`$ref`](/specification#ref). [`rotini mount`](/cli#rotini-mount) writes
-the `$ref` entries for you, and can be re-run as CLIs are added or removed.
+verified by `go.sum`. [`rotini mount`](/cli#rotini-mount) writes the `$ref` entries for you, and
+can be re-run as CLIs are added or removed.
+
+A parent overrides, for its own tree, any key of the commands it mounts except those the child's
+handler depends on. A key written next to the `$ref`, such as a new `name`, `summary`, `group` or
+`examples`, overrides the mounted command. An entry of the `commands:` next to the `$ref` that is
+named like one of the child's commands overrides that command, and its own `commands:` reach
+further down; any other entry adds a command. The entry's `name` picks the command, so a
+sub-command can't be renamed this way; the mounted command itself can. Here acme rewords db's footer and replaces the
+example `db migrate --help` shows, which names db's own program:
+
+{{< code title="acme/.rotini.spec.yaml (overrides)" language="yaml" open="true" collapsible="false" copy="true" >}}
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+      footer: Run 'acme db help <command>' for more.
+      commands:
+        - name: migrate
+          examples: ["acme db migrate --steps 2"]
+{{< /code >}}
+
+With several layers, say acme mounts db and db mounts a `migrate` spec, the spec nearest the root
+wins: what acme writes for `db migrate` replaces what db writes next to its own `$ref`, which
+replaces what the `migrate` spec says. A list or map written empty (`see_also: []`) clears the
+child's; text can be replaced but not cleared. The keys the child's handler is built against
+can't be overridden: its inputs, `stdin`, `output`, `plugins`, `plugin_discovery`, `passthrough`
+and `options_first`. Nor can `filename`, since the handler's file is in the child's package, or
+`handler:` in an override entry, and an override can't add a command below it: add commands next
+to the `$ref`, or in the child's spec. Help, man and markdown pages, completion, the contract and
+the agent pages all show the overrides. `rotini validate` reports a problem with an override in
+the parent's file, and parses the parent's examples against the mounted commands; a problem in
+the child's own spec is reported in the child's file.
 
 Help inside a mounted child is the parent's: `acme db --help`, `acme db help migrate` and
 `acme help db migrate` all show the full path, through the handlers `rotini init` writes. Text the
@@ -4011,9 +4108,18 @@ A mounted child reads the environment variables it reads on its own, named under
 `env_prefix` (or none), whatever the parent declares, and the parent's help, man and markdown
 pages and contract list those names.
 
-A `mod://` child stays at the version `go.sum` pins, so upgrading rotini doesn't move it. Upgrade
-the child's module on its own, then regenerate; its own `version:` check reports it if it needs
-a newer rotini than you have. A local `$ref` is rebuilt whenever you regenerate the parent.
+A `mod://` child is read at the version its `$ref` names, so upgrading rotini doesn't move it.
+That must be the version `go.mod` builds the module at, since the child's code is compiled at that
+one: `rotini validate` and `generate` refuse a `$ref` naming another version, a module `go.mod`
+doesn't require, and a module a `replace` points at a directory or another module, at the `$ref`.
+A `replace` to the same module at another version counts as that version. To upgrade the child,
+`go get` the new version, change the `$ref` to match, then regenerate; its own `version:` check
+reports it if it needs a newer rotini than you have. A local `$ref` is rebuilt whenever you
+regenerate the parent.
+
+How a `$ref` is written is checked even outside a Go module: a `mod://` locator must parse, and
+remote sources such as `https://` or `git::` URLs are refused. Fetching a `mod://` child, and
+checking its version, needs the module.
 
 ## Recipes
 
@@ -4028,7 +4134,9 @@ call libraries Rotini doesn't depend on.
 Delete the command from the spec and run `go generate` twice. The first run disables its handler
 file, adding `//go:build ignore` so the program still builds while you move anything you want to
 keep. The second run deletes the file. If the command comes back before then, the file returns to
-the build as it was, and once deleted, a committed file is still in Git's history.
+the build as it was, and once deleted, a committed file is still in Git's history. Renaming a
+command is the same: the old name's file is disabled and a new stub is written for the new name,
+so move the code across before the second run.
 
 #### A dependency opened only when needed
 
@@ -4348,7 +4456,7 @@ then the kind line (`:rotini:file`, `:rotini:directory`, `:rotini:none` or anoth
 from different rotini releases work together.
 
 When this output is right but the shell shows something else, the problem is in the shell's
-setup: reload the script (`source <(taskr completion bash)`) or start a new shell.
+setup: reload the completion script your program prints or start a new shell.
 
 #### End-to-end tests with testscript
 
@@ -4892,7 +5000,7 @@ func main() {
 
 {{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
 $ CRASHDEMO_CRASH_DIR=/tmp crashdemo boom
-Error: runtime error: index out of range [3] with length 0
+Error: runtime error: index out of range [1] with length 0
 crash report written to /tmp/crashdemo-2290116467.txt
 {{< /code >}}
 

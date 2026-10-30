@@ -1,0 +1,270 @@
+# R13 — the guide's "Where values come from": a flag falls back to its variable, then its
+# config key, then its default, and the command line always wins; help names both fallbacks;
+# a null key is unset; list and map flags read config lists and nested maps; a repeated
+# single-value flag keeps the last value; arguments fall back like flags; env lists split.
+
+gomodinit github.com/me/todo
+exec rotini init todo
+cp spec.yaml cmd/todo/.rotini.spec.yaml
+exec rotini generate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+cp add.go.txt internal/cmd/todo/todo_add.go
+cp deploy.go.txt internal/cmd/todo/todo_deploy.go
+cp show.go.txt internal/cmd/todo/todo_show.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# The config file sits under $XDG_CONFIG_HOME/todo, by default ~/.config/todo.
+env HOME=$WORK/home
+env USERPROFILE=$WORK/home
+env XDG_CONFIG_HOME=
+mkdir home/.config/todo
+cp config.yaml home/.config/todo/config.yaml
+
+exec ./todo$exe add 'buy milk'
+cmp stdout want-config.txt
+env TODO_DEFAULTS_PRIORITY=low
+exec ./todo$exe add 'buy milk'
+cmp stdout want-env.txt
+exec ./todo$exe add 'buy milk' -p normal
+cmp stdout want-argv.txt
+env TODO_DEFAULTS_PRIORITY=
+
+# An explicit $XDG_CONFIG_HOME moves the file.
+env XDG_CONFIG_HOME=$WORK/xdg
+exec ./todo$exe add 'buy milk'
+stdout '^added "buy milk" \(priority normal\)$'
+mkdir xdg/todo
+cp config.yaml xdg/todo/config.yaml
+exec ./todo$exe add 'buy milk'
+stdout '^added "buy milk" \(priority high\)$'
+
+# Help lists the variable first, then the config key, under the flag.
+exec ./todo$exe add --help
+stdout '^Flags:\n  -p, --priority string    how urgent \(default normal\) \[low\|normal\|high\]\n                           also set by TODO_DEFAULTS_PRIORITY or config key defaults\.priority\n      --tag \[\]string       a label \(repeatable\)\n'
+stdout '^                           also set by TODO_DEFAULTS_PRIORITY or config key defaults\.priority$'
+stdout '^      --tag \[\]string       a label \(repeatable\)$'
+
+# A null key is not set: the default applies.
+cp config-null.yaml xdg/todo/config.yaml
+exec ./todo$exe add 'buy milk'
+stdout '^added "buy milk" \(priority normal\)$'
+cp config-empty.yaml xdg/todo/config.yaml
+exec ./todo$exe add 'buy milk'
+stdout '^added "buy milk" \(priority normal\)$'
+
+# A list flag reads a config list item by item; a map flag reads nested maps as dotted keys.
+cp config-shapes.yaml xdg/todo/config.yaml
+exec ./todo$exe show
+stdout '^tags=\[a b\]$'
+stdout '^labels=map\[team.core:yes tier:api\]$'
+
+# A single-value flag given twice keeps the last value.
+exec ./todo$exe add 'buy milk' -p low -p high
+stdout '^added "buy milk" \(priority high\)$'
+
+# An argument falls back to its variable, and the command line wins over it.
+env DEPLOY_ENV=prod
+exec ./todo$exe deploy
+stdout '^deploy api to prod$'
+exec ./todo$exe deploy dev
+stdout '^deploy api to dev$'
+exec ./todo$exe deploy --help
+stdout 'also set by DEPLOY_ENV'
+env DEPLOY_ENV=
+! exec ./todo$exe deploy
+stderr 'missing required input: <env>'
+
+# A variadic argument splits its variable on its separator.
+env TODO_HOSTS=a,b
+exec ./todo$exe show
+stdout '^hosts=\[a b\]$'
+# An env list input with separator ':' splits PATH-style, spaces trimmed.
+env KUBECONFIG='a: b:c'
+exec ./todo$exe show
+stdout '^kubeconfig=\[a b c\]$'
+
+# An error about a fallback value names the variable it came from.
+env DEPLOY_ENV=x
+! exec ./todo$exe deploy
+stderr '^Error: invalid value "x" for <env> \(one of: prod, dev\) \(from environment variable DEPLOY_ENV\)$'
+
+# validate asks for a fallback or a default on an argument after one with a fallback.
+! exec rotini validate bad-args.yaml
+stderr 'argument "service": has neither a fallback nor a default, but comes after <env>, which has a fallback'
+
+-- want-config.txt --
+added "buy milk" (priority high)
+-- want-env.txt --
+added "buy milk" (priority low)
+-- want-argv.txt --
+added "buy milk" (priority normal)
+-- config.yaml --
+defaults:
+  priority: high
+-- config-null.yaml --
+defaults:
+  priority: null
+-- config-empty.yaml --
+defaults:
+  priority:
+-- config-shapes.yaml --
+show:
+  tags: [a, b]
+  labels:
+    team:
+      core: "yes"
+    tier: api
+-- bad-args.yaml --
+version: 0.0.0
+command:
+  name: app
+  commands:
+    - name: deploy
+      arguments:
+        - name: env
+          schema: { type: string, required: true, variable: DEPLOY_ENV }
+        - name: service
+          schema: { type: string }
+-- spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  env_prefix: TODO
+  config_files:
+    - name: user
+      discover: { strategy: xdg, app: todo, file: config.yaml }
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [--version]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          summary: the task title
+          schema: { type: string, required: true, minLength: 1 }
+      flags:
+        - name: priority
+          summary: how urgent
+          identifiers: [-p, --priority]
+          schema: { type: string, default: normal, enum: [low, normal, high], key: defaults.priority }
+        - name: tag
+          summary: a label
+          identifiers: [--tag]
+          schema: { type: '[]string' }
+    - name: deploy
+      summary: deploy a service
+      arguments:
+        - name: env
+          schema: { type: string, required: true, enum: [prod, dev], variable: DEPLOY_ENV }
+        - name: service
+          schema: { type: string, default: api }
+    - name: show
+      summary: show values
+      flags:
+        - name: tags
+          identifiers: [--tags]
+          schema: { type: '[]string', key: show.tags }
+        - name: labels
+          identifiers: [--labels]
+          schema: { type: 'map[string]string', key: show.labels }
+      arguments:
+        - name: hosts
+          schema: { type: '[]string', variable: TODO_HOSTS, separator: ',' }
+      env:
+        - name: kubeconfig
+          schema: { type: '[]string', variable: KUBECONFIG, separator: ':' }
+-- add.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoAddHandler)(nil)
+
+type todoAddHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[TodoAddInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	add := inputs.TodoAdd
+	fmt.Fprintf(rtx.Stdout, "added %q (priority %s)\n", add.Arguments.Title, add.Flags.Priority)
+}
+-- deploy.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoDeployHandler)(nil)
+
+type todoDeployHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoDeployInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "deploy %s to %s\n", in.TodoDeploy.Arguments.Service, in.TodoDeploy.Arguments.Env)
+}
+-- show.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoShowHandler)(nil)
+
+type todoShowHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoShowInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	s := in.TodoShow
+	fmt.Fprintf(rtx.Stdout, "tags=%v\nlabels=%v\nhosts=%v\nkubeconfig=%v\n", s.Flags.Tags, s.Flags.Labels, s.Arguments.Hosts, s.Env.Kubeconfig)
+}

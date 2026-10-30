@@ -2,13 +2,13 @@
 .SH NAME
 ops\-exec \- run a command
 .SH SYNOPSIS
-\fBops exec\fR <argv...>
+\fBops exec\fR <WORD...>
 .PP
 Every word after \fBexec\fR is passed through as written, so options go before
 \fBexec\fR.
 .SH ARGUMENTS
 .TP
-\fI<argv...>\fR
+\fI<WORD...>\fR
 the command and its arguments
 .SH "GLOBAL OPTIONS"
 .TP
@@ -22,5 +22,12 @@ repeat to count: \-vvv
 .TP
 \fB\-\-color\fR \fIstring\fR
 when to color (default auto) [auto|always|never]
+.SH "EXIT STATUS"
+.TP
+\fB0\fR
+done
+.TP
+\fB3\fR (unreachable)
+the fleet did not answer (retryable)
 .SH "SEE ALSO"
 \fBops\fR(1)

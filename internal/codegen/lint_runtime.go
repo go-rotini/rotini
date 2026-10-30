@@ -35,6 +35,27 @@ func lintMulticall(spec *Spec) []error {
 	return problems
 }
 
+// lintMulticallSelfLoop warns when the multicall prefix is the root's plugin prefix: a link
+// named after a plugin's binary routes to that plugin, whose binary is the link itself.
+func lintMulticallSelfLoop(spec *Spec) []error {
+	root := &spec.Command
+	on, prefix, _ := multicallOf(root)
+	if !on || prefix == "" || prefix != root.Name+"-" {
+		return nil
+	}
+	var example string
+	switch d := root.PluginDiscovery; {
+	case len(root.Plugins) > 0:
+		example = root.Plugins[0].Name
+	case d != nil && (d.Prefix == "" || d.Prefix == prefix):
+		example = "foo"
+	default:
+		return nil
+	}
+	return []error{&problem{kind: "spec", ptr: rootPointer + "/multicall/prefix", loc: rootLabel(spec), sev: severityWarning,
+		msg: fmt.Sprintf("uses the multicall prefix %q, which is also its plugins' binary prefix: a link named %q routes to plugin %q, whose binary is that link, so it would run itself; rotini refuses to start it, so choose another prefix", prefix, prefix+example, example)}}
+}
+
 // chdirTypes are the types a `role: chdir` flag may have.
 var chdirTypes = []string{"existingdir", "string"}
 

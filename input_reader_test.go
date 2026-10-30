@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -133,6 +134,26 @@ func TestInputReader_customSources(t *testing.T) {
 		}
 		if files.Values.App.Config.Token != "vault-token" {
 			t.Errorf("files layer token = %q, want the custom source's value", files.Values.App.Config.Token)
+		}
+	})
+
+	t.Run("a source name collision names both sources", func(t *testing.T) {
+		cfg := writeConfig(t, "api:\n  endpoint: file-endpoint\n")
+		for _, c := range []struct {
+			srcs []recon.Source
+			want string
+		}{
+			{[]recon.Source{recon.NewMapSource("app", nil)}, `could not build the configuration registry: configuration file ` + cfg + ` and a custom source are both named "app"`},
+			{[]recon.Source{vault(), vault()}, `could not build the configuration registry: two sources are named "vault", each a custom source`},
+			{[]recon.Source{recon.NewMapSource("default", nil)}, `could not build the configuration registry: a custom source is named "default", which is reserved`},
+		} {
+			var in tbInputs
+			meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}, Sources: c.srcs}
+			err := NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in)
+			ie, ok := errors.AsType[*InputError](err)
+			if !ok || ie.Msg != c.want || ie.Channel != channelConfig || CategoryOf(err) != CategoryInternal || !errors.Is(err, recon.ErrSourceConflict) {
+				t.Errorf("Read = %v, want an internal config error %q", err, c.want)
+			}
 		}
 	})
 }
@@ -552,8 +573,17 @@ func TestInputReader_configFilePinned(t *testing.T) {
 		}
 	}
 	var in2 pinnedReq
-	if err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in2); err == nil {
-		t.Error("Bind = nil error, want missing-required — api.token lives in system, not the pinned user file")
+	err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in2)
+	if ie, ok := errors.AsType[*InputError](err); !ok || CategoryOf(err) != CategoryUsage ||
+		ie.Msg != "config key api.token is required in configuration file "+user {
+		t.Errorf("Bind = %v, want a usage error naming the pinned user file — api.token lives in system", err)
+	}
+	// A pinned file that doesn't exist is named by the path it would be read from.
+	absent := filepath.Join(t.TempDir(), "absent.yaml")
+	gone := InputSettings{ConfigFiles: []ConfigFile{{Name: "system", Path: system, Format: "yaml"}, {Name: "user", Path: absent, Format: "yaml"}}}
+	err = NewInputReader(gone).Read(NewContextFor(tbAppDef(), nil), &in2)
+	if ie, ok := errors.AsType[*InputError](err); !ok || ie.Msg != "config key api.token is required in configuration file "+absent {
+		t.Errorf("Bind(absent pinned file) = %v, want the required error naming %s", err, absent)
 	}
 
 	// A pin naming an undeclared entry is a loud error, never a silent merge.
@@ -1363,6 +1393,39 @@ func TestWithInputReader_ignoresANilResult(t *testing.T) {
 	}
 	if got == nil {
 		t.Error("a nil result produced a nil input reader instead of the default")
+	}
+}
+
+// A reader from NewInputReader carries no features: it reads with the wired program's, and
+// fails with a *WiringError naming a feature the program does not wire.
+func TestWithInputReader_readsWithTheProgramsFeatures(t *testing.T) {
+	t.Parallel()
+	type in struct {
+		App struct {
+			Flags struct {
+				Home *url.URL `rotini:"home"`
+			}
+			Arguments struct{}
+		}
+	}
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "home", Identifiers: []string{"--home"}, Type: "*url.URL"}}}
+	run := func(features ...Feature) error {
+		var got error
+		lookup := func(string) (Handler, bool) {
+			return funcHandler{run: func(rtx *Context) { _, got = rtx.Inputs[in]() }}, true
+		}
+		p := NewWiredProgram(def, lookup, features...).WithInputReader(NewInputReader).WithoutSignalHandling()
+		if _, err := p.Run([]string{"--home", "https://example.com"}); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	var we *WiringError
+	if err := run(); !errors.As(err, &we) || we.Feature != URLValues().String() {
+		t.Errorf("unwired: %v, want a *WiringError naming %s", err, URLValues())
+	}
+	if err := run(URLValues()); err != nil {
+		t.Errorf("wired: %v", err)
 	}
 }
 
@@ -2443,5 +2506,43 @@ func TestInputs_tomlTimeAsText(t *testing.T) {
 		if got != want {
 			t.Errorf("%s: %#v, want %q", name, got, want)
 		}
+	}
+}
+
+// Read needs a non-nil pointer and a reader; anything else is the program's bug.
+func TestInputReader_readNeedsAPointer(t *testing.T) {
+	t.Parallel()
+	rtx := NewContextFor(tbDef(), nil)
+	var in tbNoReqInputs
+	var nilPtr *tbNoReqInputs
+	var nilReader *InputReader
+	for name, read := range map[string]func() error{
+		"value":       func() error { return NewInputReader(InputSettings{}).Read(rtx, in) },
+		"nil pointer": func() error { return NewInputReader(InputSettings{}).Read(rtx, nilPtr) },
+		"nil reader":  func() error { return nilReader.Read(rtx, &in) },
+	} {
+		var pe *ParseError
+		if err := read(); !errors.As(err, &pe) || pe.Kind != ParseKindInternal || CategoryOf(err) != CategoryInternal {
+			t.Errorf("%s: %v, want an internal *ParseError", name, err)
+		}
+	}
+}
+
+// A custom source named like a declared config file is rejected.
+func TestInputReader_customSourceNamedLikeAFile(t *testing.T) {
+	t.Parallel()
+	cfg := writeConfig(t, "api:\n  endpoint: e\n  token: t\n")
+	meta := InputSettings{
+		ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}},
+		Sources:     []recon.Source{recon.NewMapSource("app", map[string]any{})},
+	}
+	var in tbInputs
+	err := NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in)
+	if err == nil {
+		t.Fatalf("a source named like the declared file was accepted: %+v", in)
+	}
+	var ie *InputError
+	if !errors.As(err, &ie) || CategoryOf(err) != CategoryInternal {
+		t.Errorf("err = %T %v, want an internal *InputError", err, err)
 	}
 }

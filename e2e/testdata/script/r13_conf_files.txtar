@@ -1,0 +1,141 @@
+# R13 — what the conf reference promises about the files generate writes, keeps and removes.
+
+gomodinit example.com/cf
+
+# ── no conf: one generated file under internal/cmd/<root>, no entrypoint, no features ──
+cp spec.yaml .rotini.spec.yaml
+exec rotini generate .rotini.spec.yaml
+stdout '^conf: none \(defaults\)$'
+exists internal/cmd/my_tool/zz_rotini.go
+! exists main.go
+! exists cmd
+! exists internal/cmd/my_tool/renders
+! grep 'func Help\(' internal/cmd/my_tool/zz_rotini.go
+
+# ── a cmd target and no main target: still no entrypoint ───────────────────
+cp cmd-only.yaml .rotini.conf.yaml
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+! exists cmd
+! exists main.go
+
+# ── contract.go works without contract.file ─────────────────────────────────
+grep '^var Contract = ' internal/cmd/my_tool/zz_rotini.go
+! exists cli-contract.json
+
+# ── release_env: validate checks it, generate never does ────────────────────
+env CF_RELEASE=2.0.0
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+! exec rotini validate .rotini.spec.yaml --config .rotini.conf.yaml
+stderr 'planned for removal in 2\.0\.0'
+env CF_RELEASE=
+
+# ── schemas and user files: written, overwritten on every run, never removed ──
+cp files-on.yaml .rotini.conf.yaml
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+exists schemas/spec.json
+exists schemas/conf.json
+exists completions/carapace/my_tool.yaml
+exists .env.example
+exists examples/config/settings.example.yaml
+# man section 8: the page files take the section as their extension.
+exists internal/cmd/my_tool/renders/my_tool.8
+exists internal/cmd/my_tool/renders/my_tool-old.8
+grep 'ManSection = "8"' internal/cmd/my_tool/zz_rotini.go
+# The skill is named after the root, lowercased, with '_' written '-'.
+exists skills/my-tool/SKILL.md
+# Every harness by default.
+exists agents/claude-settings.json
+exists agents/my_tool.rules
+exists agents/my_tool-policy.toml
+# An edited help template is used, and survives template: false.
+exists internal/cmd/my_tool/templates/help.txt.tmpl
+cp edited.tmpl internal/cmd/my_tool/templates/help.txt.tmpl
+cp tampered.json schemas/spec.json
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+! grep 'tampered' schemas/spec.json
+grep 'EDITED' internal/cmd/my_tool/zz_rotini.go
+
+cp files-off.yaml .rotini.conf.yaml
+exec rotini generate .rotini.spec.yaml --config .rotini.conf.yaml
+exists schemas/spec.json
+exists schemas/conf.json
+exists completions/carapace/my_tool.yaml
+exists .env.example
+exists examples/config/settings.example.yaml
+exists skills/my-tool/SKILL.md
+exists agents/claude-settings.json
+grep 'EDITED' internal/cmd/my_tool/templates/help.txt.tmpl
+# The man feature off removes its pages.
+! exists internal/cmd/my_tool/renders/my_tool.8
+
+-- spec.yaml --
+version: 0.0.0
+command:
+  name: my_tool
+  summary: a demo
+  config_files:
+    - name: settings
+      path: settings.yaml
+  env:
+    - name: region
+      summary: the region
+      schema: { type: string, variable: CF_REGION }
+  commands:
+    - name: old
+      summary: going away
+      removed_in: 2.0.0
+      deprecated: use new
+    - name: new
+      summary: the replacement
+-- cmd-only.yaml --
+version: 0.0.0
+validate:
+  release_env: CF_RELEASE
+generate:
+  contract:
+    go: true
+  packages:
+    - type: cmd
+      file: internal/cmd/my_tool/zz_rotini.go
+-- files-on.yaml --
+version: 0.0.0
+generate:
+  schemas:
+    spec: { file: schemas/spec.json }
+    conf: { file: schemas/conf.json }
+  packages:
+    - type: cmd
+      file: internal/cmd/my_tool/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+      template: true
+    - type: man
+      enabled: true
+      embed: true
+      section: 8
+    - type: markdown
+      enabled: true
+    - type: skill
+      enabled: true
+    - type: permissions
+      enabled: true
+    - type: carapace
+      enabled: true
+    - type: env_example
+      enabled: true
+    - type: config_example
+      enabled: true
+-- files-off.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/my_tool/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+-- edited.tmpl --
+EDITED
+-- tampered.json --
+{"tampered": true}

@@ -1,0 +1,354 @@
+# R13 — flag groups, flag dependencies and short-circuit flags, as their descriptions promise:
+# only what the command line sets counts (a default or an environment fallback neither trips nor
+# satisfies a rule), `equals` compares the stored value, and a short-circuit flag waives every
+# declared requirement while what can't be read is still an error.
+
+gomodinit example.com/fr
+
+exec rotini validate cmd/fr/.rotini.spec.yaml --config cmd/fr/.rotini.conf.yaml
+! stderr 'mutually_exclusive'
+exec rotini generate cmd/fr/.rotini.spec.yaml --config cmd/fr/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o fr$exe ./cmd/fr
+
+# A required flag in a mutually exclusive group passes validation when it has a fallback, and the
+# environment satisfies its requirement without tripping the group.
+! exec ./fr$exe out --zone a
+stderr 'missing required input: --region'
+env FR_REGION=eu
+exec ./fr$exe out --zone a
+stdout 'region=eu'
+
+# mutually_exclusive: at most one set; an environment value doesn't trip it.
+! exec ./fr$exe out --json --yaml
+stderr 'flags --json and --yaml are mutually exclusive'
+env FR_JSON=true
+exec ./fr$exe out --yaml
+stdout 'json=true yaml=true'
+env FR_JSON=
+env FR_REGION=
+
+# one_of: exactly one, and neither a default nor an environment value satisfies it.
+! exec ./fr$exe pick
+stderr 'exactly one of --a, --b is required'
+env FR_A=true
+! exec ./fr$exe pick
+stderr 'exactly one of --a, --b is required'
+env FR_A=
+exec ./fr$exe pick --a
+! exec ./fr$exe pick --a --b y
+stderr 'mutually exclusive'
+
+# at_least_one: one or more.
+! exec ./fr$exe need
+stderr 'at least one of --c, --d is required'
+exec ./fr$exe need --c x --d y
+
+# required_together: all or none; the environment doesn't complete the set.
+exec ./fr$exe login
+env FR_PASS=secret
+! exec ./fr$exe login --user u
+stderr 'flags --user, --pass must be used together'
+env FR_PASS=
+exec ./fr$exe login --user u --pass p
+
+# Dependencies: a default doesn't trigger a rule, the environment doesn't satisfy one, and equals
+# compares the stored value (an enum alias, any case), the last one when repeated.
+exec ./fr$exe dep
+env FR_DELIM=;
+! exec ./fr$exe dep --format csv
+stderr 'flag --delimiter is required when --format is csv'
+env FR_DELIM=
+! exec ./fr$exe dep --format COMMA
+stderr 'flag --delimiter is required when --format is csv'
+exec ./fr$exe dep --format csv --format text
+! exec ./fr$exe dep --format text --format csv
+stderr 'flag --delimiter is required'
+
+# For a bool flag, `--no-x` gives false.
+! exec ./fr$exe dep --no-tls
+stderr 'flag --insecure is required when --tls is false'
+exec ./fr$exe dep --tls
+exec ./fr$exe dep --no-tls --insecure
+
+# A short-circuit flag waives groups, dependencies, bounds and patterns...
+exec ./fr$exe pick --help
+stdout 'HELP'
+exec ./fr$exe dep --format csv --no-tls --port 0 --name ABC --help
+stdout 'HELP'
+exec ./fr$exe login --user u --help
+stdout 'HELP'
+
+# ... but not what can't be read: a value of the wrong type, from the command line or the
+# environment, too many arguments, an unknown flag.
+! exec ./fr$exe dep --port abc --help
+stderr '--port'
+env FR_PORT=abc
+! exec ./fr$exe dep --help
+stderr 'FR_PORT'
+env FR_PORT=
+! exec ./fr$exe dep extra --help
+stderr 'argument'
+! exec ./fr$exe dep --bogus --help
+stderr 'unknown flag "--bogus"'
+
+-- cmd/fr/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: fr
+  summary: flag rules
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: out
+      summary: output
+      flags:
+        - name: json
+          summary: json
+          schema: { type: bool, variable: FR_JSON }
+        - name: yaml
+          summary: yaml
+          schema: { type: bool }
+        - name: region
+          summary: region
+          schema: { type: string, required: true, variable: FR_REGION }
+        - name: zone
+          summary: zone
+          schema: { type: string }
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [json, yaml]
+        - kind: mutually_exclusive
+          flags: [region, zone]
+    - name: pick
+      summary: pick one
+      flags:
+        - name: a
+          summary: a
+          schema: { type: bool, variable: FR_A }
+        - name: b
+          summary: b
+          schema: { type: string, default: x }
+      flag_groups:
+        - kind: one_of
+          flags: [a, b]
+    - name: need
+      summary: need one
+      flags:
+        - name: c
+          summary: c
+          schema: { type: string, default: x }
+        - name: d
+          summary: d
+          schema: { type: string }
+      flag_groups:
+        - kind: at_least_one
+          flags: [c, d]
+    - name: login
+      summary: log in
+      flags:
+        - name: user
+          summary: user
+          schema: { type: string }
+        - name: pass
+          summary: pass
+          schema: { type: string, variable: FR_PASS }
+      flag_groups:
+        - kind: required_together
+          flags: [user, pass]
+    - name: dep
+      summary: dependencies
+      flags:
+        - name: format
+          summary: format
+          schema:
+            type: string
+            default: csv
+            ignore_case: true
+            enum:
+              - { value: csv, aliases: [comma] }
+              - text
+        - name: delimiter
+          summary: delimiter
+          schema: { type: string, variable: FR_DELIM }
+        - name: tls
+          summary: tls
+          schema: { type: bool, negatable: true }
+        - name: insecure
+          summary: insecure
+          schema: { type: bool }
+        - name: port
+          summary: port
+          schema: { type: int, minimum: 1, variable: FR_PORT }
+        - name: name
+          summary: name
+          schema: { type: string, pattern: '^[a-z]+$' }
+      flag_dependencies:
+        - when: format
+          equals: [csv]
+          requires: [delimiter]
+        - when: tls
+          equals: [false]
+          requires: [insecure]
+-- cmd/fr/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/fr/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/fr/zz_fr.go
+      package: fr
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/fr/fr.go --
+package fr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type frHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*frHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/fr/fr_out.go --
+package fr
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type frOutHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*frOutHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FrOutInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := in.FrOut.Flags
+	fmt.Fprintf(rtx.Stdout, "json=%v yaml=%v region=%s\n", f.JSON, f.Yaml, f.Region)
+}
+-- internal/cmd/fr/fr_pick.go --
+package fr
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type frPickHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*frPickHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FrPickInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Fr.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, "HELP")
+	}
+}
+-- internal/cmd/fr/fr_need.go --
+package fr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type frNeedHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*frNeedHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[FrNeedInputs](); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- internal/cmd/fr/fr_login.go --
+package fr
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type frLoginHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*frLoginHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FrLoginInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Fr.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, "HELP")
+	}
+}
+-- internal/cmd/fr/fr_dep.go --
+package fr
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type frDepHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*frDepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FrDepInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Fr.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, "HELP")
+	}
+}

@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -105,6 +106,78 @@ func TestCollect(t *testing.T) {
 	rtx2.WithInputSettings(bareMeta)
 	if _, _, err := rtx2.InputsWithReport[tbInputs](); err == nil {
 		t.Error("InputsWithReport with missing required config = nil error, want loud")
+	}
+}
+
+// TestInputsWithReport_errorShapes pins what InputsWithReport returns beside an error: the zero
+// value for a channel that can't be acquired, the merged value and its report for a validation
+// failure, and, as for Inputs, no error when a short-circuit flag waives the requirements.
+func TestInputsWithReport_errorShapes(t *testing.T) {
+	type in struct {
+		App struct {
+			Flags struct {
+				Help bool   `rotini:"help"`
+				Name string `rotini:"name"`
+				Mode string `rotini:"mode"`
+			}
+			Arguments struct{}
+		}
+	}
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "help", Identifiers: []string{"--help"}, Type: "bool", ShortCircuit: true},
+		{Name: "name", Identifiers: []string{"--name"}, Type: "string", Required: true},
+		{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Enum: []string{"a", "b"}},
+	}}
+
+	got, _, err := NewContextFor(def, []string{"--mode", "a", "--bogus"}).InputsWithReport[in]()
+	if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Kind != ParseKindUnknownFlag || got != (in{}) {
+		t.Errorf("acquisition error: %v, value %+v; want an unknown-flag error and the zero value", err, got)
+	}
+
+	got, report, err := NewContextFor(def, []string{"--mode", "a"}).InputsWithReport[in]()
+	if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Kind != ParseKindMissingRequired {
+		t.Errorf("validation error = %v, want missing-required", err)
+	}
+	if win, ok := report.Winner("App.Flags.Mode"); got.App.Flags.Mode != "a" || !ok || win.Layer != "argv" {
+		t.Errorf("validation error kept mode %q, winner %+v %v; want the merged value and its report", got.App.Flags.Mode, win, ok)
+	}
+
+	got, _, err = NewContextFor(def, []string{"--help"}).InputsWithReport[in]()
+	if err != nil || !got.App.Flags.Help {
+		t.Errorf("short-circuit: %v, help %v; want the requirements waived", err, got.App.Flags.Help)
+	}
+}
+
+// InputsWithReport names a bad value by the identifier the user typed, as Inputs does, whether or
+// not the flag has an environment fallback.
+func TestInputsWithReport_namesTypedIdentifier(t *testing.T) {
+	type in struct {
+		App struct {
+			Flags struct {
+				Replicas int `rotini:"replicas" recon:"replicas" env:"APP_REPLICAS"`
+				Workers  int `rotini:"workers"`
+			}
+			Arguments struct{}
+		}
+	}
+	one := 1.0
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "replicas", Identifiers: []string{"-r", "--replicas"}, Type: "int", Minimum: &one},
+		{Name: "workers", Identifiers: []string{"-w", "--workers"}, Type: "int", Minimum: &one},
+	}}
+	for flag, want := range map[string]string{
+		"-r":         "-r must be >= 1 (got 0)",
+		"--replicas": "--replicas must be >= 1 (got 0)",
+		"-w":         "-w must be >= 1 (got 0)",
+	} {
+		rtx := NewContextFor(def, []string{flag, "0"}).WithEnviron([]string{"APP_REPLICAS=5"})
+		_, err := rtx.Inputs[in]()
+		_, _, reportErr := rtx.InputsWithReport[in]()
+		for name, err := range map[string]error{"Inputs": err, "InputsWithReport": reportErr} {
+			if err == nil || err.Error() != want {
+				t.Errorf("%s %s 0: %v, want %q", name, flag, err, want)
+			}
+		}
 	}
 }
 
@@ -984,5 +1057,101 @@ func TestProvenance_listRawIsTheSameFromEveryLayer(t *testing.T) {
 	hist := rep.History("App.Flags.Ports")
 	if len(hist) != 2 || hist[0].Raw != hist[1].Raw || hist[0].Raw != "1, 2" {
 		t.Errorf("ports history = %+v, want both layers to read %q", hist, "1, 2")
+	}
+}
+
+// The zero InputReport reports no fields, and its Validate returns nil.
+func TestInputReport_zeroValue(t *testing.T) {
+	t.Parallel()
+	var rep InputReport
+	if f := rep.Fields(); len(f) != 0 {
+		t.Errorf("Fields = %v, want none", f)
+	}
+	if _, ok := rep.Winner("App.Flags.Color"); ok {
+		t.Error("Winner reported a field")
+	}
+	if h := rep.History("App.Flags.Color"); h != nil {
+		t.Errorf("History = %v, want nil", h)
+	}
+	if err := rep.Validate(); err != nil {
+		t.Errorf("Validate = %v, want nil", err)
+	}
+}
+
+// History returns a copy: changing it changes neither the report nor a later History.
+func TestInputReport_historyIsACopy(t *testing.T) {
+	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
+	_, rep := MergeInputsWithReport(ovLayers(t, rtx, InputSettings{})...)
+	hist := rep.History("App.Flags.Color")
+	if len(hist) < 2 {
+		t.Fatalf("history for --color = %+v, want several layers", hist)
+	}
+	hist[len(hist)-1] = InputSource{Layer: "tampered"}
+	_ = append(hist[:1], InputSource{Layer: "appended"})
+	again := rep.History("App.Flags.Color")
+	if slices.ContainsFunc(again, func(s InputSource) bool { return s.Layer == "tampered" || s.Layer == "appended" }) {
+		t.Errorf("History = %+v, changed through a returned slice", again)
+	}
+	if win, _ := rep.Winner("App.Flags.Color"); win.Layer != "argv" {
+		t.Errorf("Winner = %+v, want argv", win)
+	}
+}
+
+// Without a rotini layer in the merge, a hand-built field keeps the Raw its Presence gave and
+// is attributed to the layer's Name; nothing says what is secret, so nothing is redacted.
+func TestMergeInputsWithReport_handBuiltAlone(t *testing.T) {
+	t.Parallel()
+	var hand ovInputs
+	hand.App.Flags.Color = "red"
+	hand.App.Flags.Token = "sk-1"
+	set := PresenceOf(hand)
+	set["App.Flags.Token"] = InputSource{Raw: "given"}
+	_, rep := MergeInputsWithReport(InputLayer[ovInputs]{Name: "vault", Values: hand, Set: set})
+	if got, _ := rep.Winner("App.Flags.Color"); got != (InputSource{Layer: "vault"}) {
+		t.Errorf("Color winner = %+v, want vault with no Raw", got)
+	}
+	if got, _ := rep.Winner("App.Flags.Token"); got != (InputSource{Layer: "vault", Raw: "given"}) {
+		t.Errorf("Token winner = %+v, want vault with the given Raw", got)
+	}
+}
+
+// A nil or empty Set supplies nothing, whatever Values holds.
+func TestMergeInputs_nilSetSuppliesNothing(t *testing.T) {
+	t.Parallel()
+	var low, high ovInputs
+	low.App.Flags.Color = "red"
+	high.App.Flags.Color = "teal"
+	for _, set := range []Presence{nil, {}} {
+		got, rep := MergeInputsWithReport(
+			InputLayer[ovInputs]{Name: "low", Values: low, Set: PresenceOf(low)},
+			InputLayer[ovInputs]{Name: "high", Values: high, Set: set},
+		)
+		if got.App.Flags.Color != "red" {
+			t.Errorf("Set %v: Color = %q, want the lower layer's red", set, got.App.Flags.Color)
+		}
+		if win, _ := rep.Winner("App.Flags.Color"); win.Layer != "low" {
+			t.Errorf("Set %v: Winner = %+v, want low", set, win)
+		}
+	}
+}
+
+func TestPresenceOf_shapes(t *testing.T) {
+	t.Parallel()
+	if set := PresenceOf(42); len(set) != 0 {
+		t.Errorf("PresenceOf(int) = %v, want empty", set)
+	}
+	type stdinInputs struct {
+		App struct {
+			Flags, Arguments struct{}
+			Stdin            *string `stdin:"text"`
+		}
+	}
+	var in stdinInputs
+	if set := PresenceOf(in); len(set) != 0 {
+		t.Errorf("nil stdin: %v, want empty", set)
+	}
+	in.App.Stdin = new("")
+	if set := PresenceOf(in); set["App.Stdin"] != (InputSource{Layer: "custom"}) {
+		t.Errorf("stdin = %v, want App.Stdin marked custom", set)
 	}
 }

@@ -3,9 +3,11 @@
 package e2e
 
 import (
+	"archive/zip"
 	"bufio"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +19,8 @@ import (
 )
 
 // dataCmds are the script commands for data passing through a program: writing exact bytes and
-// large inputs, timing a run whose stdin stays open, and measuring a run's memory.
+// large inputs, timing a run whose stdin stays open, and measuring a run's memory; and for
+// serving modules from a proxy on disk.
 func dataCmds() map[string]func(ts *testscript.TestScript, neg bool, args []string) {
 	return map[string]func(ts *testscript.TestScript, neg bool, args []string){
 		// writebytes writes a Go-quoted string's bytes to a file, for content a txtar can't
@@ -119,6 +122,61 @@ func dataCmds() map[string]func(ts *testscript.TestScript, neg bool, args []stri
 			if peak >= mb<<20 {
 				ts.Fatalf("%v peaked at %d MB, over the budget of %d MB", args[2:], peak>>20, mb)
 			}
+		},
+		// proxymodule lays out a directory of the script as module@version in a module proxy
+		// on disk, replacing any earlier copy, for a script that depends on a module it serves
+		// itself.
+		"proxymodule": func(ts *testscript.TestScript, neg bool, args []string) {
+			if neg || len(args) != 4 {
+				ts.Fatalf("usage: proxymodule <proxy-dir> <module> <version> <source-dir>")
+			}
+			module, version, src := args[1], args[2], ts.MkAbs(args[3])
+			at := filepath.Join(ts.MkAbs(args[0]), filepath.FromSlash(module), "@v")
+			ts.Check(os.MkdirAll(at, 0o755))
+			mod, err := os.ReadFile(filepath.Join(src, "go.mod"))
+			ts.Check(err)
+			ts.Check(os.WriteFile(filepath.Join(at, "list"), []byte(version+"\n"), 0o644))
+			ts.Check(os.WriteFile(filepath.Join(at, version+".info"), []byte(`{"Version":"`+version+`","Time":"2026-01-01T00:00:00Z"}`), 0o644))
+			ts.Check(os.WriteFile(filepath.Join(at, version+".mod"), mod, 0o644))
+			f, err := os.Create(filepath.Join(at, version+".zip"))
+			ts.Check(err)
+			zw := zip.NewWriter(f)
+			ts.Check(filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return err
+				}
+				rel, err := filepath.Rel(src, path)
+				if err != nil {
+					return err
+				}
+				body, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				w, err := zw.Create(module + "@" + version + "/" + filepath.ToSlash(rel))
+				if err != nil {
+					return err
+				}
+				_, err = w.Write(body)
+				return err
+			}))
+			ts.Check(zw.Close())
+			ts.Check(f.Close())
+		},
+		// goproxy points GOPROXY at module proxies on disk, tried in order.
+		"goproxy": func(ts *testscript.TestScript, neg bool, args []string) {
+			if neg || len(args) == 0 {
+				ts.Fatalf("usage: goproxy <dir>...")
+			}
+			urls := make([]string, 0, len(args))
+			for _, dir := range args {
+				p := filepath.ToSlash(ts.MkAbs(dir))
+				if !strings.HasPrefix(p, "/") {
+					p = "/" + p // a Windows volume follows a third slash: file:///C:/x
+				}
+				urls = append(urls, "file://"+p)
+			}
+			ts.Setenv("GOPROXY", strings.Join(urls, ","))
 		},
 	}
 }

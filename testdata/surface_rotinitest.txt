@@ -1,10 +1,10 @@
-field Result.Argv
-field Result.Code
-field Result.Dir
-field Result.Env
-field Result.Err
-field Result.Stderr
-field Result.Stdout
+field Result.Argv []string
+field Result.Code int
+field Result.Dir string
+field Result.Env []string
+field Result.Err error
+field Result.Stderr []byte
+field Result.Stdout []byte
 func Argv0(name string) Option
 func Clock(now time.Time) Option
 func Context(ctx context.Context) Option
@@ -18,5 +18,5 @@ func Presence(set rotini.Presence) Option
 func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result
 func Secrets() Option
 func Stdin(r io.Reader) Option
-type Option
-type Result
+type Option func(*config)
+type Result struct

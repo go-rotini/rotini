@@ -1,0 +1,218 @@
+# R10 — structured output through a composed child: a parent that mounts another CLI's spec
+# writes, checks and documents the child's output as the child does on its own, named by the
+# parent's command path.
+
+gomodinit example.com/suite
+
+exec rotini generate cmd/db/.rotini.spec.yaml --config cmd/db/.rotini.conf.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# The child's output, in the formats rotini writes.
+exec ./app$exe db get
+cmp stdout get.json
+exec ./app$exe db get -o yaml
+cmp stdout get.yaml
+
+# Off its contract: written as is without checks; with them, refused under the parent's path,
+# and nothing is written.
+exec ./app$exe db get --bad
+stdout '"state": "sideways"'
+env APP_CHECKS=1
+! exec ./app$exe db get --bad
+! stdout .
+stderr '^Error: app db get: output does not match its contract: output.state: '
+exec ./app$exe db get
+cmp stdout get.json
+env APP_CHECKS=
+
+# With the program's structured reporter, the same failure is one JSON line on stderr.
+env APP_CHECKS=1
+env APP_STRUCTURED=1
+! exec ./app$exe db get --bad
+! stdout .
+stderr '^\{"schema_version":1,"error":\{"category":"internal","command":"app db get","exit_code":1,"message":"app db get: output does not match its contract: output.state: [^"]*"\}\}$'
+! exec ./app$exe db get --nope
+stderr '^\{"schema_version":1,"error":\{"candidates":\[[^]]*"--bad"[^]]*\],"category":"usage","command":"app db get","exit_code":1,"flag":"--nope","kind":"unknown-flag","message":"unknown flag \\"--nope\\"","token":"--nope"\}\}$'
+env APP_STRUCTURED=
+env APP_CHECKS=
+
+# The parent's output schema files and help describe the child's output.
+exists schemas/output/app-db-get.output.json
+grep '"state"' schemas/output/app-db-get.output.json
+exec ./app$exe db get --help
+stdout 'Output:'
+stdout 'The state of one database\.'
+
+# DecodeOutput reads the child's output back through the parent's program.
+exec go test -count=1 ./internal/cmd/app
+
+-- get.json --
+{
+  "name": "main",
+  "state": "up"
+}
+-- get.yaml --
+name: main
+state: up
+-- cmd/db/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: manage databases
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      schema: {type: bool}
+    - name: output
+      identifiers: [-o, --output]
+      cascading: true
+      schema: {type: string, default: json, enum: [json, yaml]}
+  commands:
+    - name: get
+      summary: show one database
+      flags:
+        - name: bad
+          identifiers: [--bad]
+          schema: {type: bool}
+      output:
+        type: object
+        description: The state of one database.
+        required: [name, state]
+        properties:
+          name: {type: string}
+          state: {type: string, enum: [up, down]}
+-- cmd/db/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/db/zz_db.go
+      package: db
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a suite
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  schemas:
+    output:
+      dir: schemas/output
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+-- cmd/app/main.go --
+package main
+
+import (
+	"os"
+	"slices"
+
+	"github.com/go-rotini/rotini"
+
+	app "example.com/suite/internal/cmd/app"
+)
+
+func main() {
+	p := app.NewProgram().WithOutputChecks(os.Getenv("APP_CHECKS") == "1")
+	if os.Getenv("APP_STRUCTURED") == "1" {
+		p = p.WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
+			return !slices.Contains(rtx.Argv, "yaml")
+		}))
+	}
+	p.Execute()
+}
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type appHandler struct{ rotini.NoHooks }
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/app/app_test.go --
+package app_test
+
+import (
+	"bytes"
+	"testing"
+
+	"github.com/go-rotini/rotini"
+
+	"example.com/suite/internal/cmd/app"
+	"example.com/suite/internal/cmd/db"
+)
+
+func TestGetOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	p := app.NewProgram().WithStdout(&stdout)
+	if code, err := p.Run([]string{"db", "get", "-o", "yaml"}); code != 0 {
+		t.Fatalf("exit %d: %v", code, err)
+	}
+	got, err := rotini.DecodeOutput[db.DbGetOutput](p, stdout.Bytes(), "yaml")
+	if err != nil || got.State != "up" {
+		t.Fatalf("decoded %+v: %v", got, err)
+	}
+	_, err = rotini.DecodeOutput[db.DbGetOutput](p, []byte(`{"name":"main","state":"sideways"}`), "json")
+	if err == nil || err.Error()[:len("app db get: ")] != "app db get: " {
+		t.Fatalf("an off-contract output: %v", err)
+	}
+}
+-- internal/cmd/db/db.go --
+package db
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type dbHandler struct{ rotini.NoHooks }
+
+func (*dbHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/db/db_get.go --
+package db
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type dbGetHandler struct{ rotini.NoHooks }
+
+func (*dbGetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DbGetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Db.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	out := DbGetOutput{Name: "main", State: "up"}
+	if in.DbGet.Flags.Bad {
+		out.State = "sideways"
+	}
+	if err := rtx.WriteOutput(out, in.Db.Flags.Output, nil); err != nil {
+		rtx.HaltWith(err)
+	}
+}

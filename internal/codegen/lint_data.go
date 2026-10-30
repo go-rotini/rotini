@@ -111,7 +111,9 @@ func lintNulSeparator(spec *Spec) []error {
 			if schema == nil || schema.Separator != "nul" {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "separator", path, channel, name, msg))
+			}
 			switch {
 			case channel != "flag":
 				add("sets `separator: nul`, but command-line and environment values can't contain a NUL byte; it applies only to a list or map flag's file or stdin content (`from: [file]` or `from: [stdin]`)")
@@ -136,7 +138,9 @@ func lintVariableFile(spec *Spec) []error {
 				return
 			}
 			file := schema.VariableFile
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "variable_file", path, channel, name, msg))
+			}
 			switch {
 			case channel != "env" && channel != "flag" && channel != "argument":
 				add("sets `variable_file`, which names an environment variable; only env inputs, and flags and arguments with an environment fallback, read one, so here it would be silently ignored")

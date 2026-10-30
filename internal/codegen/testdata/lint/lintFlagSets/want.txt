@@ -1,5 +1,5 @@
 spec: .rotini.spec.yaml:14:11: flag set Output: flag "format": declared twice; each flag needs a unique name
-spec: .rotini.spec.yaml:10:11: flag set Paging: flag "limit": `default` "abc" is not a valid integer; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:11:41: flag set Paging: flag "limit": `default` "abc" is not a valid integer; every run that leaves it unset would fail
 spec: .rotini.spec.yaml:30:12: command demo/list: flag "format" is declared by both the command's own flags and flag set Output; rename one
 spec: .rotini.spec.yaml:30:12: command demo/list: flags "dry-run" (the command's own flags) and "dry_run" (flag set Output) both generate the field DryRun; rename one
 spec: .rotini.spec.yaml:41:9: command demo/show: declares `flag_sets`, which only the root command can; move them to the root, where every command of the spec can `use` them

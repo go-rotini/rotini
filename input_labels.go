@@ -21,6 +21,9 @@ type channelLabels struct {
 	env   map[string][]string
 	files map[string]string
 	view  *osView
+	// pinned is the file a bind of inputs pinned to one configuration file reads, which a
+	// missing required key is reported in; "" for any other bind.
+	pinned string
 }
 
 // envNames collects the variables each recon-keyed field of the structName sub-structs reads:
@@ -128,8 +131,12 @@ func (l channelLabels) bind(channel string, err error) error {
 		return usageBind(channel, path,
 			fmt.Sprintf("%s: expected %s%s", label(path), typ, l.origin(ce.Source)), err)
 	case errors.As(err, &mre):
+		in := ""
+		if l.pinned != "" {
+			in = " in configuration file " + l.pinned
+		}
 		return usageBind(channel, mre.Path.String(),
-			fmt.Sprintf("%s is required", label(mre.Path.String())), err)
+			fmt.Sprintf("%s is required%s", label(mre.Path.String()), in), err)
 	case errors.As(err, &ve):
 		return usageBind(channel, ve.Path.String(),
 			fmt.Sprintf("%s: %s", label(ve.Path.String()), ve.Msg), err)

@@ -1,0 +1,220 @@
+# R14 — generated artifacts at the edges of what a spec may hold: markdown code spans around a
+# placeholder holding a backtick; text a Go raw string can't hold (a NUL, a byte order mark, a
+# carriage return); a tool name too long for a tools target (rejected by validate, with its
+# position); SKILL.md's dry-run advice only for a program that has a dry-run flag; a template
+# that doesn't parse; and a feature file path that names a directory.
+gomodinit example.com/app
+
+# ── a placeholder with a backtick stays one markdown code span ──────────────
+mkdir md
+cp md.yaml md/.rotini.spec.yaml
+cp md.conf.yaml md/.rotini.conf.yaml
+exec rotini generate md/.rotini.spec.yaml
+grep '^- ``<I`D>`` — the id$' internal/cmd/md/renders/markdown_md.md
+grep '^- `--file` ``P`TH`` — a path$' internal/cmd/md/renders/markdown_md.md
+exec rotini generate md/.rotini.spec.yaml --dry-run
+! stdout 'dry run:'
+
+# ── text a Go raw string can't hold still builds, and reads back exactly ────
+mkdir raw
+cp raw.yaml raw/.rotini.spec.yaml
+cp raw.conf.yaml raw/.rotini.conf.yaml
+exec rotini generate raw/.rotini.spec.yaml
+exec go mod tidy
+exec go vet ./internal/cmd/raw/...
+exec go build -o rawbin$exe ./raw
+exec ./rawbin$exe --help
+stdout 'cr\r here'
+stdout 'a mode\x{FEFF} \[a\x00b\|c\rd\]'
+
+# ── a tool name longer than a target allows is a validate error ─────────────
+mkdir long
+cp long.yaml long/.rotini.spec.yaml
+cp long.conf.yaml long/.rotini.conf.yaml
+wantexit 1 rotini validate long/.rotini.spec.yaml
+stderr '^Error: spec: long[/\\]\.rotini\.spec\.yaml:6:7: command long/synchronize-every-replica-set-in-the-cluster-and-report-to-the-log: makes the tool name "long_synchronize-every-replica-set-in-the-cluster-and-report-to-the-log", 71 characters, longer than openai-strict allows \(64\); shorten a name on its path, or keep it from agents with `agent: false`$'
+wantexit 1 rotini generate long/.rotini.spec.yaml
+stderr 'longer than openai-strict allows'
+! exists internal/cmd/long
+
+# ── SKILL.md advises a dry run only when a command has a dry-run flag ───────
+mkdir confirm
+cp confirm.yaml confirm/.rotini.spec.yaml
+cp skill.conf.yaml confirm/.rotini.conf.yaml
+exec rotini generate confirm/.rotini.spec.yaml
+grep 'Confirm without a prompt: `--yes`' skills/confirm/SKILL.md
+! grep 'dry-run flag' skills/confirm/SKILL.md
+mkdir preview
+cp preview.yaml preview/.rotini.spec.yaml
+cp preview.conf.yaml preview/.rotini.conf.yaml
+exec rotini generate preview/.rotini.spec.yaml
+grep 'run it with its dry-run flag' skills/preview/SKILL.md
+
+# ── a template that doesn't parse is named by its path and line ─────────────
+mkdir tp internal/cmd/tp/templates
+cp confirm.yaml tp/.rotini.spec.yaml
+cp tp.conf.yaml tp/.rotini.conf.yaml
+cp broken.tmpl internal/cmd/tp/templates/help.txt.tmpl
+wantexit 1 rotini generate tp/.rotini.spec.yaml
+stderr '^Error: help template internal[/\\]cmd[/\\]tp[/\\]templates[/\\]help\.txt\.tmpl:2: bad character U\+007D ''}''$'
+
+# ── a feature file that names a directory says so ───────────────────────────
+mkdir dir dir/llms.txt
+cp confirm.yaml dir/.rotini.spec.yaml
+cp dir.conf.yaml dir/.rotini.conf.yaml
+wantexit 1 rotini generate dir/.rotini.spec.yaml
+stderr '^Error: emit program features: write dir[/\\]llms\.txt: it is a directory, not a file$'
+
+-- md.yaml --
+version: 0.0.0
+command:
+  name: md
+  summary: placeholders
+  arguments:
+    - name: id
+      summary: the id
+      schema: {type: string, required: true, placeholder: "I`D"}
+  flags:
+    - name: file
+      summary: a path
+      identifiers: [--file]
+      schema: {type: string, placeholder: "P`TH"}
+-- md.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/md/zz_rotini.go
+  features:
+    - type: markdown
+      enabled: true
+      embed: true
+-- raw.yaml --
+version: 0.0.0
+command:
+  name: raw
+  summary: "nul\0 here"
+  description: "bom﻿ here, cr\r here"
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help]
+      short_circuit: true
+      schema: {type: bool}
+    - name: mode
+      summary: "a mode﻿"
+      identifiers: [--mode]
+      schema: {type: string, enum: ["a\0b", "c\rd"]}
+-- raw.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: raw/main.go
+    - type: cmd
+      file: internal/cmd/raw/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+    - type: man
+      enabled: true
+    - type: markdown
+      enabled: true
+    - type: completion
+      enabled: true
+    - type: tools
+      enabled: true
+      go: true
+-- long.yaml --
+version: 0.0.0
+command:
+  name: long
+  summary: long names
+  commands:
+    - name: synchronize-every-replica-set-in-the-cluster-and-report-to-the-log
+      summary: too long for openai-strict
+      arguments:
+        - name: since
+          schema: {type: string}
+-- long.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/long/zz_rotini.go
+  features:
+    - type: tools
+      enabled: true
+      targets: [mcp, openai-strict]
+-- confirm.yaml --
+version: 0.0.0
+command:
+  name: confirm
+  summary: remove things
+  commands:
+    - name: remove
+      summary: remove a thing
+      effects: {kind: destructive}
+      flags:
+        - name: yes
+          summary: skip the prompt
+          identifiers: [--yes]
+          role: confirm
+          schema: {type: bool}
+-- preview.yaml --
+version: 0.0.0
+command:
+  name: preview
+  summary: remove things
+  commands:
+    - name: remove
+      summary: remove a thing
+      effects: {kind: destructive}
+      flags:
+        - name: dry-run
+          summary: show what would go
+          identifiers: [--dry-run]
+          role: dry-run
+          schema: {type: bool}
+-- skill.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/confirm/zz_rotini.go
+  features:
+    - type: skill
+      enabled: true
+-- preview.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/preview/zz_rotini.go
+  features:
+    - type: skill
+      enabled: true
+-- tp.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/tp/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+      template: true
+-- broken.tmpl --
+{{.Invocation}}
+{{.Summary}
+-- dir.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/dir/zz_rotini.go
+  features:
+    - type: llms
+      enabled: true
+      file: dir/llms.txt
+      base_url: https://example.com/

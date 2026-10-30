@@ -1,0 +1,397 @@
+# R13 — what the spec's environment keys promise: env_prefix derivation, `variable:` lists and
+# their help lines, flag and argument fallbacks, empty values, variable_file and nested families.
+
+gomodinit example.com/envy
+
+exec rotini validate cmd/envy/.rotini.spec.yaml --config cmd/envy/.rotini.conf.yaml
+exec rotini generate cmd/envy/.rotini.spec.yaml --config cmd/envy/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o envy$exe ./cmd/envy
+
+# The derived name is fixed in the generated field's env tag, prefixed; an explicit one is not.
+grep 'env:"ENVY_HOME"' internal/cmd/envy/zz_envy.go
+grep 'env:"ENVY_SERVER_PORT"' internal/cmd/envy/zz_envy.go
+! grep 'ENVY_GH_TOKEN' internal/cmd/envy/zz_envy.go
+
+# A required env input that is not set is missing; set to the empty string, it is provided.
+env HOME=$WORK/home
+env USERPROFILE=$WORK/home
+env NEED=x
+! exec ./envy$exe vars
+stderr 'ENVY_EMPTY'
+env ENVY_EMPTY=
+exec ./envy$exe vars
+stdout '^empty=""$'
+
+# A flag's environment fallback set to the empty string counts as unset.
+env NEED=
+! exec ./envy$exe vars
+stderr 'need'
+env NEED=x
+
+# With a prefix declared, the unprefixed name does not bind.
+exec ./envy$exe vars
+stdout '^home=$'
+env ENVY_HOME=/h
+exec ./envy$exe vars
+stdout '^home=/h$'
+
+# A flag's key derives its fallback variable under the prefix.
+env ENVY_SERVER_PORT=8080
+exec ./envy$exe vars
+stdout '^port=8080$'
+
+# A variable list reads the first one set; the explicit names are never prefixed.
+env GITHUB_TOKEN=second
+exec ./envy$exe vars
+stdout '^token=second$'
+env GH_TOKEN=first
+exec ./envy$exe vars
+stdout '^token=first$'
+env GH_TOKEN=
+env GITHUB_TOKEN=
+env ENVY_GH_TOKEN=prefixed
+exec ./envy$exe vars
+stdout '^token=$'
+
+# variable_file: one trailing line ending is removed, no more; an empty file variable is unset.
+writebytes two-newlines.txt "s3cret\n\n"
+writebytes crlf.txt "s3cret\r\n"
+env ENVY_SECRET_FILE=two-newlines.txt
+exec ./envy$exe vars
+stdout '^secret="s3cret\\n"$'
+env ENVY_SECRET_FILE=crlf.txt
+exec ./envy$exe vars
+stdout '^secret="s3cret"$'
+env ENVY_SECRET_FILE=
+env ENVY_SECRET=plain
+exec ./envy$exe vars
+stdout '^secret="plain"$'
+env ENVY_SECRET=
+
+# A nested family collects under the prefixed base name, segments lowercased, values strings.
+env ENVY_HTTP__TIMEOUT=30
+env ENVY_HTTP__RETRY__MAX=9
+exec ./envy$exe vars
+stdout '^http=map\[retry:map\[max:9\] timeout:30\]$'
+
+# Help lists env inputs by name, and every name of a flag's variable list, in lookup order,
+# then its file form; a config key shows only on a command that reads configuration files.
+exec ./envy$exe vars --help
+stdout 'Environment:'
+stdout 'ENVY_HOME'
+stdout 'also set by GH_TOKEN or GITHUB_TOKEN'
+stdout 'ENVY_SERVER_PORT'
+! stdout 'server\.port'
+stdout 'ENVY_SECRET.*ENVY_SECRET_FILE'
+exec ./envy$exe withconf --help
+stdout 'LEVEL'
+stdout 'server\.port'
+
+# A flag with `variable:` is keyed by its own name, so a config file's `level` supplies it.
+env ENVY_SERVER_PORT=
+exec ./envy$exe withconf
+stdout '^level=fromfile port=9$'
+env LEVEL=fromenv
+exec ./envy$exe withconf
+stdout '^level=fromenv port=9$'
+env LEVEL=
+
+# An argument's fallback fills a position the command line left out, left to right; a variadic
+# argument splits its variable on its separator, and without one the whole value is one item.
+env DEPLOY_ENV=stage
+env DEPLOY_HOSTS=a,b
+exec ./envy$exe deploy
+stdout '^env=stage hosts=\[a b\]$'
+exec ./envy$exe deploy prod
+stdout '^env=prod hosts=\[a b\]$'
+exec ./envy$exe deploy prod x
+stdout '^env=prod hosts=\[x\]$'
+env 'WORDS=a,b c'
+exec ./envy$exe words
+stdout '^words=\["a,b c"\]$'
+
+# A required nested input fails when no variable of its family is set; the prefix itself is
+# not a member, and an explicit `variable:` is not prefixed.
+env FAM_OPTS=x
+env ENVY_FAM_OPTS__A=1
+! exec ./envy$exe fam
+stderr 'FAM_OPTS'
+env FAM_OPTS__A=1
+exec ./envy$exe fam
+stdout '^opts=map\[a:1\]$'
+
+# Validation: a nested input takes one variable and no default; stdin reads no variable.
+! exec rotini validate bad.spec.yaml --config cmd/envy/.rotini.conf.yaml --fail collect
+stderr 'bad\.spec\.yaml:\d+:\d+'
+stderr 'env "fam"'
+stderr 'env "famdef"'
+stderr 'stdin'
+
+-- conf.yaml --
+level: fromfile
+server:
+  port: 9
+-- bad.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  env:
+    - name: fam
+      schema: {type: map, nesting: "__", variable: [A_FAM, B_FAM]}
+    - name: famdef
+      schema: {type: map, nesting: "__", default: {a: b}}
+  stdin:
+    format: text
+    schema: {variable: IN}
+-- cmd/envy/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: envy
+  summary: environment rules
+  env_prefix: ENVY
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+  commands:
+    - name: vars
+      summary: show variables
+      env:
+        - name: home
+          summary: a home
+          schema: {type: string}
+        - name: empty
+          summary: may be empty
+          schema: {type: string, required: true}
+        - name: secret
+          summary: a secret
+          schema: {type: string, variable: ENVY_SECRET, variable_file: ENVY_SECRET_FILE, secret: true}
+        - name: http
+          summary: http settings
+          schema: {type: map, nesting: "__"}
+      flags:
+        - name: token
+          summary: the token
+          schema: {type: string, variable: [GH_TOKEN, GITHUB_TOKEN]}
+        - name: port
+          summary: the port
+          schema: {type: int, key: server.port}
+        - name: need
+          summary: needed
+          schema: {type: string, required: true, variable: NEED}
+    - name: withconf
+      summary: reads a config file
+      config_files:
+        - name: conf
+          path: conf.yaml
+      flags:
+        - name: level
+          summary: the level
+          schema: {type: string, variable: LEVEL}
+        - name: port
+          summary: the port
+          schema: {type: int, key: server.port}
+    - name: deploy
+      summary: deploy
+      arguments:
+        - name: env
+          schema: {type: string, variable: DEPLOY_ENV}
+        - name: hosts
+          schema: {type: "[]string", variable: DEPLOY_HOSTS, separator: ","}
+    - name: words
+      summary: words
+      arguments:
+        - name: words
+          schema: {type: "[]string", variable: WORDS}
+    - name: fam
+      summary: a required family
+      env:
+        - name: opts
+          schema: {type: map, nesting: "__", variable: FAM_OPTS, required: true}
+-- cmd/envy/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/envy/main.go
+    - type: cmd
+      file: internal/cmd/envy/zz_envy.go
+      package: envy
+  features:
+    - type: help
+      enabled: true
+-- cmd/envy/main.go --
+package main
+
+import (
+	envy "example.com/envy/internal/cmd/envy"
+)
+
+func main() {
+	envy.NewProgram().
+		Execute()
+}
+-- internal/cmd/envy/envy.go --
+package envy
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type envyHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*envyHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[EnvyInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Envy.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprint(rtx.Stdout, page)
+		rtx.Halt()
+	}
+}
+
+func (*envyHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/envy/envy_vars.go --
+package envy
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type envyVarsHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*envyVarsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[EnvyVarsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	v := in.EnvyVars
+	fmt.Fprintf(rtx.Stdout, "home=%s\nempty=%q\nsecret=%q\nhttp=%v\ntoken=%s\nport=%d\n",
+		v.Env.Home, v.Env.Empty, v.Env.Secret, v.Env.HTTP, v.Flags.Token, v.Flags.Port)
+}
+-- internal/cmd/envy/envy_withconf.go --
+package envy
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type envyWithconfHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*envyWithconfHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[EnvyWithconfInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "level=%s port=%d\n", in.EnvyWithconf.Flags.Level, in.EnvyWithconf.Flags.Port)
+}
+-- internal/cmd/envy/envy_deploy.go --
+package envy
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type envyDeployHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*envyDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[EnvyDeployInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "env=%s hosts=%v\n", in.EnvyDeploy.Arguments.Env, in.EnvyDeploy.Arguments.Hosts)
+}
+-- internal/cmd/envy/envy_words.go --
+package envy
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type envyWordsHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*envyWordsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[EnvyWordsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "words=%q\n", in.EnvyWords.Arguments.Words)
+}
+-- internal/cmd/envy/envy_fam.go --
+package envy
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type envyFamHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*envyFamHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[EnvyFamInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "opts=%v\n", in.EnvyFam.Env.Opts)
+}

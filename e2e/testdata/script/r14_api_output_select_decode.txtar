@@ -1,0 +1,210 @@
+# R14 — the output helpers on a generated CLI: SortBy and SelectFields on its types, selecting
+# from a Selection leaves it unchanged, and DecodeOutput reads one yaml document.
+
+gomodinit example.com/idr
+
+exec rotini generate cmd/idr/.rotini.spec.yaml --config cmd/idr/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o idr$exe ./cmd/idr
+
+# Sorted by a field that isn't selected.
+exec ./idr$exe list --sort-by name --json id
+cmp stdout by_name.json
+
+# Reselecting a selection (name and owner.login, then owner, owner.login and name) leaves the
+# selection it reads whole.
+exec ./idr$exe list --json owner,name --reselect
+cmp stdout reselected.json
+
+# DecodeOutput takes the yaml the command writes, and refuses two documents.
+exec go test ./internal/cmd/idr
+stdout '^ok'
+
+-- by_name.json --
+{
+  "items": [
+    {
+      "id": 1
+    },
+    {
+      "id": 7
+    },
+    {
+      "id": 3
+    }
+  ]
+}
+-- reselected.json --
+{"items":[{"name":"b","owner":{"login":"y"}},{"name":"a","owner":{"login":"x"}},{"name":"c","owner":{"login":"z"}}]}
+{"items":[{"name":"b","owner":{"id":2,"login":"y"}},{"name":"a","owner":{"id":1,"login":"x"}},{"name":"c","owner":{"id":3,"login":"z"}}]}
+-- cmd/idr/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: idr
+  summary: list ids
+  schemas:
+    Owner:
+      type: object
+      required: [login, id]
+      properties:
+        login: {type: string}
+        id: {type: integer}
+    Item:
+      type: object
+      required: [id, name, owner]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        owner: {$ref: "#/schemas/Owner"}
+    ItemList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/schemas/Item"}}
+  commands:
+    - name: list
+      summary: list the items
+      output: {$ref: "#/schemas/ItemList"}
+      flags:
+        - name: json
+          summary: write these fields as json
+          identifiers: [--json]
+          role: fields
+          schema: {type: '[]string', separator: ',', values_from: output.items}
+        - name: sort-by
+          summary: sort by this field
+          identifiers: [--sort-by]
+          role: sort
+          schema: {type: string, values_from: output.items}
+        - name: reselect
+          summary: select from the selection again
+          identifiers: [--reselect]
+          schema: {type: bool}
+        - name: output
+          summary: the output format
+          identifiers: [--output, -o]
+          schema: {type: string, default: json}
+-- cmd/idr/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/idr/main.go
+    - type: cmd
+      file: internal/cmd/idr/zz_idr.go
+      package: idr
+-- internal/cmd/idr/idr.go --
+package idr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+type idrHandler struct{ base }
+
+func (*idrHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/idr/idr_list.go --
+package idr
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type idrListHandler struct{ base }
+
+func (*idrListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IdrListInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	list := IdrListOutput{Items: []Item{
+		{ID: 7, Name: "b", Owner: Owner{Login: "y", ID: 2}},
+		{ID: 1, Name: "a", Owner: Owner{Login: "x", ID: 1}},
+		{ID: 3, Name: "c", Owner: Owner{Login: "z", ID: 3}},
+	}}
+	flags := in.IdrList.Flags
+	if flags.SortBy != "" {
+		if err := rotini.SortBy(list.Items, flags.SortBy, false); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+	if len(flags.JSON) == 0 {
+		rtx.HaltWith(rtx.WriteOutput(list, flags.Output, nil))
+		return
+	}
+	sel, err := rotini.SelectFields(list, "items", flags.JSON)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if !flags.Reselect {
+		rtx.HaltWith(rtx.WriteOutput(sel, flags.Output, nil))
+		return
+	}
+	first, err := rotini.SelectFields(sel, "items", []string{"name", "owner.login"})
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if _, err := rotini.SelectFields(sel, "items", []string{"owner", "owner.login", "name"}); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	for _, s := range []rotini.Selection{first, sel} {
+		b, err := json.Marshal(s)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintln(rtx.Stdout, string(b))
+	}
+}
+-- internal/cmd/idr/decode_test.go --
+package idr
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/go-rotini/rotini"
+)
+
+func TestDecodeYAML(t *testing.T) {
+	var stdout bytes.Buffer
+	p := NewProgram().WithStdout(&stdout)
+	p.Run([]string{"list", "-o", "yaml"})
+	list, err := rotini.DecodeOutput[IdrListOutput](p, stdout.Bytes(), "yaml")
+	if err != nil || len(list.Items) != 3 || list.Items[0].Owner.Login != "y" {
+		t.Fatalf("%+v, %v", list, err)
+	}
+	twice := append(append([]byte{}, stdout.Bytes()...), append([]byte("---\n"), stdout.Bytes()...)...)
+	if _, err := rotini.DecodeOutput[IdrListOutput](p, twice, "yaml"); err == nil || !strings.Contains(err.Error(), "more than one yaml document") {
+		t.Fatalf("two documents: %v", err)
+	}
+}
+-- cmd/idr/main.go --
+package main
+
+import (
+	idr "example.com/idr/internal/cmd/idr"
+)
+
+func main() {
+	idr.NewProgram().WithOutputChecks(true).Execute()
+}

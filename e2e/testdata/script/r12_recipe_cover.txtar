@@ -24,6 +24,11 @@ wantexit 1 ./covdemo$exe boom
 exec go tool covdata percent -i=panic
 stdout 'coverage: [0-9.]+% of statements'
 
+# Without GOCOVERDIR the binary warns on stderr and writes nothing.
+env GOCOVERDIR=
+exec ./covdemo$exe hello
+stderr 'GOCOVERDIR not set'
+
 -- cover.sh.txt --
 go build -cover -coverpkg=./... -o covdemo ./cmd/covdemo
 mkdir -p cover

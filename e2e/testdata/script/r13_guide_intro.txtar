@@ -1,0 +1,88 @@
+# R13 — the site intro's quick start: what init writes, the spec fragment, the stub generate
+# seeds, and the handler the intro shows, built and run. TestIntroBlocksMatchScripts pins
+# hello.spec.yaml.txt and hello.go.txt to the intro's blocks.
+
+gomodinit github.com/me/helloworld
+exec rotini init helloworld
+exec go mod tidy
+
+# The intro's "what init writes".
+exists cmd/helloworld/.rotini.spec.yaml
+exists cmd/helloworld/.rotini.conf.yaml
+exists cmd/helloworld/.rotini-schema.spec.json
+exists cmd/helloworld/.rotini-schema.conf.json
+exists cmd/helloworld/main.go
+exists internal/cmd/helloworld/zz_rotini.go
+exists internal/cmd/helloworld/helloworld.go
+
+# Step 2: the hello command, added under commands:, which ends the seeded spec.
+cp cmd/helloworld/.rotini.spec.yaml seed.yaml
+concat cmd/helloworld/.rotini.spec.yaml seed.yaml hello.spec.yaml.txt
+
+# Step 3: the stub already reads the typed inputs and prints them, and imports all but strings.
+exec go generate ./...
+grep 'rtx\.Inputs\[HelloworldHelloInputs\]\(\)' internal/cmd/helloworld/helloworld_hello.go
+grep 'fmt\.Fprintf\(rtx\.Stdout, .*inputs\)' internal/cmd/helloworld/helloworld_hello.go
+grep '^	"context"$' internal/cmd/helloworld/helloworld_hello.go
+grep '^	"fmt"$' internal/cmd/helloworld/helloworld_hello.go
+! grep '"strings"' internal/cmd/helloworld/helloworld_hello.go
+concat internal/cmd/helloworld/helloworld_hello.go head.go.txt hello.go.txt
+
+# Step 4.
+exec go build ./cmd/helloworld
+exec ./helloworld$exe hello
+stdout '^Hello, world!$'
+exec ./helloworld$exe hello rotini --shout
+stdout '^HELLO, ROTINI!$'
+
+# --help is answered for every command by the root handler init wrote.
+exec ./helloworld$exe hello --help
+stdout '^  helloworld hello \[flags\] \[name\]$'
+! stderr .
+
+-- hello.spec.yaml.txt --
+    - name: hello
+      summary: say hello
+      arguments:
+        - name: name
+          summary: who to greet
+          schema: { type: string, default: world }
+      flags:
+        - name: shout
+          summary: greet in capitals
+          identifiers: [-s, --shout]
+          schema: { type: bool }
+-- head.go.txt --
+package helloworld
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*helloworldHelloHandler)(nil)
+
+type helloworldHelloHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+-- hello.go.txt --
+func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
+	greeting := "Hello, " + inputs.HelloworldHello.Arguments.Name + "!"
+	if inputs.HelloworldHello.Flags.Shout {
+		greeting = strings.ToUpper(greeting)
+	}
+	fmt.Fprintln(rtx.Stdout, greeting)
+}

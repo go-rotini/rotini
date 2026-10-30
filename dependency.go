@@ -98,13 +98,17 @@ type DependencyError struct {
 	Name string // the name the dependency was requested under
 
 	// got and want are the registered and requested types when the name is registered as a
-	// different type; both are empty when nothing is registered.
+	// different type, got "nil" for a nil registered as an interface; both are empty when
+	// nothing is registered.
 	got, want string
 }
 
-// Error returns a one-line message stating whether the dependency is missing or registered as
-// a different type.
+// Error returns a one-line message stating whether the dependency is missing, registered as
+// nil, or registered as a different type.
 func (e *DependencyError) Error() string {
+	if e.got == "nil" {
+		return fmt.Sprintf("rotini: the dependency %q is registered as nil, not the %s requested", e.Name, e.want)
+	}
 	if e.got != "" {
 		return fmt.Sprintf("rotini: the dependency %q is a %s, not the %s requested", e.Name, e.got, e.want)
 	}
@@ -139,8 +143,11 @@ func (rtx *Context) MustGetDependency[T any](dep Dependency[T]) T {
 	v, ok := rtx.GetDependency(dep)
 	if !ok {
 		de := &DependencyError{Name: dep.name}
-		if registered, _ := rtx.dependency(dep.name); registered != nil {
+		switch registered, found := rtx.dependency(dep.name); {
+		case registered != nil:
 			de.got, de.want = fmt.Sprintf("%T", registered), reflect.TypeFor[T]().String()
+		case found:
+			de.got, de.want = "nil", reflect.TypeFor[T]().String()
 		}
 		panic(de)
 	}

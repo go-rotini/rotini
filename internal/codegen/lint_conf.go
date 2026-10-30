@@ -67,6 +67,7 @@ var confLints = []func(*Conf) []error{
 	lintSchemaDirs,
 	lintDiffAccept,
 	lintFeatureKeys,
+	lintLlmsBaseURL,
 	lintPackageNames,
 }
 
@@ -80,7 +81,7 @@ func lintFeatureSection(conf *Conf) []error {
 	for i, f := range conf.Generate.Features {
 		if f.Section != 0 && f.Type != "man" {
 			problems = append(problems, &problem{
-				kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + ".section",
+				kind: "conf", ptr: featurePointer(i) + "/section", loc: "generate.features." + f.Type + ".section",
 				msg: "`section` is the man page section and applies only to the man feature; move it to the man entry or remove it",
 			})
 		}
@@ -204,7 +205,7 @@ func lintFeatureDirs(conf *Conf) []error {
 		if !under(path.Clean(filepath.ToSlash(f.EmbedDir))) {
 			problems = append(problems, &problem{
 				kind: "conf",
-				ptr:  featurePointer(featureIndex(conf, name)),
+				ptr:  featurePointer(featureIndex(conf, name)) + "/embed_dir",
 				loc:  "generate.features." + name + ".embed_dir",
 				msg:  fmt.Sprintf("%s must resolve under the cmd package %s so //go:embed can reach it", quotePath(f.EmbedDir), quotePath(cmdDir)),
 			})
@@ -226,7 +227,7 @@ func lintFeatureKnobs(conf *Conf) []error {
 	var problems []error
 	warn := func(name, key, msg string) {
 		problems = append(problems, &problem{
-			kind: "conf", ptr: featurePointer(featureIndex(conf, name)),
+			kind: "conf", ptr: featurePointer(featureIndex(conf, name)) + "/" + key,
 			loc: "generate.features." + name + "." + key,
 			sev: severityWarning, msg: msg,
 		})
@@ -256,34 +257,49 @@ func lintFeatureKnobs(conf *Conf) []error {
 	return problems
 }
 
-// lintSchemaFiles rejects a generate.schemas file path that is absolute or escapes the module
-// root; the path must be module-root-relative.
+// lintSchemaFiles rejects a file path rotini writes (a generate.schemas, generate.contract or
+// generate.packages file) that is absolute or escapes the module root, and a spec and conf
+// schema written to one file, where the second would overwrite the first.
 func lintSchemaFiles(conf *Conf) []error {
-	if conf.Generate == nil || conf.Generate.Schemas == nil {
+	if conf.Generate == nil {
 		return nil
 	}
 	var problems []error
-	check := func(label string, sc *SchemaConfig) {
-		if sc == nil || sc.File == "" {
+	check := func(file, ptr, loc string) {
+		if file == "" {
 			return
 		}
 		var why string
-		switch clean := path.Clean(filepath.ToSlash(sc.File)); {
-		case path.IsAbs(clean) || filepath.IsAbs(sc.File):
+		switch clean := path.Clean(filepath.ToSlash(file)); {
+		case path.IsAbs(clean) || filepath.IsAbs(file):
 			why = "must be module-root-relative, not absolute"
 		case clean == ".." || strings.HasPrefix(clean, "../"):
 			why = "must resolve under the module root"
 		default:
 			return
 		}
-		problems = append(problems, &problem{
-			kind: "conf", ptr: "/generate/schemas/" + label + "/file",
-			loc: "generate.schemas." + label + ".file",
-			msg: fmt.Sprintf("%s %s", quotePath(sc.File), why),
-		})
+		problems = append(problems, &problem{kind: "conf", ptr: ptr, loc: loc, msg: fmt.Sprintf("%s %s", quotePath(file), why)})
 	}
-	check("spec", conf.Generate.Schemas.Spec)
-	check("conf", conf.Generate.Schemas.Conf)
+	if s := conf.Generate.Schemas; s != nil {
+		for _, sc := range []struct {
+			label string
+			c     *SchemaConfig
+		}{{"spec", s.Spec}, {"conf", s.Conf}} {
+			if sc.c != nil {
+				check(sc.c.File, "/generate/schemas/"+sc.label+"/file", "generate.schemas."+sc.label+".file")
+			}
+		}
+		if s.Spec != nil && s.Conf != nil && s.Spec.File != "" && path.Clean(filepath.ToSlash(s.Spec.File)) == path.Clean(filepath.ToSlash(s.Conf.File)) {
+			problems = append(problems, &problem{kind: "conf", ptr: "/generate/schemas/conf/file", loc: "generate.schemas.conf.file",
+				msg: fmt.Sprintf("%s is also generate.schemas.spec.file; each schema needs its own file, or the second overwrites the first", quotePath(s.Conf.File))})
+		}
+	}
+	if c := conf.Generate.Contract; c != nil {
+		check(c.File, "/generate/contract/file", "generate.contract.file")
+	}
+	for i, p := range conf.Generate.Packages {
+		check(p.File, packagePointer(i)+"/file", "generate.packages."+p.Type+".file")
+	}
 	return problems
 }
 
@@ -315,7 +331,7 @@ func lintCompletionMessages(conf *Conf) []error {
 	var problems []error
 	add := func(i int, f Feature, key, msg string) {
 		problems = append(problems, &problem{
-			kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, msg: msg,
+			kind: "conf", ptr: featurePointer(i) + "/" + key, loc: "generate.features." + f.Type + "." + key, msg: msg,
 		})
 	}
 	for i, f := range conf.Generate.Features {
@@ -336,7 +352,7 @@ func lintCompletionMessages(conf *Conf) []error {
 		}
 		if f.DescriptionsEnv != "" && f.DescriptionsEnv == f.MessagesEnv {
 			problems = append(problems, &problem{
-				kind: "conf", ptr: featurePointer(i), loc: "generate.features.completion.descriptions_env", sev: severityWarning,
+				kind: "conf", ptr: featurePointer(i) + "/descriptions_env", loc: "generate.features.completion.descriptions_env", sev: severityWarning,
 				msg: "names the same variable as `messages_env`, so one setting hides both messages and descriptions; give each its own variable",
 			})
 		}

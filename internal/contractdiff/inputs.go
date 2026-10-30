@@ -36,8 +36,9 @@ func accepted(f *input) []string { return slices.Concat(f.Identifiers, f.HiddenI
 // argument starting with a digit can no longer be.
 var digitIdentifier = regexp.MustCompile(`^-\d+$`)
 
-// flags compares the flags a command accepts, matched by identifier. An inherited flag is
-// compared where it is declared, so a cascading flag's change is reported once. On the
+// flags compares the flags a command accepts: a flag of the same name that still takes one of
+// its identifiers first, else the flag that takes one of its identifiers now. An inherited
+// flag is compared where it is declared, so a cascading flag's change is reported once. On the
 // inheriting command it is compared only where an identifier moves between the command's own
 // flag and an inherited one: the flag that takes the identifier now is compared with the one
 // that took it before. A new digit identifier is also reported there, since it changes how the
@@ -56,7 +57,10 @@ func (d *differ) flags(st stability, oc, nc *command) {
 		}
 		fst := leastStable(st, of.Stability)
 		w := flagWhere(oc.Name, of)
-		nf := takerOf(of, newAccepts)
+		nf := sameName(of, nc)
+		if nf == nil {
+			nf = takerOf(of, newAccepts)
+		}
 		if nf == nil {
 			if of.ReplacedBy != "" && newAccepts[of.ReplacedBy] != nil {
 				d.replaced(fst, RuleFlagReplaced, w, "flag removed; replaced by "+of.ReplacedBy, of.RemovedIn, of.Hidden, "")
@@ -104,6 +108,18 @@ func takers(c *command) map[string]*input {
 	return m
 }
 
+// sameName returns the command's own new flag named as of is that still accepts one of its
+// identifiers, or nil.
+func sameName(of *input, nc *command) *input {
+	i := slices.IndexFunc(nc.Flags, func(f input) bool {
+		return !f.Inherited && f.Name == of.Name && slices.ContainsFunc(accepted(of), func(id string) bool { return slices.Contains(accepted(&f), id) })
+	})
+	if i < 0 {
+		return nil
+	}
+	return &nc.Flags[i]
+}
+
 // takerOf returns the new flag that takes one of of's identifiers: a flag of the command's own
 // first, else an inherited one, else nil.
 func takerOf(of *input, newAccepts map[string]*input) *input {
@@ -135,7 +151,7 @@ func (d *differ) addedFlags(st stability, oc, nc *command, matched map[*input]bo
 				}
 			}
 		}
-		if nf.Inherited || matched[nf] || slices.ContainsFunc(accepted(nf), func(id string) bool { return oldAccepts[id] }) {
+		if nf.Inherited || matched[nf] {
 			continue
 		}
 		w := flagWhere(oc.Name, nf)
@@ -150,6 +166,7 @@ func (d *differ) addedFlags(st stability, oc, nc *command, matched map[*input]bo
 
 // flag compares a flag present in both contracts.
 func (d *differ) flag(st stability, oc *command, of, nf *input, newAccepts map[string]*input, oldAccepts map[string]bool) {
+	defer d.within(of.Hidden)()
 	d.flagIdentifiers(st, oc, of, nf, newAccepts, oldAccepts)
 	w := flagWhere(oc.Name, of)
 	if of.Name != nf.Name {
@@ -200,8 +217,10 @@ func (d *differ) flagIdentifiers(st stability, oc *command, of, nf *input, newAc
 			case slices.Contains(l.new, id):
 			case slices.Contains(l.other, id):
 				d.add(st, Safe, RuleFlagIdentifierMoved, oc.Name+" "+id, l.what+" "+id+" moved between identifiers and hidden_identifiers", "")
+			case newAccepts[id] != nil && of.Inherited:
+				// Still the ancestor's identifier; it is compared where it is declared.
 			case newAccepts[id] != nil:
-				// Now another flag's identifier; the other flag is compared on its own.
+				d.removal(st, l.gone, oc.Name+" "+id, l.what+" "+id+" now sets "+strings.TrimSpace(flagWhere("", newAccepts[id])), of.IdentifiersRemovedIn[id], false)
 			default:
 				d.removal(st, l.gone, oc.Name+" "+id, l.what+" "+id+" removed", of.IdentifiersRemovedIn[id], false)
 			}
@@ -279,26 +298,37 @@ func (d *differ) arguments(st stability, oc, nc *command) {
 	}
 }
 
-// envs compares a command's environment variables, matched by variable.
+// envs compares a command's environment variables: an input of the same name that still reads
+// one of its variables first, else the input that reads one of its variables now.
 func (d *differ) envs(st stability, oc, nc *command) {
 	matched := map[int]bool{}
 	for i := range oc.Env {
 		oe := &oc.Env[i]
 		est := leastStable(st, oe.Stability)
 		w := oc.Name + " $" + first(oe.Variables, oe.Name)
-		j := slices.IndexFunc(nc.Env, func(ne input) bool {
+		shares := func(ne input) bool {
 			return slices.ContainsFunc(oe.Variables, func(v string) bool { return slices.Contains(ne.Variables, v) })
-		})
+		}
+		j := slices.IndexFunc(nc.Env, func(ne input) bool { return ne.Name == oe.Name && shares(ne) })
+		if j < 0 {
+			j = slices.IndexFunc(nc.Env, shares)
+		}
 		if j < 0 {
 			d.removal(est, RuleEnvNoDelete, w, "environment variable no longer read", oe.RemovedIn, oe.Hidden)
 			continue
 		}
 		matched[j] = true
 		ne := &nc.Env[j]
+		restore := d.within(oe.Hidden)
 		for _, v := range oe.Variables {
-			if !slices.Contains(ne.Variables, v) {
-				d.add(est, Breaking, RuleEnvVariableNoDelete, oc.Name+" $"+v, "$"+v+" no longer read", "")
+			if slices.Contains(ne.Variables, v) {
+				continue
 			}
+			msg := "$" + v + " no longer read"
+			if k := slices.IndexFunc(nc.Env, func(e input) bool { return slices.Contains(e.Variables, v) }); k >= 0 {
+				msg = "$" + v + " now sets " + nc.Env[k].Name
+			}
+			d.add(est, Breaking, RuleEnvVariableNoDelete, oc.Name+" $"+v, msg, "")
 		}
 		for _, v := range ne.Variables {
 			if !slices.Contains(oe.Variables, v) {
@@ -310,6 +340,7 @@ func (d *differ) envs(st stability, oc, nc *command) {
 			d.add(est, Breaking, RuleEnvNestingChanged, w, fmt.Sprintf("nesting separator %q → %q", oe.Nesting, ne.Nesting), "")
 		}
 		d.input(est, kindEnv, w, oe, ne)
+		restore()
 	}
 	for j := range nc.Env {
 		ne := &nc.Env[j]
@@ -390,6 +421,7 @@ func first(list []string, fallback string) string {
 
 // input compares the facts every input kind shares, then its schema.
 func (d *differ) input(st stability, kind, w string, o, n *input) {
+	defer d.within(o.Hidden)()
 	d.lifecycle(st, w, inputLifecycle(o), inputLifecycle(n))
 	d.hidden(st, RuleInputHidden, RuleInputUnhidden, w, o.Hidden, n.Hidden)
 	d.agent(st, w, o.Agent, n.Agent)
@@ -492,26 +524,39 @@ func (d *differ) inputSources(st stability, kind, w string, o, n *input) {
 
 // from compares where a typed value may come from besides the text itself. On a secret input,
 // adding `value` accepts literals again, which is safe; on any other input `value` changes
-// nothing.
+// nothing. Each direction gives one finding listing every source, so one diff.accept entry
+// acknowledges it.
 func (d *differ) from(st stability, w string, o, n *input) {
+	var removed []string
 	for _, v := range missing(o.From, n.From) {
-		if v == "value" && !o.Secret {
-			continue
+		switch {
+		case v == "value" && !o.Secret:
+		case v == "value":
+			removed = append(removed, "a secret typed on the command line is now refused")
+		default:
+			removed = append(removed, "a value no longer comes from "+v)
 		}
-		msg := "a value no longer comes from " + v
-		if v == "value" {
-			msg = "a secret typed on the command line is now refused"
-		}
-		d.add(st, Breaking, RuleInputFromNoDelete, w, msg, "")
 	}
+	if len(removed) > 0 {
+		d.add(st, Breaking, RuleInputFromNoDelete, w, strings.Join(removed, "; "), "")
+	}
+	sev := Safe
+	var added, notes []string
 	for _, v := range missing(n.From, o.From) {
 		switch {
 		case v == "value" && n.Secret:
-			d.add(st, Safe, RuleInputFromAdded, w, "a secret typed on the command line is now accepted", "")
+			added = append(added, "a secret typed on the command line is now accepted")
 		case v == "value":
 		default:
-			d.add(st, PossiblyBreaking, RuleInputFromAdded, w, "a value may now come from "+v, fromNote(v))
+			sev = PossiblyBreaking
+			added = append(added, "a value may now come from "+v)
+			if note := fromNote(v); note != "" {
+				notes = append(notes, note)
+			}
 		}
+	}
+	if len(added) > 0 {
+		d.add(st, sev, RuleInputFromAdded, w, strings.Join(added, "; "), strings.Join(notes, "; "))
 	}
 }
 

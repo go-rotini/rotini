@@ -333,7 +333,7 @@ func lintShortOnlyFlags(spec *Spec) []error {
 			if len(ids) > 1 {
 				what = "short identifiers"
 			}
-			p := inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name,
+			p := inputProblem(fmt.Sprintf("%s/flags/%d/identifiers", ptr, i), path, "flag", f.Name,
 				fmt.Sprintf("has only %s (%s) and no long form", what, strings.Join(ids, ", ")))
 			p.sev = severityWarning
 			problems = append(problems, p)

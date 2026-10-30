@@ -50,8 +50,20 @@ type importCase struct {
 	args                         []string
 	// completion is set when the program has a completion command, which the import keeps.
 	completion bool
+	// summary, when set, is text the import's summary line must contain.
+	summary string
 	// runs is a command line the built CLI must accept.
 	runs []string
+	// checks are runs of the built CLI that must keep the program's behaviour.
+	checks []importCheck
+}
+
+// importCheck runs the built CLI with args and env set; it must succeed and print want, or,
+// when fail is set, fail and print want.
+type importCheck struct {
+	args, env []string
+	want      string
+	fail      bool
 }
 
 // TestImportCobra imports each of the importer's own Cobra corpus programs, then validates,
@@ -62,7 +74,16 @@ func TestImportCobra(t *testing.T) {
 	roundTrip(t, []importCase{
 		// ssh stops parsing flags at its first argument, so a word after it that looks like a
 		// flag is an argument.
-		{framework: "cobra", fixture: "demo", pkg: ".", cli: "acme", completion: true, runs: []string{"ssh", "node1", "--not-a-flag", "-t"}},
+		{framework: "cobra", fixture: "demo", pkg: ".", cli: "acme", completion: true, runs: []string{"ssh", "node1", "--not-a-flag", "-t"},
+			checks: []importCheck{
+				{args: []string{"rollback", "api", "--reason", "r", "--last"}, want: "acme rollback"},
+				{args: []string{"deploy", "nope"}, want: "nope", fail: true},
+				{args: []string{"deploy", "api", "--json", "--yaml"}, want: "--yaml", fail: true},
+				{args: []string{"deploy", "api", "--cert", "c"}, want: "--key", fail: true},
+				{args: []string{"rollback", "api", "--last"}, want: "--reason", fail: true},
+				{args: []string{"rollback", "api", "--reason", "r"}, want: "--last", fail: true},
+				{args: []string{"rollback", "api", "--reason", "r", "--last", "--to", "3"}, want: "--to", fail: true},
+			}},
 		{framework: "cobra", fixture: "cobracli", pkg: "./cmd", cli: "acmecli", args: []string{"--strict"}, completion: true},
 	})
 }
@@ -74,7 +95,17 @@ func TestImportKong(t *testing.T) {
 	roundTrip(t, []importCase{
 		// ssh's command is a passthrough argument: the words after the node are taken as typed.
 		{framework: "kong", fixture: "kong-demo", pkg: ".", cli: "acme", args: []string{"--name", "acme", "--var", "stage=staging"},
-			runs: []string{"ssh", "node1", "uptime", "--not-a-flag"}},
+			runs: []string{"ssh", "node1", "uptime", "--not-a-flag"},
+			checks: []importCheck{
+				// env:"ACME_REPLICAS,REPLICAS" reads the first variable that is set.
+				{args: []string{"deploy", "api"}, env: []string{"ACME_REPLICAS=5", "REPLICAS=6"}, want: "Replicas:5"},
+				{args: []string{"deploy", "api"}, env: []string{"REPLICAS=6"}, want: "Replicas:6"},
+				{args: []string{"deploy", "api", "-r", "7"}, env: []string{"ACME_REPLICAS=5"}, want: "Replicas:7"},
+				{args: []string{"deploy", "api"}, env: []string{"ACME_CONTEXT=prod"}, want: "Context:prod"},
+				{args: []string{"deploy", "nope"}, want: "nope", fail: true},
+				{args: []string{"deploy", "api", "--json", "--yaml"}, want: "--yaml", fail: true},
+				{args: []string{"rollback", "svc", "--reason", "r"}, want: "--last", fail: true},
+			}},
 		// No --name: the CLI is named after the module, as go build names its binary.
 		{framework: "kong", fixture: "kong-readme", pkg: ".", cli: "shell", runs: []string{"rm", "--force", "a.txt"}},
 	})
@@ -86,7 +117,16 @@ func TestImportURFave(t *testing.T) {
 	frameworkImportCmd(t, "urfave")
 	roundTrip(t, []importCase{
 		// exec takes every word after its name as typed.
-		{framework: "urfave", fixture: "urfave-demo", pkg: ".", cli: "acme", completion: true, runs: []string{"exec", "ls", "--not-a-flag"}},
+		{framework: "urfave", fixture: "urfave-demo", pkg: ".", cli: "acme", completion: true, runs: []string{"exec", "ls", "--not-a-flag"},
+			checks: []importCheck{
+				// Sources: cli.EnvVars("ACME_REPLICAS", "REPLICAS") reads the first variable that is set.
+				{args: []string{"deploy", "svc", "--reason", "r", "--last"}, env: []string{"ACME_REPLICAS=4", "REPLICAS=6"}, want: "Replicas:4"},
+				{args: []string{"deploy", "svc", "--reason", "r", "--last"}, env: []string{"REPLICAS=6"}, want: "Replicas:6"},
+				{args: []string{"deploy", "svc", "--last"}, want: "--reason", fail: true},
+				{args: []string{"deploy", "svc", "--reason", "r"}, want: "--last", fail: true},
+				{args: []string{"deploy", "svc", "--reason", "r", "--last", "--to", "x"}, want: "--to", fail: true},
+				{args: []string{"deploy", "svc", "--reason", "r", "--last", "--json", "--yaml"}, want: "--yaml", fail: true},
+			}},
 		{framework: "urfave", fixture: "urfave-demo", pkg: ".", cli: "acme", args: []string{"--strict", "--dir", "acme-strict"}, completion: true},
 		// The root has no name: the CLI is named after the module.
 		{framework: "urfave", fixture: "urfave-readme", pkg: ".", cli: "tasks", runs: []string{"template", "add", "x"}},
@@ -107,7 +147,11 @@ func roundTrip(t *testing.T, cases []importCase) {
 			dir = tc.args[i+1]
 		}
 		t.Run(tc.fixture+"/"+dir, func(t *testing.T) {
-			fixture := importFixture(t, "corpus/"+tc.fixture)
+			name := tc.fixture
+			if !strings.Contains(name, "/") {
+				name = "corpus/" + name
+			}
+			fixture := importFixture(t, name)
 			before := treeHash(t, fixture)
 			run := runIn(t, fixture)
 
@@ -126,7 +170,7 @@ func roundTrip(t *testing.T, cases []importCase) {
 			}
 
 			got := run(bin, frameworkImportCmd(t, tc.framework, append([]string{tc.pkg}, tc.args...)...)...)
-			if !strings.Contains(got, "spec: cmd/"+dir+"/.rotini.spec.yaml") || !strings.Contains(got, "imported ") {
+			if !strings.Contains(got, "spec: cmd/"+dir+"/.rotini.spec.yaml") || !strings.Contains(got, "imported "+tc.summary) {
 				t.Fatalf("import output:\n%s", got)
 			}
 			if after := treeHash(t, fixture); after != before {
@@ -138,6 +182,14 @@ func roundTrip(t *testing.T, cases []importCase) {
 			run(bin, "validate", spec, "--config", conf)
 			if got := run(bin, "generate", spec, "--config", conf); strings.Contains(got, "created:") {
 				t.Errorf("a generate right after the import created files:\n%s", got)
+			}
+
+			// Importing again over the first import writes the same spec and conf, and leaves
+			// the generated code and handlers as they are.
+			first := treeOf(t, filepath.Join(fixture, "cmd", dir)) + treeOf(t, filepath.Join(fixture, "internal", "cmd", dir))
+			run(bin, frameworkImportCmd(t, tc.framework, append([]string{tc.pkg, "--force"}, tc.args...)...)...)
+			if again := treeOf(t, filepath.Join(fixture, "cmd", dir)) + treeOf(t, filepath.Join(fixture, "internal", "cmd", dir)); again != first {
+				t.Error("a second import changed the imported CLI's files")
 			}
 
 			run("go", append([]string{"mod", "edit", "-require=github.com/go-rotini/rotini@v0.0.0",
@@ -159,6 +211,15 @@ func roundTrip(t *testing.T, cases []importCase) {
 			}
 			if tc.runs != nil {
 				run(filepath.Join(fixture, exe), tc.runs...)
+			}
+			for _, c := range tc.checks {
+				cmd := exec.Command(filepath.Join(fixture, exe), c.args...)
+				cmd.Dir = fixture
+				cmd.Env = append(os.Environ(), c.env...)
+				out, err := cmd.CombinedOutput()
+				if (err != nil) != c.fail || !strings.Contains(string(out), c.want) {
+					t.Errorf("%s %s %s: %v\n%s\nwant fail=%t and output containing %q", strings.Join(c.env, " "), tc.cli, strings.Join(c.args, " "), err, out, c.fail, c.want)
+				}
 			}
 		})
 	}
@@ -326,7 +387,7 @@ func copyFixture(t *testing.T, from string) string {
 }
 
 // importedCLIs are the CLI names the import tests write under cmd/.
-var importedCLIs = []string{"acme", "acme-strict", "acmecli", "dlv", "kubectl", "shell", "tasks"}
+var importedCLIs = []string{"acme", "acme-strict", "acmecli", "dlv", "edge", "kubectl", "shell", "single", "tasks"}
 
 // importFixture copies the corpus program name ("corpus/demo", "network/delve") to a
 // temporary directory, adds a package of its own under internal/cmd, and returns it.

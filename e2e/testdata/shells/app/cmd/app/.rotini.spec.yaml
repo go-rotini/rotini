@@ -157,6 +157,14 @@ command:
           summary: a value with no completion hint
           identifiers: [--note]
           schema: { type: string }
+        - name: input
+          summary: a path type with no hint, which completes files
+          identifiers: [--input]
+          schema: { type: existingfile }
+        - name: root
+          summary: a path type with no hint, which completes directories
+          identifiers: [--root]
+          schema: { type: existingdir }
     - name: deploy
       summary: deploy a service
       flag_groups:

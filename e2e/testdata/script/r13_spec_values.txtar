@@ -1,0 +1,725 @@
+# R13 — the spec's value keys do what their descriptions say: value types, bounds, enums,
+# patterns, lists, object flags, `from`, time and integer spellings, path checks and expansion,
+# on the command line, the environment and a config file, and as help, man, markdown,
+# completion and the contract show them.
+
+gomodinit example.com/vals
+
+exec rotini validate cmd/vals/.rotini.spec.yaml --config cmd/vals/.rotini.conf.yaml
+exec rotini generate cmd/vals/.rotini.spec.yaml --config cmd/vals/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o vals$exe ./cmd/vals
+
+# Value types parse a kind of value; a bool takes every listed spelling, in any case.
+exec ./vals$exe show --b=off --d 1d --day 2026-09-29 --t 2026-09-29T14:00:00Z --u https://x.io/a --email 'Ann <a@b.c>' --tz Europe/Berlin --ip ::1 --cidr 10.0.0.0/8 --hp 1.2.3.4:80 --mac 00:11:22:33:44:55 --size 1.5GiB --hex 0xff --b64 aGk --re 'a+' --g '*.go'
+stdout '^D=24h0m0s$'
+stdout '^Day=2026-09-29 00:00:00 \+0000 UTC$'
+stdout '^U=https://x.io/a$'
+stdout '^Email="Ann" <a@b.c>$'
+stdout '^Tz=Europe/Berlin$'
+stdout '^IP=::1$'
+stdout '^Size=1536Mi$'
+stdout '^Hex=ff$'
+stdout '^B64=aGk=$'
+stdout '^Re=a\+$'
+stdout '^G=\*.go$'
+exec ./vals$exe show --b=T
+stdout '^B=true$'
+exec ./vals$exe show --b=yes
+stdout '^B=true$'
+! exec ./vals$exe show --b=maybe
+stderr '"maybe" is not a valid boolean'
+! exec ./vals$exe show --u /path
+stderr 'a URL needs a scheme and a host'
+! exec ./vals$exe show --tz Mars/Base
+stderr 'not a valid time zone'
+! exec ./vals$exe show --hp 1.2.3.4
+stderr 'not a valid address and port'
+! exec ./vals$exe show --g '['
+stderr 'not a valid glob pattern'
+
+# Bounds read durations and sizes in their own spelling and print them back that way; a
+# bounded number refuses NaN and infinities; minimum 0 is a real bound.
+! exec ./vals$exe show --d 500ms
+stderr '--d must be >= 1s \(got 500ms\)'
+! exec ./vals$exe show --size 10
+stderr '--size must be >= 1Mi \(got 10\)'
+! exec ./vals$exe show --cap 2Ki
+stderr '--cap must be <= 1Ki \(got 2Ki\)'
+! exec ./vals$exe show --step 1500ms
+stderr '--step must be a multiple of 1s'
+! exec ./vals$exe show --f NaN
+stderr '--f must be a finite number'
+! exec ./vals$exe show --f +Inf
+stderr '--f must be a finite number'
+! exec ./vals$exe show --f -1
+stderr '--f must be >= 0'
+! exec ./vals$exe show --lim 0
+stderr '--lim must be > 0'
+! exec ./vals$exe show --lim 3
+stderr '--lim must be a multiple of 2'
+! exec ./vals$exe show --lim 12
+stderr '--lim must be <= 10'
+
+# Lengths count runes, and an item rule written under items applies to each element.
+exec ./vals$exe show --s 'ééé'
+stdout '^S=ééé$'
+! exec ./vals$exe show --s abcde
+stderr 'at most 4 characters'
+! exec ./vals$exe show --words ab --words a
+stderr '--words must be at least 2 characters long \(got 1\)'
+
+# uniqueItems compares values as their type reads them.
+! exec ./vals$exe show --ul 1 --ul 01
+stderr 'must not repeat a value'
+! exec ./vals$exe show --ul 16 --ul 0x10
+stderr 'must not repeat a value'
+! exec ./vals$exe show --ud 1h --ud 60m
+stderr 'must not repeat a value'
+! exec ./vals$exe show --ips ::1 --ips 0:0:0:0:0:0:0:1
+stderr 'must not repeat a value'
+! exec ./vals$exe show --sizes 1Ki --sizes 1024
+stderr 'must not repeat a value'
+! exec ./vals$exe show --modes FAST --modes fast
+stderr 'must not repeat a value'
+! exec ./vals$exe show --times 2026-01-01T00:00:00Z --times 2026-01-01T01:00:00+01:00
+stderr 'must not repeat a value'
+! exec ./vals$exe show --dbs host=a --dbs '{"host":"a"}'
+stderr 'must not repeat a value'
+
+# base: prefixed takes 0x/0o/0b and underscores; an unprefixed value stays decimal.
+exec ./vals$exe show --n 0x1F
+stdout '^N=31$'
+exec ./vals$exe show --n 010
+stdout '^N=10$'
+exec ./vals$exe show --n 1_000
+stdout '^N=1000$'
+! exec ./vals$exe show --n _1
+stderr 'not a valid integer'
+
+# An enum: ignore_case stores the declared spelling; an alias binds as its value; hidden and
+# deprecated values are accepted but left out of the error's list; a quoted number on an int.
+exec ./vals$exe show --mode FAST
+stdout '^Mode=fast$'
+exec ./vals$exe show --fmt yml
+stdout '^Fmt=yaml$'
+exec ./vals$exe show --fmt secret
+stdout '^Fmt=secret$'
+exec ./vals$exe show --fmt xml
+stdout '^Fmt=xml$'
+! exec ./vals$exe show --fmt bogus
+stderr 'invalid value "bogus" for --fmt \(one of: json, yaml\)$'
+exec ./vals$exe show --lvl 2
+stdout '^Lvl=2$'
+! exec ./vals$exe show --lvl 3
+stderr 'one of: 1, 2'
+
+# The enum, ignore_case and base apply to the environment fallback too.
+env VALS_MODE=FAST
+env VALS_N=0x10
+exec ./vals$exe show
+stdout '^Mode=fast$'
+stdout '^N=16$'
+env VALS_MODE=bad
+! exec ./vals$exe show
+stderr 'invalid value "bad" for --mode .*\(from environment variable VALS_MODE\)'
+env VALS_MODE=
+env VALS_N=
+
+# A pattern matches anywhere unless anchored; pattern_message replaces the regex; a named
+# scalar schema brings its pattern, message and lengths.
+exec ./vals$exe show --sub abbbc
+stdout '^Sub=abbbc$'
+! exec ./vals$exe show --sub ac
+stderr '--sub must match b\+ \(got "ac"\)'
+! exec ./vals$exe show --name ABC
+stderr '--name must be lowercase letters \(got "ABC"\)'
+! exec ./vals$exe show --label ABC
+stderr '--label must be lowercase letters \(got "ABC"\)'
+! exec ./vals$exe show --label abcdefg
+stderr '--label must be at most 5 characters'
+
+# A separator splits CSV-style: quotes keep a comma, leading spaces go, "" is an empty list.
+exec ./vals$exe show --tags 'a,"b,c", d' --tags e
+stdout '^Tags=\["a" "b,c" "d" "e"\]$'
+exec ./vals$exe show --tags ''
+! stdout '^Tags=\["'
+exec ./vals$exe show --labels k=v=w --kv a=1,b=2
+stdout '^Labels=map\[k:v=w\]$'
+stdout '^Kv=map\[a:1 b:2\]$'
+! exec ./vals$exe show --labels novalue
+stderr 'expects key=value pairs'
+
+# dotted_keys nests, a later pair wins, and values read as their JSON spelling.
+exec ./vals$exe show --set image.tag=v2 --set replicas=3 --set a=1 --set a.b=2 --set y=null
+stdout '^Set=map\[a:map\[b:2\] image:map\[tag:v2\] replicas:3 y:<nil>\]$'
+
+# implicit_value: bare takes it, the value must be attached, short flags attach too.
+exec ./vals$exe show --color
+stdout '^Color=always$'
+exec ./vals$exe show --color=never
+stdout '^Color=never$'
+exec ./vals$exe show -cnever
+stdout '^Color=never$'
+! exec ./vals$exe show --color never
+stderr '--color takes its value attached: --color=never'
+
+# nullable tells "not given" from zero.
+exec ./vals$exe show --nn 0
+stdout '^Nn=0$'
+exec ./vals$exe show
+! stdout '^Nn='
+
+# from: @file, @@ for a literal @, @./@name for a file starting with @, - for stdin (empty is
+# an error); a value without a marker stays literal; an environment value is always literal.
+exec ./vals$exe show --tok @hello.txt
+stdout '^Tok=hello$'
+exec ./vals$exe show --tok @@alice
+stdout '^Tok=@alice$'
+exec ./vals$exe show --tok @./@name
+stdout '^Tok=at-file$'
+exec ./vals$exe show --tok literal
+stdout '^Tok=literal$'
+! exec ./vals$exe show --tok -
+stderr 'stdin is empty'
+stdin hello.txt
+exec ./vals$exe show --tok -
+stdout '^Tok=hello$'
+
+# A secret's value never appears in an error.
+! exec ./vals$exe show --pin @pin.txt
+stderr '--pin must match .*\[redacted\]'
+! stderr hunter
+
+# layout lists are tried in order and an error names them all; a date read as a Unix timestamp
+# is that day's UTC midnight; relative times.
+exec ./vals$exe show --lay 1700000000
+stdout '^Lay=2023-11-14 00:00:00 \+0000 UTC$'
+! exec ./vals$exe show --lay 01/02/2026
+stderr 'write it as 2006-01-02 or a Unix timestamp'
+exec ./vals$exe show --since yesterday
+stdout '^Since=\d{4}-\d\d-\d\d 00:00:00'
+! exec ./vals$exe show --since +2h
+stderr 'this input takes past times'
+! exec ./vals$exe show --rday 36h
+stderr 'a date moves in whole days'
+exec ./vals$exe show
+stdout '^Ago=\d{4}-'
+
+# An object flag takes JSON, key=value (quotes keep a comma, a repeated key appends), per-field
+# flags and @file; occurrences merge with later keys winning; errors name the key.
+exec ./vals$exe show --db host=h,port=5 --db.pool.max=9
+stdout '^Db=\{Host:h Pool:0x[0-9a-f]+ Port:5 Tags:\[\]\}$'
+exec ./vals$exe show --db 'host="a,b",tags=x,tags=y'
+stdout '^Db=\{Host:a,b Pool:<nil> Port:0 Tags:\[x y\]\}$'
+exec ./vals$exe show --db host=a --db host=b,port=3
+stdout '^Db=\{Host:b Pool:<nil> Port:3'
+exec ./vals$exe show --db @db.yaml
+stdout '^Db=\{Host:fromfile Pool:0x[0-9a-f]+ Port:7'
+exec ./vals$exe show --dbs '{"host":"a"}' --dbs host=b
+stdout '^Dbs=\[\{Host:a Pool:<nil> Port:0 Tags:\[\]\} \{Host:b '
+! exec ./vals$exe show --db '{"host":"h","port":0}'
+stderr '--db: port: value must be >= 1'
+! exec ./vals$exe show --db host=h,bogus=1
+stderr '--db: unknown key "bogus"'
+! exec ./vals$exe show --db port=5
+stderr '--db: missing required property "host"'
+! exec ./vals$exe show --dbs.host=a
+stderr 'unknown flag "--dbs.host"'
+env VALS_DB={"host":"e"}
+exec ./vals$exe show
+stdout '^Db=\{Host:e '
+env VALS_DB=@db.yaml
+! exec ./vals$exe show
+stderr '"@db.yaml" is not key=value'
+env VALS_DB=
+
+# A type with import binds through its UnmarshalText; one without it is refused loudly.
+exec ./vals$exe show --id id-1
+stdout '^ID=\{V:id-1\}$'
+! exec ./vals$exe show --id nope
+stderr '"nope" is not a valid thing.Thing \(must start with id-\)'
+! exec ./vals$exe show --plain v
+stderr 'the type must implement encoding.TextUnmarshaler'
+
+# Path types: existence and kind, inputfile's - once per run, outputfile's directory checks.
+! exec ./vals$exe more --req x --ef nope.txt
+stderr '--ef: no such file'
+! exec ./vals$exe more --req x --dir hello.txt
+stderr '--dir: "hello.txt" is not a directory'
+! exec ./vals$exe more --req x --in - --in2 -
+stderr 'can be given only once'
+! exec ./vals$exe more --req x --out conf
+stderr '--out: "conf" is a directory'
+! exec ./vals$exe more --req x --out nodir/x.txt
+stderr '--out: no such directory'
+
+# expand: env variables, a kept `$`, `$$`, and the errors.
+env FOO=bar
+exec ./vals$exe show --home 'x/$FOO/${FOO}'
+stdout '^Home=x/bar/bar$'
+exec ./vals$exe show --home 'C$ $1 $$'
+stdout '^Home=C\$ \$1 \$$'
+! exec ./vals$exe show --home '$NOPE'
+stderr '\$NOPE is not set'
+! exec ./vals$exe show --home '${X:-y}'
+stderr 'only \$NAME and \$\{NAME\} are expanded'
+
+# required: an empty value is provided; an empty environment fallback is unset.
+exec ./vals$exe more --req ''
+! exec ./vals$exe more
+stderr 'missing required input: --req'
+env VALS_REQ=
+! exec ./vals$exe more
+stderr 'missing required input: --req'
+env VALS_REQ=v
+exec ./vals$exe more
+stdout '^Req=v$'
+
+# minItems applies to a list left out, unless it has a default; a supplied list or map replaces
+# the default; an env list is checked when set.
+! exec ./vals$exe listed
+stderr '--list needs at least 1 value \(got 0\)'
+exec ./vals$exe more --dl c --dm a=b
+stdout '^Dl=\["c"\]$'
+stdout '^Dm=map\[a:b\]$'
+exec ./vals$exe more
+stdout '^Dl=\["a" "b"\]$'
+stdout '^Dm=map\[k:v\]$'
+exec ./vals$exe listed --list a
+env VALS_ELIST=one
+! exec ./vals$exe listed --list a
+stderr 'environment variable VALS_ELIST needs at least 2 values \(got 1\)'
+env VALS_ELIST=
+! exec ./vals$exe listed --list a
+stderr 'environment variable VALS_ELIST needs at least 2 values \(got 0\)'
+
+# Env lists split on commas, or the declared separator, trimming spaces, with no quoting.
+env VALS_PATHS='a: b:c'
+env VALS_TAGS='"x,y",z'
+exec ./vals$exe more
+stdout '^Paths=\["a" "b" "c"\]$'
+stdout '^Tags=\["\\"x" "y\\"" "z"\]$'
+env VALS_PATHS=
+env VALS_TAGS=
+
+# A config file's list binds item by item; ignore_case and relative_to apply to config values;
+# a config value is expanded too.
+exec ./vals$exe more
+stdout '^Cl=\["x" "y,z"\]$'
+stdout '^Ce=slow$'
+stdout '^Cache=.*conf[/\\]cache$'
+env VALS_ENVMODE=SLOW
+exec ./vals$exe more
+stdout '^Envmode=slow$'
+[!windows] env HOME=/h
+[!windows] exec ./vals$exe more
+[!windows] stdout '^Cfgdir=/h/fromconf$'
+
+# separator nul splits a file's content on NUL bytes, byte for byte.
+writebytes nul.bin '"a b\x00c\r\x00"'
+exec ./vals$exe more --z @nul.bin
+stdout '^Z=\["a b" "c\\r"\]$'
+
+# Pages: summaries per enum value (hidden left out, deprecated in man/markdown with its
+# replacement), default_text, a secret's default left out, placeholders, the type name as
+# written, the base note, (- for stdin/stdout) and the implicit value.
+exec ./vals$exe pages help
+stdout '--fmt string +output format \(default json\) \[json\|yaml\]'
+stdout '^ +json +machine readable$'
+! stdout 'secret|xml|yml'
+stdout '--jobs int +parallel jobs \(default the number of CPUs\)'
+stdout '--file PATH +where to read'
+stdout '--token string +api token \(@file\)$'
+! stdout s3cr3t
+stdout '--limit bytesize'
+stdout '--sizes \[\]bytesize'
+stdout '--n int +a number \(accepts 0x, 0o and 0b prefixes\)'
+stdout '--in string +input \(- for stdin\)'
+stdout '--out string +output \(- for stdout\)'
+stdout '--color\[=string\] +when to color \(implicit: always\)'
+stdout 'vals pages \[flags\] \[<TARGET>\]'
+stdout '^  \[<TARGET>\] +what to act on$'
+! stdout '\[target\]'
+exec ./vals$exe pages man
+stdout '^\\fI\[<TARGET>\]\\fR$'
+stdout '\\fByaml\\fR \\- human friendly \(also yml\)'
+stdout '\\fBxml\\fR \(deprecated: no longer maintained; use json instead\)'
+! stdout 's3cr3t|secret'
+exec ./vals$exe pages markdown
+stdout '^- `\[<TARGET>\]` — what to act on$'
+stdout '`yaml` — human friendly \(also yml\)'
+stdout '`xml` \(deprecated: no longer maintained; use json instead\)'
+stdout '`--jobs` `int` — parallel jobs \(default `the number of CPUs`\)'
+! stdout s3cr3t
+exec ./vals$exe pages run --token @tok.txt
+stdout '^fmt=json jobs=4 token=from-file$'
+exec ./vals$exe pages run
+stdout 'token=s3cr3t$'
+
+# Completion offers enum summaries, never hidden, deprecated or alias spellings, and the hint.
+exec ./vals$exe __complete pages --fmt ''
+stdout '^json\tmachine readable$'
+stdout '^yaml\thuman friendly$'
+! stdout 'secret|xml|yml'
+exec ./vals$exe __complete pages --file ''
+stdout '^:rotini:file yaml$'
+exec ./vals$exe __complete pages --id ''
+stdout '^:rotini:none$'
+
+# The contract carries each value's facts.
+grep '"enum_values": \{' cli-contract.json
+grep '"summary": "machine readable"' cli-contract.json
+grep '"replaced_by": "json"' cli-contract.json
+
+-- hello.txt --
+hello
+-- @name --
+at-file
+-- pin.txt --
+hunter22
+-- tok.txt --
+from-file
+-- db.yaml --
+host: fromfile
+port: 7
+pool:
+  max: 3
+-- conf/more.yaml --
+cl: [x, "y,z"]
+ce: SLOW
+cache: ./cache
+dir: ~/fromconf
+-- cmd/vals/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: vals
+  summary: value probes
+  env_prefix: VALS
+  schemas:
+    DB:
+      type: object
+      required: [host]
+      properties:
+        host: { type: string }
+        port: { type: integer, minimum: 1 }
+        pool:
+          type: object
+          properties:
+            max: { type: integer }
+        tags: { type: array, items: { type: string } }
+    Label:
+      type: string
+      pattern: "^[a-z]+$"
+      pattern_message: must be lowercase letters
+      maxLength: 5
+  config_files:
+    - name: main
+      path: vals.yaml
+  commands:
+    - name: show
+      summary: parse values
+      flags:
+        - { name: b, schema: { type: bool } }
+        - { name: d, schema: { type: duration, minimum: 1s } }
+        - { name: day, schema: { type: date } }
+        - { name: t, schema: { type: time } }
+        - { name: u, schema: { type: url } }
+        - { name: email, schema: { type: email } }
+        - { name: tz, schema: { type: timezone } }
+        - { name: ip, schema: { type: ip } }
+        - { name: cidr, schema: { type: cidr } }
+        - { name: hp, schema: { type: hostport } }
+        - { name: mac, schema: { type: mac } }
+        - { name: size, schema: { type: bytesize, minimum: 1Mi } }
+        - { name: cap, schema: { type: bytesize, maximum: 1024 } }
+        - { name: step, schema: { type: duration, multipleOf: 1s } }
+        - { name: hex, schema: { type: hexbytes } }
+        - { name: b64, schema: { type: base64bytes } }
+        - { name: re, schema: { type: regexp } }
+        - { name: g, schema: { type: glob } }
+        - { name: n, schema: { type: int, base: prefixed, key: n } }
+        - { name: tags, schema: { type: "[]string", separator: "," } }
+        - { name: labels, schema: { type: "map[string]string" } }
+        - { name: kv, schema: { type: "map[string]string", separator: "," } }
+        - { name: set, schema: { type: map, dotted_keys: true } }
+        - name: color
+          identifiers: [-c, --color]
+          schema: { type: string, implicit_value: always, default: auto }
+        - { name: mode, schema: { type: string, enum: [fast, slow], ignore_case: true, key: mode } }
+        - name: fmt
+          schema:
+            type: string
+            enum:
+              - { value: json, summary: machine readable }
+              - { value: yaml, summary: human friendly, aliases: [yml] }
+              - { value: secret, hidden: true }
+              - { value: xml, deprecated: no longer maintained, replaced_by: json }
+        - { name: lvl, schema: { type: int, enum: ["1", "2"] } }
+        - { name: name, schema: { type: string, pattern: "^[a-z]+$", pattern_message: must be lowercase letters } }
+        - { name: sub, schema: { type: string, pattern: "b+" } }
+        - { name: label, schema: { $ref: Label } }
+        - { name: f, schema: { type: float64, minimum: 0 } }
+        - { name: lim, schema: { type: int, maximum: 10, exclusiveMinimum: 0, multipleOf: 2 } }
+        - { name: s, schema: { type: string, minLength: 2, maxLength: 4 } }
+        - { name: words, schema: { type: "[]string", items: { minLength: 2 } } }
+        - { name: ul, schema: { type: "[]int", uniqueItems: true, base: prefixed } }
+        - { name: ud, schema: { type: "[]duration", uniqueItems: true } }
+        - { name: ips, schema: { type: "[]ip", uniqueItems: true } }
+        - { name: sizes, schema: { type: "[]bytesize", uniqueItems: true } }
+        - { name: modes, schema: { type: "[]string", enum: [fast, slow], ignore_case: true, uniqueItems: true } }
+        - { name: times, schema: { type: "[]time", uniqueItems: true } }
+        - { name: nn, schema: { type: int, nullable: true } }
+        - { name: tok, schema: { type: string, from: [file, stdin] } }
+        - { name: pin, schema: { type: string, secret: true, from: [file], pattern: "^[0-9]{4}$" } }
+        - { name: lay, schema: { type: date, layout: ["2006-01-02", unix] } }
+        - { name: since, schema: { type: time, relative: past } }
+        - { name: rday, schema: { type: date, relative: past } }
+        - { name: ago, schema: { type: time, relative: past, default: 24h } }
+        - { name: db, schema: { $ref: DB, from: [file], key: db } }
+        - { name: dbs, schema: { type: array, items: { $ref: DB }, uniqueItems: true } }
+        - { name: id, schema: { type: thing.Thing, import: example.com/vals/internal/thing } }
+        - { name: plain, schema: { type: thing.Plain, import: example.com/vals/internal/thing } }
+        - { name: home, schema: { type: string, expand: [home, env] } }
+    - name: more
+      summary: channels and lists
+      config_files:
+        - name: more
+          path: conf/more.yaml
+      flags:
+        - { name: req, schema: { type: string, required: true, key: req } }
+        - { name: dl, schema: { type: "[]string", default: [a, b] } }
+        - { name: dm, schema: { type: "map[string]string", default: { k: v } } }
+        - { name: z, schema: { type: "[]string", separator: nul, from: [file] } }
+        - { name: cl, schema: { type: "[]string", key: cl } }
+        - { name: ce, schema: { type: string, enum: [fast, slow], ignore_case: true, key: ce } }
+        - { name: cache, schema: { type: string, key: cache, relative_to: config } }
+        - { name: cfgdir, schema: { type: string, key: dir, expand: [home] } }
+        - { name: ef, schema: { type: existingfile } }
+        - { name: dir, schema: { type: existingdir } }
+        - { name: in, schema: { type: inputfile } }
+        - { name: in2, schema: { type: inputfile } }
+        - { name: out, schema: { type: outputfile } }
+      env:
+        - { name: paths, schema: { type: "[]string", separator: ":" } }
+        - { name: tags, schema: { type: "[]string" } }
+        - { name: envmode, schema: { type: string, enum: [fast, slow], ignore_case: true } }
+    - name: listed
+      summary: a list that needs a value
+      flags:
+        - { name: list, schema: { type: "[]string", minItems: 1 } }
+      env:
+        - { name: elist, schema: { type: "[]string", minItems: 2 } }
+    - name: pages
+      summary: page facts
+      flags:
+        - name: fmt
+          summary: output format
+          schema:
+            type: string
+            default: json
+            enum:
+              - { value: json, summary: machine readable }
+              - { value: yaml, summary: human friendly, aliases: [yml] }
+              - { value: secret, hidden: true }
+              - { value: xml, deprecated: no longer maintained, replaced_by: json }
+        - { name: jobs, summary: parallel jobs, schema: { type: int, default: 4, default_text: the number of CPUs } }
+        - { name: file, summary: where to read, schema: { type: string, placeholder: PATH, complete: { kind: file, extensions: [yaml] } } }
+        - { name: token, summary: api token, schema: { type: string, secret: true, from: [file], default: s3cr3t } }
+        - { name: limit, summary: memory cap, schema: { type: bytesize } }
+        - { name: sizes, summary: sizes, schema: { type: "[]bytesize" } }
+        - { name: n, summary: a number, schema: { type: int, base: prefixed } }
+        - { name: in, summary: input, schema: { type: inputfile } }
+        - { name: out, summary: output, schema: { type: outputfile } }
+        - { name: color, summary: when to color, schema: { type: string, implicit_value: always } }
+        - { name: id, summary: opaque id, schema: { type: string, complete: { kind: none, message: an id from the server } } }
+      arguments:
+        - { name: target, summary: what to act on, schema: { type: string, placeholder: "<TARGET>" } }
+-- cmd/vals/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/vals/main.go
+    - type: cmd
+      file: internal/cmd/vals/zz_vals.go
+      package: vals
+  features:
+    - type: help
+      enabled: true
+    - type: man
+      enabled: true
+    - type: markdown
+      enabled: true
+    - type: completion
+      enabled: true
+-- internal/thing/thing.go --
+package thing
+
+import (
+	"errors"
+	"strings"
+)
+
+type Thing struct{ V string }
+
+func (t *Thing) UnmarshalText(b []byte) error {
+	if !strings.HasPrefix(string(b), "id-") {
+		return errors.New("must start with id-")
+	}
+	t.V = string(b)
+	return nil
+}
+
+type Plain struct{ V string }
+-- internal/cmd/vals/print.go --
+package vals
+
+import (
+	"fmt"
+	"io"
+	"reflect"
+)
+
+// printSet writes each field that holds a value, one name=value line each.
+func printSet(w io.Writer, s any) {
+	v := reflect.ValueOf(s)
+	for i := range v.NumField() {
+		f := v.Field(i)
+		if f.IsZero() {
+			continue
+		}
+		p := reflect.New(f.Type())
+		p.Elem().Set(f)
+		var x any = f.Interface()
+		if s, ok := x.(fmt.Stringer); ok {
+			x = s.String()
+		} else if s, ok := p.Interface().(fmt.Stringer); ok {
+			x = s.String()
+		} else if f.Kind() == reflect.Pointer {
+			x = f.Elem().Interface()
+		}
+		format := "%s=%+v\n"
+		if _, ok := x.([]string); ok {
+			format = "%s=%q\n"
+		}
+		fmt.Fprintf(w, format, v.Type().Field(i).Name, x)
+	}
+}
+-- internal/cmd/vals/vals_show.go --
+package vals
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type valsShowHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*valsShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ValsShowInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	printSet(rtx.Stdout, in.ValsShow.Flags)
+}
+-- internal/cmd/vals/vals_more.go --
+package vals
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type valsMoreHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*valsMoreHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ValsMoreInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	printSet(rtx.Stdout, in.ValsMore.Flags)
+	printSet(rtx.Stdout, in.ValsMore.Env)
+}
+-- internal/cmd/vals/vals_listed.go --
+package vals
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type valsListedHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*valsListedHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ValsListedInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	printSet(rtx.Stdout, in.ValsListed.Flags)
+}
+-- internal/cmd/vals/vals_pages.go --
+package vals
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type valsPagesHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*valsPagesHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	var text string
+	var err error
+	switch rtx.Argv[len(rtx.Argv)-1] {
+	case "help":
+		text, err = Help("pages")
+	case "man":
+		text, err = Man("pages")
+	case "markdown":
+		text, err = Markdown("pages")
+	default:
+		in, ierr := rtx.Inputs[ValsPagesInputs]()
+		if ierr != nil {
+			rtx.HaltWith(ierr)
+			return
+		}
+		f := in.ValsPages.Flags
+		text = fmt.Sprintf("fmt=%s jobs=%d token=%s", f.Fmt, f.Jobs, f.Token)
+	}
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, text)
+}

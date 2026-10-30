@@ -1,11 +1,15 @@
 package rotinitest_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"iter"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,6 +199,82 @@ func TestRunStdinRefused(t *testing.T) {
 				t.Error("the run didn't fail the test")
 			}
 		})
+	}
+}
+
+// The inputs value's own env inputs win over a variable Env adds; Env's own win over Run's
+// defaults, so a test can point XDG_CONFIG_HOME at a directory it wrote first.
+func TestEnvPrecedence(t *testing.T) {
+	t.Parallel()
+	var in addInputs
+	in.ToolAdd.Env.Key = "from-inputs"
+	xdg := t.TempDir()
+	res := rotinitest.Run(t, newTool[loadJSON](), in, rotinitest.Env("TOOL_KEY=from-option", "XDG_CONFIG_HOME="+xdg))
+	if !strings.Contains(string(res.Stdout), "key=from-inputs") {
+		t.Errorf("stdout = %q, want the inputs value's key", res.Stdout)
+	}
+	var got string
+	for _, kv := range res.Env {
+		if v, ok := strings.CutPrefix(kv, "XDG_CONFIG_HOME="); ok {
+			got = v
+		}
+	}
+	if got != xdg {
+		t.Errorf("XDG_CONFIG_HOME = %q, want the Env option's %q", got, xdg)
+	}
+}
+
+type ctxKey struct{}
+
+// Context replaces the run's context.
+func TestContextOption(t *testing.T) {
+	t.Parallel()
+	def := rotini.Definition{Name: "feed", Handler: "Feed", Inputs: reflect.TypeFor[feedLines]()}
+	p := rotini.NewProgramFunc(def, func(string) (rotini.Handler, bool) {
+		return &handler{run: func(rtx *rotini.Context) {
+			fmt.Fprint(rtx.Stdout, rtx.Context().Value(ctxKey{}))
+		}}, true
+	})
+	ctx := context.WithValue(t.Context(), ctxKey{}, "given")
+	if res := rotinitest.Run(t, p, feedLines{}, rotinitest.Context(ctx)); string(res.Stdout) != "given" {
+		t.Errorf("stdout = %q, want the given context's value\n%s", res.Stdout, res.Stderr)
+	}
+}
+
+type exitSubInputs struct {
+	Ex  struct{ Flags, Arguments struct{} }
+	Sub struct{ Flags, Arguments struct{} }
+}
+
+// Only the invoked command's own exit_status counts: a code its parent documents does not.
+func TestExitDocumented_ownListOnly(t *testing.T) {
+	t.Parallel()
+	def := rotini.Definition{
+		Name: "ex", Handler: "Ex", ExitStatus: []rotini.ExitStatusDef{{Code: 4, Name: "root"}},
+		Commands: []rotini.CommandDef{{Name: "sub", Handler: "ExSub", Inputs: reflect.TypeFor[exitSubInputs]()}},
+	}
+	p := rotini.NewProgramFunc(def, func(string) (rotini.Handler, bool) {
+		return &handler{run: func(rtx *rotini.Context) { rtx.HaltWithCode(4) }}, true
+	})
+	res := rotinitest.Run(t, p, exitSubInputs{})
+	if res.Code != 4 {
+		t.Fatalf("exit %d, want 4", res.Code)
+	}
+	if msg := failure(t, func(tb testing.TB) { rotinitest.ExitDocumented(tb, res) }); !strings.Contains(msg, "ex sub exited 4, and declares no exit_status") {
+		t.Errorf("failure = %q, want the parent's code not to count", msg)
+	}
+}
+
+// Each run gets a fresh working directory of its own.
+func TestRunFreshDir(t *testing.T) {
+	t.Parallel()
+	a := rotinitest.Run(t, newTool[loadJSON](), toolInputs{})
+	b := rotinitest.Run(t, newTool[loadJSON](), toolInputs{})
+	if a.Dir == b.Dir || !filepath.IsAbs(a.Dir) {
+		t.Errorf("dirs %q and %q, want two absolute directories", a.Dir, b.Dir)
+	}
+	if info, err := os.Stat(a.Dir); err != nil || !info.IsDir() {
+		t.Errorf("dir %q: %v", a.Dir, err)
 	}
 }
 

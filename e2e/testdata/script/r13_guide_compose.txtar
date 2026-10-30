@@ -1,0 +1,148 @@
+# R13 — the guide's "Composing CLIs": a mounted child answers help, version and completion for
+# the program running it through the handlers `rotini init` writes; text its spec spells out is
+# shown as written unless set next to the $ref; and it still builds on its own.
+
+gomodinit example.com/acme
+exec rotini init acme
+exec rotini init db
+cp db.spec.yaml cmd/db/.rotini.spec.yaml
+cp db.conf.yaml cmd/db/.rotini.conf.yaml
+exec rotini generate cmd/db/.rotini.spec.yaml --config cmd/db/.rotini.conf.yaml
+cp migrate.go.txt internal/cmd/db/db_migrate.go
+
+exec rotini mount cmd/db/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml
+grep '^    - \$ref: \.\./db/\.rotini\.spec\.yaml$' cmd/acme/.rotini.spec.yaml
+cp acme.conf.yaml cmd/acme/.rotini.conf.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -ldflags '-X main.version=1.2.3' -o acme$exe ./cmd/acme
+exec go build -ldflags '-X main.version=0.9.0' -o db$exe ./cmd/db
+
+# Help inside the child is the parent's: each spelling shows the full path.
+exec ./acme$exe db --help
+stdout '^  acme db \[flags\] <command>$'
+! stderr .
+exec ./acme$exe db help migrate
+stdout '^  acme db migrate$'
+exec ./acme$exe help db migrate
+stdout '^  acme db migrate$'
+exec ./acme$exe db migrate --help
+stdout '^  acme db migrate$'
+
+# The child's footer names its own program, and is shown as written.
+exec ./acme$exe db --help
+stdout '^Run ''db help <command>'' for more\.$'
+
+# version and completion answer for the running program.
+exec ./acme$exe db version
+stdout '^acme 1\.2\.3$'
+exec ./acme$exe db --version
+stdout '^acme 1\.2\.3$'
+exec ./acme$exe db completion zsh
+stdout '^#compdef acme'
+
+# The child runs its own handler, and still builds and runs on its own.
+exec ./acme$exe db migrate
+stdout '^migrated$'
+exec ./db$exe migrate --help
+stdout '^  db migrate$'
+exec ./db$exe version
+stdout '^db 0\.9\.0$'
+exec ./db$exe completion zsh
+stdout '^#compdef db'
+
+# A footer set next to the $ref words it for the parent.
+cp cmd/acme/.rotini.spec.yaml mounted.yaml
+concat cmd/acme/.rotini.spec.yaml mounted.yaml footer.yaml.txt
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go build -ldflags '-X main.version=1.2.3' -o acme$exe ./cmd/acme
+exec ./acme$exe db --help
+stdout '^Run ''acme db help'' for more\.$'
+! stdout 'db help <command>'
+
+-- db.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: manage the database
+  footer: Run 'db help <command>' for more.
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: migrate
+      summary: run migrations
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+    - name: completion
+      summary: print a completion script
+      arguments:
+        - name: shell
+          summary: the shell
+          schema: { type: string, required: true, enum: [bash, zsh, fish, powershell, nushell] }
+-- db.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/db/main.go
+    - type: cmd
+      file: internal/cmd/db/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+-- acme.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+-- footer.yaml.txt --
+      footer: Run 'acme db help' for more.
+-- migrate.go.txt --
+package db
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dbMigrateHandler)(nil)
+
+type dbMigrateHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dbMigrateHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "migrated")
+}

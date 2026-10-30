@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -39,7 +40,7 @@ func TestBoundsProblems(t *testing.T) {
 			switch {
 			case tc.want == "" && len(got) > 0:
 				t.Errorf("got %q, want no problem", got)
-			case tc.want != "" && (len(got) != 1 || !strings.Contains(got[0], tc.want)):
+			case tc.want != "" && (len(got) != 1 || !strings.Contains(got[0].msg, tc.want)):
 				t.Errorf("got %q, want one problem containing %q", got, tc.want)
 			}
 		})
@@ -143,6 +144,42 @@ func TestLintMainDir(t *testing.T) {
 			t.Errorf("%s: %v, want nothing", name, got)
 		case tc.want != "" && (len(got) != 1 || !strings.Contains(got[0].Error(), tc.want)):
 			t.Errorf("%s: %v, want one problem naming %s", name, got, tc.want)
+		}
+	}
+}
+
+// TestLintSkillDescription pins the skill description's limits, counted as generate counts them
+// (the summary gains a full stop and a space before the feature's description), and where each
+// problem is positioned.
+func TestLintSkillDescription(t *testing.T) {
+	t.Parallel()
+	skill := func(enabled bool, desc string) *Conf {
+		return &Conf{Generate: &GenerateConfig{Features: []Feature{{Type: "markdown", Enabled: true}, {Type: "skill", Enabled: enabled, Description: desc}}}}
+	}
+	for name, tc := range map[string]struct {
+		summary string
+		conf    *Conf
+		ptr     string // "" wants no problem
+		kind    string
+	}{
+		"summary only":            {"manage records", skill(true, ""), "", ""},
+		"exactly at the limit":    {strings.Repeat("a", 1000), skill(true, strings.Repeat("b", 22)), "", ""},
+		"one over with full stop": {strings.Repeat("a", 1000), skill(true, strings.Repeat("b", 23)), "/generate/features/1/description", "conf"},
+		"long summary alone":      {strings.Repeat("a", 1024), skill(true, ""), "/command/summary", "spec"},
+		"no description at all":   {"", skill(true, ""), "/generate/features/1", "conf"},
+		"skill off":               {strings.Repeat("a", 2000), skill(false, ""), "", ""},
+		"no generate":             {"", &Conf{}, "", ""},
+	} {
+		got := lintSkillDescription(&Spec{Command: Command{Name: "demo", Summary: tc.summary}}, tc.conf)
+		if tc.ptr == "" {
+			if len(got) != 0 {
+				t.Errorf("%s: %v, want nothing", name, got)
+			}
+			continue
+		}
+		var pr *problem
+		if len(got) != 1 || !errors.As(got[0], &pr) || pr.ptr != tc.ptr || pr.kind != tc.kind || pr.sev != severityError {
+			t.Errorf("%s: %v, want one %s error at %s", name, got, tc.kind, tc.ptr)
 		}
 	}
 }

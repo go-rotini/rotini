@@ -7,6 +7,7 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -62,6 +63,60 @@ func TestByteSize_stringRoundTrips(t *testing.T) {
 	}
 }
 
+// A bare m is decimal, a fraction rounds to the nearest byte, MarshalText is String, and a
+// negative size renders but does not parse back.
+func TestByteSize_documentedEdges(t *testing.T) {
+	for in, want := range map[string]int64{"1m": 1_000_000, "1.0004K": 1000, "1.0006K": 1001, "0.5B": 1} {
+		var b ByteSize
+		if err := b.UnmarshalText([]byte(in)); err != nil || int64(b) != want {
+			t.Errorf("%q = %d (%v), want %d", in, b, err, want)
+		}
+	}
+	for _, n := range []ByteSize{0, 1500, 2 << 30} {
+		if text, err := n.MarshalText(); err != nil || string(text) != n.String() {
+			t.Errorf("MarshalText(%d) = %q, %v; want %q", n, text, err, n.String())
+		}
+	}
+	neg := ByteSize(-1024)
+	if neg.String() != "-1Ki" {
+		t.Errorf("String() = %q, want -1Ki", neg.String())
+	}
+	var back ByteSize
+	if err := back.UnmarshalText([]byte(neg.String())); err == nil {
+		t.Errorf("a negative size parsed back as %d", back)
+	}
+}
+
+type complexInputs struct {
+	App struct {
+		Flags struct {
+			C complex128 `rotini:"c"`
+		}
+	}
+}
+
+type uintptrInputs struct {
+	App struct {
+		Flags struct {
+			U uintptr `rotini:"u"`
+		}
+	}
+}
+
+// complex64, complex128 and uintptr have no parser: a value given for one is refused as the
+// program's mistake, not the user's.
+func TestNoParserTypesAreRefused(t *testing.T) {
+	cdef := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "c", Identifiers: []string{"--c"}, Type: "complex128"}}}
+	_, cerr := NewContextFor(cdef, []string{"--c", "1"}).Inputs[complexInputs]()
+	udef := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "u", Identifiers: []string{"--u"}, Type: "uintptr"}}}
+	_, uerr := NewContextFor(udef, []string{"--u", "1"}).Inputs[uintptrInputs]()
+	for name, err := range map[string]error{"complex128": cerr, "uintptr": uerr} {
+		if err == nil || CategoryOf(err) != CategoryInternal || !strings.Contains(err.Error(), "cannot parse into "+name) {
+			t.Errorf("%s: err = %v, want an internal error saying it can't parse", name, err)
+		}
+	}
+}
+
 func TestHexBytes(t *testing.T) {
 	for _, in := range []string{"deadbeef", "DEADBEEF", "0xdeadbeef", "0XDEADBEEF"} {
 		var h HexBytes
@@ -69,9 +124,52 @@ func TestHexBytes(t *testing.T) {
 			t.Errorf("%q → %q (%v)", in, h.String(), err)
 		}
 	}
-	var h HexBytes
-	if err := h.UnmarshalText([]byte("xyz")); err == nil {
-		t.Error("non-hex accepted")
+	for _, bad := range []string{"xyz", "0x0Xdeadbeef", "0x0xdeadbeef", "abc"} {
+		var h HexBytes
+		if err := h.UnmarshalText([]byte(bad)); err == nil {
+			t.Errorf("%q accepted as %q", bad, h.String())
+		}
+	}
+	if b, err := (HexBytes{0xDE, 0xAD}).MarshalText(); err != nil || string(b) != "dead" {
+		t.Errorf("MarshalText = %q, %v; want lowercase without a prefix", b, err)
+	}
+}
+
+func TestGlob(t *testing.T) {
+	for _, bad := range []string{"[a-", `abc\`, "[]"} {
+		var g Glob
+		if err := g.UnmarshalText([]byte(bad)); err == nil {
+			t.Errorf("malformed %q accepted", bad)
+		}
+		if Glob(bad).Match(bad) || Glob(bad).Match("") {
+			t.Errorf("malformed %q matched", bad)
+		}
+	}
+	var g Glob
+	if err := g.UnmarshalText([]byte("src/*.go")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := g.MarshalText(); string(b) != "src/*.go" {
+		t.Errorf("MarshalText = %q", b)
+	}
+	cases := []struct {
+		pattern, name string
+		want          bool
+	}{
+		{"src/*.go", "src/main.go", true},
+		{"src/*.go", filepath.Join("src", "main.go"), true}, // OS separators read as slashes
+		{"src/*.go", "src/sub/main.go", false},              // * stays within a segment
+		{"src/**.go", "src/sub/main.go", false},             // ** is not recursive
+		{"src/**.go", "src/main.go", true},
+		{"file?.txt", "file1.txt", true},
+		{"[a-c]x", "bx", true},
+		{`\*x`, "*x", true}, // \ escapes
+		{`\*x`, "ax", false},
+	}
+	for _, c := range cases {
+		if got := Glob(c.pattern).Match(c.name); got != c.want {
+			t.Errorf("Glob(%q).Match(%q) = %v, want %v", c.pattern, c.name, got, c.want)
+		}
 	}
 }
 
@@ -87,6 +185,11 @@ func TestBase64Bytes(t *testing.T) {
 	var b Base64Bytes
 	if err := b.UnmarshalText([]byte("not base64!!")); err == nil {
 		t.Error("invalid base64 accepted")
+	}
+	// Written back in the standard, padded alphabet, by MarshalText and String alike.
+	text, err := Base64Bytes("hi?>").MarshalText()
+	if err != nil || string(text) != "aGk/Pg==" || Base64Bytes("hi?>").String() != "aGk/Pg==" {
+		t.Errorf("MarshalText = %q, %v; String = %q; want aGk/Pg==", text, err, Base64Bytes("hi?>").String())
 	}
 }
 

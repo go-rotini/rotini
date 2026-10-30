@@ -340,3 +340,34 @@ command:
 		t.Errorf("file removed: %q", got)
 	}
 }
+
+// SKILL.md tells an agent to preview a destructive command with its dry-run flag only when a
+// command has one: a confirm flag alone is not a preview.
+func TestExports_skillDryRunAdvice(t *testing.T) {
+	const advice = "run it with its dry-run flag"
+	spec := func(role string) string {
+		return `version: 0.0.0
+command:
+  name: app
+  summary: manage things
+  commands:
+    - name: remove
+      summary: remove a thing
+      effects: { kind: destructive }
+      flags:
+        - name: flag
+          identifiers: [--flag]
+          role: ` + role + `
+          schema: { type: bool }
+`
+	}
+	for role, want := range map[string]bool{"confirm": false, "dry-run": true} {
+		page, err := os.ReadFile(filepath.Join(generateSpecModule(t, spec(role), exportsConf), "skills", "app", "SKILL.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(string(page), advice); got != want {
+			t.Errorf("role %s: SKILL.md has the dry-run advice = %v, want %v:\n%s", role, got, want, page)
+		}
+	}
+}

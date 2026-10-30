@@ -514,6 +514,22 @@ func TestProgram_WithContext_cancelHaltsForwardRunsTeardown(t *testing.T) {
 	}
 }
 
+// A cancellation never preempts the hook that is running: it finishes, then the run halts.
+func TestProgram_WithContext_cancelDoesNotPreemptTheHook(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	var order []string
+	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) {
+		cancel(ExitCause(3))
+		order = append(order, "after cancel")
+	}}
+	if code, _ := newLifeProgram(h).WithContext(ctx).Run(nil); code != 3 {
+		t.Errorf("exit = %d, want 3", code)
+	}
+	if !slices.Contains(order, "after cancel") || slices.Contains(order, "PreRun") {
+		t.Errorf("order = %v, want the hook to finish and nothing after it but teardown", order)
+	}
+}
+
 // Canceling without an ExitCause cause halts cleanly and exits 0 (the code falls
 // through to the normal resolution).
 func TestProgram_WithContext_cancelWithoutCodeExitsZero(t *testing.T) {
@@ -1542,6 +1558,25 @@ func TestOutcome_customReporterOwnsTheExitEntirely(t *testing.T) {
 	}
 }
 
+// TestOutcome_customReporterKeepsOrReplacesTheHandlersCode: a custom reporter applies no floor,
+// so a handler's code stands unless the reporter's Exit replaces it.
+func TestOutcome_customReporterKeepsOrReplacesTheHandlersCode(t *testing.T) {
+	for reporterCode, want := range map[int]int{0: 3, 70: 70} {
+		p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) {
+			rtx.RecordError(errors.New("x"))
+			rtx.HaltWithCode(3)
+		}}).WithStdout(io.Discard).WithStderr(io.Discard).
+			WithReporter(func(_ context.Context, rtx *Context, _ Outcome) {
+				if reporterCode != 0 {
+					rtx.Exit(reporterCode)
+				}
+			})
+		if code, _ := p.Run([]string{"run", "x"}); code != want {
+			t.Errorf("reporter code %d: exit = %d, want %d", reporterCode, code, want)
+		}
+	}
+}
+
 // TestOutcome_defaultReporterOrderAndStreams pins the default reporter's order, prefixes and
 // streams. Stdout and stderr share one writer so the order is observable.
 func TestOutcome_defaultReporterOrderAndStreams(t *testing.T) {
@@ -1583,6 +1618,44 @@ func TestOutcome_defaultReporterFloorIsFlat(t *testing.T) {
 				t.Errorf("exit = %d, want the flat floor of 1", code)
 			}
 		})
+	}
+}
+
+// TestOutcome_reporterRunsOnlyForARecord pins that a run recording nothing never calls the
+// reporter, so it exits silently with 0 or the code a handler set.
+func TestOutcome_reporterRunsOnlyForARecord(t *testing.T) {
+	for name, c := range map[string]struct {
+		do   func(*Context)
+		code int
+	}{
+		"nothing":         {func(*Context) {}, 0},
+		"a code":          {func(rtx *Context) { rtx.HaltWithCode(4) }, 4},
+		"a halt, no code": {func(rtx *Context) { rtx.Halt() }, 0},
+	} {
+		called := false
+		p := NewProgram(testDef(), ocProgram{do: c.do}).WithStdout(io.Discard).WithStderr(io.Discard).
+			WithReporter(func(context.Context, *Context, Outcome) { called = true })
+		if code, _ := p.Run([]string{"run", "x"}); code != c.code || called {
+			t.Errorf("%s: exit %d, reporter called %v; want %d and no call", name, code, called, c.code)
+		}
+	}
+}
+
+// TestOutcome_defaultReporterUsesOnlyStderrAndKeepsACode pins that the default reporter leaves
+// stdout to the handlers, and that its floor of 1 never replaces a code a handler set.
+func TestOutcome_defaultReporterUsesOnlyStderrAndKeepsACode(t *testing.T) {
+	var stdout, stderr strings.Builder
+	p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) {
+		rtx.RecordInfo("info")
+		rtx.RecordSuccess("done")
+		rtx.RecordError(errors.New("bad"))
+		rtx.HaltWithCode(3)
+	}}).WithStdout(&stdout).WithStderr(&stderr)
+	if code, _ := p.Run([]string{"run", "x"}); code != 3 {
+		t.Errorf("exit = %d, want the handler's 3 over the floor", code)
+	}
+	if stdout.Len() != 0 || stderr.String() != "info\nError: bad\ndone\n" {
+		t.Errorf("stdout %q, stderr %q; want every record on stderr", stdout.String(), stderr.String())
 	}
 }
 

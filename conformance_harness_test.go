@@ -46,6 +46,8 @@ var wiringFixtures = map[string]wiringFixture{
 	"cat":   {},
 	"cp":    {inputs: typesOf(cpListInputs{})},
 	"files": {inputs: typesOf(fileInputs{})},
+	"mrg":   {meta: InputSettings{ConfigFiles: mrgFiles}},
+	"bnd":   {},
 	"proj":  {meta: InputSettings{ConfigFiles: []ConfigFile{{Name: "proj", Format: "yaml"}}}, inputs: typesOf(pjShowInputs{})},
 	"set":   {meta: InputSettings{ConfigFiles: []ConfigFile{{Name: "main", Format: "yaml"}}}, inputs: typesOf(acSetInputs{})},
 	"ship":  {meta: InputSettings{ConfigFiles: []ConfigFile{{Name: "ship", Format: "yaml"}}}, inputs: typesOf(acShipInputs{})},

@@ -166,3 +166,61 @@ func (*demoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 		t.Errorf("warnings = %q, want one attributing 4 to \"demo\", which doesn't list it", got)
 	}
 }
+
+// TestExitAudit_inheritsRootExitStatus pins that a command without its own exit_status is
+// audited against the root's, constants included, and that a command's own list replaces it.
+func TestExitAudit_inheritsRootExitStatus(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, ".rotini.spec.yaml", `version: 0.0.0
+command:
+  name: demo
+  exit_status:
+    - { code: 0, summary: ok }
+    - { code: 3, name: busy, summary: locked }
+  commands:
+    - name: build
+    - name: check
+      exit_status:
+        - { code: 0, summary: clean }
+        - { code: 5, summary: dirty }
+`)
+	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
+	t.Chdir(dir)
+	gen := func() []error {
+		var notices []error
+		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil, func(n []error) { notices = append(notices, n...) }); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return notices
+	}
+	gen()
+	writeTestFile(t, filepath.Join(dir, "internal", "cmd", "demo"), "codes.go", `package demo
+
+import "github.com/go-rotini/rotini"
+
+func (*demoBuildHandler) bail(c *rotini.Context) {
+	c.Exit(3)
+	c.Exit(DemoExitBusy)
+	c.Exit(7)
+}
+
+func (*demoCheckHandler) bail(c *rotini.Context) {
+	c.Exit(5)
+	c.Exit(3)
+}
+`)
+	var got []string
+	for _, n := range gen() {
+		if strings.Contains(n.Error(), "exit_status") {
+			got = append(got, n.Error())
+		}
+	}
+	want := []string{
+		`internal/cmd/demo/codes.go:8: "demo build" exits with 7, which the exit_status it inherits from "demo" doesn't list`,
+		`internal/cmd/demo/codes.go:13: "demo check" exits with 3, which its exit_status doesn't list`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("warnings =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}

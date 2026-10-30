@@ -4,8 +4,8 @@ import "io"
 
 // Render adapts t to the renderer [rotini.Context.WriteOutput] and
 // [rotini.Context.WriteOutputItem] take: it executes t over the value and ends what it writes
-// with a newline, so a stream gets one line (or more) per item. It ignores the format it is
-// passed.
+// with a newline, so a stream gets one line (or more) per item; the zero Template writes only
+// the newline. It ignores the format it is passed.
 //
 //	rtx.WriteOutput(list, "template", shape.Render[TodoListOutput](in.Flags.Format))
 func Render[T any](t Template) func(io.Writer, string, T) error {

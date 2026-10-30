@@ -23,7 +23,8 @@ import (
 
 // ArgvError is a value [ArgvOf] can't write as a command line: a secret, a config or stdin
 // input, or a value no argv spelling reads back, such as an explicit empty list on a flag
-// without a separator. Field names the input.
+// without a separator. Field names the input. It is a [CategoryInternal] error: the program
+// asked for a command line its inputs can't have.
 type ArgvError struct {
 	Field  FieldPath
 	Reason string
@@ -33,6 +34,9 @@ type ArgvError struct {
 func (e *ArgvError) Error() string {
 	return fmt.Sprintf("rotini: %s: %s", e.Field, e.Reason)
 }
+
+// Unwrap returns [ErrInternal], so errors.Is(err, ErrInternal) holds.
+func (e *ArgvError) Unwrap() error { return ErrInternal }
 
 // ArgvOption configures [ArgvOf].
 type ArgvOption func(*argvConfig)
@@ -99,9 +103,14 @@ func ArgvPath(names ...string) ArgvOption {
 //   - a time its layout can't show exactly.
 //
 // Any other error is the program's mistake: T isn't an inputs type of def, or doesn't match the
-// command it names.
+// command it names. Every error is a [CategoryInternal] one.
 func ArgvOf[T any](def Definition, v T, set Presence, opts ...ArgvOption) (argv, env []string, err error) {
-	return argvOf(runtime.GOOS, def, v, set, opts...)
+	argv, env, err = argvOf(runtime.GOOS, def, v, set, opts...)
+	var ae *ArgvError
+	if err != nil && !errors.As(err, &ae) {
+		err = InternalError(err)
+	}
+	return argv, env, err
 }
 
 // argvOf is [ArgvOf] for a run on goos.

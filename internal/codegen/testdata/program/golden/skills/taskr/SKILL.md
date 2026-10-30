@@ -33,6 +33,10 @@ Taskr keeps a list of tasks in a file and syncs it with a server.
 - 128 + n: stopped by signal n (130 for Ctrl-C).
 - When the program writes structured errors, each is one JSON line on stderr, `{"schema_version":1,"error":{…}}`. Its `category` is `usage` (fix the command line and try again; `kind` says how: unknown-flag, unknown-command, needs-value, invalid-value, enum-violation, constraint-violation, missing-required, too-many-arguments, misplaced-flag), `internal` (a bug or misconfiguration; don't retry) or `none`. `candidates` lists the words a mistyped `token` was checked against.
 
+## Environment
+
+- `TASKR_KEY`: a server key (sets `--key`) (required) (secret: set it in the environment; never write it on the command line)
+
 ## `taskr add`
 
 add a task
@@ -52,6 +56,8 @@ list tasks
 - Also: `ls`
 - Effects: read, idempotent
 - JSON output: add `--format=json`
+- Exit 0: done
+- Exit 69 (offline): the server can't be reached (running it again may succeed)
 - Reference: [references/taskr-list.md](references/taskr-list.md)
 
 ## `taskr purge`
@@ -69,6 +75,8 @@ delete finished tasks
 add tasks read from stdin
 
 - Effects: write
+- Exit 0: done
+- Exit 69 (offline): the server can't be reached (running it again may succeed)
 - Reference: [references/taskr-import.md](references/taskr-import.md)
 
 ## `taskr remote sync`
@@ -76,6 +84,8 @@ add tasks read from stdin
 sync with the server
 
 - Effects: destructive, open world
+- Exit 0: done
+- Exit 69 (offline): the server can't be reached (running it again may succeed)
 - Reference: [references/taskr-remote-sync.md](references/taskr-remote-sync.md)
 
 ## `taskr remote show`
@@ -83,6 +93,8 @@ sync with the server
 show the server's address
 
 - Effects: read
+- Exit 0: done
+- Exit 69 (offline): the server can't be reached (running it again may succeed)
 - Reference: [references/taskr-remote-show.md](references/taskr-remote-show.md)
 
 ## `taskr remote login`
@@ -90,4 +102,6 @@ show the server's address
 log in with a key file
 
 - Effects: write, open world
+- Exit 0: done
+- Exit 69 (offline): the server can't be reached (running it again may succeed)
 - Reference: [references/taskr-remote-login.md](references/taskr-remote-login.md)

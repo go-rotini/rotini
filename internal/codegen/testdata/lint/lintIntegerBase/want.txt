@@ -1,5 +1,5 @@
-spec: .rotini.spec.yaml:46:7: command demo: flag "big": `default` 0x100 is above the declared `maximum` 255; every run that leaves it unset would fail
-spec: .rotini.spec.yaml:40:7: command demo: flag "bad": `default` "0x_" is not a valid integer; every run that leaves it unset would fail
-spec: .rotini.spec.yaml:29:7: command demo: flag "name": sets `base` but its type is string; `base: prefixed` reads 0x, 0o and 0b integer literals, so it applies to the int and uint types and lists of them
-spec: .rotini.spec.yaml:34:7: command demo: flag "ratio": sets `base` but its type is float64; `base: prefixed` reads 0x, 0o and 0b integer literals, so it applies to the int and uint types and lists of them
-spec: .rotini.spec.yaml:59:7: command demo: env "umask": `default` "1__0" is not a valid integer; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:60:18: command demo: flag "big": `default` 0x100 is above the declared `maximum` 255; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:46:18: command demo: flag "plain": `default` "0x1p4" is not a valid number; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:53:18: command demo: flag "bad": `default` "0x_" is not a valid integer; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:40:15: command demo: flag "name": sets `base` but its type is string; `base: prefixed` reads 0x, 0o and 0b literals and hexadecimal floats, so it applies to the int, uint and float types and lists of them
+spec: .rotini.spec.yaml:71:18: command demo: env "umask": `default` "1__0" is not a valid integer; every run that leaves it unset would fail

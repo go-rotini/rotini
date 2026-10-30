@@ -18,9 +18,9 @@
 //	exists cmd/demo/main.go    a path must exist
 //	wantexit 2 ./app --bad     run a command and assert its exact exit status
 //
-// wantexit, execout, gomodinit, nodeps, sizebelow, nosym, writebytes, genlines, heldstdin and
-// rssbelow are rotini's own commands, and pinnedgo its own condition; `! exec` only proves
-// a non-zero exit.
+// wantexit, execout, gomodinit, nodeps, sizebelow, nosym, concat, writebytes, genlines,
+// heldstdin, rssbelow, proxymodule and goproxy are rotini's own commands, and pinnedgo its own
+// condition; `! exec` only proves a non-zero exit.
 //
 // # Script names
 //
@@ -39,6 +39,8 @@
 //	r10  structured output
 //	r11  a lean runtime: linked packages, binary size
 //	r12  the guide's recipes: each recipe's code, built and run
+//	r13  the guide's other claims: stated behaviour, defaults and shown output, per section
+//	r14  whole CLIs built as a user would, from init to the shell, covering many areas at once
 package e2e
 
 import (

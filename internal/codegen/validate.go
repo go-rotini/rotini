@@ -197,8 +197,12 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 			}
 			return msg
 		}
-	case "anyOf":
+	case "oneOf":
 		// A choice between forms of one value says what the forms are in its `x-hint`.
+		if hint := schemaHint(strings.TrimSuffix(loc, "/oneOf")); hint != "" {
+			return patternSubject(ve.InstanceLocation) + " " + hint
+		}
+	case "anyOf":
 		if hint := schemaHint(strings.TrimSuffix(loc, "/anyOf")); hint != "" {
 			return patternSubject(ve.InstanceLocation) + " " + hint
 		}

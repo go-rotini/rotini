@@ -114,7 +114,7 @@ func readContract(source, contractFile string) ([]byte, error) {
 	switch {
 	case strings.HasPrefix(source, modScheme):
 		return readModContract(source)
-	case strings.HasPrefix(source, gitSource) && !strings.HasPrefix(source, gitScheme):
+	case strings.HasPrefix(source, gitSource) && !strings.HasPrefix(source, "git::"):
 		return readGitContract(strings.TrimPrefix(source, gitSource), contractFile)
 	}
 	b, err := os.ReadFile(source)

@@ -19,6 +19,19 @@ stderr 'output file "report\.json" already exists'
 exec ./teedemo$exe export -o report.json --force
 cmp stdout report.json
 
+# A run that fails part-way, here at a stdout that refuses every write, leaves the earlier file
+# as it was.
+cp old.json report.json
+[linux] ! execout /dev/full ./teedemo$exe export -o report.json --force
+[linux] cmp report.json old.json
+
+# With -o - the output goes to stdout twice.
+exec ./teedemo$exe export -o -
+stdout -count=2 '"count": 3'
+
+-- old.json --
+{"count": 0}
+
 -- export.go.txt --
 package teedemo
 

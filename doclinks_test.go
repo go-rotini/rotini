@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"go/ast"
+	"go/doc"
 	"regexp"
 	"sort"
 	"strings"
@@ -105,6 +106,18 @@ func TestDocLinksResolve(t *testing.T) {
 	for _, f := range d.Funcs {
 		check("func "+f.Name, f.Doc)
 	}
+	checkValues := func(values []*doc.Value) {
+		for _, v := range values {
+			check("value "+v.Names[0], v.Doc)
+			for _, spec := range v.Decl.Specs {
+				if vs, ok := spec.(*ast.ValueSpec); ok {
+					check("value "+vs.Names[0].Name, vs.Doc.Text()+vs.Comment.Text())
+				}
+			}
+		}
+	}
+	checkValues(d.Consts)
+	checkValues(d.Vars)
 	for _, ty := range d.Types {
 		check("type "+ty.Name, ty.Doc)
 		for _, m := range ty.Methods {
@@ -112,6 +125,23 @@ func TestDocLinksResolve(t *testing.T) {
 		}
 		for _, f := range ty.Funcs {
 			check("func "+f.Name, f.Doc)
+		}
+		checkValues(ty.Consts)
+		checkValues(ty.Vars)
+		// Field and interface-method comments are docs too, and carry links of their own.
+		if ts, ok := ty.Decl.Specs[0].(*ast.TypeSpec); ok {
+			var fields *ast.FieldList
+			switch t := ts.Type.(type) {
+			case *ast.StructType:
+				fields = t.Fields
+			case *ast.InterfaceType:
+				fields = t.Methods
+			}
+			if fields != nil {
+				for _, fld := range fields.List {
+					check("field of "+ty.Name, fld.Doc.Text()+fld.Comment.Text())
+				}
+			}
 		}
 	}
 

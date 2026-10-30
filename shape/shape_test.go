@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -284,6 +285,69 @@ func TestRenderError(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("wrote %q", buf.String())
+	}
+}
+
+// Render ignores the format it is passed, and a zero Template renders an empty line.
+func TestRenderIgnoresFormat(t *testing.T) {
+	render := Render[task](mustParse(t, `{{.title}}`))
+	for _, format := range []string{"", "json", "anything"} {
+		var buf bytes.Buffer
+		if err := render(&buf, format, task{Title: "x"}); err != nil || buf.String() != "x\n" {
+			t.Errorf("format %q: %q, %v", format, buf.String(), err)
+		}
+	}
+	var buf bytes.Buffer
+	if err := Render[task](Template{})(&buf, "template", task{}); err != nil || buf.String() != "\n" {
+		t.Errorf("zero Template: %q, %v", buf.String(), err)
+	}
+}
+
+// level encodes itself only as text, so a template sees that text.
+type level int
+
+func (l level) MarshalText() ([]byte, error) { return []byte("lvl-" + strconv.Itoa(int(l))), nil }
+
+func TestExecuteTextEncoding(t *testing.T) {
+	v := struct {
+		L level `json:"l"`
+	}{L: 3}
+	if got := execute(t, `{{.l}}`, v); got != "lvl-3" {
+		t.Errorf("got %q, want the text encoding", got)
+	}
+}
+
+func TestZeroTemplateText(t *testing.T) {
+	var tmpl Template
+	text, err := tmpl.MarshalText()
+	if err != nil || len(text) != 0 || tmpl.String() != "" {
+		t.Errorf("MarshalText %q, %v; String %q", text, err, tmpl.String())
+	}
+	tmpl = mustParse(t, `{{.title}}`)
+	if err := tmpl.UnmarshalText([]byte("")); err != nil || !tmpl.IsZero() {
+		t.Errorf("empty text after a template: %v, zero %v", err, tmpl.IsZero())
+	}
+}
+
+// A template that does not parse is a usage error when the flag is read.
+func TestFlagParseErrorIsUsage(t *testing.T) {
+	type in struct {
+		App struct {
+			Flags struct {
+				Format Template `rotini:"format"`
+			}
+			Arguments struct{}
+		}
+	}
+	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{{Name: "format", Identifiers: []string{"--format"}, Type: "shape.Template"}}}
+	_, err := rotini.NewContextFor(def, []string{"--format", "{{"}).Inputs[in]()
+	var pe *rotini.ParseError
+	if !errors.As(err, &pe) || rotini.CategoryOf(err) != rotini.CategoryUsage {
+		t.Fatalf("err = %v, want a usage *ParseError", err)
+	}
+	got, err := rotini.NewContextFor(def, []string{"--format", "{{.title}}"}).Inputs[in]()
+	if err != nil || got.App.Flags.Format.String() != "{{.title}}" {
+		t.Fatalf("Format = %q, %v", got.App.Flags.Format.String(), err)
 	}
 }
 

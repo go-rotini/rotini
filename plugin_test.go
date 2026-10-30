@@ -84,6 +84,34 @@ func TestRun_pluginNotFound(t *testing.T) {
 	}
 }
 
+// TestRun_pluginStartFailedSaysWhy pins the start failure of a plugin found in the plugin path
+// that is not executable: a PluginStartFailed whose message says why in rotini's words, with the
+// OS error kept as the cause.
+func TestRun_pluginStartFailedSaysWhy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no execute bit; a file it can't run is not found instead")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "app-noexec")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	def := Definition{Name: "app", Handler: "App", PluginPath: dir, Plugins: []PluginDef{{Name: "noexec", Binary: "app-noexec"}}}
+
+	p, _, _ := pluginProgram(def, []string{"noexec"})
+	_, err := p.Run(p.args)
+	re, ok := errors.AsType[*PluginError](err)
+	if !ok || re.Kind != PluginStartFailed || CategoryOf(err) != CategoryInternal {
+		t.Fatalf("err = %v, want an internal PluginStartFailed", err)
+	}
+	if want := `noexec: could not start ` + quotePath(bin) + `: permission denied`; re.Msg != want {
+		t.Errorf("Msg = %q, want %q", re.Msg, want)
+	}
+	if !errors.Is(err, os.ErrPermission) {
+		t.Errorf("errors.Is(err, os.ErrPermission) = false; the cause is lost")
+	}
+}
+
 func TestRun_discoveryDispatch(t *testing.T) {
 	writeFakeBinary(t, "acme-foo", "#!/bin/sh\necho \"plugin: $*\"\nexit 0\n")
 	def := Definition{Name: "acme", Handler: "App", PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}}
@@ -189,6 +217,34 @@ func TestRun_pluginTimeout(t *testing.T) {
 	}
 }
 
+// A plugin binary that exists but cannot start is an internal *PluginError of kind spawn-failed,
+// declared or discovered, with the OS cause reachable and no Timeout.
+func TestRun_pluginStartFailedIsInternal(t *testing.T) {
+	writeFakeBinary(t, "acme-broken", "#!/no/such/interpreter\n")
+	def := Definition{
+		Name: "acme", Handler: "App",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"},
+		Plugins:         []PluginDef{{Name: "declared", Binary: "acme-broken"}},
+	}
+	for _, word := range []string{"declared", "broken"} {
+		p, _, _ := pluginProgram(def, []string{word})
+		code, err := p.Run(p.args)
+		var pe *PluginError
+		if !errors.As(err, &pe) || pe.Kind != PluginStartFailed {
+			t.Fatalf("%s: err = %v, want a spawn-failed *PluginError", word, err)
+		}
+		if CategoryOf(err) != CategoryInternal {
+			t.Errorf("%s: CategoryOf = %v, want internal", word, CategoryOf(err))
+		}
+		if pe.Cause == nil || !errors.Is(err, pe.Cause) || pe.Timeout != 0 {
+			t.Errorf("%s: Cause = %v, Timeout = %s; want a reachable cause and no timeout", word, pe.Cause, pe.Timeout)
+		}
+		if code != 1 {
+			t.Errorf("%s: exit = %d, want 1", word, code)
+		}
+	}
+}
+
 // TestPluginBinary pins that Command.PluginBinary resolves declared plugins, aliases and
 // discovered tokens through the same plugin path dispatch uses.
 func TestPluginBinary(t *testing.T) {
@@ -258,6 +314,88 @@ func TestPluginBinary(t *testing.T) {
 			t.Errorf("alias gave (%q, %t), name gave (%q, %t)", byAlias, okAlias, byName, okName)
 		}
 	})
+}
+
+// A word that differs only in case from a declared command, hidden alias, plugin or plugin
+// alias never reaches discovery, even where a binary of exactly that spelling exists: it is an
+// unknown command carrying the declared names, whatever the filesystem's case rules.
+func TestRun_discoveryIgnoresCaseVariantsOfDeclaredNames(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	words := []string{"ST", "Status", "SYNC", "SY"}
+	for _, w := range words {
+		body := "#!/bin/sh\ntouch " + marker + "\n"
+		if err := os.WriteFile(filepath.Join(dir, progFile("app-"+w)), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	def := Definition{
+		Name: "app", Handler: "App", PluginPath: dir,
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "app-"},
+		Plugins:         []PluginDef{{Name: "sync", Aliases: []string{"sy"}, Binary: "app-sync-nothing-here", Timeout: time.Second}},
+		Commands:        []CommandDef{{Name: "status", Handler: "AppRun", HiddenAliases: []string{"st"}}},
+	}
+	for _, w := range words {
+		t.Run(w, func(t *testing.T) {
+			p, _, errb := pluginProgram(def, []string{w})
+			code, err := p.Run(p.args)
+			if code != 1 || CategoryOf(err) != CategoryUsage {
+				t.Errorf("Run = %d, %v; want 1 and a usage error", code, err)
+			}
+			pe, ok := errors.AsType[*ParseError](err)
+			if !ok || pe.Kind != ParseKindUnknownCommand || pe.Token != w {
+				t.Fatalf("err = %v, want an unknown-command ParseError for %q", err, w)
+			}
+			if !slices.Equal(pe.Candidates, []string{"status", "sync", "sy"}) {
+				t.Errorf("Candidates = %q", pe.Candidates)
+			}
+			if want := "Error: unknown command \"" + w + "\" for \"app\"\n"; errb.String() != want {
+				t.Errorf("stderr = %q, want %q", errb.String(), want)
+			}
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatal("a case variant of a declared name ran a discovered binary")
+			}
+			if p, ok := rootFrame(def).PluginBinary(w); ok {
+				t.Errorf("PluginBinary(%q) = %q, want no plugin", w, p)
+			}
+		})
+	}
+	for _, p := range rootFrame(def).DiscoveredPlugins() {
+		if slices.Contains(words, p.Name) {
+			t.Errorf("DiscoveredPlugins lists %q, a case variant of a declared name", p.Name)
+		}
+	}
+}
+
+// A plugin whose binary is the running program, through a symbolic or a hard link, is refused
+// rather than started, so a multicall link named after the plugin's binary can't run itself.
+func TestRun_pluginThatIsTheRunningBinaryIsRefused(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skip(err)
+	}
+	for name, link := range map[string]func(string, string) error{"symlink": os.Symlink, "hard link": os.Link} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, progFile("app-self"))
+			if err := link(exe, bin); err != nil {
+				t.Skipf("cannot create a %s here: %v", name, err)
+			}
+			def := Definition{Name: "app", Handler: "App", PluginPath: dir, Plugins: []PluginDef{{Name: "self", Binary: "app-self"}}}
+			p, out, _ := pluginProgram(def, []string{"self", "-test.run=^$"})
+			code, err := p.Run(p.args)
+			pe, ok := errors.AsType[*PluginError](err)
+			if code != 1 || !ok || pe.Kind != PluginStartFailed || CategoryOf(err) != CategoryInternal {
+				t.Fatalf("Run = %d, %v; want 1 and an internal PluginStartFailed", code, err)
+			}
+			if want := "self: " + quotePath(bin) + " is this program itself"; !strings.HasPrefix(pe.Msg, want) {
+				t.Errorf("Msg = %q, want it to start %q", pe.Msg, want)
+			}
+			if out.Len() != 0 {
+				t.Errorf("stdout = %q; the binary was started", out.String())
+			}
+		})
+	}
 }
 
 // TestRun_pluginHonorsProgramStdin pins that a plugin reads the Program's stdin, not the

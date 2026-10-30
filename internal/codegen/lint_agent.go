@@ -25,15 +25,10 @@ func raisesEffects(cmd, flag *Effects) bool {
 	return flag.OpenWorld != nil && *flag.OpenWorld && (cmd.OpenWorld == nil || !*cmd.OpenWorld)
 }
 
-// lintEffects checks `effects`: a flag's only raise its command's, which must declare its own,
-// and a `$ref` node takes the child's, since the child's handler is what runs.
+// lintEffects checks `effects`: a flag's only raise its command's, which must declare its own.
 func lintEffects(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, cmdPath, ptr string) {
-		if c.Ref != "" && c.Effects != nil {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/effects", loc: "command " + cmdPath,
-				msg: "sets `effects` on a `$ref` node; the child's handler is what runs, so declare its effects in the child spec"})
-		}
 		for i, f := range c.Flags {
 			if f.Effects == nil {
 				continue
@@ -59,7 +54,7 @@ var pageTypes = []string{"int", "int8", "int16", "int32", "int64", "uint", "uint
 // lintFlagRoles checks the roles a program driving the CLI reads (dry-run, confirm,
 // machine-output, page): their flag types, `role_value`, each at most once per command
 // counting the cascading flags it inherits, and a warning for a destructive command that
-// offers neither a preview nor a confirmation.
+// offers agents neither a preview nor a confirmation, unless `agent: false` keeps it from them.
 func lintFlagRoles(spec *Spec) []error {
 	var problems []error
 	walkChainsAt(spec, func(chain []*Command, cmdPath, ptr string) {
@@ -69,16 +64,14 @@ func lintFlagRoles(spec *Spec) []error {
 			own[f.Name] = true
 		}
 		inherited := map[string]string{} // role → the inherited cascading flag that has it
+		var roleFlags []FlagInput        // the command's flags with an agent role, inherited ones too
 		for _, a := range chain[:len(chain)-1] {
 			for _, f := range a.Flags {
 				if f.Cascading && isAgentRole(f.Role) && !own[f.Name] {
 					inherited[f.Role] = f.Name
+					roleFlags = append(roleFlags, f)
 				}
 			}
-		}
-		has := map[string]bool{}
-		for r := range inherited {
-			has[r] = true
 		}
 		for i, f := range c.Flags {
 			fptr := fmt.Sprintf("%s/flags/%d", ptr, i)
@@ -91,7 +84,7 @@ func lintFlagRoles(spec *Spec) []error {
 			if !isAgentRole(f.Role) {
 				continue
 			}
-			has[f.Role] = true
+			roleFlags = append(roleFlags, f)
 			if prev, ok := inherited[f.Role]; ok {
 				add("/role", fmt.Sprintf("has role %s, which the cascading flag %q this command inherits already has; a command gives each role to one flag", f.Role, prev))
 			}
@@ -109,12 +102,26 @@ func lintFlagRoles(spec *Spec) []error {
 				}
 			}
 		}
-		if c.Effects != nil && c.Effects.Kind == "destructive" && !has["dry-run"] && !has["confirm"] {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/effects", loc: "command " + cmdPath, sev: severityWarning,
-				msg: "is destructive but has no flag with `role: dry-run` or `role: confirm`; an agent can neither preview it nor confirm it without a prompt"})
+		agentOff := slices.ContainsFunc(chain, func(a *Command) bool { return a.Agent != nil && !*a.Agent })
+		if p := unsafeDestructive(c, roleFlags, cmdPath, ptr); p != nil && !agentOff {
+			problems = append(problems, p)
 		}
 	})
 	return problems
+}
+
+// unsafeDestructive warns about a destructive command whose role flags offer agents neither a
+// preview nor a confirmation, or returns nil.
+func unsafeDestructive(c *Command, roleFlags []FlagInput, cmdPath, ptr string) error {
+	if c.Effects == nil || c.Effects.Kind != "destructive" || slices.ContainsFunc(roleFlags, previewOffered) {
+		return nil
+	}
+	msg := "is destructive but has no flag with `role: dry-run` or `role: confirm`"
+	if slices.ContainsFunc(roleFlags, func(f FlagInput) bool { return f.Role == "dry-run" || f.Role == "confirm" }) {
+		msg = "is destructive but agents are offered none of its `role: dry-run` or `role: confirm` flags (each is hidden, deprecated or `agent: false`)"
+	}
+	return &problem{kind: "spec", ptr: ptr + "/effects", loc: "command " + cmdPath, sev: severityWarning,
+		msg: msg + "; an agent can neither preview it nor confirm it without a prompt"}
 }
 
 // machineOutputProblems checks one `role: machine-output` flag: a bool flag, or a string flag
@@ -189,7 +196,7 @@ func agentCommandWarning(chain []*Command, cmdPath, ptr string) error {
 	case offAt != "":
 		msg = fmt.Sprintf("has `agent: true`, which has no effect: command %q has `agent: false`, which keeps its whole subtree from agents", offAt)
 	case !commandOutByDefault(c, hiddenAbove):
-		msg = "has `agent: true`, which has no effect: the command is offered to agents already; `agent: true` brings back a hidden, deprecated, passthrough or group command"
+		msg = "has `agent: true`, which has no effect: the command is offered to agents already; `agent: true` brings back a hidden, deprecated or passthrough command, or one with sub-commands and no arguments"
 	default:
 		return nil
 	}
@@ -215,7 +222,7 @@ func agentInputWarnings(c *Command, cmdPath, ptr string) []error {
 		switch {
 		case !on(f.Agent):
 		case f.Role == "machine-output":
-			warn(at, "flag", f.Name, "tool exports select JSON with the machine-output flag themselves, so it is never a tool parameter")
+			warn(at, "flag", f.Name, "the machine-output flag is never a tool parameter; tool exports add it to every call themselves unless it has `agent: false`")
 		case f.Schema != nil && f.Schema.Secret:
 			secret(at, "flag", f.Name, f.Schema)
 		case !flagOutByDefault(f):
@@ -249,9 +256,10 @@ func agentInputWarnings(c *Command, cmdPath, ptr string) []error {
 }
 
 // commandOutByDefault reports whether a command is left out of agent outputs unless it says
-// `agent: true`: hidden (itself or an ancestor), deprecated, a group command, or passthrough.
+// `agent: true`: hidden (itself or an ancestor), deprecated, passthrough, or with sub-commands and
+// no arguments (it prints help when run bare).
 func commandOutByDefault(c *Command, hiddenAbove bool) bool {
-	if hiddenAbove || c.Hidden || c.Deprecated != "" || len(c.Commands) > 0 || c.Passthrough {
+	if hiddenAbove || c.Hidden || c.Deprecated != "" || (len(c.Commands) > 0 && len(c.Arguments) == 0) || c.Passthrough {
 		return true
 	}
 	return slices.ContainsFunc(c.Arguments, func(a ArgumentInput) bool { return a.Passthrough })
@@ -261,6 +269,12 @@ func commandOutByDefault(c *Command, hiddenAbove bool) bool {
 // `agent: true`.
 func flagOutByDefault(f FlagInput) bool {
 	return f.ShortCircuit || f.Role == "chdir" || inputOutByDefault(f.Hidden, f.Deprecated, f.Schema)
+}
+
+// previewOffered reports whether a flag is a dry-run or confirm flag agents are offered, as
+// the agent exports decide it.
+func previewOffered(f FlagInput) bool {
+	return (f.Role == "dry-run" || f.Role == "confirm") && flagParam(f)
 }
 
 // inputOutByDefault reports whether an input is left out of tool parameters unless it says
@@ -296,7 +310,7 @@ func lintFeatureKeys(conf *Conf) []error {
 	}
 	var problems []error
 	add := func(i int, f Feature, key string, sev severity, msg string) {
-		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg})
+		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i) + "/" + key, loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg})
 	}
 	for i, f := range conf.Generate.Features {
 		for _, k := range programFeatureKeys {
@@ -315,7 +329,7 @@ func lintFeatureKeys(conf *Conf) []error {
 func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []error {
 	var problems []error
 	add := func(key string, sev severity, msg string) {
-		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg})
+		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i) + "/" + key, loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg})
 	}
 	if clean := path.Clean(filepath.ToSlash(f.File)); f.File != "" && (clean == ".." || strings.HasPrefix(clean, "../")) {
 		add("file", severityError, fmt.Sprintf("%s must resolve under the module root", quotePath(f.File)))
@@ -326,6 +340,9 @@ func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []e
 		add("template", severityWarning, f.Type+" is built in Go and has no editable template; `template` and `template_dir` have no effect here")
 	case f.TemplateDir != "" && !f.Template:
 		add("template_dir", severityWarning, "is set but `template` is false; `template_dir` is used only when the editable template is seeded (`template: true`); it is otherwise ignored")
+	}
+	if f.Type == "tools" && f.McpRevision != "" && len(f.Targets) > 0 && !slices.Contains(f.Targets, "mcp") {
+		add("mcp_revision", severityError, "sets the revision mcp.json is written for, but `targets` doesn't include mcp, so it would be silently ignored; add mcp or remove `mcp_revision`")
 	}
 	md := conf.Generate.featureOf("markdown")
 	mdOn := md != nil && md.Enabled
@@ -340,17 +357,65 @@ func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []e
 	return problems
 }
 
+// lintLlmsBaseURL warns about an llms feature `base_url` that doesn't end in "/": llms.txt links
+// each page as `base_url` followed by its file name, so https://x/app would link
+// https://x/appapp-list.md.
+func lintLlmsBaseURL(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	for i, f := range conf.Generate.Features {
+		if f.Type != "llms" || f.BaseUrl == "" || strings.HasSuffix(f.BaseUrl, "/") {
+			continue
+		}
+		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i) + "/base_url", loc: "generate.features.llms.base_url", sev: severityWarning,
+			msg: fmt.Sprintf("%q doesn't end in \"/\"; each link is `base_url` followed by the page's file name, so links read %q; end it with \"/\"", f.BaseUrl, f.BaseUrl+"<page>.md")})
+	}
+	return problems
+}
+
+// lintSkillDescription checks the enabled skill feature's SKILL.md `description`, the root's
+// summary followed by the feature's `description`: it must be set, and at most 1024
+// characters. The problem is positioned at the feature's `description` when it has one, else
+// at the root's summary.
+func lintSkillDescription(spec *Spec, conf *Conf) []error {
+	if spec == nil || conf == nil || conf.Generate == nil {
+		return nil
+	}
+	i := slices.IndexFunc(conf.Generate.Features, func(f Feature) bool { return f.Type == "skill" && f.Enabled })
+	if i < 0 {
+		return nil
+	}
+	f := conf.Generate.Features[i]
+	const loc = "generate.features.skill.description"
+	n := len([]rune(skillDescription(spec.Command.Summary, f.Description)))
+	switch {
+	case n == 0:
+		return []error{&problem{kind: "conf", ptr: featurePointer(i), loc: loc,
+			msg: "the skill needs a description, and the root command has no summary to start it; give the root a summary, or set `description`"}}
+	case n <= skillDescriptionLimit:
+		return nil
+	}
+	msg := fmt.Sprintf("the skill's description, the root's summary followed by this `description`, is %d characters; the Agent Skills format allows %d, so shorten it", n, skillDescriptionLimit)
+	if f.Description == "" {
+		return []error{&problem{kind: "spec", ptr: "/command/summary", loc: "command " + spec.Command.Name + " summary",
+			msg: fmt.Sprintf("is the skill's description, and is %d characters; the Agent Skills format allows %d, so shorten it", n, skillDescriptionLimit)}}
+	}
+	return []error{&problem{kind: "conf", ptr: featurePointer(i) + "/description", loc: loc, msg: msg}}
+}
+
 // embedKnobProblems checks `embed` and `embed_dir` on a whole-program feature: only
 // config_example and env_example put text in the binary, so only they take them.
 func embedKnobProblems(i int, f Feature, pf programFeature) []error {
 	at := func(key string, sev severity, msg string) error {
-		return &problem{kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg}
+		return &problem{kind: "conf", ptr: featurePointer(i) + "/" + key, loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg}
 	}
 	switch {
 	case pf.accessor && f.EmbedDir != "" && !f.Embed:
 		return []error{at("embed_dir", severityWarning, "is set but `embed` is false; `embed_dir` is used only in embed mode (//go:embed); inline content writes no file, so it is ignored")}
 	case !pf.accessor && (f.Embed || f.EmbedDir != ""):
-		return []error{at("embed", severityError, f.Type+" writes files for agents into the repository, not into the binary; `embed` and `embed_dir` don't apply, so remove them (use `file` to choose where they go)")}
+		return []error{at("embed", severityError, f.Type+" writes its files into the repository, not into the binary; `embed` and `embed_dir` don't apply, so remove them (use `file` to choose where they go)")}
 	}
 	return nil
 }

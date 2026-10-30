@@ -2,7 +2,9 @@
 # long-only flags aligned with the long column, constraints on each input kind, a stdin
 # section for each format, and a passthrough command, described enum values, a passthrough
 # argument, long input descriptions, stability markers, exit-code links, help topics and
-# response files, and a header and footer on each page kind.
+# response files, and a header and footer on each page kind; a deprecated command's own page,
+# the root's exit_status inherited by commands without their own, secrets that refuse a typed
+# value, list defaults (JSON in man and markdown), and code spans in man rules and enum values.
 version: 0.0.0
 command:
   name: ops
@@ -62,6 +64,9 @@ command:
     - name: profile
       summary: the output profile
       schema: {type: string, key: profile, enum: [{value: short, summary: one line each}, {value: long, summary: every field}]}
+  exit_status:
+    - { code: 0, summary: done }
+    - { code: 3, name: unreachable, summary: the fleet did not answer, retryable: true }
   topics:
     - name: filters
       summary: how filters work
@@ -107,7 +112,7 @@ command:
           schema: {type: string, required: true, minLength: 2, maxLength: 63, pattern: '^[a-z][a-z0-9-]*$'}
         - name: replicas
           summary: how many copies
-          schema: {type: int, minimum: 1}
+          schema: {type: int, minimum: 1, placeholder: COUNT}
       flags:
         - name: port
           summary: listen port
@@ -135,6 +140,26 @@ command:
           summary: extra environment
           identifiers: [--env, -e]
           schema: {type: 'map[string]string', maxItems: 8}
+        - name: token
+          summary: the deploy token
+          identifiers: [--token]
+          schema: {type: string, secret: true, from: [file, stdin]}
+        - name: key
+          summary: the signing key
+          identifiers: [--key]
+          schema: {type: string, secret: true, from: [file]}
+        - name: label
+          summary: a label to apply
+          identifiers: [--label]
+          schema: {type: '[]string', separator: ",", default: ["a,b", 'c"d']}
+        - name: zone
+          summary: the zones to use
+          identifiers: [--zone]
+          schema: {type: '[]string', default: [eu, us]}
+        - name: quote
+          summary: the quoting style
+          identifiers: [--quote]
+          schema: {type: string, pattern: '^[a-z`"]+$', enum: ['a`b', plain]}
     - name: import
       summary: import tasks
       group: Data
@@ -160,7 +185,13 @@ command:
       arguments:
         - name: argv
           summary: the command and its arguments
-          schema: {type: '[]string', required: true}
+          schema: {type: '[]string', required: true, placeholder: WORD}
+    - name: legacy
+      summary: ship the old way
+      deprecated: renamed
+      deprecated_since: 1.4.0
+      removed_in: 2.0.0
+      replaced_by: deploy
     - name: run
       summary: run a command on a host
       options_first: true

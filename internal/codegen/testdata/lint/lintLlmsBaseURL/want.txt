@@ -1,0 +1,1 @@
+warning: conf: .rotini.conf.yaml:15:17: generate.features.llms.base_url: "https://x/app" doesn't end in "/"; each link is `base_url` followed by the page's file name, so links read "https://x/app<page>.md"; end it with "/"

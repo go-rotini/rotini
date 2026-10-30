@@ -68,10 +68,8 @@ func ExampleInputReader_Read() {
 		}
 	}
 
-	os.Setenv("SERVER_PORT", "9090")
-	defer os.Unsetenv("SERVER_PORT")
-
-	rtx := NewContextFor(def, nil) // --port absent from argv
+	// --port is absent from argv; the run's environment supplies it.
+	rtx := NewContextFor(def, nil).WithEnviron([]string{"SERVER_PORT=9090"})
 	if err := NewInputReader(InputSettings{}).Read(rtx, &inputs); err != nil {
 		fmt.Println("bind:", err)
 		return

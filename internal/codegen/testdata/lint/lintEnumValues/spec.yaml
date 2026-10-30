@@ -25,6 +25,13 @@ command:
       schema: { type: 'map[string]string', enum: [a] }
     - name: format
       schema: { type: string, enum: [json, yaml, json] }
+    # A member that is the right type but breaks the input's own constraints is never accepted.
+    - name: workers
+      schema: { type: int, enum: ['1', '5'], minimum: 2 }
+    - name: region
+      schema: { type: string, enum: [eu, US], pattern: '^[a-z]+$' }
+    - name: grace
+      schema: { type: duration, enum: [1s, 1h], maximum: 30m }
     - name: listen
       schema: { $ref: Port }
     - name: connect

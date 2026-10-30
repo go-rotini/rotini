@@ -52,8 +52,8 @@ stdout '^name=from-dotenv .* region=eu$'
 exec ./app$exe --need x --plain
 stdout '^name=from-dotenv .* region=eu$'
 exec ./app$exe --need x --explain-inputs
-stdout '^App.Flags.Name = "from-dotenv" from env:APP_NAME$'
-stdout '^App.Env.Region = "eu" from env:APP_REGION$'
+stdout '^App.Flags.Name = "from-dotenv" from config:dotenv#APP_NAME$'
+stdout '^App.Env.Region = "eu" from config:dotenv#APP_REGION$'
 env APP_NAME=real
 exec ./app$exe --need x
 stdout '^name=real '

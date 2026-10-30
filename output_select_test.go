@@ -5,6 +5,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/toml"
+	"github.com/go-rotini/yaml"
 )
 
 type selOwner struct {
@@ -53,10 +56,21 @@ func TestSelectFields(t *testing.T) {
 		{"envelope keeps the rest", list, "tasks", []string{"title"}, `{"tasks":[{"title":"a"},{"title":"b"}],"total":2}`},
 		{"a missing field is left out", list, "tasks", []string{"status"}, `{"tasks":[{"status":"open"},{}],"total":2}`},
 		{"dot paths join under one parent", list.Tasks, "", []string{"owner.login", "owner.id", "id"}, `[{"id":1,"owner":{"id":7,"login":"ann"}},{"id":2}]`},
+		{"a list on the way is stepped through", []selList{list, {Total: 0}}, "tasks", []string{"id"}, `[{"tasks":[{"id":1},{"id":2}],"total":2},{"tasks":null,"total":0}]`},
 		{"an absent envelope property", map[string]any{"total": 0}, "tasks", []string{"id"}, `{"total":0}`},
 		{"null items", map[string]any{"tasks": nil}, "tasks", []string{"id"}, `{"tasks":null}`},
 		{"a null item", []any{nil, map[string]any{"id": 1}}, "", []string{"id"}, `[null,{"id":1}]`},
 		{"a nil slice", []selTask(nil), "", []string{"id"}, `null`},
+		{"a list inside an item", map[string]any{"tags": []any{map[string]any{"name": "a", "id": 1}, map[string]any{"id": 2}}}, "", []string{"tags.name"},
+			`{"tags":[{"name":"a"},{}]}`},
+		{"two fields of a list inside an item", map[string]any{"tags": []any{map[string]any{"name": "a", "id": 1, "x": 0}}}, "", []string{"tags.name", "tags.id"},
+			`{"tags":[{"id":1,"name":"a"}]}`},
+		{"a null element of a list inside an item", map[string]any{"tags": []any{nil, map[string]any{"name": "a"}}}, "", []string{"tags.name"},
+			`{"tags":[null,{"name":"a"}]}`},
+		{"a list inside an item lacking the field", map[string]any{"id": 1, "tags": []any{"a", "b"}}, "", []string{"id", "tags.name"}, `{"id":1}`},
+		{"a field through a scalar", map[string]any{"id": 1, "owner": "ann"}, "", []string{"id", "owner.login"}, `{"id":1}`},
+		{"a whole field and one inside it", map[string]any{"owner": map[string]any{"login": "ann", "id": 7}}, "", []string{"owner.login", "owner"},
+			`{"owner":{"id":7,"login":"ann"}}`},
 		{"big numbers stay exact", map[string]any{"n": uint64(18446744073709551615)}, "", []string{"n"}, `{"n":18446744073709551615}`},
 	}
 	for _, tt := range tests {
@@ -140,6 +154,7 @@ func TestSortBy(t *testing.T) {
 		{"floats and ints", []sortItem{{2.5, "b"}, {1, "a"}, {10, "c"}}, false, "a b c"},
 		{"strings byte-wise", []sortItem{{"b", "b"}, {"B", "B"}, {"a", "a"}}, false, "B a b"},
 		{"RFC 3339 times", []sortItem{{"2026-01-02T00:00:00+05:00", "b"}, {"2026-01-01T23:00:00Z", "c"}, {"2025-12-31T00:00:00Z", "a"}}, false, "a b c"},
+		{"times among other strings are strings", []sortItem{{"2026-01-02T00:00:00+05:00", "b"}, {"2026-01-01T23:00:00Z", "a"}, {"x", "c"}}, false, "a b c"},
 		{"bools", []sortItem{{true, "t"}, {false, "f"}}, false, "f t"},
 		{"missing and null last", []sortItem{{nil, "x"}, {2, "b"}, {nil, "y"}, {1, "a"}}, false, "a b x y"},
 		{"missing last descending too", []sortItem{{nil, "x"}, {1, "a"}, {2, "b"}}, true, "b a x"},
@@ -179,7 +194,7 @@ func TestSortBy_errors(t *testing.T) {
 	}{
 		{"mixed kinds", []sortItem{{1, "a"}, {"x", "b"}}, "n", `SortBy: field "n" holds both numbers and strings`},
 		{"a list", []sortItem{{[]int{1}, "a"}}, "n", `SortBy: field "n" holds a list, which does not sort`},
-		{"an object", []sortItem{{map[string]int{"a": 1}, "a"}}, "n", `SortBy: field "n" holds a object, which does not sort`},
+		{"an object", []sortItem{{map[string]int{"a": 1}, "a"}}, "n", `SortBy: field "n" holds an object, which does not sort`},
 		{"an empty field", []sortItem{{1, "a"}}, "", `SortBy: field "" has an empty segment`},
 	}
 	for _, tt := range tests {
@@ -215,6 +230,29 @@ func TestPartialSchema(t *testing.T) {
 	}
 	if _, err := partialSchema([]byte("{")); err == nil {
 		t.Error("a broken schema should fail")
+	}
+}
+
+// A renderer that nests a Selection in its own document gets the selected fields from each
+// encoder's marshaler.
+func TestSelection_marshalersNested(t *testing.T) {
+	t.Parallel()
+	sel, err := SelectFields(sampleList, "tasks", []string{"id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]any{"list": sel}
+	b, err := json.Marshal(doc)
+	if err != nil || string(b) != `{"list":{"tasks":[{"id":1},{"id":2}]}}` {
+		t.Errorf("json = %s, %v", b, err)
+	}
+	b, err = yaml.Marshal(doc)
+	if err != nil || string(b) != "list:\n  tasks:\n    - id: 1\n    - id: 2\n" {
+		t.Errorf("yaml = %q, %v", b, err)
+	}
+	b, err = toml.Marshal(doc)
+	if err != nil || string(b) != "list = { tasks = [{ id = 1 }, { id = 2 }] }\n" {
+		t.Errorf("toml = %q, %v", b, err)
 	}
 }
 

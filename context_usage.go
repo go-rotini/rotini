@@ -1,6 +1,6 @@
 package rotini
 
-// Usage returns the usage line of [Context.Command] ("taskr add <title> [flags]"): the
+// Usage returns the usage line of [Context.Command] ("taskr add [flags] <title>"): the
 // spec's `usage` when set, else the line rotini derives from the command's shape, which is the
 // line help prints under its Usage heading. A cascading hook gets its own command's line. It
 // returns "" for a Context with no command, or a hand-built [Definition] that sets none.

@@ -5,8 +5,9 @@
 // experimental item every change is safe, and on a beta item a breaking one is possibly
 // breaking.
 //
-// Commands match by path, flags by identifier, arguments by name (by position when renamed in
-// place), environment variables by variable and config entries by key. Input and output
+// Commands match by path, flags by identifier (one of the same name first), arguments by name
+// (by position when renamed in place), environment variables by variable (one of the same name
+// first) and config entries by key. Input and output
 // schemas are compared in opposite directions: narrowing what a caller may pass breaks
 // callers, widening what the program writes breaks readers. A shared definition is compared
 // once, where it is defined, at the most settled stability of the commands that use it.
@@ -139,6 +140,14 @@ type differ struct {
 	old, new *document
 	release  string
 	findings []Finding
+	inHidden bool // the command or input being compared is hidden in the old contract, or sits in one that is
+}
+
+// within marks what is compared until restore runs as inside a hidden item, when hidden is set.
+func (d *differ) within(hidden bool) (restore func()) {
+	was := d.inHidden
+	d.inHidden = was || hidden
+	return func() { d.inHidden = was }
 }
 
 // stability is the effective stability of an item in the old contract: "experimental",
@@ -165,10 +174,14 @@ func leastStable(a stability, b string) stability {
 	return a
 }
 
-// add records a finding, adjusted for the old item's stability: on an experimental item every
-// finding is safe, and on a beta item a breaking one is possibly breaking. An expected finding
-// stays expected.
+// add records a finding, adjusted for the old item: inside a hidden command or input, a
+// breaking removal is possibly breaking, as removing the hidden item itself is. Then for its
+// stability: on an experimental item every finding is safe, and on a beta item a breaking one
+// is possibly breaking. An expected finding stays expected.
 func (d *differ) add(st stability, sev Severity, rule, where, msg, note string) {
+	if d.inHidden && sev == Breaking && strings.HasSuffix(rule, "_NO_DELETE") {
+		sev, note = PossiblyBreaking, joinNote(note, "was hidden")
+	}
 	if sev != Expected && sev != Safe {
 		switch st {
 		case "experimental":
@@ -190,7 +203,8 @@ func joinNote(a, b string) string {
 }
 
 // removal records the removal of an item the old contract declared: expected when its
-// removed_in is at or below the release, possibly breaking when it was hidden, else breaking.
+// removed_in is at or below the release, possibly breaking when it or an item it sits in was
+// hidden, else breaking.
 func (d *differ) removal(st stability, rule, where, msg, removedIn string, hidden bool) {
 	d.removalWith(st, rule, where, msg, removedIn, hidden, "")
 }
@@ -207,7 +221,7 @@ func (d *differ) removalWith(st stability, rule, where, msg, removedIn string, h
 	case removedIn != "":
 		note = joinNote(note, "planned for removal in "+removedIn)
 	}
-	if hidden {
+	if hidden || d.inHidden {
 		d.add(st, PossiblyBreaking, rule, where, msg, joinNote(note, "was hidden"))
 		return
 	}

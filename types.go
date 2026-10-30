@@ -52,7 +52,8 @@ func (b *ByteSize) UnmarshalText(text []byte) error {
 func (b ByteSize) MarshalText() ([]byte, error) { return []byte(b.String()), nil }
 
 // String renders the size in the largest binary unit it is an exact multiple of — `512Mi`, `2Gi`
-// — and in plain bytes otherwise, so it always parses back to the same value.
+// — and in plain bytes otherwise, so a size that isn't negative parses back to the same value.
+// A negative size renders with a minus sign, which [ByteSize.UnmarshalText] refuses.
 func (b ByteSize) String() string {
 	n := int64(b)
 	if n == 0 {
@@ -199,7 +200,9 @@ type HexBytes []byte
 // UnmarshalText implements [encoding.TextUnmarshaler].
 func (h *HexBytes) UnmarshalText(text []byte) error {
 	s := strings.TrimSpace(string(text))
-	s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+	if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
+		s = s[2:]
+	}
 	b, err := hex.DecodeString(s)
 	if err != nil {
 		return fmt.Errorf("%q is not hexadecimal: %w", string(text), err)
@@ -307,7 +310,7 @@ func parseBool(s string) (bool, error) {
 }
 
 // Time layouts beyond Go's reference-time layouts: a Unix timestamp in seconds (fractions
-// allowed) or in milliseconds.
+// allowed) or in milliseconds, each with an optional leading "-" and never a "+".
 const (
 	layoutUnix      = "unix"
 	layoutUnixMilli = "unixmilli"
@@ -329,7 +332,7 @@ func parseTimeLayout(s, layout string) (time.Time, error) {
 		return t, nil
 	case layoutUnixMilli:
 		ms, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
+		if err != nil || strings.HasPrefix(s, "+") {
 			return time.Time{}, errors.New("want a Unix timestamp in milliseconds, e.g. 1759104000000")
 		}
 		return time.UnixMilli(ms).UTC(), nil

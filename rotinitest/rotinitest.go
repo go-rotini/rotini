@@ -24,8 +24,9 @@
 //   - Pass a fresh program to every call, built as main builds it (with the dependencies main
 //     adds). Run sets its streams and environment, so a program shared between tests, such as
 //     the generated package's Program variable, leaks state between them.
-//   - Config inputs come from configuration files the test writes into the run's directory
-//     ([Dir]) or its XDG_CONFIG_HOME; putting one in the inputs value fails the test.
+//   - Config inputs come from configuration files the test writes first, into the directory it
+//     passes as the run's ([Dir]) or as XDG_CONFIG_HOME ([Env]); putting one in the inputs
+//     value fails the test.
 //   - Command lines that typed inputs can't express (a typo, an unknown flag) are tested with
 //     [rotini.Program.Run] directly.
 //   - Handlers still run in the test process's working directory; see [rotini.Program.WithDir].
@@ -103,7 +104,8 @@ func Context(ctx context.Context) Option {
 }
 
 // Env adds variables to the run's environment, as KEY=value; PATH for a test that runs plugins,
-// for one. The inputs value's own env inputs win.
+// for one. A variable it sets replaces Run's own HOME, USERPROFILE or XDG_CONFIG_HOME, and the
+// inputs value's own env inputs win over it.
 func Env(kv ...string) Option {
 	return func(c *config) { c.env = append(c.env, kv...) }
 }

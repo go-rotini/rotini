@@ -1,10 +1,14 @@
 package codegen
 
 import (
+	"bytes"
+	"cmp"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -205,6 +209,14 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			if n.passthrough {
 				data.Passthrough = n.name
 			}
+			// deprecated_identifiers deprecates only those aliases, never the command itself.
+			if len(n.deprecatedIdentifiers) == 0 && n.deprecated != "" {
+				data.Deprecated = withReplacement(n.deprecated, n.replacedBy.text)
+				data.DeprecatedSince, data.RemovedIn = n.lifecycle.since, n.lifecycle.removedIn
+			}
+			if len(data.ExitStatus) == 0 {
+				data.ExitStatus = out[0].data.ExitStatus // the root's exit_status is program-wide
+			}
 			data.Stability = leastStable(stability, n.help.Stability)
 			markStream(data.Output, n.stream)
 			out = append(out, helpNode{
@@ -222,7 +234,13 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		}
 	}
 	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs, gp.envPrefix), true, gp.rootHelp.Stability)
-	return append(out, topicNodes(gp, feat, section, date)...)
+	out = append(out, topicNodes(gp, feat, section, date)...)
+	if feat.name == manFeatureDesc.name || feat.name == markdownFeatureDesc.name {
+		for i := range out {
+			withStructuredDefaults(&out[i].data)
+		}
+	}
+	return out
 }
 
 // stabilityRank orders stability markers from least to most stable; "" is stable.
@@ -398,6 +416,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				Type:        flagDisplayType(e.Schema),
 				Required:    e.Schema != nil && e.Schema.Required,
 				Default:     schemaDefaultString(e.Schema),
+				defaultJSON: structuredDefault(e.Schema),
 				Enum:        enumOf(e.Schema),
 				EnumValues:  enumValuesOf(e.Schema),
 				Deprecated:  e.Deprecated,
@@ -422,6 +441,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				Type:        flagDisplayType(c.Schema),
 				Required:    c.Schema != nil && c.Schema.Required,
 				Default:     schemaDefaultString(c.Schema),
+				defaultJSON: structuredDefault(c.Schema),
 				Enum:        enumOf(c.Schema),
 				EnumValues:  enumValuesOf(c.Schema),
 				Deprecated:  c.Deprecated,
@@ -448,12 +468,14 @@ func argumentRow(a ArgumentInput, envPrefix string, readsConfig bool) templateDo
 	}
 	row := templateDocArgumentRow{
 		Name:        a.Name,
-		Summary:     withStreamNote(a.Summary, a.Schema),
+		Placeholder: argPlaceholder(a),
+		Summary:     withSecretNote(withStreamNote(a.Summary, a.Schema), a.Schema),
 		Description: a.Description,
 		Stability:   a.Stability,
 		Required:    a.Schema != nil && a.Schema.Required,
 		Variadic:    isVariadicSchema(a.Schema),
 		Default:     schemaDefaultString(a.Schema),
+		defaultJSON: structuredDefault(a.Schema),
 		Enum:        enumOf(a.Schema),
 		EnumValues:  enumValuesOf(a.Schema),
 		Passthrough: a.Passthrough,
@@ -627,13 +649,14 @@ func flagRow(f FlagInput, envPrefix string) templateDocFlagRow {
 	constraints, rules := constraintText(f.Schema, "flag")
 	row := templateDocFlagRow{
 		Identifiers: shortFirst(negatableIdentifiers(f, ids)),
-		Summary:     withStreamNote(f.Summary, f.Schema),
+		Summary:     withSecretNote(withStreamNote(f.Summary, f.Schema), f.Schema),
 		Description: f.Description,
 		Stability:   f.Stability,
 		Group:       f.Group,
 		Type:        flagDisplayType(f.Schema),
 		Required:    f.Schema != nil && f.Schema.Required,
 		Default:     schemaDefaultString(f.Schema),
+		defaultJSON: structuredDefault(f.Schema),
 		Enum:        enumOf(f.Schema),
 		EnumValues:  enumValuesOf(f.Schema),
 		Deprecated:  withReplacement(deprecated, f.ReplacedBy),
@@ -880,10 +903,7 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 			if a.Hidden {
 				continue
 			}
-			name := a.Name
-			if a.Schema != nil && a.Schema.Placeholder != "" {
-				name = a.Schema.Placeholder
-			}
+			name := cmp.Or(argPlaceholder(a), a.Name)
 			if isVariadicSchema(a.Schema) {
 				name += "..."
 			}
@@ -902,6 +922,14 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 		}
 	}
 	return b.String()
+}
+
+// argPlaceholder returns the argument's declared placeholder, or "" when it declares none.
+func argPlaceholder(a ArgumentInput) string {
+	if a.Schema == nil {
+		return ""
+	}
+	return a.Schema.Placeholder
 }
 
 func isVariadicSchema(schema *InputSchema) bool {
@@ -969,6 +997,76 @@ func schemaDefaultString(schema *InputSchema) string {
 		return ""
 	}
 	return defaultString(schema.Default)
+}
+
+// structuredDefault is a list or map default as JSON, with a space after each comma
+// (`["a,b", "c\"d"]`), which man and markdown show so an item holding a separator, a space or
+// a quote reads unambiguously; "" for a scalar default, or when the pages show default_text or
+// no default.
+func structuredDefault(schema *InputSchema) string {
+	if schema == nil || schema.DefaultText != "" || schema.Secret || schema.Default == nil {
+		return ""
+	}
+	v := reflect.ValueOf(schema.Default)
+	switch {
+	case v.Kind() == reflect.Slice || v.Kind() == reflect.Array:
+		items := make([]string, v.Len())
+		for i := range items {
+			items[i] = defaultJSONText(v.Index(i).Interface())
+		}
+		return "[" + strings.Join(items, ", ") + "]"
+	case v.Kind() == reflect.Map && v.Type().Key().Kind() == reflect.String:
+		keys := make([]string, 0, v.Len())
+		for _, k := range v.MapKeys() {
+			keys = append(keys, k.String())
+		}
+		slices.Sort(keys)
+		entries := make([]string, len(keys))
+		for i, k := range keys {
+			entries[i] = defaultJSONText(k) + ": " + defaultJSONText(v.MapIndex(reflect.ValueOf(k).Convert(v.Type().Key())).Interface())
+		}
+		return "{" + strings.Join(entries, ", ") + "}"
+	}
+	return ""
+}
+
+// defaultJSONText is v as compact JSON, without HTML escaping.
+func defaultJSONText(v any) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return defaultString(v)
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// withStructuredDefaults shows each list or map default on a man or markdown page as JSON.
+func withStructuredDefaults(d *templateHelpData) {
+	flags := func(rows []templateDocFlagRow) []templateDocFlagRow {
+		rows = slices.Clone(rows)
+		for i := range rows {
+			rows[i].Default = cmp.Or(rows[i].defaultJSON, rows[i].Default)
+		}
+		return rows
+	}
+	d.Arguments = slices.Clone(d.Arguments)
+	for i := range d.Arguments {
+		d.Arguments[i].Default = cmp.Or(d.Arguments[i].defaultJSON, d.Arguments[i].Default)
+	}
+	d.Flags, d.Cascading = flags(d.Flags), flags(d.Cascading)
+	d.FlagGroups = slices.Clone(d.FlagGroups)
+	for i := range d.FlagGroups {
+		d.FlagGroups[i].Flags = flags(d.FlagGroups[i].Flags)
+	}
+	d.Environment = slices.Clone(d.Environment)
+	for i := range d.Environment {
+		d.Environment[i].Default = cmp.Or(d.Environment[i].defaultJSON, d.Environment[i].Default)
+	}
+	d.Configuration = slices.Clone(d.Configuration)
+	for i := range d.Configuration {
+		d.Configuration[i].Default = cmp.Or(d.Configuration[i].defaultJSON, d.Configuration[i].Default)
+	}
 }
 
 // enumOf returns an input's enum values for the docs pages: every value that is not hidden,
@@ -1225,9 +1323,15 @@ func loadFeatureTemplate(pl *planner, featDir string, feat docFeature) (*templat
 		}
 		src = []byte(feat.embedded)
 	}
-	tmpl, err := parseDocTemplate(feat.tmplFile, string(src))
+	tmpl, err := template.New(feat.tmplFile).Funcs(templateFuncMap()).Parse(string(src))
 	if err != nil {
-		return nil, fmt.Errorf("%s template %s: %w", feat.name, path, err)
+		// "template: help.txt.tmpl:162: bad character" names the file as the template; name
+		// it by its path, keeping the line.
+		at := strings.TrimPrefix(err.Error(), "template: "+feat.tmplFile)
+		if at == err.Error() {
+			at = ": " + at
+		}
+		return nil, fmt.Errorf("%s template %s%s", feat.name, relToWorkdir(path), at)
 	}
 	return tmpl, nil
 }

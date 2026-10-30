@@ -282,3 +282,23 @@ blue,green
 typed-path	the program typed
 == directory-unique
 src/	Directory
+== path-type-file
+a.yaml	
+b.yml	
+bin/	
+c.txt	
+cases.txt	
+completion_bash.sh	
+completion_fish.fish	
+completion_nushell.nu	
+completion_powershell.ps1	
+completion_zsh.zsh	
+drivers/	
+sp\ ace.yaml	
+src/	
+sub/	
+== path-type-directory
+bin/	Directory
+drivers/	Directory
+src/	Directory
+sub/	Directory

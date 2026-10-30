@@ -1,0 +1,41 @@
+# R15 — `rotini mount --prune` removes an entry with the comment lines attached directly above it,
+# as `rotini fmt` attaches them; a comment above a blank line is a heading and stays, and a deeper
+# comment belongs to the entry before.
+
+exec rotini mount --prune --into app.spec.yaml
+stdout '^removed \.\./gone/\.rotini\.spec\.yaml: the file no longer exists$'
+stdout '^removed \.\./old/\.rotini\.spec\.yaml: the file no longer exists$'
+cmp app.spec.yaml want.spec.yaml
+
+# The result is already as fmt writes it.
+exec rotini fmt app.spec.yaml
+cmp app.spec.yaml want.spec.yaml
+
+-- kept/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kept
+-- app.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  commands:
+    # Services
+
+    # the gone cli,
+    # mounted for a while
+    - $ref: ../gone/.rotini.spec.yaml
+    - $ref: kept/.rotini.spec.yaml
+      # kept's own note
+    # the old cli
+    - $ref: ../old/.rotini.spec.yaml
+      group: tools
+-- want.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  commands:
+    # Services
+
+    - $ref: kept/.rotini.spec.yaml
+      # kept's own note

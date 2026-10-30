@@ -26,9 +26,12 @@ import (
 // problem in source. It assumes the spec is schema-valid.
 func (p *Processor) lintSpec(rs *reconciledSpec) []error {
 	problems := make([]error, 0, len(specLints))
+	view, filled := overrideLintView(rs.spec, rs.path)
 	for _, rule := range specLints {
-		problems = append(problems, rule(rs.spec)...)
+		problems = append(problems, rule(view)...)
 	}
+	problems = dropFilled(problems, filled)
+	problems = append(problems, lintOverrides(rs.spec, rs.path)...)
 	problems = append(problems, lintComposedTree(rs.spec, rs.path)...)
 	problems = remapFlagSetProblems(rs.spec, problems)
 	locateProblems(problems, rs.path, rs.locate)
@@ -42,6 +45,7 @@ var specLints = []func(*Spec) []error{
 	lintRootAliases,
 	lintDocLevelKeys,
 	lintRefNodeKeys,
+	lintRefLocators,
 	lintHandlerSource,
 	lintImportConsistency,
 	lintLocalTimeout,
@@ -71,8 +75,10 @@ var specLints = []func(*Spec) []error{
 	lintConfigSource,
 	lintEnvNesting,
 	lintConfigInputFiles,
+	lintConfigInputScope,
 	lintConfigKeyCollisions,
 	lintEnvVariableTypes,
+	lintEnvVariableKeys,
 	lintConstraintApplicability,
 	lintCountFlags,
 	lintPassthrough,
@@ -87,9 +93,11 @@ var specLints = []func(*Spec) []error{
 	lintComplete,
 	lintBoundsSatisfiable,
 	lintEnumValues,
+	lintDashEnumValues,
 	lintEnumSummaries,
 	lintSummaryLines,
 	lintRequiredDefault,
+	lintRequiredVisibility,
 	lintDefaultScalar,
 	lintDefaultConstraints,
 	lintItemConstraints,
@@ -108,6 +116,7 @@ var specLints = []func(*Spec) []error{
 	lintUniqueItems,
 	lintOutputStream,
 	lintOutputKinds,
+	lintOutputSatisfiable,
 	lintDeprecationLifecycle,
 	lintArgumentFallback,
 	lintRelativeTime,
@@ -131,6 +140,7 @@ var specLints = []func(*Spec) []error{
 	lintExpand,
 	lintUsageSchemaName,
 	lintMulticall,
+	lintMulticallSelfLoop,
 	lintChdirRole,
 	lintValuesFrom,
 	lintFieldRoles,
@@ -201,8 +211,9 @@ func lintDocLevelKeys(spec *Spec) []error {
 
 // lintRefNodeKeys rejects handler-coupled keys (inputs, output, plugins, passthrough) on a
 // `$ref` node. The child's handler is generated against the child's own inputs and output,
-// so an overlay would yield a parser that handler does not match. Only identity and
-// presentation keys plus additive `commands:` may be overlaid.
+// so an overlay would yield a parser that handler does not match. Every other command-level
+// key may be overridden, and `commands:` merges. `filename` names a handler file, which a
+// mounted command doesn't have here.
 func lintRefNodeKeys(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -215,53 +226,12 @@ func lintRefNodeKeys(spec *Spec) []error {
 		if c.Name == "" {
 			loc, subject = "command "+strings.TrimSuffix(path, "/"+c.Ref), fmt.Sprintf("$ref %q: ", c.Ref)
 		}
-		reject := func(key string) {
-			problems = append(problems, &problem{
-				kind: "spec", ptr: ptr + "/" + key, loc: loc,
-				msg: fmt.Sprintf("%ssets %#q on a `$ref` node; a composed command delegates to the child's handler (built against the child's own inputs and output), so %#q cannot be overlaid here; declare it in the child spec instead", subject, key, key),
-			})
-		}
-		if len(c.Flags) > 0 {
-			reject("flags")
-		}
-		if len(c.Arguments) > 0 {
-			reject("arguments")
-		}
-		if len(c.Env) > 0 {
-			reject("env")
-		}
-		if len(c.Config) > 0 {
-			reject("config")
-		}
-		if len(c.ConfigFiles) > 0 {
-			reject("config_files")
-		}
-		if c.Stdin != nil {
-			reject("stdin")
-		}
-		if len(c.FlagGroups) > 0 {
-			reject("flag_groups")
-		}
-		if len(c.FlagDependencies) > 0 {
-			reject("flag_dependencies")
-		}
-		if c.Output != nil {
-			reject("output")
-		}
-		if c.OutputStream {
-			reject("output_stream")
-		}
-		if len(c.Plugins) > 0 {
-			reject("plugins")
-		}
-		if c.PluginDiscovery != nil {
-			reject("plugin_discovery")
-		}
-		if c.Passthrough {
-			reject("passthrough")
-		}
-		if c.OptionsFirst {
-			reject("options_first")
+		for _, key := range overrideOnlyKeys(c, true) {
+			msg := fmt.Sprintf("%ssets %#q on a `$ref` node; a composed command delegates to the child's handler (built against the child's own inputs and output), so %#q cannot be overridden here; declare it in the child spec instead", subject, key, key)
+			if key == "filename" {
+				msg = fmt.Sprintf("%ssets `filename` on a `$ref` node; a composed command's handler file is in the child's package, not here, so there is no file to name", subject)
+			}
+			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/" + key, loc: loc, msg: msg})
 		}
 	})
 	return problems
@@ -391,7 +361,11 @@ func lintRequiredArgumentOrder(spec *Spec) []error {
 				continue
 			}
 			if firstOptional != "" {
-				problems = append(problems, inputProblem(fmt.Sprintf("%s/arguments/%d", ptr, i), path, "argument", a.Name,
+				key := "minItems"
+				if a.Schema.Required {
+					key = "required"
+				}
+				problems = append(problems, schemaKeyProblem(fmt.Sprintf("%s/arguments/%d", ptr, i), key, path, "argument", a.Name,
 					fmt.Sprintf("required but comes after optional argument %q; positionals fill in order, so the first value always goes to %q and it can never be left out. Make %q required too, or move %q before it",
 						firstOptional, firstOptional, firstOptional, a.Name)))
 			}
@@ -409,7 +383,9 @@ func lintIgnoreCase(spec *Spec) []error {
 			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || !schema.IgnoreCase {
 				return // an object input: lintObjectFlags
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "ignore_case", path, channel, name, msg))
+			}
 			if len(schema.Enum) == 0 {
 				add("sets `ignore_case` but declares no `enum`; `ignore_case` changes how a value is matched against enum members, so without one it does nothing")
 				return
@@ -438,7 +414,9 @@ func lintSeparator(spec *Spec) []error {
 			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.Separator == "" {
 				return // an object input: lintObjectFlags
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "separator", path, channel, name, msg))
+			}
 			t := getSchemaType(schema)
 			isList, isMap := strings.HasPrefix(t, "[]"), strings.HasPrefix(t, "map[")
 			switch {
@@ -453,7 +431,7 @@ func lintSeparator(spec *Spec) []error {
 			case isMap && schema.Separator == "=":
 				add("sets `separator` to \"=\", which already separates each map entry's key from its value")
 			case channel == "env" && schema.Separator == ",":
-				p := inputProblem(ptr, path, channel, name, "sets `separator` to \",\", which an env input already splits on; remove it")
+				p := schemaKeyProblem(ptr, "separator", path, channel, name, "sets `separator` to \",\", which an env input already splits on; remove it")
 				p.sev = severityWarning
 				problems = append(problems, p)
 			}
@@ -488,7 +466,9 @@ func lintImplicitValue(spec *Spec) []error {
 			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.ImplicitValue == nil {
 				return // an object input: lintObjectFlags
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "implicit_value", path, channel, name, msg))
+			}
 			t := getSchemaType(schema)
 			switch {
 			case channel != "flag":
@@ -526,11 +506,11 @@ func lintDottedKeys(spec *Spec) []error {
 				return
 			}
 			if channel != "flag" {
-				problems = append(problems, inputProblem(ptr, path, channel, name, "sets `dotted_keys`, which applies to flags only"))
+				problems = append(problems, schemaKeyProblem(ptr, "dotted_keys", path, channel, name, "sets `dotted_keys`, which applies to flags only"))
 				return
 			}
 			if t := getSchemaType(schema); t != "map[string]any" {
-				problems = append(problems, inputProblem(ptr, path, channel, name,
+				problems = append(problems, schemaKeyProblem(ptr, "dotted_keys", path, channel, name,
 					fmt.Sprintf("sets `dotted_keys` but its type is %s; dotted keys need type \"map\" (map[string]any) to nest into", t)))
 			}
 		})
@@ -538,14 +518,18 @@ func lintDottedKeys(spec *Spec) []error {
 	return problems
 }
 
-// lintConfigurationFiles requires each config_files entry to set exactly one of path or
-// discover, with xdg requiring app, walk-up rejecting it, and discover naming a file alone. Name
-// uniqueness is checked by lintConfigFilesScope.
+// lintConfigurationFiles refuses the names the configuration reader reserves and requires each
+// config_files entry to set exactly one of path or discover, with xdg requiring app, walk-up
+// rejecting it, and discover naming a file alone. Name uniqueness is checked by
+// lintConfigFilesScope.
 func lintConfigurationFiles(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		for i, cf := range c.ConfigFiles {
 			add := func(msg string) { problems = append(problems, configFileProblem(ptr, path, i, cf.Name, msg)) }
+			if cf.Name == "explicit" || cf.Name == "default" {
+				add("the name is reserved for the configuration reader's own layers, so every run that reads configuration would fail; choose another name")
+			}
 			switch {
 			case cf.Path == "" && cf.Discover == nil:
 				add("needs a location; set `path` or `discover`")
@@ -586,7 +570,9 @@ func lintEnvNesting(spec *Spec) []error {
 			if schema == nil || schema.Nesting == "" {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "nesting", path, channel, name, msg))
+			}
 			if channel != "env" {
 				add("sets `nesting`, which applies to env inputs only")
 				return
@@ -595,7 +581,8 @@ func lintEnvNesting(spec *Spec) []error {
 				add(fmt.Sprintf("sets `nesting` but its type is %s; a variable family needs type \"map\" (map[string]any) to nest into", t))
 			}
 			if schema.Default != nil {
-				add("sets both `nesting` and `default`; a nested family has no single default; seed defaults in code or config instead")
+				problems = append(problems, schemaKeyProblem(ptr, "default", path, channel, name,
+					"sets both `nesting` and `default`; a nested family has no single default; seed defaults in code or config instead"))
 			}
 		})
 	})
@@ -718,7 +705,9 @@ func lintConfigSource(spec *Spec) []error {
 				return
 			}
 			target := schema.ConfigSource
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "config_source", path, channel, name, msg))
+			}
 			if channel != "flag" && channel != "env" {
 				add("sets `config_source`, which applies to flag and env inputs only")
 				return
@@ -753,13 +742,23 @@ var constraintNumericFamily = map[string]bool{
 }
 
 // inputProblem builds a spec problem about one input, labeled `command <path>: <channel>
-// "<name>": …` and positioned at ptr, the input's pointer from [eachInputAt].
+// "<name>": …` and positioned at ptr: the key at fault below the input's pointer from
+// [eachInputAt], or the input itself when no one key is.
 func inputProblem(ptr, path, channel, name, msg string) *problem {
 	subject := channel
 	if name != "" {
 		subject = fmt.Sprintf("%s %q", channel, name)
 	}
 	return &problem{kind: "spec", ptr: ptr, loc: "command " + path, msg: subject + ": " + msg}
+}
+
+// schemaKeyProblem is [inputProblem] positioned at key (such as "enum" or "enum/2") in the
+// schema of the input at ptr, or at the same key under `items`, where a list's per-value
+// constraint may be written instead.
+func schemaKeyProblem(ptr, key, path, channel, name, msg string) *problem {
+	p := inputProblem(ptr+"/schema/"+key, path, channel, name, msg)
+	p.alt = ptr + "/schema/items/" + key
+	return p
 }
 
 // eachInputAt is [eachInputSchema] plus each input's positional JSON pointer, which stays
@@ -787,7 +786,7 @@ func eachInputAt(c *Command, cmdPtr string, visit func(channel, name, ptr string
 func inertKeyProblems(ptr, path, channel, name string, schema *InputSchema) []error {
 	var problems []error
 	inert := func(key, where string) {
-		problems = append(problems, inputProblem(ptr, path, channel, name,
+		problems = append(problems, schemaKeyProblem(ptr, key, path, channel, name,
 			fmt.Sprintf("sets %#q, which applies only to %s; here it would do nothing", key, where)))
 	}
 	if negatable(schema) && channel != "flag" {
@@ -823,33 +822,103 @@ func lintConstraintApplicability(spec *Spec) []error {
 				typ = t // checked as the type the named schema declares, as the runtime does
 			}
 			elem := strings.TrimPrefix(typ, "[]")
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
-			numericBounds := schema.Minimum != nil || schema.Maximum != nil ||
-				schema.ExclusiveMinimum != nil || schema.ExclusiveMaximum != nil || schema.MultipleOf != nil
-			switch {
-			case numericBounds && measuredTypes[elem]:
-				for _, msg := range measuredBoundProblems(schema, elem) {
-					add(msg)
-				}
-			case numericBounds && !constraintNumericFamily[elem]:
-				add(fmt.Sprintf("`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf` apply to numeric types, durations and sizes only, not %s; the bound would be silently ignored", typ))
-			case numericBounds:
-				for _, key := range boundKeys {
-					if text, ok := boundsByKey(schema)[key].(string); ok {
-						add(fmt.Sprintf("%#q %q is text, but %s takes a number; a string bound is for a duration or bytesize input", key, text, typ))
-					}
-				}
+			add := func(key, msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, key, path, channel, name, msg))
 			}
-			if (schema.MinLength != 0 || schema.MaxLength != nil || schema.Pattern != "") && !stringValued(elem) {
-				add(fmt.Sprintf("`minLength`/`maxLength`/`pattern` apply to string types only, not %s; the constraint would be silently ignored", typ))
+			for _, km := range boundApplicability(schema, typ, elem) {
+				add(km.key, km.msg)
 			}
-			if (schema.MinItems != 0 || schema.MaxItems != nil) &&
-				!strings.HasPrefix(typ, "[]") && !strings.HasPrefix(typ, "map[") {
-				add(fmt.Sprintf("`minItems`/`maxItems` apply to repeatable (list or map) types only, not %s; the count bound would be silently ignored", typ))
+			if key := firstSetKey(map[string]bool{"minLength": schema.MinLength != 0, "maxLength": schema.MaxLength != nil, "pattern": schema.Pattern != ""},
+				"minLength", "maxLength", "pattern"); key != "" && !stringValued(elem) {
+				add(key, fmt.Sprintf("`minLength`/`maxLength`/`pattern` apply to string types only, not %s; the constraint would be silently ignored", typ))
+			}
+			for _, km := range ignoredShapeKeys(schema, channel, typ) {
+				add(km.key, km.msg)
 			}
 		})
 	})
 	return problems
+}
+
+// boundApplicability reports numeric bounds an input of type typ (elem for a list's element)
+// can't check: on a non-numeric type, or written as text that isn't a duration or size of a
+// measured type, or as text on a plain number.
+func boundApplicability(schema *InputSchema, typ, elem string) []keyedMsg {
+	bounds := boundsByKey(schema)
+	first := ""
+	for _, key := range boundKeys {
+		if bounds[key] != nil && first == "" {
+			first = key
+		}
+	}
+	switch {
+	case first == "":
+		return nil
+	case measuredTypes[elem]:
+		return measuredBoundProblems(schema, elem)
+	case !constraintNumericFamily[elem]:
+		return []keyedMsg{{first, fmt.Sprintf("`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf` apply to numeric types, durations and sizes only, not %s; the bound would be silently ignored", typ)}}
+	}
+	var out []keyedMsg
+	for _, key := range boundKeys {
+		if text, ok := bounds[key].(string); ok {
+			out = append(out, keyedMsg{key, fmt.Sprintf("%#q %q is text, but %s takes a number; a string bound is for a duration or bytesize input", key, text, typ)})
+		}
+	}
+	return out
+}
+
+// ignoredShapeKeys reports `minItems`/`maxItems` on an input that isn't a list or map, `items`
+// on one that isn't a list, and `placeholder` on a bool flag, which takes no value to name: each
+// would be silently ignored. A count flag is lintCountFlags's.
+func ignoredShapeKeys(schema *InputSchema, channel, typ string) []keyedMsg {
+	var msgs []keyedMsg
+	if (schema.MinItems != 0 || schema.MaxItems != nil) &&
+		!strings.HasPrefix(typ, "[]") && !strings.HasPrefix(typ, "map[") {
+		key := "minItems"
+		if schema.MinItems == 0 {
+			key = "maxItems"
+		}
+		msgs = append(msgs, keyedMsg{key, fmt.Sprintf("`minItems`/`maxItems` apply to repeatable (list or map) types only, not %s; the count bound would be silently ignored", typ)})
+	}
+	if schema.Items != nil && schema.Type != "count" && !strings.HasPrefix(typ, "[]") {
+		msgs = append(msgs, keyedMsg{"items", fmt.Sprintf("`items` describes the elements of a list type, not %s; it would be silently ignored, so make the type a list (array, []string) or drop `items`", typ)})
+	}
+	if schema.Placeholder != "" && channel == "flag" && typ == "bool" {
+		msgs = append(msgs, keyedMsg{"placeholder", "`placeholder` names a flag's value, but a bool flag takes none; it would be silently ignored"})
+	}
+	return msgs
+}
+
+// keyedMsg is a problem's message and the schema key it is about.
+type keyedMsg struct{ key, msg string }
+
+// groupKey is the key a problem about a group of keys, as keyList takes them ("minimum/maximum"),
+// is placed at: the first of them the schema sets.
+func groupKey(group string, s *InputSchema) string {
+	keys := strings.Split(group, "/")
+	if len(keys) == 1 {
+		return group
+	}
+	if k := firstSetKey(map[string]bool{
+		"minimum": s.Minimum != nil, "maximum": s.Maximum != nil,
+		"exclusiveMinimum": s.ExclusiveMinimum != nil, "exclusiveMaximum": s.ExclusiveMaximum != nil, "multipleOf": s.MultipleOf != nil,
+		"minLength": s.MinLength != 0, "maxLength": s.MaxLength != nil, "pattern": s.Pattern != "",
+		"minItems": s.MinItems != 0, "maxItems": s.MaxItems != nil,
+	}, keys...); k != "" {
+		return k
+	}
+	return keys[0]
+}
+
+// firstSetKey returns the first of keys whose entry in set is true, or "".
+func firstSetKey(set map[string]bool, keys ...string) string {
+	for _, k := range keys {
+		if set[k] {
+			return k
+		}
+	}
+	return ""
 }
 
 // boundKeys lists the numeric-bound keys in a fixed order so messages are deterministic.
@@ -865,15 +934,15 @@ func boundsByKey(s *InputSchema) map[string]any {
 
 // measuredBoundProblems reports bounds on a duration or bytesize input that normalizeBounds
 // left as text because they did not parse in the type's unit.
-func measuredBoundProblems(s *InputSchema, elem string) []string {
+func measuredBoundProblems(s *InputSchema, elem string) []keyedMsg {
 	want := "a size such as 512Mi, 10MB or 1073741824"
 	if elem == "time.Duration" {
 		want = "a duration such as 30s or 1h30m"
 	}
-	var out []string
+	var out []keyedMsg
 	for _, key := range boundKeys {
 		if text, ok := boundsByKey(s)[key].(string); ok {
-			out = append(out, fmt.Sprintf("%#q %q is not %s", key, text, want))
+			out = append(out, keyedMsg{key, fmt.Sprintf("%#q %q is not %s", key, text, want)})
 		}
 	}
 	return out
@@ -927,14 +996,14 @@ func lintCountFlags(spec *Spec) []error {
 			if schema == nil || schema.Type != "count" {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			if channel != "flag" {
-				add("`type: count` counts argv flag occurrences; it applies to flags only")
+				problems = append(problems, schemaKeyProblem(ptr, "type", path, channel, name, "`type: count` counts argv flag occurrences; it applies to flags only"))
 				return
 			}
 			var bad []string
 			for key, set := range map[string]bool{
 				"default":         schema.Default != nil,
+				"base":            intBase(schema) != "",
 				"enum":            len(schema.Enum) > 0,
 				"required":        schema.Required,
 				"nullable":        schema.Nullable,
@@ -959,7 +1028,8 @@ func lintCountFlags(spec *Spec) []error {
 			}
 			if len(bad) > 0 {
 				sort.Strings(bad)
-				add(fmt.Sprintf("a count flag has no value to resolve, so %s cannot apply; remove them (the generated int field is the occurrence tally)", keyList(bad)))
+				problems = append(problems, schemaKeyProblem(ptr, groupKey(bad[0], schema), path, channel, name,
+					fmt.Sprintf("a count flag has no value to resolve, so %s cannot apply; remove them (the generated int field is the occurrence tally)", keyList(bad))))
 			}
 		})
 	})
@@ -979,12 +1049,12 @@ func lintVariable(spec *Spec) []error {
 			}
 			if channel == "env" || channel == "flag" || channel == "argument" {
 				if len(vars) > 1 && schema.Nesting != "" {
-					problems = append(problems, inputProblem(ptr, path, channel, name,
+					problems = append(problems, schemaKeyProblem(ptr, "variable", path, channel, name,
 						fmt.Sprintf("sets `nesting` with %d variables; a nested input reads the family of variables under ONE prefix, so name one", len(vars))))
 				}
 				return
 			}
-			problems = append(problems, inputProblem(ptr, path, channel, name,
+			problems = append(problems, schemaKeyProblem(ptr, "variable", path, channel, name,
 				"sets `variable`, which names an environment variable; only env inputs, flags and arguments (as their env fallback) read one, so here it would be silently ignored"))
 		})
 	})
@@ -1014,41 +1084,49 @@ func lintShortCircuit(spec *Spec) []error {
 			if !f.ShortCircuit {
 				continue
 			}
-			for _, msg := range shortCircuitFlagProblems(f, grouped[f.Name], dependent[f.Name]) {
-				problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name, msg))
+			for _, km := range shortCircuitFlagProblems(f, grouped[f.Name], dependent[f.Name]) {
+				problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d/%s", ptr, i, km.key), path, "flag", f.Name, km.msg))
 			}
 		}
 	})
 	return problems
 }
 
-// shortCircuitFlagProblems lists what is wrong with one short_circuit flag's declaration.
-func shortCircuitFlagProblems(f FlagInput, grouped, dependent bool) []string {
+// shortCircuitFlagProblems lists what is wrong with one short_circuit flag's declaration, each
+// with the pointer of the key at fault below the flag.
+func shortCircuitFlagProblems(f FlagInput, grouped, dependent bool) []keyedMsg {
 	s := f.Schema
 	if s == nil {
 		s = &InputSchema{}
 	}
-	var msgs []string
+	typeAt, sourceAt := "schema/type", "schema/variable"
+	if s.Type == "" {
+		typeAt = "short_circuit"
+	}
+	if s.Key != "" {
+		sourceAt = "schema/key"
+	}
+	var msgs []keyedMsg
 	if s.Type != "bool" && s.Type != "boolean" {
-		msgs = append(msgs, fmt.Sprintf("sets `short_circuit` but its type is %s; a short-circuit flag is a bool switch", displayType(s.Type)))
+		msgs = append(msgs, keyedMsg{typeAt, fmt.Sprintf("sets `short_circuit` but its type is %s; a short-circuit flag is a bool switch", displayType(s.Type))})
 	}
 	if s.Required {
-		msgs = append(msgs, "sets `short_circuit` and `required`; a short-circuit flag replaces the run, so it can't also be required")
+		msgs = append(msgs, keyedMsg{"schema/required", "sets `short_circuit` and `required`; a short-circuit flag replaces the run, so it can't also be required"})
 	}
 	if defaultString(s.Default) == "true" {
-		msgs = append(msgs, "sets `short_circuit` with a default of true, which would short-circuit every run")
+		msgs = append(msgs, keyedMsg{"schema/default", "sets `short_circuit` with a default of true, which would short-circuit every run"})
 	}
 	if s.Key != "" || len(variables(s)) > 0 {
-		msgs = append(msgs, "sets `short_circuit` and reads an environment variable or config key (`key` / `variable`); only the command line sets a short-circuit flag, or every run with that value set would be short-circuited")
+		msgs = append(msgs, keyedMsg{sourceAt, "sets `short_circuit` and reads an environment variable or config key (`key` / `variable`); only the command line sets a short-circuit flag, or every run with that value set would be short-circuited"})
 	}
 	if negatable(s) {
-		msgs = append(msgs, "sets `short_circuit` and `negatable`; a negated short-circuit flag has no meaning")
+		msgs = append(msgs, keyedMsg{"schema/negatable", "sets `short_circuit` and `negatable`; a negated short-circuit flag has no meaning"})
 	}
 	if grouped {
-		msgs = append(msgs, "sets `short_circuit` but is listed in `flag_groups`; a short-circuit flag waives flag groups, so the group could never apply to it")
+		msgs = append(msgs, keyedMsg{"short_circuit", "sets `short_circuit` but is listed in `flag_groups`; a short-circuit flag waives flag groups, so the group could never apply to it"})
 	}
 	if dependent {
-		msgs = append(msgs, "sets `short_circuit` but is listed in `flag_dependencies`; a short-circuit flag waives flag dependencies, so the rule could never apply to it")
+		msgs = append(msgs, keyedMsg{"short_circuit", "sets `short_circuit` but is listed in `flag_dependencies`; a short-circuit flag waives flag dependencies, so the rule could never apply to it"})
 	}
 	return msgs
 }
@@ -1073,7 +1151,7 @@ func lintStdinFormat(spec *Spec) []error {
 		}
 		typ := getSchemaType(c.Stdin.Schema)
 		add := func(want string) {
-			problems = append(problems, inputProblem(ptr+"/stdin", path, "stdin", "",
+			problems = append(problems, inputProblem(ptr+"/stdin/schema/type", path, "stdin", "",
 				fmt.Sprintf("`format` %q binds the payload as %s, but the schema declares %s; declare %s, or use a document format (json/yaml/jsonc/toml) to decode into a typed payload instead",
 					c.Stdin.Format, want, displayType(typ), want)))
 		}
@@ -1100,35 +1178,37 @@ func lintComplete(spec *Spec) []error {
 			if schema == nil || schema.Complete == nil {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(key, msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, key, path, channel, name, msg))
+			}
 			if m := schema.Complete.Message; m != "" && (strings.ContainsAny(m, "\r\n") || strings.TrimSpace(m) == "") {
-				add("sets a `complete.message` that isn't one line of text; a shell shows a message as a single line")
+				add("complete/message", "sets a `complete.message` that isn't one line of text; a shell shows a message as a single line")
 			}
 			if channel != "flag" && channel != "argument" {
-				add("sets `complete`, which describes a value typed on the command line; only flags and arguments are, so here it would be silently ignored")
+				add("complete", "sets `complete`, which describes a value typed on the command line; only flags and arguments are, so here it would be silently ignored")
 				return
 			}
-			if t := getSchemaType(schema); channel == "flag" && (t == "bool" || t == "boolean" || t == "count") {
-				add(fmt.Sprintf("sets `complete` but its type is %s, which takes no value; there is nothing to complete", t))
+			if t := getSchemaType(schema); channel == "flag" && (t == "bool" || schema.Type == "count") {
+				add("complete", fmt.Sprintf("sets `complete` but its type is %s, which takes no value; there is nothing to complete", schema.Type))
 				return
 			}
 			if len(schema.Complete.Extensions) > 0 && schema.Complete.Kind != "file" {
-				add(fmt.Sprintf("sets `complete.extensions` with kind %q; extensions narrow files, so they apply to kind \"file\" only", schema.Complete.Kind))
+				add("complete/extensions", fmt.Sprintf("sets `complete.extensions` with kind %q; extensions narrow files, so they apply to kind \"file\" only", schema.Complete.Kind))
 			}
 			t := getSchemaType(schema)
 			switch kind := schema.Complete.Kind; kind {
 			case "command":
 				switch {
 				case channel != "argument":
-					add("sets `complete.kind: command`, which completes the command path an argument names (a help command's); a flag's value isn't a command path")
+					add("complete/kind", "sets `complete.kind: command`, which completes the command path an argument names (a help command's); a flag's value isn't a command path")
 				case t != "string" && t != "[]string":
-					add(fmt.Sprintf("sets `complete.kind: command` but its type is %s; a command path is words, so the argument is a string or a list of strings", t))
+					add("complete/kind", fmt.Sprintf("sets `complete.kind: command` but its type is %s; a command path is words, so the argument is a string or a list of strings", t))
 				case len(schema.Enum) > 0:
-					add("sets `complete.kind: command` and `enum`; the command names are the candidates, so an enum would never be offered")
+					add("complete/kind", "sets `complete.kind: command` and `enum`; the command names are the candidates, so an enum would never be offered")
 				}
 			case "executable", "user", "group", "host":
 				if t != "string" && t != "[]string" {
-					p := inputProblem(ptr, path, channel, name, fmt.Sprintf("sets `complete.kind: %s` but its type is %s, which can't hold the %s names the shell offers", kind, t, nativeKindNouns[kind]))
+					p := schemaKeyProblem(ptr, "complete/kind", path, channel, name, fmt.Sprintf("sets `complete.kind: %s` but its type is %s, which can't hold the %s names the shell offers", kind, t, nativeKindNouns[kind]))
 					p.sev = severityWarning
 					problems = append(problems, p)
 				}
@@ -1157,16 +1237,16 @@ func lintDefaultScalar(spec *Spec) []error {
 			case []any, map[string]any:
 				if repeatableSchema(schema) {
 					if bad := nonScalarElement(v); bad != "" {
-						problems = append(problems, inputProblem(ptr, path, channel, name,
+						problems = append(problems, schemaKeyProblem(ptr, "default", path, channel, name,
 							fmt.Sprintf("every element of a multi-value `default` must be a scalar, and one is %s; each element is seeded as one occurrence and coerced through the input's element type, so there is nowhere for a nested list or map to go", bad)))
 					}
 					return
 				}
-				problems = append(problems, inputProblem(ptr, path, channel, name,
+				problems = append(problems, schemaKeyProblem(ptr, "default", path, channel, name,
 					fmt.Sprintf("a multi-value `default` needs a repeatable type, and this one is %s; each element is seeded as a separate occurrence, which a single-valued input has nowhere to put. Declare the type as a list (e.g. []string) or a map, or give a single scalar default", displayType(schema.Type))))
 				return
 			}
-			problems = append(problems, inputProblem(ptr, path, channel, name,
+			problems = append(problems, schemaKeyProblem(ptr, "default", path, channel, name,
 				fmt.Sprintf("`default` must be a scalar, or a list for a repeatable input; not %s. A default is seeded as argv occurrences and coerced through the input's type, and there is no spelling that turns %s into one",
 					defaultKindName(schema.Default), defaultKindName(schema.Default))))
 		})
@@ -1192,10 +1272,10 @@ func defaultKindName(v any) string {
 func lintPatternCompiles(spec *Spec) []error {
 	var problems []error
 	orphans := func(path, ptr, where string, b BaseSchema) {
-		walkSchemaTree(b, func(s BaseSchema) {
+		walkSchemaTreeAt(b, ptr, "", func(s BaseSchema, ptr, _ string) {
 			if s.PatternMessage != "" && s.Pattern == "" {
 				problems = append(problems, &problem{
-					kind: "spec", ptr: ptr, loc: "command " + path,
+					kind: "spec", ptr: ptr + "/pattern_message", loc: "command " + path,
 					msg: fmt.Sprintf("%s: `pattern_message` %q has no `pattern` beside it; it replaces a pattern's failure message, so it would never be shown", where, s.PatternMessage),
 				})
 			}
@@ -1214,13 +1294,13 @@ func lintPatternCompiles(spec *Spec) []error {
 				if channel == "stdin" {
 					where = "stdin"
 				}
-				orphans(path, ptr, where, schema.BaseSchema)
+				orphans(path, ptr+"/schema", where, schema.BaseSchema)
 			}
 			if channel == "stdin" || schema == nil || schema.Pattern == "" {
 				return
 			}
 			if _, err := regexp.Compile(schema.Pattern); err != nil {
-				problems = append(problems, inputProblem(ptr, path, channel, name,
+				problems = append(problems, schemaKeyProblem(ptr, "pattern", path, channel, name,
 					fmt.Sprintf("`pattern` %q does not compile (%v); it would silently never enforce", schema.Pattern, err)))
 			}
 		})
@@ -1240,16 +1320,45 @@ func lintConfigInputFiles(spec *Spec) []error {
 				return
 			}
 			if channel != "config" {
-				problems = append(problems, inputProblem(ptr, path, channel, name, "sets `file`, which applies to config inputs only"))
+				problems = append(problems, schemaKeyProblem(ptr, "file", path, channel, name, "sets `file`, which applies to config inputs only"))
 				return
 			}
 			if !declared[schema.File] {
-				problems = append(problems, inputProblem(ptr, path, channel, name,
+				problems = append(problems, schemaKeyProblem(ptr, "file", path, channel, name,
 					fmt.Sprintf("pins `file` %q, which is not a `config_files` entry in scope (declared on this command or an ancestor)", schema.File)))
 			}
 		})
 	})
 	return problems
+}
+
+// lintConfigInputScope warns about a config input on a command with no `config_files` entry in
+// scope: none on the command, its ancestors or the commands below it, whose files it is also
+// read from. The default input reader then has nothing to read it from, though a custom one
+// could still supply it.
+func lintConfigInputScope(spec *Spec) []error {
+	var problems []error
+	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
+		cmd := chain[len(chain)-1]
+		if len(cmd.Config) == 0 || len(chainConfigNames(chain)) > 0 || mayDeclareConfigFiles(cmd.Commands) {
+			return
+		}
+		for i, in := range cmd.Config {
+			p := inputProblem(fmt.Sprintf("%s/config/%d", ptr, i), path, "config", in.Name,
+				"no `config_files` entry is in scope (on this command, an ancestor or a command below it), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless an input reader set with WithInputReader supplies it")
+			p.sev = severityWarning
+			problems = append(problems, p)
+		}
+	})
+	return problems
+}
+
+// mayDeclareConfigFiles reports whether any of cmds, or a command below one, declares
+// `config_files`. A composed command's spec isn't read here, so it may.
+func mayDeclareConfigFiles(cmds []Command) bool {
+	return slices.ContainsFunc(cmds, func(c Command) bool {
+		return len(c.ConfigFiles) > 0 || c.Ref != "" || mayDeclareConfigFiles(c.Commands)
+	})
 }
 
 // lintDeprecatedIdentifiers requires a command's deprecated_identifiers to be among its
@@ -1277,7 +1386,7 @@ func lintDeprecatedIdentifiers(spec *Spec) []error {
 		for i, f := range c.Flags {
 			if len(f.DeprecatedIdentifiers) > 0 {
 				subset(func(msg string) {
-					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name, msg))
+					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d/deprecated_identifiers", ptr, i), path, "flag", f.Name, msg))
 				}, slices.Concat(flagIdentifiers(f), f.HiddenIdentifiers), f.DeprecatedIdentifiers, "identifiers")
 			}
 		}
@@ -1412,7 +1521,7 @@ func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 		for i, f := range c.Flags {
 			for _, id := range matchIdentifiers(f) {
 				if prev, dup := claimedBy[id]; dup {
-					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name,
+					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d/identifiers", ptr, i), path, "flag", f.Name,
 						fmt.Sprintf("identifier %q is already declared by flag %q", id, prev)))
 					continue
 				}
@@ -1462,17 +1571,56 @@ func lintSchemaRefs(spec *Spec) []error {
 		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
 			walkSchemaTree(s.schema.BaseSchema, checkAt("command "+path, "output", s.ptr))
 		}
+		for i, e := range c.ExitStatus {
+			at := fmt.Sprintf("%s/exit_status/%d/output", ptr, i)
+			for _, s := range outputShapesAt(e.Output, at) {
+				walkSchemaTree(s.schema.BaseSchema, checkAt("command "+path, fmt.Sprintf("exit_status %d output", e.Code), s.ptr))
+			}
+		}
 	})
 	for _, name := range names {
 		walkSchemaTree(spec.Command.Schemas[name].BaseSchema, checkAt(rootLabel(spec), fmt.Sprintf("schema %q", name), rootPointer+"/schemas/"+name))
 	}
+	return append(problems, schemaRefCycles(spec, names)...)
+}
+
+// schemaRefCycles reports each named schema whose `$ref` chain leads back to it: the chain never
+// reaches a type, and the generated program would recurse forever resolving it. Each cycle is
+// reported once, at its first schema in sorted order.
+func schemaRefCycles(spec *Spec, names []string) []error {
+	var problems []error
+	inCycle := map[string]bool{}
+	for _, name := range names {
+		if inCycle[name] {
+			continue
+		}
+		chain := []string{name}
+		for next := refTypeName(spec.Command.Schemas[name].Ref); next != ""; next = refTypeName(spec.Command.Schemas[next].Ref) {
+			if _, ok := spec.Command.Schemas[next]; !ok || slices.Contains(chain[1:], next) {
+				break // an undeclared schema, reported above, or a cycle further along
+			}
+			chain = append(chain, next)
+			if next != name {
+				continue
+			}
+			for _, n := range chain {
+				inCycle[n] = true
+			}
+			problems = append(problems, &problem{kind: "spec", ptr: rootPointer + "/schemas/" + name + "/$ref", loc: rootLabel(spec),
+				msg: fmt.Sprintf("schema %q: its `$ref` chain (%s) leads back to itself, so it never reaches a type; end the chain at a schema that declares `type`", name, strings.Join(chain, " → "))})
+			break
+		}
+	}
 	return problems
 }
 
+// maxFileNameBytes is the longest file name the common file systems accept (ext4, APFS, NTFS).
+const maxFileNameBytes = 255
+
 // lintHandlerFilenames rejects two commands resolving to the same stub file and a `filename`
 // override that is not a bare "*.go" name or that the go tool reads specially (_test.go,
-// GOOS/GOARCH suffixes). Composed commands generate no stub and are skipped. The walk mirrors
-// the generator's derivation.
+// GOOS/GOARCH suffixes), or a stub file name too long to create. Composed commands generate no
+// stub and are skipped. The walk mirrors the generator's derivation.
 func lintHandlerFilenames(spec *Spec) []error {
 	rootName := spec.Command.Name
 	var problems []error
@@ -1493,6 +1641,14 @@ func lintHandlerFilenames(spec *Spec) []error {
 			}
 		}
 		fn := commandStubFilename(rootName, path, c.Filename)
+		if len(fn) > maxFileNameBytes {
+			at := ptr + "/name"
+			if c.Filename != "" {
+				at = ptr + "/filename"
+			}
+			problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + display,
+				msg: fmt.Sprintf("generates a handler file name of %d bytes, longer than the %d a file system allows; shorten the command's name, or set a shorter `filename`", len(fn), maxFileNameBytes)})
+		}
 		if prev, dup := byFile[strings.ToLower(fn)]; dup {
 			if prev.display == display {
 				// Two siblings share this name; lintSiblingCollisions already reports it.
@@ -1528,36 +1684,112 @@ func lintHandlerFilenames(spec *Spec) []error {
 
 // lintSchemaTypes rejects an input `type:` that cannot become a Go type. The schema leaves
 // `type` free-form, so the rule resolves aliases and requires the result to parse as a Go type
-// expression, rejects unknown lowercase names (typos), and requires an `import` for an
-// author-written qualified type.
+// expression, rejects unknown lowercase names (typos), requires an `import` for an
+// author-written qualified type and refuses one beside a type that uses none, and refuses a
+// `type` beside `$ref`. Document shapes are checked by [shapeTypeProblems].
 func lintSchemaTypes(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
-			if schema == nil || schema.Type == "" {
-				return
-			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
-			resolved := jsonSchemaTypeToGo(schema.Type)
-			expr, err := parser.ParseExpr(resolved)
-			if err != nil || !isGoTypeExpr(expr) {
-				add(fmt.Sprintf("`type` %q is not a Go type; use a builtin (string, int, bool, []string, map[string]int), a rotini alias (count, duration, date), a JSON Schema name (integer, number, array, object), or an imported type with `import`", schema.Type))
-				return
-			}
-			// A lowercase unqualified name must be a Go builtin or rotini alias. A
-			// capitalized one may be a type the author defines in the generated package.
-			if name := unknownLowercaseTypeName(expr); name != "" {
-				add(didYouMean(fmt.Sprintf("`type` %q is not a type rotini knows; %q is neither a Go builtin nor a rotini type", schema.Type, name),
-					name, knownTypeNames()))
-				return
-			}
-			// rotini supplies imports only for types its aliases resolve to.
-			if resolved == schema.Type && isQualifiedType(expr) && strings.TrimSpace(schema.Import) == "" {
-				add(fmt.Sprintf("`type` %q is qualified but declares no `import`; the generated code would reference a package it does not import", schema.Type))
+			for _, km := range inputTypeProblems(schema) {
+				problems = append(problems, schemaKeyProblem(ptr, km.key, path, channel, name, km.msg))
 			}
 		})
 	})
+	return append(problems, shapeTypeProblems(spec)...)
+}
+
+// inputTypeProblems says what is wrong with one input's `type` and `import`; see
+// [lintSchemaTypes].
+func inputTypeProblems(schema *InputSchema) []keyedMsg {
+	if schema == nil || schema.Type == "" {
+		return nil
+	}
+	if schema.Ref != "" {
+		return []keyedMsg{{"type", fmt.Sprintf("sets both `$ref` and `type` %q; the schema `$ref` names decides the type, so `type` would be silently ignored; drop one", schema.Type)}}
+	}
+	resolved := jsonSchemaTypeToGo(schema.Type)
+	expr, err := parser.ParseExpr(resolved)
+	if err != nil || !isGoTypeExpr(expr) {
+		return []keyedMsg{{"type", fmt.Sprintf("`type` %q is not a Go type; use a builtin (string, int, bool, []string, map[string]int), a rotini alias (count, duration, date), a JSON Schema name (integer, number, array, object), or an imported type with `import`", schema.Type)}}
+	}
+	// A lowercase unqualified name must be a Go builtin or rotini alias. A
+	// capitalized one may be a type the author defines in the generated package.
+	if name := unknownLowercaseTypeName(expr); name != "" {
+		return []keyedMsg{{"type", didYouMean(fmt.Sprintf("`type` %q is not a type rotini knows; %q is neither a Go builtin nor a rotini type", schema.Type, name),
+			name, knownTypeNames())}}
+	}
+	var msgs []keyedMsg
+	imp := strings.TrimSpace(schema.Import)
+	// rotini supplies imports only for types its aliases resolve to.
+	if resolved == schema.Type && isQualifiedType(expr) && imp == "" {
+		msgs = append(msgs, keyedMsg{"type", fmt.Sprintf("`type` %q is qualified but declares no `import`; the generated code would reference a package it does not import", schema.Type)})
+	}
+	if imp != "" && !isQualifiedType(expr) {
+		msgs = append(msgs, keyedMsg{"import", fmt.Sprintf("`import` %q is set, but `type` %q names no type from a package, so the generated code would import a package it never uses; write the type as pkg.Name, or drop `import`", imp, schema.Type)})
+	}
+	return msgs
+}
+
+// shapeTypeProblems checks the `type` of every node of the document shapes: named schemas,
+// output, exit status output, and the properties of stdin and config file schemas. An unknown
+// one would silently generate an `any` field that checks nothing.
+func shapeTypeProblems(spec *Spec) []error {
+	var problems []error
+	shapeTypes := func(loc, subject, ptr string, root BaseSchema, ownType bool) {
+		walkSchemaTreeAt(root, ptr, "", func(b BaseSchema, ptr, path string) {
+			if path == "" && !ownType {
+				return // an input's own type: lintSchemaTypes checks it
+			}
+			who := subject
+			if path != "" {
+				who += " property " + strconv.Quote(path)
+			}
+			if msg := shapeTypeProblem(b.Type); msg != "" {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr + "/type", loc: loc, msg: who + ": " + msg})
+			}
+		})
+	}
+	for _, name := range slices.Sorted(maps.Keys(spec.Command.Schemas)) {
+		shapeTypes(rootLabel(spec), fmt.Sprintf("schema %q", name), rootPointer+"/schemas/"+name, spec.Command.Schemas[name].BaseSchema, true)
+	}
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		loc := "command " + path
+		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
+			shapeTypes(loc, "output", s.ptr, s.schema.BaseSchema, true)
+		}
+		for i, e := range c.ExitStatus {
+			for _, s := range outputShapesAt(e.Output, fmt.Sprintf("%s/exit_status/%d/output", ptr, i)) {
+				shapeTypes(loc, fmt.Sprintf("exit_status %d output", e.Code), s.ptr, s.schema.BaseSchema, true)
+			}
+		}
+		if c.Stdin != nil && c.Stdin.Schema != nil {
+			shapeTypes(loc, "stdin", ptr+"/stdin/schema", c.Stdin.Schema.BaseSchema, false)
+		}
+		for i, f := range c.ConfigFiles {
+			if f.Schema != nil {
+				shapeTypes(loc, fmt.Sprintf("config file %q schema", f.Name), fmt.Sprintf("%s/config_files/%d/schema", ptr, i), f.Schema.BaseSchema, true)
+			}
+		}
+	})
 	return problems
+}
+
+// shapeTypeProblem says why a document shape's `type` names no type, or returns "". JSON
+// Schema's own names, Go builtins, rotini aliases and capitalized or qualified Go types pass.
+func shapeTypeProblem(typ string) string {
+	switch typ {
+	case "", "string", "integer", "number", "boolean", "object", "array", "null":
+		return ""
+	}
+	expr, err := parser.ParseExpr(jsonSchemaTypeToGo(typ))
+	if err != nil || !isGoTypeExpr(expr) {
+		return fmt.Sprintf("`type` %q is not a Go type; use a JSON Schema name (string, integer, number, boolean, object, array), a builtin, a rotini alias, or an imported type with `import`", typ)
+	}
+	if name := unknownLowercaseTypeName(expr); name != "" {
+		return didYouMean(fmt.Sprintf("`type` %q is not a type rotini knows; %q is neither a Go builtin nor a rotini type", typ, name), name, knownTypeNames())
+	}
+	return ""
 }
 
 // goPredeclaredTypes are the type names Go makes available in every package.
@@ -1704,7 +1936,9 @@ func lintDefaultConstraints(spec *Spec) []error {
 			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.Default == nil {
 				return // an object input: lintObjectFlags
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "default", path, channel, name, msg))
+			}
 
 			values := defaultList(schema.Default)
 			multi := len(values) > 0
@@ -1797,8 +2031,8 @@ func pluralWord(word string, n int) string {
 	return word + "s"
 }
 
-// formatBound renders a bound as the runtime's formatNum does, with no trailing zeros.
-func formatBound(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
+// formatBound renders a bound as the runtime's formatNum does: exactly, in plain decimal.
+func formatBound(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 
 // isDefaultMultipleOf mirrors parser.go's isMultipleOf, including its float tolerance (1.2
 // is a multiple of 0.1).
@@ -1821,17 +2055,19 @@ func lintItemConstraints(spec *Spec) []error {
 			if channel == "stdin" || schema == nil || schema.Items == nil || !isArrayInputSchema(schema) {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(key, msg string) {
+				problems = append(problems, inputProblem(ptr+"/schema/items/"+key, path, channel, name, msg))
+			}
 			it := &schema.Items.BaseSchema
 
 			if it.MinItems > 0 || it.MaxItems != nil {
-				add("`minItems`/`maxItems` on `items` would count values inside ONE element, but an element of a " +
-					channel + " list is a single value; put the bound on the list itself")
+				add(firstSetKey(map[string]bool{"minItems": it.MinItems > 0, "maxItems": true}, "minItems", "maxItems"), "`minItems`/`maxItems` on `items` would count values inside ONE element, but an element of a "+
+					channel+" list is a single value; put the bound on the list itself")
 			}
 
 			conflict := func(key string, differ bool) {
 				if differ {
-					add(fmt.Sprintf("%#q is declared on both the list and its `items`, with different values; "+
+					add(key, fmt.Sprintf("%#q is declared on both the list and its `items`, with different values; "+
 						"they mean the same thing (a rule every element must pass), so declare it once", key))
 				}
 			}

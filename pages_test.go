@@ -27,6 +27,12 @@ func TestStripANSI(t *testing.T) {
 		"\x1bPq#0\x1b\\plain": "plain",
 		"\x1b_app\x07plain":   "plain",
 		"\x1b[1":              "\x1b[1",
+		"\x1bXsos\x1b\\plain": "plain",
+		"\x1b^pm\x07plain":    "plain",
+		"plain\x1b":           "plain\x1b",
+		"\x1b\x01plain":       "\x1b\x01plain",
+		"\x1b]8;;open":        "\x1b]8;;open",
+		"\x1b(":               "\x1b(",
 	} {
 		if got := StripANSI(in); got != want {
 			t.Errorf("StripANSI(%q) = %q, want %q", in, got, want)

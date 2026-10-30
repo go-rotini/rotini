@@ -1,0 +1,145 @@
+# R13 — the guide's "Suggesting a correction": a mistyped command, flag, enum value, env value
+# and discovered plugin each carry what a reporter needs to suggest the nearest word, through
+# the guide's two blocks (suggest.go.txt and rank.go.txt, byte for byte). A secret value is
+# never offered, nothing close gives nothing, and the default reporter never suggests.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+concat internal/cmd/todo/report.go report_head.go.txt suggest.go.txt rank.go.txt report_tail.go.txt
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+exec go build -o plain$exe ./cmd/plain
+
+! exec ./todo$exe lsit
+cmp stderr command.txt
+! exec ./todo$exe add --priorty high
+stderr '^Did you mean "--priority"\?$'
+! exec ./todo$exe add --priority hgh
+stderr '^Did you mean "high"\?$'
+env TODO_MODE=fats
+! exec ./todo$exe add
+stderr '^Did you mean "fast"\?$'
+env TODO_MODE=
+! exec ./todo$exe ext snyc
+stderr '^Did you mean "sync"\?$'
+
+# A secret value is neither printed nor ranked.
+env TODO_TOKEN=alpah
+! exec ./todo$exe add
+! stderr 'Did you mean'
+! stderr alpah
+env TODO_TOKEN=
+
+# Nothing close: no suggestion.
+! exec ./todo$exe zzzzzzzz
+! stderr 'Did you mean'
+
+# The default reporter prints the error and no suggestion.
+! exec ./plain$exe lsit
+stderr '^Error: unknown command "lsit" for "todo"$'
+! stderr 'Did you mean'
+! stderr '"list"'
+
+-- command.txt --
+Error: unknown command "lsit" for "todo"
+Did you mean "list"?
+Did you mean "list"?
+-- report_head.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+func closest(typed string, candidates []string) string {
+	best, _ := rotini.NewSuggestor().Closest(typed, candidates)
+	return best
+}
+
+// Report prints each error and two suggestions for it: the Suggestor's, and closest's.
+func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+-- suggest.go.txt --
+if hits := rotini.NewSuggestor().For(err); len(hits) > 0 {
+	fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", hits[0])
+}
+-- rank.go.txt --
+if typed, candidates, ok := rotini.SuggestionFacts(err); ok {
+	if best := closest(typed, candidates); best != "" {
+		fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
+	}
+}
+-- report_tail.go.txt --
+	}
+	if out.Failed() {
+		rtx.Exit(1)
+	}
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  commands:
+    - name: add
+      summary: add a task
+      flags:
+        - name: priority
+          identifiers: [--priority]
+          schema: { type: string, enum: [low, high] }
+      env:
+        - name: mode
+          schema: { type: string, variable: TODO_MODE, enum: [fast, slow] }
+        - name: token
+          schema: { type: string, variable: TODO_TOKEN, secret: true, enum: [alpha, beta] }
+    - name: list
+      summary: list tasks
+    - name: ext
+      summary: extensions
+      plugin_discovery:
+        prefix: todo-ext-
+      commands:
+        - name: sync
+          summary: sync tasks
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+-- cmd/todo/main.go --
+package main
+
+import cmd "example.com/todo/internal/cmd/todo"
+
+func main() { cmd.NewProgram().WithReporter(cmd.Report).Execute() }
+-- cmd/plain/main.go --
+package main
+
+import cmd "example.com/todo/internal/cmd/todo"
+
+func main() { cmd.NewProgram().Execute() }
+-- internal/cmd/todo/todo_add.go --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoAddHandler)(nil)
+
+type todoAddHandler struct{ rotini.NoHooks }
+
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[TodoAddInputs](); err != nil {
+		rtx.HaltWith(err)
+	}
+}

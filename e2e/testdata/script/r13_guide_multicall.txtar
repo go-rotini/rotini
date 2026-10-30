@@ -1,0 +1,133 @@
+# R13 — the guide's "One binary, several names": multicall with a prefix, installed as copies,
+# the root's own name, and pages and usage that keep the root's invocation.
+
+gomodinit example.com/busybox
+
+exec rotini generate cmd/busybox/.rotini.spec.yaml --config cmd/busybox/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o busybox$exe ./cmd/busybox
+
+# The prefix is stripped before the name is matched: acme-ls runs `busybox ls`.
+cp busybox$exe acme-ls$exe
+exec ./acme-ls$exe -l
+stdout '^ls ran: long=true$'
+
+# Pages and rtx.Usage() still show the root's invocation.
+exec ./acme-ls$exe --bad
+stdout '^usage: busybox ls \[flags\]$'
+exec ./acme-ls$exe --help
+stdout '^  busybox ls \[flags\]$'
+
+# A name that matches no top-level command, the root's own included, runs the root.
+cp busybox$exe acme-busybox$exe
+exec ./acme-busybox$exe
+stdout '^root ran$'
+cp busybox$exe ls$exe
+exec ./ls$exe
+stdout '^root ran$'
+
+# On Windows names match without regard to case.
+[windows] cp busybox$exe ACME-LS.EXE
+[windows] exec ./ACME-LS.EXE
+[windows] stdout '^ls ran: long=false$'
+
+-- cmd/busybox/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: busybox
+  summary: many tools
+  multicall: {prefix: acme-}
+  flags:
+    - name: help
+      summary: show help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+  commands:
+    - name: ls
+      summary: list files
+      flags:
+        - name: long
+          summary: long format
+          identifiers: [-l]
+          schema: {type: bool}
+-- cmd/busybox/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/busybox/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/busybox/zz_busybox.go
+      package: busybox
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/busybox/busybox.go --
+package busybox
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*busyboxHandler)(nil)
+
+type busyboxHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*busyboxHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, _, err := rtx.PartialInputs[BusyboxInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Busybox.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+	}
+}
+
+func (*busyboxHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "root ran")
+}
+-- internal/cmd/busybox/busybox_ls.go --
+package busybox
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*busyboxLsHandler)(nil)
+
+type busyboxLsHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*busyboxLsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[BusyboxLsInputs]()
+	if err != nil {
+		fmt.Fprintln(rtx.Stdout, "usage:", rtx.Usage())
+		rtx.HaltWithCode(0)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "ls ran: long=%t\n", in.BusyboxLs.Flags.Long)
+}

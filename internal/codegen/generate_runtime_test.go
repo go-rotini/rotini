@@ -165,3 +165,34 @@ command:
 		t.Errorf("problems = %v", problems)
 	}
 }
+
+// Only a multicall prefix that is also the root's plugin prefix, with plugins to reach, warns.
+func TestLintMulticallSelfLoop(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, body string
+		want       string // the plugin the warning names; "" for no warning
+	}{
+		{"declared plugin", "  multicall: {prefix: app-}\n  plugins: [{name: sync}]\n", "sync"},
+		{"default discovery", "  multicall: {prefix: app-}\n  plugin_discovery: {}\n  commands: [{name: a}]\n", "foo"},
+		{"discovery with the same prefix", "  multicall: {prefix: app-}\n  plugin_discovery: {prefix: app-}\n  commands: [{name: a}]\n", "foo"},
+		{"discovery with another prefix", "  multicall: {prefix: app-}\n  plugin_discovery: {prefix: ext-}\n  commands: [{name: a}]\n", ""},
+		{"another multicall prefix", "  multicall: {prefix: bb-}\n  plugins: [{name: sync}]\n", ""},
+		{"no prefix", "  multicall: true\n  plugins: [{name: sync}]\n", ""},
+		{"no plugins", "  multicall: {prefix: app-}\n  commands: [{name: a}]\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			problems := lintMulticallSelfLoop(decodeSpecYAML(t, "version: 0.0.0\ncommand:\n  name: app\n"+tc.body))
+			if tc.want == "" {
+				if len(problems) != 0 {
+					t.Errorf("problems = %v, want none", problems)
+				}
+				return
+			}
+			if len(problems) != 1 || !strings.Contains(problems[0].Error(), `a link named "app-`+tc.want+`"`) {
+				t.Errorf("problems = %v, want one naming app-%s", problems, tc.want)
+			}
+		})
+	}
+}

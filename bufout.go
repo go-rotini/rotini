@@ -101,6 +101,20 @@ func (rtx *Context) flushOutput() {
 	}
 }
 
+// endOutput discards the output files the run left open and writes out its buffered stdout,
+// for a run that ends without settling (a re-raised panic).
+func (rtx *Context) endOutput() {
+	rtx.abortOutputs()
+	rtx.flushOutput()
+}
+
+// forceEnd is the best-effort cleanup before a forced exit: no hook runs, so it discards the
+// run's open output files and writes out its buffered stdout.
+func (rtx *Context) forceEnd() {
+	rtx.discardOutputs()
+	rtx.flushOutput()
+}
+
 func (rtx *Context) bufferedOut() *bufferedStdout {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
@@ -115,7 +129,7 @@ func (rtx *Context) bufferedOut() *bufferedStdout {
 //
 // When the run ends, before the reporter runs, rotini flushes the buffer and checks the result:
 // a write that fails then (a full disk, a closed pipe) is recorded as an error, so the run
-// exits non-zero. This happens on every path that reaches the reporter, a halt, a recovered
+// exits non-zero. The error is neither a usage nor an internal one ([CategoryNone]). This happens on every path that reaches the reporter, a halt, a recovered
 // panic and a trapped signal included. A panic re-raised by [Program.WithPanicRecover](false)
 // flushes first, ignoring a failure; a second signal's forced exit flushes only when no write is
 // in progress, so it may drop buffered output.

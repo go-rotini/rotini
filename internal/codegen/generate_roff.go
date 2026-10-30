@@ -22,6 +22,76 @@ import (
 
 // roffEscapeLine escapes one line of text for a roff text line.
 func roffEscapeLine(s string) string {
+	return textLine(roffEscape(s))
+}
+
+// textLine keeps an escaped line that would start with "." from being read as a request.
+func textLine(out string) string {
+	if strings.HasPrefix(out, ".") {
+		out = `\&` + out
+	}
+	return out
+}
+
+// roffCode is roffInline for text holding markdown code spans, as the pages' rules do: each
+// span is set in bold, without its backtick fence (a fence of two or more backticks lets the
+// code hold one). A backtick that opens no span stays literal.
+func roffCode(s string) string {
+	s = strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
+	var b strings.Builder
+	for {
+		open := strings.IndexByte(s, '`')
+		if open < 0 {
+			break
+		}
+		n := backtickRun(s, open)
+		end := closingRun(s, open+n, n)
+		if end < 0 {
+			b.WriteString(roffEscape(s[:open+n]))
+			s = s[open+n:]
+			continue
+		}
+		code := s[open+n : end]
+		if len(code) > 1 && code[0] == ' ' && code[len(code)-1] == ' ' && strings.Trim(code, " ") != "" {
+			code = code[1 : len(code)-1]
+		}
+		b.WriteString(roffEscape(s[:open]))
+		b.WriteString(`\fB`)
+		b.WriteString(roffEscape(code))
+		b.WriteString(`\fR`)
+		s = s[end+n:]
+	}
+	b.WriteString(roffEscape(s))
+	return textLine(b.String())
+}
+
+// backtickRun is the length of the run of backticks starting at s[i].
+func backtickRun(s string, i int) int {
+	n := 0
+	for i+n < len(s) && s[i+n] == '`' {
+		n++
+	}
+	return n
+}
+
+// closingRun is where the first run of exactly n backticks at or after s[from] starts, or -1.
+func closingRun(s string, from, n int) int {
+	for i := from; i < len(s); {
+		if s[i] != '`' {
+			i++
+			continue
+		}
+		run := backtickRun(s, i)
+		if run == n {
+			return i
+		}
+		i += run
+	}
+	return -1
+}
+
+// roffEscape escapes text for a roff text line, leaving the leading "." check to textLine.
+func roffEscape(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for s != "" {
@@ -46,11 +116,7 @@ func roffEscapeLine(s string) string {
 			b.WriteRune(r)
 		}
 	}
-	out := b.String()
-	if strings.HasPrefix(out, ".") {
-		out = `\&` + out
-	}
-	return out
+	return b.String()
 }
 
 // roffInline escapes text for use inside one roff line: line breaks become spaces.

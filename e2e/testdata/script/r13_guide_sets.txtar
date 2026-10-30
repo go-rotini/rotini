@@ -1,0 +1,82 @@
+# R13 — the guide's "Sharing flags between commands": its flag set spec builds, a handler reads
+# a set's flag as in.TodoList.Flags.Format, and a helper takes the set's struct, as the guide
+# writes them.
+
+gomodinit github.com/me/todo
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+cp list.go.txt internal/cmd/todo/todo_list.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+exec ./todo$exe list --format json
+stdout '^format=json items=0$'
+exec ./todo$exe show --help
+stdout '^Output:$'
+stdout '^      --format string +how to print'
+
+-- list.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoListHandler)(nil)
+
+type todoListHandler struct{ rotini.NoHooks }
+
+type Item struct{ Title string }
+
+func print(rtx *rotini.Context, out TodoOutputFlagSet, items []Item) {
+	fmt.Fprintf(rtx.Stdout, "format=%s items=%d\n", out.Format, len(items))
+}
+
+func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoListInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	var items []Item
+	if in.TodoList.Flags.Format != in.TodoList.Flags.TodoOutputFlagSet.Format {
+		panic("a set's flag is the command's flag")
+	}
+	print(rtx, in.TodoList.Flags.TodoOutputFlagSet, items)
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  flag_sets:
+    Output:
+      group: Output
+      flags:
+        - name: format
+          summary: how to print
+          schema: { type: string, enum: [text, json], default: text }
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: list
+      use: [Output]
+    - name: show
+      use: [Output]
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_rotini.go
+  features:
+    - type: help
+      enabled: true

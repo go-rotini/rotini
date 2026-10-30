@@ -59,4 +59,13 @@ func TestIsTerminal_usesFd(t *testing.T) {
 	if !IsTerminal(tty) {
 		t.Error("a terminal *os.File did not report one")
 	}
+	// Context.Stdout under WithBufferedOutput still reports the terminal under it.
+	var buffered bool
+	p := NewProgram(Definition{Name: "app", Handler: "App"}, &funcHandlers{run: func(rtx *Context) {
+		buffered = IsTerminal(rtx.Stdout)
+	}}).WithStdout(tty).WithStderr(&bytes.Buffer{}).WithBufferedOutput(true).WithoutSignalHandling()
+	p.Run(nil)
+	if !buffered {
+		t.Error("a buffered stdout over a terminal did not report one")
+	}
 }

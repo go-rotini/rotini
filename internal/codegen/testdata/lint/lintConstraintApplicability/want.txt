@@ -1,10 +1,12 @@
-spec: .rotini.spec.yaml:6:7: command demo: flag "force": `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf` apply to numeric types, durations and sizes only, not bool; the bound would be silently ignored
-spec: .rotini.spec.yaml:12:7: command demo: flag "retries": `minLength`/`maxLength`/`pattern` apply to string types only, not int; the constraint would be silently ignored
-spec: .rotini.spec.yaml:20:7: command demo: flag "wait": `minimum` "5" is not a duration such as 30s or 1h30m
-spec: .rotini.spec.yaml:23:7: command demo: flag "cache": `maximum` "12XB" is not a size such as 512Mi, 10MB or 1073741824
-spec: .rotini.spec.yaml:26:7: command demo: flag "workers": `maximum` "1s" is text, but int takes a number; a string bound is for a duration or bytesize input
-spec: .rotini.spec.yaml:43:7: command demo: argument "labels": sets `properties`, which applies only to a map flag, whose property names feed shell completion (an object's shape belongs in a named schema); here it would do nothing
-spec: .rotini.spec.yaml:38:7: command demo: env "loud": sets `negatable`, which applies only to bool flags (it derives a --no-<name> form); here it would do nothing
-spec: .rotini.spec.yaml:40:7: command demo: env "region": sets `key`, which applies only to config inputs and the configuration fallback of flags and arguments; here it would do nothing
-spec: .rotini.spec.yaml:47:5: command demo: stdin: sets `negatable`, which applies only to bool flags (it derives a --no-<name> form); here it would do nothing
-spec: .rotini.spec.yaml:47:5: command demo: stdin: sets `key`, which applies only to config inputs and the configuration fallback of flags and arguments; here it would do nothing
+spec: .rotini.spec.yaml:11:18: command demo: flag "force": `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf` apply to numeric types, durations and sizes only, not bool; the bound would be silently ignored
+spec: .rotini.spec.yaml:17:20: command demo: flag "retries": `minLength`/`maxLength`/`pattern` apply to string types only, not int; the constraint would be silently ignored
+spec: .rotini.spec.yaml:22:41: command demo: flag "wait": `minimum` "5" is not a duration such as 30s or 1h30m
+spec: .rotini.spec.yaml:25:41: command demo: flag "cache": `maximum` "12XB" is not a size such as 512Mi, 10MB or 1073741824
+spec: .rotini.spec.yaml:28:36: command demo: flag "workers": `maximum` "1s" is text, but int takes a number; a string bound is for a duration or bytesize input
+spec: .rotini.spec.yaml:32:37: command demo: flag "port": `items` describes the elements of a list type, not string; it would be silently ignored, so make the type a list (array, []string) or drop `items`
+spec: .rotini.spec.yaml:35:41: command demo: flag "quiet": `placeholder` names a flag's value, but a bool flag takes none; it would be silently ignored
+spec: .rotini.spec.yaml:51:39: command demo: argument "labels": sets `properties`, which applies only to a map flag, whose property names feed shell completion (an object's shape belongs in a named schema); here it would do nothing
+spec: .rotini.spec.yaml:46:39: command demo: env "loud": sets `negatable`, which applies only to bool flags (it derives a --no-<name> form); here it would do nothing
+spec: .rotini.spec.yaml:48:35: command demo: env "region": sets `key`, which applies only to config inputs and the configuration fallback of flags and arguments; here it would do nothing
+spec: .rotini.spec.yaml:55:37: command demo: stdin: sets `negatable`, which applies only to bool flags (it derives a --no-<name> form); here it would do nothing
+spec: .rotini.spec.yaml:55:48: command demo: stdin: sets `key`, which applies only to config inputs and the configuration fallback of flags and arguments; here it would do nothing

@@ -49,11 +49,12 @@ type templateProgramData struct {
 	BaseURL          string // llms: where the markdown pages are published, "" for none
 
 	Commands []templateProgramCommand // the commands offered to agents, root first
-	Optional []templateProgramCommand // llms: the other visible commands (groups, deprecated, passthrough)
+	Optional []templateProgramCommand // llms: the other visible commands (help-only groups, deprecated, passthrough)
 	Env      []templateProgramInput   // environment variables the offered commands read
 	Config   []templateProgramInput   // config values the offered commands read
 	JSON     bool                     // some command has a machine-output flag
 	Previews bool                     // some command has a dry-run or confirm flag
+	DryRuns  bool                     // some command has a dry-run flag
 }
 
 // templateProgramCommand is one command on a whole-program page.
@@ -77,6 +78,7 @@ type templateProgramCommand struct {
 // templateProgramInput is an environment variable or config value on a whole-program page.
 type templateProgramInput struct {
 	Name     string // the variable(s), or the config key
+	Flag     string // env: the flag the variable sets, "" for an env input
 	Summary  string
 	Required bool
 	Secret   bool
@@ -113,17 +115,25 @@ func programData(p *program, a *agentProgram, link func(page string) string) tem
 		d.Commands = append(d.Commands, row)
 		d.JSON = d.JSON || row.JSON != ""
 		d.Previews = d.Previews || row.DryRun != "" || row.Confirm != ""
-		for _, e := range cmd.Env {
-			if !listedForAgents(e) {
-				continue
-			}
-			name := strings.Join(e.Variables, ", ")
-			if i, ok := envAt[name]; ok {
+		d.DryRuns = d.DryRuns || row.DryRun != ""
+		addEnv := func(in templateProgramInput) {
+			if i, ok := envAt[in.Name]; ok {
 				d.Env[i].Commands = append(d.Env[i].Commands, c.invocation)
-				continue
+				return
 			}
-			envAt[name] = len(d.Env)
-			d.Env = append(d.Env, templateProgramInput{Name: name, Summary: e.Summary, Required: e.Required, Secret: e.Secret, Commands: []string{c.invocation}})
+			envAt[in.Name] = len(d.Env)
+			in.Commands = []string{c.invocation}
+			d.Env = append(d.Env, in)
+		}
+		for _, e := range cmd.Env {
+			if listedForAgents(e) {
+				addEnv(templateProgramInput{Name: strings.Join(e.Variables, ", "), Summary: e.Summary, Required: e.Required, Secret: e.Secret})
+			}
+		}
+		for _, f := range cmd.Flags {
+			if len(f.Env) > 0 && listedForAgents(f) {
+				addEnv(templateProgramInput{Name: strings.Join(f.Env, ", "), Flag: longIdentifier(f), Summary: f.Summary, Required: f.Required, Secret: f.Secret})
+			}
 		}
 		for _, cfg := range cmd.Config {
 			if !listedForAgents(cfg) {
@@ -141,8 +151,8 @@ func programData(p *program, a *agentProgram, link func(page string) string) tem
 	return d
 }
 
-// listedForAgents reports whether an env or config input is listed on the agent pages: a
-// visible one unless `agent: false`, a hidden one with `agent: true`.
+// listedForAgents reports whether an env or config input, or a flag's variable, is listed on
+// the agent pages: a visible one unless `agent: false`, a hidden one with `agent: true`.
 func listedForAgents(in agentInput) bool {
 	if in.Agent != nil {
 		return *in.Agent
@@ -198,15 +208,12 @@ func renderSkill(p *program, f *Feature, a *agentProgram, tmpl *template.Templat
 		return ""
 	})
 	d.SkillName = name
-	d.SkillDescription = sentence(p.rootHelp.Summary)
-	if f.Description != "" {
-		d.SkillDescription = strings.TrimSpace(d.SkillDescription + " " + f.Description)
-	}
+	d.SkillDescription = skillDescription(p.rootHelp.Summary, f.Description)
 	switch n := len([]rune(d.SkillDescription)); {
 	case n == 0:
 		return nil, nil, errors.New("the skill needs a description: give the root command a summary, or set the feature's `description`")
-	case n > 1024:
-		return nil, nil, fmt.Errorf("the skill's description (the root's summary and the feature's `description`) is %d characters; the Agent Skills format allows 1024", n)
+	case n > skillDescriptionLimit:
+		return nil, nil, fmt.Errorf("the skill's description (the root's summary and the feature's `description`) is %d characters; the Agent Skills format allows %d", n, skillDescriptionLimit)
 	}
 	d.AllowedTools = allowedTools(a)
 	page, err := renderProgramPage(tmpl, d)
@@ -225,6 +232,59 @@ func renderSkill(p *program, f *Feature, a *agentProgram, tmpl *template.Templat
 		}
 	}
 	return files, notices, nil
+}
+
+// skillReferenceLink matches a link SKILL.md makes to one of its reference pages.
+var skillReferenceLink = sync.OnceValue(func() *regexp.Regexp {
+	return regexp.MustCompile(`\(references/([^()/\\\s]+\.md)\)`)
+})
+
+// pruneSkillReferences removes each reference page the previous SKILL.md linked that this run
+// doesn't write, as a renamed or removed command leaves behind. SKILL.md is rotini's, so its
+// links record the pages it wrote. A page is removed only when its name is one rotini gives the
+// program's pages (<root>.md, <root>-*.md) and the skill template doesn't name it, so a file the
+// author wrote or links by hand is kept.
+func (p *program) pruneSkillReferences(base string, files map[string][]byte, f *Feature) error {
+	if p.skipPrune {
+		return nil
+	}
+	skill := ""
+	for rel := range files {
+		if dir, ok := strings.CutSuffix(rel, "/SKILL.md"); ok {
+			skill = dir
+		}
+	}
+	if skill == "" {
+		return nil
+	}
+	dir := filepath.Join(base, filepath.FromSlash(skill))
+	prior, _, exists, err := p.plan.read(filepath.Join(dir, "SKILL.md"))
+	if err != nil || !exists {
+		return err
+	}
+	tmplText := templateSkill
+	if f.Template {
+		src, _, ok, err := p.plan.read(filepath.Join(p.module.root, filepath.FromSlash(f.TemplateDir), skillTemplateName))
+		if err != nil {
+			return err
+		}
+		if ok {
+			tmplText = string(src)
+		}
+	}
+	root := manPageName(p.rootName, nil)
+	for _, m := range skillReferenceLink().FindAllStringSubmatch(string(prior), -1) {
+		name := m[1]
+		page := strings.TrimSuffix(name, ".md")
+		if _, written := files[skill+"/references/"+name]; written || !safePageName(name) ||
+			(page != root && !strings.HasPrefix(page, root+"-")) || strings.Contains(tmplText, "references/"+name) {
+			continue
+		}
+		if err := p.plan.remove(filepath.Join(dir, "references", name)); err != nil {
+			return fmt.Errorf("prune %s: %w", relToWorkdir(filepath.Join(dir, "references", name)), err)
+		}
+	}
+	return nil
 }
 
 // allowedTools is the skill's allowed-tools: a Claude Code Bash rule for every name of every
@@ -302,6 +362,19 @@ func renderLLMS(p *program, f *Feature, a *agentProgram, tmpl *template.Template
 		return nil, nil, err
 	}
 	return map[string][]byte{"": page}, nil, nil
+}
+
+// skillDescriptionLimit is the most characters SKILL.md's `description` may hold.
+const skillDescriptionLimit = 1024
+
+// skillDescription is SKILL.md's `description`: the root's summary as a sentence, then the skill
+// feature's own description.
+func skillDescription(summary, description string) string {
+	d := sentence(summary)
+	if description != "" {
+		d = strings.TrimSpace(d + " " + description)
+	}
+	return d
 }
 
 // sentence ends s with a full stop unless it ends a sentence already; "" stays "".

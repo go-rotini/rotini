@@ -108,6 +108,9 @@ type composeCtx struct {
 	specRoot string
 	// flagSets are the flag sets of the spec declaring the subtree; nil for the program's own.
 	flagSets map[string]FlagSet
+	// overrides are the override entries for the commands being walked, by name, in the order
+	// they apply: the spec nearest the root last, so its keys win.
+	overrides map[string][]override
 }
 
 // scopedConfigFile is one config_files entry tagged with the path of the command that
@@ -268,6 +271,9 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 		if c.Name == "" {
 			return nil, errors.New("command entry has neither a name nor a $ref")
 		}
+		var below map[string][]override
+		var replacedBy replacement
+		c, below, replacedBy = gp.applyOverrides(c, ctx)
 
 		path := gp.childPath(parentPath, c.Name)
 		prefix := gp.rootPascal + toPascalCase(path)
@@ -316,8 +322,13 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			gp.own = append(gp.own, gc)
 		}
 
-		children, err := gp.walk(c.Commands, path, base, moduleName, seen, ctx)
+		childCtx := ctx
+		childCtx.overrides = below
+		children, err := gp.walk(c.Commands, path, base, moduleName, seen, childCtx)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkOverrides(below, children, gp.pathSegments[path]); err != nil {
 			return nil, err
 		}
 		if err := checkCollisions(children, c.Plugins); err != nil {
@@ -346,7 +357,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			lifecycle:             lifecycleOf(&c),
 			inputsType:            inputsType,
 			hiddenAliases:         c.HiddenAliases,
-			replacedBy:            gp.commandReplacement(c.ReplacedBy, ctx.specRoot),
+			replacedBy:            replacedBy,
 			flagSets:              flagSetNames(&c, ctx.setsOr(gp.flagSets)),
 			children:              children,
 		})
@@ -357,22 +368,22 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 	return out, nil
 }
 
-// overlayCommand applies the $ref overlay model: the child command is the base, and every
-// identity or presentation key the parent set on the `$ref` node overrides the child's.
-// `commands` is merged additively by the caller; handler-coupled keys are rejected on a
-// `$ref` node by validation.
+// overlayCommand applies the override model: the child command is the base, and every key the
+// parent writes for it (beside its `$ref`, or in an override entry) replaces the child's. A list
+// or map written empty clears the child's. `commands` is merged by the caller; keys the handler
+// depends on are rejected by validation.
 func overlayCommand(child, parent Command) Command {
 	m := child
 	if parent.Name != "" {
 		m.Name = parent.Name
 	}
-	if len(parent.Aliases) > 0 {
+	if parent.Aliases != nil {
 		m.Aliases = parent.Aliases
 	}
-	if len(parent.DeprecatedIdentifiers) > 0 {
+	if parent.DeprecatedIdentifiers != nil {
 		m.DeprecatedIdentifiers = parent.DeprecatedIdentifiers
 	}
-	if len(parent.DeprecatedIdentifiersRemovedIn) > 0 {
+	if parent.DeprecatedIdentifiersRemovedIn != nil {
 		m.DeprecatedIdentifiersRemovedIn = parent.DeprecatedIdentifiersRemovedIn
 	}
 	if parent.Hidden {
@@ -392,6 +403,7 @@ func overlayCommand(child, parent Command) Command {
 	}
 	m.Stability = cmp.Or(parent.Stability, m.Stability)
 	m.Agent = cmp.Or(parent.Agent, m.Agent)
+	m.Effects = cmp.Or(parent.Effects, m.Effects)
 	if parent.Summary != "" {
 		m.Summary = parent.Summary
 	}
@@ -410,16 +422,16 @@ func overlayCommand(child, parent Command) Command {
 	if parent.Headings != nil {
 		m.Headings = parent.Headings
 	}
-	if len(parent.Groups) > 0 {
+	if parent.Groups != nil {
 		m.Groups = parent.Groups
 	}
-	if len(parent.Examples) > 0 {
+	if parent.Examples != nil {
 		m.Examples = parent.Examples
 	}
-	if len(parent.ExitStatus) > 0 {
+	if parent.ExitStatus != nil {
 		m.ExitStatus = parent.ExitStatus
 	}
-	if len(parent.SeeAlso) > 0 {
+	if parent.SeeAlso != nil {
 		m.SeeAlso = parent.SeeAlso
 	}
 	if parent.Help != "" {
@@ -445,7 +457,7 @@ func overlayCommand(child, parent Command) Command {
 // overlayMetadata applies the `metadata` a `$ref` node declares to the mounted command m,
 // replacing the composed command's; see [overlayCommand].
 func overlayMetadata(m *Command, parent Command) {
-	if len(parent.Metadata) > 0 {
+	if parent.Metadata != nil {
 		m.Metadata = parent.Metadata
 	}
 }
@@ -454,6 +466,10 @@ func overlayMetadata(m *Command, parent Command) {
 // it in seen so a cycle back to it is reported. The caller defers release, which unmarks
 // it: a spec may appear twice in a tree, but not inside itself.
 func loadComposedSpec(base, ref, moduleName string, seen map[string]bool) (rr resolvedRef, release func(), err error) {
+	// A local spec's own validation reports how its $ref entries are written, at the entry.
+	if err := refLocatorError(ref); err != nil && !strings.HasPrefix(base, modScheme) {
+		return rr, nil, &refEntryError{fmt.Errorf("compose %q: %w", ref, err)}
+	}
 	locator, err := locateRef(base, ref)
 	if err != nil {
 		return rr, nil, fmt.Errorf("compose %q: %w", ref, err)
@@ -465,7 +481,11 @@ func loadComposedSpec(base, ref, moduleName string, seen map[string]bool) (rr re
 	release = func() { delete(seen, locator) }
 	if rr, err = loadRef(locator, moduleName); err != nil {
 		release()
-		return rr, nil, fmt.Errorf("compose %q: %w", ref, err)
+		err = fmt.Errorf("compose %q: %w", ref, err)
+		if _, ok := errors.AsType[*modVersionError](err); ok && !strings.HasPrefix(base, modScheme) {
+			err = &refEntryError{err}
+		}
+		return rr, nil, err
 	}
 	if rr.spec.Command.Name == "" {
 		release()
@@ -535,15 +555,22 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	if !passthrough {
 		ctx.typeAlias, ctx.typeRoot, ctx.typePascal = alias, composeRootPath, delegateRoot
 	}
+	// An entry beside the `$ref` named like one of the child's own commands overrides it; the
+	// others are added.
+	overrides, additions, err := gp.splitBeside(c.Commands, childRoot.Commands, rr.childBase, moduleName)
+	if err != nil {
+		return rnode{}, err
+	}
+	ctx.overrides = overridesByName(overrides, "")
 	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
 	}
-	// `commands:` authored beside the `$ref` belong to the parent: they resolve against the
+	// The commands added beside the `$ref` belong to the parent: they resolve against the
 	// parent's base in a non-composed context and are grafted beside the child's subtree.
 	// Name or alias collisions across the merged set are errors.
-	if len(c.Commands) > 0 {
-		authored, err := gp.walk(c.Commands, composeRootPath, base, moduleName, seen, composeCtx{})
+	if len(additions) > 0 {
+		authored, err := gp.walk(additions, composeRootPath, base, moduleName, seen, composeCtx{})
 		if err != nil {
 			return rnode{}, err
 		}
@@ -710,7 +737,17 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	synth := overlayCommand(gc, c)
 	synth.Ref = ""
 	synth.Commands = gc.Commands // authored siblings merge below
+	overrides, additions, err := gp.splitBeside(c.Commands, gc.Commands, rr.childBase, moduleName)
+	if err != nil {
+		return nil, err
+	}
+	// This spec's overrides of the grandchild's commands apply first, then those of the specs
+	// above it, which reach the mounted command by the name this spec gives it.
+	above := ctx.overrides[synth.Name]
 	gcCtx := ctx
+	gcCtx.overrides = map[string][]override{synth.Name: append([]override{{
+		cmd: Command{Name: synth.Name, Commands: overrides}, specRoot: ctx.specRoot,
+	}}, above...)}
 	gcCtx.pluginHost = gc.Name
 	gcCtx.scope = &schemaScope{name: gc.Name, schemas: gc.Schemas}
 	gcCtx.flagSets = gc.FlagSets
@@ -722,14 +759,18 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 		return nil, err
 	}
 	if len(nodes) == 1 {
-		nodes[0].replacedBy = gp.overlayReplacement(c.ReplacedBy, gc.ReplacedBy, ctx.specRoot, gcCtx.specRoot)
+		if !slices.ContainsFunc(above, func(o override) bool { return o.cmd.ReplacedBy != "" }) {
+			nodes[0].replacedBy = gp.overlayReplacement(c.ReplacedBy, gc.ReplacedBy, ctx.specRoot, gcCtx.specRoot)
+		}
 		nodes[0].ref = c.Ref
 	}
-	// `commands:` beside the nested `$ref` resolve against this spec's base, delegate to the
+	// Commands added beside the nested `$ref` resolve against this spec's base, delegate to the
 	// direct child, and are grafted as children of the grandchild.
-	if len(c.Commands) > 0 && len(nodes) == 1 {
+	if len(additions) > 0 && len(nodes) == 1 {
 		siblingParent := gp.childPath(parentPath, synth.Name)
-		authored, err := gp.walk(c.Commands, siblingParent, base, moduleName, seen, ctx)
+		addCtx := ctx
+		addCtx.overrides = nil
+		authored, err := gp.walk(additions, siblingParent, base, moduleName, seen, addCtx)
 		if err != nil {
 			return nil, err
 		}

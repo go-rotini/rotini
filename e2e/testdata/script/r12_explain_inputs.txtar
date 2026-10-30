@@ -23,10 +23,20 @@ exec ./todo$exe deploy --explain-inputs --token typed
 stdout '^TodoDeploy\.Flags\.Token = \[redacted\] from argv:--token; overrides env:TODO_TOKEN_FILE \[redacted\]$'
 ! stdout 'Arguments\.Target'
 
+# The guide's sample, byte for byte.
+env TODO_TOKEN_FILE=
+exec ./todo$exe deploy prod --token s3cr3t --explain-inputs
+cmp stdout explain.txt
+
 # Without the flag the run is checked as usual.
 ! exec ./todo$exe deploy
 stderr 'target'
 
+-- explain.txt --
+TodoDeploy.Arguments.Target = "prod" from argv:<target>
+TodoDeploy.Flags.ExplainInputs = "true" from argv:--explain-inputs
+TodoDeploy.Flags.Port = "9000" from env:TODO_PORT; overrides config:user#deploy.port "8000", default "8080"
+TodoDeploy.Flags.Token = [redacted] from argv:--token
 -- token.txt --
 s3cret
 -- todo.yaml --

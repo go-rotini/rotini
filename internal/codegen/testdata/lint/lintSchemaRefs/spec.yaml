@@ -1,4 +1,5 @@
-# A ref to an undeclared schema would surface as "undefined type" in generated code.
+# A ref to an undeclared schema would surface as "undefined type" in generated code, and a
+# chain of refs that loops never reaches a type.
 version: 0.0.0
 command:
   name: demo
@@ -8,5 +9,24 @@ command:
       properties:
         ok:
           type: bool
+    Port:
+      $ref: Listen
+    Listen:
+      $ref: '#/schemas/Port'
+    # Fine: an object that refers to itself through a property.
+    Node:
+      type: object
+      properties:
+        next:
+          $ref: Node
+  flags:
+    - name: port
+      schema:
+        $ref: Port
   output:
     $ref: '#/schemas/Reslt'
+  exit_status:
+    - code: 3
+      summary: not found
+      output:
+        $ref: Missing

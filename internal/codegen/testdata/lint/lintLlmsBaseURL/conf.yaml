@@ -1,0 +1,15 @@
+# llms.txt links each page as `base_url` followed by its file name, so a base_url without a
+# trailing "/" runs into the file name: https://x/app links https://x/appapp-list.md.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: markdown
+      enabled: true
+      embed: true
+    - type: llms
+      enabled: true
+      base_url: https://x/app

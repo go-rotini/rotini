@@ -43,7 +43,7 @@
       }
     },
     {
-      "description": "list tasks\n\nEffects: read, idempotent.",
+      "description": "list tasks\n\nEffects: read, idempotent.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
       "name": "taskr_list",
       "parametersJsonSchema": {
         "additionalProperties": false,
@@ -92,7 +92,7 @@
       }
     },
     {
-      "description": "add tasks read from stdin\n\nEffects: write.",
+      "description": "add tasks read from stdin\n\nEffects: write.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
       "name": "taskr_import",
       "parametersJsonSchema": {
         "additionalProperties": false,
@@ -115,14 +115,29 @@
       }
     },
     {
-      "description": "sync with the server\n\nEffects: destructive, open world.\n\nRequires TASKR_KEY in the server's environment.",
+      "description": "sync with the server\n\nEffects: destructive, open world.\n\nRequires TASKR_KEY in the server's environment.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
       "name": "taskr_remote_sync",
       "parametersJsonSchema": {
         "additionalProperties": false,
         "properties": {
+          "max_upload": {
+            "description": "the largest batch to send",
+            "type": "string"
+          },
           "prune": {
             "description": "also delete tasks the server doesn't have",
             "type": "boolean"
+          },
+          "retry_after": {
+            "description": "pauses between retries",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timeout": {
+            "description": "how long to wait for the server",
+            "type": "string"
           },
           "verbose": {
             "description": "say more",
@@ -134,7 +149,7 @@
       }
     },
     {
-      "description": "show the server's address\n\nEffects: read.",
+      "description": "show the server's address\n\nEffects: read.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
       "name": "taskr_remote_show",
       "parametersJsonSchema": {
         "additionalProperties": false,

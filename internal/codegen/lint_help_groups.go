@@ -1,19 +1,23 @@
 package codegen
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // lintGroups checks a command's `groups`: each name is listed once, and each names a group one
 // of the command's sub-commands or flags uses (a warning otherwise, as a likely typo). A
 // composed sub-command may take its group from its own spec, which isn't read here, so a
-// command with one doesn't get the warning.
+// command with one, or mounted with `$ref` or below one, doesn't get the warning.
 func lintGroups(spec *Spec) []error {
 	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
+		c := chain[len(chain)-1]
 		if len(c.Groups) == 0 {
 			return
 		}
 		used := map[string]bool{}
-		unknowable := false
+		unknowable := slices.ContainsFunc(chain, func(a *Command) bool { return a.Ref != "" })
 		for _, sub := range c.Commands {
 			used[sub.Group] = true
 			if sub.Ref != "" && sub.Group == "" {

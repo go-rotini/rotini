@@ -15,6 +15,10 @@ add a note
 \fBexec\fR
 run a command
 .TP
+\fBlegacy\fR
+ship the old way (deprecated since 1.4.0, removed in 2.0.0: renamed; use ops
+deploy instead)
+.TP
 \fBrun\fR
 run a command on a host
 .SH "DATA"
@@ -92,7 +96,14 @@ the output profile [short|long]
 \fBlong\fR \- every field
 .RE
 .RE
+.SH "EXIT STATUS"
+.TP
+\fB0\fR
+done
+.TP
+\fB3\fR (unreachable)
+the fleet did not answer (retryable)
 .SH "SEE ALSO"
 \fBops\-deploy\fR(1), \fBops\-import\fR(1), \fBops\-upper\fR(1),
-\fBops\-note\fR(1), \fBops\-exec\fR(1), \fBops\-run\fR(1),
+\fBops\-note\fR(1), \fBops\-exec\fR(1), \fBops\-legacy\fR(1), \fBops\-run\fR(1),
 \fBops\-filters\fR(1), \fBops\-environment\fR(1)

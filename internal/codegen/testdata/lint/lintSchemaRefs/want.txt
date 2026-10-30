@@ -1,1 +1,3 @@
-spec: .rotini.spec.yaml:12:5: command demo: output: `$ref` "#/schemas/Reslt" points to an undeclared schema (no "Reslt" under the root command's `schemas`); did you mean "Result"?
+spec: .rotini.spec.yaml:27:5: command demo: output: `$ref` "#/schemas/Reslt" points to an undeclared schema (no "Reslt" under the root command's `schemas`); did you mean "Result"?
+spec: .rotini.spec.yaml:32:9: command demo: exit_status 3 output: `$ref` "#/schemas/Missing" points to an undeclared schema (no "Missing" under the root command's `schemas`)
+spec: .rotini.spec.yaml:15:13: command demo: schema "Listen": its `$ref` chain (Listen → Port → Listen) leads back to itself, so it never reaches a type; end the chain at a schema that declares `type`

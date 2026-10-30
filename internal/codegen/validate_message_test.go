@@ -125,6 +125,8 @@ func TestSchemaMessagesAreNotJargon(t *testing.T) {
 		"an unknown key":         "version: 0.0.0\ncommand:\n  name: app\n  summry: typo\n",
 		"a command with no name": "version: 0.0.0\ncommand:\n  summary: nameless\n",
 		"an unknown flag key":    "version: 0.0.0\ncommand:\n  name: app\n  flags:\n    - name: f\n      nope: 1\n",
+		"an empty multicall":     "version: 0.0.0\ncommand:\n  name: app\n  multicall: {}\n  commands:\n    - name: ls\n",
+		"a text multicall":       "version: 0.0.0\ncommand:\n  name: app\n  multicall: \"yes\"\n  commands:\n    - name: ls\n",
 	}
 	for name, doc := range docs {
 		t.Run(name, func(t *testing.T) {

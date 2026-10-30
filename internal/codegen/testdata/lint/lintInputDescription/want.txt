@@ -1,3 +1,4 @@
+warning: spec: .rotini.spec.yaml:28:7: command demo: config "region": no `config_files` entry is in scope (on this command, an ancestor or a command below it), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless an input reader set with WithInputReader supplies it
 warning: spec: .rotini.spec.yaml:17:20: command demo: flag "--host": sets `description` but no `summary`; help shows only the summary, so its row there is empty; add a one-line summary
 warning: spec: .rotini.spec.yaml:21:20: command demo: argument "file": sets `description` but no `summary`; help shows only the summary, so its row there is empty; add a one-line summary
 warning: spec: .rotini.spec.yaml:25:20: command demo: env "token": sets `description` but no `summary`; help shows only the summary, so its row there is empty; add a one-line summary

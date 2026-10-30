@@ -119,7 +119,7 @@ command:
           identifiers: [-p, --priority]
           schema: { type: string, default: normal, enum: [low, normal, high] }
         - name: tag
-          summary: a label (repeatable)
+          summary: a label
           identifiers: [--tag]
           schema: { type: '[]string' }
     - name: help

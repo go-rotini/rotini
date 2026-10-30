@@ -282,6 +282,45 @@ func TestManPages_lintClean(t *testing.T) {
 	}
 }
 
+// TestPages_inputWithoutSummary pins that an input with no summary reads cleanly: markdown
+// leaves out the dash before the summary, and man starts no text line with a space.
+func TestPages_inputWithoutSummary(t *testing.T) {
+	spec := `version: 0.0.0
+command:
+  name: acme
+  summary: acme control
+  flags:
+    - name: format
+      identifiers: [--format]
+      schema: {type: string, enum: [json, yaml]}
+    - name: count
+      identifiers: [--count]
+      schema: {type: int, variable: ACME_COUNT}
+  arguments:
+    - name: target
+      schema: {type: string}
+`
+	conf := manConfEmbed + `    - type: markdown
+      enabled: true
+      embed: true
+`
+	dir, _ := emitModule(t, spec, conf)
+	md := readEmitted(t, dir, "internal/cmd/acme/renders/markdown_acme.md")
+	for _, want := range []string{"- `--format` `string` (one of `json`, `yaml`)\n", "- `--count` `int`; also set by `ACME_COUNT`", "- `[target]`\n"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "— ;") || strings.Contains(md, "—\n") {
+		t.Errorf("markdown has a dash with no summary after it:\n%s", md)
+	}
+	for line := range strings.Lines(manPages(t, dir)["acme.1"]) {
+		if strings.HasPrefix(line, " ") {
+			t.Errorf("man page line starts with a space: %q", line)
+		}
+	}
+}
+
 // TestManPages_section pins that a conf section sets the header section, the file extension,
 // the cross-reference sections and the ManSection constant.
 func TestManPages_section(t *testing.T) {

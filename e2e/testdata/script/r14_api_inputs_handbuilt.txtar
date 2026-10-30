@@ -1,0 +1,219 @@
+# R14 — a hand-built program (rotini.NewProgram over the generated Definition and
+# InputSettings, with every feature) reads inputs exactly as the generated NewProgram does:
+# argv over env over config over defaults, the same validation errors, and the same
+# provenance. rotinitest drives both from the same typed inputs, and the per-channel layers
+# merge to what Inputs returns.
+
+gomodinit example.com/shop
+
+exec rotini generate cmd/shop/.rotini.spec.yaml --config cmd/shop/.rotini.conf.yaml
+exec go mod tidy
+exec go vet ./...
+exec go test -count=1 -race ./internal/cmd/shop
+! stderr .
+
+-- cmd/shop/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: shop
+  summary: place orders
+  env_prefix: SHOP
+  config_files:
+    - name: app
+      path: ./shop.yaml
+  flags:
+    - name: region
+      summary: where to ship
+      identifiers: [--region]
+      cascading: true
+      schema: {type: string, default: eu, enum: [eu, us], variable: SHOP_REGION}
+  env:
+    - name: owner
+      summary: who places orders
+      schema: {type: string, default: nobody}
+  commands:
+    - name: order
+      summary: place an order
+      flags:
+        - name: qty
+          identifiers: [-q, --qty]
+          schema: {type: integer, default: 1, minimum: 1, key: order.qty}
+        - name: note
+          identifiers: [--note]
+          schema: {type: string, key: order.note}
+      arguments:
+        - name: item
+          schema: {type: string, required: true}
+-- cmd/shop/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/shop/main.go
+    - type: cmd
+      file: internal/cmd/shop/zz_shop.go
+      package: shop
+-- cmd/shop/main.go --
+package main
+
+import shop "example.com/shop/internal/cmd/shop"
+
+func main() {
+	shop.NewProgram().Execute()
+}
+-- internal/cmd/shop/shop.go --
+package shop
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type shopHandler struct{ rotini.NoHooks }
+
+func (*shopHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/shop/shop_order.go --
+package shop
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type shopOrderHandler struct{ rotini.NoHooks }
+
+func (*shopOrderHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ShopOrderInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	merged, report, err := rtx.InputsWithReport[ShopOrderInputs]()
+	if err != nil || !reflect.DeepEqual(merged, in) {
+		rtx.HaltWith(fmt.Errorf("InputsWithReport = %+v, %v; Inputs = %+v", merged, err, in))
+		return
+	}
+	defaults, _ := rtx.DefaultInputs[ShopOrderInputs]()
+	files, _ := rtx.FileInputs[ShopOrderInputs]()
+	env, _ := rtx.EnvInputs[ShopOrderInputs]()
+	argv, _ := rtx.ArgvInputs[ShopOrderInputs]()
+	layered, layeredReport := rotini.MergeInputsWithReport(defaults, files, env, argv)
+	if err := layeredReport.Validate(); err != nil || !reflect.DeepEqual(layered, in) {
+		rtx.HaltWith(fmt.Errorf("merged layers = %+v, %v; Inputs = %+v", layered, err, in))
+		return
+	}
+	var prov strings.Builder
+	if err := report.Format(&prov); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "region=%s owner=%s qty=%d note=%q item=%s\n%s",
+		in.Shop.Flags.Region, in.Shop.Env.Owner, in.ShopOrder.Flags.Qty,
+		in.ShopOrder.Flags.Note, in.ShopOrder.Arguments.Item, prov.String())
+}
+-- internal/cmd/shop/handbuilt_test.go --
+package shop
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/rotinitest"
+)
+
+// handBuilt is the program a test or tool builds without the generated constructor.
+func handBuilt() *rotini.Program {
+	return rotini.NewProgram(NewProgram().Definition(), Handlers()).WithInputSettings(InputSettings)
+}
+
+func TestHandBuiltMatchesGenerated(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte("order:\n  qty: 4\n  note: from file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		in   func() ShopOrderInputs
+		env  []string
+	}{
+		{"defaults and file", func() ShopOrderInputs {
+			var in ShopOrderInputs
+			in.ShopOrder.Arguments.Item = "tea"
+			return in
+		}, nil},
+		{"env over file", func() ShopOrderInputs {
+			var in ShopOrderInputs
+			in.ShopOrder.Arguments.Item = "tea"
+			in.Shop.Env.Owner = "ada"
+			return in
+		}, []string{"SHOP_REGION=us"}},
+		{"argv over env", func() ShopOrderInputs {
+			var in ShopOrderInputs
+			in.Shop.Flags.Region = "eu"
+			in.ShopOrder.Flags.Qty = 9
+			in.ShopOrder.Arguments.Item = "--tea"
+			return in
+		}, []string{"SHOP_REGION=us"}},
+		{"bound violation", func() ShopOrderInputs {
+			var in ShopOrderInputs
+			in.ShopOrder.Arguments.Item = "tea"
+			return in
+		}, nil},
+		{"enum violation from env", func() ShopOrderInputs {
+			var in ShopOrderInputs
+			in.ShopOrder.Arguments.Item = "tea"
+			return in
+		}, []string{"SHOP_REGION=mars"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts := []rotinitest.Option{rotinitest.Dir(dir), rotinitest.Env(tc.env...)}
+			in := tc.in()
+			set := rotini.PresenceOf(in)
+			if tc.name == "bound violation" {
+				set["ShopOrder.Flags.Qty"] = rotini.InputSource{} // --qty=0
+				opts = append(opts, rotinitest.Presence(set))
+			}
+			gen := rotinitest.Run(t, NewProgram(), in, opts...)
+			hand := rotinitest.Run(t, handBuilt(), in, opts...)
+			if gen.Code != hand.Code || string(gen.Stdout) != string(hand.Stdout) || string(gen.Stderr) != string(hand.Stderr) {
+				t.Fatalf("generated and hand-built differ:\ngenerated %d %q %q\nhand-built %d %q %q",
+					gen.Code, gen.Stdout, gen.Stderr, hand.Code, hand.Stdout, hand.Stderr)
+			}
+			if (gen.Err == nil) != (hand.Err == nil) || rotini.CategoryOf(gen.Err) != rotini.CategoryOf(hand.Err) {
+				t.Fatalf("errors differ: %v / %v", gen.Err, hand.Err)
+			}
+			t.Logf("%d %s%s", gen.Code, gen.Stdout, gen.Stderr)
+			switch tc.name {
+			case "defaults and file":
+				want := "region=eu owner=nobody qty=4 note=\"from file\" item=tea\n"
+				if got := string(gen.Stdout); len(got) < len(want) || got[:len(want)] != want {
+					t.Errorf("stdout %q, want it to start %q", got, want)
+				}
+			case "argv over env":
+				want := "region=eu owner=nobody qty=9 note=\"from file\" item=--tea\n"
+				if got := string(gen.Stdout); len(got) < len(want) || got[:len(want)] != want {
+					t.Errorf("stdout %q, want it to start %q", got, want)
+				}
+			case "env over file":
+				want := "region=us owner=ada qty=4"
+				if got := string(gen.Stdout); len(got) < len(want) || got[:len(want)] != want {
+					t.Errorf("stdout %q, want it to start %q", got, want)
+				}
+			case "bound violation", "enum violation from env":
+				if gen.Code != 1 || rotini.CategoryOf(gen.Err) != rotini.CategoryUsage {
+					t.Errorf("exit %d (%v), want a usage error exiting 1", gen.Code, gen.Err)
+				}
+			}
+		})
+	}
+}

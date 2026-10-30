@@ -1,0 +1,1297 @@
+# R14 — a version-control CLI built end to end from a YAML spec, then taken through a spec's
+# life: a deep command tree with aliases, hidden and deprecated commands, flags and enum values,
+# a directory flag, a count flag, an optional-value flag, a digit option, a passthrough
+# argument and `--`, topics and pages; completion through the binary and a sourced bash script;
+# then commands renamed, removed and added, with two-step stub pruning, `rotini diff` against
+# the old contract, `rotini fmt` and `rotini validate` with mistakes.
+
+gomodinit example.com/vcs
+exec rotini init vcs
+cp spec-v1.yaml cmd/vcs/.rotini.spec.yaml
+cp conf.yaml cmd/vcs/.rotini.conf.yaml
+exec rotini generate cmd/vcs/.rotini.spec.yaml --config cmd/vcs/.rotini.conf.yaml
+stderr '^Warning: spec: cmd/vcs/\.rotini\.spec\.yaml:45:20: command vcs: flag "dir": has only a short identifier \(-C\) and no long form$'
+cp vcs.go.txt internal/cmd/vcs/vcs.go
+cp repo.go.txt internal/cmd/vcs/repo.go
+cp vcs_init.go.txt internal/cmd/vcs/vcs_init.go
+cp vcs_commit.go.txt internal/cmd/vcs/vcs_commit.go
+cp vcs_log.go.txt internal/cmd/vcs/vcs_log.go
+cp vcs_run.go.txt internal/cmd/vcs/vcs_run.go
+cp vcs_diff.go.txt internal/cmd/vcs/vcs_diff.go
+cp vcs_man.go.txt internal/cmd/vcs/vcs_man.go
+exec go mod tidy
+exec go build -o vcs$exe ./cmd/vcs
+exec go vet ./...
+exec go fmt ./...
+! stdout .
+
+# -C runs in another directory; commits record a message, an author from the environment and a
+# date in either layout; --no-verify negates a default-true flag.
+mkdir repo
+exec ./vcs$exe -C repo init
+stdout '^initialized empty repository in \.vcs$'
+exec ./vcs$exe -C repo commit -m first --date 2026-01-02
+stdout '^\[1\] first$'
+env 'VCS_AUTHOR=Ada <ada@example.com>'
+exec ./vcs$exe -C repo ci -m second --date '2026-01-03 04:05'
+env VCS_AUTHOR=
+wantexit 1 ./vcs$exe -C repo commit
+stderr '^Error: flag --message is required unless --amend is set$'
+exec ./vcs$exe -C repo commit --amend
+stdout '^\[2\] second$'
+wantexit 1 ./vcs$exe -C repo commit -m WIP
+stderr 'pre-commit check failed'
+exec ./vcs$exe -C repo commit -m WIP --no-verify --sign-off
+exec ./vcs$exe log -C repo --oneline -n 2
+cmp stdout want-log.txt
+wantexit 1 ./vcs$exe -C nowhere log
+stderr '^Error: -C: no such directory: "nowhere"$'
+wantexit 1 ./vcs$exe log
+stderr '^Error: not a vcs repository \(run vcs init\)$'
+
+# A count flag, an optional value attached to its flag, a value that isn't attached.
+exec ./vcs$exe -C repo -vv --color log -n 1 --oneline
+stderr '^debug: dir=.*repo color=always$'
+wantexit 1 ./vcs$exe --color never log
+stderr '^Error: unknown command "never" for "vcs"; --color takes its value attached: --color=never$'
+wantexit 1 ./vcs$exe --verbose=3 log
+stderr '^Error: --verbose counts occurrences and takes no value$'
+
+# Enum values: a hidden one is accepted but never offered, a deprecated one is reported by the
+# root's loop with its replacement.
+exec ./vcs$exe -C repo log --format raw -n 1
+exec ./vcs$exe -C repo log --format full -n 1
+stderr '^Warning: flag "--format" value "full" is deprecated: use medium; use medium instead$'
+wantexit 1 ./vcs$exe log --format bogus
+stderr '^Error: invalid value "bogus" for --format \(one of: short, medium\)$'
+exec ./vcs$exe log --help
+stdout '^      --format string    how to print each commit \(default medium\) \[short\|medium\]$'
+
+# Digit options and their group, a URL argument, a pattern in words, too many arguments.
+wantexit 1 ./vcs$exe clone https://example.com/r -46
+stderr '^Error: flags -4 and -6 are mutually exclusive$'
+wantexit 1 ./vcs$exe clone example.com/r
+stderr '^Error: <url>: "example\.com/r" is not a valid URL'
+wantexit 1 ./vcs$exe clone https://example.com/r -b Main
+stderr '^Error: -b must be lowercase letters, digits, /, _ or - \(got "Main"\)$'
+wantexit 1 ./vcs$exe clone https://example.com/r d extra
+stderr '^Error: vcs clone accepts at most 2 arguments \(got 3\)$'
+
+# The passthrough argument takes words as typed from its first word on, and `--` is counted.
+exec ./vcs$exe run -e A=1 ls -- -x --help
+stdout '^env A=1$'
+stdout '^program="ls" args=\["-x" "--help"\] dash=1$'
+exec ./vcs$exe diff a b -- p1 p2
+stdout '^revisions=\["a" "b"\] paths=\["p1" "p2"\]$'
+
+# Deprecated, hidden and aliased commands and spellings.
+exec ./vcs$exe stash save hi
+stderr '^Warning: command "save" is deprecated: renamed; use vcs stash push instead$'
+exec ./vcs$exe remote del origin
+exec ./vcs$exe --help
+! stdout 'filter-branch'
+! stdout '\bman\b'
+stdout '^  commit, ci    record a snapshot$'
+stdout '^  gc            clean up \(experimental\)$'
+stdout '^  revisions    how to name a commit$'
+exec ./vcs$exe remote rm --help
+stdout '^  vcs remote remove <name>$'
+exec ./vcs$exe help revisions
+stdout '^A revision is a commit number'
+wantexit 1 ./vcs$exe help nope
+stderr '^Error: no help for command "nope"$'
+exec ./vcs$exe gc --help
+stdout '^This command is experimental: it may change or be removed in any release\.$'
+stdout '\(deprecated since 0\.2\.0, removed in 1\.0\.0: it is always aggressive now\)$'
+
+# Man pages: aliases, the exit statuses, cascading flags under GLOBAL OPTIONS.
+exec ./vcs$exe man
+stdout '^\\fBcommit\\fR, \\fBci\\fR$'
+stdout '^\.SH "EXIT STATUS"$'
+exec ./vcs$exe man commit
+stdout '^\.SH "GLOBAL OPTIONS"$'
+wantexit 1 ./vcs$exe man nope
+stderr '^Error: no man page for command "nope"$'
+
+# Completion: hidden and deprecated names are left out, a set digit option takes its group
+# with it, and the flag a dependency requires comes first.
+exec ./vcs$exe __complete remote ''
+! stdout '^del'
+stdout '^rm\tremove a remote$'
+exec ./vcs$exe __complete stash ''
+! stdout '^save'
+exec ./vcs$exe __complete clone -4 -
+! stdout '^-6'
+! stdout '^--ipv'
+exec ./vcs$exe __complete commit --
+stdout '\A--message\tthe commit message\n'
+exec ./vcs$exe __complete log --format ''
+cmp stdout want-format.txt
+exec ./vcs$exe __complete help ''
+stdout '^revisions\thow to name a commit$'
+! stdout '^man'
+exec ./vcs$exe completion bash
+cp stdout completion.bash
+[exec:bash] exec bash drive-bash.sh
+[exec:bash] stdout '^remote: add list ls remove rm$'
+[exec:bash] stdout '^format: short medium$'
+[exec:bash] stdout '^color: auto always never$'
+
+# The spec changes: stash save is removed, gc becomes maintenance with gc as an alias, tag is
+# added, and three changes break callers.
+cp cmd/vcs/contract.json old-contract.json
+cp spec-v2.yaml cmd/vcs/.rotini.spec.yaml
+exec rotini generate cmd/vcs/.rotini.spec.yaml --config cmd/vcs/.rotini.conf.yaml
+stderr '^Warning: pruned vcs_gc\.go \(disabled; removed by the next generate\); its command is no longer in the spec$'
+stderr '^Warning: pruned vcs_stash_save\.go \(disabled; removed by the next generate\); its command is no longer in the spec$'
+stdout '^created: internal/cmd/vcs/vcs_maintenance\.go$'
+stdout '^created: internal/cmd/vcs/vcs_tag\.go$'
+grep '^//go:build ignore$' internal/cmd/vcs/vcs_gc.go
+exec go build -o vcs$exe ./cmd/vcs
+exec ./vcs$exe gc --prune 2h
+stdout 'Prune:2h0m0s'
+exec ./vcs$exe tag v1
+# Generating again deletes the disabled stubs.
+exec rotini generate cmd/vcs/.rotini.spec.yaml --config cmd/vcs/.rotini.conf.yaml
+stderr '^Warning: pruned vcs_gc\.go; its command is no longer in the spec$'
+! exists internal/cmd/vcs/vcs_gc.go
+! exists internal/cmd/vcs/vcs_stash_save.go
+
+wantexit 2 rotini diff old-contract.json --spec cmd/vcs/.rotini.spec.yaml --config cmd/vcs/.rotini.conf.yaml
+cmp stdout want-diff.txt
+
+# fmt puts keys in reading order and keeps the comment with its entry; the generated code is
+# unchanged by it.
+wantexit 2 rotini fmt --check cmd/vcs/.rotini.spec.yaml
+stderr '^would reformat cmd/vcs/\.rotini\.spec\.yaml$'
+exec rotini fmt cmd/vcs/.rotini.spec.yaml
+exec rotini fmt --check cmd/vcs/.rotini.spec.yaml
+grep -count=1 '^    # tags are names for commits\n    - name: tag\n      summary: name a commit$' cmd/vcs/.rotini.spec.yaml
+exec rotini generate --dry-run cmd/vcs/.rotini.spec.yaml --config cmd/vcs/.rotini.conf.yaml
+
+# validate reports each mistake at its position, in one run.
+wantexit 1 rotini validate bad.spec.yaml
+cmp stderr want-bad.txt
+-- bad.spec.yaml --
+version: 0.0.0
+command:
+  name: vcs
+  summary: broken on purpose
+  examples:
+    - vcs comit -m x
+    - vcs log --format nope
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool, default: true }
+  commands:
+    - name: commit
+      summary: typo
+      flags:
+        - name: message
+          identifiers: [-m]
+          schema: { type: strng }
+        - name: level
+          identifiers: [--level]
+          schema: { type: int, enum: ["1", "two"] }
+        - name: size
+          identifiers: [--size]
+          schema: { type: int, minimum: 10, maximum: 5 }
+        - name: name
+          identifiers: [--name]
+          schema: { type: string, required: true, default: x }
+        - name: helpme
+          identifiers: [-h]
+          schema: { type: bool }
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [message, nosuch]
+    - name: log
+      deprecated: old
+      replaced_by: history
+      flags:
+        - name: format
+          identifiers: [--format]
+          schema: { type: string, enum: [short, long] }
+    - name: log
+      summary: dup
+-- conf.yaml --
+$schema: ./.rotini-schema.conf.json
+version: 0.0.0
+generate:
+  schemas:
+    conf:
+      file: cmd/vcs/.rotini-schema.conf.json
+    spec:
+      file: cmd/vcs/.rotini-schema.spec.json
+  packages:
+    - type: main
+      file: cmd/vcs/main.go
+    - type: cmd
+      file: internal/cmd/vcs/zz_rotini.go
+  features:
+    # help is on so `vcs --help` works from the first build. The other three
+    # are opt-in; flip `enabled` to turn one on.
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+    - type: man
+      enabled: true
+    - type: markdown
+      enabled: true
+  contract:
+    file: cmd/vcs/contract.json
+validate:
+  fail: collect
+-- drive-bash.sh --
+# Source the script vcs printed and call its completion function the way TAB does. bash 3.2
+# sets no COMP_TYPE; 9 is the TAB that inserts.
+export PATH="$PWD:$PATH"
+source ./completion.bash
+COMP_TYPE=9
+complete_line() {
+    COMP_WORDS=("$@")
+    COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
+    COMPREPLY=()
+    _vcs_complete
+}
+complete_line vcs remote ""
+echo "remote: ${COMPREPLY[*]}"
+complete_line vcs log --format ""
+echo "format: ${COMPREPLY[*]}"
+complete_line vcs --color=
+echo "color: ${COMPREPLY[*]}"
+-- repo.go.txt --
+package vcs
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+type commit struct {
+	N       int       `json:"n"`
+	Message string    `json:"message"`
+	Author  string    `json:"author,omitempty"`
+	Date    time.Time `json:"date"`
+}
+
+var errNoRepo = errors.New("not a vcs repository (run vcs init)")
+
+func repoDir(rtx *rotini.Context) (string, error) {
+	dir := filepath.Join(rtx.Dir(), ".vcs")
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return "", errNoRepo
+	}
+	return dir, nil
+}
+
+func readCommits(rtx *rotini.Context) ([]commit, error) {
+	dir, err := repoDir(rtx)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(filepath.Join(dir, "log"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var out []commit
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var c commit
+		if err := json.Unmarshal(sc.Bytes(), &c); err != nil {
+			return nil, fmt.Errorf("corrupt log: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, sc.Err()
+}
+
+func writeCommits(rtx *rotini.Context, cs []commit) error {
+	dir, err := repoDir(rtx)
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(filepath.Join(dir, "log"))
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(f)
+	for _, c := range cs {
+		if err := enc.Encode(c); err != nil {
+			f.Close()
+			return err
+		}
+	}
+	return f.Close()
+}
+
+func verbosef(rtx *rotini.Context, level, have int, format string, args ...any) {
+	if have >= level {
+		fmt.Fprintf(rtx.Stderr, "debug: "+format+"\n", args...)
+	}
+}
+-- spec-v1.yaml --
+$schema: ./.rotini-schema.spec.json
+version: 0.0.0
+command:
+  name: vcs
+  summary: a tiny version control system
+  description: vcs tracks snapshots of a directory in a .vcs folder beside it.
+  footer: Use "vcs help <command>" for more information about a command.
+  examples:
+    - vcs init
+    - vcs -C ./repo commit -m "first"
+    - vcs log --oneline -n 5
+  see_also: [git(1)]
+  exit_status:
+    - code: 0
+      name: ok
+      summary: the command succeeded
+    - code: 1
+      name: failed
+      summary: anything went wrong
+  groups:
+    - name: Start
+      description: start a working area
+    - name: History
+      description: examine and change history
+  topics:
+    - name: revisions
+      summary: how to name a commit
+      body: |
+        A revision is a commit number (3), HEAD for the newest commit,
+        or HEAD~N for N commits before it.
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: dir
+      identifiers: [-C]
+      summary: run as if started in this directory
+      cascading: true
+      role: chdir
+      schema: { type: existingdir, placeholder: path }
+    - name: verbose
+      identifiers: [-v, --verbose]
+      summary: say more (repeat for more)
+      cascading: true
+      schema: { type: count }
+    - name: color
+      identifiers: [--color]
+      summary: when to color output
+      cascading: true
+      schema:
+        type: string
+        default: auto
+        implicit_value: always
+        enum:
+          - { value: auto, summary: color when stdout is a terminal }
+          - always
+          - never
+  commands:
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+      description: Print the vcs version.
+    - name: completion
+      summary: print a shell completion script
+      arguments:
+        - name: shell
+          summary: the shell to complete for
+          schema: { type: string, required: true, enum: [bash, zsh, fish, powershell, nushell] }
+    - name: man
+      summary: print a man page
+      hidden: true
+      arguments:
+        - name: command
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: init
+      summary: create an empty repository
+      group: Start
+      arguments:
+        - name: directory
+          summary: where to create it
+          schema: { type: string, default: ".", complete: { kind: directory } }
+      flags:
+        - name: bare
+          identifiers: [--bare]
+          summary: create a repository with no working area
+          schema: { type: bool }
+    - name: clone
+      summary: copy a repository
+      group: Start
+      arguments:
+        - name: url
+          summary: where to copy from
+          schema: { type: url, required: true }
+        - name: directory
+          summary: where to copy to
+          schema: { type: string }
+      flags:
+        - name: depth
+          identifiers: [--depth]
+          summary: copy only the newest commits
+          schema: { type: int, minimum: 1 }
+        - name: branch
+          identifiers: [-b, --branch]
+          summary: the branch to check out
+          schema: { type: string, pattern: '^[a-z0-9/_-]+$', pattern_message: 'must be lowercase letters, digits, /, _ or -' }
+        - name: ipv4
+          identifiers: ['-4', --ipv4]
+          summary: use IPv4 only
+          schema: { type: bool }
+        - name: ipv6
+          identifiers: ['-6', --ipv6]
+          summary: use IPv6 only
+          schema: { type: bool }
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [ipv4, ipv6]
+    - name: commit
+      summary: record a snapshot
+      aliases: [ci]
+      group: History
+      flags:
+        - name: message
+          identifiers: [-m, --message]
+          summary: the commit message
+          schema: { type: string, minLength: 1 }
+        - name: amend
+          identifiers: [--amend]
+          summary: replace the newest commit
+          schema: { type: bool }
+        - name: all
+          identifiers: [-a, --all]
+          summary: stage every changed file first
+          schema: { type: bool }
+        - name: author
+          identifiers: [--author]
+          summary: who wrote it
+          schema: { type: email, variable: VCS_AUTHOR }
+        - name: date
+          identifiers: [--date]
+          summary: when it was written
+          schema: { type: datetime, layout: ['2006-01-02 15:04', '2006-01-02'], relative: past }
+        - name: verify
+          identifiers: [--verify]
+          summary: run the pre-commit check
+          schema: { type: bool, default: true, negatable: true }
+        - name: signoff
+          identifiers: [-s, --signoff]
+          hidden_identifiers: [--sign-off]
+          summary: add a Signed-off-by line
+          schema: { type: bool }
+      flag_dependencies:
+        - unless: [amend]
+          requires: [message]
+    - name: log
+      summary: show commits
+      group: History
+      arguments:
+        - name: paths
+          summary: only commits touching these paths
+          schema: { type: '[]string' }
+      flags:
+        - name: oneline
+          identifiers: [--oneline]
+          summary: one commit per line
+          schema: { type: bool }
+        - name: max-count
+          identifiers: [-n, --max-count]
+          summary: show at most this many
+          schema: { type: int, minimum: 0 }
+        - name: since
+          identifiers: [--since]
+          summary: only commits after this date
+          schema: { type: date, relative: past }
+        - name: grep
+          identifiers: [--grep]
+          summary: only commits whose message matches
+          schema: { type: regexp }
+        - name: format
+          identifiers: [--format]
+          summary: how to print each commit
+          schema:
+            type: string
+            default: medium
+            enum:
+              - { value: short, summary: number and title }
+              - { value: medium, summary: "number, date and message" }
+              - { value: raw, hidden: true }
+              - { value: full, deprecated: use medium, replaced_by: medium }
+    - name: remote
+      summary: manage remotes
+      commands:
+        - name: add
+          summary: add a remote
+          arguments:
+            - name: name
+              summary: the remote's name
+              schema: { type: string, required: true }
+            - name: url
+              summary: its address
+              schema: { type: url, required: true }
+        - name: remove
+          summary: remove a remote
+          aliases: [rm]
+          hidden_aliases: [del]
+          arguments:
+            - name: name
+              summary: the remote's name
+              schema: { type: string, required: true }
+        - name: list
+          summary: list remotes
+          aliases: [ls]
+    - name: stash
+      summary: set changes aside
+      commands:
+        - name: push
+          summary: save changes
+          arguments:
+            - name: message
+              schema: { type: string }
+        - name: save
+          summary: save changes
+          deprecated: renamed
+          replaced_by: stash push
+          arguments:
+            - name: message
+              schema: { type: string }
+        - name: pop
+          summary: restore saved changes
+    - name: run
+      summary: run a command inside the repository
+      arguments:
+        - name: program
+          summary: the program to run
+          schema: { type: string, required: true, complete: { kind: executable } }
+        - name: args
+          summary: its arguments
+          passthrough: true
+          schema: { type: '[]string' }
+      flags:
+        - name: env
+          identifiers: [-e, --env]
+          summary: an extra environment variable
+          schema: { type: 'map[string]string' }
+    - name: diff
+      summary: show changes between commits
+      arguments:
+        - name: revisions
+          summary: commits to compare, then -- and paths
+          schema: { type: '[]string' }
+    - name: filter-branch
+      summary: rewrite history
+      hidden: true
+    - name: gc
+      summary: clean up
+      stability: experimental
+      flags:
+        - name: aggressive
+          identifiers: [--aggressive]
+          summary: try harder
+          deprecated: it is always aggressive now
+          deprecated_since: 0.2.0
+          removed_in: 1.0.0
+          schema: { type: bool }
+        - name: prune
+          identifiers: [--prune]
+          summary: drop unreachable objects older than this
+          schema: { type: duration, default: 336h, minimum: 1h }
+-- spec-v2.yaml --
+$schema: ./.rotini-schema.spec.json
+version: 0.0.0
+command:
+  name: vcs
+  summary: a tiny version control system
+  description: vcs tracks snapshots of a directory in a .vcs folder beside it.
+  footer: Use "vcs help <command>" for more information about a command.
+  examples:
+    - vcs init
+    - vcs -C ./repo commit -m "first"
+    - vcs log --oneline -n 5
+  see_also: [git(1)]
+  exit_status:
+    - code: 0
+      name: ok
+      summary: the command succeeded
+    - code: 1
+      name: failed
+      summary: anything went wrong
+  groups:
+    - name: Start
+      description: start a working area
+    - name: History
+      description: examine and change history
+  topics:
+    - name: revisions
+      summary: how to name a commit
+      body: |
+        A revision is a commit number (3), HEAD for the newest commit,
+        or HEAD~N for N commits before it.
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: dir
+      identifiers: [-C]
+      summary: run as if started in this directory
+      cascading: true
+      role: chdir
+      schema: { type: existingdir, placeholder: path }
+    - name: verbose
+      identifiers: [-v, --verbose]
+      summary: say more (repeat for more)
+      cascading: true
+      schema: { type: count }
+    - name: color
+      identifiers: [--color]
+      summary: when to color output
+      cascading: true
+      schema:
+        type: string
+        default: auto
+        implicit_value: always
+        enum:
+          - { value: auto, summary: color when stdout is a terminal }
+          - always
+          - never
+  commands:
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+      description: Print the vcs version.
+    - name: completion
+      summary: print a shell completion script
+      arguments:
+        - name: shell
+          summary: the shell to complete for
+          schema: { type: string, required: true, enum: [bash, zsh, fish, powershell, nushell] }
+    - name: man
+      summary: print a man page
+      hidden: true
+      arguments:
+        - name: command
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: init
+      summary: create an empty repository
+      group: Start
+      arguments:
+        - name: directory
+          summary: where to create it
+          schema: { type: string, default: ".", complete: { kind: directory } }
+      flags:
+        - name: bare
+          identifiers: [--bare]
+          summary: create a repository with no working area
+          schema: { type: bool }
+    - name: clone
+      summary: copy a repository
+      group: Start
+      arguments:
+        - name: url
+          summary: where to copy from
+          schema: { type: url, required: true }
+        - name: directory
+          summary: where to copy to
+          schema: { type: string }
+      flags:
+        - name: depth
+          identifiers: [--depth]
+          summary: copy only the newest commits
+          schema: { type: int, minimum: 2 }
+        - name: branch
+          identifiers: [-b, --branch]
+          summary: the branch to check out
+          schema: { type: string, pattern: '^[a-z0-9/_-]+$', pattern_message: 'must be lowercase letters, digits, /, _ or -' }
+        - name: ipv4
+          identifiers: [--ipv4]
+          summary: use IPv4 only
+          schema: { type: bool }
+        - name: ipv6
+          identifiers: ['-6', --ipv6]
+          summary: use IPv6 only
+          schema: { type: bool }
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [ipv4, ipv6]
+    - name: commit
+      summary: record a snapshot
+      aliases: [ci]
+      group: History
+      flags:
+        - name: message
+          identifiers: [-m, --message]
+          summary: the commit message
+          schema: { type: string, minLength: 1 }
+        - name: amend
+          identifiers: [--amend]
+          summary: replace the newest commit
+          schema: { type: bool }
+        - name: all
+          identifiers: [-a, --all]
+          summary: stage every changed file first
+          schema: { type: bool }
+        - name: author
+          identifiers: [--author]
+          summary: who wrote it
+          schema: { type: email, variable: VCS_AUTHOR }
+        - name: date
+          identifiers: [--date]
+          summary: when it was written
+          schema: { type: datetime, layout: ['2006-01-02 15:04', '2006-01-02'], relative: past }
+        - name: verify
+          identifiers: [--verify]
+          summary: run the pre-commit check
+          schema: { type: bool, default: true, negatable: true }
+        - name: signoff
+          identifiers: [-s, --signoff]
+          hidden_identifiers: [--sign-off]
+          summary: add a Signed-off-by line
+          schema: { type: bool }
+      flag_dependencies:
+        - unless: [amend]
+          requires: [message]
+    - name: log
+      summary: show commits
+      group: History
+      arguments:
+        - name: paths
+          summary: only commits touching these paths
+          schema: { type: '[]string' }
+      flags:
+        - name: oneline
+          identifiers: [--oneline]
+          summary: one commit per line
+          schema: { type: bool }
+        - name: max-count
+          identifiers: [-n, --max-count]
+          summary: show at most this many
+          schema: { type: int, minimum: 0 }
+        - name: since
+          identifiers: [--since]
+          summary: only commits after this date
+          schema: { type: date, relative: past }
+        - name: grep
+          identifiers: [--grep]
+          summary: only commits whose message matches
+          schema: { type: regexp }
+        - name: format
+          identifiers: [--format]
+          summary: how to print each commit
+          schema:
+            type: string
+            default: short
+            enum:
+              - { value: short, summary: number and title }
+              - { value: medium, summary: "number, date and message" }
+              - { value: raw, hidden: true }
+              - { value: full, deprecated: use medium, replaced_by: medium }
+    - name: remote
+      summary: manage remotes
+      commands:
+        - name: add
+          summary: add a remote
+          arguments:
+            - name: name
+              summary: the remote's name
+              schema: { type: string, required: true }
+            - name: url
+              summary: its address
+              schema: { type: url, required: true }
+        - name: remove
+          summary: remove a remote
+          aliases: [rm]
+          hidden_aliases: [del]
+          arguments:
+            - name: name
+              summary: the remote's name
+              schema: { type: string, required: true }
+        - name: list
+          summary: list remotes
+          aliases: [ls]
+    - name: stash
+      summary: set changes aside
+      commands:
+        - name: push
+          summary: save changes
+          arguments:
+            - name: message
+              schema: { type: string }
+        - name: pop
+          summary: restore saved changes
+    - name: run
+      summary: run a command inside the repository
+      arguments:
+        - name: program
+          summary: the program to run
+          schema: { type: string, required: true, complete: { kind: executable } }
+        - name: args
+          summary: its arguments
+          passthrough: true
+          schema: { type: '[]string' }
+      flags:
+        - name: env
+          identifiers: [-e, --env]
+          summary: an extra environment variable
+          schema: { type: 'map[string]string' }
+    - name: diff
+      summary: show changes between commits
+      arguments:
+        - name: revisions
+          summary: commits to compare, then -- and paths
+          schema: { type: '[]string' }
+    - name: filter-branch
+      summary: rewrite history
+      hidden: true
+    - name: maintenance
+      aliases: [gc]
+      summary: clean up
+      stability: experimental
+      flags:
+        - name: aggressive
+          identifiers: [--aggressive]
+          summary: try harder
+          deprecated: it is always aggressive now
+          deprecated_since: 0.2.0
+          removed_in: 1.0.0
+          schema: { type: bool }
+        - name: prune
+          identifiers: [--prune]
+          summary: drop unreachable objects older than this
+          schema: { type: duration, default: 336h, minimum: 1h }
+    # tags are names for commits
+    - summary: name a commit
+      name: tag
+      arguments:
+        - name: name
+          schema: { type: string, required: true }
+        - name: revision
+          schema: { type: int, default: 0, minimum: 0 }
+-- vcs.go.txt --
+package vcs
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*vcsHandler)(nil)
+
+type vcsHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*vcsHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	argv, err := rtx.ArgvInputs[VcsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	inputs := argv.Values
+
+	for _, d := range rotini.Deprecations(rtx) {
+		if d.ReplacedBy != "" {
+			rtx.RecordWarning(fmt.Errorf("%w; use %s instead", d, d.ReplacedBy))
+			continue
+		}
+		rtx.RecordWarning(d)
+	}
+	verbosef(rtx, 1, inputs.Vcs.Flags.Verbose, "dir=%s color=%s", rtx.Dir(), inputs.Vcs.Flags.Color)
+
+	if inputs.Vcs.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		rtx.HaltWithCode(0)
+		return
+	}
+
+	if inputs.Vcs.Flags.Version {
+		version := rtx.Version()
+		if version == "" {
+			version = "unknown"
+		}
+
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		rtx.HaltWithCode(0)
+		return
+	}
+}
+
+func (*vcsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[VcsInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+-- vcs_commit.go.txt --
+package vcs
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*vcsCommitHandler)(nil)
+
+type vcsCommitHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*vcsCommitHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[VcsCommitInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := inputs.VcsCommit.Flags
+	cs, err := readCommits(rtx)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	date := f.Date
+	if date.IsZero() {
+		date = rtx.Now()
+	}
+	c := commit{N: len(cs) + 1, Message: f.Message, Author: f.Author.String(), Date: date.UTC()}
+	if f.Author.Address == "" {
+		c.Author = ""
+	}
+	if f.Signoff {
+		c.Message += "\n\nSigned-off-by: " + c.Author
+	}
+	if f.Amend {
+		if len(cs) == 0 {
+			rtx.HaltWith(errors.New("nothing to amend"))
+			return
+		}
+		c.N = cs[len(cs)-1].N
+		if c.Message == "" {
+			c.Message = cs[len(cs)-1].Message
+		}
+		cs = cs[:len(cs)-1]
+	}
+	if f.Verify && c.Message == "WIP" {
+		rtx.HaltWith(errors.New("pre-commit check failed: WIP commits are not allowed (use --no-verify)"))
+		return
+	}
+	cs = append(cs, c)
+	if err := writeCommits(rtx, cs); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "[%d] %s\n", c.N, c.Message)
+}
+-- vcs_diff.go.txt --
+package vcs
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*vcsDiffHandler)(nil)
+
+type vcsDiffHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*vcsDiffHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[VcsDiffInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	revs := inputs.VcsDiff.Arguments.Revisions
+	var paths []string
+	if i, ok := rtx.DashIndex(); ok {
+		revs, paths = revs[:i], revs[i:]
+	}
+	fmt.Fprintf(rtx.Stdout, "revisions=%q paths=%q\n", revs, paths)
+}
+-- vcs_init.go.txt --
+package vcs
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*vcsInitHandler)(nil)
+
+type vcsInitHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*vcsInitHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[VcsInitInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	dir := inputs.VcsInit.Arguments.Directory
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(rtx.Dir(), dir)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".vcs"), 0o755); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	kind := "repository"
+	if inputs.VcsInit.Flags.Bare {
+		kind = "bare repository"
+	}
+	fmt.Fprintf(rtx.Stdout, "initialized empty %s in %s\n", kind, filepath.Join(inputs.VcsInit.Arguments.Directory, ".vcs"))
+}
+-- vcs_log.go.txt --
+package vcs
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*vcsLogHandler)(nil)
+
+type vcsLogHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*vcsLogHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[VcsLogInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := inputs.VcsLog.Flags
+	cs, err := readCommits(rtx)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	slices.Reverse(cs)
+	shown := 0
+	for _, c := range cs {
+		if f.MaxCount > 0 && shown == f.MaxCount {
+			break
+		}
+		if !f.Since.IsZero() && c.Date.Before(f.Since) {
+			continue
+		}
+		if f.Grep != nil && !f.Grep.MatchString(c.Message) {
+			continue
+		}
+		shown++
+		title, _, _ := strings.Cut(c.Message, "\n")
+		switch {
+		case f.Oneline || f.Format == "short":
+			fmt.Fprintf(rtx.Stdout, "%d %s\n", c.N, title)
+		case f.Format == "raw":
+			fmt.Fprintf(rtx.Stdout, "%d\x00%s\x00%s\n", c.N, c.Date.Format("2006-01-02"), c.Message)
+		default:
+			fmt.Fprintf(rtx.Stdout, "commit %d\nDate: %s\n\n    %s\n\n", c.N, c.Date.Format("2006-01-02 15:04"), c.Message)
+		}
+	}
+	if len(inputs.VcsLog.Arguments.Paths) > 0 {
+		fmt.Fprintf(rtx.Stdout, "paths: %s\n", strings.Join(inputs.VcsLog.Arguments.Paths, ","))
+	}
+}
+-- vcs_man.go.txt --
+package vcs
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*vcsManHandler)(nil)
+
+type vcsManHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*vcsManHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[VcsManInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
+	page, err := Man(inputs.VcsMan.Arguments.Command...)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if _, err := fmt.Fprint(rtx.Stdout, page); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- vcs_run.go.txt --
+package vcs
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"slices"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*vcsRunHandler)(nil)
+
+type vcsRunHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*vcsRunHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[VcsRunInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	a := inputs.VcsRun.Arguments
+	dash, _ := rtx.DashIndex()
+	env := inputs.VcsRun.Flags.Env
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		fmt.Fprintf(rtx.Stdout, "env %s=%s\n", k, env[k])
+	}
+	fmt.Fprintf(rtx.Stdout, "program=%q args=%q dash=%d\n", a.Program, a.Args, dash)
+}
+-- want-bad.txt --
+Warning: spec: bad.spec.yaml:31:11: command vcs/commit: flag "helpme": identifier "-h" is also flag "help" on command vcs, which short-circuits; after "commit" it means this flag instead, and only "--help" still reaches flag "help" there. Use another identifier for -h
+Warning: spec: bad.spec.yaml:20:24: command vcs/commit: flag "message": has only a short identifier (-m) and no long form
+Warning: spec: bad.spec.yaml:32:24: command vcs/commit: flag "helpme": has only a short identifier (-h) and no long form
+Error: spec: bad.spec.yaml:35:11: command vcs/commit: `flag_groups` entry (mutually_exclusive) references unknown flag "nosuch"; it has no matching entry in this command's `flags`
+Error: spec: bad.spec.yaml:44:7: command vcs: two sibling commands are both named "log"
+Error: spec: bad.spec.yaml:21:27: command vcs/commit: flag "message": `type` "strng" is not a type rotini knows; "strng" is neither a Go builtin nor a rotini type; did you mean "string"?
+Error: spec: bad.spec.yaml:14:38: command vcs: flag "help": sets `short_circuit` with a default of true, which would short-circuit every run
+Error: spec: bad.spec.yaml:27:41: command vcs/commit: flag "size": `minimum` 10 is above `maximum` 5, so no value can ever be accepted; lower `minimum` or raise `maximum`
+Error: spec: bad.spec.yaml:24:44: command vcs/commit: flag "level": `enum` value "two" is not a valid integer, so no value can match both; fix the value or the type
+Error: spec: bad.spec.yaml:30:60: command vcs/commit: flag "name": sets `required` and a `default`; the default always supplies a value, so the requirement can never fire. Drop `default` to make it required, or drop `required`
+Error: spec: bad.spec.yaml:39:20: command vcs/log: sets `replaced_by: history`, which names no command; write the path below the root command, without the program's name (`purge`, `remote add`)
+Error: spec: bad.spec.yaml:6:7: command vcs: example "vcs comit -m x" does not parse: unknown command "comit" for "vcs"
+Error: spec: bad.spec.yaml:7:7: command vcs: example "vcs log --format nope" does not parse: invalid value "nope" for --format (one of: short, long)
+-- want-diff.txt --
+Breaking:
+  INPUT_BOUND_NARROWED       vcs clone --depth  narrowed: minimum 1 → 2
+  FLAG_IDENTIFIER_NO_DELETE  vcs clone -4       identifier -4 removed
+
+Possibly breaking:
+  INPUT_DEFAULT_CHANGED  vcs log --format  default "medium" → "short" (the same command line behaves differently)
+
+Expected:
+  COMMAND_REPLACED  vcs stash save  command removed; replaced by vcs stash push
+
+Safe:
+  COMMAND_RENAMED_ALIAS_KEPT  vcs gc   renamed vcs maintenance; the old name still runs it as an alias
+  COMMAND_ADDED               vcs tag  command added
+
+2 breaking, 1 possibly breaking, 1 expected, 2 safe, 0 accepted
+-- want-format.txt --
+short	number and title
+medium	number, date and message
+:rotini:option keep-order
+-- want-log.txt --
+3 WIP
+2 second

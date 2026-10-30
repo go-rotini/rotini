@@ -13,6 +13,15 @@ command:
     - name: quiet
       schema:
         type: bool
+    - name: workdir
+      cascading: true
+      short_circuit: true
+      role: chdir
+      schema:
+        type: string
+        key: workdir
+        from: [file]
+        repeatable: true
   flag_groups:
     - kind: mutually_exclusive
       flags: [dir, quiet]

@@ -674,3 +674,27 @@ func TestFloat32_typedChecks(t *testing.T) {
 		t.Errorf("ArgvOf = %q, %v; want --ratio=0.1", argv, err)
 	}
 }
+
+// UnsetConfigValue drops a mapping the removal empties, keeps the comment above the key, and
+// treats a key the file doesn't hold, or a file that doesn't exist, as done.
+func TestUnsetConfigValue_emptiesAndAbsences(t *testing.T) {
+	dir := t.TempDir()
+	keys := []ConfigKey{{Key: "region", Type: "string"}, {Key: "db.host", Type: "string"}}
+	path := pfWrite(t, dir, "app.yaml", "# where\nregion: eu\ndb:\n  host: h\n")
+	rtx := cwContext(dir, nil, ConfigFile{Name: "app", Path: path, Keys: keys})
+	if err := UnsetConfigValue(rtx, "app", "db.host"); err != nil {
+		t.Fatal(err)
+	}
+	if got := cwRead(t, path); got != "# where\nregion: eu\n" {
+		t.Errorf("after removing db's only key:\n%s", got)
+	}
+
+	missing := filepath.Join(dir, "none", "app.yaml")
+	rtx = cwContext(dir, nil, ConfigFile{Name: "app", Path: missing, Keys: keys})
+	if err := UnsetConfigValue(rtx, "app", "region"); err != nil {
+		t.Errorf("unset in a missing file: %v", err)
+	}
+	if _, err := os.Lstat(missing); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("unset in a missing file created it: %v", err)
+	}
+}

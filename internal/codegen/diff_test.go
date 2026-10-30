@@ -80,12 +80,19 @@ func runDiffCases(t *testing.T, cases []diffCase) {
 			if !slices.Equal(got, want) {
 				t.Errorf("findings:\n  got  %s\n  want %s", strings.Join(got, "\n       "), strings.Join(want, "\n       "))
 			}
+			seen := map[[2]string]bool{}
 			for _, f := range r.Findings {
 				if f.Message == "" {
 					t.Errorf("%s at %s has no message", f.Rule, f.Where)
 				}
 				if !contractdiff.KnownRule(f.Rule) {
 					t.Errorf("%s is not in the rule catalog", f.Rule)
+				}
+				// diff.accept takes one entry per rule and place, so no two findings may share both.
+				if key := [2]string{f.Rule, f.Where}; seen[key] {
+					t.Errorf("two %s findings at %s; one diff.accept entry can't acknowledge both", f.Rule, f.Where)
+				} else {
+					seen[key] = true
 				}
 			}
 		})
@@ -940,6 +947,12 @@ func TestDiff_stdinOutputExitRules(t *testing.T) {
 			old:  "  schemas:\n    In: {type: object, properties: {a: {type: string}}}\n" + sub("      stdin: {format: json, schema: {$ref: \"#/schemas/In\"}}\n"),
 			new:  "  schemas:\n    In: {type: object, required: [a], properties: {a: {type: string}}}\n" + sub("      stdin: {format: json, schema: {$ref: \"#/schemas/In\"}}\n"),
 			want: []string{"breaking INPUT_PROPERTY_REQUIRED_ADDED definitions.In.a"},
+		},
+		{
+			name: "stdin field inside a list",
+			old:  sub("      stdin: {format: json, schema: {type: object, properties: {items: {type: array, items: {type: string}}}}}\n"),
+			new:  sub("      stdin: {format: json, schema: {type: object, properties: {items: {type: array, items: {type: integer}}}}}\n"),
+			want: []string{"breaking INPUT_TYPE_CHANGED app run stdin.items[]"},
 		},
 		{
 			name: "output removed", old: schemas + out("        $ref: \"#/schemas/Task\"\n"), new: schemas + sub(""),

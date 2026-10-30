@@ -1,0 +1,39 @@
+# R13 — how a $ref is written is checked with no go.mod, where nothing is fetched: a malformed
+# mod:// locator and a remote source are placed at their $ref, by validate and by generate.
+
+! exists go.mod
+
+# A well-formed mod:// $ref passes; it is fetched and checked against go.mod only in a module.
+exec rotini validate good.yaml --config .rotini.conf.yaml
+! stderr .
+
+wantexit 1 rotini validate bad.yaml --config .rotini.conf.yaml
+stderr '^Error: spec: bad\.yaml:5:13: command app: invalid module ref "mod://example\.com/db@/\.rotini\.spec\.yaml"; missing version$'
+stderr '^Error: spec: bad\.yaml:7:13: command app/web: \$ref "https://example\.com/web\.yaml" is a remote source, which is not supported; use a relative path or mod://<module>@<version>/<path>$'
+stderr '^Error: spec: bad\.yaml:8:13: command app: \$ref "git::https://example\.com/r\.git//cli\.yaml" is a remote source'
+
+wantexit 1 rotini generate bad.yaml --config .rotini.conf.yaml
+stderr '^Error: spec: bad\.yaml:5:13: command app: invalid module ref'
+! exists internal
+
+-- good.yaml --
+version: 0.0.0
+command:
+  name: app
+  commands:
+    - $ref: mod://example.com/db@v1.0.0/.rotini.spec.yaml
+-- bad.yaml --
+version: 0.0.0
+command:
+  name: app
+  commands:
+    - $ref: mod://example.com/db@/.rotini.spec.yaml
+    - name: web
+      $ref: https://example.com/web.yaml
+    - $ref: git::https://example.com/r.git//cli.yaml
+-- .rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/app/zz_rotini.go

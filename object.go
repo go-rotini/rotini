@@ -147,6 +147,9 @@ func typedField(t reflect.Type, path []string, text string) (value any, list boo
 			t = t.Elem() // the key is free; the value type still applies
 			continue
 		}
+		if t.Kind() == reflect.Interface {
+			return inferScalar(text), false, nil // nested inside a free-form value: typed as JSON
+		}
 		if t.Kind() != reflect.Struct {
 			return text, false, nil
 		}

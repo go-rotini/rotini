@@ -1,0 +1,175 @@
+# R15 — how values are read and reported, in a generated CLI: a repeated flag is checked on
+# its winning value only, a map spread across config files merges per entry, a .env value is
+# credited to its file, floats and Unix layouts refuse what their type doesn't read, a
+# timezone matches exactly, a date read as a timestamp is a date, and flag-rule and bound
+# messages name exactly what the user typed and declared.
+
+gomodinit example.com/vals
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# ── a repeated flag: only the winning value is checked ───────────────────────
+
+exec ./app$exe --lim 99 --lim 4
+stdout '^lim=4 '
+exec ./app$exe --lim x --lim 4
+stdout '^lim=4 '
+! exec ./app$exe --lim 4 --lim 99
+stderr '^Error: --lim must be <= 9 \(got 99\)$'
+
+# ── a config map across two files merges per entry, credited per entry ──────
+
+exec ./app$exe
+stdout ' labels=map\[owner:ops team:core tier:api\] '
+exec ./app$exe --explain-inputs
+stdout '^App\.Config\.Labels = "owner=ops, team=core, tier=api" from config:system#labels\.owner, config:user#labels\.team, config:user#labels\.tier; overrides config:system#labels\.tier "web"$'
+
+# ── a .env value is credited to the .env file ───────────────────────────────
+
+cp dotenv.txt .env
+exec ./app$exe --explain-inputs
+stdout '^App\.Flags\.Port = "8080" from config:dotenv#APP_PORT$'
+cp badenv.txt .env
+! exec ./app$exe
+stderr 'APP_PORT \(from \.env\)'
+rm .env
+
+# ── floats: hex floats and _ need base: prefixed; inf and nan are numbers ────
+
+! exec ./app$exe --rate 0x1p4
+stderr '^Error: --rate: "0x1p4" is not a valid number$'
+! exec ./app$exe --rate 1_000
+stderr '^Error: --rate: "1_000" is not a valid number$'
+exec ./app$exe --rate -Inf --hex 0x1p4
+stdout ' rate=-Inf hex=16 '
+exec ./app$exe --hex 1_000.5
+stdout ' hex=1000.5 '
+
+# ── timezone: exact names, UTC and Local, never empty ───────────────────────
+
+exec ./app$exe --tz Europe/Berlin
+stdout ' tz=Europe/Berlin '
+exec ./app$exe --tz Local
+stdout ' tz=Local '
+! exec ./app$exe --tz=
+stderr '--tz'
+! exec ./app$exe --tz utc
+stderr 'unknown time zone utc'
+
+# ── Unix layouts refuse a leading +; a date read as a timestamp is a date ───
+
+! exec ./app$exe --ms +1700000000000
+stderr 'Unix timestamp in milliseconds'
+! exec ./app$exe --day +1700000000
+stderr 'Unix timestamp in seconds'
+exec ./app$exe --day 1700000000
+stdout ' day=2023-11-14T00:00:00Z '
+
+# ── messages name what was typed and declared ───────────────────────────────
+
+! exec ./app$exe -46
+stderr '^Error: flags -4 and -6 are mutually exclusive$'
+! exec ./app$exe --big 9007199254740993
+stderr '^Error: --big must be <= 9007199254740992 \(got 9007199254740993\)$'
+! exec ./app$exe --token @
+stderr '^Error: --token: "@" names no file; write @path to read a file, or @@ for a literal @$'
+
+-- user.yaml --
+labels: {team: core, tier: api}
+-- system.yaml --
+labels: {owner: ops, tier: web}
+-- dotenv.txt --
+APP_PORT=8080
+-- badenv.txt --
+APP_PORT=eighty
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: values as read
+  env_prefix: APP
+  config_files:
+    - name: user
+      path: ./user.yaml
+      format: yaml
+    - name: system
+      path: ./system.yaml
+      format: yaml
+    - name: dotenv
+      path: ./.env
+      format: dotenv
+      as: env
+  flag_groups:
+    - kind: mutually_exclusive
+      flags: [ipv4, ipv6]
+  flags:
+    - { name: lim, summary: a limit, identifiers: [--lim], schema: { type: int, maximum: 9 } }
+    - { name: rate, summary: a rate, identifiers: [--rate], schema: { type: float64 } }
+    - { name: hex, summary: a prefixed float, identifiers: [--hex], schema: { type: float64, base: prefixed } }
+    - { name: tz, summary: a zone, identifiers: [--tz], schema: { type: timezone } }
+    - { name: day, summary: a day, identifiers: [--day], schema: { type: date, layout: unix } }
+    - { name: ms, summary: an instant, identifiers: [--ms], schema: { type: time, layout: unixmilli } }
+    - { name: ipv4, summary: IPv4 only, identifiers: ['-4', --ipv4], schema: { type: bool } }
+    - { name: ipv6, summary: IPv6 only, identifiers: ['-6', --ipv6], schema: { type: bool } }
+    - { name: big, summary: a big number, identifiers: [--big], schema: { type: int64, maximum: 9007199254740992 } }
+    - { name: token, summary: a token, identifiers: [--token], schema: { type: string, from: [file] } }
+    - { name: port, summary: a port, identifiers: [--port], schema: { type: int, variable: APP_PORT } }
+    - name: explain-inputs
+      summary: explain where values came from
+      identifiers: [--explain-inputs]
+      short_circuit: true
+      hidden: true
+      schema: { type: bool }
+  config:
+    - name: labels
+      summary: labels
+      schema: { type: 'map[string]string', key: labels }
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appHandler)(nil)
+
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, rep, err := rtx.InputsWithReport[AppInputs]()
+	if in.App.Flags.ExplainInputs {
+		_ = rep.Format(rtx.Stdout)
+		return
+	}
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := in.App.Flags
+	tz := "-"
+	if f.Tz != nil {
+		tz = f.Tz.String()
+	}
+	fmt.Fprintf(rtx.Stdout, "lim=%d rate=%v hex=%v tz=%s day=%s labels=%v port=%d \n",
+		f.Lim, f.Rate, f.Hex, tz, f.Day.Format(time.RFC3339), in.App.Config.Labels, f.Port)
+}

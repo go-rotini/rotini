@@ -8,10 +8,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/recon"
 )
 
 // The conformance rows for a configuration value of the wrong shape (a list or map where an
-// input takes one value) and for an empty environment variable over a .env file.
+// input takes one value), for an empty environment variable over a .env file, and for the
+// configuration errors that name their file or source.
 
 type shpInputs struct {
 	App struct {
@@ -125,7 +128,7 @@ func shapeConformanceCases() []dataCase {
 				t.Errorf("arguments = %+v, %v", a, err)
 			}
 		}},
-		{"ENV-14", func(t *testing.T) { // a variable set to "" leaves the .env file's value, for both readers and the report
+		{"ENV-14", func(t *testing.T) { // a variable set to "" leaves the .env file's value, for both readers and the report, which credits the file
 			env := []string{"APP_NAME=", "APP_REGION=", "APP_PORT="}
 			rtx := shpContext(t, "port: 9\n", "APP_NAME=dot\nAPP_REGION=eu\n", env)
 			in, err := rtx.Inputs[shpInputs]()
@@ -139,7 +142,7 @@ func shapeConformanceCases() []dataCase {
 					t.Errorf("%s: name %q, region %q, port %d, %v", reader, a.Flags.Name, a.Env.Region, a.Flags.Port, got.err)
 				}
 			}
-			if w, _ := rep.Winner("App.Flags.Name"); w.Origin != "env:APP_NAME" || w.Raw != "dot" {
+			if w, _ := rep.Winner("App.Flags.Name"); w.Origin != "config:dotenv#APP_NAME" || w.Raw != "dot" {
 				t.Errorf("name winner = %+v", w)
 			}
 			if w, _ := rep.Winner("App.Flags.Port"); w.Origin != "config:app#port" {
@@ -155,6 +158,50 @@ func shapeConformanceCases() []dataCase {
 				t.Errorf("empty variable alone: %v, want --name missing", err)
 			}
 		}},
+		{"CFG-14", func(t *testing.T) { // a required input pinned to one file, missing there, names that file, found or not
+			files := []ConfigFile{{Name: "app", Path: "app.yaml"}, {Name: "user", Path: "user.yaml"}}
+			dir := t.TempDir()
+			user := filepath.Join(dir, "user.yaml")
+			shpConfigError(t, dir, files, nil, CategoryUsage, "config key token is required in configuration file "+user)
+			if err := os.WriteFile(user, []byte("other: x\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			shpConfigError(t, dir, files, nil, CategoryUsage, "config key token is required in configuration file "+user)
+		}},
+		{"CFG-15", func(t *testing.T) { // a source name collision is an internal error naming the sources
+			dir := t.TempDir()
+			files := []ConfigFile{{Name: "user", Path: "app.yaml"}}
+			shpConfigError(t, dir, files, []recon.Source{recon.NewMapSource("user", nil)}, CategoryInternal,
+				`could not build the configuration registry: configuration file `+filepath.Join(dir, "app.yaml")+` and a custom source are both named "user"`)
+		}},
+	}
+}
+
+type shpPinnedInputs struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Config    struct {
+			Token string `rotini:"token" recon:"token,required" cfgfile:"user"`
+		}
+	}
+}
+
+// shpConfigError reads shpPinnedInputs in dir, where app.yaml holds a token, through every
+// reader, and checks that each reports a config *InputError of category cat whose message is
+// want.
+func shpConfigError(t *testing.T, dir string, files []ConfigFile, sources []recon.Source, cat Category, want string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte("token: t\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def := Definition{Name: "app", Handler: "App", Inputs: reflect.TypeFor[shpPinnedInputs]()}
+	rtx := NewContextFor(def, nil).WithDir(dir).WithInputSettings(InputSettings{ConfigFiles: files, Sources: sources})
+	for reader, err := range readerErrors[shpPinnedInputs](rtx, "files") {
+		ie, ok := errors.AsType[*InputError](err)
+		if !ok || ie.Channel != channelConfig || CategoryOf(err) != cat || ie.Msg != want {
+			t.Errorf("%s = %v, want a %v config error %q", reader, err, cat, want)
+		}
 	}
 }
 

@@ -101,6 +101,14 @@ func TestMount(t *testing.T) {
 			want:   "command:\n  name: app\n  commands:\n    - $ref: ../ab12/.rotini.spec.yaml\n    - $ref: ../r2d2/.rotini.spec.yaml\n    - name: help\n",
 		},
 		{
+			// As fmt attaches them: the comments right above an entry go with it, a comment
+			// above a blank line is a heading and stays, a deeper one closes the entry before.
+			name:   "prune takes the comments attached above",
+			parent: "command:\n  name: app\n  commands:\n    # Services\n\n    # the gone cli\n    # two lines\n    - $ref: ../gone/.rotini.spec.yaml\n    - name: help\n      # help's own note\n    # another gone one\n    - $ref: ../gone2/.rotini.spec.yaml\n",
+			opts:   MountOptions{Prune: true},
+			want:   "command:\n  name: app\n  commands:\n    # Services\n\n    - name: help\n      # help's own note\n",
+		},
+		{
 			name:   "prune every entry",
 			parent: "command:\n  name: app\n  commands:\n    - $ref: ../gone/.rotini.spec.yaml\n  summary: s\n",
 			opts:   MountOptions{Prune: true},
@@ -299,6 +307,13 @@ func TestMount_under(t *testing.T) {
 			under:  []string{"db", "seed"},
 			specs:  []string{"cmd/migrate/.rotini.spec.yaml"},
 			errHas: `app db has no command "seed" written here; if it's declared in ../db/.rotini.spec.yaml, mount into that spec instead`,
+		},
+		{
+			name:   "an override of a command declared in the $ref'd spec",
+			parent: "command:\n  name: app\n  commands:\n    - $ref: ../db/.rotini.spec.yaml\n      commands:\n        - name: seed\n          summary: seed it\n",
+			under:  []string{"db", "seed"},
+			specs:  []string{"cmd/migrate/.rotini.spec.yaml"},
+			errHas: `app db seed overrides a command declared in ../db/.rotini.spec.yaml; mount into that spec instead`,
 		},
 		{
 			name:   "no such command",

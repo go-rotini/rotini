@@ -1,0 +1,380 @@
+# R14 — the argv grammar and input precedence, attacked from outside: attached and separate
+# values, = inside values, empty values, short clusters, negative numbers and words that look
+# like flags, repeats, bool and count forms, unknown and misplaced flags at each level,
+# cascading flags at depth, aliases, `--`, passthrough, response files, unicode look-alikes,
+# and the order command line > environment > .env > configuration files, with
+# --explain-inputs naming the source that won.
+
+gomodinit example.com/gram
+
+exec rotini validate cmd/gram/.rotini.spec.yaml --config cmd/gram/.rotini.conf.yaml
+exec rotini generate cmd/gram/.rotini.spec.yaml --config cmd/gram/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o gram$exe ./cmd/gram
+
+# Attached and separate values; = inside a value; an empty value is given.
+exec ./gram$exe run --out=x=y
+stdout '^Out="x=y"$'
+exec ./gram$exe run --out =x
+stdout '^Out="=x"$'
+exec ./gram$exe run -o=v
+stdout '^Out="v"$'
+exec ./gram$exe run -ov
+stdout '^Out="v"$'
+exec ./gram$exe run --out=
+stdout '^$'
+! exec ./gram$exe run -o
+stderr '^Error: -o needs a value$'
+
+# A value-taking flag takes the next word, whatever it is; `--` after it is its value.
+exec ./gram$exe run -o --all
+stdout '^Out="--all"$'
+exec ./gram$exe run --out -- x
+stdout '^Out="--" First="x"$'
+
+# Short clusters: bools set in turn, a value flag takes the rest; a trailing =value belongs to
+# the last flag, which must be a bool.
+exec ./gram$exe run -aov
+stdout '^Out="v" All=true$'
+exec ./gram$exe run -abo=x
+stdout '^Out="x" All=true Big=true$'
+exec ./gram$exe run -ab=false
+stdout '^All=true$'
+! exec ./gram$exe run -vv=3
+stderr 'does not take a value'
+! exec ./gram$exe run -ax
+stderr '^Error: unknown flag "-x"$'
+exec ./gram$exe run -c-5
+stdout '^Count=-5$'
+
+# Negative numbers are values and arguments; other dash words are flags.
+exec ./gram$exe run --count -5 -1.5 -.5 -5s
+stdout '^Count=-5 First="-1.5" Rest=\["-.5","-5s"\]$'
+! exec ./gram$exe run -Inf
+stderr '^Error: unknown flag "-I"$'
+exec ./gram$exe run - --
+stdout '^First="-"$'
+exec ./gram$exe run -- -a --
+stdout '^First="-a" Rest=\["--"\]$'
+
+# Bool and count forms; the negated form takes no value; repeats keep the last value.
+exec ./gram$exe run --all=false --all
+stdout '^All=true$'
+exec ./gram$exe --no-color run --color=off
+stdout '^$'
+! exec ./gram$exe run --no-color=false
+stderr 'is the negated form and takes no value'
+! exec ./gram$exe run --verbose=2
+stderr 'counts occurrences and takes no value'
+exec ./gram$exe -v run -vv deep -v
+stdout '^Verbose=4$'
+exec ./gram$exe run --out a --out b
+stdout '^Out="b"$'
+! exec ./gram$exe run --once a --once a
+stderr '--once was given more than once \("a", then "a"\)'
+
+# An optional value never takes the next word.
+exec ./gram$exe run --opt x
+stdout '^Opt="yes" First="x"$'
+
+# Unknown and misplaced flags at every level; a root-only flag can't follow a sub-command.
+! exec ./gram$exe --nope
+stderr '^Error: unknown flag "--nope"$'
+! exec ./gram$exe run deep --nope
+stderr '^Error: unknown flag "--nope"$'
+! exec ./gram$exe --top x run
+stderr '^Error: --top belongs to "gram", not "gram run"$'
+! exec ./gram$exe run deep --out x
+stderr '^Error: --out belongs to "gram run", not "gram run deep"$'
+! exec ./gram$exe -o x run
+stderr '^Error: unknown flag "-o"$'
+
+# Aliases match exactly; no case folding, no prefixes; a name after an argument is an argument.
+exec ./gram$exe r -a
+stdout '^All=true$'
+! exec ./gram$exe R
+stderr '^Error: unknown command "R" for "gram"$'
+! exec ./gram$exe ru
+stderr '^Error: unknown command "ru" for "gram"$'
+exec ./gram$exe run x deep
+stdout '^First="x" Rest=\["deep"\]$'
+
+# Look-alike dashes and invisible characters are not flags or are unknown ones.
+exec ./gram$exe run —out
+stdout '^First="—out"$'
+! exec ./gram$exe run --out​
+stderr 'unknown flag'
+! exec ./gram$exe run --OUT x
+stderr '^Error: unknown flag "--OUT"$'
+
+# A passthrough argument keeps every word from its first one on, as typed.
+exec ./gram$exe exec --region eu ls -la --help
+stdout '^Region="eu" Cmd=\["ls","-la","--help"\]$'
+exec ./gram$exe exec -- -x --region y
+stdout '^Cmd=\["-x","--region","y"\]$'
+! exec ./gram$exe exec -x
+stderr '^Error: unknown flag "-x"$'
+
+# Response files: one word per line, kept exactly; comments and blank lines skipped; words
+# from a file aren't expanded again; @@ is a literal @; nothing after `--` is expanded.
+exec ./gram$exe @args.rsp
+stdout '^Out="hello world" First="@inner.rsp"$'
+exec ./gram$exe run @@x
+stdout '^First="@x"$'
+exec ./gram$exe run -- @inner.rsp
+stdout '^First="@inner.rsp"$'
+! exec ./gram$exe @missing.rsp
+stderr '^Error: could not read response file "missing.rsp": no such file$'
+! exec ./gram$exe @loop.rsp
+stderr '^Error: unknown command "@loop.rsp" for "gram"$'
+
+# Integer bounds compare exactly past 2^53.
+exec ./gram$exe run --count 9007199254740992
+stdout '^Count=9007199254740992$'
+! exec ./gram$exe run --count 9007199254740993
+stderr '--count must be <= '
+
+# Precedence: command line > environment > .env > the first config file > later files.
+cd prec
+exec ../gram$exe run
+stdout '^Color=true Top="toml-top" Out="dotenv-out" Count=3 Tag=\["y"\] Label=\{"a":"ya","b":"tb"\}$'
+env EXPLAIN=1
+env GRAM_RUN_OUT=env-out
+exec ../gram$exe run --tag t1
+stdout '^GramRun.Flags.Out = "env-out" from env:GRAM_RUN_OUT; overrides config:main#run.out "yaml-out"$'
+stdout '^GramRun.Flags.Tag = "t1" from argv:--tag; overrides config:main#run.tag "y"$'
+stdout '^GramRun.Flags.Label = "a=ya, b=tb" from config:main#run.label.a, config:sys#run.label.b; overrides config:sys#run.label.a "ta"$'
+stdout '^GramRun.Flags.Count = "3" from config:sys#run.count$'
+stdout '^Gram.Flags.Top = "toml-top" from config:sys#top$'
+
+# An empty variable leaves the .env value; the command line replaces a merged map whole.
+env GRAM_RUN_OUT=
+exec ../gram$exe run --label z=1
+stdout '^Color=true Top="toml-top" Out="dotenv-out" Count=3 Tag=\["y"\] Label=\{"z":"1"\}$'
+stdout '^GramRun.Flags.Label = "z=1" from argv:--label; overrides '
+
+# A bad value names its source; a configuration file's names the file and key.
+env GRAM_RUN_COUNT=0x10
+! exec ../gram$exe run
+stderr '^Error: --count: "0x10" is not a valid integer \(from environment variable GRAM_RUN_COUNT\)$'
+env GRAM_RUN_COUNT=
+cd ../badcfg
+! exec ../gram$exe run
+stderr '--color: "maybe" is not a valid boolean \(from configuration file .*badcfg[/\\]gram.yaml, key color\)$'
+exec ../gram$exe --color run
+stdout '^Color=true$'
+
+-- args.rsp --
+run
+--out
+hello world
+  # an indented comment
+
+@inner.rsp
+-- inner.rsp --
+--all
+-- loop.rsp --
+@loop.rsp
+-- prec/gram.yaml --
+color: true
+run:
+  out: yaml-out
+  tag: [y]
+  label: { a: ya }
+-- prec/gram.toml --
+top = "toml-top"
+
+[run]
+out = "toml-out"
+count = 3
+tag = ["t1", "t2"]
+
+[run.label]
+a = "ta"
+b = "tb"
+-- prec/.env --
+GRAM_RUN_OUT=dotenv-out
+-- badcfg/gram.yaml --
+color: maybe
+-- cmd/gram/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: gram
+  summary: argv grammar probes
+  env_prefix: GRAM
+  response_files: { prefix: "@" }
+  config_files:
+    - name: main
+      path: gram.yaml
+    - name: sys
+      path: gram.toml
+    - name: dotenv
+      path: .env
+      format: dotenv
+      as: env
+  flags:
+    - name: verbose
+      identifiers: [-v, --verbose]
+      cascading: true
+      schema: { type: count }
+    - name: color
+      identifiers: [--color]
+      cascading: true
+      schema: { type: bool, negatable: true, key: color }
+    - name: top
+      identifiers: [-T, --top]
+      schema: { type: string, key: top }
+  commands:
+    - name: run
+      summary: run things
+      aliases: [r]
+      flags:
+        - { name: out, identifiers: [-o, --out], schema: { type: string, key: run.out } }
+        - { name: all, identifiers: [-a, --all], schema: { type: bool } }
+        - { name: big, identifiers: [-b, --big], schema: { type: bool } }
+        - { name: count, identifiers: [-c, --count], schema: { type: int64, maximum: 9007199254740992, key: run.count } }
+        - { name: tag, identifiers: [-t, --tag], schema: { type: "[]string", key: run.tag } }
+        - { name: label, identifiers: [-l, --label], schema: { type: "map[string]string", key: run.label } }
+        - { name: once, schema: { type: string, repeatable: false } }
+        - { name: opt, schema: { type: string, implicit_value: "yes" } }
+      arguments:
+        - { name: first, schema: { type: string } }
+        - { name: rest, schema: { type: "[]string" } }
+      commands:
+        - name: deep
+          summary: deeper
+          flags:
+            - { name: x, schema: { type: string } }
+    - name: exec
+      summary: pass words on
+      flags:
+        - { name: region, schema: { type: string } }
+      arguments:
+        - { name: cmd, passthrough: true, schema: { type: "[]string" } }
+-- cmd/gram/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/gram/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/gram/zz_gram.go
+      package: gram
+-- internal/cmd/gram/dump.go --
+package gram
+
+import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+// dump prints every input that holds a value, Name=JSON, and with EXPLAIN set the report.
+func dump[T any](rtx *rotini.Context) {
+	in, report, err := rtx.InputsWithReport[T]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	var parts []string
+	flat(reflect.ValueOf(in), &parts)
+	fmt.Fprintln(rtx.Stdout, strings.Join(parts, " "))
+	if _, ok := rtx.LookupEnv("EXPLAIN"); ok {
+		_ = report.Format(rtx.Stdout)
+	}
+}
+
+func flat(v reflect.Value, out *[]string) {
+	for i := range v.NumField() {
+		f := v.Field(i)
+		if f.Kind() == reflect.Struct {
+			flat(f, out)
+			continue
+		}
+		if f.IsZero() {
+			continue
+		}
+		b, _ := json.Marshal(f.Interface())
+		*out = append(*out, v.Type().Field(i).Name+"="+string(b))
+	}
+}
+-- internal/cmd/gram/gram.go --
+package gram
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*gramHandler)(nil)
+
+type gramHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*gramHandler) Run(ctx context.Context, rtx *rotini.Context) { dump[GramInputs](rtx) }
+-- internal/cmd/gram/gram_run.go --
+package gram
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*gramRunHandler)(nil)
+
+type gramRunHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*gramRunHandler) Run(ctx context.Context, rtx *rotini.Context) { dump[GramRunInputs](rtx) }
+-- internal/cmd/gram/gram_run_deep.go --
+package gram
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*gramRunDeepHandler)(nil)
+
+type gramRunDeepHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*gramRunDeepHandler) Run(ctx context.Context, rtx *rotini.Context) { dump[GramRunDeepInputs](rtx) }
+-- internal/cmd/gram/gram_exec.go --
+package gram
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*gramExecHandler)(nil)
+
+type gramExecHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*gramExecHandler) Run(ctx context.Context, rtx *rotini.Context) { dump[GramExecInputs](rtx) }

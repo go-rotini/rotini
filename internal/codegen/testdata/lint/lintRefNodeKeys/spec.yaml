@@ -1,5 +1,5 @@
 # A $ref node delegates to the child's handler, built against the child's own inputs,
-# so a handler-coupled key overlaid here would not match it.
+# so a handler-coupled key overridden here would not match it; it has no handler file here.
 version: 0.0.0
 command:
   name: demo
@@ -11,3 +11,4 @@ command:
             type: bool
       options_first: true
       output_stream: true
+      filename: demo_child.go

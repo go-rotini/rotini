@@ -14,6 +14,7 @@ A word starting with `@` names a response file (`@args`), whose lines are read a
 
 - `note` — add a note
 - `exec` — run a command
+- `legacy` — ship the old way *(deprecated since 1.4.0, removed in 2.0.0: renamed; use ops deploy instead)*
 - `run` — run a command on a host
 
 ## Data Commands
@@ -44,7 +45,7 @@ Each one asks before it acts.
 Flags that shape what ops prints.
 
 - `-v, --verbose` — say more; repeat to count: -vvv
-- `--color` `string` — when to color (default `auto`) (one of auto, always, never)
+- `--color` `string` — when to color (default `auto`) (one of `auto`, `always`, `never`)
 
 ## Environment
 
@@ -54,7 +55,7 @@ Flags that shape what ops prints.
 
   .Keep it secret; a path such as C:\ops\token works too.
 
-- `OPS_LOG` `string` — the log level (one of debug, info, error)
+- `OPS_LOG` `string` — the log level (one of `debug`, `info`, `error`)
   - `debug` — everything
   - `info`
   - `error` — failures only
@@ -65,6 +66,11 @@ Flags that shape what ops prints.
 
   The region commands use when none is given.
 
-- `profile` (profile) `string` — the output profile (one of short, long)
+- `profile` (profile) `string` — the output profile (one of `short`, `long`)
   - `short` — one line each
   - `long` — every field
+
+## Exit Status
+
+- `0` — done
+- `3` (`unreachable`) — the fleet did not answer (retryable)

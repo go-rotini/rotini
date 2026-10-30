@@ -11,11 +11,12 @@ generate:
     - type: help
       enabled: true
       targets: [mcp]
-    # go without the mcp target, and embed, which doesn't apply.
+    # go and mcp_revision without the mcp target, and embed, which doesn't apply.
     - type: tools
       enabled: true
       targets: [gemini]
       go: true
+      mcp_revision: 2025-11-25
       embed: true
     # The skill's references need the markdown feature, which is off.
     - type: skill
@@ -25,6 +26,16 @@ generate:
     - type: llms
       enabled: true
       file: ../llms.txt
+    # Every other whole-program key on a per-command feature.
+    - type: man
+      enabled: true
+      file: man.txt
+      mcp_revision: 2026-07-28
+      go: true
+      name: demo
+      description: Use when the user asks for a demo.
+      base_url: https://example.com/
+      harnesses: [claude]
     # Built from the contract: no template.
     - type: permissions
       enabled: true

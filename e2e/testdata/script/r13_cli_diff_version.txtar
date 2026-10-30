@@ -1,0 +1,62 @@
+# R13 — what the CLI reference says about `rotini diff` (the new contract defaults to the one
+# built from the spec whether or not the conf writes one, git:<ref> needs a contract file, and
+# --fail-on never lets a stale diff.accept entry pass), `rotini version` and the completion
+# messages switch.
+gomodinit example.com/app
+
+# ── diff: the new contract is built from the spec, contract file or not ─────
+exec rotini generate app.yaml --config contract.conf.yaml
+cp cli-contract.json old.json
+exec rotini diff old.json --spec app.yaml --config plain.conf.yaml
+stdout '^no changes$'
+# A bare git:<ref> reads the conf's contract file, so it needs one.
+wantexit 1 rotini diff git:HEAD --spec app.yaml --config plain.conf.yaml
+stderr 'git:<ref> reads the committed contract file; set generate\.contract\.file, or name the file with git:<ref>:<path>'
+# A diff.accept entry that matches no change fails the run, unless --fail-on is never.
+wantexit 2 rotini diff old.json --spec app.yaml --config stale.conf.yaml
+stderr '^Warning: diff\.accept entry FLAG_NO_DELETE at "app --gone" matched no change; remove it$'
+exec rotini diff old.json --spec app.yaml --config stale.conf.yaml --fail-on never
+stderr 'matched no change'
+
+# ── version: text and --version agree; --format json adds the build ─────────
+exec rotini version
+stdout '^v\d+\.\d+\.\d+$'
+cp stdout version.txt
+exec rotini --version
+cmp stdout version.txt
+exec rotini generate --version
+cmp stdout version.txt
+exec rotini version --format json
+stdout '"version": "v\d+\.\d+\.\d+"'
+stdout '"go_version": "go'
+stdout '"module_path": "github\.com/go-rotini/rotini"'
+stdout '"module_version": '
+
+# ── completion: the companion's messages can be switched off ────────────────
+exec rotini completion zsh
+stdout 'Set ROTINI_COMPLETION_MESSAGES=off to hide completion messages'
+
+-- app.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: an app
+  flags:
+    - name: verbose
+      identifiers: [--verbose]
+      summary: say more
+      schema: { type: bool }
+-- contract.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+-- plain.conf.yaml --
+version: 0.0.0
+-- stale.conf.yaml --
+version: 0.0.0
+diff:
+  accept:
+    - rule: FLAG_NO_DELETE
+      where: app --gone
+      reason: no longer needed

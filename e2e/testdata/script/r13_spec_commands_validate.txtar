@@ -1,0 +1,84 @@
+# R13 — validation of command keys: root-only keys, deprecation lifecycles, passthrough shape,
+# each reported at its position.
+
+! exec rotini validate .rotini.spec.yaml --config .rotini.conf.yaml
+cmp stderr want.txt
+
+# Metadata keys can't be empty.
+! exec rotini validate meta.spec.yaml --config .rotini.conf.yaml
+stderr '^Error: spec: meta.spec.yaml:6:23: /command/commands/0/metadata/: string length 0 is below minLength 1$'
+
+-- want.txt --
+Error: spec: .rotini.spec.yaml:5:27: command demo: the root command cannot declare `deprecated_identifiers` ("dm"); with no routing token, a deprecated root alias can never be detected; declare them on sub-commands
+Error: spec: .rotini.spec.yaml:10:9: command demo/sub: sets `schemas`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)
+Error: spec: .rotini.spec.yaml:13:31: command demo/sub: `deprecated_identifiers` entry "x" is not one of its aliases; it could never be reported as deprecated; did you mean "s"?
+Error: spec: .rotini.spec.yaml:21:9: command demo/run: sets `passthrough` and declares `commands`, but a passthrough command never descends; a child token is a raw positional
+Error: spec: .rotini.spec.yaml:16:20: command demo/run: sets `passthrough` and declares `plugins` or `plugin_discovery`, but a passthrough command never dispatches; the token is a raw positional
+Error: spec: .rotini.spec.yaml:35:23: command demo/old: flag "--out": removed_in 2.0.0 is not later than deprecated_since 2.0.0
+Error: spec: .rotini.spec.yaml:33:46: command demo/old: flag "--out": deprecated_identifiers_removed_in names "--out", which deprecated_identifiers does not list; deprecate it first
+Error: spec: .rotini.spec.yaml:38:29: command demo/old: flag "--fresh": sets `deprecated_since` without `deprecated`; say why it is deprecated, or drop `deprecated_since`
+Error: spec: .rotini.spec.yaml:45:23: command demo/old: config "color": sets `removed_in` without `deprecated`; say why it is deprecated, or drop `removed_in`
+Error: spec: .rotini.spec.yaml:11:18: command demo/sub: sets `multicall`, a root-command-level key valid only on the root command; remove it (it is read only at the root, so here it is silently ignored)
+-- meta.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: sub
+      metadata: { "": empty }
+-- .rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: demo
+  deprecated_identifiers: [dm]
+  commands:
+    - name: sub
+      summary: sub
+      schemas:
+        DB: { type: object }
+      multicall: true
+      aliases: [s]
+      deprecated_identifiers: [x]
+    - name: run
+      summary: run
+      passthrough: true
+      arguments:
+        - name: words
+          schema: { type: '[]string' }
+      commands:
+        - name: child
+          summary: child
+      plugins:
+        - name: tool
+      plugin_discovery: {}
+    - name: old
+      summary: old
+      flags:
+        - name: out
+          identifiers: [--out, --o2]
+          deprecated: gone
+          deprecated_identifiers: [--o2]
+          deprecated_identifiers_removed_in: { --out: 2.0.0 }
+          deprecated_since: 2.0.0
+          removed_in: 2.0.0
+          schema: { type: string }
+        - name: fresh
+          deprecated_since: 1.0.0
+          schema: { type: string }
+      config_files:
+        - name: app
+          path: app.yaml
+      config:
+        - name: color
+          removed_in: 2.0.0
+          schema: { type: string, key: color }
+-- .rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+validate:
+  fail: collect

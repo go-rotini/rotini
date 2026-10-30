@@ -1,0 +1,451 @@
+# R13 — what the spec reference promises for `stdin:`: the document formats and their
+# generated types, the byte-order mark, JSON Lines as a slice, `unless_argument` with `-`, a
+# stream read across two Inputs calls, `const` in a payload, and `metadata`.
+
+gomodinit example.com/io
+
+exec rotini generate cmd/io/.rotini.spec.yaml --config cmd/io/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o io$exe ./cmd/io
+
+# The document formats decode into a typed payload, and a $ref by name and by pointer is the
+# same schema. A schema's description is the generated type's doc comment.
+grep 'Stdin +\*IoPlainStdin' internal/cmd/io/zz_io.go
+grep 'Stdin +\*IoYamldocStdin' internal/cmd/io/zz_io.go
+grep 'Stdin +\*\[\]IoRecordsStdin' internal/cmd/io/zz_io.go
+grep '// An item to load\.' internal/cmd/io/zz_io.go
+grep '// What the item is called\.' internal/cmd/io/zz_io.go
+
+# One leading byte-order mark is removed in every format but bytes; json is the default.
+writebytes bom.json '"\ufeff{\"name\":\"a\",\"size\":1}"'
+stdin bom.json
+exec ./io$exe plain
+stdout '^a 1$'
+writebytes bom.yaml '"\ufeffname: b\nsize: 2\n"'
+stdin bom.yaml
+exec ./io$exe yamldoc
+stdout '^b 2$'
+writebytes bom.jsonc '"\ufeff{\n  // a comment\n  \"name\": \"c\",\n  \"size\": 3,\n}"'
+stdin bom.jsonc
+exec ./io$exe jsoncdoc
+stdout '^c 3$'
+writebytes bom.toml '"\ufeffname = \"d\"\nsize = 4\n"'
+stdin bom.toml
+exec ./io$exe tomldoc
+stdout '^d 4$'
+writebytes bom.txt '"\ufeffhello"'
+stdin bom.txt
+exec ./io$exe text
+stdout '^\[hello\]$'
+
+# The payload is validated against its schema.
+stdin bad.yaml
+! exec ./io$exe yamldoc
+stderr 'size'
+
+# JSON Lines without stream is a slice; a bad record names its line.
+stdin tasks.jsonl
+exec ./io$exe records
+stdout '^2 records: x y$'
+stdin badtasks.jsonl
+! exec ./io$exe records
+stderr 'line 2'
+
+# const is checked in a stdin payload.
+stdin wrongkind.json
+! exec ./io$exe tagged
+stderr 'kind'
+stdin rightkind.json
+exec ./io$exe tagged
+stdout '^ok$'
+
+# unless_argument: a file reads the file; `-` (alone or in a list) reads stdin.
+stdin piped.txt
+exec ./io$exe cat file.txt
+stdout '^from file$'
+! stdout 'piped'
+stdin piped.txt
+exec ./io$exe cat -
+stdout '^piped$'
+stdin piped.txt
+exec ./io$exe cat file.txt -
+stdout '^piped$'
+stdin piped.txt
+exec ./io$exe cat
+stdout '^piped$'
+
+# With required, an empty stdin is an error only when no file is given.
+stdin empty.txt
+exec ./io$exe cat file.txt
+! stderr .
+stdin empty.txt
+! exec ./io$exe cat
+stderr 'stdin'
+
+# A stream is read once per run: a second Inputs call continues where the first stopped.
+stdin three.txt
+exec ./io$exe twice
+stdout '^first=one$'
+stdout '^then=two,three$'
+
+# metadata is in the contract and on no page.
+exec ./io$exe plain --help
+stdout 'Stdin:'
+! stdout 'owner'
+grep '"owner": "data-team"' cli-contract.json
+
+-- bad.yaml --
+name: b
+size: big
+-- tasks.jsonl --
+{"name":"x","size":1}
+
+{"name":"y","size":2}
+-- badtasks.jsonl --
+{"name":"x","size":1}
+{"name":"y","size":"no"}
+-- wrongkind.json --
+{"kind":"other"}
+-- rightkind.json --
+{"kind":"event"}
+-- file.txt --
+from file
+-- piped.txt --
+piped
+-- empty.txt --
+-- three.txt --
+one
+two
+three
+-- cmd/io/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: io
+  summary: stdin formats
+  flags:
+    - name: help
+      identifiers: [--help]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+  schemas:
+    Item:
+      type: object
+      description: An item to load.
+      required: [name]
+      properties:
+        name: {type: string, description: What the item is called.}
+        size: {type: integer}
+  commands:
+    - name: plain
+      summary: read json
+      stdin:
+        schema: {$ref: Item}
+        metadata: {owner: data-team}
+    - name: yamldoc
+      summary: read yaml
+      stdin: {format: yaml, schema: {$ref: '#/schemas/Item'}}
+    - name: jsoncdoc
+      summary: read jsonc
+      stdin: {format: jsonc, schema: {$ref: Item}}
+    - name: tomldoc
+      summary: read toml
+      stdin: {format: toml, schema: {$ref: Item}}
+    - name: text
+      summary: read text
+      stdin: {format: text}
+    - name: records
+      summary: read records
+      stdin: {format: jsonl, schema: {$ref: Item}}
+    - name: tagged
+      summary: read a tagged payload
+      stdin:
+        schema:
+          type: object
+          properties:
+            kind: {type: string, const: event}
+    - name: cat
+      summary: print files or stdin
+      arguments:
+        - name: files
+          schema: {type: '[]inputfile'}
+      stdin:
+        format: text
+        unless_argument: files
+        schema: {required: true}
+    - name: twice
+      summary: read a stream in two calls
+      stdin: {format: lines, stream: true}
+-- cmd/io/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/io/main.go
+    - type: cmd
+      file: internal/cmd/io/zz_io.go
+      package: io
+  features:
+    - type: help
+      enabled: true
+  contract:
+    file: cli-contract.json
+-- cmd/io/main.go --
+package main
+
+import (
+	io "example.com/io/internal/cmd/io"
+)
+
+func main() {
+	io.NewProgram().Execute()
+}
+-- internal/cmd/io/io.go --
+package io
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (base) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {}
+
+type ioHandler struct {
+	rotini.NoCascadingPostRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+}
+
+func (*ioHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IoInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Io.Flags.Help {
+		page, _ := rtx.InvokedHelp()
+		fmt.Fprint(rtx.Stdout, page)
+		rtx.Halt()
+	}
+}
+
+func (*ioHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+func fail(rtx *rotini.Context, err error) {
+	rtx.HaltWith(err)
+}
+-- internal/cmd/io/io_plain.go --
+package io
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ioPlainHandler struct{ base }
+
+func (*ioPlainHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IoPlainInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	s := in.IoPlain.Stdin
+	fmt.Fprintln(rtx.Stdout, s.Name, s.Size)
+}
+-- internal/cmd/io/io_yamldoc.go --
+package io
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ioYamldocHandler struct{ base }
+
+func (*ioYamldocHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IoYamldocInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	s := in.IoYamldoc.Stdin
+	fmt.Fprintln(rtx.Stdout, s.Name, s.Size)
+}
+-- internal/cmd/io/io_jsoncdoc.go --
+package io
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ioJsoncdocHandler struct{ base }
+
+func (*ioJsoncdocHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IoJsoncdocInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	s := in.IoJsoncdoc.Stdin
+	fmt.Fprintln(rtx.Stdout, s.Name, s.Size)
+}
+-- internal/cmd/io/io_tomldoc.go --
+package io
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ioTomldocHandler struct{ base }
+
+func (*ioTomldocHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IoTomldocInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	s := in.IoTomldoc.Stdin
+	fmt.Fprintln(rtx.Stdout, s.Name, s.Size)
+}
+-- internal/cmd/io/io_text.go --
+package io
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ioTextHandler struct{ base }
+
+func (*ioTextHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IoTextInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "[%s]\n", *in.IoText.Stdin)
+}
+-- internal/cmd/io/io_records.go --
+package io
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ioRecordsHandler struct{ base }
+
+func (*ioRecordsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IoRecordsInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	recs := *in.IoRecords.Stdin
+	fmt.Fprintf(rtx.Stdout, "%d records: %s %s\n", len(recs), recs[0].Name, recs[1].Name)
+}
+-- internal/cmd/io/io_tagged.go --
+package io
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ioTaggedHandler struct{ base }
+
+func (*ioTaggedHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[IoTaggedInputs](); err != nil {
+		fail(rtx, err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, "ok")
+}
+-- internal/cmd/io/io_cat.go --
+package io
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ioCatHandler struct{ base }
+
+func (*ioCatHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IoCatInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	if in.IoCat.Stdin != nil {
+		fmt.Fprintln(rtx.Stdout, strings.TrimSpace(*in.IoCat.Stdin))
+		return
+	}
+	for _, f := range in.IoCat.Arguments.Files {
+		b, _ := os.ReadFile(f)
+		fmt.Fprint(rtx.Stdout, string(b))
+	}
+}
+-- internal/cmd/io/io_twice.go --
+package io
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ioTwiceHandler struct{ base }
+
+func (*ioTwiceHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[IoTwiceInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	for line := range in.IoTwice.Stdin {
+		fmt.Fprintln(rtx.Stdout, "first="+line)
+		break
+	}
+	again, err := rtx.Inputs[IoTwiceInputs]()
+	if err != nil {
+		fail(rtx, err)
+		return
+	}
+	var rest []string
+	for line := range again.IoTwice.Stdin {
+		rest = append(rest, line)
+	}
+	fmt.Fprintln(rtx.Stdout, "then="+strings.Join(rest, ","))
+}

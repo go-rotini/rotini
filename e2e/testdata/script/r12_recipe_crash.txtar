@@ -21,13 +21,16 @@ stderr 'set CRASHDEMO_CRASH_DIR'
 mkdir crashes
 env CRASHDEMO_CRASH_DIR=$WORK/crashes
 wantexit 1 ./crashdemo$exe boom --note private-note
-stderr '^Error: runtime error: index out of range'
-stderr 'crash report written to .*crashdemo-.*\.txt'
+stderr '\AError: runtime error: index out of range \[3\] with length 0\ncrash report written to .*crashdemo-\d+\.txt\n\z'
 [unix] exec sh -c 'cat crashes/crashdemo-*.txt'
 [unix] stdout '^version: 1\.0\.0$'
 [unix] stdout 'goroutine'
 [unix] stdout 'crashdemo_boom\.go'
 [unix] ! stdout 'private-note'
+
+# The guide's run: the panic, then where the report went.
+wantexit 1 ./crashdemo$exe boom
+stderr '\AError: runtime error: index out of range \[1\] with length 0\ncrash report written to .*crashdemo-\d+\.txt\n\z'
 
 -- report.go.txt --
 package crashdemo

@@ -1,0 +1,289 @@
+# R15 — validate's newer rules, each positioned at the key at fault with the same message in
+# every format: a required input help hides or deprecates, two keys reading one environment
+# variable, an argument enum value read as a flag, a config input with no file to read, an
+# output shape nothing can pass, and an llms base_url without its trailing "/". Input problems
+# sit at the key, not the input's entry.
+
+# A required flag that is hidden, and a required argument that is deprecated.
+exec rotini validate required.yaml
+stderr '^Warning: spec: required\.yaml:7:15: command app: flag "token": is `required` and `hidden`: every run must pass it, but help doesn''t show it, so a user can''t learn it exists; drop `hidden`, or drop `required`$'
+stderr '^Warning: spec: required\.yaml:11:19: command app: argument "mode": is `required` and `deprecated`: every run must pass it, but passing it reports it as deprecated, so a user can''t stop using it; drop `required` while it is deprecated, or drop `deprecated`$'
+exec rotini validate required.json
+stderr '^Warning: spec: required\.json:9:19: command app: flag "token": is `required` and `hidden`: every run must pass it, but help doesn''t show it, so a user can''t learn it exists; drop `hidden`, or drop `required`$'
+stderr '^Warning: spec: required\.json:16:23: command app: argument "mode": is `required` and `deprecated`: '
+
+# a.b_c and a_b.c both derive C_A_B_C, and a `variable:` names it too.
+exec rotini validate envkeys.yaml
+stderr '^Warning: spec: envkeys\.yaml:11:36: command app: flag "second": reads environment variable C_A_B_C, derived from key "a_b\.c", and flag "first" reads it too, derived from key "a\.b_c"; setting it sets both, so rename a key or give one its own `variable:`$'
+stderr '^Warning: spec: envkeys\.yaml:14:41: command app: flag "third": reads environment variable C_A_B_C, named by `variable:`, and flag "first" reads it too, derived from key "a\.b_c"; '
+exec rotini validate envkeys.toml
+stderr '^Warning: spec: envkeys\.toml:18:7: command app: flag "second": reads environment variable C_A_B_C, derived from key "a_b\.c", and flag "first" reads it too, derived from key "a\.b_c"; setting it sets both, so rename a key or give one its own `variable:`$'
+stderr '^Warning: spec: envkeys\.toml:26:12: command app: flag "third": reads environment variable C_A_B_C, named by `variable:`'
+
+# An argument enum value starting with "-".
+exec rotini validate dash.yaml
+stderr '^Warning: spec: dash\.yaml:8:21: command app: argument "order": has `enum` value "-desc", which starts with "-": completion offers it, but the parser reads it as an unknown flag unless it comes after "--"; choose one that doesn''t start with "-"$'
+exec rotini validate dash.jsonc
+stderr '^Warning: spec: dash\.jsonc:9:55: command app: argument "order": has `enum` value "-desc", which starts with "-": completion offers it, but the parser reads it as an unknown flag unless it comes after "--"; choose one that doesn''t start with "-"$'
+
+# A config input with no config_files entry in scope.
+exec rotini validate config.yaml
+stderr '^Warning: spec: config\.yaml:5:7: command app: config "color": no `config_files` entry is in scope \(on this command, an ancestor or a command below it\), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless an input reader set with WithInputReader supplies it$'
+exec rotini validate config.json
+stderr '^Warning: spec: config\.json:6:7: command app: config "color": no `config_files` entry is in scope \(on this command, an ancestor or a command below it\), so no configuration file is read for it; '
+# With an entry, nothing to say.
+exec rotini validate config-ok.yaml
+! stderr 'config_files'
+
+# An output that requires an undeclared property, and a const of the wrong type.
+wantexit 1 rotini validate output.yaml
+stderr '^Error: spec: output\.yaml:6:20: command app: output: `required` names "nmae", which isn''t one of its `properties`, so no output can pass; declare the property, or take it out of `required`; did you mean "name"\?$'
+stderr '^Error: spec: output\.yaml:10:39: command app: output property "version": `const` 3 is a whole number, but the type is string, so no output can pass; make the `const` a value of the type, or change the type$'
+wantexit 1 rotini validate output.toml
+stderr '^Error: spec: output\.toml:8:19: command app: output: `required` names "nmae", which isn''t one of its `properties`, so no output can pass; declare the property, or take it out of `required`; did you mean "name"\?$'
+stderr '^Error: spec: output\.toml:18:9: command app: output property "version": `const` 3 is a whole number, but the type is string, '
+
+# An llms base_url without a trailing "/".
+exec rotini validate app.yaml --config llms.conf.yaml
+stderr '^Warning: conf: llms\.conf\.yaml:9:17: generate\.features\.llms\.base_url: "https://x/app" doesn''t end in "/"; each link is `base_url` followed by the page''s file name, so links read "https://x/app<page>\.md"; end it with "/"$'
+exec rotini validate app.yaml --config llms.conf.json
+stderr '^Warning: conf: llms\.conf\.json:6:54: generate\.features\.llms\.base_url: "https://x/app" doesn''t end in "/"; '
+
+# A destructive command kept from agents with `agent: false` has nothing to preview or confirm
+# for them; the same command offered to agents is warned about.
+exec rotini validate destructive.yaml
+stderr '^Warning: spec: destructive\.yaml:8:9: command app/wipe: is destructive but has no flag with `role: dry-run` or `role: confirm`; '
+! stderr 'app/nuke'
+! stderr 'app/admin/reset'
+
+# An input's constraint problem sits at the constraint, in every format.
+wantexit 1 rotini validate bounds.yaml
+stderr '^Error: spec: bounds\.yaml:7:37: command app: flag "replicas": `minimum` 10 is above `maximum` 1, so no value can ever be accepted; lower `minimum` or raise `maximum`$'
+wantexit 1 rotini validate bounds.json
+stderr '^Error: spec: bounds\.json:9:47: command app: flag "replicas": `minimum` 10 is above `maximum` 1, so no value can ever be accepted; lower `minimum` or raise `maximum`$'
+
+-- app.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: an app
+-- required.yaml --
+version: 0.0.0
+command:
+  name: app
+  flags:
+    - name: token
+      identifiers: [--token]
+      hidden: true
+      schema: { type: string, required: true }
+  arguments:
+    - name: mode
+      deprecated: pass --mode instead
+      schema: { type: string, required: true }
+-- required.json --
+{
+  "version": "0.0.0",
+  "command": {
+    "name": "app",
+    "flags": [
+      {
+        "name": "token",
+        "identifiers": ["--token"],
+        "hidden": true,
+        "schema": { "type": "string", "required": true }
+      }
+    ],
+    "arguments": [
+      {
+        "name": "mode",
+        "deprecated": "pass --mode instead",
+        "schema": { "type": "string", "required": true }
+      }
+    ]
+  }
+}
+-- envkeys.yaml --
+version: 0.0.0
+command:
+  name: app
+  env_prefix: C
+  flags:
+    - name: first
+      identifiers: [--first]
+      schema: { type: string, key: a.b_c }
+    - name: second
+      identifiers: [--second]
+      schema: { type: string, key: a_b.c }
+    - name: third
+      identifiers: [--third]
+      schema: { type: string, variable: C_A_B_C }
+-- envkeys.toml --
+version = "0.0.0"
+
+[command]
+name = "app"
+env_prefix = "C"
+
+[[command.flags]]
+name = "first"
+identifiers = ["--first"]
+schema = { type = "string", key = "a.b_c" }
+
+[[command.flags]]
+name = "second"
+identifiers = ["--second"]
+
+[command.flags.schema]
+type = "string"
+key = "a_b.c"
+
+[[command.flags]]
+name = "third"
+identifiers = ["--third"]
+
+[command.flags.schema]
+type = "string"
+variable = "C_A_B_C"
+-- dash.yaml --
+version: 0.0.0
+command:
+  name: app
+  arguments:
+    - name: order
+      schema:
+        type: string
+        enum: [asc, -desc]
+-- dash.jsonc --
+{
+  "version": "0.0.0",
+  "command": {
+    "name": "app",
+    "arguments": [
+      {
+        "name": "order",
+        // "-desc" reads as a flag before "--".
+        "schema": { "type": "string", "enum": ["asc", "-desc"] }
+      }
+    ]
+  }
+}
+-- config.yaml --
+version: 0.0.0
+command:
+  name: app
+  config:
+    - name: color
+      schema: { type: string }
+-- config.json --
+{
+  "version": "0.0.0",
+  "command": {
+    "name": "app",
+    "config": [
+      { "name": "color", "schema": { "type": "string" } }
+    ]
+  }
+}
+-- config-ok.yaml --
+version: 0.0.0
+command:
+  name: app
+  config_files:
+    - name: main
+      path: app.yaml
+  config:
+    - name: color
+      schema: { type: string }
+-- output.yaml --
+version: 0.0.0
+command:
+  name: app
+  output:
+    type: object
+    required: [id, nmae]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      version: { type: string, const: 3 }
+-- output.toml --
+version = "0.0.0"
+
+[command]
+name = "app"
+
+[command.output]
+type = "object"
+required = ["id", "nmae"]
+
+[command.output.properties.id]
+type = "string"
+
+[command.output.properties.name]
+type = "string"
+
+[command.output.properties.version]
+type = "string"
+const = 3
+-- llms.conf.yaml --
+version: 0.0.0
+generate:
+  features:
+    - type: markdown
+      enabled: true
+      embed: true
+    - type: llms
+      enabled: true
+      base_url: https://x/app
+-- llms.conf.json --
+{
+  "version": "0.0.0",
+  "generate": {
+    "features": [
+      { "type": "markdown", "enabled": true, "embed": true },
+      { "type": "llms", "enabled": true, "base_url": "https://x/app" }
+    ]
+  }
+}
+-- destructive.yaml --
+version: 0.0.0
+command:
+  name: app
+  commands:
+    - name: wipe
+      summary: wipe everything
+      effects:
+        kind: destructive
+    - name: nuke
+      summary: nuke everything
+      agent: false
+      effects:
+        kind: destructive
+    - name: admin
+      agent: false
+      commands:
+        - name: reset
+          summary: reset everything
+          effects:
+            kind: destructive
+-- bounds.yaml --
+version: 0.0.0
+command:
+  name: app
+  flags:
+    - name: replicas
+      identifiers: [--replicas]
+      schema: { type: int, minimum: 10, maximum: 1 }
+-- bounds.json --
+{
+  "version": "0.0.0",
+  "command": {
+    "name": "app",
+    "flags": [
+      {
+        "name": "replicas",
+        "identifiers": ["--replicas"],
+        "schema": { "type": "int", "minimum": 10, "maximum": 1 }
+      }
+    ]
+  }
+}

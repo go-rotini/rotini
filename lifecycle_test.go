@@ -450,6 +450,13 @@ func TestAsCommand_restoresThePreviousFrame(t *testing.T) {
 	}
 }
 
+// AsCommand of a nil hook is nil, so a plan built from optional hooks leaves the step empty.
+func TestAsCommand_nilHookIsNil(t *testing.T) {
+	if AsCommand(0, nil) != nil {
+		t.Error("AsCommand(0, nil) is not nil")
+	}
+}
+
 // TestLifecycle_nilDoIsATeardownOnlyStep: a step with a nil Do still runs its Undo.
 func TestLifecycle_nilDoIsATeardownOnlyStep(t *testing.T) {
 	var order []string

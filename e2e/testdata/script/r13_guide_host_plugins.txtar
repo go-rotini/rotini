@@ -1,0 +1,326 @@
+# R13 — the guide's "Be a plugin for kubectl, Docker or Flux": a Docker plugin's metadata probe
+# and plugin-format completion, and a kubectl plugin's display name, short flag spellings and
+# its kubectl_complete- twin. metadata.go.txt is the block the guide shows.
+
+# ── Docker ──────────────────────────────────────────────────────────────────
+cd docker
+gomodinit example.com/where
+exec rotini generate cmd/where/.rotini.spec.yaml --config cmd/where/.rotini.conf.yaml
+concat internal/cmd/where/docker_where_docker_cli_plugin_metadata.go metadata-head.go.txt metadata.go.txt
+cp main.go.txt cmd/where/main.go
+exec go mod tidy
+exec go build -o docker-where$exe ./cmd/where
+
+# The probe prints one JSON object and nothing else.
+exec ./docker-where$exe docker-cli-plugin-metadata
+cmp stdout want-metadata.json
+! stderr .
+
+# Docker passes its own arguments through, so the plugin's root takes Docker's global options.
+exec ./docker-where$exe -c prod where
+stdout '^context prod$'
+
+# The hidden metadata command is offered nowhere.
+exec ./docker-where$exe __complete ''
+stdout '^where\t'
+! stdout 'docker-cli-plugin-metadata'
+
+# With PluginCompletion, the last line is always the directive.
+exec ./docker-where$exe __complete where -
+stdout '^--context\t'
+stdout '\n:[0-9]+\n\z'
+
+# display_name puts the command the user types on the pages.
+exec ./docker-where$exe where --help
+stdout '^  docker where'
+! stdout 'docker-where where'
+
+# ── kubectl ─────────────────────────────────────────────────────────────────
+cd $WORK/kubectl
+gomodinit example.com/ctx
+exec rotini generate cmd/ctx/.rotini.spec.yaml --config cmd/ctx/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o kubectl-ctx$exe ./cmd/ctx
+
+# The short spellings kubectl users type parse as they expect.
+exec ./kubectl-ctx$exe use -nfoo -lapp=api -ojson -Aw
+stdout '^namespace=foo selector=app=api output=json all=true watch=true$'
+
+# Help shows the command the user types.
+exec ./kubectl-ctx$exe use --help
+stdout '^  kubectl ctx use'
+! stdout 'kubectl-ctx use'
+
+# Installed a second time as kubectl_complete-ctx, it answers completion in the plugin format.
+cp kubectl-ctx$exe kubectl_complete-ctx$exe
+exec ./kubectl_complete-ctx$exe u
+stdout '^use\tswitch the context$'
+stdout '\n:[0-9]+\n\z'
+
+-- docker/want-metadata.json --
+{"SchemaVersion":"0.1.0","ShortDescription":"Show which context and daemon endpoint docker would use","Vendor":"example","Version":"1.2.3"}
+-- docker/main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	cmd "example.com/where/internal/cmd/where"
+)
+
+var version = "1.2.3"
+
+func main() {
+	cmd.NewProgram().
+		WithVersion(version).
+		WithCompletion(rotini.PluginCompletion).
+		Execute()
+}
+-- docker/cmd/where/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: docker-where
+  display_name: docker
+  summary: docker's view
+  flags:
+    - name: help
+      summary: show help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+    - name: context
+      summary: the docker context
+      identifiers: [-c, --context]
+      cascading: true
+      schema: { type: string }
+  commands:
+    - name: where
+      summary: Show which context and daemon endpoint docker would use
+    - name: docker-cli-plugin-metadata
+      summary: print the plugin's metadata for docker
+      hidden: true
+-- docker/cmd/where/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/where/zz_where.go
+      package: where
+  features:
+    - type: help
+      enabled: true
+-- docker/internal/cmd/where/docker_where.go --
+package where
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dockerWhereHandler)(nil)
+
+type dockerWhereHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dockerWhereHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DockerWhereInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.DockerWhere.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+	}
+}
+
+func (*dockerWhereHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- docker/internal/cmd/where/docker_where_where.go --
+package where
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dockerWhereWhereHandler)(nil)
+
+type dockerWhereWhereHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dockerWhereWhereHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DockerWhereWhereInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, "context", in.DockerWhere.Flags.Context)
+}
+-- docker/metadata-head.go.txt --
+package where
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dockerWhereDockerCliPluginMetadataHandler)(nil)
+
+type dockerWhereDockerCliPluginMetadataHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+-- docker/metadata.go.txt --
+func (*dockerWhereDockerCliPluginMetadataHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	meta := map[string]string{
+		"SchemaVersion":    "0.1.0",
+		"Vendor":           "example",
+		"Version":          rtx.Version(),
+		"ShortDescription": "Show which context and daemon endpoint docker would use",
+	}
+	if err := json.NewEncoder(rtx.Stdout).Encode(meta); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+-- kubectl/cmd/ctx/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kubectl-ctx
+  display_name: kubectl ctx
+  summary: switch contexts
+  multicall: {complete: kubectl_complete-}
+  flags:
+    - name: help
+      summary: show help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+    - name: namespace
+      summary: the namespace
+      identifiers: [-n, --namespace]
+      cascading: true
+      schema: {type: string}
+    - name: selector
+      summary: a label selector
+      identifiers: [-l, --selector]
+      cascading: true
+      schema: {type: string}
+    - name: output
+      summary: the output format
+      identifiers: [-o, --output]
+      cascading: true
+      schema: {type: string}
+    - name: all-namespaces
+      summary: every namespace
+      identifiers: [-A, --all-namespaces]
+      cascading: true
+      schema: {type: bool}
+    - name: watch
+      summary: keep watching
+      identifiers: [-w, --watch]
+      cascading: true
+      schema: {type: bool}
+  commands:
+    - name: use
+      summary: switch the context
+-- kubectl/cmd/ctx/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/ctx/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/ctx/zz_ctx.go
+      package: ctx
+  features:
+    - type: help
+      enabled: true
+-- kubectl/internal/cmd/ctx/kubectl_ctx.go --
+package ctx
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*kubectlCtxHandler)(nil)
+
+type kubectlCtxHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*kubectlCtxHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KubectlCtxInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.KubectlCtx.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintln(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+	}
+}
+
+func (*kubectlCtxHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+-- kubectl/internal/cmd/ctx/kubectl_ctx_use.go --
+package ctx
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*kubectlCtxUseHandler)(nil)
+
+type kubectlCtxUseHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*kubectlCtxUseHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KubectlCtxUseInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := in.KubectlCtx.Flags
+	fmt.Fprintf(rtx.Stdout, "namespace=%s selector=%s output=%s all=%t watch=%t\n", f.Namespace, f.Selector, f.Output, f.AllNamespaces, f.Watch)
+}

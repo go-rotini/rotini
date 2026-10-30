@@ -26,6 +26,9 @@ command:
     - name: token
       summary: the server token
       schema: { type: string, required: true, secret: true, variable: TASKR_TOKEN }
+  exit_status:
+    - { code: 0, summary: done }
+    - { code: 69, name: offline, summary: the server can't be reached, retryable: true }
   schemas:
     Task:
       type: object
@@ -116,6 +119,18 @@ command:
               identifiers: [--prune]
               effects: { kind: destructive }
               schema: { type: bool }
+            - name: timeout
+              summary: how long to wait for the server
+              identifiers: [--timeout]
+              schema: { type: duration, minimum: 1s, maximum: 1h }
+            - name: max-upload
+              summary: the largest batch to send
+              identifiers: [--max-upload]
+              schema: { type: bytesize, exclusiveMinimum: 0B, maximum: 10MB }
+            - name: retry-after
+              summary: pauses between retries
+              identifiers: [--retry-after]
+              schema: { type: '[]duration', minimum: 1s }
             - name: key
               summary: a server key
               identifiers: [--key]

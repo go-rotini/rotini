@@ -1,0 +1,1 @@
+warning: spec: .rotini.spec.yaml:9:11: command demo/build: config "color": no `config_files` entry is in scope (on this command, an ancestor or a command below it), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless an input reader set with WithInputReader supplies it

@@ -20,7 +20,7 @@ func TestPruneGoDir_twoSteps(t *testing.T) {
 	var notes []string
 	prune := func() {
 		t.Helper()
-		if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, func(n string) { notes = append(notes, n) }); err != nil {
+		if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, true, func(n string) { notes = append(notes, n) }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -42,6 +42,30 @@ func TestPruneGoDir_twoSteps(t *testing.T) {
 		t.Error("the disabled stub survived the second prune")
 	}
 	if want := []string{"demo_ship.go (disabled; removed by the next generate)", "demo_ship.go"}; !slices.Equal(notes, want) {
+		t.Errorf("notes = %q, want %q", notes, want)
+	}
+}
+
+// TestPruneGoDir_disableOnly pins init's half of the cycle: a live orphan is disabled, and one
+// already disabled is left in place, unreported.
+func TestPruneGoDir_disableOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "demo_ship.go", orphanStub)
+	writeTestFile(t, dir, "demo_old.go", string(disableStub([]byte(orphanStub))))
+	var notes []string
+	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, false, func(n string) { notes = append(notes, n) }); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"demo_ship.go", "demo_old.go"} {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !stubDisabled(body) {
+			t.Errorf("%s =\n%s\nwant it disabled", name, body)
+		}
+	}
+	if want := []string{"demo_ship.go (disabled; removed by the next generate)"}; !slices.Equal(notes, want) {
 		t.Errorf("notes = %q, want %q", notes, want)
 	}
 }
@@ -84,7 +108,7 @@ func TestPruneGoDir_legacyMarker(t *testing.T) {
 	dir := t.TempDir()
 	legacy := strings.Replace(orphanStub, stubMarker, legacyStubMarker, 1)
 	writeTestFile(t, dir, "demo_ship.go", legacy)
-	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, nil); err != nil {
+	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, "demo_ship.go"))
@@ -112,7 +136,7 @@ func TestPruneGoDir_leavesClaimedFilesAlone(t *testing.T) {
 	for name, body := range files {
 		writeTestFile(t, dir, name, body)
 	}
-	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{"kept.go": true, "current.go": true}, nil); err != nil {
+	if err := pruneGoDir(newPlanner(false), dir, map[string]bool{"kept.go": true, "current.go": true}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range files {
@@ -175,6 +199,66 @@ func TestStubDisabled_noteMustFollowTheConstraint(t *testing.T) {
 	moved := "//go:build ignore\n\n// mine\n" + disabledNote + "\n" + orphanStub
 	if stubDisabled([]byte(moved)) {
 		t.Error("a note away from the constraint was recognized")
+	}
+}
+
+// TestGenerate_caseOnlyRename renames a command only in case (Foo to foo) on a case-insensitive
+// file system, where the handler file keeps its old spelling: it stays the command's handler,
+// not an orphan disabled on one run and restored on the next, and each generated page is
+// written under the spelling the spec now gives, which a case-sensitive checkout reads.
+func TestGenerate_caseOnlyRename(t *testing.T) {
+	probe := t.TempDir()
+	writeTestFile(t, probe, "Ab", "")
+	if _, err := os.Stat(filepath.Join(probe, "aB")); err != nil {
+		t.Skip("the file system is case-sensitive")
+	}
+	const conf = `version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/app/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+      embed: true
+`
+	spec := func(name string) string {
+		return "version: 0.0.0\ncommand:\n  name: app\n  commands:\n    - name: " + name + "\n"
+	}
+	dir := generateSpecModule(t, spec("Foo"), conf)
+	cmdDir := filepath.Join(dir, "internal", "cmd", "app")
+	writeTestFile(t, dir, ".rotini.spec.yaml", spec("foo"))
+	for range 2 {
+		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(_ string, e error) {
+			if e != nil {
+				t.Fatal(e)
+			}
+		}, func([]error) {}); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(cmdDir, "app_Foo.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stubDisabled(body) {
+			t.Fatalf("the handler was disabled:\n%s", body)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(cmdDir, "renders"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	for _, want := range []string{"help_app_foo.txt", "markdown_app_foo.md"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("renders holds %v, want %s", names, want)
+		}
 	}
 }
 

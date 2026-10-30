@@ -46,9 +46,9 @@ func lintStreamPaths(spec *Spec) []error {
 				if kind == "outputfile" {
 					instead = "string"
 				}
-				add(ptr, path, channel, name, fmt.Sprintf("is type %s, whose \"-\" names a standard stream; that is command-line grammar, so use it on a flag or argument (or %s here)", kind, instead))
+				add(ptr+"/schema/type", path, channel, name, fmt.Sprintf("is type %s, whose \"-\" names a standard stream; that is command-line grammar, so use it on a flag or argument (or %s here)", kind, instead))
 			case len(schema.From) > 0:
-				add(ptr, path, channel, name, fmt.Sprintf("is type %s and sets `from`; its \"-\" already names a standard stream, so remove `from`", kind))
+				add(ptr+"/schema/from", path, channel, name, fmt.Sprintf("is type %s and sets `from`; its \"-\" already names a standard stream, so remove `from`", kind))
 			}
 		})
 		for i, a := range c.Arguments {
@@ -64,9 +64,9 @@ func lintStreamPaths(spec *Spec) []error {
 		for _, f := range files {
 			switch {
 			case fromStdin != "":
-				add(f.ptr, f.path, f.channel, f.name, fmt.Sprintf("is type inputfile, whose \"-\" reads stdin, but %s already consumes stdin; stdin has one consumer", fromStdin))
+				add(f.ptr+"/schema/type", f.path, f.channel, f.name, fmt.Sprintf("is type inputfile, whose \"-\" reads stdin, but %s already consumes stdin; stdin has one consumer", fromStdin))
 			case leaf.Stdin != nil && (f.channel != "argument" || leaf.Stdin.UnlessArgument != f.name):
-				add(f.ptr, f.path, f.channel, f.name, fmt.Sprintf("is type inputfile, whose \"-\" reads stdin, but command %s declares `stdin`; stdin has one consumer, unless `stdin.unless_argument` names this argument", path))
+				add(f.ptr+"/schema/type", f.path, f.channel, f.name, fmt.Sprintf("is type inputfile, whose \"-\" reads stdin, but command %s declares `stdin`; stdin has one consumer, unless `stdin.unless_argument` names this argument", path))
 			}
 		}
 	})

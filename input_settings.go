@@ -15,7 +15,9 @@ type InputSettings struct {
 	// joined into the config precedence after the declared config_files, so explicit
 	// files beat ambient services. Codegen never emits one; the program appends its own.
 	// A per-input `file:` pin stays a config_files anchor and cannot name a custom
-	// source, and a source name colliding with a declared file is rejected.
+	// source. A source name colliding with a declared file's or another source's, or one
+	// recon reserves ("explicit", "default"), fails the read with an internal [*InputError]
+	// naming the sources.
 	Sources []recon.Source
 	// StdinSchemas maps a command's stdin payload type name ("<Prefix>Stdin") to a
 	// self-contained JSON Schema the input reader validates the decoded payload against.
@@ -82,7 +84,8 @@ type DiscoverDef struct {
 	// Strategy is "walk-up" (the working directory up to the filesystem root), "xdg"
 	// ($XDG_CONFIG_HOME/<app> when absolute, else ~/.config/<app>), "native" (the platform's
 	// config directory: %AppData% on Windows, ~/Library/Application Support on macOS, else as
-	// xdg) or "xdg-system" (each absolute directory of $XDG_CONFIG_DIRS, else /etc/xdg).
+	// xdg) or "xdg-system" (each absolute directory of $XDG_CONFIG_DIRS; when it is unset or
+	// empty, /etc/xdg, and nothing on Windows).
 	Strategy string
 	File     string // the file name looked for in each searched directory
 	App      string // the application directory under the config root (xdg, native and xdg-system)

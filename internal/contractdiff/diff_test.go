@@ -59,6 +59,9 @@ func runRaw(t *testing.T, cases []rawCase) {
 			if got := lines(r); !slices.Equal(got, want) {
 				t.Errorf("findings:\n  got  %s\n  want %s", strings.Join(got, "\n       "), strings.Join(want, "\n       "))
 			}
+			if got := lines(r); len(slices.Compact(slices.Clone(got))) != len(got) {
+				t.Errorf("two findings share a rule and place, which one diff.accept entry can't tell apart: %v", got)
+			}
 		})
 	}
 }
@@ -452,6 +455,14 @@ Accepted:
 	if b.String() != want {
 		t.Errorf("text:\n%s\nwant:\n%s", b.String(), want)
 	}
+	r, _ = Diff(old, after, Options{Accept: []Accept{{Rule: RuleInputDefaultChanged, Where: "app --b", Reason: "faster"}}})
+	b.Reset()
+	if err := r.WriteText(&b); err != nil {
+		t.Fatal(err)
+	}
+	if line := "  INPUT_DEFAULT_CHANGED  app --b  default 1 → 2 (possibly breaking; faster)\n"; !strings.Contains(b.String(), line) {
+		t.Errorf("text:\n%s\nwant the line:\n%s", b.String(), line)
+	}
 	var none bytes.Buffer
 	if err := (Report{}).WriteText(&none); err != nil || none.String() != "no changes\n" {
 		t.Errorf("an empty report wrote %q", none.String())
@@ -462,7 +473,7 @@ Accepted:
 // internal/codegen's spec-built tables.
 func TestRules_everyRuleTested(t *testing.T) {
 	var src []byte
-	for _, path := range []string{"diff_test.go", "kinds_test.go", "../codegen/diff_test.go", "../codegen/diff_agent_test.go"} {
+	for _, path := range []string{"diff_test.go", "kinds_test.go", "../codegen/diff_test.go", "../codegen/diff_agent_test.go", "../codegen/diff_matrix_test.go"} {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -493,7 +504,11 @@ func TestDiff_argumentFrom(t *testing.T) {
 	runRaw(t, []rawCase{
 		{
 			name: "removed", old: contract(arg(`"file", "stdin"`)), new: contract(arg("")),
-			want: []string{"breaking INPUT_FROM_NO_DELETE app <token>", "breaking INPUT_FROM_NO_DELETE app <token>"},
+			want: []string{"breaking INPUT_FROM_NO_DELETE app <token>"},
+		},
+		{
+			name: "both added", old: contract(arg("")), new: contract(arg(`"file", "stdin"`)),
+			want: []string{"possibly_breaking INPUT_FROM_ADDED app <token>"},
 		},
 		{
 			name: "narrowed", old: contract(arg(`"file", "stdin"`)), new: contract(arg(`"file"`)),
@@ -504,6 +519,16 @@ func TestDiff_argumentFrom(t *testing.T) {
 			want: []string{"possibly_breaking INPUT_FROM_ADDED app <token>"},
 		},
 	})
+
+	// One finding per direction names every source, so one diff.accept entry acknowledges it.
+	r, _ := Diff(contract(arg(`"file", "stdin"`)), contract(arg("")), Options{Accept: []Accept{{Rule: RuleInputFromNoDelete, Where: "app <token>"}}})
+	if len(r.Findings) != 1 || r.Findings[0].Message != "a value no longer comes from file; a value no longer comes from stdin" || r.Failed(FailOnBreaking) {
+		t.Errorf("removed: %+v", r)
+	}
+	r, _ = Diff(contract(arg("")), contract(arg(`"file", "stdin"`)), Options{})
+	if f := r.Findings[0]; f.Note != "a value starting with @ now reads a file; a value of - now reads stdin" {
+		t.Errorf("added: note %q", f.Note)
+	}
 }
 
 // cmds is a contract with the given commands.

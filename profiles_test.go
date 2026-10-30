@@ -403,6 +403,16 @@ func TestConfigProfiles(t *testing.T) {
 	if _, err := ConfigProfiles(pfContext(dir, nil, meta), "nosuch"); err == nil || !errors.Is(err, ErrInternal) {
 		t.Errorf("an unknown file: %v", err)
 	}
+	for _, file := range []string{"plain", "nosuch"} {
+		if _, err := ConfigProfiles(pfContext(dir, nil, meta), file); !isInputError(err) {
+			t.Errorf("%s: err = %#v, want an *InputError", file, err)
+		}
+	}
+}
+
+func isInputError(err error) bool {
+	_, ok := errors.AsType[*InputError](err)
+	return ok
 }
 
 func TestResolveConfigFile_selectsTheProfile(t *testing.T) {

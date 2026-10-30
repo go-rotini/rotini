@@ -62,7 +62,8 @@ func relative(s *InputSchema) string {
 	return s.Relative
 }
 
-// prefixedBase is the one value of `base`: an integer input also takes 0x, 0o and 0b literals.
+// prefixedBase is the one value of `base`: a number input also takes 0x, 0o and 0b literals,
+// and a float input hexadecimal floats and `_` between digits.
 const prefixedBase = "prefixed"
 
 // intBase reads `base`: prefixed, or "".

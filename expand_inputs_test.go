@@ -111,6 +111,12 @@ func TestExpand_argvErrors(t *testing.T) {
 		if err == nil || err.Error() != want || !errors.As(err, &pe) || !errors.Is(err, ErrUsage) {
 			t.Errorf("%s: err = %v, want usage error %q", argv, err, want)
 		}
+		// InputsWithReport names the value as Inputs does.
+		meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "conf", Scope: "app", Path: conf, Format: "yaml"}}}
+		rtx := NewContextFor(exDef, []string{argv}).WithDir(work).WithEnviron(append(env, "A=1")).WithInputSettings(meta)
+		if _, _, err := rtx.InputsWithReport[exInputs](); err == nil || err.Error() != want {
+			t.Errorf("%s: InputsWithReport err = %v, want %q", argv, err, want)
+		}
 	}
 	// An argv expansion failure fails even under a short-circuit flag.
 	if _, err := exBind(t, work, conf, "", env, "--help", "--paths=$NOPE"); err == nil {

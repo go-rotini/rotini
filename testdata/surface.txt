@@ -1,10 +1,10 @@
 const CategoryInternal
-const CategoryNone
+const CategoryNone Category
 const CategoryUsage
-const FlagGroupAtLeastOne
-const FlagGroupMutuallyExclusive
-const FlagGroupOneOf
-const FlagGroupRequiredTogether
+const FlagGroupAtLeastOne FlagGroupKind
+const FlagGroupMutuallyExclusive FlagGroupKind
+const FlagGroupOneOf FlagGroupKind
+const FlagGroupRequiredTogether FlagGroupKind
 const ParseKindConstraintViolation
 const ParseKindEnumViolation
 const ParseKindInternal
@@ -16,328 +16,330 @@ const ParseKindNoArguments
 const ParseKindTooManyArguments
 const ParseKindUnknownCommand
 const ParseKindUnknownFlag
-const ParseKindUnspecified
-const PluginNotFound
+const ParseKindUnspecified ParseKind
+const PluginNotFound PluginErrorKind
 const PluginStartFailed
 const PluginTimeout
-field AppDirectories.Cache
-field AppDirectories.Config
-field AppDirectories.Data
-field AppDirectories.State
-field ArgDef.Base
-field ArgDef.Complete
+field AppDirectories.Cache string
+field AppDirectories.Config string
+field AppDirectories.Data string
+field AppDirectories.State string
+field ArgDef.Base string
+field ArgDef.Complete Completion
 field ArgDef.Constraints
-field ArgDef.Default
-field ArgDef.Deprecated
-field ArgDef.DeprecatedSince
-field ArgDef.Enum
-field ArgDef.EnumValues
-field ArgDef.From
-field ArgDef.Glob
-field ArgDef.Hidden
-field ArgDef.IgnoreCase
-field ArgDef.Layout
-field ArgDef.Layouts
-field ArgDef.Metadata
-field ArgDef.Name
-field ArgDef.Passthrough
-field ArgDef.Relative
-field ArgDef.RemovedIn
-field ArgDef.Required
-field ArgDef.Secret
-field ArgDef.Separator
-field ArgDef.Type
-field ArgDef.Variadic
-field ArgvError.Field
-field ArgvError.Reason
-field Command.Arguments
-field Command.Commands
-field Command.Deprecated
-field Command.DeprecatedIdentifiers
-field Command.DeprecatedIdentifiersRemovedIn
-field Command.DeprecatedSince
-field Command.FlagDependencies
-field Command.FlagGroups
-field Command.Flags
-field Command.Handler
-field Command.Invoked
-field Command.Matched
-field Command.Metadata
-field Command.Name
-field Command.OptionsFirst
-field Command.Output
-field Command.Passthrough
-field Command.PluginDiscovery
-field Command.PluginPath
-field Command.Plugins
-field Command.RemovedIn
-field Command.ReplacedBy
-field Command.Usage
-field CommandDef.Aliases
-field CommandDef.Arguments
-field CommandDef.Commands
-field CommandDef.Deprecated
-field CommandDef.DeprecatedIdentifiers
-field CommandDef.DeprecatedIdentifiersRemovedIn
-field CommandDef.DeprecatedSince
-field CommandDef.Effects
-field CommandDef.ExitStatus
-field CommandDef.FlagDependencies
-field CommandDef.FlagGroups
-field CommandDef.Flags
-field CommandDef.Handler
-field CommandDef.Hidden
-field CommandDef.HiddenAliases
-field CommandDef.Inputs
-field CommandDef.Metadata
-field CommandDef.Name
-field CommandDef.OptionsFirst
-field CommandDef.Output
-field CommandDef.Passthrough
-field CommandDef.PluginDiscovery
-field CommandDef.PluginPath
-field CommandDef.Plugins
-field CommandDef.RemovedIn
-field CommandDef.ReplacedBy
-field CommandDef.Summary
-field CommandDef.Usage
-field Completion.Extensions
-field Completion.Kind
-field Completion.Message
-field CompletionCandidate.Description
-field CompletionCandidate.Value
-field CompletionDescriptionsDef.Env
-field CompletionMessagesDef.Env
-field CompletionOptions.KeepOrder
-field CompletionOptions.NoSpace
-field CompletionResult.Candidates
-field CompletionResult.Hint
-field CompletionResult.IgnoreCase
-field CompletionResult.KeepOrder
-field CompletionResult.Messages
-field CompletionResult.NoSpace
-field ConfigFile.As
-field ConfigFile.Discover
-field ConfigFile.Format
-field ConfigFile.Keys
-field ConfigFile.Name
-field ConfigFile.Path
-field ConfigFile.PathFrom
-field ConfigFile.Profiles
-field ConfigFile.Schema
-field ConfigFile.Scope
-field ConfigKey.Base
+field ArgDef.Date bool
+field ArgDef.Default string
+field ArgDef.Deprecated string
+field ArgDef.DeprecatedSince string
+field ArgDef.Enum []string
+field ArgDef.EnumValues []EnumValue
+field ArgDef.From []string
+field ArgDef.Glob bool
+field ArgDef.Hidden bool
+field ArgDef.IgnoreCase bool
+field ArgDef.Layout string
+field ArgDef.Layouts []string
+field ArgDef.Metadata map[string]string
+field ArgDef.Name string
+field ArgDef.Passthrough bool
+field ArgDef.Relative string
+field ArgDef.RemovedIn string
+field ArgDef.Required bool
+field ArgDef.Secret bool
+field ArgDef.Separator string
+field ArgDef.Type string
+field ArgDef.Variadic bool
+field ArgvError.Field FieldPath
+field ArgvError.Reason string
+field Command.Arguments []ArgDef
+field Command.Commands []CommandDef
+field Command.Deprecated string
+field Command.DeprecatedIdentifiers []string
+field Command.DeprecatedIdentifiersRemovedIn map[string]string
+field Command.DeprecatedSince string
+field Command.FlagDependencies []FlagDependency
+field Command.FlagGroups []FlagGroup
+field Command.Flags []FlagDef
+field Command.Handler string
+field Command.Invoked bool
+field Command.Matched string
+field Command.Metadata map[string]string
+field Command.Name string
+field Command.OptionsFirst bool
+field Command.Output *OutputDef
+field Command.Passthrough bool
+field Command.PluginDiscovery *PluginDiscoveryDef
+field Command.PluginPath string
+field Command.Plugins []PluginDef
+field Command.RemovedIn string
+field Command.ReplacedBy string
+field Command.Usage string
+field CommandDef.Aliases []string
+field CommandDef.Arguments []ArgDef
+field CommandDef.Commands []CommandDef
+field CommandDef.Deprecated string
+field CommandDef.DeprecatedIdentifiers []string
+field CommandDef.DeprecatedIdentifiersRemovedIn map[string]string
+field CommandDef.DeprecatedSince string
+field CommandDef.Effects *Effects
+field CommandDef.ExitStatus []ExitStatusDef
+field CommandDef.FlagDependencies []FlagDependency
+field CommandDef.FlagGroups []FlagGroup
+field CommandDef.Flags []FlagDef
+field CommandDef.Handler string
+field CommandDef.Hidden bool
+field CommandDef.HiddenAliases []string
+field CommandDef.Inputs reflect.Type
+field CommandDef.Metadata map[string]string
+field CommandDef.Name string
+field CommandDef.OptionsFirst bool
+field CommandDef.Output *OutputDef
+field CommandDef.Passthrough bool
+field CommandDef.PluginDiscovery *PluginDiscoveryDef
+field CommandDef.PluginPath string
+field CommandDef.Plugins []PluginDef
+field CommandDef.RemovedIn string
+field CommandDef.ReplacedBy string
+field CommandDef.Summary string
+field CommandDef.Usage string
+field Completion.Extensions []string
+field Completion.Kind string
+field Completion.Message string
+field CompletionCandidate.Description string
+field CompletionCandidate.Value string
+field CompletionDescriptionsDef.Env string
+field CompletionMessagesDef.Env string
+field CompletionOptions.KeepOrder bool
+field CompletionOptions.NoSpace bool
+field CompletionResult.Candidates []CompletionCandidate
+field CompletionResult.Hint Completion
+field CompletionResult.IgnoreCase bool
+field CompletionResult.KeepOrder bool
+field CompletionResult.Messages []string
+field CompletionResult.NoSpace bool
+field ConfigFile.As string
+field ConfigFile.Discover *DiscoverDef
+field ConfigFile.Format string
+field ConfigFile.Keys []ConfigKey
+field ConfigFile.Name string
+field ConfigFile.Path string
+field ConfigFile.PathFrom *PathFromDef
+field ConfigFile.Profiles *ProfilesDef
+field ConfigFile.Schema string
+field ConfigFile.Scope string
+field ConfigKey.Base string
 field ConfigKey.Constraints
-field ConfigKey.Enum
-field ConfigKey.EnumValues
-field ConfigKey.IgnoreCase
-field ConfigKey.Key
-field ConfigKey.Layout
-field ConfigKey.Layouts
-field ConfigKey.Object
-field ConfigKey.Secret
-field ConfigKey.Separator
-field ConfigKey.Type
-field Constraints.ExclusiveMaximum
-field Constraints.ExclusiveMinimum
-field Constraints.MaxItems
-field Constraints.MaxLength
-field Constraints.Maximum
-field Constraints.MinItems
-field Constraints.MinLength
-field Constraints.Minimum
-field Constraints.MultipleOf
-field Constraints.Pattern
-field Constraints.PatternMessage
-field Constraints.UniqueItems
-field Context.Argv
-field Context.Stderr
-field Context.Stdin
-field Context.Stdout
-field Definition.Arguments
-field Definition.Commands
-field Definition.CompletionDescriptions
-field Definition.CompletionMessages
-field Definition.Effects
-field Definition.ExitStatus
-field Definition.FlagDependencies
-field Definition.FlagGroups
-field Definition.Flags
-field Definition.Handler
-field Definition.Inputs
-field Definition.Metadata
-field Definition.Multicall
-field Definition.Name
-field Definition.OptionsFirst
-field Definition.Output
-field Definition.Passthrough
-field Definition.PluginDiscovery
-field Definition.PluginPath
-field Definition.Plugins
-field Definition.ResponseFiles
-field Definition.Topics
-field Definition.Usage
-field DependencyError.Name
-field Deprecation.Identifier
-field Deprecation.Kind
-field Deprecation.Message
-field Deprecation.Name
-field Deprecation.RemovedIn
-field Deprecation.ReplacedBy
-field Deprecation.Since
-field Deprecation.Value
-field DiscoverDef.App
-field DiscoverDef.File
-field DiscoverDef.Strategy
-field DiscoveredPlugin.Name
-field DiscoveredPlugin.Path
-field Effects.Idempotent
-field Effects.Kind
-field Effects.OpenWorld
-field EnumValue.Aliases
-field EnumValue.Deprecated
-field EnumValue.DeprecatedAliases
-field EnumValue.DeprecatedSince
-field EnumValue.Hidden
-field EnumValue.RemovedIn
-field EnumValue.ReplacedBy
-field EnumValue.Summary
-field EnumValue.Value
-field ExitStatusDef.Code
-field ExitStatusDef.DocsURL
-field ExitStatusDef.Name
-field ExitStatusDef.Retryable
-field ExitStatusDef.Summary
-field FlagDef.Base
-field FlagDef.Complete
+field ConfigKey.Enum []string
+field ConfigKey.EnumValues []EnumValue
+field ConfigKey.IgnoreCase bool
+field ConfigKey.Key string
+field ConfigKey.Layout string
+field ConfigKey.Layouts []string
+field ConfigKey.Object bool
+field ConfigKey.Secret bool
+field ConfigKey.Separator string
+field ConfigKey.Type string
+field Constraints.ExclusiveMaximum *float64
+field Constraints.ExclusiveMinimum *float64
+field Constraints.MaxItems *int
+field Constraints.MaxLength *int
+field Constraints.Maximum *float64
+field Constraints.MinItems int
+field Constraints.MinLength int
+field Constraints.Minimum *float64
+field Constraints.MultipleOf *float64
+field Constraints.Pattern string
+field Constraints.PatternMessage string
+field Constraints.UniqueItems bool
+field Context.Argv []string
+field Context.Stderr io.Writer
+field Context.Stdin io.Reader
+field Context.Stdout io.Writer
+field Definition.Arguments []ArgDef
+field Definition.Commands []CommandDef
+field Definition.CompletionDescriptions *CompletionDescriptionsDef
+field Definition.CompletionMessages *CompletionMessagesDef
+field Definition.Effects *Effects
+field Definition.ExitStatus []ExitStatusDef
+field Definition.FlagDependencies []FlagDependency
+field Definition.FlagGroups []FlagGroup
+field Definition.Flags []FlagDef
+field Definition.Handler string
+field Definition.Inputs reflect.Type
+field Definition.Metadata map[string]string
+field Definition.Multicall *MulticallDef
+field Definition.Name string
+field Definition.OptionsFirst bool
+field Definition.Output *OutputDef
+field Definition.Passthrough bool
+field Definition.PluginDiscovery *PluginDiscoveryDef
+field Definition.PluginPath string
+field Definition.Plugins []PluginDef
+field Definition.ResponseFiles *ResponseFilesDef
+field Definition.Topics []TopicDef
+field Definition.Usage string
+field DependencyError.Name string
+field Deprecation.Identifier string
+field Deprecation.Kind string
+field Deprecation.Message string
+field Deprecation.Name string
+field Deprecation.RemovedIn string
+field Deprecation.ReplacedBy string
+field Deprecation.Since string
+field Deprecation.Value string
+field DiscoverDef.App string
+field DiscoverDef.File string
+field DiscoverDef.Strategy string
+field DiscoveredPlugin.Name string
+field DiscoveredPlugin.Path string
+field Effects.Idempotent *bool
+field Effects.Kind string
+field Effects.OpenWorld *bool
+field EnumValue.Aliases []string
+field EnumValue.Deprecated string
+field EnumValue.DeprecatedAliases []string
+field EnumValue.DeprecatedSince string
+field EnumValue.Hidden bool
+field EnumValue.RemovedIn string
+field EnumValue.ReplacedBy string
+field EnumValue.Summary string
+field EnumValue.Value string
+field ExitStatusDef.Code int
+field ExitStatusDef.DocsURL string
+field ExitStatusDef.Name string
+field ExitStatusDef.Retryable bool
+field ExitStatusDef.Summary string
+field FlagDef.Base string
+field FlagDef.Complete Completion
 field FlagDef.Constraints
-field FlagDef.Default
-field FlagDef.Defaults
-field FlagDef.Deprecated
-field FlagDef.DeprecatedIdentifiers
-field FlagDef.DeprecatedIdentifiersRemovedIn
-field FlagDef.DeprecatedSince
-field FlagDef.DottedKeys
-field FlagDef.Effects
-field FlagDef.Enum
-field FlagDef.EnumValues
-field FlagDef.From
-field FlagDef.Hidden
-field FlagDef.HiddenIdentifiers
-field FlagDef.Identifiers
-field FlagDef.IgnoreCase
-field FlagDef.ImplicitValue
-field FlagDef.KeyPaths
-field FlagDef.Layout
-field FlagDef.Layouts
-field FlagDef.Local
-field FlagDef.Metadata
-field FlagDef.Name
-field FlagDef.Negatable
-field FlagDef.Negation
-field FlagDef.NoRepeat
-field FlagDef.ObjectSchema
-field FlagDef.Relative
-field FlagDef.RemovedIn
-field FlagDef.ReplacedBy
-field FlagDef.Required
-field FlagDef.Role
-field FlagDef.Secret
-field FlagDef.Separator
-field FlagDef.ShortCircuit
-field FlagDef.Summary
-field FlagDef.Type
-field FlagDependency.Equals
-field FlagDependency.Forbids
-field FlagDependency.Requires
-field FlagDependency.Unless
-field FlagDependency.When
-field FlagGroup.Flags
-field FlagGroup.Kind
-field InputError.Candidates
-field InputError.Cause
-field InputError.Channel
-field InputError.Input
-field InputError.Msg
-field InputError.Token
-field InputLayer.Name
-field InputLayer.Set
-field InputLayer.Values
-field InputSettings.ConfigFiles
-field InputSettings.EnvPrefix
-field InputSettings.Sources
-field InputSettings.StdinSchemas
-field InputSource.Layer
-field InputSource.Origin
-field InputSource.Raw
-field LifecycleStep.Do
-field LifecycleStep.Name
-field LifecycleStep.Undo
-field MulticallDef.Complete
-field MulticallDef.Prefix
+field FlagDef.Date bool
+field FlagDef.Default string
+field FlagDef.Defaults []string
+field FlagDef.Deprecated string
+field FlagDef.DeprecatedIdentifiers []string
+field FlagDef.DeprecatedIdentifiersRemovedIn map[string]string
+field FlagDef.DeprecatedSince string
+field FlagDef.DottedKeys bool
+field FlagDef.Effects *Effects
+field FlagDef.Enum []string
+field FlagDef.EnumValues []EnumValue
+field FlagDef.From []string
+field FlagDef.Hidden bool
+field FlagDef.HiddenIdentifiers []string
+field FlagDef.Identifiers []string
+field FlagDef.IgnoreCase bool
+field FlagDef.ImplicitValue string
+field FlagDef.KeyPaths []string
+field FlagDef.Layout string
+field FlagDef.Layouts []string
+field FlagDef.Local bool
+field FlagDef.Metadata map[string]string
+field FlagDef.Name string
+field FlagDef.Negatable bool
+field FlagDef.Negation string
+field FlagDef.NoRepeat bool
+field FlagDef.ObjectSchema string
+field FlagDef.Relative string
+field FlagDef.RemovedIn string
+field FlagDef.ReplacedBy string
+field FlagDef.Required bool
+field FlagDef.Role string
+field FlagDef.Secret bool
+field FlagDef.Separator string
+field FlagDef.ShortCircuit bool
+field FlagDef.Summary string
+field FlagDef.Type string
+field FlagDependency.Equals []string
+field FlagDependency.Forbids []string
+field FlagDependency.Requires []string
+field FlagDependency.Unless []string
+field FlagDependency.When string
+field FlagGroup.Flags []string
+field FlagGroup.Kind FlagGroupKind
+field InputError.Candidates []string
+field InputError.Cause error
+field InputError.Channel string
+field InputError.Input string
+field InputError.Msg string
+field InputError.Token string
+field InputLayer.Name string
+field InputLayer.Set Presence
+field InputLayer.Values T
+field InputSettings.ConfigFiles []ConfigFile
+field InputSettings.EnvPrefix string
+field InputSettings.Sources []recon.Source
+field InputSettings.StdinSchemas map[string]string
+field InputSource.Layer string
+field InputSource.Origin string
+field InputSource.Raw string
+field LifecycleStep.Do func(ctx context.Context, rtx *Context)
+field LifecycleStep.Name string
+field LifecycleStep.Undo func(ctx context.Context, rtx *Context)
+field MulticallDef.Complete string
+field MulticallDef.Prefix string
 field NoHooks.NoCascadingPostRun
 field NoHooks.NoCascadingPreRun
 field NoHooks.NoPostRun
 field NoHooks.NoPreRun
-field Outcome.Errors
-field Outcome.Infos
-field Outcome.Panics
-field Outcome.Successes
-field Outcome.Warnings
-field OutputDef.Kinds
-field OutputDef.Schema
-field OutputDef.Stream
-field OutputDef.Tag
-field OutputDef.Type
-field OutputKind.Schema
-field OutputKind.Type
-field OutputKind.Value
-field Page.Content
-field Page.Name
-field Page.Path
-field Page.Topic
-field PanicError.Stack
-field PanicError.Value
-field ParseError.Candidates
-field ParseError.Command
-field ParseError.Flag
-field ParseError.Kind
-field ParseError.Msg
-field ParseError.Token
-field PathFromDef.Env
-field PathFromDef.Flag
-field PluginDef.Aliases
-field PluginDef.Binary
-field PluginDef.Name
-field PluginDef.Summary
-field PluginDef.Timeout
-field PluginDiscoveryDef.Hidden
-field PluginDiscoveryDef.Prefix
-field PluginDispatch.Args
-field PluginDispatch.Def
-field PluginDispatch.Dir
-field PluginDispatch.Discovered
-field PluginError.Binary
-field PluginError.Candidates
-field PluginError.Cause
-field PluginError.Kind
-field PluginError.Msg
-field PluginError.Name
-field PluginError.Timeout
-field ProfilesDef.Default
-field ProfilesDef.Env
-field ProfilesDef.Flag
-field ProfilesDef.Under
-field Resolution.Argv
-field Resolution.Chain
-field Resolution.Plugin
-field ResponseFilesDef.Prefix
-field TopicDef.Name
-field TopicDef.Summary
-field WiringError.Command
-field WiringError.Feature
-field WiringError.Handler
-field WiringError.Msg
+field Outcome.Errors []error
+field Outcome.Infos []string
+field Outcome.Panics []*PanicError
+field Outcome.Successes []string
+field Outcome.Warnings []error
+field OutputDef.Kinds []OutputKind
+field OutputDef.Schema string
+field OutputDef.Stream bool
+field OutputDef.Tag string
+field OutputDef.Type reflect.Type
+field OutputKind.Schema string
+field OutputKind.Type reflect.Type
+field OutputKind.Value string
+field Page.Content string
+field Page.Name string
+field Page.Path []string
+field Page.Topic bool
+field PanicError.Stack []byte
+field PanicError.Value any
+field ParseError.Candidates []string
+field ParseError.Command string
+field ParseError.Flag string
+field ParseError.Kind ParseKind
+field ParseError.Msg string
+field ParseError.Token string
+field PathFromDef.Env string
+field PathFromDef.Flag string
+field PluginDef.Aliases []string
+field PluginDef.Binary string
+field PluginDef.Name string
+field PluginDef.Summary string
+field PluginDef.Timeout time.Duration
+field PluginDiscoveryDef.Hidden bool
+field PluginDiscoveryDef.Prefix string
+field PluginDispatch.Args []string
+field PluginDispatch.Def PluginDef
+field PluginDispatch.Dir string
+field PluginDispatch.Discovered bool
+field PluginError.Binary string
+field PluginError.Candidates []string
+field PluginError.Cause error
+field PluginError.Kind PluginErrorKind
+field PluginError.Msg string
+field PluginError.Name string
+field PluginError.Timeout time.Duration
+field ProfilesDef.Default string
+field ProfilesDef.Env string
+field ProfilesDef.Flag string
+field ProfilesDef.Under string
+field Resolution.Argv []string
+field Resolution.Chain []Command
+field Resolution.Plugin *PluginDispatch
+field ResponseFilesDef.Prefix string
+field TopicDef.Name string
+field TopicDef.Summary string
+field WiringError.Command string
+field WiringError.Feature string
+field WiringError.Handler string
+field WiringError.Msg string
 func AllowSecretWrite() ConfigWriteOption
 func AppDirs(rtx *Context, app, strategy string) (AppDirectories, error)
 func ArgvOf[T any](def Definition, v T, set Presence, opts ...ArgvOption) (argv, env []string, err error)
@@ -414,8 +416,9 @@ func UsageError(err error) error
 func UserHomes() Feature
 func WithDependency[T any](dep Dependency[T], value T) Option
 func YAML() Feature
-method ArgValueCompleter.CompleteArgValue
+method ArgValueCompleter.CompleteArgValue(rtx *Context, arg, partial string) []string
 method ArgvError.Error() string
+method ArgvError.Unwrap() error
 method Base64Bytes.MarshalText() ([]byte, error)
 method Base64Bytes.String() string
 method Base64Bytes.UnmarshalText(text []byte) error
@@ -457,6 +460,7 @@ method Context.MustGetDependency[T any](dep Dependency[T]) T
 method Context.Now() time.Time
 method Context.Parser() *Parser
 method Context.PartialInputs[T any]() (T, Presence, error)
+method Context.PluginHelp(path ...string) bool
 method Context.RecordError(err error)
 method Context.RecordInfo(msg string)
 method Context.RecordSuccess(msg string)
@@ -492,15 +496,15 @@ method DependencyError.Error() string
 method DependencyError.Unwrap() []error
 method Deprecation.Error() string
 method Feature.String() string
-method FlagValueCompleter.CompleteFlagValue
+method FlagValueCompleter.CompleteFlagValue(rtx *Context, flag, partial string) []string
 method Glob.MarshalText() ([]byte, error)
 method Glob.Match(name string) bool
 method Glob.UnmarshalText(text []byte) error
-method Handler.CascadingPostRun
-method Handler.CascadingPreRun
-method Handler.PostRun
-method Handler.PreRun
-method Handler.Run
+method Handler.CascadingPostRun(ctx context.Context, rtx *Context)
+method Handler.CascadingPreRun(ctx context.Context, rtx *Context)
+method Handler.PostRun(ctx context.Context, rtx *Context)
+method Handler.PreRun(ctx context.Context, rtx *Context)
+method Handler.Run(ctx context.Context, rtx *Context)
 method HexBytes.MarshalText() ([]byte, error)
 method HexBytes.String() string
 method HexBytes.UnmarshalText(text []byte) error
@@ -578,92 +582,92 @@ method Suggestor.WithMaxResults(n int) *Suggestor
 method Suggestor.WithMinScore(score float64) *Suggestor
 method WiringError.Error() string
 method WiringError.Unwrap() error
-type AppDirectories
-type ArgDef
-type ArgValueCompleter
-type ArgvError
-type ArgvOption
-type Base64Bytes
-type ByteSize
-type Category
-type Command
-type CommandDef
-type Completion
-type CompletionCandidate
-type CompletionDescriptionsDef
-type CompletionFormat
-type CompletionMessagesDef
-type CompletionOptions
-type CompletionResult
-type CompletionScriptFunc
-type ConfigFile
-type ConfigKey
-type ConfigWriteOption
-type Constraints
-type Context
-type Definition
-type Dependency
-type DependencyError
-type Deprecation
-type DiscoverDef
-type DiscoveredPlugin
-type Effects
-type EnumValue
-type ExitStatusDef
-type Feature
-type FieldPath
-type FlagDef
-type FlagDependency
-type FlagGroup
-type FlagGroupKind
-type FlagValueCompleter
-type Glob
-type Handler
-type HandlerLookup
-type HelpFunc
-type HexBytes
-type InputError
-type InputLayer
-type InputReader
-type InputReport
-type InputSettings
-type InputSource
-type Lifecycle
-type LifecycleStep
-type MulticallDef
-type NoCascadingPostRun
-type NoCascadingPreRun
-type NoHooks
-type NoPostRun
-type NoPreRun
-type Option
-type Outcome
-type OutputDef
-type OutputFile
-type OutputKind
-type OutputOption
-type Page
-type PanicError
-type ParseError
-type ParseKind
-type Parser
-type PathFromDef
-type PluginDef
-type PluginDiscoveryDef
-type PluginDispatch
-type PluginError
-type PluginErrorKind
-type Presence
-type ProfilesDef
-type Program
-type Reporter
-type Resolution
-type Resolver
-type ResponseFilesDef
-type Selection
-type Suggestor
-type TopicDef
-type WiringError
+type AppDirectories struct
+type ArgDef struct
+type ArgValueCompleter interface
+type ArgvError struct
+type ArgvOption func(*argvConfig)
+type Base64Bytes []byte
+type ByteSize int64
+type Category int
+type Command struct
+type CommandDef struct
+type Completion struct
+type CompletionCandidate struct
+type CompletionDescriptionsDef struct
+type CompletionFormat func(w io.Writer, result CompletionResult) error
+type CompletionMessagesDef struct
+type CompletionOptions struct
+type CompletionResult struct
+type CompletionScriptFunc func(shell string) (string, error)
+type ConfigFile struct
+type ConfigKey struct
+type ConfigWriteOption func(*configWrite)
+type Constraints struct
+type Context struct
+type Definition struct
+type DependencyError struct
+type Dependency[T any] struct
+type Deprecation struct
+type DiscoverDef struct
+type DiscoveredPlugin struct
+type Effects struct
+type EnumValue struct
+type ExitStatusDef struct
+type Feature struct
+type FieldPath string
+type FlagDef struct
+type FlagDependency struct
+type FlagGroup struct
+type FlagGroupKind string
+type FlagValueCompleter interface
+type Glob string
+type Handler interface
+type HandlerLookup func(name string) (Handler, bool)
+type HelpFunc func(path ...string) (string, error)
+type HexBytes []byte
+type InputError struct
+type InputLayer[T any] struct
+type InputReader struct
+type InputReport struct
+type InputSettings struct
+type InputSource struct
+type Lifecycle func(chain []Command, handlers []Handler) []LifecycleStep
+type LifecycleStep struct
+type MulticallDef struct
+type NoCascadingPostRun struct
+type NoCascadingPreRun struct
+type NoHooks struct
+type NoPostRun struct
+type NoPreRun struct
+type Option func(*Program)
+type Outcome struct
+type OutputDef struct
+type OutputFile struct
+type OutputKind struct
+type OutputOption func(*outputConfig)
+type Page struct
+type PanicError struct
+type ParseError struct
+type ParseKind int
+type Parser struct
+type PathFromDef struct
+type PluginDef struct
+type PluginDiscoveryDef struct
+type PluginDispatch struct
+type PluginError struct
+type PluginErrorKind int
+type Presence map[FieldPath]InputSource
+type ProfilesDef struct
+type Program struct
+type Reporter func(ctx context.Context, rtx *Context, out Outcome)
+type Resolution struct
+type Resolver func(def Definition, argv []string) (Resolution, error)
+type ResponseFilesDef struct
+type Selection struct
+type Suggestor struct
+type TopicDef struct
+type WiringError struct
 var ErrDependencyNotFound
 var ErrInternal
 var ErrUsage

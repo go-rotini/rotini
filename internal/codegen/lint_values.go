@@ -33,7 +33,7 @@ func lintValuesParse(spec *Spec) []error {
 			}
 			check := func(what, consequence string, values []string) {
 				if msg := runtimeRejects(schema, values); msg != "" {
-					problems = append(problems, inputProblem(ptr, path, channel, name,
+					problems = append(problems, schemaKeyProblem(ptr, what, path, channel, name,
 						fmt.Sprintf("%#q %s; %s", what, msg, consequence)))
 				}
 			}
@@ -188,20 +188,22 @@ func lintObjectFlags(spec *Spec) []error {
 			if ref == "" {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(key, msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, key, path, channel, name, msg))
+			}
 			if channel == "argument" {
-				add(fmt.Sprintf("refers to the object schema %q; an object value is taken by a flag, whose name gives its fields somewhere to go (--%s host=…, --%s.host=…); declare it as a flag", refTypeName(ref), name, name))
+				add("$ref", fmt.Sprintf("refers to the object schema %q; an object value is taken by a flag, whose name gives its fields somewhere to go (--%s host=…, --%s.host=…); declare it as a flag", refTypeName(ref), name, name))
 				return
 			}
 			if channel != "flag" {
 				return // env and config inputs decode objects through recon
 			}
 			if bad := scalarOnlyKeys(schema); len(bad) > 0 {
-				add(fmt.Sprintf("an object flag, so %s cannot apply; an object's rules belong in its schema %q", keyList(bad), refTypeName(ref)))
+				add(groupKey(bad[0], schema), fmt.Sprintf("an object flag, so %s cannot apply; an object's rules belong in its schema %q", keyList(bad), refTypeName(ref)))
 			}
 			if schema.Default != nil {
 				if msg := objectDefaultProblem(schema, schemas); msg != "" {
-					add("has a `default` that " + msg + "; " + defaultFails)
+					add("default", "has a `default` that "+msg+"; "+defaultFails)
 				}
 			}
 		})
@@ -290,18 +292,20 @@ func lintLayout(spec *Spec) []error {
 			if len(layouts) == 0 {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(key, msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, key, path, channel, name, msg))
+			}
 			if t := strings.TrimPrefix(getSchemaType(schema), "[]"); t != "time.Time" && t != "*time.Time" {
-				add(fmt.Sprintf("sets `layout` but its type is %s; a layout says how a time is written, so it applies to time, datetime and date", displayType(getSchemaType(schema))))
+				add("layout", fmt.Sprintf("sets `layout` but its type is %s; a layout says how a time is written, so it applies to time, datetime and date", displayType(getSchemaType(schema))))
 				return
 			}
 			for i, l := range layouts {
 				if msg := layoutProblem(l); msg != "" {
-					add(msg)
+					add(fmt.Sprintf("layout/%d", i), msg)
 					continue
 				}
 				if j := shadowingLayout(layouts[:i], l); j >= 0 {
-					p := inputProblem(ptr, path, channel, name, fmt.Sprintf("lists `layout` %q after %q, which also reads its values, as a different time; %q is never reached for them, so list the more specific layout first", l, layouts[j], l))
+					p := schemaKeyProblem(ptr, fmt.Sprintf("layout/%d", i), path, channel, name, fmt.Sprintf("lists `layout` %q after %q, which also reads its values, as a different time; %q is never reached for them, so list the more specific layout first", l, layouts[j], l))
 					p.sev = severityWarning
 					problems = append(problems, p)
 				}

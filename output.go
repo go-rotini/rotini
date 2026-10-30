@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -127,6 +128,26 @@ func tagItem(name string, out *OutputDef, v any) (*OutputKind, any, error) {
 	return kind, filled.Elem().Interface(), nil
 }
 
+// tagSelection is tagItem for a Selection of one of out's kinds: a selected tag that is empty is
+// filled in, and one naming another kind is an internal error. A tag left out of the selection
+// stays out.
+func tagSelection(name, tag string, kind *OutputKind, sel Selection) (Selection, error) {
+	m, ok := sel.data.(map[string]any)
+	if !ok {
+		return sel, nil
+	}
+	switch value, has := m[tag]; {
+	case !has || value == kind.Value:
+		return sel, nil
+	case value != "":
+		text, _ := json.Marshal(value) //nolint:errcheck,errchkjson // a JSON-shaped value always encodes
+		return sel, InternalError(fmt.Errorf("%s: the item is a %s, the %q kind, but its %s is %s", name, sel.from, kind.Value, tag, text))
+	}
+	filled := maps.Clone(m)
+	filled[tag] = kind.Value
+	return Selection{from: sel.from, data: filled}, nil
+}
+
 // tagFieldIndex returns the index of t's field whose JSON name is tag, or -1.
 func tagFieldIndex(t reflect.Type, tag string) int {
 	if t.Kind() != reflect.Struct {
@@ -153,8 +174,9 @@ var machineFormats = []string{"json", "yaml", "toml"}
 // It returns an internal error, and writes nothing, when the command declares a stream
 // (output_stream), when v is not the type the command declares as its output, when no renderer
 // is passed for a format rotini does not write, or, with [Program.WithOutputChecks], when v does
-// not match the declared shape. A renderer's error is returned unwrapped. A command that declares
-// no output may still use it; nothing is checked.
+// not match the declared shape. A renderer's error is returned unwrapped, and a failed write
+// returns the writer's error, prefixed with the command's name. A command that declares no
+// output may still use it; nothing is checked.
 //
 // v may be a [Selection] made from a value of the declared type by [SelectFields]: it is checked
 // as that type, and against the declared shape with every `required` removed.
@@ -171,7 +193,8 @@ func (rtx *Context) WriteOutput[T any](v T, format string, render func(io.Writer
 // When the items come in several kinds (the spec's `oneOf`; see [OutputDef.Tag]), item is a value
 // of any kind's type. Its tag field is filled in from that type when it is empty; a tag naming
 // another kind, or a type that is none of the kinds, is an internal error, and the item is
-// checked against its own kind's shape.
+// checked against its own kind's shape. A [Selection] made from a kind's value is treated the
+// same way when it selects the tag field.
 func (rtx *Context) WriteOutputItem[T any](item T, format string, render func(io.Writer, string, T) error) error {
 	return writeOutput(rtx, rtx.Stdout, item, format, render, true)
 }
@@ -230,7 +253,11 @@ func (rtx *Context) CheckOutput(v any) error {
 		if kind == nil {
 			return InternalError(fmt.Errorf("%s: the output is a %s, which is not one of the kinds the command declares (%s)", name, t, cmd.Output.kindValues()))
 		}
-		schema = kind.Schema
+		tagged, err := tagSelection(name, cmd.Output.Tag, kind, sel)
+		if err != nil {
+			return err
+		}
+		v, schema = tagged, kind.Schema
 	case cmd.Output.Tag != "":
 		kind, tagged, err := tagItem(name, cmd.Output, v)
 		if err != nil {
@@ -281,7 +308,11 @@ func writeOutputValue(rtx *Context, w io.Writer, v any, t reflect.Type, format s
 		if kind == nil {
 			return InternalError(fmt.Errorf("%s: the item written is a %s, which is not one of the kinds the command declares (%s)", name, sel.from, out.kindValues()))
 		}
-		schema = kind.Schema
+		tagged, err := tagSelection(name, out.Tag, kind, sel)
+		if err != nil {
+			return err
+		}
+		v, schema = tagged, kind.Schema
 	case out.Tag != "":
 		kind, tagged, err := tagItem(name, out, v)
 		if err != nil {
@@ -304,8 +335,11 @@ func writeOutputValue(rtx *Context, w io.Writer, v any, t reflect.Type, format s
 	if format == "" {
 		format = "json"
 	}
-	if schema != "" && rtx.outputChecks != nil {
-		if err := rtx.outputChecks(name, schema, v, selected); err != nil {
+	rtx.mu.RLock()
+	check := rtx.outputChecks // Context.WithOutputChecks may change it from another goroutine
+	rtx.mu.RUnlock()
+	if schema != "" && check != nil {
+		if err := check(name, schema, v, selected); err != nil {
 			return err
 		}
 	}
@@ -500,7 +534,8 @@ func outputPath(pointer string) string {
 // DecodeOutput decodes a command's output, as captured from its stdout, into T, checking it
 // against the command's declared schema. T is the generated <Prefix>Output type, which names
 // the command; for output written item by item with [Context.WriteOutputItem], T is a slice of
-// it and every item is decoded. format is json, yaml or toml. It is for tests:
+// it and every item is decoded. format is json, yaml or toml; data holds one json value or yaml
+// document, or one per item for a stream. It is for tests:
 //
 //	var stdout bytes.Buffer
 //	p := cmd.NewProgram().WithStdout(&stdout)
@@ -683,7 +718,13 @@ func decodeOutputDocument(data []byte, format string) (any, error) {
 	case "json":
 		doc, err = unmarshalExact(data)
 	case "yaml":
-		err = yaml.Unmarshal(data, &doc)
+		var docs []any
+		if docs, err = decodeStream(data, format); err == nil && len(docs) > 1 {
+			err = errors.New("more than one yaml document")
+		}
+		if len(docs) > 0 {
+			doc = docs[0]
+		}
 	default:
 		var m map[string]any
 		err = toml.Unmarshal(data, &m)

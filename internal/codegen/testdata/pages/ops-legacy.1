@@ -1,0 +1,29 @@
+.TH "OPS\-LEGACY" 1 "" "ops" "User Commands"
+.SH NAME
+ops\-legacy \- ship the old way
+.SH SYNOPSIS
+\fBops legacy\fR
+.SH DESCRIPTION
+This command is deprecated since 1.4.0, removed in 2.0.0: renamed; use ops
+deploy instead
+.SH "GLOBAL OPTIONS"
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+print help
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+say more
+.br
+repeat to count: \-vvv
+.TP
+\fB\-\-color\fR \fIstring\fR
+when to color (default auto) [auto|always|never]
+.SH "EXIT STATUS"
+.TP
+\fB0\fR
+done
+.TP
+\fB3\fR (unreachable)
+the fleet did not answer (retryable)
+.SH "SEE ALSO"
+\fBops\fR(1)

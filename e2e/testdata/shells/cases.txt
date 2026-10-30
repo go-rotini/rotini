@@ -54,3 +54,5 @@ at-file-directory	app --token @sub/|	unordered
 list-item	app --tag blue,|
 program-path	./bin/old/app |
 directory-unique	app --dir sr|	unordered
+path-type-file	app quote --input |	unordered
+path-type-directory	app quote --root |	unordered

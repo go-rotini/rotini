@@ -103,18 +103,19 @@ type timeSpec struct {
 	layout   string   // the first layout, "" for RFC 3339
 	layouts  []string // every layout, when there are several; nil means layout alone
 	relative string   // "", past, future or both
+	date     bool     // a date input whose layouts carry a time of day ([FlagDef.Date])
 	base     string   // "" for decimal only, or prefixed
 	clock    *runClock
 }
 
 // flagTimeSpec is the time spec of flag fd, measured from clock.
 func flagTimeSpec(fd *FlagDef, clock *runClock) timeSpec {
-	return timeSpec{layout: fd.Layout, layouts: fd.Layouts, relative: fd.Relative, base: fd.Base, clock: clock}
+	return timeSpec{layout: fd.Layout, layouts: fd.Layouts, relative: fd.Relative, date: fd.Date, base: fd.Base, clock: clock}
 }
 
 // argTimeSpec is the time spec of argument ad, measured from clock.
 func argTimeSpec(ad *ArgDef, clock *runClock) timeSpec {
-	return timeSpec{layout: ad.Layout, layouts: ad.Layouts, relative: ad.Relative, base: ad.Base, clock: clock}
+	return timeSpec{layout: ad.Layout, layouts: ad.Layouts, relative: ad.Relative, date: ad.Date, base: ad.Base, clock: clock}
 }
 
 // plain reports whether a time input reads RFC 3339 only, as an undeclared time does.
@@ -133,9 +134,12 @@ func (ts timeSpec) list() []string {
 	return nil
 }
 
-// dateOnly reports whether every layout writes a calendar date and no time of day, as
-// `type: date` does: relative values then land on a date.
+// dateOnly reports whether the input reads a calendar date: a date input, or one whose every
+// layout writes a date and no time of day. Its values then land on a date.
 func (ts timeSpec) dateOnly() bool {
+	if ts.date {
+		return true
+	}
 	list := ts.list()
 	if len(list) == 0 {
 		return false
@@ -195,6 +199,10 @@ func parseTimeValue(s string, ts timeSpec) (time.Time, error) {
 	for _, l := range list {
 		t, err := parseTimeLayout(s, l)
 		if err == nil {
+			if ts.date {
+				y, m, d := t.Date()
+				t = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+			}
 			return t, nil
 		}
 		if firstErr == nil {
@@ -352,7 +360,7 @@ func orList(items []string) string {
 // a pointer to one, or a list of them) reads each value under ts's layouts and relative forms,
 // and an integer field under its base. Any other field, or a plain spec, is plain coerce.
 func coerceTime(f reflect.Value, raw []string, ts timeSpec) error {
-	if ts.base == basePrefixed && len(raw) > 0 && isPlainInteger(f.Type()) {
+	if ts.base == basePrefixed && len(raw) > 0 && (isPlainInteger(f.Type()) || isPlainFloat(f.Type())) {
 		return coercePrefixed(f, raw, ts.clock.features())
 	}
 	if ts.plain() || len(raw) == 0 {

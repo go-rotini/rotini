@@ -36,7 +36,10 @@ type problem struct {
 	loc  string
 	// ptr is the JSON pointer of the subject when loc is a human label (lint rules). A
 	// schema violation's loc is itself a pointer. locateProblems resolves either to pos.
-	ptr   string
+	ptr string
+	// alt is where the subject may be written instead of ptr, tried before ptr's ancestors: an
+	// input constraint written under `items` applies to the list as if written on it.
+	alt   string
 	pos   string // "path:line:col" in the source, or just "path" when unplaceable
 	msg   string
 	sev   severity
@@ -83,6 +86,14 @@ func locateProblems(problems []error, path string, locate sourceLocator) {
 		ptr := p.ptr
 		if ptr == "" && strings.HasPrefix(p.loc, "/") {
 			ptr = p.loc
+		}
+		if p.alt != "" {
+			if _, _, ok := locate(ptr); !ok {
+				if line, col, ok := locate(p.alt); ok {
+					p.ptr, p.pos = p.alt, fmt.Sprintf("%s:%d:%d", path, line, col)
+					continue
+				}
+			}
 		}
 		if line, col, ok := locateNearest(locate, ptr); ok {
 			p.pos = fmt.Sprintf("%s:%d:%d", path, line, col)

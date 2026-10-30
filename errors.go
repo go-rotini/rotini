@@ -209,10 +209,13 @@ func (e *PanicError) Unwrap() []error {
 // resolved command names a handler method that does not exist, or whose return value does not
 // implement [Handler] — or that a command declares config inputs but the program has no
 // [InputSettings], or that a program built with [NewWiredProgram] needs a [Feature] it was not
-// given. It is always [CategoryInternal].
+// given, or that [Context.CompletionScript] was called on a program with no completion scripts.
+// It is always [CategoryInternal].
 //
-// Command and Handler are empty for a missing InputSettings, a nil handlers value passed to
-// [NewProgram] and a nil lookup passed to [NewProgramFunc].
+// Handler is set only for a resolved command whose handler is missing or not a [Handler], and
+// Command names that command. Some missing-[Feature] errors also set Command, to the command
+// whose run needed the feature. Both are empty for the other wiring errors, including a nil
+// handlers value passed to [NewProgram] and a nil lookup passed to [NewProgramFunc].
 type WiringError struct {
 	Command string // the command whose handler wiring is broken
 	Handler string // the handler method name the Definition referenced

@@ -19,7 +19,9 @@ func lintRepeatable(spec *Spec) []error {
 			if schema == nil || schema.Repeatable == nil {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "repeatable", path, channel, name, msg))
+			}
 			if channel != "flag" {
 				add("sets `repeatable`, which applies only to flags given on the command line; here it would do nothing")
 				return
@@ -51,23 +53,25 @@ func lintUniqueItems(spec *Spec) []error {
 			if schema == nil || channel == "stdin" {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(key, msg string) {
+				problems = append(problems, inputProblem(ptr+"/schema/"+key, path, channel, name, msg))
+			}
 			if schema.Items != nil && schema.Items.UniqueItems {
-				add("sets `uniqueItems` under `items`, but it is a rule about the whole list; move it up beside `type`")
+				add("items/uniqueItems", "sets `uniqueItems` under `items`, but it is a rule about the whole list; move it up beside `type`")
 			}
 			if !schema.UniqueItems {
 				return
 			}
 			typ, _ := inputValueType(schema, spec.Command.Schemas)
 			if !strings.HasPrefix(typ, "[]") || schema.Type == "count" {
-				add(fmt.Sprintf("sets `uniqueItems`, which applies to list types only, not %s; it would be silently ignored", typeSpelling(typ)))
+				add("uniqueItems", fmt.Sprintf("sets `uniqueItems`, which applies to list types only, not %s; it would be silently ignored", typeSpelling(typ)))
 				return
 			}
 			if objectRef(schema, spec.Command.Schemas) != "" {
 				return
 			}
 			if dup := duplicateDefault(schema); dup != "" {
-				add(fmt.Sprintf("`default` repeats %s, but `uniqueItems` is set; %s", dup, defaultFails))
+				add("default", fmt.Sprintf("`default` repeats %s, but `uniqueItems` is set; %s", dup, defaultFails))
 			}
 		})
 	})

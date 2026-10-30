@@ -1,0 +1,475 @@
+# R14 — generated output is repeatable: one spec written as YAML, JSON, JSONC, TOML and as YAML
+# with its keys in another order generates the same bytes in every generated file; a second
+# generate and a dry run find nothing to write; and fmt, which is idempotent, changes nothing
+# that is generated.
+
+# ── one project per spec format, all generated alike ────────────────────────
+mkdir y j c t s
+cd y
+gomodinit example.com/ops
+cp ../spec.yaml .rotini.spec.yaml
+cp ../conf.yaml .rotini.conf.yaml
+exec rotini generate .rotini.spec.yaml
+cd ../j
+gomodinit example.com/ops
+cp ../spec.json .rotini.spec.json
+cp ../conf.yaml .rotini.conf.yaml
+exec rotini generate .rotini.spec.json
+cd ../c
+gomodinit example.com/ops
+cp ../spec.jsonc .rotini.spec.jsonc
+cp ../conf.yaml .rotini.conf.yaml
+exec rotini generate .rotini.spec.jsonc
+cd ../t
+gomodinit example.com/ops
+cp ../spec.toml .rotini.spec.toml
+cp ../conf.yaml .rotini.conf.yaml
+exec rotini generate .rotini.spec.toml
+cd ../s
+gomodinit example.com/ops
+cp ../sorted.yaml .rotini.spec.yaml
+cp ../conf.yaml .rotini.conf.yaml
+exec rotini generate .rotini.spec.yaml
+cd ..
+
+# Every file Rotini rewrites on each run is byte-identical across the five.
+cmp j/internal/cmd/ops/zz_rotini.go y/internal/cmd/ops/zz_rotini.go
+cmp c/internal/cmd/ops/zz_rotini.go y/internal/cmd/ops/zz_rotini.go
+cmp t/internal/cmd/ops/zz_rotini.go y/internal/cmd/ops/zz_rotini.go
+cmp s/internal/cmd/ops/zz_rotini.go y/internal/cmd/ops/zz_rotini.go
+cmp j/contract.json y/contract.json
+cmp c/contract.json y/contract.json
+cmp t/contract.json y/contract.json
+cmp s/contract.json y/contract.json
+cmp j/tools/mcp.json y/tools/mcp.json
+cmp t/tools/mcp.json y/tools/mcp.json
+cmp s/tools/mcp.json y/tools/mcp.json
+cmp j/skills/ops/SKILL.md y/skills/ops/SKILL.md
+cmp t/skills/ops/SKILL.md y/skills/ops/SKILL.md
+cmp s/skills/ops/SKILL.md y/skills/ops/SKILL.md
+cmp j/llms.txt y/llms.txt
+cmp t/llms.txt y/llms.txt
+cmp s/llms.txt y/llms.txt
+cmp j/completions/carapace/ops.yaml y/completions/carapace/ops.yaml
+cmp t/completions/carapace/ops.yaml y/completions/carapace/ops.yaml
+cmp j/.env.example y/.env.example
+cmp t/.env.example y/.env.example
+cmp j/examples/config/user.example.yaml y/examples/config/user.example.yaml
+cmp t/examples/config/user.example.yaml y/examples/config/user.example.yaml
+cmp j/internal/cmd/ops/ops_deploy.go y/internal/cmd/ops/ops_deploy.go
+cmp t/internal/cmd/ops/ops_deploy.go y/internal/cmd/ops/ops_deploy.go
+
+# ── a second run writes nothing, and a dry run agrees (exit 0) ──────────────
+cd y
+cp internal/cmd/ops/zz_rotini.go ../zz.before
+exec rotini generate .rotini.spec.yaml
+! stdout 'created:'
+cmp internal/cmd/ops/zz_rotini.go ../zz.before
+exec rotini generate --dry-run .rotini.spec.yaml
+! stdout 'dry run:'
+cd ../t
+exec rotini generate --dry-run .rotini.spec.toml
+! stdout 'dry run:'
+cd ..
+
+# ── fmt is idempotent and changes nothing generated ─────────────────────────
+cd s
+exec rotini fmt .rotini.spec.yaml .rotini.conf.yaml
+cp .rotini.spec.yaml ../fmt1.yaml
+exec rotini fmt --check .rotini.spec.yaml .rotini.conf.yaml
+! stdout .
+exec rotini fmt .rotini.spec.yaml .rotini.conf.yaml
+cmp .rotini.spec.yaml ../fmt1.yaml
+exec rotini generate --dry-run .rotini.spec.yaml
+! stdout 'dry run:'
+cd ..
+
+# The generated module builds and vets.
+cd y
+exec go mod tidy
+exec go vet ./...
+cd ..
+-- spec.yaml --
+version: 0.0.0
+command:
+  name: ops
+  summary: run the fleet
+  env_prefix: OPS
+  config_files:
+    - name: user
+      path: ~/.ops.yaml
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help, -h]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+    - name: color
+      summary: when to color
+      identifiers: [--color]
+      cascading: true
+      schema: {type: string, enum: [auto, always, never], default: auto}
+  env:
+    - name: token
+      summary: the API token
+      schema: {type: string, secret: true}
+  config:
+    - name: region
+      summary: the default region
+      schema: {type: string, key: region, pattern: '^[a-z]+-[0-9]$'}
+  topics:
+    - name: filters
+      summary: how filters work
+      body: A filter narrows a list.
+  schemas:
+    Task:
+      type: object
+      required: [title]
+      properties:
+        title: {type: string, description: what to do}
+        due: {type: string, description: when it is due}
+  commands:
+    - name: deploy
+      summary: ship a service
+      aliases: [ship]
+      effects: {kind: write}
+      arguments:
+        - name: service
+          summary: the service to ship
+          schema: {type: string, required: true}
+      flags:
+        - name: port
+          summary: listen port
+          identifiers: [--port, -p]
+          schema: {type: int, default: 8080, minimum: 1, maximum: 65535}
+        - name: tag
+          summary: a label
+          identifiers: [--tag]
+          schema: {type: '[]string', separator: ","}
+    - name: import
+      summary: import tasks
+      stdin:
+        format: json
+        schema: {$ref: Task}
+-- sorted.yaml --
+command:
+  commands:
+    - aliases: [ship]
+      arguments:
+        - name: service
+          schema: {required: true, type: string}
+          summary: the service to ship
+      effects: {kind: write}
+      flags:
+        - identifiers: [--port, -p]
+          name: port
+          schema: {default: 8080, maximum: 65535, minimum: 1, type: int}
+          summary: listen port
+        - identifiers: [--tag]
+          name: tag
+          schema: {separator: ",", type: '[]string'}
+          summary: a label
+      name: deploy
+      summary: ship a service
+    - name: import
+      stdin:
+        format: json
+        schema: {$ref: Task}
+      summary: import tasks
+  config:
+    - name: region
+      schema: {key: region, pattern: '^[a-z]+-[0-9]$', type: string}
+      summary: the default region
+  config_files:
+    - name: user
+      path: ~/.ops.yaml
+  env:
+    - name: token
+      schema: {secret: true, type: string}
+      summary: the API token
+  env_prefix: OPS
+  flags:
+    - cascading: true
+      identifiers: [--help, -h]
+      name: help
+      schema: {type: bool}
+      short_circuit: true
+      summary: print help
+    - cascading: true
+      identifiers: [--color]
+      name: color
+      schema: {default: auto, enum: [auto, always, never], type: string}
+      summary: when to color
+  name: ops
+  schemas:
+    Task:
+      properties:
+        due: {description: when it is due, type: string}
+        title: {description: what to do, type: string}
+      required: [title]
+      type: object
+  summary: run the fleet
+  topics:
+    - body: A filter narrows a list.
+      name: filters
+      summary: how filters work
+version: 0.0.0
+-- spec.json --
+{
+  "version": "0.0.0",
+  "command": {
+    "name": "ops",
+    "summary": "run the fleet",
+    "env_prefix": "OPS",
+    "config_files": [
+      {
+        "name": "user",
+        "path": "~/.ops.yaml"
+      }
+    ],
+    "flags": [
+      {
+        "name": "help",
+        "summary": "print help",
+        "identifiers": [
+          "--help",
+          "-h"
+        ],
+        "cascading": true,
+        "short_circuit": true,
+        "schema": {
+          "type": "bool"
+        }
+      },
+      {
+        "name": "color",
+        "summary": "when to color",
+        "identifiers": [
+          "--color"
+        ],
+        "cascading": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "default": "auto"
+        }
+      }
+    ],
+    "env": [
+      {
+        "name": "token",
+        "summary": "the API token",
+        "schema": {
+          "type": "string",
+          "secret": true
+        }
+      }
+    ],
+    "config": [
+      {
+        "name": "region",
+        "summary": "the default region",
+        "schema": {
+          "type": "string",
+          "key": "region",
+          "pattern": "^[a-z]+-[0-9]$"
+        }
+      }
+    ],
+    "topics": [
+      {
+        "name": "filters",
+        "summary": "how filters work",
+        "body": "A filter narrows a list."
+      }
+    ],
+    "schemas": {
+      "Task": {
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "what to do"
+          },
+          "due": {
+            "type": "string",
+            "description": "when it is due"
+          }
+        }
+      }
+    },
+    "commands": [
+      {
+        "name": "deploy",
+        "summary": "ship a service",
+        "aliases": [
+          "ship"
+        ],
+        "effects": {
+          "kind": "write"
+        },
+        "arguments": [
+          {
+            "name": "service",
+            "summary": "the service to ship",
+            "schema": {
+              "type": "string",
+              "required": true
+            }
+          }
+        ],
+        "flags": [
+          {
+            "name": "port",
+            "summary": "listen port",
+            "identifiers": [
+              "--port",
+              "-p"
+            ],
+            "schema": {
+              "type": "int",
+              "default": 8080,
+              "minimum": 1,
+              "maximum": 65535
+            }
+          },
+          {
+            "name": "tag",
+            "summary": "a label",
+            "identifiers": [
+              "--tag"
+            ],
+            "schema": {
+              "type": "[]string",
+              "separator": ","
+            }
+          }
+        ]
+      },
+      {
+        "name": "import",
+        "summary": "import tasks",
+        "stdin": {
+          "format": "json",
+          "schema": {
+            "$ref": "Task"
+          }
+        }
+      }
+    ]
+  }
+}
+-- spec.jsonc --
+// the same spec, as JSONC
+{"version":"0.0.0","command":{"name":"ops","summary":"run the fleet","env_prefix":"OPS","config_files":[{"name":"user","path":"~/.ops.yaml"}],"flags":[{"name":"help","summary":"print help","identifiers":["--help","-h"],"cascading":true,"short_circuit":true,"schema":{"type":"bool"}},{"name":"color","summary":"when to color","identifiers":["--color"],"cascading":true,"schema":{"type":"string","enum":["auto","always","never"],"default":"auto"}}],"env":[{"name":"token","summary":"the API token","schema":{"type":"string","secret":true}}],"config":[{"name":"region","summary":"the default region","schema":{"type":"string","key":"region","pattern":"^[a-z]+-[0-9]$"}}],"topics":[{"name":"filters","summary":"how filters work","body":"A filter narrows a list."}],"schemas":{"Task":{"type":"object","required":["title"],"properties":{"title":{"type":"string","description":"what to do"},"due":{"type":"string","description":"when it is due"}}}},"commands":[ // the sub-commands
+{"name":"deploy","summary":"ship a service","aliases":["ship"],"effects":{"kind":"write"},"arguments":[{"name":"service","summary":"the service to ship","schema":{"type":"string","required":true}}],"flags":[{"name":"port","summary":"listen port","identifiers":["--port","-p"],"schema":{"type":"int","default":8080,"minimum":1,"maximum":65535}},{"name":"tag","summary":"a label","identifiers":["--tag"],"schema":{"type":"[]string","separator":","}}]},{"name":"import","summary":"import tasks","stdin":{"format":"json","schema":{"$ref":"Task"}}}]}}
+-- spec.toml --
+version = "0.0.0"
+
+[command]
+name = "ops"
+summary = "run the fleet"
+env_prefix = "OPS"
+[[command.config_files]]
+name = "user"
+path = "~/.ops.yaml"
+[[command.flags]]
+name = "help"
+summary = "print help"
+identifiers = ["--help", "-h"]
+cascading = true
+short_circuit = true
+schema = { type = "bool" }
+[[command.flags]]
+name = "color"
+summary = "when to color"
+identifiers = ["--color"]
+cascading = true
+schema = { type = "string", enum = ["auto", "always", "never"], default = "auto" }
+[[command.env]]
+name = "token"
+summary = "the API token"
+schema = { type = "string", secret = true }
+[[command.config]]
+name = "region"
+summary = "the default region"
+schema = { type = "string", key = "region", pattern = "^[a-z]+-[0-9]$" }
+[[command.topics]]
+name = "filters"
+summary = "how filters work"
+body = "A filter narrows a list."
+[[command.commands]]
+name = "deploy"
+summary = "ship a service"
+aliases = ["ship"]
+effects = { kind = "write" }
+[[command.commands.arguments]]
+name = "service"
+summary = "the service to ship"
+schema = { type = "string", required = true }
+[[command.commands.flags]]
+name = "port"
+summary = "listen port"
+identifiers = ["--port", "-p"]
+schema = { type = "int", default = 8080, minimum = 1, maximum = 65535 }
+[[command.commands.flags]]
+name = "tag"
+summary = "a label"
+identifiers = ["--tag"]
+schema = { type = "[]string", separator = "," }
+[[command.commands]]
+name = "import"
+summary = "import tasks"
+
+[command.commands.stdin]
+format = "json"
+schema = { "$ref" = "Task" }
+
+[command.schemas.Task]
+type = "object"
+required = ["title"]
+
+[command.schemas.Task.properties]
+title = { type = "string", description = "what to do" }
+due = { type = "string", description = "when it is due" }
+-- conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: contract.json
+  packages:
+    - type: main
+      file: cmd/ops/main.go
+    - type: cmd
+      file: internal/cmd/ops/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+    - type: man
+      enabled: true
+    - type: markdown
+      enabled: true
+    - type: config_example
+      enabled: true
+    - type: env_example
+      enabled: true
+    - type: tools
+      enabled: true
+      targets: [mcp, openai-strict, gemini]
+    - type: skill
+      enabled: true
+    - type: llms
+      enabled: true
+      base_url: https://example.com/ops/
+    - type: carapace
+      enabled: true

@@ -1,11 +1,57 @@
 # An unresolvable type would otherwise surface as a gofmt error over the whole
-# generated file, naming neither the input nor its line.
+# generated file, naming neither the input nor its line. In a document shape (a named
+# schema, output, stdin or a config file's schema) a misspelt type would silently become an
+# `any` field that checks nothing.
 version: 0.0.0
 command:
   name: demo
+  schemas:
+    Port:
+      type: strng
+    Task:
+      type: object
+      properties:
+        id: {type: integr}
+        # Fine: JSON Schema names, a rotini alias and a Go builtin.
+        done: {type: boolean}
+        none: {type: 'null'}
+        took: {type: duration}
+        tags: {type: '[]string'}
   flags:
     - name: weird
       identifiers:
         - --weird
       schema:
         type: 'not a go type!'
+    - name: unused-import
+      identifiers:
+        - --unused-import
+      schema:
+        type: string
+        import: github.com/google/uuid
+  output:
+    type: object
+    properties:
+      count: {type: nmber}
+  exit_status:
+    - code: 3
+      summary: partial
+      output: {type: 'bad type!'}
+  stdin:
+    format: json
+    schema:
+      type: object
+      properties:
+        name: {type: strin}
+  config_files:
+    - name: app
+      path: app.yaml
+      schema:
+        type: object
+        properties:
+          port: {type: innt}
+  arguments:
+    - name: target
+      schema:
+        $ref: Port
+        type: int

@@ -180,6 +180,30 @@ func findPlugin(f *Command, tok string) (PluginDef, bool) {
 	return PluginDef{}, false
 }
 
+// foldsToDeclared reports whether tok differs only in case from a name f declares: a
+// sub-command's name or alias (hidden ones included), or a declared plugin's name or alias.
+// Such a word never reaches plugin discovery, where a case-insensitive filesystem would find
+// <prefix><tok> as the binary of the declared spelling, or a binary a declared name shadows.
+func foldsToDeclared(f *Command, tok string) bool {
+	variant := func(n string) bool { return n != tok && strings.EqualFold(n, tok) }
+	for i := range f.Commands {
+		if c := &f.Commands[i]; variant(c.Name) || slices.ContainsFunc(c.Aliases, variant) || slices.ContainsFunc(c.HiddenAliases, variant) {
+			return true
+		}
+	}
+	for _, r := range f.Plugins {
+		if variant(r.Name) || slices.ContainsFunc(r.Aliases, variant) {
+			return true
+		}
+	}
+	return false
+}
+
+// discoverable reports whether tok, matching nothing f declares, names a discovered plugin of f.
+func discoverable(f *Command, tok string) bool {
+	return f.PluginDiscovery != nil && pluginToken(tok) && !foldsToDeclared(f, tok)
+}
+
 // isFlag reports whether tok is a flag token, given chain, the commands reached so far. Every
 // argv walker (the resolver, the parser, completion and the deprecation and plugin-host parses)
 // decides with it, so they agree on where flags are. Bare "-" and "--" are not flags, and

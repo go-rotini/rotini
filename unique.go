@@ -45,6 +45,9 @@ func uniqueKeyFor(typ string, ts timeSpec, enum enumSet) func(string) string {
 		return func(v string) string {
 			if ts.base == basePrefixed {
 				v = prefixedText(v)
+				if t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64 {
+					v = prefixedFloatText(v)
+				}
 			}
 			f := reflect.New(t).Elem()
 			if coerce(f, []string{v}, noFeatures) != nil {

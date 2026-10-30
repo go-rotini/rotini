@@ -19,9 +19,11 @@
                           .JSON is what to add for JSON output; .DryRun and .Confirm are flags;
                           .ExitStatus rows are {.Code .Name .Summary .Retryable .DocsURL};
                           .Link is its reference page, "" when the markdown feature is off
-         .Env[] .Config[] {.Name .Summary .Required .Secret .Commands} — what the commands read
-                          from the environment and config files
+         .Env[] .Config[] {.Name .Flag .Summary .Required .Secret .Commands} — what the
+                          commands read from the environment and config files; .Flag is
+                          the flag an environment variable sets, "" for an env input
          .JSON .Previews  some command has a JSON flag; some has a dry-run or confirm flag
+         .DryRuns         some command has a dry-run flag
        HELPERS: quote (a YAML/JSON string), join, upper, lower, title, trim, trimPrefix,
                 trimSuffix, replace, indent, repeat, default, contains, hasPrefix, hasSuffix,
                 first, last. */ -}}
@@ -48,7 +50,7 @@ allowed-tools: {{quote .}}
 {{- if .JSON}}
 - For output you can parse, add the command's JSON flag, listed below. It writes JSON to stdout; messages and errors go to stderr.
 {{- end}}
-{{- if .Previews}}
+{{- if .DryRuns}}
 - Before running a destructive command, run it with its dry-run flag to see what it would do.
 {{- end}}
 - Effects say what a command does: read changes nothing, write creates or changes things, and destructive deletes or overwrites what can't be got back. A command with no effects listed may do any of these.
@@ -63,7 +65,7 @@ allowed-tools: {{quote .}}
 
 ## Environment
 
-{{range .}}- `{{.Name}}`{{with .Summary}}: {{.}}{{end}}{{if .Required}} (required){{end}}{{if .Secret}} (secret: set it in the environment; never write it on the command line){{end}}
+{{range .}}- `{{.Name}}`{{with .Summary}}: {{.}}{{end}}{{with .Flag}} (sets `{{.}}`){{end}}{{if .Required}} (required){{end}}{{if .Secret}} (secret: set it in the environment; never write it on the command line){{end}}
 {{end}}
 {{- end}}
 {{- with .Config}}

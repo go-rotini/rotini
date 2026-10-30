@@ -14,7 +14,8 @@ import (
 // what emerges only once refs are followed: collisions across composition boundaries and
 // cyclic or missing refs. Reusing the composer keeps validate and generate in agreement. Each
 // child spec's own checks run in Processor.validateComposedSpecs. It is best-effort: it skips
-// a spec with no refs and an invalid root (lintRootCommand reports it). For a spec outside the
+// a spec with no refs and an invalid root (lintRootCommand reports it). In a module, each mod://
+// $ref must name the version go.mod builds, checked first and placed at the $ref. For a spec outside the
 // current module, or with no module, it checks only that each local ref names a spec file.
 func lintComposedTree(spec *Spec, specPath string) []error {
 	if !specHasRefs(spec) {
@@ -27,6 +28,9 @@ func lintComposedTree(spec *Spec, specPath string) []error {
 	if err != nil {
 		return missingLocalRefs(spec, specPath)
 	}
+	if problems := modRefVersions(spec); len(problems) > 0 {
+		return problems
+	}
 	// The composer resolves refs and import paths relative to the current module, so run it
 	// only when the spec lives inside that module.
 	absSpec, err1 := filepath.Abs(specPath)
@@ -36,10 +40,67 @@ func lintComposedTree(spec *Spec, specPath string) []error {
 		return missingLocalRefs(spec, specPath)
 	}
 	if _, err := resolveTree(spec, specPath, name); err != nil {
+		if _, ok := errors.AsType[*refEntryError](err); ok {
+			return nil // reported at the entry, by the file that writes it
+		}
 		// The composer reports on the tree as a whole, so the problem is placed on the root.
 		return []error{&problem{kind: "spec", ptr: rootPointer, loc: "command " + spec.Command.Name, msg: "composition: " + err.Error()}}
 	}
 	return nil
+}
+
+// lintRefLocators checks how each $ref is written, which needs no module: a mod:// locator must
+// parse, and a remote source (https://, git::) is refused. Each problem is placed at the $ref.
+func lintRefLocators(spec *Spec) []error {
+	var problems []error
+	walkRefsAt(spec, func(c *Command, loc, ptr string) {
+		if err := refLocatorError(c.Ref); err != nil {
+			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/$ref", loc: loc, msg: err.Error()})
+		}
+	})
+	return problems
+}
+
+// modRefVersions refuses each mod:// $ref of spec whose version isn't the one the main
+// module's go.mod builds that module at, placed at the $ref.
+func modRefVersions(spec *Spec) []error {
+	var problems []error
+	var build *goModBuild
+	walkRefsAt(spec, func(c *Command, loc, ptr string) {
+		module, version, _, err := parseModLocator(c.Ref)
+		if !strings.HasPrefix(c.Ref, modScheme) || err != nil {
+			return // lintRefLocators reports a malformed one
+		}
+		msg := ""
+		if build == nil {
+			if build, err = goModBuildFunc(); err != nil {
+				build, msg = &goModBuild{}, err.Error()
+			}
+		}
+		if msg == "" {
+			if err := build.check(module, version); err != nil {
+				msg = err.Error()
+			}
+		}
+		if msg != "" {
+			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/$ref", loc: loc, msg: fmt.Sprintf("$ref %q: %s", c.Ref, msg)})
+		}
+	})
+	return problems
+}
+
+// walkRefsAt visits each sub-command written as a $ref, with the location label of the
+// command it sits under (an unnamed $ref's own path segment is the ref) and its JSON pointer.
+func walkRefsAt(spec *Spec, visit func(c *Command, loc, ptr string)) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		if c.Ref == "" || ptr == rootPointer {
+			return
+		}
+		if c.Name == "" {
+			path = strings.TrimSuffix(path, "/"+c.Ref)
+		}
+		visit(c, "command "+path, ptr)
+	})
 }
 
 // writtenCommand is a command entry as a spec file writes it: inline, or a $ref.

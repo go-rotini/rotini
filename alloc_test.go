@@ -130,6 +130,9 @@ var (
 // non-zero exit.
 func allocsFor(t *testing.T, p *Program, argv []string) float64 {
 	t.Helper()
+	if raceEnabled {
+		t.Skip("allocation budgets are measured without -race")
+	}
 	if code, err := p.Run(argv); code != 0 || err != nil {
 		t.Fatalf("Run(%q) = %d, %v", argv, code, err)
 	}

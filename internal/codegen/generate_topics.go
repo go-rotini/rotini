@@ -177,7 +177,7 @@ func fileRow(summary string) templateDocEnvRow {
 // envRow describes a variable an input reads.
 func envRow(summary string, schema *InputSchema, deprecated, since, removedIn, stability string) templateDocEnvRow {
 	return templateDocEnvRow{
-		Summary: summary, Type: flagDisplayType(schema), Default: schemaDefaultString(schema), Secret: schema != nil && schema.Secret,
+		Summary: summary, Type: flagDisplayType(schema), Default: schemaDefaultString(schema), defaultJSON: structuredDefault(schema), Secret: schema != nil && schema.Secret,
 		Deprecated: deprecated, DeprecatedSince: since, RemovedIn: removedIn, Stability: stability,
 	}
 }

@@ -1,0 +1,215 @@
+# R14 — a program built by hand on the public API, with no codegen, behaves as the generated
+# program for the same spec does: the same values bound from argv, env fallbacks and defaults,
+# and the same errors and exit codes, through NewProgramFunc and through NewWiredProgram with
+# the features the generated NewProgram passes.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+grep 'rotini.Fallbacks\(\),' internal/cmd/app/zz_app.go
+grep 'rotini.Bounds\(\),' internal/cmd/app/zz_app.go
+exec go mod tidy
+exec go build -o gen$exe ./cmd/app
+exec go build -o hand$exe ./cmd/hand
+env APP_NAME=
+
+# Values: the bound inputs print the same.
+exec ./gen$exe greet ada
+cp stdout gen.txt
+exec ./hand$exe greet ada
+cmp stdout gen.txt
+stdout '^ada  x1 verbose=false$'
+
+exec ./gen$exe -v hi --name=x -c 3 ada
+cp stdout gen.txt
+exec ./hand$exe -v hi --name=x -c 3 ada
+cmp stdout gen.txt
+env HAND_WIRED=1
+exec ./hand$exe -v hi --name=x -c 3 ada
+cmp stdout gen.txt
+env HAND_WIRED=
+
+env APP_NAME=env
+exec ./gen$exe greet ada
+cp stdout gen.txt
+exec ./hand$exe greet ada
+cmp stdout gen.txt
+stdout '^ada env x1'
+env APP_NAME=
+
+# Errors: the same message on stderr and exit 1.
+wantexit 1 ./gen$exe greet
+cp stderr gen.txt
+wantexit 1 ./hand$exe greet
+cmp stderr gen.txt
+stderr '^Error: missing required input: <who>$'
+
+wantexit 1 ./gen$exe greet -c 0 ada
+cp stderr gen.txt
+wantexit 1 ./hand$exe greet -c 0 ada
+cmp stderr gen.txt
+env HAND_WIRED=1
+wantexit 1 ./hand$exe greet -c 0 ada
+cmp stderr gen.txt
+env HAND_WIRED=
+
+wantexit 1 ./gen$exe greet --bogus ada
+cp stderr gen.txt
+wantexit 1 ./hand$exe greet --bogus ada
+cmp stderr gen.txt
+
+wantexit 1 ./gen$exe nope
+cp stderr gen.txt
+wantexit 1 ./hand$exe nope
+cmp stderr gen.txt
+stderr '^Error: unknown command "nope" for "app"$'
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a test app
+  flags:
+    - name: verbose
+      identifiers: [-v, --verbose]
+      schema: {type: bool}
+      cascading: true
+  commands:
+    - name: greet
+      summary: greet someone
+      aliases: [hi]
+      flags:
+        - name: name
+          identifiers: [-n, --name]
+          schema: {type: string, variable: APP_NAME}
+        - name: count
+          identifiers: [-c, --count]
+          schema: {type: int, default: 1, minimum: 1}
+      arguments:
+        - name: who
+          schema: {type: string, required: true}
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- cmd/app/main.go --
+package main
+
+import cmd "example.com/app/internal/cmd/app"
+
+func main() { cmd.NewProgram().Execute() }
+-- internal/cmd/app/app_greet.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*appGreetHandler)(nil)
+
+type appGreetHandler struct{ rotini.NoHooks }
+
+func (*appGreetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AppGreetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	g := in.AppGreet
+	fmt.Fprintf(rtx.Stdout, "%s %s x%d verbose=%t\n", g.Arguments.Who, g.Flags.Name, g.Flags.Count, in.App.Flags.Verbose)
+}
+-- cmd/hand/main.go --
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"reflect"
+
+	"github.com/go-rotini/rotini"
+)
+
+type appCommand struct {
+	Flags struct {
+		Verbose bool `rotini:"verbose"`
+	}
+	Arguments struct{}
+}
+
+type appInputs struct{ App appCommand }
+
+type greetInputs struct {
+	App      appCommand
+	AppGreet struct {
+		Flags struct {
+			Name  string `rotini:"name" recon:"name" env:"APP_NAME"`
+			Count int    `rotini:"count"`
+		}
+		Arguments struct {
+			Who string `rotini:"who"`
+		}
+	}
+}
+
+var definition = rotini.Definition{
+	Name:    "app",
+	Handler: "App",
+	Flags:   []rotini.FlagDef{{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool"}},
+	Inputs:  reflect.TypeFor[appInputs](),
+	Usage:   "app [flags] <command>",
+	Commands: []rotini.CommandDef{{
+		Name: "greet", Handler: "AppGreet", Summary: "greet someone", Aliases: []string{"hi"},
+		Flags: []rotini.FlagDef{
+			{Name: "name", Identifiers: []string{"-n", "--name"}, Type: "string"},
+			{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int", Default: "1", Minimum: new(float64(1))},
+		},
+		Arguments: []rotini.ArgDef{{Name: "who", Type: "string", Required: true}},
+		Inputs:    reflect.TypeFor[greetInputs](),
+		Usage:     "app greet [flags] <who>",
+	}},
+}
+
+type root struct{ rotini.NoHooks }
+
+func (root) Run(_ context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[appInputs](); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+
+type greet struct{ rotini.NoHooks }
+
+func (greet) Run(_ context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[greetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	g := in.AppGreet
+	fmt.Fprintf(rtx.Stdout, "%s %s x%d verbose=%t\n", g.Arguments.Who, g.Flags.Name, g.Flags.Count, in.App.Flags.Verbose)
+}
+
+func lookup(name string) (rotini.Handler, bool) {
+	switch name {
+	case "App":
+		return root{}, true
+	case "AppGreet":
+		return greet{}, true
+	}
+	return nil, false
+}
+
+func main() {
+	p := rotini.NewProgramFunc(definition, lookup)
+	if os.Getenv("HAND_WIRED") != "" {
+		p = rotini.NewWiredProgram(definition, lookup, rotini.Fallbacks(), rotini.Bounds())
+	}
+	p.Execute()
+}

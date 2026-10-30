@@ -284,7 +284,10 @@ func checkJSONLRecord(schema string, v any) error {
 	}
 	if err := documentResult(schema, result); err != nil {
 		if ie, ok := asError[*InputError](err); ok {
-			return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin line %d: %s", line, ie.Msg), Cause: ie.Cause, usage: ie.usage}
+			// The line already says the problem is in stdin: "stdin line 2: field "value": …",
+			// not "stdin line 2: stdin field "value": …".
+			msg := strings.TrimPrefix(strings.TrimPrefix(ie.Msg, "stdin: "), "stdin ")
+			return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin line %d: %s", line, msg), Cause: ie.Cause, usage: ie.usage}
 		}
 		return err
 	}

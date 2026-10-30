@@ -1,0 +1,821 @@
+# R14 — a data tool built end to end from a JSON spec: files, `-` and a streamed stdin for one
+# argument, response files, JSON Lines and a JSON document on stdin checked against their
+# schemas, an output file written atomically and refused when it exists, a custom reporter's
+# exit codes, the hooks in order through a panic, and Ctrl-C mid-write leaving no file.
+
+gomodinit example.com/data
+exec rotini init dp --format json
+cp spec.json cmd/dp/.rotini.spec.json
+exec rotini generate cmd/dp/.rotini.spec.json --config cmd/dp/.rotini.conf.json
+cp main.go.txt cmd/dp/main.go
+cp dp.go.txt internal/cmd/dp/dp.go
+cp report.go.txt internal/cmd/dp/report.go
+cp dp_count.go.txt internal/cmd/dp/dp_count.go
+cp dp_convert.go.txt internal/cmd/dp/dp_convert.go
+cp dp_sum.go.txt internal/cmd/dp/dp_sum.go
+cp dp_stats.go.txt internal/cmd/dp/dp_stats.go
+cp dp_slow.go.txt internal/cmd/dp/dp_slow.go
+cp dp_fail.go.txt internal/cmd/dp/dp_fail.go
+mkdir kick
+cp kick.go.txt kick/main.go
+exec go mod tidy
+exec go build -o dp$exe ./cmd/dp
+exec go build -o kicker$exe ./kick
+exec go vet ./...
+
+# The handlers' own tests, with typed inputs and an isolated environment.
+cp dp_test.go.txt internal/cmd/dp/dp_test.go
+cp helpers_test.go.txt internal/cmd/dp/helpers_test.go
+exec go test ./internal/cmd/dp
+
+# Files and stdin: `-` reads stdin once, among files or alone, and no file reads it too.
+exec ./dp$exe count f1.txt f1.txt -m a
+stdout '"lines": 6,'
+stdout '"matched": 4'
+stdin f1.txt
+exec ./dp$exe count
+stdout '"lines": 3'
+stdin f1.txt
+exec ./dp$exe count - f1.txt
+stdout '"lines": 6'
+wantexit 2 ./dp$exe count - -
+stderr '^dp: error: <files>: "-" \(stdin\) can be given only once; <files> already reads it$'
+stderr '^dp: run ''dp count --help'' for usage$'
+wantexit 2 ./dp$exe count nope.txt
+stderr '^dp: error: <files>: no such file: "nope\.txt"$'
+
+# A response file holds one argument per line, the command's name included; @@ is a literal @.
+exec ./dp$exe @args.rsp
+stdout '"lines": 3,'
+stdout '"matched": 2'
+wantexit 2 ./dp$exe count @@x
+stderr 'no such file: "@x"'
+
+# JSON Lines, streamed: each record is checked as it is read and an error names its line once.
+stdin records.jsonl
+exec ./dp$exe sum
+cmp stdout want-sum.jsonl
+stdin bad.jsonl
+wantexit 2 ./dp$exe sum
+stdout '^\{"n":1,"total":1\}$'
+stderr '^dp: error: stdin line 3: missing required property "value"$'
+stdin badtype.jsonl
+wantexit 2 ./dp$exe sum
+stderr '^dp: error: stdin line 1: field "value": value is not of type number$'
+stdin empty.txt
+wantexit 2 ./dp$exe sum
+stderr '^dp: error: required stdin payload is empty; pipe JSON Lines$'
+# --help never waits for stdin.
+exec ./dp$exe sum --help
+stdout '^  jsonl Record \(streamed\) \(required\)$'
+
+# A JSON document, whole.
+stdin numbers.json
+exec ./dp$exe stats
+stdout '^n=3 min=1 max=4 mean=2\.6666666666666665$'
+stdin nonumbers.json
+wantexit 2 ./dp$exe stats
+stderr '^dp: error: stdin: array length 0 is below minItems 1$'
+
+# An output file is written whole, refused when it exists, replaced with --force; - is stdout.
+exec ./dp$exe convert doc.json -o out.json -t compact
+cmp out.json want-compact.json
+wantexit 2 ./dp$exe convert doc.json -o out.json
+stderr 'out\.json'
+exec ./dp$exe convert doc.json -o out.json --force
+cmp out.json want-pretty.json
+stdin doc.json
+exec ./dp$exe convert - -t compact
+cmp stdout want-compact.json
+wantexit 2 ./dp$exe convert doc.json -o nodir/out.json
+! exists nodir
+
+# The reporter's codes: 1 for a plain error, the handler's own code, 70 for an internal error
+# and for a panic, whose teardown still runs leaf first.
+wantexit 1 ./dp$exe fail
+stderr '^dp: error: plain failure$'
+wantexit 7 ./dp$exe fail --code 7
+stderr '^dp: warning: failing on purpose$'
+wantexit 70 ./dp$exe fail --internal
+wantexit 70 ./dp$exe fail --panic --trace
+cmp stderr want-panic.txt
+wantexit 2 ./dp$exe fail --code 300
+stderr '^dp: error: --code must be <= 255 \(got 300\)$'
+
+# Ctrl-C while the output file is open: teardown runs, the reporter says so, the run exits 130
+# and no file is left behind.
+[!unix] stop 'the rest sends SIGINT'
+exec ./kicker$exe writing ./dp$exe slow slow.txt --for 1m --trace
+cmp stdout want-interrupt.txt
+! exists slow.txt
+-- args.rsp --
+count
+f1.txt
+# comment
+
+--match
+b
+-- bad.jsonl --
+{"value":1}
+
+{"label":"x"}
+{"value":3}
+-- badtype.jsonl --
+{"value":"x"}
+-- doc.json --
+{"b": [1, 2], "a": "x"}
+-- dp.go.txt --
+package dp
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dpHandler)(nil)
+
+type dpHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+}
+
+func (*dpHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	trace(rtx, "root CascadingPostRun")
+}
+
+func (*dpHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	trace(rtx, "root CascadingPreRun")
+	argv, err := rtx.ArgvInputs[DpInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	inputs := argv.Values
+
+	if inputs.Dp.Flags.Help {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		rtx.HaltWithCode(0)
+		return
+	}
+
+	if inputs.Dp.Flags.Version {
+		version := rtx.Version()
+		if version == "" {
+			version = "unknown"
+		}
+
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+
+		rtx.HaltWithCode(0)
+		return
+	}
+}
+
+func (*dpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[DpInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+}
+-- dp_convert.go.txt --
+package dp
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dpConvertHandler)(nil)
+
+type dpConvertHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dpConvertHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[DpConvertInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	in := inputs.DpConvert
+	src, err := rotini.OpenInput(rtx, in.Arguments.Input)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	data, err := io.ReadAll(src)
+	src.Close()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	var doc any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		rtx.HaltWith(rotini.UsageError(err))
+		return
+	}
+	out, err := rotini.CreateOutput(rtx, in.Flags.Out, rotini.Overwrite(in.Flags.Force))
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	defer out.Abort()
+	enc := json.NewEncoder(out)
+	if in.Flags.To == "pretty" {
+		enc.SetIndent("", "  ")
+	}
+	if err := enc.Encode(doc); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	rtx.HaltWith(out.Close())
+}
+-- dp_count.go.txt --
+package dp
+
+import (
+	"bufio"
+	"context"
+	"iter"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dpCountHandler)(nil)
+
+type dpCountHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dpCountHandler) PreRun(ctx context.Context, rtx *rotini.Context) {
+	trace(rtx, "count PreRun")
+}
+
+func (*dpCountHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[DpCountInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	in := inputs.DpCount
+	var out DpCountOutput
+	count := func(lines iter.Seq2[string, error]) error {
+		for line, err := range lines {
+			if err != nil {
+				return err
+			}
+			out.Lines++
+			if in.Flags.Match != nil && in.Flags.Match.MatchString(line) {
+				out.Matched++
+			}
+		}
+		return nil
+	}
+	files := in.Arguments.Files
+	if len(files) == 0 {
+		files = []string{"-"}
+	}
+	for _, name := range files {
+		lines := in.Stdin
+		if name != "-" {
+			f, err := rotini.OpenInput(rtx, name)
+			if err != nil {
+				rtx.HaltWith(err)
+				return
+			}
+			defer f.Close()
+			sc := bufio.NewScanner(f)
+			lines = func(yield func(string, error) bool) {
+				for sc.Scan() {
+					if !yield(sc.Text(), nil) {
+						return
+					}
+				}
+				if err := sc.Err(); err != nil {
+					yield("", err)
+				}
+			}
+		}
+		if lines == nil {
+			continue // stdin is a terminal
+		}
+		if err := count(lines); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+	rtx.HaltWith(rtx.WriteOutput(out, "json", nil))
+}
+-- dp_fail.go.txt --
+package dp
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dpFailHandler)(nil)
+
+type dpFailHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dpFailHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[DpFailInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := inputs.DpFail.Flags
+	switch {
+	case f.Panic:
+		panic("boom")
+	case f.Internal:
+		rtx.HaltWith(rotini.InternalError(errors.New("the index is corrupt")))
+	case f.Code != 0:
+		rtx.RecordWarning(errors.New("failing on purpose"))
+		rtx.HaltWithCode(f.Code)
+	default:
+		rtx.HaltWith(errors.New("plain failure"))
+	}
+}
+
+func (*dpFailHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+	trace(rtx, "fail PostRun")
+}
+-- dp_slow.go.txt --
+package dp
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dpSlowHandler)(nil)
+
+type dpSlowHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dpSlowHandler) PreRun(ctx context.Context, rtx *rotini.Context) {
+	trace(rtx, "slow PreRun")
+}
+
+func (*dpSlowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[DpSlowInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	in := inputs.DpSlow
+	out, err := rotini.CreateOutput(rtx, in.Arguments.Out, rotini.Overwrite(true))
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintln(out, "started")
+	fmt.Fprintln(rtx.Stderr, "writing", in.Arguments.Out)
+	select {
+	case <-ctx.Done():
+		rtx.HaltWith(ctx.Err())
+		return
+	case <-time.After(in.Flags.For):
+	}
+	fmt.Fprintln(out, "finished")
+	rtx.HaltWith(out.Close())
+}
+
+func (*dpSlowHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, "slow PostRun: cleaned up")
+}
+-- dp_stats.go.txt --
+package dp
+
+import (
+	"context"
+	"fmt"
+	"slices"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dpStatsHandler)(nil)
+
+type dpStatsHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dpStatsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[DpStatsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if inputs.DpStats.Stdin == nil {
+		rtx.HaltWith(rotini.UsageError(errNoStdin))
+		return
+	}
+	xs := *inputs.DpStats.Stdin
+	sum := 0.0
+	for _, x := range xs {
+		sum += x
+	}
+	fmt.Fprintf(rtx.Stdout, "n=%d min=%g max=%g mean=%g\n", len(xs), slices.Min(xs), slices.Max(xs), sum/float64(len(xs)))
+}
+-- dp_sum.go.txt --
+package dp
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*dpSumHandler)(nil)
+
+type dpSumHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*dpSumHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[DpSumInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if inputs.DpSum.Stdin == nil {
+		rtx.HaltWith(rotini.UsageError(errNoStdin))
+		return
+	}
+	var out DpSumOutput
+	for rec, err := range inputs.DpSum.Stdin {
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		out.N++
+		out.Total += rec.Value
+		if err := rtx.WriteOutputItem(out, "json", nil); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+}
+-- empty.txt --
+
+-- f1.txt --
+a
+bb
+ab
+-- kick.go.txt --
+// kick runs a command, waits until its stderr prints a line containing a word, sends it SIGINT,
+// and prints its exit code and the rest of what it wrote to stderr.
+package main
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+func main() {
+	word := os.Args[1]
+	cmd := exec.Command(os.Args[2], os.Args[3:]...)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		panic(err)
+	}
+	cmd.Stdout = os.Stdout
+	if err := cmd.Start(); err != nil {
+		panic(err)
+	}
+	sc := bufio.NewScanner(stderr)
+	sent := false
+	for sc.Scan() {
+		fmt.Println("stderr:", sc.Text())
+		if !sent && strings.Contains(sc.Text(), word) {
+			cmd.Process.Signal(os.Interrupt)
+			sent = true
+		}
+	}
+	err = cmd.Wait()
+	code := 0
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		code = ee.ExitCode()
+	}
+	fmt.Println("exit", code)
+}
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.json --config ./.rotini.conf.json
+package main
+
+import (
+	cmd "example.com/data/internal/cmd/dp"
+)
+
+// go build -ldflags "-X main.version=1.2.3" ./cmd/...
+var version = "0.0.0"
+
+func main() {
+	cmd.NewProgram().
+		WithVersion(version).
+		WithReporter(cmd.Report).
+		Execute()
+}
+-- nonumbers.json --
+[]
+-- numbers.json --
+[1, 3, 4]
+-- records.jsonl --
+{"value":1}
+
+{"value":2.5,"label":"x"}
+{"value":-0.5}
+-- report.go.txt --
+package dp
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+
+	"github.com/go-rotini/rotini"
+)
+
+var errNoStdin = errors.New("pipe the data on stdin")
+
+// trace prints a line for a hook when --trace (or DP_TRACE) is on, read from the command line
+// and environment only.
+func trace(rtx *rotini.Context, what string) {
+	if slices.Contains(rtx.Argv, "--trace") || envIs(rtx, "DP_TRACE", "1") {
+		fmt.Fprintln(rtx.Stderr, "trace:", what)
+	}
+}
+
+func envIs(rtx *rotini.Context, name, want string) bool {
+	v, _ := rtx.LookupEnv(name)
+	return v == want
+}
+
+// Report prints every record with a "dp:" prefix and exits 2 for a usage error, 70 for a bug
+// or a panic, and 1 otherwise, keeping a signal's 128+n and a handler's own code.
+func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, w := range out.Warnings {
+		fmt.Fprintln(rtx.Stderr, "dp: warning:", w)
+	}
+	if ctx.Err() != nil {
+		fmt.Fprintln(rtx.Stderr, "dp: interrupted")
+		return
+	}
+	for _, err := range out.Errors {
+		fmt.Fprintln(rtx.Stderr, "dp: error:", err)
+	}
+	for _, p := range out.Panics {
+		fmt.Fprintln(rtx.Stderr, "dp: crash:", p.Value)
+	}
+	switch {
+	case len(out.Panics) > 0:
+		rtx.Exit(DpExitInternal)
+	case len(out.Errors) == 0:
+	case rotini.CategoryOf(out.Errors[0]) == rotini.CategoryUsage:
+		fmt.Fprintf(rtx.Stderr, "dp: run '%s --help' for usage\n", rtx.CommandPath())
+		rtx.Exit(DpExitUsage)
+	case rotini.CategoryOf(out.Errors[0]) == rotini.CategoryInternal:
+		rtx.Exit(DpExitInternal)
+	default:
+		rtx.Exit(DpExitFailed)
+	}
+}
+-- spec.json --
+{
+  "$schema": "./.rotini-schema.spec.json",
+  "version": "0.0.0",
+  "command": {
+    "name": "dp",
+    "summary": "a small data pipeline",
+    "description": "dp counts, converts and sums data from files and stdin.",
+    "response_files": { "prefix": "@" },
+    "schemas": {
+      "Record": {
+        "type": "object",
+        "description": "One measurement.",
+        "required": ["value"],
+        "properties": { "value": { "type": "number" }, "label": { "type": "string" } }
+      }
+    },
+    "exit_status": [
+      { "code": 1, "name": "failed", "summary": "something failed" },
+      { "code": 2, "name": "usage", "summary": "the command line was wrong" },
+      { "code": 70, "name": "internal", "summary": "a bug" }
+    ],
+    "flags": [
+      { "name": "help", "identifiers": ["-h", "--help"], "summary": "print help", "cascading": true, "short_circuit": true, "schema": { "type": "bool" } },
+      { "name": "version", "identifiers": ["--version"], "summary": "print version", "cascading": true, "short_circuit": true, "schema": { "type": "bool" } },
+      { "name": "trace", "identifiers": ["--trace"], "summary": "print each hook as it runs", "cascading": true, "schema": { "type": "bool", "variable": "DP_TRACE" } }
+    ],
+    "commands": [
+      { "name": "help", "summary": "print help", "arguments": [ { "name": "command", "schema": { "type": "[]string", "complete": { "kind": "command" } } } ] },
+      { "name": "version", "summary": "print version" },
+      {
+        "name": "count",
+        "summary": "count lines",
+        "arguments": [
+          { "name": "files", "summary": "files to read", "schema": { "type": "[]inputfile" } }
+        ],
+        "flags": [
+          { "name": "match", "identifiers": ["-m", "--match"], "summary": "count only lines matching", "schema": { "type": "regexp" } }
+        ],
+        "stdin": { "format": "lines", "stream": true, "unless_argument": "files" },
+        "output": {
+          "type": "object",
+          "required": ["lines"],
+          "properties": { "lines": { "type": "integer" }, "matched": { "type": "integer" } }
+        }
+      },
+      {
+        "name": "convert",
+        "summary": "convert a JSON document",
+        "arguments": [
+          { "name": "input", "summary": "the document", "schema": { "type": "inputfile", "required": true } }
+        ],
+        "flags": [
+          { "name": "to", "identifiers": ["-t", "--to"], "summary": "the format to write", "schema": { "type": "string", "default": "pretty", "enum": ["pretty", "compact"] } },
+          { "name": "out", "identifiers": ["-o", "--out"], "summary": "where to write", "schema": { "type": "outputfile", "default": "-" } },
+          { "name": "force", "identifiers": ["-f", "--force"], "summary": "replace an existing file", "role": "force", "schema": { "type": "bool" } }
+        ]
+      },
+      {
+        "name": "sum",
+        "summary": "sum the values of JSON lines",
+        "stdin": {
+          "format": "jsonl",
+          "stream": true,
+          "schema": { "$ref": "#/schemas/Record", "required": true }
+        },
+        "output_stream": true,
+        "output": {
+          "type": "object",
+          "required": ["n", "total"],
+          "properties": { "n": { "type": "integer" }, "total": { "type": "number" } }
+        }
+      },
+      {
+        "name": "stats",
+        "summary": "describe a JSON array of numbers",
+        "stdin": { "format": "json", "schema": { "type": "array", "items": { "type": "number" }, "minItems": 1, "required": true } }
+      },
+      {
+        "name": "slow",
+        "summary": "write a file slowly",
+        "arguments": [
+          { "name": "out", "summary": "the file", "schema": { "type": "outputfile", "required": true } }
+        ],
+        "flags": [
+          { "name": "for", "identifiers": ["--for"], "summary": "how long", "schema": { "type": "duration", "default": "10s" } }
+        ]
+      },
+      {
+        "name": "fail",
+        "summary": "fail on purpose",
+        "flags": [
+          { "name": "code", "identifiers": ["--code"], "summary": "exit with this code", "schema": { "type": "int", "minimum": 0, "maximum": 255 } },
+          { "name": "panic", "identifiers": ["--panic"], "summary": "panic instead", "schema": { "type": "bool" } },
+          { "name": "internal", "identifiers": ["--internal"], "summary": "fail with an internal error", "schema": { "type": "bool" } }
+        ]
+      }
+    ]
+  }
+}
+-- want-compact.json --
+{"a":"x","b":[1,2]}
+-- want-interrupt.txt --
+stderr: trace: root CascadingPreRun
+stderr: trace: slow PreRun
+stderr: writing slow.txt
+stderr: slow PostRun: cleaned up
+stderr: trace: root CascadingPostRun
+stderr: dp: interrupted
+exit 130
+-- want-panic.txt --
+trace: root CascadingPreRun
+trace: fail PostRun
+trace: root CascadingPostRun
+dp: crash: boom
+-- want-pretty.json --
+{
+  "a": "x",
+  "b": [
+    1,
+    2
+  ]
+}
+-- want-sum.jsonl --
+{"n":1,"total":1}
+{"n":2,"total":3.5}
+{"n":3,"total":3}
+-- dp_test.go.txt --
+package dp
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/rotinitest"
+)
+
+func TestCountFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("ab\nb\nab\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var in DpCountInputs
+	in.DpCount.Arguments.Files = []string{"a.txt"}
+	in.DpCount.Flags.Match = mustRegexp(t, "a")
+	res := rotinitest.Run(t, NewProgram().WithReporter(Report), in, rotinitest.Dir(dir))
+	rotinitest.ExitDocumented(t, res)
+	if out := rotinitest.Output[DpCountOutput](t, res); out.Lines != 3 || out.Matched != 2 {
+		t.Errorf("count = %+v (argv %q)", out, res.Argv)
+	}
+}
+
+func TestSumStdin(t *testing.T) {
+	t.Parallel()
+	var in DpSumInputs
+	res := rotinitest.Run(t, NewProgram().WithReporter(Report), in,
+		rotinitest.Stdin(strings.NewReader("{\"value\":2}\n{\"value\":3}\n")))
+	items, err := rotini.DecodeOutput[[]DpSumOutput](NewProgram(), res.Stdout, "json")
+	if err != nil || len(items) != 2 || items[1].Total != 5 {
+		t.Errorf("items = %+v, %v", items, err)
+	}
+}
+
+func TestUsageExitCode(t *testing.T) {
+	t.Parallel()
+	var stderr bytes.Buffer
+	code, err := NewProgram().WithReporter(Report).WithStderr(&stderr).Run([]string{"fail", "--code", "300"})
+	if code != 2 || err == nil || !strings.Contains(stderr.String(), "dp: run 'dp fail --help' for usage") {
+		t.Errorf("code %d, err %v, stderr %q", code, err, stderr.String())
+	}
+}
+-- helpers_test.go.txt --
+package dp
+
+import (
+	"regexp"
+	"testing"
+)
+
+func mustRegexp(t *testing.T, s string) *regexp.Regexp {
+	t.Helper()
+	return regexp.MustCompile(s)
+}

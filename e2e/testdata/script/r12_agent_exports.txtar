@@ -1,0 +1,381 @@
+# R12 — what agents are offered, derived from the spec: which commands become tools (a hidden
+# group's children only with `agent: true`, a mounted child's commands included, a command with
+# sub-commands only when it declares arguments), which inputs become parameters, the input
+# schemas (enums of numbers as numbers, bounds, defaults exactly as declared), the JSON flag
+# added to calls, the MCP annotations from effects, the server's environment, and the skill
+# page naming only the preview, confirm and JSON flags and the variables agents are offered.
+
+gomodinit example.com/ops
+
+exec rotini generate cmd/ops/.rotini.spec.yaml --config cmd/ops/.rotini.conf.yaml
+stderr 'tools: "ops login" is left out of the tool definitions: its required flag "password" is a secret, which a tool never passes on the command line; declare `variable:` so the server''s environment can supply it'
+stderr 'tools: "ops get" is left out of openai.json: it has a map or free-form object parameter'
+
+# The destructive-command warning counts only the preview and confirm flags agents are offered:
+# wipe's are hidden and `agent: false`.
+stderr 'command ops/wipe: is destructive but agents are offered none of its `role: dry-run` or `role: confirm` flags'
+! stderr 'command ops/apply: is destructive'
+
+# Tools: commands that run, the mounted child's, and the hidden ones that say `agent: true`.
+grep '"name": "ops_get"' tools/mcp.json
+grep '"name": "ops_kid_ping"' tools/mcp.json
+grep '"path": \[\n\s+"kid",\n\s+"ping"\n\s+\]' tools/mcp.json
+grep '"name": "ops_internal_trace"' tools/mcp.json
+grep '"name": "ops_hush"' tools/mcp.json
+! grep '"name": "ops_internal_dump"' tools/mcp.json
+! grep '"name": "ops_internal"' tools/mcp.json
+! grep '"name": "ops_db"' tools/mcp.json
+! grep '"name": "ops_db_drop"' tools/mcp.json
+! grep '"name": "ops_exec"' tools/mcp.json
+! grep '"name": "ops_mcp"' tools/mcp.json
+! grep '"name": "ops_login"' tools/mcp.json
+grep 'Requires OPS_TOKEN in the server''s environment' tools/mcp.json
+
+# A command with sub-commands that declares arguments runs, so it is a tool beside its
+# sub-commands, and is on the skill page and in llms.txt; `agent: false` still keeps one out,
+# and the root, with sub-commands and no arguments, only prints help.
+grep '"name": "ops_repo"' tools/mcp.json
+grep '"name": "ops_repo_list"' tools/mcp.json
+grep '"path": \[\n\s+"repo"\n\s+\],\n\s+"arguments": \[\n\s+\{\n\s+"name": "name"' tools/mcp.json
+grep '"name": "ops_repo"' tools/openai.json
+grep '"name": "ops_repo"' tools/gemini.json
+! grep '"name": "ops_team' tools/mcp.json
+! grep '"name": "ops",' tools/mcp.json
+grep '^- `ops repo`: show a repository \(read\)$' skills/ops/SKILL.md
+grep '^## `ops repo`$' skills/ops/SKILL.md
+exists skills/ops/references/ops-repo.md
+! grep 'ops team' skills/ops/SKILL.md
+grep '^- \[ops repo\]\(https://ops.example.com/ops-repo.md\): show a repository$' llms.txt
+! grep 'ops team' llms.txt
+
+# Parameters: the hidden, `agent: false` and `from:` flags, and hidden and deprecated enum
+# values, are left out; the JSON flag is added to every call.
+! grep '"(verbose|shy|key-file|token|json)": \{' tools/mcp.json
+grep '"fixed": \[\n\s+"--json"\n\s+\]' tools/mcp.json
+
+# A JSON flag with `agent: false` is never added to a call, nor named on the skill page; a
+# hidden one still is.
+grep '"path": \[\n\s+"stats"\n\s+\]\n\s+\}' tools/mcp.json
+grep '"path": \[\n\s+"tally"\n\s+\],\n\s+"fixed": \[\n\s+"--json"\n\s+\]' tools/mcp.json
+! grep '## `ops stats`\n\nshow stats\n+- Effects: read\n- JSON output' skills/ops/SKILL.md
+grep '## `ops tally`\n\ncount things\n+- Effects: read\n- JSON output: add `--json`' skills/ops/SKILL.md
+grep '"enum": \[\n\s+"pod",\n\s+"node",\n\s+"svc"\n\s+\]' tools/mcp.json
+! grep 'secret-kind|"old"|"service"' tools/mcp.json
+
+# Schemas: an int enum is numbers, a float list's items too, and a default past float64's
+# precision is written as declared; bounds and lengths are kept.
+grep '"default": 2,\n\s+"description": "a level",\n\s+"enum": \[\n\s+1,\n\s+2,\n\s+3\n\s+\],\n\s+"type": "integer"' tools/mcp.json
+grep '"items": \{\n\s+"enum": \[\n\s+0.5,\n\s+1\n\s+\],\n\s+"type": "number"' tools/mcp.json
+grep '"default": 18446744073709551615,' tools/mcp.json
+grep '"maximum": 100,\n\s+"minimum": 1,' tools/mcp.json
+grep '"exclusiveMaximum": 1,\n\s+"exclusiveMinimum": 0,\n\s+"multipleOf": 0.1,' tools/mcp.json
+grep '"maxLength": 20,\n\s+"minLength": 2,\n\s+"pattern": "\^\[a-z\]\+\$",' tools/mcp.json
+grep '"description": "a day",\n\s+"format": "date",' tools/mcp.json
+grep '"negated": "--no-cache"' tools/mcp.json
+grep 'a big number. default: 18446744073709551615\.' tools/gemini.json
+! grep '18446744073709552000' tools/mcp.json
+
+# Annotations follow effects: a flag's raise its command's, and a command without effects has
+# none, which clients read as the worst case.
+grep '"annotations": \{\n\s+"idempotentHint": true,\n\s+"openWorldHint": false,\n\s+"readOnlyHint": true\n\s+\},\n\s+"description": "get a thing' tools/mcp.json
+grep '"annotations": \{\n\s+"destructiveHint": true,\n\s+"readOnlyHint": false\n\s+\},\n\s+"description": "apply changes' tools/mcp.json
+grep '"annotations": \{\n\s+"destructiveHint": true,\n\s+"idempotentHint": false,\n\s+"openWorldHint": true,\n\s+"readOnlyHint": false\n\s+\},\n\s+"description": "wipe everything' tools/mcp.json
+grep '"annotations": \{\n\s+"destructiveHint": false,\n\s+"idempotentHint": true,\n\s+"readOnlyHint": false\n\s+\},\n\s+"description": "migrate' tools/mcp.json
+grep '"annotations": \{\n\s+"openWorldHint": true,\n\s+"readOnlyHint": true\n\s+\},\n\s+"description": "ping it' tools/mcp.json
+! grep '"annotations": \{[^}]*\},\n\s+"description": "trace' tools/mcp.json
+
+# The skill page names the confirm flag agents are offered, never a hidden or `agent: false` one.
+grep 'Confirm without a prompt: `--yes`' skills/ops/SKILL.md
+
+# The environment: a visible env input and a hidden one with `agent: true` are listed, the
+# others aren't; a tool's description names the required ones its server must supply.
+grep '^- `OPS_ENDPOINT`: the endpoint \(required\)$' skills/ops/SKILL.md
+grep '^- `OPS_DEBUG`: debug calls$' skills/ops/SKILL.md
+! grep 'OPS_TRACE|OPS_QUIET' skills/ops/SKILL.md
+
+# A flag's variable is listed with the flag it sets, a secret's by name only; a hidden or
+# `agent: false` flag's isn't.
+grep '^- `OPS_ZONE`: the zone \(sets `--zone`\)$' skills/ops/SKILL.md
+grep '^- `OPS_TOKEN`: the API token \(sets `--token`\) \(required\) \(secret: set it in the environment; never write it on the command line\)$' skills/ops/SKILL.md
+! grep 'OPS_VERBOSE|OPS_SHY' skills/ops/SKILL.md
+grep 'Requires OPS_ENDPOINT, OPS_TOKEN in the server''s environment' tools/mcp.json
+! grep '[-]-(preview|sure)' skills/ops/SKILL.md
+grep '^allowed-tools: "Bash\(ops get \*\) Bash\(ops stats \*\) Bash\(ops tally \*\) Bash\(ops hush \*\) Bash\(ops repo list \*\) Bash\(ops kid ping \*\)"$' skills/ops/SKILL.md
+
+# Permissions: the destructive flag asks, and the hidden group gets no rule. A command with
+# sub-commands gets none even when it is offered, since its rule would match them too.
+grep '"Bash\(ops apply \*--force\*\)"' agents/claude-settings.json
+! grep 'internal' agents/claude-settings.json
+grep '"Bash\(ops repo list \*\)"' agents/claude-settings.json
+! grep '"Bash\(ops repo \*\)"' agents/claude-settings.json
+grep 'match = \["ops repo list"\]' agents/ops.rules
+! grep '^    match = \["ops repo"\]' agents/ops.rules
+
+# A second generate writes nothing.
+exec rotini generate --dry-run cmd/ops/.rotini.spec.yaml --config cmd/ops/.rotini.conf.yaml
+
+-- cmd/ops/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: ops
+  summary: run operations
+  flags:
+    - name: json
+      summary: write JSON
+      cascading: true
+      role: machine-output
+      schema: {type: bool}
+    - name: token
+      summary: the API token
+      cascading: true
+      schema: {type: string, secret: true, required: true, variable: OPS_TOKEN}
+  env:
+    - name: region
+      summary: the region
+      schema: {type: string, required: true, variable: OPS_REGION}
+  commands:
+    - name: get
+      summary: get a thing
+      effects: {kind: read, idempotent: true, open_world: false}
+      output: {type: object, properties: {name: {type: string}}}
+      env:
+        - name: endpoint
+          summary: the endpoint
+          schema: {type: string, required: true, variable: OPS_ENDPOINT}
+        - name: trace
+          summary: trace calls
+          hidden: true
+          schema: {type: bool, variable: OPS_TRACE}
+        - name: debug
+          summary: debug calls
+          hidden: true
+          agent: true
+          schema: {type: bool, variable: OPS_DEBUG}
+        - name: quiet
+          summary: say less
+          agent: false
+          schema: {type: bool, variable: OPS_QUIET}
+      arguments:
+        - name: kind
+          summary: the kind
+          schema:
+            type: string
+            required: true
+            enum:
+              - pod
+              - {value: node, summary: a machine}
+              - {value: svc, aliases: [service]}
+              - {value: old, deprecated: use pod}
+              - {value: secret-kind, hidden: true}
+      flags:
+        - name: limit
+          summary: how many
+          schema: {type: int, minimum: 1, maximum: 100, default: 10}
+        - name: name
+          summary: name filter
+          schema: {type: string, pattern: '^[a-z]+$', minLength: 2, maxLength: 20}
+        - name: label
+          summary: labels
+          schema: {type: 'map[string]string'}
+        - name: tags
+          summary: tags
+          schema: {type: '[]string', minItems: 1, maxItems: 3, uniqueItems: true}
+        - name: ratio
+          summary: a ratio
+          schema: {type: float64, exclusiveMinimum: 0, exclusiveMaximum: 1, multipleOf: 0.1}
+        - name: since
+          summary: how far back
+          schema: {type: duration, default: 1h}
+        - name: at
+          summary: when
+          schema: {type: time}
+        - name: key-file
+          summary: a key file
+          schema: {type: string, from: [file]}
+        - name: verbose
+          summary: chatty
+          hidden: true
+          schema: {type: bool, variable: OPS_VERBOSE}
+        - name: shy
+          summary: kept out
+          agent: false
+          schema: {type: bool, variable: OPS_SHY}
+        - name: zone
+          summary: the zone
+          schema: {type: string, variable: OPS_ZONE}
+        - name: page
+          summary: the page
+          role: page
+          schema: {type: int}
+        - name: day
+          summary: a day
+          schema: {type: time, layout: '2006-01-02'}
+        - name: epoch
+          summary: an epoch
+          schema: {type: time, layout: unix}
+        - name: level
+          summary: a level
+          schema: {type: int, enum: ['1', '2', '3'], default: 2}
+        - name: ratios
+          summary: ratios
+          schema: {type: '[]float64', enum: ['0.5', '1'], separator: ';'}
+        - name: mode
+          summary: the mode
+          schema: {type: string, enum: [fast, slow], ignore_case: true}
+        - name: color
+          summary: colour
+          schema: {type: string, enum: [auto, always, never], implicit_value: always, default: auto}
+        - name: cache
+          summary: use the cache
+          schema: {type: bool, negatable: true, default: true}
+        - name: mask
+          summary: a mask
+          schema: {type: uint16, base: prefixed, maximum: 4095}
+        - name: size
+          summary: a size
+          schema: {type: int, nullable: true}
+        - name: big
+          summary: a big number
+          schema: {type: uint64, default: 18446744073709551615}
+    - name: apply
+      summary: apply changes
+      effects: {kind: write}
+      stdin: {format: json, schema: {type: object, properties: {items: {type: '[]string'}}}}
+      flags:
+        - name: force
+          summary: overwrite
+          effects: {kind: destructive}
+          schema: {type: bool}
+        - name: yes
+          summary: no prompt
+          role: confirm
+          schema: {type: bool}
+    - name: wipe
+      summary: wipe everything
+      effects: {kind: destructive, idempotent: false, open_world: true}
+      flags:
+        - name: preview
+          summary: preview
+          hidden: true
+          role: dry-run
+          schema: {type: bool}
+        - name: sure
+          summary: no prompt
+          agent: false
+          role: confirm
+          schema: {type: bool}
+    - name: login
+      summary: log in
+      effects: {kind: write}
+      flags:
+        - name: password
+          summary: the password
+          schema: {type: string, secret: true, required: true}
+    - name: db
+      summary: databases
+      commands:
+        - name: migrate
+          summary: migrate
+          effects: {kind: write, idempotent: true}
+        - name: drop
+          summary: drop
+          deprecated: use wipe
+          effects: {kind: destructive}
+    - name: internal
+      summary: internals
+      hidden: true
+      commands:
+        - name: dump
+          summary: dump
+        - name: trace
+          summary: trace
+          agent: true
+    - name: exec
+      summary: run anything
+      passthrough: true
+      arguments:
+        - {name: args, schema: {type: '[]string'}}
+    - name: mcp
+      summary: serve tools
+      agent: false
+    - name: stats
+      summary: show stats
+      effects: {kind: read}
+      output: {type: object, properties: {count: {type: integer}}}
+      flags:
+        - name: json
+          summary: write JSON
+          agent: false
+          role: machine-output
+          schema: {type: bool}
+    - name: tally
+      summary: count things
+      effects: {kind: read}
+      output: {type: object, properties: {count: {type: integer}}}
+      flags:
+        - name: json
+          summary: write JSON
+          hidden: true
+          role: machine-output
+          schema: {type: bool}
+    - name: hush
+      summary: secret command
+      hidden: true
+      agent: true
+      effects: {kind: read}
+    - name: repo
+      summary: show a repository
+      effects: {kind: read}
+      arguments:
+        - name: name
+          summary: the repository
+          schema: {type: string, required: true}
+      commands:
+        - name: list
+          summary: list repositories
+          effects: {kind: read}
+    - name: team
+      summary: show a team
+      agent: false
+      arguments:
+        - {name: name, schema: {type: string}}
+      commands:
+        - name: list
+          summary: list teams
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/ops/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/ops/main.go
+    - type: cmd
+      file: internal/cmd/ops/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+    - type: markdown
+      enabled: true
+    - type: tools
+      enabled: true
+      targets: [mcp, openai-strict, gemini]
+    - type: skill
+      enabled: true
+    - type: llms
+      enabled: true
+      base_url: https://ops.example.com/
+    - type: permissions
+      enabled: true
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: a child cli
+  commands:
+    - name: ping
+      summary: ping it
+      effects: {kind: read, open_world: true}
+      flags:
+        - name: count
+          summary: how many
+          schema: {type: int, default: 3}

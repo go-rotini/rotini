@@ -1,0 +1,305 @@
+# R13 — the guide's "Errors and exit codes" and "Handling errors in a handler": what a reporter
+# that doesn't exit leaves, rtx.Exit over a handler's code, the first code winning, recording
+# without stopping, categories and wrapping, the default panic line, and the guide's branching
+# block (branch.go.txt), byte for byte.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+concat internal/cmd/todo/todo_add.go add_head.go.txt branch.go.txt add_tail.go.txt
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+exec go build -o noexit$exe ./cmd/noexit
+exec go build -o override$exe ./cmd/override
+
+# The guide's branches: a missing input prints its own hint and exits 2; another usage error is
+# recorded for the default reporter and exits 2; a valid call runs.
+wantexit 2 ./todo$exe add
+cmp stderr missing.txt
+wantexit 2 ./todo$exe add --bogus x
+stderr '^Error: unknown flag "--bogus"$'
+exec ./todo$exe add milk
+stdout '^added milk$'
+
+# HaltWithCode records nothing, so nothing is printed; the first non-zero code wins, and a
+# teardown's code changes nothing.
+wantexit 2 ./todo$exe silent
+! stderr .
+wantexit 3 ./todo$exe first
+! stderr .
+
+# RecordError carries on: both errors are printed, the handler sees rtx.Failed, and the run
+# exits 1.
+wantexit 1 ./todo$exe multi
+stdout '^failed: true$'
+stderr '^Error: one$'
+stderr '^Error: two$'
+
+# Categories: parse errors are usage errors; the wrappers change only the category.
+exec ./todo$exe cat --n x
+cmp stdout cats.txt
+
+# A panic: teardown runs, the default reporter prints "Fatal Error: <value>" with no stack, and
+# the run exits 1.
+wantexit 1 ./todo$exe boom
+stdout '^teardown$'
+cmp stderr boom.txt
+
+# A reporter that doesn't exit: the run keeps a handler's code, and otherwise exits 0 even
+# though it failed. It prints only what it prints.
+wantexit 0 ./noexit$exe multi
+stderr '^reported 2 errors$'
+! stderr 'Error:'
+wantexit 4 ./noexit$exe keep
+stderr '^reported 1 errors$'
+
+# rtx.Exit in a reporter replaces the code a handler set.
+wantexit 9 ./override$exe keep
+
+-- missing.txt --
+missing required input: <title>
+Run 'todo add --help' for usage.
+-- boom.txt --
+Fatal Error: boom
+-- cats.txt --
+parse: usage
+usage: usage true
+internal: internal true
+plain: none
+-- add_head.go.txt --
+package todo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoAddHandler)(nil)
+
+type todoAddHandler struct{ rotini.NoHooks }
+
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+-- branch.go.txt --
+inputs, err := rtx.Inputs[TodoAddInputs]()
+if err != nil {
+	var pe *rotini.ParseError
+	switch {
+	case errors.As(err, &pe) && pe.Kind == rotini.ParseKindMissingRequired:
+		fmt.Fprintf(rtx.Stderr, "%s\nRun '%s --help' for usage.\n", err, rtx.CommandPath())
+		rtx.HaltWithCode(2)
+	case rotini.CategoryOf(err) == rotini.CategoryUsage:
+		rtx.RecordError(err)
+		rtx.HaltWithCode(2)
+	default:
+		rtx.HaltWith(err)
+	}
+	return
+}
+-- add_tail.go.txt --
+	fmt.Fprintln(rtx.Stdout, "added", inputs.TodoAdd.Arguments.Title)
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  commands:
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          schema: { type: string, required: true }
+    - name: silent
+      summary: exits 2 without an error
+    - name: first
+      summary: sets two codes
+    - name: multi
+      summary: records two errors
+    - name: keep
+      summary: records an error and sets 4
+    - name: cat
+      summary: prints categories
+      flags:
+        - name: n
+          identifiers: [--n]
+          schema: { type: int }
+    - name: boom
+      summary: panics
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+-- cmd/todo/main.go --
+package main
+
+import cmd "example.com/todo/internal/cmd/todo"
+
+func main() { cmd.NewProgram().Execute() }
+-- cmd/noexit/main.go --
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+	cmd "example.com/todo/internal/cmd/todo"
+)
+
+func main() {
+	cmd.NewProgram().WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+		fmt.Fprintf(rtx.Stderr, "reported %d errors\n", len(out.Errors))
+	}).Execute()
+}
+-- cmd/override/main.go --
+package main
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+	cmd "example.com/todo/internal/cmd/todo"
+)
+
+func main() {
+	cmd.NewProgram().WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+		if out.Failed() {
+			rtx.Exit(9)
+		}
+	}).Execute()
+}
+-- internal/cmd/todo/todo_silent.go --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoSilentHandler)(nil)
+
+type todoSilentHandler struct{ rotini.NoHooks }
+
+func (*todoSilentHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.HaltWithCode(2)
+}
+-- internal/cmd/todo/todo_first.go --
+package todo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoFirstHandler)(nil)
+
+type todoFirstHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoFirstHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.HaltWithCode(3)
+	rtx.HaltWithCode(5)
+}
+
+func (*todoFirstHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+	rtx.HaltWithCode(6)
+}
+-- internal/cmd/todo/todo_multi.go --
+package todo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoMultiHandler)(nil)
+
+type todoMultiHandler struct{ rotini.NoHooks }
+
+func (*todoMultiHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.RecordError(errors.New("one"))
+	rtx.RecordError(errors.New("two"))
+	fmt.Fprintln(rtx.Stdout, "failed:", rtx.Failed())
+}
+-- internal/cmd/todo/todo_keep.go --
+package todo
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoKeepHandler)(nil)
+
+type todoKeepHandler struct{ rotini.NoHooks }
+
+func (*todoKeepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.RecordError(errors.New("kept"))
+	rtx.HaltWithCode(4)
+}
+-- internal/cmd/todo/todo_cat.go --
+package todo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoCatHandler)(nil)
+
+type todoCatHandler struct{ rotini.NoHooks }
+
+func (*todoCatHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	_, perr := rtx.Inputs[TodoCatInputs]()
+	fmt.Fprintln(rtx.Stdout, "parse:", rotini.CategoryOf(perr))
+	base := errors.New("base")
+	u := rotini.UsageError(base)
+	fmt.Fprintln(rtx.Stdout, "usage:", rotini.CategoryOf(u), errors.Is(u, base))
+	i := rotini.InternalError(base)
+	fmt.Fprintln(rtx.Stdout, "internal:", rotini.CategoryOf(i), errors.Is(i, base))
+	fmt.Fprintln(rtx.Stdout, "plain:", rotini.CategoryOf(base))
+}
+-- internal/cmd/todo/todo_boom.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoBoomHandler)(nil)
+
+type todoBoomHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoBoomHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	panic("boom")
+}
+
+func (*todoBoomHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "teardown")
+}

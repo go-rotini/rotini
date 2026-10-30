@@ -115,7 +115,7 @@ func detectFormatKind(root *cfgedit.YAMLNode, name string) string {
 	switch {
 	case keys["command"]:
 		return FormatKindSpec
-	case keys["generate"] || keys["validate"]:
+	case keys["generate"] || keys["validate"] || keys["diff"]:
 		return FormatKindConf
 	case keys["name"] || keys["$ref"]:
 		return FormatKindCommand

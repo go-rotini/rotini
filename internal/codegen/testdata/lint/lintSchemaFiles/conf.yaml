@@ -1,7 +1,15 @@
-# generate.schemas paths are module-root-relative: one that climbs out of the module has
-# nowhere to be written, so validate refuses it before generate would.
+# The files rotini writes (schemas, the contract, generated packages) are module-root-relative:
+# one that climbs out of the module has nowhere to be written, so validate refuses it before
+# generate would. The spec and conf schemas each need a file of their own.
 version: 0.0.0
 generate:
   schemas:
     spec:
       file: ../../outside.spec.json
+    conf:
+      file: ../../outside.spec.json
+  contract:
+    file: ../contract.json
+  packages:
+    - type: cmd
+      file: ../cmd/demo/zz_rotini.go

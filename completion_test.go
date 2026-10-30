@@ -845,6 +845,30 @@ func TestPluginCompletion_directives(t *testing.T) {
 	}
 }
 
+// TestPluginCompletion_flagsAndUncompletedKinds pins NoSpace (+2) and KeepOrder (+32), and that
+// the kinds the hosts can't complete map to NoFileComp (4).
+func TestPluginCompletion_flagsAndUncompletedKinds(t *testing.T) {
+	write := func(r CompletionResult) string {
+		var out bytes.Buffer
+		if err := PluginCompletion(&out, r); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	for _, kind := range []string{"command", "executable", "user", "group", "host"} {
+		if got := write(CompletionResult{Hint: Completion{Kind: kind}}); got != ":4\n" {
+			t.Errorf("kind %s = %q, want :4", kind, got)
+		}
+	}
+	both := CompletionResult{Candidates: []CompletionCandidate{{Value: "a"}}, NoSpace: true, KeepOrder: true}
+	if got := write(both); got != "a\n:34\n" {
+		t.Errorf("NoSpace and KeepOrder = %q, want a then :34", got)
+	}
+	if got := write(CompletionResult{Hint: Completion{Kind: "directory"}, NoSpace: true}); got != ":18\n" {
+		t.Errorf("directory with NoSpace = %q, want :18", got)
+	}
+}
+
 // TestPluginCompletion_candidatesWinOverAFilteringHint pins that real candidates suppress the
 // file-extension (8) and directory (16) directives, whose candidates the hosts read as
 // arguments.

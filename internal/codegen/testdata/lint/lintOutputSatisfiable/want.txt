@@ -1,0 +1,7 @@
+spec: .rotini.spec.yaml:8:20: command demo: output: `required` names "nmae", which isn't one of its `properties`, so no output can pass; declare the property, or take it out of `required`; did you mean "name"?
+spec: .rotini.spec.yaml:17:34: command demo: output property "count": `const` 1.5 is a number, but the type is int, so no output can pass; make the `const` a value of the type, or change the type
+spec: .rotini.spec.yaml:22:22: command demo: output property "items[]": `required` names "missing", which isn't one of its `properties`, so no output can pass; declare the property, or take it out of `required`
+spec: .rotini.spec.yaml:24:41: command demo: output property "items[].ok": `const` "yes" is a string, but the type is boolean, so no output can pass; make the `const` a value of the type, or change the type
+spec: .rotini.spec.yaml:13:39: command demo: output property "version": `const` 3 is a whole number, but the type is string, so no output can pass; make the `const` a value of the type, or change the type
+spec: .rotini.spec.yaml:34:20: command demo: exit_status 3 output: `required` names "reason", which isn't one of its `properties`, so no output can pass; declare the property, or take it out of `required`
+spec: .rotini.spec.yaml:43:30: command demo/watch: output `oneOf` entry 1: `required` names "done", which isn't one of its `properties`, so no output can pass; declare the property, or take it out of `required`

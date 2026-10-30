@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"cmp"
 	"encoding"
 	"errors"
 	"fmt"
@@ -217,7 +218,7 @@ const (
 	ParseKindNeedsValue                    // a value-taking flag was given no value
 	ParseKindInvalidValue                  // a value could not be coerced/resolved (bad type, unreadable @file, malformed map, value on a no-value flag)
 	ParseKindEnumViolation                 // a value was not one of a declared enum's members
-	ParseKindConstraintViolation           // a declared bound or flag-group/dependency rule was violated
+	ParseKindConstraintViolation           // a declared bound, a no-repeat flag or a flag-group/dependency rule was violated
 	ParseKindMissingRequired               // a required flag or argument was absent
 	ParseKindNoArguments                   // a positional was given to a command that accepts none
 	ParseKindTooManyArguments              // more positionals than the command's declared (non-variadic) arity
@@ -321,8 +322,8 @@ func NewParser() *Parser {
 // positionals the fields around it leave. Parse does not consult env or config fallbacks;
 // [Context.Inputs] does.
 //
-// It returns a [*ParseError] when out is not a non-nil pointer, a flag is unknown or missing
-// its value, a value cannot be coerced, a required input is absent, a value falls outside a
+// It returns a [*ParseError] when out is not a non-nil pointer to a struct, a flag is unknown or
+// missing its value, a value cannot be coerced, a required input is absent, a value falls outside a
 // declared enum, or any declared constraint, flag group or flag dependency is violated. A check
 // the program's features do not wire is a [*WiringError].
 //
@@ -347,6 +348,9 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []Command, err
 		return nil, nil, err
 	}
 	v := reflect.ValueOf(out).Elem()
+	if v.Kind() != reflect.Struct {
+		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: fmt.Sprintf("rotini: Parse out argument must point to an inputs struct, not %s", v.Type())}
+	}
 	anchor := frameAnchor(v, chain, rtx.frameIndex())
 	if err := expandInputs(rtx.features(), v, chain, store, anchor, layerView(rtx, chain, v, store)); err != nil {
 		return nil, nil, err
@@ -619,7 +623,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 			// name belongs to one of its ancestors, never to it.
 			extra, err := consumeFlagToken(chain[:depth], tok, argv, i, addFlag)
 			if err != nil {
-				return nil, withRunCandidates(err, chain[:depth], leaf)
+				return nil, argvFlagError(err, chain, depth, store)
 			}
 			i += extra
 			noteDetached(store, chain[:depth], tok, argv, i)
@@ -658,6 +662,19 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 
 	store.expandGlobs(chain[leaf].Arguments, leaf, acq.goos)
 	return store, nil
+}
+
+// argvFlagError is the error for a flag token that failed to parse with the first depth
+// commands of chain reached. After a mistyped sub-command, flags are checked against the wrong
+// command, so the mistyped word is what is reported; a flag before it is reported as it is.
+func argvFlagError(err error, chain []Command, depth int, store *parsedInputs) error {
+	leaf := len(chain) - 1
+	if depth == len(chain) {
+		if stray := strayCommand(&chain[leaf], &store.scopes[leaf], store); stray != nil {
+			return stray
+		}
+	}
+	return withRunCandidates(err, chain[:depth], leaf)
 }
 
 // withRunCandidates narrows an unknown-flag error's candidates to the flags the run accepts,
@@ -856,6 +873,15 @@ func checkValueShape(typ, base, label, flag string, vals []string, secret bool) 
 	return nil
 }
 
+// winningValues is the part of a flag's argv values that binding keeps, and so the part its
+// checks apply to: every value of a repeatable flag, only the last of any other.
+func winningValues(fd *FlagDef, vals []string) []string {
+	if len(vals) < 2 || repeatableFlag(*fd) {
+		return vals
+	}
+	return vals[len(vals)-1:]
+}
+
 // checkFlagValues checks one flag's argv values against its enum, its key=value shape when it
 // is a map, and its constraints. label is the flag as the user typed it.
 func checkFlagValues(fd *FlagDef, label string, vals []string, dir string, clock *runClock) error {
@@ -940,7 +966,12 @@ func extraPositionals(chain []Command, si *scopeInputs, store *parsedInputs) err
 	}
 	hint := store.detachedHint(si.args[n:]) + store.lateFlagHint(si.args[n:]) // only a word that is one too many
 	if n == 0 {
-		return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%s takes no arguments (got %d)", pathOf(chain), len(si.args)) + hint, Command: leaf.Name}
+		word := redactValue(si.args[0], store.secretWord(si.args[0]))
+		got := strconv.Quote(word)
+		if more := len(si.args) - 1; more > 0 {
+			got += fmt.Sprintf(" and %d more", more)
+		}
+		return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%s takes no arguments, got %s", pathOf(chain), got) + hint, Command: leaf.Name, Token: word}
 	}
 	return &ParseError{Kind: ParseKindTooManyArguments, Msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", pathOf(chain), n, plural("argument", n), len(si.args)) + hint, Command: leaf.Name}
 }
@@ -984,10 +1015,11 @@ func validate(chain []Command, store *parsedInputs) error {
 				continue
 			}
 			var err error
+			vals := winningValues(fd, fsi.flags[fd.Name])
 			if waived {
-				err = checkFlagShape(fd, fsi.label(fd), fsi.flags[fd.Name])
+				err = checkFlagShape(fd, fsi.label(fd), vals)
 			} else if err = checkRepeat(fd, fsi.label(fd), fsi.flags[fd.Name], store.setOnArgv(i, fd.Name)); err == nil {
-				err = checkFlagValues(fd, fsi.label(fd), fsi.flags[fd.Name], store.dir, store.clock)
+				err = checkFlagValues(fd, fsi.label(fd), vals, store.dir, store.clock)
 			}
 			if err != nil {
 				return withSource(withWritten(scoped(err, f.Name, fsi.label(fd)), fsi.flags[fd.Name], fsi.written), fsi.origin[fd.Name])
@@ -1225,35 +1257,87 @@ func checkItemCount(label string, c Constraints, n int) error {
 }
 
 // checkNumericBounds enforces the numeric bounds on one value. An unparseable value is
-// skipped; coerce reports it.
-func checkNumericBounds(label string, c Constraints, v string, secret bool, parse func(string) (float64, bool), format func(float64) string) error {
+// skipped; coerce reports it. exact is the value in decimal when the input is an integer, so
+// it is compared exactly ([checkNumberBounds]); "" otherwise.
+func checkNumericBounds(label string, c Constraints, v, exact string, secret bool, parse func(string) (float64, bool), format func(float64) string) error {
 	n, numeric := parse(v)
 	if !numeric {
 		return nil
 	}
-	return checkNumberBounds(label, c, n, redactValue(v, secret), format)
+	return checkNumberBounds(label, c, n, exact, redactValue(v, secret), format)
 }
 
 // checkNumberBounds is the numeric rule core shared by the command-line path and
 // [Context.CheckInputs]: n is the value, got the text an error shows for it (already redacted
-// for a secret input), and format renders a bound. Declaring any bound also requires a finite
-// number, so NaN and ±Inf are rejected; an unbounded float accepts them.
-func checkNumberBounds(label string, c Constraints, n float64, got string, format func(float64) string) error {
+// for a secret input), and format renders a bound. exact is an integer input's value in
+// decimal, or "": a float64 holds whole numbers exactly only up to 2^53, so an integer is
+// compared with its bounds exactly. Declaring any bound also requires a finite number, so NaN
+// and ±Inf are rejected; an unbounded float accepts them.
+func checkNumberBounds(label string, c Constraints, n float64, exact, got string, format func(float64) string) error {
+	below := func(b *float64) bool { return b != nil && boundCmp(n, exact, *b) < 0 }
+	above := func(b *float64) bool { return b != nil && boundCmp(n, exact, *b) > 0 }
 	switch {
 	case hasNumericBounds(c) && (math.IsNaN(n) || math.IsInf(n, 0)):
 		return constraintViolation("%s must be a finite number (got %s)", label, got)
-	case c.Minimum != nil && n < *c.Minimum:
+	case below(c.Minimum):
 		return constraintViolation("%s must be >= %s (got %s)", label, format(*c.Minimum), got)
-	case c.Maximum != nil && n > *c.Maximum:
+	case above(c.Maximum):
 		return constraintViolation("%s must be <= %s (got %s)", label, format(*c.Maximum), got)
-	case c.ExclusiveMinimum != nil && n <= *c.ExclusiveMinimum:
+	case c.ExclusiveMinimum != nil && !above(c.ExclusiveMinimum):
 		return constraintViolation("%s must be > %s (got %s)", label, format(*c.ExclusiveMinimum), got)
-	case c.ExclusiveMaximum != nil && n >= *c.ExclusiveMaximum:
+	case c.ExclusiveMaximum != nil && !below(c.ExclusiveMaximum):
 		return constraintViolation("%s must be < %s (got %s)", label, format(*c.ExclusiveMaximum), got)
-	case c.MultipleOf != nil && !isMultipleOf(n, *c.MultipleOf):
+	case c.MultipleOf != nil && !multipleOf(n, exact, *c.MultipleOf):
 		return constraintViolation("%s must be a multiple of %s (got %s)", label, format(*c.MultipleOf), got)
 	}
 	return nil
+}
+
+// boundCmp compares a value with the bound b, -1, 0 or +1: the decimal integer exact when it
+// is one that fits 64 bits, else n.
+func boundCmp(n float64, exact string, b float64) int {
+	if i, err := strconv.ParseInt(exact, 10, 64); err == nil {
+		switch {
+		case b >= 0x1p63:
+			return -1
+		case b < -0x1p63:
+			return 1
+		}
+		return cmpTrunc(cmp.Compare(i, int64(math.Trunc(b))), b)
+	}
+	if u, err := strconv.ParseUint(exact, 10, 64); err == nil { // above the int64 range
+		switch {
+		case b >= 0x1p64:
+			return -1
+		case b < 0x1p63:
+			return 1
+		}
+		return cmpTrunc(cmp.Compare(u, uint64(math.Trunc(b))), b)
+	}
+	return cmp.Compare(n, b)
+}
+
+// cmpTrunc finishes comparing an integer with b once c compares it with b's whole part: equal
+// whole parts leave b's fraction to decide.
+func cmpTrunc(c int, b float64) int {
+	if c != 0 {
+		return c
+	}
+	return cmp.Compare(math.Trunc(b), b)
+}
+
+// multipleOf reports whether a value is a multiple of m: exactly for the decimal integer exact
+// when m is a whole number, else as [isMultipleOf] reads n.
+func multipleOf(n float64, exact string, m float64) bool {
+	if m >= 1 && m < 0x1p63 && m == math.Trunc(m) {
+		if i, err := strconv.ParseInt(exact, 10, 64); err == nil {
+			return i%int64(m) == 0
+		}
+		if u, err := strconv.ParseUint(exact, 10, 64); err == nil {
+			return u%uint64(m) == 0
+		}
+	}
+	return isMultipleOf(n, m)
 }
 
 // hasNumericBounds reports whether c declares any numeric bound.
@@ -1261,10 +1345,10 @@ func hasNumericBounds(c Constraints) bool {
 	return c.Minimum != nil || c.Maximum != nil || c.ExclusiveMinimum != nil || c.ExclusiveMaximum != nil || c.MultipleOf != nil
 }
 
-// parseNumber reports whether v is a number, and its value.
+// parseNumber reports whether v is a number, and its value: a decimal one, or inf or nan.
 func parseNumber(v string) (float64, bool) {
 	n, err := strconv.ParseFloat(v, 64)
-	return n, err == nil
+	return n, err == nil && plainFloatText(v)
 }
 
 // checkStringBounds enforces the length and pattern bounds on one value. A secret's length is
@@ -1365,7 +1449,8 @@ func coveredFrame(chain []Command, store *parsedInputs, has func(*Command) bool)
 
 // validateFlagGroups enforces each command's cross-flag presence rules. Set means explicitly
 // provided on argv (a default or fallback does not count), read from the store's argvSet so
-// flags inside short clusters count.
+// flags inside short clusters count. A flag that is set is named as the user typed it (-4 in
+// -46), any other by its canonical identifier.
 func validateFlagGroups(chain []Command, store *parsedInputs) error {
 	for i := range chain {
 		if !store.covers(i) {
@@ -1376,14 +1461,13 @@ func validateFlagGroups(chain []Command, store *parsedInputs) error {
 			all := make([]string, 0, len(g.Flags))
 			var set []string
 			for _, name := range g.Flags {
-				label := "--" + name
-				if fd, ok := findFlagDef(f.Flags, name); ok {
-					label = flagLabel(fd)
-				}
-				all = append(all, label)
 				if store.setOnArgv(i, name) {
+					label := typedRuleLabel(f, &store.scopes[i], name)
+					all = append(all, label)
 					set = append(set, label)
+					continue
 				}
+				all = append(all, dependencyLabel(f, name))
 			}
 			if err := checkFlagGroup(g.Kind, set, all); err != nil {
 				return scoped(err, f.Name, "")
@@ -1498,8 +1582,9 @@ func isArrayType(typ string) bool { return strings.HasPrefix(typ, "[]") }
 // key=value pairs.
 func isMapType(typ string) bool { return strings.HasPrefix(typ, "map[") }
 
-// formatNum renders a numeric bound without a trailing ".000…".
-func formatNum(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
+// formatNum renders a numeric bound exactly, in plain decimal: the shortest digits that read
+// back as it, with no exponent and no trailing ".000…" (9007199254740992, 0.0000001).
+func formatNum(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 
 // flagDefaults returns the occurrences a flag's declared default seeds when the user supplied
 // none: the single Default, else every element of Defaults. Both empty means no default, so
@@ -1667,6 +1752,12 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 	switch {
 	case strings.HasPrefix(value, "@@") && slices.Contains(from, "file"):
 		return value[1:], nil // a doubled @ is one literal @: @@alice is the value @alice
+	case value == "@" && slices.Contains(from, "file"):
+		return "", &ParseError{
+			Kind: ParseKindInvalidValue,
+			Msg:  label + `: "@" names no file; write @path to read a file, or @@ for a literal @`,
+			Flag: flag, Token: value,
+		}
 	case strings.HasPrefix(value, "@") && slices.Contains(from, "file"):
 		path := joinDir(acq.dir, value[1:])
 		data, err := readValueFile(path)
@@ -2593,7 +2684,7 @@ func coerceNumber(f reflect.Value, last string) error {
 		f.SetUint(n)
 	case reflect.Float32, reflect.Float64:
 		x, err := strconv.ParseFloat(last, 64)
-		if err != nil {
+		if err != nil || !plainFloatText(last) {
 			return notValid(last, "number")
 		}
 		if f.OverflowFloat(x) {

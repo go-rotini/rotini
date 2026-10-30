@@ -1,0 +1,35 @@
+# A required flag or argument that help doesn't show, or that tells the user to stop using it.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Hidden: every run must pass it, but help doesn't show it.
+    - name: token
+      hidden: true
+      schema: { type: string, required: true }
+    # Deprecated: passing it reports the deprecation, yet every run must.
+    - name: region
+      deprecated: use --zone
+      schema: { type: string, required: true }
+    # Both: two warnings.
+    - name: legacy
+      hidden: true
+      deprecated: gone soon
+      schema: { type: string, required: true }
+    # Correct: only one spelling is deprecated, so the other is the one to use. No problem.
+    - name: db
+      identifiers: [--db, --database]
+      deprecated_identifiers: [--database]
+      deprecated: use --db
+      schema: { type: string, required: true }
+    # Correct: hidden but optional. No problem.
+    - name: debug
+      hidden: true
+      schema: { type: bool }
+  arguments:
+    - name: target
+      hidden: true
+      schema: { type: string, required: true }
+    - name: mode
+      deprecated: pass --mode instead
+      schema: { type: string, required: true }

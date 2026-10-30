@@ -1,0 +1,11 @@
+ship the old way
+
+This command is deprecated since 1.4.0, removed in 2.0.0: renamed; use ops deploy instead
+
+Usage:
+  ops legacy
+
+Global Flags:
+  -h, --help            print help
+  -v, --verbose         say more (repeatable)
+      --color string    when to color (default auto) [auto|always|never]

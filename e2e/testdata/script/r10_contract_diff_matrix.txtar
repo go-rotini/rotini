@@ -1,0 +1,749 @@
+# R10 — rotini diff rates each kind of change to a mounted child, named through the parent.
+#
+# The parent mounts db with $ref; the contract lists db's commands under the parent's path and
+# db's variables under db's own prefix, and is the same bytes wherever the module sits. One
+# edit of the child at a time is compared with the first contract, through the real binary.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+cp cli-contract.json v1.json
+
+# ── the contract names the child's items through the parent ──
+grep '"name": "app db migrate"' v1.json
+grep '"DB_URL"' v1.json
+grep '"DB_STEPS"' v1.json
+! grep 'APP_URL|APP_STEPS' v1.json
+
+# ── the same spec in another directory, with another home, gives the same bytes ──
+mkdir elsewhere/cmd/app elsewhere/cmd/db
+cp go.mod elsewhere/go.mod
+cp cmd/app/.rotini.spec.yaml elsewhere/cmd/app/.rotini.spec.yaml
+cp cmd/app/.rotini.conf.yaml elsewhere/cmd/app/.rotini.conf.yaml
+cp cmd/db/.rotini.spec.yaml elsewhere/cmd/db/.rotini.spec.yaml
+cd elsewhere
+env HOME=$WORK/otherhome
+env XDG_CONFIG_HOME=$WORK/otherxdg
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+cmp cli-contract.json ../v1.json
+cd ..
+
+# ── one change at a time ──
+cp db.flag-renamed.yaml cmd/db/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'FLAG_NO_DELETE +app db migrate --steps +flag removed'
+stdout 'FLAG_ADDED +app db migrate --count +flag added'
+stdout '^1 breaking, 0 possibly breaking, 0 expected, 1 safe, 0 accepted$'
+
+cp db.flag-env-renamed.yaml cmd/db/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'INPUT_ENV_NO_DELETE +app db migrate --steps \$DB_STEPS'
+stdout 'INPUT_ENV_ADDED +app db migrate --steps \$DB_MIGRATE_STEPS'
+
+cp db.env-renamed.yaml cmd/db/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'ENV_NO_DELETE +app db \$DB_URL'
+stdout 'ENV_ADDED +app db \$DB_DSN'
+
+cp db.arg-required.yaml cmd/db/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'ARGUMENT_REQUIRED_ADDED +app db migrate <target>'
+stdout '^1 breaking, 0 possibly breaking'
+
+cp db.enum-narrowed.yaml cmd/db/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'ENUM_VALUE_NO_DELETE +app db migrate --mode value dry'
+
+cp db.bound-widened.yaml cmd/db/.rotini.spec.yaml
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'INPUT_BOUND_WIDENED +app db migrate --steps +widened: maximum 10 → 100'
+stdout '^0 breaking, 0 possibly breaking, 0 expected, 1 safe, 0 accepted$'
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml --fail-on possibly
+
+cp db.default-changed.yaml cmd/db/.rotini.spec.yaml
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'INPUT_DEFAULT_CHANGED +app db migrate --steps +default 1 → 2'
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml --fail-on possibly
+
+cp db.alias-removed.yaml cmd/db/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'ALIAS_NO_DELETE +app db migrate alias mg'
+
+cp db.exit-removed.yaml cmd/db/.rotini.spec.yaml
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'EXIT_STATUS_NO_DELETE +app db migrate exit 3'
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml --fail-on possibly
+
+cp db.output-changed.yaml cmd/db/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'OUTPUT_PROPERTY_NO_DELETE +app db migrate output.skipped'
+stdout 'OUTPUT_TYPE_CHANGED +app db migrate output.applied'
+stdout 'OUTPUT_ENUM_VALUE_ADDED +app db migrate output.state value partial'
+
+# ── renaming the mount removes every command below it ──
+cp db.spec.yaml cmd/db/.rotini.spec.yaml
+cp app.mount-renamed.yaml cmd/app/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/app/.rotini.spec.yaml
+stdout 'COMMAND_NO_DELETE +app db +command removed'
+stdout 'COMMAND_NO_DELETE +app db migrate +command removed'
+stdout 'COMMAND_ADDED +app database +command added'
+
+# ── the JSON report: each finding, the acknowledgements, the summary ──
+cp app.spec.yaml cmd/app/.rotini.spec.yaml
+cp db.flag-renamed.yaml cmd/db/.rotini.spec.yaml
+cp ack.conf.yaml cmd/app/.rotini.conf.yaml
+exec rotini diff v1.json --spec cmd/app/.rotini.spec.yaml --format json
+cp stdout report.json
+grep '"severity": "breaking"' report.json
+grep '"rule": "FLAG_NO_DELETE"' report.json
+grep '"where": "app db migrate --steps"' report.json
+grep '"reason": "renamed --count"' report.json
+grep '"unmatched_accepts": \[\]' report.json
+grep '"accepted": 1' report.json
+grep '"breaking": 0' report.json
+grep '"safe": 1' report.json
+
+# ── two contract files need no spec ──
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+cp cli-contract.json v2.json
+mkdir bare
+cd bare
+wantexit 2 rotini diff ../v1.json ../v2.json
+stdout 'FLAG_NO_DELETE +app db migrate --steps'
+exec rotini diff ../v2.json ../v2.json
+stdout '^no changes$'
+
+# ── a document that isn't a contract, or a bad release, is an error ──
+wantexit 1 rotini diff ../notcontract.json ../v2.json
+stderr 'not a rotini contract'
+wantexit 1 rotini diff ../v1.json ../v2.json --release two
+stderr 'release'
+cd ..
+
+# ── an identifier moving to another flag, a config file's schema, stdin streaming, a plugin's
+#    timeout, and the items of a hidden command ──
+exec rotini generate cmd/solo/.rotini.spec.yaml --config cmd/solo/.rotini.conf.yaml
+cp solo-contract.json solo-v1.json
+grep '"timeout": "10s"' solo-v1.json
+grep '"region"' solo-v1.json
+
+cp solo.moved.yaml cmd/solo/.rotini.spec.yaml
+wantexit 2 rotini diff solo-v1.json --spec cmd/solo/.rotini.spec.yaml
+stdout 'FLAG_IDENTIFIER_NO_DELETE +solo -x +identifier -x now sets --b'
+! stdout 'FLAG_NAME_CHANGED'
+stdout '^1 breaking, 0 possibly breaking, 0 expected, 0 safe, 0 accepted$'
+
+cp solo.region-required.yaml cmd/solo/.rotini.spec.yaml
+wantexit 2 rotini diff solo-v1.json --spec cmd/solo/.rotini.spec.yaml
+stdout 'INPUT_PROPERTY_REQUIRED_ADDED +solo config_files main.region +property now required'
+stdout '^1 breaking, 0 possibly breaking'
+
+cp solo.streamed.yaml cmd/solo/.rotini.spec.yaml
+exec rotini diff solo-v1.json --spec cmd/solo/.rotini.spec.yaml
+stdout 'STDIN_STREAM_CHANGED +solo read stdin +stdin is read one item at a time now'
+stdout 'PLUGIN_TIMEOUT_CHANGED +solo lint +timeout 10s → 30s'
+stdout '^0 breaking, 2 possibly breaking'
+wantexit 2 rotini diff solo-v1.json --spec cmd/solo/.rotini.spec.yaml --fail-on possibly
+
+cp solo.hidden-trimmed.yaml cmd/solo/.rotini.spec.yaml
+exec rotini diff solo-v1.json --spec cmd/solo/.rotini.spec.yaml
+stdout 'FLAG_NO_DELETE +solo debug --trace +flag removed \(was hidden\)'
+stdout 'ALIAS_NO_DELETE +solo debug alias dbg'
+stdout '^0 breaking, 2 possibly breaking'
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: mounts db
+  env_prefix: APP
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+-- app.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: mounts db
+  env_prefix: APP
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+-- app.mount-renamed.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: mounts db
+  env_prefix: APP
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+      name: database
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- ack.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+diff:
+  accept:
+    - {rule: FLAG_NO_DELETE, where: app db migrate --steps, reason: renamed --count}
+-- notcontract.json --
+{"name": "app"}
+-- cmd/db/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.flag-renamed.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: count
+          summary: how many
+          identifiers: [--count]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.flag-env-renamed.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_MIGRATE_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.env-renamed.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: dsn
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.arg-required.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string, required: true}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.enum-narrowed.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.bound-widened.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 100}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.default-changed.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 2, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.alias-removed.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- db.exit-removed.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: integer}
+          skipped: {type: integer}
+          state: {type: string, enum: [done, failed]}
+-- db.output-changed.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: the database
+  env_prefix: DB
+  env:
+    - name: url
+      summary: where the database is
+      schema: {type: string}
+  commands:
+    - name: migrate
+      summary: apply migrations
+      aliases: [mg]
+      flags:
+        - name: steps
+          summary: how many
+          identifiers: [--steps]
+          schema: {type: int, variable: DB_STEPS, default: 1, maximum: 10}
+        - name: mode
+          summary: how to apply
+          identifiers: [--mode]
+          schema: {type: string, enum: [apply, dry]}
+      arguments:
+        - name: target
+          summary: the version to reach
+          schema: {type: string}
+      output:
+        type: object
+        properties:
+          applied: {type: string}
+          state: {type: string, enum: [done, failed, partial]}
+      exit_status:
+        - {code: 3, name: locked, summary: the database is locked}
+-- cmd/solo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: solo-contract.json
+  packages:
+    - type: main
+      file: cmd/solo/main.go
+    - type: cmd
+      file: internal/cmd/solo/zz_solo.go
+      package: solo
+-- cmd/solo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: solo
+  summary: one program
+  flags:
+    - {name: a, summary: the a, identifiers: [-x, --a], schema: {type: string}}
+    - {name: b, summary: the b, identifiers: [--b], schema: {type: string}}
+  config_files:
+    - name: main
+      path: ~/.solo.yaml
+      schema: {type: object, properties: {region: {type: string}}}
+  plugins:
+    - {name: lint, summary: lints, timeout: 10s}
+  commands:
+    - name: read
+      summary: reads lines
+      stdin: {format: lines}
+    - name: debug
+      summary: debugging
+      hidden: true
+      aliases: [dbg]
+      flags:
+        - {name: trace, summary: traces, identifiers: [--trace], schema: {type: bool}}
+-- solo.moved.yaml --
+version: 0.0.0
+command:
+  name: solo
+  summary: one program
+  flags:
+    - {name: a, summary: the a, identifiers: [--a], schema: {type: string}}
+    - {name: b, summary: the b, identifiers: [-x, --b], schema: {type: string}}
+  config_files:
+    - name: main
+      path: ~/.solo.yaml
+      schema: {type: object, properties: {region: {type: string}}}
+  plugins:
+    - {name: lint, summary: lints, timeout: 10s}
+  commands:
+    - name: read
+      summary: reads lines
+      stdin: {format: lines}
+    - name: debug
+      summary: debugging
+      hidden: true
+      aliases: [dbg]
+      flags:
+        - {name: trace, summary: traces, identifiers: [--trace], schema: {type: bool}}
+-- solo.region-required.yaml --
+version: 0.0.0
+command:
+  name: solo
+  summary: one program
+  flags:
+    - {name: a, summary: the a, identifiers: [-x, --a], schema: {type: string}}
+    - {name: b, summary: the b, identifiers: [--b], schema: {type: string}}
+  config_files:
+    - name: main
+      path: ~/.solo.yaml
+      schema: {type: object, required: [region], properties: {region: {type: string}}}
+  plugins:
+    - {name: lint, summary: lints, timeout: 10s}
+  commands:
+    - name: read
+      summary: reads lines
+      stdin: {format: lines}
+    - name: debug
+      summary: debugging
+      hidden: true
+      aliases: [dbg]
+      flags:
+        - {name: trace, summary: traces, identifiers: [--trace], schema: {type: bool}}
+-- solo.streamed.yaml --
+version: 0.0.0
+command:
+  name: solo
+  summary: one program
+  flags:
+    - {name: a, summary: the a, identifiers: [-x, --a], schema: {type: string}}
+    - {name: b, summary: the b, identifiers: [--b], schema: {type: string}}
+  config_files:
+    - name: main
+      path: ~/.solo.yaml
+      schema: {type: object, properties: {region: {type: string}}}
+  plugins:
+    - {name: lint, summary: lints, timeout: 30s}
+  commands:
+    - name: read
+      summary: reads lines
+      stdin: {format: lines, stream: true}
+    - name: debug
+      summary: debugging
+      hidden: true
+      aliases: [dbg]
+      flags:
+        - {name: trace, summary: traces, identifiers: [--trace], schema: {type: bool}}
+-- solo.hidden-trimmed.yaml --
+version: 0.0.0
+command:
+  name: solo
+  summary: one program
+  flags:
+    - {name: a, summary: the a, identifiers: [-x, --a], schema: {type: string}}
+    - {name: b, summary: the b, identifiers: [--b], schema: {type: string}}
+  config_files:
+    - name: main
+      path: ~/.solo.yaml
+      schema: {type: object, properties: {region: {type: string}}}
+  plugins:
+    - {name: lint, summary: lints, timeout: 10s}
+  commands:
+    - name: read
+      summary: reads lines
+      stdin: {format: lines}
+    - name: debug
+      summary: debugging
+      hidden: true

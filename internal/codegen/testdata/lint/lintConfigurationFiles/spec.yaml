@@ -1,5 +1,6 @@
 # Exactly one of path/discover, the xdg strategy needs an app directory, and discover looks
-# for a file name, not a path.
+# for a file name, not a path. The names the configuration reader keeps for its own layers are
+# refused.
 version: 0.0.0
 command:
   name: demo
@@ -29,3 +30,7 @@ command:
       discover:
         strategy: walk-up
         file: .demo.d...yaml
+    - name: explicit
+      path: ./explicit.json
+    - name: default
+      path: ./default.yaml

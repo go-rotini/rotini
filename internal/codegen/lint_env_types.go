@@ -12,7 +12,10 @@ type envSite struct {
 	variable, typ      string
 	ptr, path, channel string
 	name               string
-	own                bool // declared by the chain's last command, where it is reported
+	own                bool   // declared by the chain's last command, where it is reported
+	key                string // the key the variable is derived from, or the input's name
+	explicit           bool   // named by `variable:` rather than derived from key
+	at                 string // the pointer of what names the variable: `variable`, `key` or the name
 }
 
 // lintEnvVariableTypes warns when one environment variable feeds inputs that read it
@@ -41,7 +44,7 @@ func lintEnvVariableTypes(spec *Spec) []error {
 			if s.typ == "string" || prev.typ == "string" {
 				consequence = "any value suits the string, but one the other rejects fails every run that sets it"
 			}
-			p := inputProblem(s.ptr, s.path, s.channel, s.name, fmt.Sprintf(
+			p := inputProblem(s.at, s.path, s.channel, s.name, fmt.Sprintf(
 				"reads environment variable %s as %s, but %s %q reads it as %s; %s, so give one its own variable",
 				s.variable, s.typ, prev.channel, prev.name, prev.typ, consequence))
 			p.sev = severityWarning
@@ -49,6 +52,48 @@ func lintEnvVariableTypes(spec *Spec) []error {
 		}
 	})
 	return problems
+}
+
+// lintEnvVariableKeys warns when two inputs in one command chain read one environment variable
+// for different keys: `a.b_c` and `a_b.c` both derive A_B_C, and a `variable:` can name what
+// another input derives. Setting the variable then sets both. Inputs sharing a key mean one
+// setting, and two that both name the variable with `variable:` share it on purpose; a variable
+// read as two types is lintEnvVariableTypes's.
+func lintEnvVariableKeys(spec *Spec) []error {
+	var problems []error
+	said := map[string]bool{}
+	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
+		sites := make([]envSite, 0, len(chain))
+		for depth, c := range chain {
+			sites = append(sites, envSitesOf(spec, c, depth == len(chain)-1, path, ptr)...)
+		}
+		first := map[string]envSite{}
+		for _, s := range sites {
+			prev, ok := first[s.variable]
+			if !ok {
+				first[s.variable] = s
+				continue
+			}
+			if prev.key == s.key || prev.typ != s.typ || (prev.explicit && s.explicit) || !s.own || said[s.ptr+"\x00"+s.variable] {
+				continue
+			}
+			said[s.ptr+"\x00"+s.variable] = true
+			p := inputProblem(s.at, s.path, s.channel, s.name, fmt.Sprintf(
+				"reads environment variable %s, %s, and %s %q reads it too, %s; setting it sets both, so rename a key or give one its own `variable:`",
+				s.variable, envSource(s), prev.channel, prev.name, envSource(prev)))
+			p.sev = severityWarning
+			problems = append(problems, p)
+		}
+	})
+	return problems
+}
+
+// envSource says how a site comes to read its variable.
+func envSource(s envSite) string {
+	if s.explicit {
+		return "named by `variable:`"
+	}
+	return fmt.Sprintf("derived from key %q", s.key)
 }
 
 // envSitesOf lists the environment variables c's inputs read. For an ancestor (own false)
@@ -61,22 +106,33 @@ func envSitesOf(spec *Spec, c *Command, own bool, path, ptr string) []envSite {
 		if !own && (channel == "argument" || channel == "flag" && !cascadingFlag(c, name)) {
 			return
 		}
-		var vars string
+		var vars, key string
 		switch channel {
 		case "flag", "argument":
-			vars = flagEnvVar(schema, flagReconKey(name, schema), prefix)
+			key = flagReconKey(name, schema)
+			vars = flagEnvVar(schema, key, prefix)
 		case "env":
 			if schema != nil && schema.Nesting != "" {
 				return // a nested input reads a family of variables, not one
 			}
+			key = name
 			vars = envVarName(EnvInput{Name: name, Schema: schema}, prefix)
 		default:
 			return
 		}
+		explicit := len(variables(schema)) > 0
+		named := at + "/name"
+		switch {
+		case explicit:
+			named = at + "/schema/variable"
+		case schema != nil && schema.Key != "":
+			named = at + "/schema/key"
+		}
 		typ := envReading(schema, spec.Command.Schemas)
 		for v := range strings.SplitSeq(vars, ",") {
 			if v != "" {
-				sites = append(sites, envSite{variable: v, typ: typ, ptr: at, path: path, channel: channel, name: name, own: own})
+				sites = append(sites, envSite{variable: v, typ: typ, ptr: at, path: path, channel: channel, name: name, own: own,
+					key: key, explicit: explicit, at: named})
 			}
 		}
 	})

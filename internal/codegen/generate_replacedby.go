@@ -48,7 +48,7 @@ func withReplacement(message, replacement string) string {
 // overlaySpellings applies the `hidden_aliases` and `replaced_by` a `$ref` node declares to the
 // mounted command m; see [overlayCommand].
 func overlaySpellings(m *Command, parent Command) {
-	if len(parent.HiddenAliases) > 0 {
+	if parent.HiddenAliases != nil {
 		m.HiddenAliases = parent.HiddenAliases
 	}
 	if parent.ReplacedBy != "" {

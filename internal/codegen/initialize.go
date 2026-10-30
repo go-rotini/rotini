@@ -62,6 +62,11 @@ type Initialized struct {
 
 	// Changes is set by a dry run: each file init would create or replace, one per line.
 	Changes []string
+
+	// Notices are generate's non-fatal findings for every CLI init generated: validation
+	// warnings, disabled and restored handlers, hook-audit and feature warnings. In a dry run a
+	// handler init would disable is a change, not a notice.
+	Notices []error
 }
 
 // SeedFiles is one CLI's seed spec and conf, as [Initialized] reports them.
@@ -71,23 +76,23 @@ type SeedFiles struct {
 
 // initialize plans the seed spec and conf for a new CLI under cmd/<name>/ (or, with a
 // template, every CLI the template declares), then validates and generates each without
-// pruning, all through pl. The generate step reads the seed from memory, so a dry run, which
-// writes nothing, plans exactly what a real one writes. The first CLI returned is the one
-// named name.
-func (p *Processor) initialize(name string, opt InitOptions, pl *planner) ([]SeedFiles, error) {
+// deleting anything, all through pl. The generate step reads the seed from memory, so a dry
+// run, which writes nothing, plans exactly what a real one writes. The first CLI returned is
+// the one named name; the notices are every generate's.
+func (p *Processor) initialize(name string, opt InitOptions, pl *planner) ([]SeedFiles, []error, error) {
 	if name == "" {
-		return nil, errors.New("a CLI name is required")
+		return nil, nil, errors.New("a CLI name is required")
 	}
 	if !cliNameRe().MatchString(name) {
-		return nil, fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+		return nil, nil, fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
 	}
 	if windowsDeviceElement(name) != "" {
-		return nil, fmt.Errorf("invalid CLI name %q: it is a Windows device name, which the go tool refuses as a directory in an import path on every system", name)
+		return nil, nil, fmt.Errorf("invalid CLI name %q: it is a Windows device name, which the go tool refuses as a directory in an import path on every system", name)
 	}
 
 	moduleRoot, modulePath, err := findModule()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	format := opt.Format
@@ -96,13 +101,13 @@ func (p *Processor) initialize(name string, opt InitOptions, pl *planner) ([]See
 	}
 	f, err := normalizeFormat(format)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	data := templateInitData{Version: seedVersion(p.version), Name: name, Ext: string(f), Module: modulePath}
 	clis, err := initCLIs(opt.Template, data)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	seeds := make([]SeedFiles, len(clis))
@@ -115,7 +120,7 @@ func (p *Processor) initialize(name string, opt InitOptions, pl *planner) ([]See
 	}
 	if !opt.Force {
 		if err := existingSeed(seeds, moduleRoot); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -124,37 +129,40 @@ func (p *Processor) initialize(name string, opt InitOptions, pl *planner) ([]See
 	if pl.dry {
 		defer withSeedOverlay(pl.pending)()
 	}
+	var notices []error
 	for i, c := range clis {
 		specBytes, err := c.spec(f)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := pl.write(seeds[i].Spec, specBytes); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		confBytes, err := c.conf(f)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := pl.write(seeds[i].Conf, confBytes); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// Files the template seeds itself are created before generate, which then keeps them.
 		for _, file := range c.files {
 			if err := pl.createOnce(filepath.Join(moduleRoot, filepath.FromSlash(file.path)), file.content); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
 		rs, rc, err := p.reconcileSeed(seeds[i].Spec, specBytes, seeds[i].Conf, confBytes, f)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		// Never prune: with --force the seed may replace a spec with more commands, whose
-		// (possibly edited) handlers must survive.
-		if _, err := p.validateAndEmit(rs, rc, false, pl); err != nil {
-			return nil, err
+		// Delete nothing: with --force the seed may replace a spec with more commands, whose
+		// (possibly edited) handlers are only disabled, so the package builds.
+		found, err := p.validateAndEmit(rs, rc, false, pl)
+		if err != nil {
+			return nil, nil, err
 		}
+		notices = append(notices, found...)
 	}
 
 	// Report the CLI named name first, then the others in the order they were written.
@@ -169,7 +177,7 @@ func (p *Processor) initialize(name string, opt InitOptions, pl *planner) ([]See
 			ordered = append(ordered, seeds[i])
 		}
 	}
-	return ordered, nil
+	return ordered, notices, nil
 }
 
 // reconcileSeed is reconcile for the seed documents init has in memory.

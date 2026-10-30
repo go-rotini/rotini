@@ -1,0 +1,243 @@
+# R4 — outcomes from hook combinations, in a real process, then a signal in each phase.
+#
+# Every hook of a three-deep tree prints its name and then does what ACT asks of it
+# (hook=action, comma-separated). The transcript and the exact exit code pin, for each
+# combination: which hooks ran, what the default reporter printed and in what order, and the
+# code the process exited with.
+
+gomodinit example.com/phase
+
+exec rotini generate cmd/phase/.rotini.spec.yaml --config cmd/phase/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o phase$exe ./cmd/phase
+
+# ── an error in the root's setup, a panic in the leaf's teardown ─────────────
+# Neither stops the other: every hook runs, the error prints before the panic, exit 1.
+env ACT=phase.CascadingPreRun=error,go.PostRun=panic
+wantexit 1 ./phase$exe job go
+cmp stdout all.txt
+cmp stderr error-then-panic.txt
+
+# ── a panic in the root's setup unwinds only the root ────────────────────────
+env ACT=phase.CascadingPreRun=panic
+wantexit 1 ./phase$exe job go
+cmp stdout root-only.txt
+stderr '^Fatal Error: phase.CascadingPreRun panicked$'
+! stderr 'goroutine'
+
+# ── a warning with a halt stops the work without failing the run ─────────────
+env ACT=go.PreRun=warn,go.PreRun=halt
+wantexit 0 ./phase$exe job go
+! stdout 'go.Run'
+stdout 'phase.CascadingPostRun'
+cmp stderr warned.txt
+
+# ── a code set in the work outranks the floor of a later error ───────────────
+env ACT=go.Run=code3,job.CascadingPostRun=error
+wantexit 3 ./phase$exe job go
+cmp stdout all.txt
+stderr '^Error: job.CascadingPostRun failed$'
+
+# ── Halt in teardown changes nothing ─────────────────────────────────────────
+env ACT=go.PostRun=halt
+wantexit 0 ./phase$exe job go
+cmp stdout all.txt
+! stderr .
+
+# ── Exit in teardown skips the rest, and still reports what was recorded ─────
+env ACT=go.Run=error,go.CascadingPostRun=exit4
+wantexit 4 ./phase$exe job go
+stdout 'go.CascadingPostRun'
+! stdout 'job.CascadingPostRun'
+! stdout 'phase.CascadingPostRun'
+stderr '^Error: go.Run failed$'
+
+# ── signals ──────────────────────────────────────────────────────────────────
+# The hook sends SIGTERM to its own process and waits for the run context to end.
+[!unix] stop 'sends a real signal to its own process'
+
+# In setup: the rest of setup and the work are skipped; only begun teardown runs. 128+15.
+env ACT=job.CascadingPreRun=signal
+wantexit 143 ./phase$exe job go
+cmp stdout signal-in-setup.txt
+! stderr .
+
+# In teardown, after a clean halt: forward progress had already stopped, and the signal still
+# sets the exit code.
+env ACT=go.PreRun=halt,phase.CascadingPostRun=signal
+wantexit 143 ./phase$exe job go
+stdout 'phase.CascadingPostRun'
+! stdout 'go.Run'
+! stderr .
+
+# In teardown, after a recorded error: the error is reported and the signal's code stands.
+env ACT=go.Run=haltwith,go.PostRun=signal
+wantexit 143 ./phase$exe job go
+cmp stdout all.txt
+cmp stderr run-failed.txt
+
+# A second signal during teardown exits 130 at once, skipping the teardown left.
+env ACT=go.PostRun=signal2
+wantexit 130 ./phase$exe job go
+stdout 'go.PostRun'
+! stdout 'go.CascadingPostRun'
+! stdout 'NEVER'
+
+# Buffered stdout is flushed when a signal stops the run, and on the forced exit too.
+env BUF=1
+env ACT=go.Run=signal
+wantexit 143 ./phase$exe job go
+cmp stdout all.txt
+env ACT=go.PostRun=signal2
+wantexit 130 ./phase$exe job go
+stdout 'go.PostRun'
+! stdout 'go.CascadingPostRun'
+
+-- all.txt --
+phase.CascadingPreRun
+job.CascadingPreRun
+go.CascadingPreRun
+go.PreRun
+go.Run
+go.PostRun
+go.CascadingPostRun
+job.CascadingPostRun
+phase.CascadingPostRun
+-- root-only.txt --
+phase.CascadingPreRun
+phase.CascadingPostRun
+-- signal-in-setup.txt --
+phase.CascadingPreRun
+job.CascadingPreRun
+job.CascadingPostRun
+phase.CascadingPostRun
+-- error-then-panic.txt --
+Error: phase.CascadingPreRun failed
+Fatal Error: go.PostRun panicked
+-- warned.txt --
+Warning: go.PreRun warned
+-- run-failed.txt --
+Error: go.Run failed
+-- cmd/phase/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: phase
+  summary: a tree whose hooks act on request
+  commands:
+    - name: job
+      summary: a middle command
+      commands:
+        - name: go
+          summary: the leaf
+-- cmd/phase/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/phase/zz_phase.go
+      package: phase
+-- cmd/phase/main.go --
+package main
+
+import (
+	"os"
+
+	phase "example.com/phase/internal/cmd/phase"
+)
+
+func main() {
+	p := phase.NewProgram()
+	if os.Getenv("BUF") != "" {
+		p.WithBufferedOutput(true)
+	}
+	p.Execute()
+}
+-- internal/cmd/phase/act.go --
+package phase
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+// act prints hook and then does each action ACT names for it.
+func act(ctx context.Context, rtx *rotini.Context, hook string) {
+	fmt.Fprintln(rtx.Stdout, hook)
+	for _, a := range strings.Split(os.Getenv("ACT"), ",") {
+		name, what, _ := strings.Cut(a, "=")
+		if name != hook {
+			continue
+		}
+		switch what {
+		case "error":
+			rtx.RecordError(fmt.Errorf("%s failed", hook))
+		case "haltwith":
+			rtx.HaltWith(fmt.Errorf("%s failed", hook))
+		case "warn":
+			rtx.RecordWarning(fmt.Errorf("%s warned", hook))
+		case "halt":
+			rtx.Halt()
+		case "code3":
+			rtx.HaltWithCode(3)
+		case "exit4":
+			rtx.Exit(4)
+		case "panic":
+			panic(hook + " panicked")
+		case "signal":
+			raise(ctx, rtx, false)
+		case "signal2":
+			raise(ctx, rtx, true)
+		}
+	}
+}
+
+// raise sends the process SIGTERM and waits for the run context to end; with again, it then
+// sends a second one and waits to be killed. The timeouts are safety nets: a regression fails
+// an assertion instead of hanging the suite.
+func raise(ctx context.Context, rtx *rotini.Context, again bool) {
+	self, _ := os.FindProcess(os.Getpid())
+	_ = self.Signal(syscall.SIGTERM)
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		fmt.Fprintln(rtx.Stdout, "NEVER: the signal did not reach the run context")
+	}
+	if again {
+		_ = self.Signal(syscall.SIGTERM)
+		time.Sleep(5 * time.Second)
+		fmt.Fprintln(rtx.Stdout, "NEVER: the second signal did not end the process")
+	}
+}
+
+// hooks names each hook after the command it runs for.
+type hooks struct{}
+
+func (hooks) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	act(ctx, rtx, rtx.Command().Name+".CascadingPreRun")
+}
+func (hooks) PreRun(ctx context.Context, rtx *rotini.Context) { act(ctx, rtx, rtx.Command().Name+".PreRun") }
+func (hooks) Run(ctx context.Context, rtx *rotini.Context)    { act(ctx, rtx, rtx.Command().Name+".Run") }
+func (hooks) PostRun(ctx context.Context, rtx *rotini.Context) {
+	act(ctx, rtx, rtx.Command().Name+".PostRun")
+}
+func (hooks) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	act(ctx, rtx, rtx.Command().Name+".CascadingPostRun")
+}
+-- internal/cmd/phase/phase.go --
+package phase
+
+type phaseHandler struct{ hooks }
+-- internal/cmd/phase/phase_job.go --
+package phase
+
+type phaseJobHandler struct{ hooks }
+-- internal/cmd/phase/phase_job_go.go --
+package phase
+
+type phaseJobGoHandler struct{ hooks }

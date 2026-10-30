@@ -231,6 +231,15 @@ func findTarget(doc *cfgedit.YAMLDoc, into string, under []string, dir string) (
 			return mountTarget{}, fmt.Errorf("%s: %s has no command %q", into, t.where, name)
 		}
 		c := entries[i]
+		if t.abs != "" && c.ref == "" {
+			own, err := refCommandNames(t.abs)
+			if err != nil {
+				return mountTarget{}, fmt.Errorf("%s: %w", into, err)
+			}
+			if slices.Contains(own, name) {
+				return mountTarget{}, fmt.Errorf("%s: %s %s overrides a command declared in %s; mount into that spec instead", into, t.where, name, t.ref)
+			}
+		}
 		if c.item.Value.Kind != cfgedit.YAMLMapping || c.item.Value.Flow {
 			return mountTarget{}, fmt.Errorf("%s: %s %s is written as a {...} mapping; write it as a block mapping to mount into it", into, t.where, name)
 		}
@@ -432,7 +441,7 @@ func spliceMounts(doc *cfgedit.YAMLDoc, cmdMap *cfgedit.YAMLNode, list *cfgedit.
 	var ops []splice
 	kept := len(existing) - len(removed)
 	for _, c := range removed {
-		ops = append(ops, splice{doc.LineStart(c.item.Dash), doc.NextLine(c.item.Value.End), ""})
+		ops = append(ops, splice{commentsAbove(doc, c.item), doc.NextLine(c.item.Value.End), ""})
 	}
 	if kept == 0 && len(add) == 0 && list != nil {
 		// Every entry went: drop the key too, rather than leave a commands: holding nothing.
@@ -495,6 +504,24 @@ func spliceMounts(doc *cfgedit.YAMLDoc, cmdMap *cfgedit.YAMLNode, list *cfgedit.
 		ops = append(ops, splice{at, at, b.String()})
 	}
 	return applySplices(src, ops)
+}
+
+// commentsAbove returns the start of the comment lines attached to item, as fmt attaches them:
+// those directly above its dash, indented no deeper than it. A blank line ends them, so a
+// comment above one is a heading for what follows and stays; a deeper comment closes the entry
+// before. Without attached comments it is the start of the dash's line.
+func commentsAbove(doc *cfgedit.YAMLDoc, item *cfgedit.YAMLItem) int {
+	start := doc.LineStart(item.Dash)
+	for start > 0 {
+		prev := doc.LineStart(start - 1)
+		text := strings.TrimRight(string(doc.Src[prev:doc.LineEnd(prev)]), " \t\r")
+		trimmed := strings.TrimLeft(text, " ")
+		if !strings.HasPrefix(trimmed, "#") || len(text)-len(trimmed) > item.Col {
+			break
+		}
+		start = prev
+	}
+	return start
 }
 
 // applySplices applies non-overlapping splices, last first so earlier offsets hold.

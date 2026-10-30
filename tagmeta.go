@@ -26,7 +26,7 @@ import (
 // JSON layouts) when there are several, and relative:"past"; and an integer field's
 // base:"prefixed". A malformed list reads as the first layout alone.
 func tagTimeSpec(tag reflect.StructTag) timeSpec {
-	ts := timeSpec{layout: tag.Get("layout"), relative: tag.Get("relative"), base: tag.Get("base")}
+	ts := timeSpec{layout: tag.Get("layout"), relative: tag.Get("relative"), date: tag.Get("date") == "true", base: tag.Get("base")}
 	if v, ok := tag.Lookup("layoutlist"); ok {
 		if list, ok := splitTagList(v); ok {
 			ts.layouts = list

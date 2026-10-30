@@ -19,7 +19,7 @@ func lintStdinSchema(spec *Spec) []error {
 		if format == "" {
 			format = "json"
 		}
-		problems = append(problems, inputProblem(ptr+"/stdin", path, "stdin", "",
+		problems = append(problems, inputProblem(ptr+"/stdin/format", path, "stdin", "",
 			fmt.Sprintf("`format` %q decodes the payload into a typed value, but no schema `type` or `$ref` describes it, so no Stdin field would be generated; declare its schema (a `$ref` to a named schema, or `type: object` with properties), or use `format: text` or `lines` to read it raw", format)))
 	})
 	return problems

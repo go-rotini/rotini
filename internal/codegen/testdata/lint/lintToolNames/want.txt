@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:19:7: command demo/synchronize-every-replica-set-in-the-cluster-and-report-to-the-log: makes the tool name "demo_synchronize-every-replica-set-in-the-cluster-and-report-to-the-log", 71 characters, longer than openai-strict allows (64); shorten a name on its path, or keep it from agents with `agent: false`

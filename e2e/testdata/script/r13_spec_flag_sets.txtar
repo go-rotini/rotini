@@ -1,0 +1,184 @@
+# R13 — flag sets as their description promises: a set's flags come after the command's own, in
+# `use` order; the set's group heads every member without a group of its own; its dependencies
+# come with it; its summary is on no page; and a composed child uses its own sets, never its
+# parent's, even under the same name.
+
+gomodinit example.com/ps
+
+exec rotini generate cmd/kid/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+exec rotini generate cmd/ps/.rotini.spec.yaml --config cmd/ps/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o ps$exe ./cmd/ps
+
+# Own flags first, then each set in `use` order; the set's group, unless a member names its own.
+exec ./ps$exe ls --help
+stdout 'Flags:\n +--all +every item\n\nOutput:\n +--parent-only +.*\n\nPaging:\n +--page int +.*\n +--size int +.*\n\nMisc:\n +--debug'
+! stdout 'SET SUMMARY'
+! grep 'SET SUMMARY' internal/cmd/ps/renders/markdown_ps_ls.md
+
+# The set's flags bind through the set's embedded struct, and its dependency applies.
+exec ./ps$exe ls --all --parent-only --page 2 --size 5 --debug
+stdout 'all=true parent=true page=2 size=5 debug=true'
+! exec ./ps$exe ls --page 2
+stderr 'flag --size is required when --page is set'
+
+# The mounted child's Output set is the child's own.
+exec ./ps$exe kid run --child-only
+stdout 'child=true'
+! exec ./ps$exe kid run --parent-only
+stderr 'unknown flag "--parent-only"'
+
+# `use` is not valid next to `$ref`.
+! exec rotini validate cmd/bad/.rotini.spec.yaml --config cmd/ps/.rotini.conf.yaml
+stderr 'bad[/\\]\.rotini\.spec\.yaml:12:12:.*sets `use` beside `\$ref`'
+
+-- cmd/bad/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  summary: mounts a child with a set
+  flag_sets:
+    Output:
+      flags:
+        - name: x
+          schema: { type: bool }
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+      use: [Output]
+
+-- cmd/ps/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: ps
+  summary: a parent with flag sets
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  flag_sets:
+    Output:
+      summary: SET SUMMARY for readers of the spec
+      group: Output
+      flags:
+        - name: parent-only
+          summary: the parent's flag
+          schema: { type: bool }
+    Paging:
+      group: Paging
+      flags:
+        - name: page
+          summary: the page
+          schema: { type: int }
+        - name: size
+          summary: the page size
+          schema: { type: int }
+        - name: debug
+          summary: debug paging
+          group: Misc
+          schema: { type: bool }
+      flag_dependencies:
+        - when: page
+          requires: [size]
+  commands:
+    - name: ls
+      summary: list
+      use: [Output, Paging]
+      flags:
+        - name: all
+          summary: every item
+          schema: { type: bool }
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/ps/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/ps/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/ps/zz_ps.go
+      package: ps
+  features:
+    - type: help
+      enabled: true
+    - type: markdown
+      enabled: true
+      embed: true
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: a child with its own sets
+  flag_sets:
+    Output:
+      flags:
+        - name: child-only
+          summary: the child's flag
+          schema: { type: bool }
+  commands:
+    - name: run
+      summary: run
+      use: [Output]
+-- cmd/kid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kid/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/kid/zz_kid.go
+      package: kid
+-- internal/cmd/ps/ps_ls.go --
+package ps
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type psLsHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*psLsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[PsLsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := in.PsLs.Flags
+	fmt.Fprintf(rtx.Stdout, "all=%v parent=%v page=%d size=%d debug=%v\n", f.All, f.ParentOnly, f.Page, f.Size, f.Debug)
+}
+-- internal/cmd/kid/kid_run.go --
+package kid
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type kidRunHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*kidRunHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KidRunInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "child=%v\n", in.KidRun.Flags.ChildOnly)
+}

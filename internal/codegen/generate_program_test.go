@@ -316,6 +316,91 @@ func TestToolExports_selection(t *testing.T) {
 	}
 }
 
+// TestAgentProgram_commandsWithSubCommands pins which commands with sub-commands are offered to
+// agents: one that declares arguments runs, so it is offered unless it says `agent: false`; one
+// without only prints help, so it is offered only with `agent: true`. Validate's "no effect"
+// warning agrees with each.
+func TestAgentProgram_commandsWithSubCommands(t *testing.T) {
+	t.Parallel()
+	const body = `version: 0.0.0
+command:
+  name: app
+  commands:
+    - name: repo
+      arguments:
+        - {name: name, schema: {type: string, required: true}}
+      commands:
+        - name: list
+    - name: team
+      agent: false
+      arguments:
+        - {name: name, schema: {type: string}}
+      commands:
+        - name: list
+    - name: db
+      commands:
+        - name: migrate
+    - name: cache
+      agent: true
+      commands:
+        - name: clear
+    - name: old
+      deprecated: use repo
+      arguments:
+        - {name: name, schema: {type: string}}
+      commands:
+        - name: list
+`
+	gp := runtimeLaneProgram(t, body)
+	a, err := gp.agentProgram()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range a.offered() {
+		got = append(got, strings.Join(c.c.Path, " "))
+	}
+	want := []string{"repo", "repo list", "db migrate", "cache", "cache clear", "old list"}
+	if !slices.Equal(got, want) {
+		t.Errorf("offered %q, want %q", got, want)
+	}
+	spec := decodeSpecYAML(t, body)
+	for i := range spec.Command.Commands {
+		c := &spec.Command.Commands[i]
+		if out := commandOutByDefault(c, false); c.Agent == nil && out == slices.Contains(want, c.Name) {
+			t.Errorf("%s: commandOutByDefault %v disagrees with the agent outputs", c.Name, out)
+		}
+	}
+	if rules := permissionRules(a); slices.ContainsFunc(rules, func(r permissionRule) bool { return !r.cmd.leaf }) {
+		t.Error("a permission rule names a command with sub-commands")
+	}
+}
+
+// TestReadFlags_offered pins which role flags reach agents: a JSON flag unless `agent: false`
+// (a hidden one still does), and preview and confirm flags only when they are parameters.
+func TestReadFlags_offered(t *testing.T) {
+	off, on := new(false), new(true)
+	cases := []struct {
+		name  string
+		flag  agentInput
+		check func(agentCommand) bool
+	}{
+		{"json", agentInput{Role: "machine-output", Identifiers: []string{"--json"}}, func(c agentCommand) bool { return len(c.machine) == 1 }},
+		{"hidden json", agentInput{Role: "machine-output", Identifiers: []string{"--json"}, Hidden: true}, func(c agentCommand) bool { return len(c.machine) == 1 }},
+		{"json kept from agents", agentInput{Role: "machine-output", Identifiers: []string{"--json"}, Agent: off}, func(c agentCommand) bool { return c.machine == nil }},
+		{"hidden dry-run", agentInput{Role: "dry-run", Identifiers: []string{"--dry-run"}, Hidden: true}, func(c agentCommand) bool { return c.dryRun == "" }},
+		{"hidden dry-run brought back", agentInput{Role: "dry-run", Identifiers: []string{"--dry-run"}, Hidden: true, Agent: on}, func(c agentCommand) bool { return c.dryRun == "--dry-run" }},
+		{"confirm kept from agents", agentInput{Role: "confirm", Identifiers: []string{"--yes"}, Agent: off}, func(c agentCommand) bool { return c.confirm == "" }},
+	}
+	for _, tc := range cases {
+		ac := agentCommand{c: agentContractCmd{Output: map[string]any{"type": "object"}, Flags: []agentInput{tc.flag}}}
+		ac.readFlags()
+		if !tc.check(ac) {
+			t.Errorf("%s: machine %v, dry-run %q, confirm %q", tc.name, ac.machine, ac.dryRun, ac.confirm)
+		}
+	}
+}
+
 // TestPermissions_rules checks the permission snippets: JSON and TOML parse, no rule names a
 // root or group command, each Codex rule's pattern matches its own match examples and not its
 // not_match ones, and the Gemini regexes compile and match the command.
@@ -451,6 +536,47 @@ func TestSkill_format(t *testing.T) {
 	}
 	if n := strings.Count(string(page), "\n"); n > skillLineLimit {
 		t.Errorf("SKILL.md is %d lines", n)
+	}
+}
+
+// TestSkill_prunesStaleReferences pins that generate removes a reference page it wrote for a
+// command that has left the spec or is no longer offered to agents, and keeps the files it
+// didn't write, which SKILL.md never linked.
+func TestSkill_prunesStaleReferences(t *testing.T) {
+	dir, _ := generateProgram(t, programConf)
+	refs := filepath.Join(dir, "skills", "taskr", "references")
+	for _, name := range []string{"taskr-purge.md", "taskr-list.md"} {
+		if _, err := os.Stat(filepath.Join(refs, name)); err != nil {
+			t.Fatalf("the first generate didn't write %s: %v", name, err)
+		}
+	}
+	writeTestFile(t, refs, "taskr-notes.md", "mine\n")
+	writeTestFile(t, refs, "guide.md", "mine\n")
+
+	spec, err := os.ReadFile(filepath.Join(dir, ".rotini.spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := strings.Replace(string(spec), "    - name: purge\n", "    - name: clean\n", 1)
+	renamed = strings.Replace(renamed, "      aliases: [ls]\n", "      aliases: [ls]\n      agent: false\n", 1)
+	if strings.Count(renamed, "\n") != strings.Count(string(spec), "\n")+1 || !strings.Contains(renamed, "name: clean") {
+		t.Fatal("the fixture no longer has the purge and list commands")
+	}
+	writeTestFile(t, dir, ".rotini.spec.yaml", renamed)
+	if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for name, want := range map[string]bool{
+		"taskr-purge.md": false, // renamed
+		"taskr-list.md":  false, // no longer offered to agents
+		"taskr-clean.md": true,
+		"taskr-notes.md": true, // never linked
+		"guide.md":       true,
+	} {
+		_, err := os.Stat(filepath.Join(refs, name))
+		if got := err == nil; got != want {
+			t.Errorf("%s exists = %v, want %v", name, got, want)
+		}
 	}
 }
 

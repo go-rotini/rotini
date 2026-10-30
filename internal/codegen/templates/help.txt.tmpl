@@ -23,8 +23,9 @@
                           .Description is the paragraph the command's `groups` gives it
          .FlagGroups[]    {.Title .Description .Flags[]} — the same, for .Flags
          .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .EnumValues
-                          .Deprecated .Constraints .Rules .Passthrough .Env .ConfigKey} — .Passthrough:
-                          the argument and every word after it are passed on as typed; .Env and
+                          .Deprecated .Constraints .Rules .Passthrough .Placeholder .Env .ConfigKey} —
+                          .Passthrough: the argument and every word after it are passed on as
+                          typed; .Placeholder: its declared display name, "" for none; .Env and
                           .ConfigKey as on a flag row
          .Flags[]         {.Identifiers .Label .Summary .Type .Required .Default .Implicit .Enum
                           .EnumValues .Deprecated .Env .ConfigKey .Constraints .Rules} —
@@ -48,6 +49,11 @@
                           releases that deprecated the item and will remove it ("" when not
                           planned); deprecation .Deprecated .DeprecatedSince .RemovedIn renders
                           "deprecated since 1.4.0, removed in 2.0.0: <message>"
+         .Deprecated      on the page: the command's own deprecation message, ending "; use
+                          <replacement> instead" when it declares replaced_by, "" when it is not
+                          deprecated; .DeprecatedSince and .RemovedIn as on a row
+         .ExitStatus[]    {.Code .Name .Summary .Retryable .Output .DocsURL} — the command's
+                          exit_status, else the root's, which is program-wide
          .Environment[]   {.Var .Summary .Type .Required .Default .Enum .EnumValues .Deprecated
                           .Constraints .Rules}
          .Configuration[] {.Name .Location .Summary .Type .Required .Default .Enum
@@ -64,6 +70,8 @@
          .Description     on argument, flag, env and config rows too: the input's longer text,
                           paragraphs separated by blank lines ("" for none). Help shows .Summary
                           only; man and markdown show both
+         .Default         on argument, flag, env and config rows: the default as help shows it
+                          ("" for none); man and markdown write a list or map default as JSON
          .Stability       on command, argument, flag, env and config rows: "experimental", "beta"
                           or "" (stable), as declared. On the page itself: the command's
                           stability, inherited from its ancestors; stabilityNote .Stability
@@ -91,6 +99,9 @@
 {{- with $prose}}{{.}}
 
 {{end -}}
+{{- if .Deprecated}}This command is {{deprecation .Deprecated .DeprecatedSince .RemovedIn}}
+
+{{end -}}
 {{- with .Stability}}{{stabilityNote .}}
 
 {{end -}}
@@ -115,7 +126,7 @@
 {{end}}
 {{end -}}
 {{- with .Arguments}}{{$.Headings.Arguments}}
-{{range .}}  {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
+{{range .}}  {{if .Required}}<{{or .Placeholder .Name}}{{if .Variadic}}...{{end}}>{{else}}[{{or .Placeholder .Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Constraints}} ({{.}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{if or .Env .ConfigKey}}  	{{alsoSetBy .Env .ConfigKey "" ""}}
 {{end}}{{template "values" .}}{{end}}
 {{end -}}

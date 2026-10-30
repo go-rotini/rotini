@@ -1,0 +1,107 @@
+# R13 — the guide's Carapace section: what the carapace-spec file carries from the spec.
+
+gomodinit example.com/kit
+
+exec rotini generate cmd/kit/.rotini.spec.yaml --config cmd/kit/.rotini.conf.yaml
+
+# Commands with their aliases, group and summary; a hidden alias is left out.
+grep '^    aliases:\n      - d\n    description: ship it\n    group: Shipping\n' completions/carapace/kit.yaml
+! grep '- dep$' completions/carapace/kit.yaml
+
+# Flags with their modifiers; cascading flags as persistent ones; hidden flags and hidden or
+# deprecated spellings listed as hidden.
+grep '^      "--target=!": where to$' completions/carapace/kit.yaml
+grep '^persistentflags:\n  "-v, --verbose": say more\n' completions/carapace/kit.yaml
+grep '^  "--auth=&": the token$' completions/carapace/kit.yaml
+grep '^  "--tok=&": the token$' completions/carapace/kit.yaml
+grep '^  "--old-auth=&": old spelling$' completions/carapace/kit.yaml
+grep '^  "--secret=&": hidden flag$' completions/carapace/kit.yaml
+
+# Completion hints, a message when messages are on, and command as the top-level names.
+grep '^          - \$carapace\.net\.Hosts$' completions/carapace/kit.yaml
+grep '^          - \$executables$' completions/carapace/kit.yaml
+grep '^          - \$carapace\.os\.Users$' completions/carapace/kit.yaml
+grep '^          - \$carapace\.os\.Groups$' completions/carapace/kit.yaml
+grep '^          - \$message\(free text\)$' completions/carapace/kit.yaml
+grep '^      positionalany:\n        - deploy\n        - exec\n        - help\n' completions/carapace/kit.yaml
+
+# A passthrough argument that comes first stops flag parsing.
+grep '^  - name: exec\n    description: run a command\n    parsing: non-interspersed\n' completions/carapace/kit.yaml
+
+-- cmd/kit/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kit
+  summary: a tool kit
+  flags:
+    - name: verbose
+      summary: say more
+      identifiers: [-v, --verbose]
+      cascading: true
+      schema: {type: bool}
+    - name: token
+      summary: the token
+      identifiers: [--token, --auth]
+      hidden_identifiers: [--tok]
+      deprecated_identifiers: [--auth]
+      schema: {type: string}
+    - name: auth
+      summary: old spelling
+      identifiers: [--old-auth]
+      deprecated: use --token
+      schema: {type: string}
+    - name: secret
+      summary: hidden flag
+      hidden: true
+      schema: {type: string}
+  commands:
+    - name: deploy
+      summary: ship it
+      aliases: [d]
+      hidden_aliases: [dep]
+      group: Shipping
+      flags:
+        - name: target
+          summary: where to
+          schema: {type: string, required: true, complete: {kind: host}}
+        - name: shell
+          summary: which program
+          schema: {type: string, complete: {kind: executable}}
+        - name: owner
+          summary: the owner
+          schema: {type: string, complete: {kind: user}}
+        - name: team
+          summary: the group
+          schema: {type: string, complete: {kind: group}}
+        - name: note
+          summary: a note
+          schema: {type: string, complete: {kind: none, message: free text}}
+    - name: exec
+      summary: run a command
+      arguments:
+        - name: argv
+          summary: the command
+          passthrough: true
+          schema: {type: '[]string'}
+    - name: help
+      summary: show help
+      arguments:
+        - name: command
+          summary: the command
+          schema: {type: '[]string', complete: {kind: command}}
+-- cmd/kit/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kit/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/kit/zz_kit.go
+      package: kit
+  features:
+    - type: completion
+      enabled: true
+      messages: declared
+    - type: carapace
+      enabled: true

@@ -9,6 +9,18 @@ import (
 	"testing"
 )
 
+// TestDescribeEnum_numeric pins that an editor's list of an integer input's values, with their
+// descriptions, keeps the values numbers, as the config file writes them.
+func TestDescribeEnum_numeric(t *testing.T) {
+	in := &InputSchema{Type: "int", Enum: []any{map[string]any{"value": "1", "summary": "low"}, "2"}}
+	s, _ := inputJSONSchema(in).(map[string]any)
+	describeEnum(s, in)
+	got, _ := json.Marshal(s)
+	if want := `{"enum":[1,2],"enumDescriptions":["low",""],"type":"integer"}`; string(got) != want {
+		t.Errorf("schema = %s, want %s", got, want)
+	}
+}
+
 // TestConfigSchemas_golden pins the schema written for each config file of
 // testdata/configschema/spec.yaml. Refresh with
 // `go test ./internal/codegen -run ConfigSchemas_golden -update`.

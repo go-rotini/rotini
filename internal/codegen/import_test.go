@@ -236,6 +236,18 @@ func TestReadImportResult(t *testing.T) {
 	}
 }
 
+// TestImportStatsPlural pins the summary's nouns to their counts.
+func TestImportStatsPlural(t *testing.T) {
+	one := &importResult{Command: &importCommand{Name: "a", Flags: []*importFlag{{}}}}
+	if got, want := one.stats(nil), "imported 1 command, 1 flag: 0 lossy, 0 unsupported, 0 info"; got != want {
+		t.Errorf("stats = %q, want %q", got, want)
+	}
+	two := &importResult{Command: &importCommand{Name: "a", Commands: []*importCommand{{Name: "b"}}}}
+	if got, want := two.stats(nil), "imported 2 commands, 0 flags: 0 lossy, 0 unsupported, 0 info"; got != want {
+		t.Errorf("stats = %q, want %q", got, want)
+	}
+}
+
 // TestYAMLString pins that every rendered scalar reads back as the string it came from.
 func TestYAMLString(t *testing.T) {
 	for _, s := range []string{
@@ -541,5 +553,107 @@ func TestRunImporter_vendorMod(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
 		t.Errorf("the run wrote into the module: %v", entries)
+	}
+}
+
+// TestImport_valueShapes pins how the value shapes an importer describes are written, on a
+// program with no sub-commands: a map default as a mapping with sorted keys, an empty list
+// default left out, a negated identifier, repeatable: false, several environment variables, a
+// file completion with extensions, an implicit value, an integer enum, and a bounded variadic
+// argument. The spec must validate and generate, and a second import over it must write it
+// byte for byte.
+func TestImport_valueShapes(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/acme\n\ngo 1.26\n")
+	t.Chdir(dir)
+	restore := importRunner
+	t.Cleanup(func() { importRunner = restore })
+	importRunner = func(context.Context, string, ImportOptions) (*importResult, []importNote, error) {
+		res, err := readImportResult(strings.NewReader(`{"format": "rotini-import/1", "source": {"framework": "kong"}, "command": {"name": "acme", "summary": "Acme",
+			"flags": [
+				{"name": "set", "identifiers": ["--set"], "schema": {"type": "map[string]string", "default": {"b": "2", "a": "1"}}},
+				{"name": "tags", "identifiers": ["--tags"], "schema": {"type": "[]string", "default": []}},
+				{"name": "color", "identifiers": ["--color"], "schema": {"type": "bool", "default": true, "negatable": "--plain"}},
+				{"name": "once", "identifiers": ["--once"], "schema": {"type": "string", "repeatable": false}},
+				{"name": "token", "identifiers": ["--token"], "schema": {"type": "string", "variable": ["ACME_TOKEN", "TOKEN"]}},
+				{"name": "config", "identifiers": ["--config"], "schema": {"type": "string", "placeholder": "FILE", "complete": {"kind": "file", "extensions": ["yaml", "yml"]}}},
+				{"name": "when", "identifiers": ["--when"], "schema": {"type": "string", "enum": [{"value": "auto"}, {"value": "always"}, {"value": "never"}], "default": "auto", "implicit_value": "always"}},
+				{"name": "level", "identifiers": ["-l", "--level"], "schema": {"type": "int", "enum": [{"value": "1", "summary": "low"}, {"value": "2"}], "default": 1}}
+			],
+			"arguments": [{"name": "files", "schema": {"type": "[]string", "required": true, "minItems": 1, "maxItems": 3}}]}}`))
+		return res, nil, err
+	}
+	p := NewProcessor("1.4.0")
+	if _, err := p.Import(context.Background(), ImportOptions{Package: "."}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "cmd", "acme", ".rotini.spec.yaml")
+	spec := readTestFile(t, path)
+	for _, want := range []string{
+		"        default:\n          a: \"1\"\n          b: \"2\"\n",
+		"        negatable: --plain\n",
+		"        repeatable: false\n",
+		"        variable:\n          - ACME_TOKEN\n          - TOKEN\n",
+		"        complete:\n          kind: file\n          extensions:\n            - yaml\n            - yml\n        placeholder: FILE\n",
+		"        implicit_value: always\n",
+		"          - value: \"1\"\n            summary: low\n          - \"2\"\n",
+		"        minItems: 1\n        maxItems: 3\n",
+	} {
+		if !strings.Contains(spec, want) {
+			t.Errorf("spec =\n%s\nwant it to contain\n%s", spec, want)
+		}
+	}
+	if strings.Contains(spec, "footer:") || strings.Contains(spec, "commands:") {
+		t.Errorf("a program with no sub-commands got a help footer or commands:\n%s", spec)
+	}
+	if _, tags, _ := strings.Cut(spec, "- name: tags\n"); strings.Contains(strings.SplitN(tags, "- name:", 2)[0], "default") {
+		t.Errorf("an empty list default was written:\n%s", spec)
+	}
+	if _, err := p.Import(context.Background(), ImportOptions{Package: ".", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if again := readTestFile(t, path); again != spec {
+		t.Errorf("a second import wrote\n%s\nwant\n%s", again, spec)
+	}
+}
+
+// TestImportForce pins that an existing spec or conf alone stops an import, and that --force
+// replaces both; a dry run of an import that would write the same files plans no change.
+func TestImportForce(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/acme\n\ngo 1.26\n")
+	writeTestFile(t, dir, "cmd/acme/.rotini.conf.yaml", "old conf\n")
+	t.Chdir(dir)
+	fakeImporter(t)
+	p := NewProcessor("1.4.0")
+	if _, err := p.Import(context.Background(), ImportOptions{Package: "."}); err == nil || !strings.Contains(err.Error(), "cmd/acme/.rotini.conf.yaml already exists (use --force to overwrite)") {
+		t.Fatalf("err = %v, want the existing conf refused", err)
+	}
+	writeTestFile(t, dir, "cmd/acme/.rotini.spec.yaml", "old spec\n")
+	if _, err := p.Import(context.Background(), ImportOptions{Package: ".", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if spec := readTestFile(t, filepath.Join(dir, "cmd", "acme", ".rotini.spec.yaml")); !strings.Contains(spec, "name: acme") {
+		t.Errorf("spec =\n%s\nwant it replaced", spec)
+	}
+	if conf := readTestFile(t, filepath.Join(dir, "cmd", "acme", ".rotini.conf.yaml")); !strings.Contains(conf, "generate:") {
+		t.Errorf("conf =\n%s\nwant it replaced", conf)
+	}
+	planned, err := p.ImportDryRun(context.Background(), ImportOptions{Package: ".", Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(planned.Changes) != 0 {
+		t.Errorf("changes = %q, want none", planned.Changes)
+	}
+}
+
+// TestImportTestArgs_timeoutAndTags pins that --timeout bounds the import's go test and that
+// --tags reach it.
+func TestImportTestArgs_timeoutAndTags(t *testing.T) {
+	r := &importRun{modfile: "go.mod", opts: ImportOptions{Package: ".", Tags: "dev,e2e"}}
+	args := strings.Join(r.testArgs("overlay.json", "TestRotiniImport_1", 30*time.Second), " ")
+	if !strings.Contains(args, "-timeout 30s") || !strings.Contains(args, "-tags dev,e2e") {
+		t.Errorf("go test args = %q", args)
 	}
 }

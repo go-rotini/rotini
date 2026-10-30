@@ -110,6 +110,9 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: Read out argument must be a non-nil pointer to an inputs struct"}
 	}
+	if rv.Elem().Kind() != reflect.Struct {
+		return errNotInputsStruct(rv.Elem().Type())
+	}
 
 	// 1. argv → a store, without validation: step 3 checks the reconciled store.
 	store, chain, err := parseArgvStore(b.parser, rtx, out)
@@ -308,7 +311,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 		srcs = append(srcs, files...)
 		r, err := newRegistry(fs, recon.WithoutWatch(), recon.WithSources(srcs...))
 		if err != nil {
-			return internalBind(channelFlag, "", "could not build the flag-fallback registry", err)
+			return registryError(channelFlag, "", "the flag-fallback registry", srcs, err)
 		}
 		defer r.Close()
 		reg = fallbackLookup{reg: r}
@@ -892,21 +895,89 @@ func configChannelOf(v reflect.Value) bool {
 
 // configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. boot carries any config_source-supplied paths and the
-// selected profiles.
+// selected profiles. A map several sources hold merges entry by entry ([mapMergeSource]).
 func (b *InputReader) configRegistry(files []ConfigFile, boot fileBootstrap, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
 	srcs, err := b.fileSources(files, boot, waived, view)
 	if err != nil {
 		return nil, nil, err
 	}
 	paths := sourcePaths(srcs)
+	raw := slices.Clone(srcs)
 	for i, src := range srcs {
+		if i < len(raw)-1 {
+			src = mapMergeSource{Source: src, lower: raw[i+1:]}
+		}
 		srcs[i] = spellings{Source: src, keys: keys, clock: view.clockRef()}
 	}
 	reg, err := newRegistry(view.clockRef().features(), recon.WithoutWatch(), recon.WithSources(srcs...))
 	if err != nil {
-		return nil, nil, internalBind(channelConfig, "", "could not build the configuration registry", err)
+		return nil, nil, registryError(channelConfig, "", "the configuration registry", srcs, err)
 	}
 	return reg, paths, nil
+}
+
+// registryError is the error for a registry over srcs that could not be built, what naming the
+// registry and input the input it was built for. Sources whose names collide are named, and
+// so is what each one is; a configuration registry's error then names the colliding source as
+// its input.
+func registryError(channel, input, what string, srcs []recon.Source, err error) *InputError {
+	msg := "could not build " + what
+	if errors.Is(err, recon.ErrSourceConflict) {
+		if name, first, second := sourceConflict(srcs); first != nil {
+			switch d := sourceDesc(first); {
+			case second == nil:
+				msg += fmt.Sprintf(": %s is named %q, which is reserved", d, name)
+			case sourceDesc(second) == d:
+				msg += fmt.Sprintf(": two sources are named %q, each %s", name, d)
+			default:
+				msg += fmt.Sprintf(": %s and %s are both named %q", d, sourceDesc(second), name)
+			}
+			if input == "" && channel == channelConfig {
+				input = name
+			}
+		}
+	}
+	return internalBind(channel, input, msg, err)
+}
+
+// sourceConflict finds the first source in srcs whose name a registry refuses: one recon
+// reserves (second is nil), or one an earlier source already has (first is that source).
+func sourceConflict(srcs []recon.Source) (name string, first, second recon.Source) {
+	seen := map[string]recon.Source{}
+	for _, s := range srcs {
+		n := s.Name()
+		if n == "explicit" || n == "default" {
+			return n, s, nil
+		}
+		if prev, ok := seen[n]; ok {
+			return n, prev, s
+		}
+		seen[n] = s
+	}
+	return "", nil, nil
+}
+
+// sourceDesc says what a registry source is, in the user's terms.
+func sourceDesc(s recon.Source) string {
+	if sp, ok := s.(spellings); ok {
+		s = sp.Source
+	}
+	if ms, ok := s.(mapMergeSource); ok {
+		s = ms.Source
+	}
+	if ns, ok := s.(namedSource); ok {
+		if ns.path != "" {
+			return "configuration file " + ns.path
+		}
+		return fmt.Sprintf("configuration file %q", ns.name)
+	}
+	switch s.Name() {
+	case "flags":
+		return "the command-line source"
+	case osEnvSourceName:
+		return "the environment source"
+	}
+	return "a custom source"
 }
 
 // cfgRegs is the config channel's registries for one bind: the merged precedence chain plus
@@ -1001,12 +1072,36 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		}
 		reg, err := newRegistry(c.view.clockRef().features(), recon.WithoutWatch(), recon.WithSources(srcs...))
 		if err != nil {
-			return nil, internalBind(channelConfig, name, fmt.Sprintf("could not build the registry for configuration file %q", name), err)
+			return nil, registryError(channelConfig, name, fmt.Sprintf("the registry for configuration file %q", name), srcs, err)
 		}
 		c.perFile[name] = reg
 		return reg, nil
 	}
 	return nil, internalBind(channelConfig, name, fmt.Sprintf("input pinned to unknown configuration file %q", name), nil)
+}
+
+// filePath names the config_files entry name as the user knows it: the file it was read from,
+// else its declared path or, for a search that found nowhere to look, the file name it
+// searches for.
+func (c *cfgRegs) filePath(name string) string {
+	if p := c.paths[name]; p != "" {
+		return p
+	}
+	for source, p := range c.paths {
+		if strings.HasPrefix(source, name+"#") {
+			return p // a profiled file: every profile's source reads the one file
+		}
+	}
+	for _, f := range c.files {
+		if f.Name != name {
+			continue
+		}
+		if f.Discover != nil {
+			return f.Discover.File
+		}
+		return f.Path
+	}
+	return name
 }
 
 // labels names this channel's inputs and files for messages.
@@ -1235,7 +1330,9 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 		}
 		tmp := reflect.New(reflect.StructOf(fields))
 		if err := bindConfigWaived(reg, tmp.Interface(), regs.waived); err != nil {
-			return regs.labels().bindStruct(channelConfig, err, reg, tmp.Elem())
+			labels := regs.labels()
+			labels.pinned = regs.filePath(file)
+			return labels.bindStruct(channelConfig, err, reg, tmp.Elem())
 		}
 		for i, j := range idxs {
 			cs.Field(j).Set(tmp.Elem().Field(i))
@@ -1281,6 +1378,28 @@ func (s namedSource) Get(p recon.Path) (recon.Value, bool, error) {
 		return recon.Value{}, false, nil
 	}
 	return v, ok, err
+}
+
+// mapMergeSource is a configuration source whose maps take the entries of the same map in the
+// sources below it, lower lists nearest first, so a map spread across several files reads entry
+// by entry, the first declared file winning per key. Any other value is the source's own.
+type mapMergeSource struct {
+	recon.Source
+
+	lower []recon.Source
+}
+
+func (s mapMergeSource) Get(p recon.Path) (recon.Value, bool, error) {
+	v, found, err := s.Source.Get(p)
+	if err != nil || !found || v.Kind() != recon.MapKind {
+		return v, found, err
+	}
+	for _, l := range s.lower {
+		if lv, ok, lerr := l.Get(p); lerr == nil && ok && lv.Kind() == recon.MapKind {
+			v = mergeValues(lv, v)
+		}
+	}
+	return v, true, nil
 }
 
 // sourcePaths maps each configuration file source's logical name to the file it read.
@@ -1882,11 +2001,13 @@ type valueKeys struct {
 	prefixed  map[string]prefixedKey
 }
 
-// prefixedKey is how an integer field's text arrives: one value, or a list, which a string
-// holds split on sep. prefixed is the field's base: prefixed; without it the text is decimal.
+// prefixedKey is how an integer field's text arrives, or a float field's under base: prefixed:
+// one value, or a list, which a string holds split on sep. prefixed is the field's base:
+// prefixed; without it an integer's text is decimal.
 type prefixedKey struct {
 	list     bool
 	bytes    bool // a []uint8, which a string would otherwise bind as its bytes
+	float    bool
 	sep      string
 	prefixed bool
 }
@@ -1895,7 +2016,10 @@ type prefixedKey struct {
 // without the leading zeros the config library would read as octal. Anything else is kept, for
 // validation to report.
 func (k prefixedKey) text(s string) string {
-	if k.prefixed {
+	switch {
+	case k.float:
+		return prefixedFloatText(s)
+	case k.prefixed:
 		return prefixedText(s)
 	}
 	return plainDecimalText(s)
@@ -2013,10 +2137,11 @@ func channelValueKeys(v reflect.Value, structName string) valueKeys {
 			if key == "" {
 				continue
 			}
-			if plainIntegerField(sf.Type) {
+			prefixed := sf.Tag.Get("base") == basePrefixed
+			if float := prefixed && isPlainFloat(sf.Type); float || plainIntegerField(sf.Type) {
 				ft := derefType(sf.Type)
 				list := ft.Kind() == reflect.Slice
-				keys.prefixed[key] = prefixedKey{list: list, bytes: list && ft.Elem().Kind() == reflect.Uint8, sep: recon.ParseTag(sf.Tag.Get("recon")).Separator, prefixed: sf.Tag.Get("base") == basePrefixed}
+				keys.prefixed[key] = prefixedKey{list: list, bytes: list && ft.Elem().Kind() == reflect.Uint8, float: float, sep: recon.ParseTag(sf.Tag.Get("recon")).Separator, prefixed: prefixed}
 				continue
 			}
 			switch ft := derefType(sf.Type); {
@@ -2321,14 +2446,14 @@ func channelChecked(tag reflect.StructTag, constrained bool, enum enumSet, decim
 	return constrained || enum.declared() || decimal || tag.Get("path") != ""
 }
 
-// decimalOnly reports whether f is an integer field read as decimal only: one that doesn't
+// decimalOnly reports whether f is a number field read as decimal only: one that doesn't
 // declare base: prefixed.
 func decimalOnly(f reflect.StructField) bool {
-	return f.Tag.Get("base") != basePrefixed && plainIntegerField(f.Type)
+	return f.Tag.Get("base") != basePrefixed && (plainIntegerField(f.Type) || isPlainFloat(f.Type))
 }
 
-// checkDecimal refuses a value of integer field f that isn't decimal, or doesn't fit the field's
-// type, when decimal says the field doesn't declare base: prefixed: without it an integer is
+// checkDecimal refuses a value of number field f that isn't decimal, or doesn't fit the field's
+// type, when decimal says the field doesn't declare base: prefixed: without it a number is
 // decimal on every channel, as on the command line.
 func checkDecimal(decimal bool, f reflect.StructField, label string, vals []string, secret bool) error {
 	if !decimal {

@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -25,7 +26,8 @@ import (
 //
 // Program features add no Go code to the cmd package (tools' `go: true`, and config_example
 // and env_example's ConfigExample and EnvExample, are the exceptions) and are never pruned:
-// turning one off leaves its files, as with the contract file.
+// turning one off leaves its files, as with the contract file. The one exception is a skill
+// reference page a removed or renamed command leaves (see pruneSkillReferences).
 
 // programFeature describes one whole-program feature.
 type programFeature struct {
@@ -99,6 +101,11 @@ func (p *program) emitProgramFeatures() error {
 		base, err := underModule(p.module.root, "generate.features."+pf.name+".file", cmp.Or(f.File, pf.file))
 		if err != nil {
 			return err
+		}
+		if pf.name == "skill" {
+			if err := p.pruneSkillReferences(base, files, f); err != nil {
+				return err
+			}
 		}
 		for _, rel := range slices.Sorted(maps.Keys(files)) {
 			target := base
@@ -200,8 +207,8 @@ type agentCommand struct {
 	effects     *Effects // the worst case over the command and every flag it accepts
 	toolEffects *Effects // the worst case over the command and the flags a tool can pass
 	machine     []string // what to add to the command line for JSON output; nil for none
-	dryRun      string   // the identifier of its dry-run flag; "" for none
-	confirm     string   // the identifier of its confirm flag; "" for none
+	dryRun      string   // the identifier of its dry-run flag, when agents are offered it; "" for none
+	confirm     string   // the identifier of its confirm flag, when agents are offered it; "" for none
 	stability   string   // the least stable of it and its ancestors: experimental, beta or ""
 }
 
@@ -212,12 +219,17 @@ func (p *program) agentProgram() (*agentProgram, error) {
 		return nil, err
 	}
 	a := &agentProgram{display: p.rootDisplay, help: p.commandHelps()}
-	if err := json.Unmarshal(raw, &a.doc); err != nil {
+	// Numbers keep their text, so a default or bound past float64's precision is written as
+	// the contract writes it.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&a.doc); err != nil {
 		return nil, fmt.Errorf("read the contract back: %w", err)
 	}
 	groups := map[string]bool{}
 	off := map[string]bool{}        // command paths with `agent: false`
 	declared := map[string]string{} // command path → its declared stability
+	var rootExits []contractExit
 	for _, c := range a.doc.Commands {
 		if len(c.Path) > 0 {
 			groups[strings.Join(c.Path[:len(c.Path)-1], " ")] = true
@@ -226,11 +238,17 @@ func (p *program) agentProgram() (*agentProgram, error) {
 			off[strings.Join(c.Path, " ")] = true
 		}
 		declared[strings.Join(c.Path, " ")] = c.Stability
+		if len(c.Path) == 0 && !c.Plugin {
+			rootExits = c.ExitStatus
+		}
 	}
 	displayWords := strings.Fields(p.rootDisplay)
 	for _, c := range a.doc.Commands {
 		if c.Plugin {
 			continue
+		}
+		if len(c.ExitStatus) == 0 {
+			c.ExitStatus = rootExits // the root's exit_status is program-wide
 		}
 		key := strings.Join(c.Path, " ")
 		ac := agentCommand{
@@ -247,31 +265,45 @@ func (p *program) agentProgram() (*agentProgram, error) {
 		}
 		passthrough := c.Passthrough || slices.ContainsFunc(c.Arguments, func(in agentInput) bool { return in.Passthrough })
 		optIn := c.Agent != nil && *c.Agent
-		ac.offered = !underOff && (optIn || (!c.Hidden && c.Deprecated == "" && ac.leaf && !passthrough))
-		var flagEffects, toolFlagEffects []*Effects
-		for _, f := range c.Flags {
-			if f.Effects != nil {
-				flagEffects = append(flagEffects, f.Effects)
-				if toolFlagOffered(f) {
-					toolFlagEffects = append(toolFlagEffects, f.Effects)
-				}
-			}
-			switch f.Role {
-			case "machine-output":
-				if c.Output != nil {
-					ac.machine = machineOutputArgv(f)
-				}
-			case "dry-run":
-				ac.dryRun = longIdentifier(f)
-			case "confirm":
-				ac.confirm = longIdentifier(f)
-			}
-		}
-		ac.effects = worstEffects(c.Effects, flagEffects)
-		ac.toolEffects = worstEffects(c.Effects, toolFlagEffects)
+		// A command with sub-commands and no arguments only prints help.
+		runnable := ac.leaf || len(c.Arguments) > 0
+		ac.offered = !underOff && (optIn || (!c.Hidden && c.Deprecated == "" && runnable && !passthrough))
+		ac.readFlags()
 		a.commands = append(a.commands, ac)
 	}
 	return a, nil
+}
+
+// readFlags resolves what a command's flags add: its worst-case effects, over every flag and
+// over the flags a tool can pass, and its JSON, preview and confirm flags. A preview or confirm
+// flag counts only when agents are offered it; the JSON flag unless it has `agent: false`.
+func (ac *agentCommand) readFlags() {
+	c := ac.c
+	var flagEffects, toolFlagEffects []*Effects
+	for _, f := range c.Flags {
+		if f.Effects != nil {
+			flagEffects = append(flagEffects, f.Effects)
+			if toolFlagOffered(f) {
+				toolFlagEffects = append(toolFlagEffects, f.Effects)
+			}
+		}
+		switch f.Role {
+		case "machine-output":
+			if c.Output != nil && (f.Agent == nil || *f.Agent) {
+				ac.machine = machineOutputArgv(f)
+			}
+		case "dry-run":
+			if toolFlagOffered(f) {
+				ac.dryRun = longIdentifier(f)
+			}
+		case "confirm":
+			if toolFlagOffered(f) {
+				ac.confirm = longIdentifier(f)
+			}
+		}
+	}
+	ac.effects = worstEffects(c.Effects, flagEffects)
+	ac.toolEffects = worstEffects(c.Effects, toolFlagEffects)
 }
 
 // offered returns the commands offered to agents, in contract order.

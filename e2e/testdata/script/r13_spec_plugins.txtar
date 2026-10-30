@@ -1,0 +1,216 @@
+# R13 — what the spec reference promises for plugins: a declared plugin's aliases and summary,
+# discovery's default prefix and `hidden`, a discovered name that collides with a declared one,
+# and `plugin_path` (expanded, a missing directory simply empty, searched after the host
+# binary's own directory).
+
+gomodinit example.com/pl
+
+exec rotini generate cmd/pl/.rotini.spec.yaml --config cmd/pl/.rotini.conf.yaml
+exec go mod tidy
+mkdir bin
+mkdir plugdir
+mkdir home/qplugins
+exec go build -o bin/pl$exe ./cmd/pl
+exec go build -o bin/pl-deploy$exe ./plugins/beside
+exec go build -o bin/pl-extra$exe ./plugins/beside
+exec go build -o plugdir/pl-deploy$exe ./plugins/inpath
+exec go build -o plugdir/pl-other$exe ./plugins/inpath
+exec go build -o home/qplugins/q-secret$exe ./plugins/inpath
+
+env PLUGDIR=$WORK${/}plugdir
+env HOME=$WORK${/}home
+env USERPROFILE=$WORK${/}home
+
+# A declared plugin runs by its name or an alias, and its summary is listed in help.
+exec bin/pl$exe up deploy a b
+stdout '^beside pl-deploy \[a b\]$'
+exec bin/pl$exe up dep a
+stdout '^beside pl-deploy \[a\]$'
+exec bin/pl$exe up --help
+stdout 'deploy, dep +deploy it'
+
+# The host binary's own directory is searched before plugin_path; $VAR in plugin_path is
+# expanded, so a plugin only there is found.
+exec bin/pl$exe up other
+stdout '^inpath pl-other \[\]$'
+
+# Discovery's prefix defaults to the program's name and a dash.
+exec bin/pl$exe up extra
+stdout '^beside pl-extra \[\]$'
+
+# A discovered name that a declared plugin already has is listed once, as the declared one.
+exec bin/pl$exe __complete up ''
+stdout -count=1 '^deploy'
+stdout '^deploy\tdeploy it'
+stdout '^extra'
+stdout '^other'
+
+# hidden: still dispatches (from a ~ plugin_path), left out of completion.
+exec bin/pl$exe quiet secret
+stdout '^inpath q-secret \[\]$'
+exec bin/pl$exe __complete quiet ''
+! stdout 'secret'
+
+# Response files are read from the run's directory before -C applies, and a plugin gets the
+# expanded words.
+exec bin/pl$exe -C sub +run.rsp
+stdout '^inpath pl-other \[\]$'
+exec bin/pl$exe up deploy +words.rsp
+stdout '^beside pl-deploy \[one two three\]$'
+
+# A plugin_path that doesn't exist is simply empty, and a failure names where it searched.
+exec bin/pl$exe __complete gone ''
+! stderr .
+! exec bin/pl$exe gone thing
+stderr 'searched next to the binary .*, then the plugin path .*nowhere, then PATH'
+
+-- run.rsp --
+up
+other
+-- sub/run.rsp --
+up
+extra
+-- words.rsp --
+# indented comments and blank lines are skipped
+
+   # like this
+one two
+three
+-- cmd/pl/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: pl
+  summary: a plugin host
+  response_files: {prefix: '+'}
+  flags:
+    - name: dir
+      identifiers: [-C]
+      role: chdir
+      cascading: true
+      schema: {type: string}
+    - name: help
+      identifiers: [--help]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+  commands:
+    - name: up
+      summary: declared and discovered plugins
+      plugin_path: $PLUGDIR
+      plugin_discovery: {}
+      plugins:
+        - name: deploy
+          aliases: [dep]
+          summary: deploy it
+    - name: quiet
+      summary: hidden discovery
+      plugin_path: ~/qplugins
+      plugin_discovery: {prefix: q-, hidden: true}
+    - name: gone
+      summary: a plugin path that doesn't exist
+      plugin_path: ./nowhere
+      plugin_discovery: {prefix: g-}
+-- cmd/pl/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/pl/main.go
+    - type: cmd
+      file: internal/cmd/pl/zz_pl.go
+      package: pl
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+-- cmd/pl/main.go --
+package main
+
+import (
+	pl "example.com/pl/internal/cmd/pl"
+)
+
+func main() {
+	pl.NewProgram().Execute()
+}
+-- internal/cmd/pl/pl.go --
+package pl
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (base) Run(ctx context.Context, rtx *rotini.Context) {}
+
+type plHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*plHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[PlInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Pl.Flags.Help {
+		page, _ := rtx.InvokedHelp()
+		fmt.Fprint(rtx.Stdout, page)
+		rtx.Halt()
+	}
+}
+
+func (*plHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+-- internal/cmd/pl/pl_up.go --
+package pl
+
+type plUpHandler struct{ base }
+-- internal/cmd/pl/pl_quiet.go --
+package pl
+
+type plQuietHandler struct{ base }
+-- internal/cmd/pl/pl_gone.go --
+package pl
+
+type plGoneHandler struct{ base }
+-- plugins/beside/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func main() {
+	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	fmt.Printf("beside %s %v\n", name, os.Args[1:])
+}
+-- plugins/inpath/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func main() {
+	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	fmt.Printf("inpath %s %v\n", name, os.Args[1:])
+}

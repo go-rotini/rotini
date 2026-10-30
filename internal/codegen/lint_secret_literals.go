@@ -25,12 +25,12 @@ func lintSecretLiterals(spec *Spec) []error {
 			at := fmt.Sprintf("%s/flags/%d", ptr, i)
 			if literalFreeSecret(s) {
 				if s.ImplicitValue != nil {
-					problems = append(problems, inputProblem(at, path, "flag", f.Name,
+					problems = append(problems, inputProblem(at+"/schema/implicit_value", path, "flag", f.Name,
 						"is secret and refuses a value typed on the command line (its `from` leaves out `value`), so it can't have an `implicit_value`, which is one; remove `implicit_value`"))
 				}
 				continue
 			}
-			p := inputProblem(at, path, "flag", f.Name,
+			p := inputProblem(at+"/schema/secret", path, "flag", f.Name,
 				"is secret but accepts its value on the command line, where it shows in the process list and shell history; declare `from: [file]` or `from: [stdin]`, without `value`, to refuse it")
 			p.sev = severityWarning
 			problems = append(problems, p)

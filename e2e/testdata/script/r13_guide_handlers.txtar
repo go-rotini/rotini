@@ -1,0 +1,399 @@
+# R13 — the guide's handler blocks, built and run: a short-circuit flag of one command (its
+# requirements waived, input that can't be read still an error, a broken config file skipped),
+# prompted answers checked with CheckInputs, a hand-built layer merged and validated, AppDirs,
+# and a streamed stdin that is nil when a file is given. Each *.go.txt that a guide block shows
+# is that block.
+
+# ── local short circuit: deploy --print-plan ────────────────────────────────
+cd $WORK/deploy
+gomodinit example.com/deploy
+exec rotini generate cmd/deploy/.rotini.spec.yaml --config cmd/deploy/.rotini.conf.yaml
+concat internal/cmd/deploy/deploy.go deploy_head.go.txt plan.go.txt
+exec go mod tidy
+exec go build -o deploy$exe ./cmd/deploy
+
+exec ./deploy$exe --print-plan
+stdout '^\{Flags:\{PrintPlan:true Replicas:1\} Arguments:\{Service:\}'
+! stderr .
+wantexit 1 ./deploy$exe
+stderr 'missing required input: <service>'
+exec ./deploy$exe api
+! stdout .
+
+# What can't be read is still an error with the flag set.
+wantexit 1 ./deploy$exe --print-plan --bogus
+stderr 'unknown flag "--bogus"'
+wantexit 1 ./deploy$exe --print-plan --replicas many
+stderr '--replicas'
+wantexit 1 ./deploy$exe --print-plan a b
+stderr 'accepts at most 1 argument'
+
+# A config file that can't be parsed is skipped for a short-circuited run; a normal run reports it.
+cp broken.txt deploy.yaml
+exec ./deploy$exe --print-plan
+stdout 'PrintPlan:true'
+wantexit 1 ./deploy$exe api
+stderr 'deploy\.yaml'
+
+# ── prompted answers and a hand-built layer: todo add ────────────────────────
+cd $WORK/todo
+gomodinit example.com/todo
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+concat internal/cmd/todo/todo_add.go add_head.go.txt prompted.go.txt add_tail.go.txt layer.go.txt merge_tail.go.txt
+concat internal/cmd/todo/todo_sync.go sync_head.go.txt sync.go.txt sync_tail.go.txt
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# The prompt fills what the command line left out, and CheckInputs checks the result.
+exec ./todo$exe add
+stdout '^added "from the prompt" \(priority normal\)$'
+exec ./todo$exe add 'typed'
+stdout '^added "typed" \(priority normal\)$'
+wantexit 1 ./todo$exe add 'x' -p urgent
+stderr '^Error: invalid value "urgent" for --priority \(one of: low, normal, high\)$'
+
+# The vault layer's values are checked with rotini's own when the merged report validates.
+env USE_VAULT=1
+exec ./todo$exe add 'buy milk'
+stdout '^merged "buy milk" \(priority high\)$'
+env TODO_PRIORITY=low
+exec ./todo$exe add 'buy milk'
+stdout '^merged "buy milk" \(priority high\)$'
+exec ./todo$exe add 'buy milk' -p low
+stdout '^merged "buy milk" \(priority low\)$'
+env TODO_PRIORITY=
+env VAULT_PRIORITY=urgent
+wantexit 1 ./todo$exe add 'buy milk'
+stderr 'invalid value "urgent"'
+env VAULT_PRIORITY=
+env USE_VAULT=
+
+# AppDirs creates nothing; the handler creates the state directory.
+env HOME=$WORK/home
+env USERPROFILE=$WORK/home
+env XDG_STATE_HOME=$WORK/state
+exec ./todo$exe sync
+stdout '^state=.*state[/\\]todo$'
+exists $WORK/state/todo
+! exists $WORK/home/.config/todo
+
+# A hook whose inputs have no configuration values opens no configuration file: sync runs
+# beside a broken one, and show, which reads a config key, reports it.
+cp broken.txt todo.yaml
+exec ./todo$exe sync
+stdout '^state='
+wantexit 1 ./todo$exe show
+stderr 'todo\.yaml'
+
+# ── a streamed stdin: logs grep ──────────────────────────────────────────────
+cd $WORK/logs
+gomodinit example.com/logs
+exec rotini generate cmd/logs/.rotini.spec.yaml --config cmd/logs/.rotini.conf.yaml
+concat internal/cmd/logs/logs_grep.go grep_head.go.txt logs_grep.go.txt grep_tail.go.txt
+exec go mod tidy
+exec go build -o logs$exe ./cmd/logs
+
+stdin $WORK/logs/app.log
+exec ./logs$exe grep error
+stdout '^error: disk full$'
+! stdout fine
+
+# Given a file, stdin is not read and the iterator is nil.
+exec ./logs$exe grep error app.log
+! stdout .
+
+-- deploy/deploy.yaml --
+-- todo/broken.txt --
+replicas: [
+-- deploy/broken.txt --
+replicas: [
+-- deploy/deploy_head.go.txt --
+package deploy
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*deployHandler)(nil)
+
+type deployHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+-- deploy/plan.go.txt --
+// spec, under the deploy command:
+//   - name: print-plan
+//     summary: print what would be deployed, and deploy nothing
+//     short_circuit: true
+//     schema: { type: bool }
+
+func (*deployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DeployInputs]() // succeeds even with <service> missing
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	if in.Deploy.Flags.PrintPlan {
+		fmt.Fprintf(rtx.Stdout, "%+v\n", in.Deploy)
+		return
+	}
+	// … deploy
+}
+-- deploy/cmd/deploy/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: deploy
+  summary: deploy a service
+  config_files:
+    - name: user
+      path: deploy.yaml
+  arguments:
+    - name: service
+      schema: { type: string, required: true }
+  flags:
+    - name: print-plan
+      summary: print what would be deployed, and deploy nothing
+      identifiers: [--print-plan]
+      short_circuit: true
+      schema: { type: bool }
+    - name: replicas
+      identifiers: [--replicas]
+      schema: { type: int, default: 1, key: replicas }
+-- deploy/cmd/deploy/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/deploy/main.go
+    - type: cmd
+      file: internal/cmd/deploy/zz_rotini.go
+      package: deploy
+-- todo/cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  config_files:
+    - name: user
+      path: todo.yaml
+  commands:
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          schema: { type: string, required: true, minLength: 1 }
+      flags:
+        - name: priority
+          identifiers: [-p, --priority]
+          schema: { type: string, default: normal, enum: [low, normal, high], variable: TODO_PRIORITY }
+    - name: sync
+      summary: sync tasks
+    - name: show
+      summary: show the zone
+      config:
+        - name: zone
+          schema: { type: string, key: zone, default: none }
+-- todo/cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+    - type: cmd
+      file: internal/cmd/todo/zz_rotini.go
+      package: todo
+-- todo/add_head.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoAddHandler)(nil)
+
+type todoAddHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func askForMissing(_ *rotini.Context, in TodoAddInputs) TodoAddInputs {
+	if in.TodoAdd.Arguments.Title == "" {
+		in.TodoAdd.Arguments.Title = "from the prompt"
+	}
+	if in.TodoAdd.Flags.Priority == "" {
+		in.TodoAdd.Flags.Priority = "normal"
+	}
+	return in
+}
+
+func fromVault() TodoAddInputs {
+	var in TodoAddInputs
+	in.TodoAdd.Flags.Priority = "high"
+	if p := os.Getenv("VAULT_PRIORITY"); p != "" {
+		in.TodoAdd.Flags.Priority = p
+	}
+	return in
+}
+
+var vaultSet = rotini.PresenceOf(fromVault())
+
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if os.Getenv("USE_VAULT") != "" {
+		vaultRun(rtx)
+		return
+	}
+	promptedRun(rtx)
+}
+
+func promptedRun(rtx *rotini.Context) {
+-- todo/prompted.go.txt --
+argv, err := rtx.ArgvInputs[TodoAddInputs]()
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+
+in := askForMissing(rtx, argv.Values) // your own prompting code
+
+if err := rtx.CheckInputs(in, rotini.PresenceOf(in)); err != nil {
+	rtx.HaltWith(err)
+	return
+}
+-- todo/add_tail.go.txt --
+	fmt.Fprintf(rtx.Stdout, "added %q (priority %s)\n", in.TodoAdd.Arguments.Title, in.TodoAdd.Flags.Priority)
+}
+
+func vaultRun(rtx *rotini.Context) {
+-- todo/layer.go.txt --
+argv, _ := rtx.ArgvInputs[TodoAddInputs]()
+env, _ := rtx.EnvInputs[TodoAddInputs]()
+vault := rotini.InputLayer[TodoAddInputs]{Name: "vault", Values: fromVault(), Set: vaultSet}
+
+merged, report := rotini.MergeInputsWithReport(env, vault, argv)
+if err := report.Validate(); err != nil {
+	rtx.HaltWith(err)
+	return
+}
+-- todo/merge_tail.go.txt --
+	fmt.Fprintf(rtx.Stdout, "merged %q (priority %s)\n", merged.TodoAdd.Arguments.Title, merged.TodoAdd.Flags.Priority)
+}
+-- todo/sync_head.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*todoSyncHandler)(nil)
+
+type todoSyncHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*todoSyncHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[TodoSyncInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+-- todo/sync.go.txt --
+dirs, err := rotini.AppDirs(rtx, "todo", "xdg")
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+if err := os.MkdirAll(dirs.State, 0o700); err != nil {
+	rtx.HaltWith(err)
+	return
+}
+-- todo/sync_tail.go.txt --
+	fmt.Fprintf(rtx.Stdout, "state=%s\n", dirs.State)
+}
+-- logs/app.log --
+error: disk full
+fine
+-- logs/cmd/logs/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: logs
+  summary: read logs
+  commands:
+    - name: grep
+      arguments:
+        - name: pattern
+          schema: { type: string, required: true }
+        - name: files
+          schema: { type: '[]inputfile' }
+      stdin:
+        format: lines
+        stream: true
+        unless_argument: files
+-- logs/cmd/logs/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/logs/main.go
+    - type: cmd
+      file: internal/cmd/logs/zz_rotini.go
+      package: logs
+-- logs/grep_head.go.txt --
+package logs
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*logsGrepHandler)(nil)
+
+type logsGrepHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*logsGrepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+-- logs/logs_grep.go.txt --
+in, err := rtx.Inputs[LogsGrepInputs]()
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+if in.LogsGrep.Stdin == nil {
+	// Files were given (or stdin is a terminal): read in.LogsGrep.Arguments.Files.
+	return
+}
+for line, err := range in.LogsGrep.Stdin {
+	if err != nil {
+		rtx.HaltWith(err) // a read error, or Ctrl-C: the run exits 130
+		return
+	}
+	if strings.Contains(line, in.LogsGrep.Arguments.Pattern) {
+		fmt.Fprintln(rtx.Stdout, line)
+	}
+}
+-- logs/grep_tail.go.txt --
+}

@@ -73,8 +73,8 @@ func FileMode(perm fs.FileMode) OutputOption {
 //   - A path is written atomically: to a temporary file beside it, renamed into place by
 //     Close. Abort, a failed write or a failed Close removes the temporary file and leaves an
 //     existing file untouched, and so does a run that ends with the file still open, by a
-//     return, a halt or a panic. A relative path is resolved against the run's directory
-//     ([Context.Dir]).
+//     return, a halt, a panic or a forced exit after a signal. A relative path is resolved
+//     against the run's directory ([Context.Dir]).
 //   - An existing file that is not a regular file, such as /dev/null, a named pipe or NUL on
 //     Windows, is written directly, not atomically.
 //
@@ -86,6 +86,9 @@ func FileMode(perm fs.FileMode) OutputOption {
 // links to the old one, its owner and its extended attributes are not carried over. On Windows,
 // the rename is retried briefly while another program holds the file open, and a read-only
 // file cannot be replaced.
+//
+// A path whose directory doesn't exist, or that permission denies, is a usage error; any
+// other failure to open or create the file is uncategorised ([CategoryNone]).
 //
 // The file is not synced to disk: Close makes it visible whole, as most tools that write
 // files do, not durable across a power loss.
@@ -112,7 +115,7 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 			return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %s is a symbolic link to a file that doesn't exist", quotePath(path)), err: rerr})
 		}
 		if rerr != nil {
-			return nil, &pathError{msg: fmt.Sprintf("could not follow output file %s", quotePath(path)), err: rerr, detail: true}
+			return nil, outputOpenError(fmt.Sprintf("could not follow output file %s", quotePath(path)), rerr)
 		}
 		target = resolved
 		info, err = os.Stat(target)
@@ -125,7 +128,7 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 		// No O_TRUNC: it does nothing to a device or pipe, and Windows refuses it on NUL.
 		f, err := os.OpenFile(target, os.O_WRONLY, 0)
 		if err != nil {
-			return nil, &pathError{msg: fmt.Sprintf("could not open output file %s", quotePath(path)), err: err, detail: true}
+			return nil, outputOpenError(fmt.Sprintf("could not open output file %s", quotePath(path)), err)
 		}
 		return rtx.trackOutput(&OutputFile{rtx: rtx, name: path, w: f, file: f, target: target}), nil
 	case exists && !cfg.overwrite:
@@ -142,19 +145,30 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	}
 	f, tmp, err := createTemp(target, perm)
 	if err != nil {
-		return nil, &pathError{msg: fmt.Sprintf("could not create output file %s", quotePath(path)), err: err, detail: true}
+		return nil, outputOpenError(fmt.Sprintf("could not create output file %s", quotePath(path)), err)
 	}
 	if keepMode {
 		// The temporary file was created through the umask; give it the replaced file's mode.
 		if err := f.Chmod(perm); err != nil {
 			_ = f.Close()
 			_ = os.Remove(tmp)
-			return nil, &pathError{msg: fmt.Sprintf("could not create output file %s", quotePath(path)), err: err, detail: true}
+			return nil, outputOpenError(fmt.Sprintf("could not create output file %s", quotePath(path)), err)
 		}
 	}
 	return rtx.trackOutput(&OutputFile{
 		rtx: rtx, name: path, w: f, file: f, tmp: tmp, target: target, overwrite: cfg.overwrite,
 	}), nil
+}
+
+// outputOpenError is the error for an output file CreateOutput could not open, create or
+// follow, saying why: a usage error when its directory doesn't exist or permission is denied,
+// which the user can fix, and uncategorised for any other I/O failure.
+func outputOpenError(msg string, err error) error {
+	pe := &pathError{msg: msg, err: err, detail: true}
+	if pathMissing(err) || errors.Is(err, fs.ErrPermission) {
+		return UsageError(pe)
+	}
+	return pe
 }
 
 // createTemp creates a new file beside target, named after it, with perm before the umask.
@@ -171,7 +185,8 @@ func createTemp(target string, perm fs.FileMode) (*os.File, string, error) {
 	return nil, "", errors.New("could not find a free temporary name")
 }
 
-// Write writes p to the file, or to stdout for "-".
+// Write writes p to the file, or to stdout for "-". After Close or Abort it returns
+// [fs.ErrClosed].
 func (f *OutputFile) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -320,6 +335,22 @@ func (rtx *Context) abortOutputs() {
 		if err := f.Abort(); err != nil {
 			rtx.RecordWarning(err)
 		}
+	}
+}
+
+// discardOutputs removes the temporary files of the output files the run left open, ignoring
+// failures, for a forced exit. It takes no file's lock: a handler's goroutine may be blocked
+// in a write while holding one.
+func (rtx *Context) discardOutputs() {
+	rtx.mu.RLock()
+	open := slices.Clone(rtx.outputs)
+	rtx.mu.RUnlock()
+	for _, f := range open {
+		if f.tmp == "" {
+			continue
+		}
+		_ = f.file.Close() // Windows can't remove an open file
+		_ = os.Remove(f.tmp)
 	}
 }
 

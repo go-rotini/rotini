@@ -121,7 +121,7 @@ func TestSpecNumbers_nonFiniteIsPositioned(t *testing.T) {
 		{
 			ext:  "toml",
 			body: "version = \"0.0.0\"\n\n[command]\nname = \"demo\"\n\n[[command.flags]]\nname = \"x\"\nidentifiers = [\"--x\"]\nschema = { type = \"float64\", default = inf }\n",
-			want: ".rotini.spec.toml:7:",
+			want: ".rotini.spec.toml:9:40:",
 		},
 		{
 			ext:  "yaml",

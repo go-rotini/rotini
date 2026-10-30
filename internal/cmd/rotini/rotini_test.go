@@ -309,6 +309,43 @@ func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 	}
 }
 
+// TestCLI_initializePrintsNotices pins that init prints generate's notices as warnings, on a
+// real run and a dry run, and still exits as it would without them.
+func TestCLI_initializePrintsNotices(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	notices := []error{errors.New("pruned a_b.go (disabled; removed by the next generate); its command is no longer in the spec")}
+	in := codegen.Initialized{Spec: "cmd/a/.rotini.spec.yaml", Conf: "cmd/a/.rotini.conf.yaml", Result: "[12:00:00] 5ms", Notices: notices}
+	for _, tc := range []struct {
+		argv    []string
+		changes []string
+		code    int
+	}{
+		{[]string{"init", "a", "--force"}, nil, 0},
+		{[]string{"init", "a", "--force", "--dry-run"}, nil, 0},
+		{[]string{"init", "a", "--force", "--dry-run"}, []string{"1. update internal/cmd/a/a_b.go"}, 2},
+	} {
+		p, _, errb := newTestCLI(t)
+		fn := func(string, codegen.InitOptions) (codegen.Initialized, error) {
+			got := in
+			got.Changes = tc.changes
+			return got, nil
+		}
+		p.WithDependency(initializeDep, codegen.InitializeFn(fn))
+		p.WithDependency(initializeDryRunDep, codegen.InitializeDryRunFn(fn))
+		code, _ := p.Run(tc.argv)
+		if code != tc.code {
+			t.Errorf("%q: exit %d, want %d", tc.argv, code, tc.code)
+		}
+		if want := "Warning: " + notices[0].Error() + "\n"; !strings.HasPrefix(errb.String(), want) {
+			t.Errorf("%q: stderr = %q, want it to start with %q", tc.argv, errb.String(), want)
+		}
+	}
+}
+
 // init requires the name argument.
 func TestCLI_initializeRequiresAName(t *testing.T) {
 	p, _, errb := newTestCLI(t)

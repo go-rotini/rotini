@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/go-rotini/jsonschema"
 )
@@ -206,5 +207,49 @@ func TestStructuredReporter_candidatesMatchTheToken(t *testing.T) {
 	}
 	if _, has := line.Error["candidates"]; has {
 		t.Errorf("candidates paired with another error's token: %v", line.Error)
+	}
+}
+
+type secretInputs struct {
+	App struct {
+		Flags struct {
+			N   int            `rotini:"n"`
+			F   float64        `rotini:"f"`
+			L   []int          `rotini:"l"`
+			O   map[string]any `rotini:"o"`
+			B   bool           `rotini:"b"`
+			Dur time.Duration  `rotini:"dur"`
+		}
+		Arguments struct{}
+	}
+}
+
+// A secret value the user mistyped never reaches a structured line, in its token or its
+// message, whatever the value's type.
+func TestStructuredReporter_secretsNeverAppear(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "n", Identifiers: []string{"--n"}, Type: "int", Secret: true},
+			{Name: "f", Identifiers: []string{"--f"}, Type: "float64", Secret: true},
+			{Name: "l", Identifiers: []string{"--l"}, Type: "[]int", Separator: ",", Secret: true},
+			{Name: "o", Identifiers: []string{"--o"}, Type: "object", ObjectSchema: `{"type":"object","properties":{"a":{"type":"integer"}}}`, Secret: true},
+			{Name: "b", Identifiers: []string{"--b"}, Type: "bool", Secret: true},
+			{Name: "dur", Identifiers: []string{"--dur"}, Type: "duration", Secret: true},
+		},
+	}
+	fns := map[string]func(context.Context, *Context){"App": func(_ context.Context, rtx *Context) {
+		if _, err := rtx.Inputs[secretInputs](); err != nil {
+			rtx.HaltWith(err)
+		}
+	}}
+	for _, argv := range [][]string{
+		{"--n", "hunter2"}, {"--n=hunter2"}, {"--n", "1", "--n", "hunter2"}, {"--f", "hunter2"}, {"--l", "1,hunter2"},
+		{"--o", `{"a":"hunter2"}`}, {"--o", "hunter2"}, {"--b=hunter2"}, {"--dur", "hunter2"},
+	} {
+		body := structuredLine(t, NewProgramFunc(def, fnLookup(fns)), argv...)
+		if raw, _ := json.Marshal(body); bytes.Contains(raw, []byte("hunter2")) || body["kind"] != "invalid-value" || body["category"] != "usage" {
+			t.Errorf("%q: %s", argv, raw)
+		}
 	}
 }

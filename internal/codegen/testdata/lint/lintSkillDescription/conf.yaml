@@ -1,0 +1,26 @@
+# SKILL.md's description is the root's summary followed by the skill's `description`; together
+# they may hold at most 1024 characters. Without a description and a summary there is none.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    - type: markdown
+      enabled: true
+    - type: skill
+      enabled: true
+      description: >-
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.
+        Use it to manage the demo records: list them, add one, edit one, remove one, export them.

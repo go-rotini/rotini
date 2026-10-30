@@ -1,0 +1,122 @@
+# R13 — the conf's validate.fail, $schema, dry_run_env and header, as the conf reference states them.
+
+gomodinit example.com/cv
+
+# ── validate.fail: fast stops at the first problem, in validate and generate ──
+! exec rotini validate many.spec.yaml --config fast.conf.yaml
+stderr 'declared twice'
+! stderr 'variadic'
+! exec rotini generate many.spec.yaml --config fast.conf.yaml
+stderr 'declared twice'
+! stderr 'variadic'
+# --fail overrides it.
+! exec rotini validate many.spec.yaml --config fast.conf.yaml --fail collect
+stderr 'declared twice'
+stderr 'variadic'
+
+# ── $schema: any URI is accepted, and never fetched ─────────────────────────
+exec rotini validate app.spec.yaml --config schema.conf.yaml
+! stderr .
+
+# ── the skill's name: validate rejects one over 64 characters ───────────────
+! exec rotini validate app.spec.yaml --config longskill.conf.yaml
+stderr 'generate[/.]features.*name'
+
+# ── header: on the entrypoint when first written, never rewritten after ─────
+exec rotini generate app.spec.yaml --config header.conf.yaml
+grep '^// Copyright 2026 Example\.$' cmd/app/main.go
+grep '^// Copyright 2026 Example\.$' internal/cmd/app/zz_rotini.go
+cp header2.conf.yaml header.conf.yaml
+exec rotini generate app.spec.yaml --config header.conf.yaml
+grep '^// Copyright 2026 Example\.$' cmd/app/main.go
+! grep 'Other' cmd/app/main.go
+grep '^// Copyright 2026 Other\.$' internal/cmd/app/zz_rotini.go
+
+# ── dry_run_env: set and true, with nothing to change, exits 0 ──────────────
+env CV_DRY=Yes
+exec rotini generate app.spec.yaml --config header.conf.yaml
+! stderr .
+cp app2.spec.yaml app.spec.yaml
+wantexit 2 rotini generate app.spec.yaml --config header.conf.yaml
+stderr '^dry run: '
+env CV_DRY=0
+exec rotini generate app.spec.yaml --config header.conf.yaml
+exists internal/cmd/app/app_greet.go
+
+-- many.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  flags:
+    - name: out
+      identifiers:
+        - --out
+      schema:
+        type: string
+    - name: out
+      identifiers:
+        - --output
+      schema:
+        type: string
+  arguments:
+    - name: paths
+      schema:
+        type: '[]string'
+    - name: target
+      schema:
+        type: string
+-- fast.conf.yaml --
+version: 0.0.0
+validate:
+  fail: fast
+-- app.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+-- app2.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: a demo
+  commands:
+    - name: greet
+      summary: say hello
+-- schema.conf.yaml --
+$schema: urn:example:not-a-url
+version: 0.0.0
+-- longskill.conf.yaml --
+version: 0.0.0
+generate:
+  features:
+    - type: markdown
+      enabled: true
+    - type: skill
+      enabled: true
+      name: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- header.conf.yaml --
+version: 0.0.0
+generate:
+  dry_run_env: CV_DRY
+  packages:
+    - type: main
+      file: cmd/app/main.go
+      header: |
+        // Copyright 2026 Example.
+    - type: cmd
+      file: internal/cmd/app/zz_rotini.go
+      header: |
+        // Copyright 2026 Example.
+-- header2.conf.yaml --
+version: 0.0.0
+generate:
+  dry_run_env: CV_DRY
+  packages:
+    - type: main
+      file: cmd/app/main.go
+      header: |
+        // Copyright 2026 Other.
+    - type: cmd
+      file: internal/cmd/app/zz_rotini.go
+      header: |
+        // Copyright 2026 Other.

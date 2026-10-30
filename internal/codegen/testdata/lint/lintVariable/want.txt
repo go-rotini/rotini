@@ -1,1 +1,2 @@
-spec: .rotini.spec.yaml:27:7: command demo: config "timeout": sets `variable`, which names an environment variable; only env inputs, flags and arguments (as their env fallback) read one, so here it would be silently ignored
+spec: .rotini.spec.yaml:31:19: command demo: config "timeout": sets `variable`, which names an environment variable; only env inputs, flags and arguments (as their env fallback) read one, so here it would be silently ignored
+warning: spec: .rotini.spec.yaml:27:7: command demo: config "timeout": no `config_files` entry is in scope (on this command, an ancestor or a command below it), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless an input reader set with WithInputReader supplies it

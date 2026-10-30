@@ -60,19 +60,19 @@ Additional names that invoke this command. Command aliases affect dispatch routi
 
 `boolean` · default `false`
 
-When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line).
+When true, the command is omitted from its parent's generated Commands list, the man page's SEE ALSO and shell completion (it still dispatches on the command line).
 
 #### `deprecated`
 
 `string`
 
-Deprecation message. The command is annotated as deprecated in its parent's generated Commands list, and invoking it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those aliases report; without, every name does.
+Deprecation message. The command is annotated as deprecated in its parent's generated Commands list and left out of shell completion, and invoking it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those aliases report; without, every name does.
 
 #### `deprecated_identifiers`
 
 array of `string`
 
-Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rotini's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Sub-commands only, like 'aliases' — rejected on the root by rotini validation.
+Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rotini's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Shell completion leaves them out. Sub-commands only, like 'aliases' — rejected on the root by rotini validation.
 
 #### `deprecated_since`
 
@@ -140,7 +140,7 @@ Environment-variable inputs for this command
 
 array of [`ConfigInput`](#configinput)
 
-Config-value inputs for this command, bound by key from an in-scope config_files source (declared on this command or any ancestor — see config_files).
+Config-value inputs for this command, bound by key from an in-scope config_files source (declared on this command or any ancestor — see config_files). `rotini validate` warns about one when no `config_files` entry is in scope on the command, its ancestors or the commands below it, since the default input reader then has no file to read it from.
 
 #### `stdin`
 
@@ -152,7 +152,7 @@ Declares expected stdin format and schema for this command
 
 array of [`ConfigurationFile`](#configurationfile)
 
-Configuration files this command reads values from, each at a fixed 'path' or found with 'discover'. Files cascade: a command can read from the files declared on it and on every command above it, so a 'config' input here or on any sub-command may pin itself (schema 'file:') to a file declared here or on any ancestor. Only the files along the invoked command's path are loaded; files declared on other branches are never read. File names must be unique along a path (a collision is an error), and declaring the same physical file at two levels is a warning. When two files in scope define the same key, the one declared nearest the invoked command wins, and within one command's list the first declared wins, so list the more specific file (a project's) before the more general one (the user's). In a composed CLI, a `$ref`'d child's files travel with its commands, so `parent child cmd` reads what `child cmd` reads without the parent declaring anything.
+Configuration files this command reads values from, each at a fixed 'path' or found with 'discover'. Files cascade: a command can read from the files declared on it and on every command above it, so a 'config' input here or on any sub-command may pin itself (schema 'file:') to a file declared here or on any ancestor. Only the files along the invoked command's path are loaded; files declared on other branches are never read. File names must be unique along a path (a collision is an error), and declaring the same physical file at two levels is a warning. When two files in scope define the same key, the one declared nearest the invoked command wins, and within one command's list the first declared wins, so list the more specific file (a project's) before the more general one (the user's). A map several files hold merges entry by entry under the same order; a list is replaced whole. In a composed CLI, a `$ref`'d child's files travel with its commands, so `parent child cmd` reads what `child cmd` reads without the parent declaring anything.
 
 #### `env_prefix`
 
@@ -200,7 +200,7 @@ The `flag_sets` this command adds, by name, in order. Each set's flags come afte
 
 array of [`Command`](#command)
 
-Sub-commands of this command, declared inline or composed with $ref. On a $ref command these are added to the composed child's own sub-commands (see '$ref'); a name or alias that collides across the combined list is an error.
+Sub-commands of this command, declared inline or composed with $ref. On a $ref command, an entry named like one of the composed child's sub-commands overrides it, and the others are added to them (see '$ref'); a name or alias that collides across the combined list is an error.
 
 #### `$ref`
 
@@ -209,16 +209,17 @@ Sub-commands of this command, declared inline or composed with $ref. On a $ref c
 The spec file whose root command is mounted here as this sub-command. Not valid on the root command. Two forms are accepted:
 
 - A relative path, resolved against this spec file's directory (`$ref: ../db/.rotini.spec.yaml`).
-- `mod://<module>@<version>/<path>`, a spec inside another Go module (`$ref: mod://github.com/acme/db@v1.4.0/cmd/db/.rotini.spec.yaml`). The version is required, and &lt;path&gt; is the spec file's path inside that module. The module is read from the module cache with `go mod download`, so it is verified against go.sum; add it to go.mod first (`go get github.com/acme/db@v1.4.0`). A relative $ref inside that spec resolves within the same module and cannot leave it.
+- `mod://<module>@<version>/<path>`, a spec inside another Go module (`$ref: mod://github.com/acme/db@v1.4.0/cmd/db/.rotini.spec.yaml`). The version is required, and &lt;path&gt; is the spec file's path inside that module. The module is read from the module cache with `go mod download`, so it is verified against go.sum; add it to go.mod first (`go get github.com/acme/db@v1.4.0`). The version must be the one go.mod builds the module at, after its `replace` directives: a $ref naming another version, a module go.mod doesn't require, or a module replaced by a directory or another module is rejected. A relative $ref inside that spec resolves within the same module and cannot leave it.
 
-Git and https URLs are not accepted. Either way, the mounted command uses the handlers of the composed spec's own generated package unless `handler:` names another.
+Remote sources (https, git and other URLs) are not accepted. How a $ref is written is checked even outside a Go module; fetching a mod:// spec needs one. Either way, the mounted command uses the handlers of the composed spec's own generated package unless `handler:` names another.
 
-The composed spec is the base, and the parent can adjust it where it is mounted:
+The composed spec is the base, and the parent overrides it where it is mounted, for its own tree, without forking it:
 
-- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path, hidden_aliases, replaced_by, metadata) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
-- A 'commands:' list next to the $ref is added to the child's own sub-commands: its inline entries get their own handler files, and its $ref entries are mounted as further children.
+- Every other command-level key written next to the $ref (name, aliases, hidden_aliases, summary, description, usage, header, footer, examples, headings, groups, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_since, removed_in, replaced_by, deprecated_identifiers, deprecated_identifiers_removed_in, stability, agent, effects, metadata, plugin_path) replaces the child's value for the mounted command. A list or map written empty (`examples: []`) clears the child's; text can be replaced but not cleared.
+- An entry of the 'commands:' list next to the $ref that is named like one of the child's sub-commands, and has no $ref, overrides that sub-command the same way, and its own 'commands:' entries override that sub-command's sub-commands, as deep as needed: `- {name: migrate, examples: [acme db migrate --steps 2]}`. Its name picks the command, so a sub-command can't be renamed this way. Every other entry is added to the child's sub-commands: an inline entry gets its own handler file, and a $ref entry is mounted as a further child. An override can't add a command below it.
+- With several layers (acme mounts db, which mounts migrate), the spec nearest the root wins: acme's override of `db migrate` replaces what db sets next to its own $ref, which replaces what migrate's spec says.
 - `handler:` on a $ref command points it at a different handler package.
-- Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, use, output, plugins, plugin_discovery, passthrough, options_first) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
+- Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, use, output, output_stream, plugins, plugin_discovery, passthrough, options_first) can't be overridden, here or in an override entry: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec. Nor can `filename`, since the mounted command's handler file is in the child's package, or `handler:` in an override entry.
 
 The child's own plugins, plugin_discovery, passthrough and options_first travel with it. `rotini validate` and `generate` on the parent also check every spec composed by a relative path as its own document, reporting problems at their position in that file. A spec composed with mod:// is not checked that way: it belongs to its own module, which validates it.
 
@@ -272,7 +273,7 @@ Not supported on a local command and rejected by rotini validation: a timeout is
 
 `boolean` or [`Multicall`](#multicall)
 
-Root only: dispatch on the name the binary was invoked as, so one binary serves several names through links or copies. `true` is busybox style: a binary named after a top-level command (a symlink `ls` to the binary) runs it, as if the user had typed `<root> ls`. The object form sets a prefix to strip first, a prefix that answers shell completion, or both. The name is the base name the binary was run as, never a resolved symlink; on Windows a trailing .exe is dropped and names match without regard to case. A name that matches no command, the root's own included, runs the root as usual. Help pages still show the root's invocation (`busybox ls`).
+Root only: dispatch on the name the binary was invoked as, so one binary serves several names through links or copies. `true` is busybox style: a binary named after a top-level command, one of its aliases or hidden aliases, or a declared plugin (a symlink `ls` to the binary) runs it, as if the user had typed `<root> ls`. The object form sets a prefix to strip first, a prefix that answers shell completion, or both. The name is the base name the binary was run as, never a resolved symlink; on Windows a trailing .exe is dropped and names match without regard to case. A name that matches no command, the root's own included, runs the root as usual. Help pages still show the root's invocation (`busybox ls`).
 
 ### Documentation
 
@@ -286,13 +287,13 @@ Short one-liner describing this command. It is shown next to the command in its 
 
 `string`
 
-Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set.
+Long description of this command: shown atop its generated help page, in the man page's DESCRIPTION, and under the summary on the markdown page. A page given verbatim ('help', 'man' or 'markdown') leaves it out.
 
 #### `usage`
 
 `string`
 
-Usage-line override. When omitted, rotini derives `<command path> [flags] <command> <arguments>` from the command's shape. Ignored when 'help' is set.
+Usage-line override, shown on the help page, as the man page's SYNOPSIS and under the markdown page's Usage. When omitted, rotini derives it from the command's shape: the command path, then `[flags]` when the command has visible flags of its own, `<command>` when it has sub-commands, and its arguments (`<command path> [flags] <command> <arguments>`). A page given verbatim leaves it out.
 
 #### `display_name`
 
@@ -304,19 +305,19 @@ Root only: the name the generated help, man and markdown pages show for the prog
 
 array of `string`
 
-Example command-line invocations, rendered one per line. Ignored when 'help' is set.
+Example command-line invocations, rendered one per line on the help page and in the man and markdown pages' EXAMPLES section. `rotini validate` parses each command in an example that runs this program against the spec, and rejects one that doesn't parse (an unknown command or flag, a bad value, a missing argument). A page given verbatim leaves them out.
 
 #### `exit_status`
 
 array of [`ExitStatusEntry`](#exitstatusentry)
 
-Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. Ignored when 'man' (verbatim) is set.
+Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The root's list is program-wide: a command without its own exit_status documents the root's, on its pages, on the agent skill page, in its tool definitions and in the exit-code check below, and a command's own list replaces the root's rather than adding to it. The contract records each command's own list. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. A page given verbatim ('man' or 'markdown') leaves the section out.
 
 #### `see_also`
 
 array of `string`
 
-Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.
+Cross-references rendered as a SEE ALSO section in the man and markdown pages (e.g. related commands or man pages like 'rotini-generate(1)', or URLs); the man page also links the parent and sub-commands. A page given verbatim ('man' or 'markdown') leaves it out.
 
 #### `group`
 
@@ -352,7 +353,7 @@ Section heading overrides for the generated page; sane defaults fill any unset h
 
 `string`
 
-Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering; terminal styling kept) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields.
+Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering; terminal styling kept) and ignores the structured help fields (description/usage/header/footer/examples/headings) for the help page; the man and markdown pages still render from them, and 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields.
 
 #### `man`
 
@@ -406,13 +407,13 @@ Override the name of this command's generated handler-stub .go file (in the cli 
 
 [`Effects`](#effects)
 
-What running this command does, for the people and the programs (such as AI agents) that run it. Help, man and markdown show it as a line (`Effects: destructive, not idempotent`), and the contract, the generated Definition (CommandDef.Effects), tool exports, the agent skill page and permission snippets carry it. Unset says nothing, and a program reading the contract then assumes the worst: destructive, reaching outside the machine. Sub-commands don't inherit it. A flag's own `effects` raises it for a run that gives the flag. Not allowed on a `$ref` node: the child spec, whose handler runs, declares it. Nothing changes at run time.
+What running this command does, for the people and the programs (such as AI agents) that run it. Help, man and markdown show it as a line (`Effects: destructive, not idempotent`), and the contract, the generated Definition (CommandDef.Effects), tool exports, the agent skill page and permission snippets carry it. Unset says nothing, and a program reading the contract then assumes the worst: destructive, reaching outside the machine. Sub-commands don't inherit it. A flag's own `effects` raises it for a run that gives the flag. Set next to a `$ref`, it replaces the composed command's. Nothing changes at run time.
 
 #### `agent`
 
 `boolean` or `null`
 
-Whether this command and its sub-commands are offered to AI agents: in tool exports, the agent skill page, llms.txt, permission snippets and the MCP companion. `false` leaves the subtree out, while it stays in help. `true` brings back a command left out by default: a hidden or deprecated one, one with sub-commands (which prints help when run bare), or a passthrough command (which would run whatever it is given). Unset follows those defaults. Nothing changes at run time.
+Whether this command and its sub-commands are offered to AI agents: in tool exports, the agent skill page, llms.txt, permission snippets and the MCP companion. `false` leaves the subtree out, while it stays in help. `true` brings back a command left out by default: a hidden or deprecated one, one with sub-commands and no arguments (which only prints help), or a passthrough command (which would run whatever it is given). Unset follows those defaults. Nothing changes at run time.
 
 
 ## FlagInput
@@ -427,7 +428,7 @@ Logical name for the flag
 
 `boolean` or `null`
 
-Whether this flag is a tool parameter for AI agents (tool exports and the MCP companion). `false` leaves it out, while it stays in help. `true` brings back a flag left out by default: a hidden, deprecated, secret or short-circuit flag, or one that reads `from:` a file or stdin (which would let an agent read the host's files, or put a secret in the model's context). Unset follows those defaults.
+Whether this flag is a tool parameter for AI agents (tool exports and the MCP companion). `false` leaves it out, while it stays in help. `true` brings back a flag left out by default: a hidden, deprecated, secret or short-circuit flag, the directory flag (`role: chdir`), or one that reads `from:` a file or stdin (which would let an agent read the host's files, or put a secret in the model's context). Unset follows those defaults. The machine-output flag is never a parameter: tool exports add it to every call, and `false` stops that.
 
 ### `cascading`
 
@@ -439,7 +440,7 @@ When true, this flag applies to its command and to every command below it: it ma
 
 `string`
 
-Deprecation message. The flag is annotated as deprecated in generated help, and using it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those spellings report — the others are the ones to move to (`identifiers: [--db, --database]`, `deprecated_identifiers: [--database]`, `deprecated: use --db`); without, the whole flag is deprecated and every spelling reports.
+Deprecation message. The flag is annotated as deprecated in generated help, and using it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those spellings report — the others are the ones to move to (`identifiers: [--db, --database]`, `deprecated_identifiers: [--database]`, `deprecated: use --db`) — and help lists only the others, with no deprecation note; without, the whole flag is deprecated and every spelling reports.
 
 ### `deprecated_identifiers`
 
@@ -483,7 +484,7 @@ Presentation only: parsing, precedence and the generated field are unchanged. Us
 
 `boolean` · default `false`
 
-When true, the flag is omitted from generated help (it still parses on the command line).
+When true, the flag is omitted from generated help, man and markdown pages and shell completion (it still parses on the command line).
 
 ### `hidden_identifiers`
 
@@ -523,7 +524,7 @@ With `deprecated`: the flag to use instead, as one of its identifiers (`--output
 
 What this flag means to a program driving the CLI, such as an agent. 'force' marks the bool flag that lets the command replace existing output files (the handler passes it on, as in rotini.CreateOutput(rtx, path, rotini.Overwrite(in.Flags.Force))). 'fields' marks the list flag that chooses which output fields are written (`--json id,title`, applied with rotini.SelectFields), and 'sort' the string flag that names the field to sort by (`--sort-by title`, applied with rotini.SortBy); each takes its values from an `enum` or `values_from`. These three change nothing at run time. At most one flag per command has a given role.
 
-'chdir' is the one role the runtime acts on: a directory flag like git's `-C dir`, spelled with whatever identifiers the flag declares (`-C`, `-w, --workdir` or any other), on the root, cascading, read from the command line only (no default, env or config fallback, or `from:`), one per program. Rotini reads it before anything else, and resolves walk-up config discovery, relative paths, `@file` values, path checks and the directory plugins run in against it (Context.Dir returns it). It never changes the process's working directory, so a handler joins relative paths with rtx.Dir(). A relative value is resolved against the run's directory, and given more than once, the last wins.
+'chdir' is the one role the runtime acts on: a directory flag like git's `-C dir`, spelled with whatever identifiers the flag declares (`-C`, `-w, --workdir` or any other): a `string` or `existingdir` flag on the root, cascading, read from the command line only (no default, env or config fallback, or `from:`), not short-circuit, in no flag group or dependency, one per program. Rotini reads it before anything else, and resolves walk-up config discovery, relative paths, `@file` values, path checks and the directory plugins run in against it (Context.Dir returns it). It never changes the process's working directory, so a handler joins relative paths with rtx.Dir(). A relative value is resolved against the run's directory, and given more than once, the last wins.
 
 'dry-run' marks the bool flag that previews a run without changing anything, and 'confirm' the bool flag that answers yes for a command that would otherwise refuse or prompt. 'machine-output' marks the flag that makes the command write its declared `output` as JSON: a bool flag, or a string flag with an `enum` and `role_value` naming the value that selects JSON (`--format json`). 'page' marks the flag that selects a page of results. They change nothing at run time either; the contract, tool exports and the agent skill page read them, and a command has each at most once, counting the cascading flags it inherits.
 
@@ -815,7 +816,7 @@ With 'lines' or 'jsonl' only: generate an iterator (`iter.Seq2[string, error]`, 
 
 `string`
 
-The name of an optional file argument of the same command (`inputfile` or `existingfile`, or a list of either): stdin is read only when that argument got no value, or its value is (or, for a list, contains) `-`. Otherwise the Stdin field stays nil and nothing is read. This is the `cat [FILE...]` and `jq FILTER [FILE]` shape. Without it, a declared stdin is read on every run, even when a file is given, which waits forever when a caller holds stdin open. With `required`, an empty stdin is an error only when no file is given.
+The name of an optional file argument of the same command, with no `default` (`inputfile` or `existingfile`, or a list of either): stdin is read only when that argument got no value, or its value is (or, for a list, contains) `-`, which only an `inputfile` accepts. Otherwise the Stdin field stays nil and nothing is read. This is the `cat [FILE...]` and `jq FILTER [FILE]` shape. Without it, a declared stdin is read on every run, even when a file is given, which waits forever when a caller holds stdin open. With `required`, an empty stdin is an error only when no file is given.
 
 
 ## ConfigurationFile
@@ -824,7 +825,7 @@ The name of an optional file argument of the same command (`inputfile` or `exist
 
 `string` · **required**
 
-Logical name for the config file (e.g. 'app-config'). It anchors per-input pins (schema 'file:') and config_source claims, so it must be unique within its chain (this command and its ancestors) — a name collision in scope is an error.
+Logical name for the config file (e.g. 'app-config'). It anchors per-input pins (schema 'file:') and config_source claims, so it must be unique within its chain (this command and its ancestors) — a name collision in scope is an error. `explicit` and `default` are reserved for the reader's own layers.
 
 ### `as`
 
@@ -917,13 +918,13 @@ The flag whose presence triggers the rule.
 
 ## ResponseFiles
 
-Response files: arguments kept in a file and named on the command line. Before the first `--`, a word starting with the prefix names a file, read relative to the working directory, whose lines become arguments: one argument per line, kept exactly (spaces included), with a trailing carriage return removed. Empty and blank lines and lines starting with `#` are skipped. Words read from a file are not expanded again, and a `--` in a file ends expansion like one typed. To pass a word that starts with the prefix, double it: `@@x` is the argument `@x`. Words after `--` are never expanded. A file that can't be read is a usage error, even beside `--help`. Plugins and passthrough arguments receive the expanded words.
+Response files: arguments kept in a file and named on the command line. Before the first `--`, a word starting with the prefix names a file of at most 1 MiB, read relative to the run's directory before any `role: chdir` flag applies, whose lines become arguments: one argument per line, kept exactly (spaces included), with a leading byte-order mark and a trailing carriage return removed. Empty and blank lines and lines whose first non-blank character is `#` are skipped. Words read from a file are not expanded again, and a `--` in a file ends expansion like one typed. To pass a word that starts with the prefix, double it: `@@x` is the argument `@x`. Words after `--` are never expanded. A file that can't be read is a usage error, even beside `--help`. Plugins and passthrough arguments receive the expanded words.
 
 ### `prefix`
 
 `string` · **required**
 
-The one character that starts a response-file word, such as `@`. Not a letter, digit, `-` or space.
+The one character that starts a response-file word, such as `@`. Not a letter, digit, `-` or space, and not `@` when a flag or argument reads `from: [file]`, whose `@file` values it would take over.
 
 
 ## HandlerSource
@@ -940,7 +941,7 @@ Go import path of the handler package, in the same 'alias path' form an input ty
 
 `string` · **required**
 
-Function-name prefix the package exports per command: codegen delegates this command to '&lt;alias&gt;.&lt;convention&gt;()' and each sub-command to '&lt;alias&gt;.&lt;convention&gt;&lt;SubPath&gt;()', each returning a rotini.Handler. PascalCase Go-exportable identifier.
+Function-name prefix the package exports per command: codegen delegates this command to '&lt;alias&gt;.&lt;convention&gt;()' and, on a '$ref' command, each of the composed spec's sub-commands to '&lt;alias&gt;.&lt;convention&gt;&lt;SubPath&gt;()', each returning a rotini.Handler. PascalCase Go-exportable identifier.
 
 
 ## PluginSpec
@@ -984,7 +985,7 @@ When true, discovered plugins still dispatch but are omitted from completion lis
 
 `string`
 
-Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-').
+Executable-name prefix to discover: a file name, so it holds no '/' or '\'. Default: the host binary name followed by '-' (e.g. 'acme-').
 
 
 ## ExitStatusEntry
@@ -1128,7 +1129,7 @@ The word after `help` that shows the topic (`demo help filters`). Its man page i
 
 `string` · **required**
 
-A one-line description, shown beside the name in the root's list of topics, in the man page's NAME line and at the top of the markdown page. The help page shows the body, or this summary when the topic has none.
+A one-line description, shown beside the name in the root's list of topics, in the man page's NAME line and at the top of the markdown page. The help page shows the body; a generated topic's page opens with this summary.
 
 ### `body`
 
@@ -1149,7 +1150,7 @@ JSON Schema-inspired type definition used for output/response and object propert
 
 ### `const`
 
-The one value this property may hold (standard JSON Schema semantics), checked wherever the shape is: output checks, stdin payloads, config files and object flags. Its Go field keeps the declared `type`. In a stream whose items come in several kinds (`oneOf` on `output`), each kind names itself with a required string property holding a `const`, such as `kind: {type: string, const: progress}`.
+The one value this property may hold (standard JSON Schema semantics), checked wherever the shape is: output checks, stdin payloads, config files and object flags. Its Go field keeps the declared `type`. In a stream whose items come in several kinds (`oneOf` on `output`), each kind names itself with a required string property holding a `const`, such as `kind: {type: string, const: progress}`. On an output shape it must be a value of the declared `type` (`const: 3` on a string is rejected), or no output could pass.
 
 ### `description`
 
@@ -1169,7 +1170,7 @@ The generated &lt;Prefix&gt;Output is then an interface that only the kinds' typ
 
 array of `string`
 
-Required property names for object schemas (standard JSON Schema semantics).
+Required property names for object schemas (standard JSON Schema semantics). On an output shape, each must be one of its `properties`, or no output could pass.
 
 
 ## Effects
@@ -1259,15 +1260,15 @@ document instead; see [StdinSpec](#stdinspec).
 
 `string` · one of `prefixed`
 
-Integer inputs only (the int and uint types, integer, and lists of them): with `base: prefixed`, a value may also be written with a base prefix after an optional sign — `0x1F` or `0X1F` (hexadecimal), `0o17` (octal), `0b101` (binary) — and `_` may separate digits, as in Go literals (`1_000`, `0xFF_FF`). A value without a prefix is still decimal: `010` is ten, never octal. Misplaced underscores (`_1`, `1_`, `1__0`, `-_1`) are invalid, and a value out of the type's range is an error as usual.
+Number inputs only (the int, uint and float types, integer, number, and lists of them): with `base: prefixed`, a value may also be written with a base prefix after an optional sign — `0x1F` or `0X1F` (hexadecimal), `0o17` (octal), `0b101` (binary) — and `_` may separate digits, as in Go literals (`1_000`, `0xFF_FF`). A float also takes a hexadecimal float (`0x1p4`, `0x1.8p1`) and `_` in its decimal form (`1_000.5`). A value without a prefix is still decimal: `010` is ten, never octal. Misplaced underscores (`_1`, `1_`, `1__0`, `-_1`) are invalid, and a value out of the type's range is an error as usual.
 
-It applies wherever the input reads text: the command line, a flag's or argument's environment and config fallbacks, env inputs, config values written as strings, and `default` and `enum` values. Bounds, enum and `uniqueItems` compare the number a value reads as, so `0x10` and `16` are the same. Without `base`, an integer is decimal from every source, so `0x10` is an invalid value. Help notes what the input accepts. `prefixed` is the only value.
+It applies wherever the input reads text: the command line, a flag's or argument's environment and config fallbacks, env inputs, config values written as strings, and `default` and `enum` values. Bounds, enum and `uniqueItems` compare the number a value reads as, so `0x10` and `16` are the same. Without `base`, a number is decimal from every source, so `0x10`, `0x1p4` and `1_000` are invalid values. Help notes what the input accepts. `prefixed` is the only value.
 
 ### `complete`
 
 [`CompletionHint`](#completionhint)
 
-Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both.
+Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter), plus an optional message to show when there is nothing to offer. Declare 'kind', 'message' or both. An existingfile, inputfile or outputfile input, or a list of them, that declares no kind completes files, and an existingdir input directories, unless it has an enum or `values_from`; a declared kind replaces that, and `kind: none` turns it off.
 
 Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback, which the completer can replace for one request with rtx.SetCompletionFallback.
 
@@ -1279,7 +1280,7 @@ Flag and env inputs only: names a config_files entry whose file path this input 
 
 ### `default`
 
-The value an input takes when nothing supplies one. A scalar for a single value; a list for a repeatable input, each element added as one occurrence (as if the flag were repeated); a mapping for a map input, added as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). Write it the way a user would type the value (a duration as 30s, a date as 2026-09-29 or in the input's `layout:`). `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that uses it. A supplied value replaces the default; the two never merge. `default_text:` changes only how help shows it.
+The value an input takes when nothing supplies one. A scalar for a single value; a list for a repeatable input, each element added as one occurrence (as if the flag were repeated); a mapping for a map input, added as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). Write it the way a user would type the value (a duration as 30s, a date as 2026-09-29 or in the input's `layout:`). `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that uses it. A supplied value replaces the default; the two never merge. `default_text:` changes only how help shows it. Man and markdown pages write a list or map default as JSON (`["a,b", "c"]`), so an item holding a separator, a space or a quote reads as one item; help writes it tersely (`[a,b c]`).
 
 ### `default_text`
 
@@ -1308,7 +1309,7 @@ Path inputs (string, existingfile, existingdir, inputfile, outputfile, and lists
 
 `string`
 
-Config inputs only: reads this input from one named config_files entry only, never from the other files, so a key present in another file does not satisfy it (or its 'required'). Omit it to read through the declared order, where the first file with the key wins.
+Config inputs only: reads this input from one named config_files entry only, never from the other files, so a key present in another file does not satisfy it (or its 'required', whose error names this file). Omit it to read through the declared order, where the first file with the key wins.
 
 ### `from`
 
@@ -1352,7 +1353,7 @@ Dotted key path the value is read from (config inputs, and the config fallback o
 
 `string` or `array`
 
-Time inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout (the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is: `2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`), or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies wherever the input reads a value, and a `default` must parse under it. It may be a list, tried in order: the first layout that parses wins, help shows the first, and an error names them all (`layout: [2006-01-02, unix]`). Put the most specific first, since a value that parses under an earlier layout never reaches a later one.
+Time inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout (the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is: `2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`), or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds), each with an optional leading `-` and never a `+`. A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). A `date` is always that day's UTC midnight, under a layout with a time of day (`unix` included) too. Applies wherever the input reads a value, and a `default` must parse under it. It may be a list, tried in order: the first layout that parses wins, help shows the first, and an error names them all (`layout: [2006-01-02, unix]`). Put the most specific first, since a value that parses under an earlier layout never reaches a later one.
 
 ### `negatable`
 
@@ -1362,7 +1363,7 @@ Bool flags only: also accept a `--no-<name>` form for every long identifier, whi
 
 Use it to turn something off for one run when a default, a config file or an environment variable already turned it on, which a plain bool flag cannot do. Short identifiers get no negated form.
 
-A declared identifier always wins over a derived negated one, so a flag you declare as `--no-cache` keeps that name. The negated form takes no value: `--no-color=true` is a parse error. The generated field is the same single bool either way, and help shows it as `--[no-]color`.
+A derived negated form can't be an identifier a flag on the command path already declares: `rotini validate` rejects a negatable `--cache` beside a flag declared as `--no-cache`. The negated form takes no value: `--no-color=true` is a parse error. The generated field is the same single bool either way, and help shows it as `--[no-]color`.
 
 A string names the one negated form instead: `negatable: --plain` on `--color` accepts `--plain` to set it false, and no `--no-color`. It is a long identifier that no flag on the command path declares, and help shows it beside the flag's own identifiers: `--color, --plain`.
 
@@ -1376,7 +1377,7 @@ Env inputs only, map-typed ('map'/'object' → map[string]any): the separator th
 
 `string`
 
-Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, `<PATH>` instead of the argument's name. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or &lt;angle-bracketed&gt;.
+Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, and `<PATH>` instead of the argument's name on the usage line and in its Arguments row. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or &lt;angle-bracketed&gt;.
 
 ### `relative`
 
@@ -1400,19 +1401,19 @@ Durations take Go units plus `d` (24h) and `w`. Words are read in any case. On a
 
 `boolean` or `null`
 
-On a single-value flag: `repeatable: false` makes giving the flag more than once on the command line an error naming the first and last values, instead of the last value winning, which is the default. `-vv` and `--color --no-color` are repeats, and so is a cascading flag given at two levels of the command path; a sub-command that redeclares the flag has its own. Environment and configuration values are unaffected. Rejected on list, map, count and object flags, which repeat by nature, and on arguments, env and config inputs.
+On a single-value flag: `repeatable: false` makes giving the flag more than once on the command line an error naming the first and last values, instead of the last value winning, which is the default; only that winning value is then checked against the flag's type and rules. `-vv` and `--color --no-color` are repeats, and so is a cascading flag given at two levels of the command path; a sub-command that redeclares the flag has its own. Environment and configuration values are unaffected. Rejected on list, map, count and object flags, which repeat by nature, and on arguments, env and config inputs.
 
 ### `required`
 
 `boolean` · default `false`
 
-When true, the input must be provided (or stdin must not be empty for stdin inputs). On the command line an empty value (`--name ""`, `--name=`, or `''` as an argument) is provided; add `minLength: 1` to refuse it. An env input set to the empty string is provided too, while a flag's environment fallback set to the empty string counts as unset; either way, a `.env` file that sets the variable supplies the value instead. Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema.
+When true, the input must be provided (or stdin must not be empty for stdin inputs). On the command line an empty value (`--name ""`, `--name=`, or `''` as an argument) is provided; add `minLength: 1` to refuse it. An env input set to the empty string is provided too, while a flag's environment fallback set to the empty string counts as unset; either way, a `.env` file that sets the variable supplies the value instead. Rejected beside a `default`, which would always supply the value. Note: this is a boolean — unlike the string-array 'required' on Schema. `rotini validate` warns about a required flag or argument that is also `hidden` (every run must pass what help doesn't show) or `deprecated` (every run must pass what it is told to stop using).
 
 ### `secret`
 
 `boolean` · default `false`
 
-When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input. A secret flag or argument whose from: list leaves out value refuses a value typed on the command line, which would show in the process list and shell history; `rotini validate` warns about a secret flag that accepts one. Help, man and markdown pages leave out a secret input's default unless `default_text` sets what to show.
+When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input. A secret flag or argument whose from: list leaves out value refuses a value typed on the command line, which would show in the process list and shell history; `rotini validate` warns about a secret flag that accepts one. Help, man and markdown pages say how to pass a secret that refuses a typed value, by the forms its `from` lists: `(@file or - for stdin)`, `(@file)` or `(- for stdin)`. They leave out a secret input's default unless `default_text` sets what to show.
 
 ### `separator`
 
@@ -1438,11 +1439,13 @@ On a flag or an argument it also turns on the fallback chain (command line, then
 
 An argument's fallback fills a position the command line left out (`deploy` reads `<env>` from `DEPLOY_ENV`). Positionals fill left to right, so a fallback applies only when every argument before it has a value, and an argument after one with a fallback needs a fallback or a default too. A variadic argument splits its environment value on its `separator`; without one the whole value is one item. Not on a passthrough argument, or the arguments of a passthrough command, whose words are taken as typed.
 
+`rotini validate` warns about two inputs on one command path that read one variable for different keys, through derived names (`a.b_c` and `a_b.c` both derive A_B_C) or a `variable:` naming what another derives: setting the variable sets both.
+
 ### `variable_file`
 
 `string`
 
-An environment variable holding the path of a file to read this input's value from, the convention Docker and Kubernetes secrets use: with `variable_file: APP_TOKEN_FILE`, `APP_TOKEN_FILE=/run/secrets/token` reads the value from that file. One trailing line ending is removed, a relative path is read from the run's working directory, and the file may be at most 1 MiB. Setting both the plain variable and this one is an error; an empty value counts as unset. Valid on env inputs and on flags that read an environment variable (as part of the flag's fallback); like `variable:`, the name is exact and never given the `env_prefix`. Help lists it after the plain names, and a secret input's file contents are redacted like any other value.
+An environment variable holding the path of a file to read this input's value from, the convention Docker and Kubernetes secrets use: with `variable_file: APP_TOKEN_FILE`, `APP_TOKEN_FILE=/run/secrets/token` reads the value from that file. One trailing line ending is removed, a relative path is read from the run's directory, and the file may be at most 1 MiB. Setting both the plain variable and this one is an error; an empty value counts as unset. Valid on env inputs, and on flags and arguments that read an environment variable (as part of their fallback); like `variable:`, the name is exact and never given the `env_prefix`. Help lists it after the plain names, and a secret input's file contents are redacted like any other value.
 
 
 ## ConfigurationFileDiscover
@@ -1529,6 +1532,8 @@ Allowed values. The check applies to the final value, wherever it came from, so 
 Members are strings, so quote a number (`enum: ["1", "2"]` on an int input). Each member is a value (`json`) or a value with a one-line summary saying what it means (`{value: yaml, summary: human-friendly}`); the two forms mix freely. Summaries are shown in help, man and markdown pages, offered as descriptions in shell completion, and carried in the contract's `enum_values`; JSON Schema output lists the values only. Summaries belong on an input's own schema: an output or stdin schema, and a named schema under `schemas`, take plain values.
 
 The object form also takes `aliases` (other spellings accepted and bound as the value: `{value: yaml, aliases: [yml]}`), `hidden: true` (accepted, but left out of help's list, completion and error messages), and `deprecated` with a message, optionally `deprecated_since`, `removed_in` and `replaced_by` (another value). A deprecated value is still accepted and is left out of the same lists; `rotini.Deprecations` reports it when given on the command line, as it does `deprecated_aliases`, the aliases being retired. Help keeps its short list of the values to use; man and markdown pages list each value with its aliases and deprecation.
+
+On an argument, a value or alias starting with `-` reads as a flag unless typed after `--`, though completion offers it before; `rotini validate` warns about one.
 
 ### `exclusiveMaximum`
 
@@ -1624,16 +1629,16 @@ Property schemas for an object shape. Used by document shapes (output, stdin pay
 
 `string`
 
-The type used to parse and store the value. Go type names (bool, int, float64, []string, duration, map) and JSON Schema names (boolean, integer, number, array, object) are equivalent. A bool accepts true/false, yes/no, on/off, y/n, t/f and 1/0, in any case, so `--cache=off` and CACHE=yes both work.
+The type used to parse and store the value; an input that leaves it out (or has no `schema`) is a string. Go type names (bool, int, float64, []string, duration, map) and JSON Schema names (boolean, integer, number, array, object) are equivalent. A bool accepts true/false, yes/no, on/off, y/n, t/f and 1/0, in any case, so `--cache=off` and CACHE=yes both work. A float (float32, float64, number) takes decimal text (`1.5`, `.5`, `1e3`) and `inf`, `+inf`, `-inf`, `infinity` and `nan` in any case, unless it declares a numeric bound, which requires a finite number; a hexadecimal float or `_` between digits needs `base: prefixed`.
 
 Value types parse a kind of value and generate the matching Go field:
 
 - 'duration' — time.Duration; Go units plus 'd' days and 'w' weeks (7d, 2w3d)
 - 'time' / 'datetime' — time.Time, RFC 3339 (2026-09-29T14:00:00Z)
 - 'date' — time.Time, a calendar date (2026-09-29, that day's UTC midnight). All three time types take `layout:` for another format, Unix timestamps included, and `relative:` for times measured from now (2h, today)
-- 'url' — \*url.URL; needs a scheme and host
+- 'url' — \*url.URL; needs a scheme and a host, or an opaque part as in mailto:ann@example.com
 - 'email' — mail.Address; 'Name &lt;a@b.c&gt;' or a bare address
-- 'timezone' — \*time.Location; an IANA name such as Europe/Berlin
+- 'timezone' — \*time.Location; an IANA name such as Europe/Berlin, matched exactly in its case on every system, or `UTC`, or `Local` for the zone of the machine the CLI runs on. An empty value is refused
 - 'mac' (net.HardwareAddr), 'ip' (netip.Addr), 'cidr' (netip.Prefix), 'hostport' (netip.AddrPort)
 - 'bytesize' — rotini.ByteSize; 512Mi, 10MB, 1.5GiB (an 'i' makes the unit binary)
 - 'hexbytes' — rotini.HexBytes; optional 0x
@@ -1644,7 +1649,7 @@ Value types parse a kind of value and generate the matching Go field:
 - 'inputfile' — a plain string field, checked like 'existingfile', except that '-' means stdin: rotini.OpenInput(rtx, path) opens either (`cat a.txt - b.txt`). Only one '-' may be given per run, across every inputfile value. Unlike `from: [stdin]`, where '-' replaces the value with stdin's text, the value stays '-' and the handler reads the stream. Help adds '(- for stdin)'
 - 'outputfile' — a plain string field: a file to write, where '-' means stdout. Checked at parse time to be no directory and to sit in an existing directory; rotini.CreateOutput(rtx, path) writes it atomically and refuses to replace an existing file unless given rotini.Overwrite(true). Help adds '(- for stdout)'
 
-A value type works inside Go spellings too ('[]bytesize', 'map[string]duration'), and help shows the name as written ('--limit bytesize'), not the Go type. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.
+A value type works inside Go spellings too ('[]bytesize', 'map[string]duration'), and help shows the name as written ('--limit bytesize'), not the Go type. The path types (existingfile, existingdir, inputfile, outputfile) show as `string`, the type of their field. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.
 
 Shapes that change how a flag is written:
 

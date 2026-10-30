@@ -211,10 +211,39 @@ func (t *tool) addParam(in agentInput) {
 	if desc != "" {
 		s["description"] = desc
 	}
+	withoutRawBounds(s, in.Type)
 	t.properties[in.Name] = s
 	t.order = append(t.order, in.Name)
 	if in.Required {
 		t.required = append(t.required, in.Name)
+	}
+}
+
+// rawBoundKeys are the numeric bounds the contract writes on a duration or bytesize input, in
+// nanoseconds or bytes.
+var rawBoundKeys = []string{"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"}
+
+// withoutRawBounds drops the bounds of a duration or bytesize parameter, or of each value of a
+// list or map of them: the value is a string such as `30s` or `10MB`, so a number of
+// nanoseconds or bytes beside it would mislead a model. The contract keeps them.
+func withoutRawBounds(s map[string]any, typ string) {
+	elem := strings.TrimPrefix(typ, "[]")
+	key := "items"
+	if _, val, ok := splitMapType(typ); ok {
+		elem, key = val, "additionalProperties"
+	}
+	if elem != "duration" && elem != "bytesize" {
+		return
+	}
+	for _, k := range rawBoundKeys {
+		delete(s, k)
+	}
+	if inner, ok := s[key].(map[string]any); ok {
+		inner = maps.Clone(inner)
+		for _, k := range rawBoundKeys {
+			delete(inner, k)
+		}
+		s[key] = inner
 	}
 }
 
@@ -226,11 +255,14 @@ func (t *tool) addInputs(cmd agentContractCmd) (serverEnv []string, skip string)
 		if !in.Required {
 			return ""
 		}
-		if in.Secret && (len(in.Env) > 0 || in.ConfigKey != "") {
-			serverEnv = append(serverEnv, in.Env...)
-			return ""
+		if in.Secret {
+			if len(in.Env) > 0 || in.ConfigKey != "" {
+				serverEnv = append(serverEnv, in.Env...)
+				return ""
+			}
+			return fmt.Sprintf("its required %s %q is a secret, which a tool never passes on the command line; declare `variable:` so the server's environment can supply it", inputChannel(in), in.Name)
 		}
-		return fmt.Sprintf("its required %s %q isn't a tool parameter (it is hidden, deprecated, secret or read from a file); give it `agent: true` or a fallback the server can supply", inputChannel(in), in.Name)
+		return fmt.Sprintf("its required %s %q isn't a tool parameter (it is hidden, deprecated, read from a file or `agent: false`); give it `agent: true`", inputChannel(in), in.Name)
 	}
 	// rotini.ArgvOf quotes a variadic's items for its separator unless its words are raw or fixed
 	// arguments follow it.

@@ -192,6 +192,9 @@ func pickField(node any, path []string) (any, bool) {
 		out := make([]any, len(n))
 		found := false
 		for i, e := range n {
+			if e == nil {
+				continue // a null element stays null
+			}
 			sub, ok := pickField(e, path)
 			if !ok {
 				sub = map[string]any{}
@@ -215,15 +218,18 @@ func mergeFields(dst map[string]any, src any) {
 	}
 }
 
+// mergeValue merges src into a copy of dst, which may be shared with the value selected from.
 func mergeValue(dst, src any) any {
 	switch s := src.(type) {
 	case map[string]any:
 		if d, ok := dst.(map[string]any); ok {
+			d = maps.Clone(d)
 			mergeFields(d, s)
 			return d
 		}
 	case []any:
 		if d, ok := dst.([]any); ok && len(d) == len(s) {
+			d = slices.Clone(d)
 			for i := range s {
 				d[i] = mergeValue(d[i], s[i])
 			}
@@ -308,8 +314,10 @@ func SortBy[E any](items []E, field string, desc bool) error {
 		k := jsonKind(keys[i])
 		switch {
 		case k == "null":
-		case k == "list" || k == "object":
-			return fmt.Errorf("SortBy: field %q holds a %s, which does not sort", field, k)
+		case k == "list":
+			return fmt.Errorf("SortBy: field %q holds a list, which does not sort", field)
+		case k == "object":
+			return fmt.Errorf("SortBy: field %q holds an object, which does not sort", field)
 		case kind == "":
 			kind = k
 		case kind != k:
@@ -383,16 +391,27 @@ func sortCompare(kind string, keys []any) func(a, b any) int {
 	return func(any, any) int { return 0 }
 }
 
-// compareNumbers compares two JSON numbers, exactly when both are integers.
+// compareNumbers compares two JSON numbers, exactly when both are integers an int64 or a uint64
+// holds.
 func compareNumbers(a, b json.Number) int {
-	if x, err := a.Int64(); err == nil {
-		if y, err := b.Int64(); err == nil {
-			return cmp.Compare(x, y)
-		}
+	x, xerr := a.Int64()
+	y, yerr := b.Int64()
+	if xerr == nil && yerr == nil {
+		return cmp.Compare(x, y)
 	}
-	x, _ := strconv.ParseFloat(a.String(), 64) //nolint:errcheck // a decoded number always parses
-	y, _ := strconv.ParseFloat(b.String(), 64) //nolint:errcheck // a decoded number always parses
-	return cmp.Compare(x, y)
+	ux, uxerr := strconv.ParseUint(a.String(), 10, 64)
+	uy, uyerr := strconv.ParseUint(b.String(), 10, 64)
+	switch {
+	case uxerr == nil && uyerr == nil:
+		return cmp.Compare(ux, uy)
+	case xerr == nil && x < 0 && uyerr == nil:
+		return -1
+	case yerr == nil && y < 0 && uxerr == nil:
+		return 1
+	}
+	fx, _ := strconv.ParseFloat(a.String(), 64) //nolint:errcheck // a decoded number always parses
+	fy, _ := strconv.ParseFloat(b.String(), 64) //nolint:errcheck // a decoded number always parses
+	return cmp.Compare(fx, fy)
 }
 
 func boolRank(b bool) int {
