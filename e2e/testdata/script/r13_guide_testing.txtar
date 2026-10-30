@@ -48,8 +48,9 @@ func TestAddRejectsUnknownPriority(t *testing.T) {
 -- test-environ.go.txt --
 func TestAddDefaultPriority(t *testing.T) {
 	t.Parallel()
+	home := t.TempDir()
 	code, err := NewProgram().
-		WithEnviron([]string{"HOME=" + t.TempDir(), "TODO_DEFAULTS_PRIORITY=high"}).
+		WithEnviron([]string{"HOME=" + home, "USERPROFILE=" + home, "TODO_DEFAULTS_PRIORITY=high"}).
 		WithDir(t.TempDir()).
 		Run([]string{"add", "buy milk"})
 	if err != nil || code != 0 {
@@ -105,8 +106,9 @@ func TestPlainRunReadsTheProcess(t *testing.T) {
 // WithEnviron replaces the whole environment the run reads.
 func TestWithEnvironReplacesTheProcess(t *testing.T) {
 	var out bytes.Buffer
+	home := t.TempDir()
 	code, err := NewProgram().WithStdout(&out).
-		WithEnviron([]string{"HOME=" + t.TempDir(), "TODO_DEFAULTS_PRIORITY=high"}).
+		WithEnviron([]string{"HOME=" + home, "USERPROFILE=" + home, "TODO_DEFAULTS_PRIORITY=high"}).
 		WithDir(t.TempDir()).
 		Run([]string{"add", "buy milk"})
 	if err != nil || code != 0 {

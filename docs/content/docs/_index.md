@@ -3737,15 +3737,16 @@ Keep two things in mind:
   `NewProgram().WithReporter(Report)` and expect exit code 2.
 - **Environment variables and config files come from the process,** unless the test gives the
   run its own. `WithEnviron` sets the whole environment a run reads (env inputs, flag fallbacks,
-  `HOME` and `XDG_CONFIG_HOME` for config discovery, plugin lookup), and `WithDir` sets the
-  directory walk-up discovery, relative config paths and `@file` values start from. A test that
-  sets both doesn't touch the process, so it can run in parallel:
+  `HOME` (`USERPROFILE` on Windows) and `XDG_CONFIG_HOME` for config discovery, plugin lookup),
+  and `WithDir` sets the directory walk-up discovery, relative config paths and `@file` values
+  start from. A test that sets both doesn't touch the process, so it can run in parallel:
 
 {{< code title="todo_test.go (environ)" language="golang" open="true" collapsible="false" copy="true" >}}
 func TestAddDefaultPriority(t *testing.T) {
 	t.Parallel()
+	home := t.TempDir()
 	code, err := NewProgram().
-		WithEnviron([]string{"HOME=" + t.TempDir(), "TODO_DEFAULTS_PRIORITY=high"}).
+		WithEnviron([]string{"HOME=" + home, "USERPROFILE=" + home, "TODO_DEFAULTS_PRIORITY=high"}).
 		WithDir(t.TempDir()).
 		Run([]string{"add", "buy milk"})
 	if err != nil || code != 0 {

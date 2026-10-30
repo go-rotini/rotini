@@ -121,7 +121,7 @@ cp share/completions/acme.ps1 completion.ps1
 [exec:pwsh] env DOTNET_CLI_HOME=$WORK
 [exec:pwsh] env POWERSHELL_TELEMETRY_OPTOUT=1
 [exec:pwsh] exec pwsh -NoProfile -File drive-pwsh.ps1
-[exec:pwsh] stdout '^db: completion help migrate st status version$'
+[exec:pwsh] stdout '^db: completion help migrate st status version\r?$'
 -- acme.spec.yaml --
 $schema: ./.rotini-schema.spec.json
 version: 0.0.0

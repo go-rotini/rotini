@@ -211,7 +211,7 @@ func TestOverride_validatePositions(t *testing.T) {
 	if err == nil {
 		t.Fatal("validated clean")
 	}
-	root, mig := filepath.FromSlash("cmd/root/.rotini.spec.yaml"), filepath.FromSlash("cmd/mig/.rotini.spec.yaml")
+	root, mig := "cmd/root/.rotini.spec.yaml", filepath.FromSlash("cmd/mig/.rotini.spec.yaml") // the root as given, a $ref as resolved
 	for _, want := range []string{
 		root + ":10:18: command acme/db/status: overrides the mounted command `acme db status`, so it can't set `stdin`",
 		root + ":14:15: command acme/db/migrate: overrides `acme db migrate`, which declares no command \"down\"",

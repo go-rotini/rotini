@@ -36,7 +36,7 @@ stdout '^\[\d\d:\d\d:\d\d\] \S+$'
 ! stderr .
 cp greet.yaml cmd/demo/.rotini.spec.yaml
 wantexit 2 rotini init demo --force --dry-run
-stderr '^1\. update cmd/demo/\.rotini\.spec\.yaml \(\d+ bytes, mode 0644\)$'
+stderr '^1\. update cmd/demo/\.rotini\.spec\.yaml \(\d+ bytes, mode 06(44|66)\)$'
 stderr '^dry run: 1 change not written$'
 cmp cmd/demo/.rotini.spec.yaml greet.yaml
 
@@ -49,7 +49,7 @@ cp mine.go.txt internal/cmd/demo/mine.go
 cp main-edited.go.txt cmd/demo/main.go
 # A dry run lists the greet handler it would disable as a change, not a warning.
 wantexit 2 rotini init demo --force --dry-run
-stderr '^\d+\. update internal[/\\]cmd[/\\]demo[/\\]demo_greet\.go \(\d+ bytes, mode 0644\)$'
+stderr '^\d+\. update internal[/\\]cmd[/\\]demo[/\\]demo_greet\.go \(\d+ bytes, mode 06(44|66)\)$'
 ! stderr 'Warning: pruned'
 ! grep '^//go:build ignore$' internal/cmd/demo/demo_greet.go
 exec rotini init demo --force
