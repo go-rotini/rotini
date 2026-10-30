@@ -52,7 +52,7 @@ stdout '^  kubectl ctx use'
 ! stdout 'kubectl-ctx use'
 
 # Installed a second time as kubectl_complete-ctx, it answers completion in the plugin format.
-cp kubectl-ctx$exe kubectl_complete-ctx$exe
+exec go build -o kubectl_complete-ctx$exe ./cmd/ctx
 exec ./kubectl_complete-ctx$exe u
 stdout '^use\tswitch the context$'
 stdout '\n:[0-9]+\n\z'
