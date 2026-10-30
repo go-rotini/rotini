@@ -41,9 +41,9 @@ stdout '^  "problems": \[$'
 stdout '"severity": "error"'
 stdout '"document": "spec"'
 stdout '"file": "many\.yaml"'
-stdout '"line": 5'
-stdout '"col": 7'
-stdout '"pointer": "/command/flags/0"'
+stdout '"line": 7'
+stdout '"col": 23'
+stdout '"pointer": "/command/flags/0/schema/type"'
 stdout '"hint": '
 ! stderr .
 # Warnings only: exit 0.

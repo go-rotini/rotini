@@ -28,7 +28,7 @@ func TestCheckNumberBounds_nonFinite(t *testing.T) {
 			t.Errorf("%s unbounded: err = %v, want accepted", v, err)
 		}
 	}
-	if err := checkNumberBounds("ratio", Constraints{ExclusiveMinimum: new(0.0)}, math.NaN(), "NaN", formatNum); err == nil {
+	if err := checkNumberBounds("ratio", Constraints{ExclusiveMinimum: new(0.0)}, math.NaN(), "", "NaN", formatNum); err == nil {
 		t.Error("a typed NaN passed exclusiveMinimum: 0")
 	}
 }

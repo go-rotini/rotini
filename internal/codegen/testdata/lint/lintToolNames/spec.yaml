@@ -1,0 +1,22 @@
+# A tool's name is the root's name and the command path joined with "_"; each target caps its
+# length (openai-strict at 64 characters).
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    # Correct: a short name, a long one kept from agents, and a long hidden one. No problem.
+    - name: list
+    - name: reconcile-every-replica-set-in-the-cluster
+      agent: false
+      commands:
+        - name: and-report-what-changed-since-last-time
+    - name: describe-every-replica-set-in-the-cluster-and-report-to-the-log
+      hidden: true
+      arguments:
+        - name: since
+          schema: { type: string }
+    # 71 characters with the root's name: too long for openai-strict.
+    - name: synchronize-every-replica-set-in-the-cluster-and-report-to-the-log
+      arguments:
+        - name: since
+          schema: { type: string }

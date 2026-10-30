@@ -45,7 +45,8 @@ import (
 //   - stopping — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] to
 //     stop with a code, [Context.Exit] to stop and skip pending teardown
 //   - rotini's own settings — [Context.Version], [Context.Help], [Context.InvokedHelp],
-//     [Context.HelpFor], [Context.CompletionScript] and [Context.Parser] read them;
+//     [Context.HelpFor], [Context.CompletionScript] and [Context.Parser] read them, and
+//     [Context.PluginHelp] runs a plugin's help;
 //     [Context.WithVersion], [Context.WithHelp], [Context.WithCompletionScript], [Context.WithParser],
 //     [Context.WithInputSettings], [Context.WithInputReader], [Context.WithEnviron],
 //     [Context.WithDir], [Context.WithClock], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
@@ -109,8 +110,10 @@ type Context struct {
 	readerFn func(InputSettings) *InputReader
 	version  string
 	help     HelpFunc
-	scripts  CompletionScriptFunc
-	parser   *Parser
+	// pluginHelp runs a plugin with --help for [Context.PluginHelp]; nil outside a run.
+	pluginHelp func(rtx *Context, words []string) bool
+	scripts    CompletionScriptFunc
+	parser     *Parser
 
 	// view is the environment and directory this run reads; see [Program.WithEnviron] and
 	// [Program.WithDir]. nil reads the process's.

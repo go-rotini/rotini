@@ -1,0 +1,216 @@
+# R14 — schema keys one by one: a mistake inside a list of tables is positioned at the key in
+# every format, and keys that would be accepted but silently do nothing, or generate a program
+# that misbehaves, are refused by validate at the key's position.
+
+# The same bad bound inside the second flag, in each format, names the bound's own line.
+! exec rotini validate flags.spec.yaml --config .rotini.conf.yaml
+stderr '^Error: spec: flags\.spec\.yaml:12:18: /command/flags/1/schema/minimum: '
+! exec rotini validate flags.spec.json --config .rotini.conf.yaml
+stderr '^Error: spec: flags\.spec\.json:17:22: /command/flags/1/schema/minimum: '
+! exec rotini validate flags.spec.jsonc --config .rotini.conf.yaml
+stderr '^Error: spec: flags\.spec\.jsonc:18:22: /command/flags/1/schema/minimum: '
+! exec rotini validate flags.spec.toml --config .rotini.conf.yaml
+stderr '^Error: spec: flags\.spec\.toml:18:11: /command/flags/1/schema/minimum: '
+stderr '^Error: spec: flags\.spec\.toml:22:9: /command/commands/0/bogus: unknown key "bogus" on a command$'
+
+# Keys that contradict another key, name nothing, or would be ignored.
+! exec rotini validate .rotini.spec.yaml --config .rotini.conf.yaml
+cmp stderr want.txt
+
+# An empty deprecation message deprecates nothing, a discovery prefix is a file name, and an
+# empty multicall says which forms it takes.
+! exec rotini validate schema.spec.yaml --config .rotini.conf.yaml
+stderr '^Error: spec: schema\.spec\.yaml:6:13: /command/plugin_discovery/prefix: "prefix" must look like "acme-"$'
+stderr '^Error: spec: schema\.spec\.yaml:7:14: /command/multicall: "multicall" must be true or false, or an object setting `prefix`, `complete` or both$'
+stderr '^Error: spec: schema\.spec\.yaml:11:19: /command/commands/0/deprecated: string length 0 is below minLength 1$'
+
+# Files rotini writes stay inside the module, and each schema has its own file.
+! exec rotini validate .rotini.spec.yaml --config paths.conf.yaml
+stderr '^Error: conf: paths\.conf\.yaml:6:13: generate\.schemas\.conf\.file: "s\.json" is also generate\.schemas\.spec\.file; each schema needs its own file, or the second overwrites the first$'
+stderr '^Error: conf: paths\.conf\.yaml:8:11: generate\.contract\.file: "\.\./contract\.json" must resolve under the module root$'
+stderr '^Error: conf: paths\.conf\.yaml:13:13: generate\.packages\.cmd\.file: "\.\./cmd/demo/zz_rotini\.go" must resolve under the module root$'
+
+# A feature key that doesn't apply is positioned at the key, not at its entry.
+! exec rotini validate .rotini.spec.yaml --config feature.conf.yaml
+stderr '^Error: conf: feature\.conf\.yaml:7:16: generate\.features\.help\.section: '
+
+-- .rotini.conf.yaml --
+version: 0.0.0
+-- paths.conf.yaml --
+version: 0.0.0
+generate:
+  schemas:
+    spec: { file: s.json }
+    conf:
+      file: s.json
+  contract:
+    file: ../contract.json
+  packages:
+    - type: main
+      file: cmd/demo/main.go
+    - type: cmd
+      file: ../cmd/demo/zz_rotini.go
+-- feature.conf.yaml --
+version: 0.0.0
+generate:
+  features:
+    - type: help
+      enabled: true
+      # section belongs to man pages
+      section: 5
+-- flags.spec.yaml --
+version: "0.0.0"
+command:
+  name: "x"
+  summary: "s"
+  flags:
+    - name: "b"
+      schema:
+        type: "int"
+    - name: "a"
+      schema:
+        type: "int"
+        minimum: "x"
+  commands:
+    - name: "c"
+      bogus: 1
+-- flags.spec.json --
+{
+  "version": "0.0.0",
+  "command": {
+    "name": "x",
+    "summary": "s",
+    "flags": [
+      {
+        "name": "b",
+        "schema": {
+          "type": "int"
+        }
+      },
+      {
+        "name": "a",
+        "schema": {
+          "type": "int",
+          "minimum": "x"
+        }
+      }
+    ],
+    "commands": [
+      {
+        "name": "c",
+        "bogus": 1
+      }
+    ]
+  }
+}
+-- flags.spec.jsonc --
+// jsonc
+{
+  "version": "0.0.0",
+  "command": {
+    "name": "x",
+    "summary": "s",
+    "flags": [
+      {
+        "name": "b",
+        "schema": {
+          "type": "int"
+        }
+      },
+      {
+        "name": "a",
+        "schema": {
+          "type": "int",
+          "minimum": "x"
+        }
+      }
+    ],
+    "commands": [
+      {
+        "name": "c",
+        "bogus": 1
+      }
+    ]
+  }
+}
+-- flags.spec.toml --
+version = "0.0.0"
+
+[command]
+name = "x"
+summary = "s"
+
+[[command.flags]]
+name = "b"
+
+[command.flags.schema]
+type = "int"
+
+[[command.flags]]
+name = "a"
+
+[command.flags.schema]
+type = "int"
+minimum = "x"
+
+[[command.commands]]
+name = "c"
+bogus = 1
+-- .rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: demo
+  schemas:
+    Port: { $ref: Listen }
+    Listen: { $ref: Port }
+    Level: { type: strng }
+  flags:
+    - name: workers
+      schema: { type: int, enum: ['1', '4'], minimum: 2 }
+    - name: tier
+      schema:
+        type: string
+        enum: [gold, { value: silver, deprecated_since: 1.0.0 }]
+    - name: quiet
+      schema: { type: bool, placeholder: YES }
+    - name: port
+      schema: { type: string, items: { type: int } }
+    - name: id
+      schema: { type: string, import: github.com/google/uuid }
+    - name: listen
+      schema: { $ref: Port, type: int }
+  commands:
+    - name: list
+      summary: list
+      output:
+        type: object
+        properties:
+          count: { type: integr }
+      exit_status:
+        - code: 3
+          summary: partial
+          output: { $ref: Missing }
+-- schema.spec.yaml --
+version: 0.0.0
+command:
+  name: demo
+  summary: demo
+  plugin_discovery:
+    prefix: tools/demo-
+  multicall: {}
+  commands:
+    - name: old
+      summary: old
+      deprecated: ''
+-- want.txt --
+Error: spec: .rotini.spec.yaml:34:19: command demo/list: exit_status 3 output: `$ref` "#/schemas/Missing" points to an undeclared schema (no "Missing" under the root command's `schemas`)
+Error: spec: .rotini.spec.yaml:7:21: command demo: schema "Listen": its `$ref` chain (Listen → Port → Listen) leads back to itself, so it never reaches a type; end the chain at a schema that declares `type`
+Error: spec: .rotini.spec.yaml:17:42: command demo: flag "quiet": `placeholder` names a flag's value, but a bool flag takes none; it would be silently ignored
+Error: spec: .rotini.spec.yaml:19:38: command demo: flag "port": `items` describes the elements of a list type, not string; it would be silently ignored, so make the type a list (array, []string) or drop `items`
+Error: spec: .rotini.spec.yaml:21:39: command demo: flag "id": `import` "github.com/google/uuid" is set, but `type` "string" names no type from a package, so the generated code would import a package it never uses; write the type as pkg.Name, or drop `import`
+Error: spec: .rotini.spec.yaml:23:35: command demo: flag "listen": sets both `$ref` and `type` "int"; the schema `$ref` names decides the type, so `type` would be silently ignored; drop one
+Error: spec: .rotini.spec.yaml:8:20: command demo: schema "Level": `type` "strng" is not a type rotini knows; "strng" is neither a Go builtin nor a rotini type; did you mean "string"?
+Error: spec: .rotini.spec.yaml:30:26: command demo/list: output property "count": `type` "integr" is not a type rotini knows; "integr" is neither a Go builtin nor a rotini type; did you mean "integer"?
+Error: spec: .rotini.spec.yaml:11:35: command demo: flag "workers": `enum` value 1 is below the declared `minimum` 2, so it is offered but always refused; drop the value or change the constraint
+Error: spec: .rotini.spec.yaml:15:15: command demo: flag "tier": gives `enum` value "silver" `deprecated_since`, `removed_in` or `replaced_by` without `deprecated`; they plan a deprecation, so say why with `deprecated`

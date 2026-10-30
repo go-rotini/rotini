@@ -4,9 +4,10 @@ Usage:
   ops [flags] <command>
 
 Commands:
-  note    add a note
-  exec    run a command
-  run     run a command on a host
+  note      add a note
+  exec      run a command
+  legacy    ship the old way (deprecated since 1.4.0, removed in 2.0.0: renamed; use ops deploy instead)
+  run       run a command on a host
 
 Data:
   Commands that read a document from standard input.

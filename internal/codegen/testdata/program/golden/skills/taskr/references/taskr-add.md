@@ -17,7 +17,7 @@ taskr add [flags] <title>
 ## Flags
 
 - `-t, --tag` `[]string` — tags for the task; repeatable; each value at most once
-- `--priority` `string` — how urgent it is (default `low`) (one of low, high) (experimental)
+- `--priority` `string` — how urgent it is (default `low`) (one of `low`, `high`) (experimental)
 - `--due` `date` — when it is due
 
 ## Global Flags

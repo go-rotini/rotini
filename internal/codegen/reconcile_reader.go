@@ -81,7 +81,9 @@ func readRaw(path string) (fileFormat, []byte, error) {
 		}
 		return format, nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	return format, data, nil
+	// A byte order mark, as some Windows editors write, is not part of the document in any
+	// format; JSON's decoder would reject it.
+	return format, bytes.TrimPrefix(data, []byte("\xef\xbb\xbf")), nil
 }
 
 // readLog collects the files read while recordReads runs, so watch mode can watch every file

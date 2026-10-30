@@ -128,7 +128,7 @@ func shapeConformanceCases() []dataCase {
 				t.Errorf("arguments = %+v, %v", a, err)
 			}
 		}},
-		{"ENV-14", func(t *testing.T) { // a variable set to "" leaves the .env file's value, for both readers and the report
+		{"ENV-14", func(t *testing.T) { // a variable set to "" leaves the .env file's value, for both readers and the report, which credits the file
 			env := []string{"APP_NAME=", "APP_REGION=", "APP_PORT="}
 			rtx := shpContext(t, "port: 9\n", "APP_NAME=dot\nAPP_REGION=eu\n", env)
 			in, err := rtx.Inputs[shpInputs]()
@@ -142,7 +142,7 @@ func shapeConformanceCases() []dataCase {
 					t.Errorf("%s: name %q, region %q, port %d, %v", reader, a.Flags.Name, a.Env.Region, a.Flags.Port, got.err)
 				}
 			}
-			if w, _ := rep.Winner("App.Flags.Name"); w.Origin != "env:APP_NAME" || w.Raw != "dot" {
+			if w, _ := rep.Winner("App.Flags.Name"); w.Origin != "config:dotenv#APP_NAME" || w.Raw != "dot" {
 				t.Errorf("name winner = %+v", w)
 			}
 			if w, _ := rep.Winner("App.Flags.Port"); w.Origin != "config:app#port" {

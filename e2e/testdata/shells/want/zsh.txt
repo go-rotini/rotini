@@ -227,3 +227,7 @@ blue,green
 typed-path	the program typed
 == directory-unique
 <_path_files -/>
+== path-type-file
+<_files>
+== path-type-directory
+<_path_files -/>

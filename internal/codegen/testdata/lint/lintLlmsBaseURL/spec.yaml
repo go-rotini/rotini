@@ -1,0 +1,7 @@
+version: 0.0.0
+command:
+  name: app
+  summary: manage app records
+  commands:
+    - name: list
+      summary: list records

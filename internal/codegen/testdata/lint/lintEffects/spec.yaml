@@ -28,7 +28,7 @@ command:
           effects: { kind: read }
           role: dry-run
           schema: { type: bool }
-    # A $ref node takes its effects from the child spec.
+    # A $ref node may override the child's effects.
     - name: db
       $ref: ./child.yaml
       effects: { kind: read }

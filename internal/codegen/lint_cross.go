@@ -39,6 +39,7 @@ var crossLints = []func(*Spec, *Conf) []error{
 	lintFlagsFirst,
 	lintPosixNames,
 	lintToolStdinClash,
+	lintToolNames,
 	lintPackagePaths,
 	lintCarapaceValues,
 	lintGeneratedNames,
@@ -97,7 +98,7 @@ func lintUnshownMessages(spec *Spec, conf *Conf) []error {
 			if schema == nil || schema.Complete == nil || schema.Complete.Message == "" {
 				return
 			}
-			p := inputProblem(ptr, path, channel, name, "sets `complete.message`, but the conf's completion feature is off or doesn't set `messages`, so it is never shown; enable completion with `messages: declared`, or remove the message")
+			p := schemaKeyProblem(ptr, "complete/message", path, channel, name, "sets `complete.message`, but the conf's completion feature is off or doesn't set `messages`, so it is never shown; enable completion with `messages: declared`, or remove the message")
 			p.sev = severityWarning
 			problems = append(problems, p)
 		})

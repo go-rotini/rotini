@@ -48,7 +48,11 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 	for name := range defs {
 		fixed[name] = true
 	}
-	types, err := initialismIdents(stripGenerated(string(src), outputRootSentinel), fixed)
+	sized, err := sizedNumberTypes(stripGenerated(string(src), outputRootSentinel), defs)
+	if err != nil {
+		return "", err
+	}
+	types, err := initialismIdents(sized, fixed)
 	if err != nil {
 		return "", err
 	}
@@ -222,7 +226,7 @@ func eachOwnNode(nodes []rnode, visit func(n *rnode)) {
 func collectOutputDefs(gp *program) map[string]any {
 	defs := map[string]any{}
 	for name, sch := range gp.schemas {
-		defs[name] = jsonSchemaTypes(schemaToDoc(sch))
+		defs[name] = typeDoc(sch)
 	}
 	add := func(prefix string, out *Schema) {
 		if out == nil {
@@ -233,18 +237,18 @@ func collectOutputDefs(gp *program) map[string]any {
 		if _, kinds := outputKinds(out, gp.schemas); kinds != nil {
 			for _, k := range kinds {
 				if k.ref == "" {
-					defs[k.typeName(prefix+"Output")] = jsonSchemaTypes(schemaToDoc(k.decl))
+					defs[k.typeName(prefix+"Output")] = typeDoc(k.decl)
 				}
 			}
 			return
 		}
-		defs[prefix+"Output"] = jsonSchemaTypes(schemaToDoc(*out))
+		defs[prefix+"Output"] = typeDoc(*out)
 	}
 	// Only the stdin schema's BaseSchema is type structure; required, default, etc. are
 	// input metadata.
 	addStdin := func(prefix string, in *Inputs) {
 		if in != nil && in.Stdin != nil && in.Stdin.Schema != nil && !rawStdinFormat(in.Stdin.Format) {
-			defs[prefix+"Stdin"] = jsonSchemaTypes(schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema}))
+			defs[prefix+"Stdin"] = typeDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema})
 		}
 	}
 	add(gp.rootPascal, gp.rootOutput)

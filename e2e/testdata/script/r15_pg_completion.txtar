@@ -1,0 +1,87 @@
+# R15 — a path type with no `complete:` kind completes paths: existingfile, inputfile and
+# outputfile files, existingdir directories, through __complete and the carapace spec. A
+# declared kind still wins, a declared message is kept, and an enum completes only its values.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+exec ./app$exe __complete --input ''
+stdout '\A:rotini:file\n\z'
+exec ./app$exe __complete --out ''
+stdout '\A:rotini:file\n\z'
+exec ./app$exe __complete --root ''
+stdout '\A:rotini:directory\n\z'
+exec ./app$exe __complete --many ''
+stdout '\A:rotini:file\n\z'
+exec ./app$exe __complete ''
+stdout '\A:rotini:file\n\z'
+
+# A declared kind wins over the type's; a declared message stays beside the type's kind.
+exec ./app$exe __complete --opaque ''
+stdout '\A:rotini:none\n\z'
+exec ./app$exe __complete --pick ''
+stdout '\A:rotini:message pick a config file\n:rotini:directory\n\z'
+# An enum on a path type completes its values only.
+exec ./app$exe __complete --preset ''
+stdout '\Aa\.yaml\n\z'
+
+# The carapace spec turns the same hints into its macros.
+grep '\n    input:\n      - \$files\n    out:\n      - \$files\n    root:\n      - \$directories\n    many:\n      - \$files\n    pick:\n      - \$directories\n    preset:\n      - a\.yaml\n  positional:\n    - \[\$files\]\n' completions/carapace/app.yaml
+! grep '^    opaque:' completions/carapace/app.yaml
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: read and write files
+  flags:
+    - name: input
+      summary: a file to read
+      identifiers: [--input]
+      schema: {type: existingfile}
+    - name: out
+      summary: where to write
+      identifiers: [--out]
+      schema: {type: outputfile}
+    - name: root
+      summary: the work directory
+      identifiers: [--root]
+      schema: {type: existingdir}
+    - name: many
+      summary: files to read
+      identifiers: [--many]
+      schema: {type: '[]existingfile'}
+    - name: opaque
+      summary: a file named by id
+      identifiers: [--opaque]
+      schema: {type: existingfile, complete: {kind: none}}
+    - name: pick
+      summary: a config directory
+      identifiers: [--pick]
+      schema: {type: existingdir, complete: {message: pick a config file}}
+    - name: preset
+      summary: a preset file
+      identifiers: [--preset]
+      schema: {type: existingfile, enum: [a.yaml]}
+  arguments:
+    - name: source
+      summary: what to read, - for stdin
+      schema: {type: inputfile}
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: completion
+      enabled: true
+      messages: declared
+    - type: carapace
+      enabled: true

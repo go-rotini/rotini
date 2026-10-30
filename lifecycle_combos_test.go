@@ -430,8 +430,8 @@ func TestLifecycle_reRaisedPanicDiscardsOpenOutputs(t *testing.T) {
 	}
 }
 
-// Execute under a supplied context exits with the code its cancellation cause carries, and an
-// empty info is not a record.
+// Execute under a context canceled before the run starts runs no hook, CascadingPreRun and
+// teardown included, and exits with the code its cancellation cause carries.
 func TestExecute_withContextCancelCause(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(ExitCause(5))
@@ -445,8 +445,8 @@ func TestExecute_withContextCancelCause(t *testing.T) {
 	if code != 5 {
 		t.Errorf("exit code = %d, want 5", code)
 	}
-	if want := []string{"c0.CascadingPreRun", "c0.CascadingPostRun"}; !slices.Equal(*log, want) {
-		t.Errorf("order = %v, want %v", *log, want)
+	if len(*log) != 0 {
+		t.Errorf("order = %v, want no hook run: the context was canceled before the run", *log)
 	}
 	if errs.Len() != 0 {
 		t.Errorf("stderr = %q, want nothing reported", errs.String())

@@ -539,6 +539,47 @@ func TestSkill_format(t *testing.T) {
 	}
 }
 
+// TestSkill_prunesStaleReferences pins that generate removes a reference page it wrote for a
+// command that has left the spec or is no longer offered to agents, and keeps the files it
+// didn't write, which SKILL.md never linked.
+func TestSkill_prunesStaleReferences(t *testing.T) {
+	dir, _ := generateProgram(t, programConf)
+	refs := filepath.Join(dir, "skills", "taskr", "references")
+	for _, name := range []string{"taskr-purge.md", "taskr-list.md"} {
+		if _, err := os.Stat(filepath.Join(refs, name)); err != nil {
+			t.Fatalf("the first generate didn't write %s: %v", name, err)
+		}
+	}
+	writeTestFile(t, refs, "taskr-notes.md", "mine\n")
+	writeTestFile(t, refs, "guide.md", "mine\n")
+
+	spec, err := os.ReadFile(filepath.Join(dir, ".rotini.spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := strings.Replace(string(spec), "    - name: purge\n", "    - name: clean\n", 1)
+	renamed = strings.Replace(renamed, "      aliases: [ls]\n", "      aliases: [ls]\n      agent: false\n", 1)
+	if strings.Count(renamed, "\n") != strings.Count(string(spec), "\n")+1 || !strings.Contains(renamed, "name: clean") {
+		t.Fatal("the fixture no longer has the purge and list commands")
+	}
+	writeTestFile(t, dir, ".rotini.spec.yaml", renamed)
+	if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for name, want := range map[string]bool{
+		"taskr-purge.md": false, // renamed
+		"taskr-list.md":  false, // no longer offered to agents
+		"taskr-clean.md": true,
+		"taskr-notes.md": true, // never linked
+		"guide.md":       true,
+	} {
+		_, err := os.Stat(filepath.Join(refs, name))
+		if got := err == nil; got != want {
+			t.Errorf("%s exists = %v, want %v", name, got, want)
+		}
+	}
+}
+
 // TestProgramFeatures_errors pins the generate errors: a tool name too long for OpenAI, two
 // commands with one tool name, and an invalid skill name.
 func TestProgramFeatures_errors(t *testing.T) {

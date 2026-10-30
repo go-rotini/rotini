@@ -110,6 +110,9 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: Read out argument must be a non-nil pointer to an inputs struct"}
 	}
+	if rv.Elem().Kind() != reflect.Struct {
+		return errNotInputsStruct(rv.Elem().Type())
+	}
 
 	// 1. argv → a store, without validation: step 3 checks the reconciled store.
 	store, chain, err := parseArgvStore(b.parser, rtx, out)
@@ -892,14 +895,18 @@ func configChannelOf(v reflect.Value) bool {
 
 // configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. boot carries any config_source-supplied paths and the
-// selected profiles.
+// selected profiles. A map several sources hold merges entry by entry ([mapMergeSource]).
 func (b *InputReader) configRegistry(files []ConfigFile, boot fileBootstrap, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
 	srcs, err := b.fileSources(files, boot, waived, view)
 	if err != nil {
 		return nil, nil, err
 	}
 	paths := sourcePaths(srcs)
+	raw := slices.Clone(srcs)
 	for i, src := range srcs {
+		if i < len(raw)-1 {
+			src = mapMergeSource{Source: src, lower: raw[i+1:]}
+		}
 		srcs[i] = spellings{Source: src, keys: keys, clock: view.clockRef()}
 	}
 	reg, err := newRegistry(view.clockRef().features(), recon.WithoutWatch(), recon.WithSources(srcs...))
@@ -954,6 +961,9 @@ func sourceConflict(srcs []recon.Source) (name string, first, second recon.Sourc
 func sourceDesc(s recon.Source) string {
 	if sp, ok := s.(spellings); ok {
 		s = sp.Source
+	}
+	if ms, ok := s.(mapMergeSource); ok {
+		s = ms.Source
 	}
 	if ns, ok := s.(namedSource); ok {
 		if ns.path != "" {
@@ -1368,6 +1378,28 @@ func (s namedSource) Get(p recon.Path) (recon.Value, bool, error) {
 		return recon.Value{}, false, nil
 	}
 	return v, ok, err
+}
+
+// mapMergeSource is a configuration source whose maps take the entries of the same map in the
+// sources below it, lower lists nearest first, so a map spread across several files reads entry
+// by entry, the first declared file winning per key. Any other value is the source's own.
+type mapMergeSource struct {
+	recon.Source
+
+	lower []recon.Source
+}
+
+func (s mapMergeSource) Get(p recon.Path) (recon.Value, bool, error) {
+	v, found, err := s.Source.Get(p)
+	if err != nil || !found || v.Kind() != recon.MapKind {
+		return v, found, err
+	}
+	for _, l := range s.lower {
+		if lv, ok, lerr := l.Get(p); lerr == nil && ok && lv.Kind() == recon.MapKind {
+			v = mergeValues(lv, v)
+		}
+	}
+	return v, true, nil
 }
 
 // sourcePaths maps each configuration file source's logical name to the file it read.
@@ -1969,11 +2001,13 @@ type valueKeys struct {
 	prefixed  map[string]prefixedKey
 }
 
-// prefixedKey is how an integer field's text arrives: one value, or a list, which a string
-// holds split on sep. prefixed is the field's base: prefixed; without it the text is decimal.
+// prefixedKey is how an integer field's text arrives, or a float field's under base: prefixed:
+// one value, or a list, which a string holds split on sep. prefixed is the field's base:
+// prefixed; without it an integer's text is decimal.
 type prefixedKey struct {
 	list     bool
 	bytes    bool // a []uint8, which a string would otherwise bind as its bytes
+	float    bool
 	sep      string
 	prefixed bool
 }
@@ -1982,7 +2016,10 @@ type prefixedKey struct {
 // without the leading zeros the config library would read as octal. Anything else is kept, for
 // validation to report.
 func (k prefixedKey) text(s string) string {
-	if k.prefixed {
+	switch {
+	case k.float:
+		return prefixedFloatText(s)
+	case k.prefixed:
 		return prefixedText(s)
 	}
 	return plainDecimalText(s)
@@ -2100,10 +2137,11 @@ func channelValueKeys(v reflect.Value, structName string) valueKeys {
 			if key == "" {
 				continue
 			}
-			if plainIntegerField(sf.Type) {
+			prefixed := sf.Tag.Get("base") == basePrefixed
+			if float := prefixed && isPlainFloat(sf.Type); float || plainIntegerField(sf.Type) {
 				ft := derefType(sf.Type)
 				list := ft.Kind() == reflect.Slice
-				keys.prefixed[key] = prefixedKey{list: list, bytes: list && ft.Elem().Kind() == reflect.Uint8, sep: recon.ParseTag(sf.Tag.Get("recon")).Separator, prefixed: sf.Tag.Get("base") == basePrefixed}
+				keys.prefixed[key] = prefixedKey{list: list, bytes: list && ft.Elem().Kind() == reflect.Uint8, float: float, sep: recon.ParseTag(sf.Tag.Get("recon")).Separator, prefixed: prefixed}
 				continue
 			}
 			switch ft := derefType(sf.Type); {
@@ -2408,14 +2446,14 @@ func channelChecked(tag reflect.StructTag, constrained bool, enum enumSet, decim
 	return constrained || enum.declared() || decimal || tag.Get("path") != ""
 }
 
-// decimalOnly reports whether f is an integer field read as decimal only: one that doesn't
+// decimalOnly reports whether f is a number field read as decimal only: one that doesn't
 // declare base: prefixed.
 func decimalOnly(f reflect.StructField) bool {
-	return f.Tag.Get("base") != basePrefixed && plainIntegerField(f.Type)
+	return f.Tag.Get("base") != basePrefixed && (plainIntegerField(f.Type) || isPlainFloat(f.Type))
 }
 
-// checkDecimal refuses a value of integer field f that isn't decimal, or doesn't fit the field's
-// type, when decimal says the field doesn't declare base: prefixed: without it an integer is
+// checkDecimal refuses a value of number field f that isn't decimal, or doesn't fit the field's
+// type, when decimal says the field doesn't declare base: prefixed: without it a number is
 // decimal on every channel, as on the command line.
 func checkDecimal(decimal bool, f reflect.StructField, label string, vals []string, secret bool) error {
 	if !decimal {

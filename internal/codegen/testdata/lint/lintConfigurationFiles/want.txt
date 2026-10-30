@@ -1,5 +1,7 @@
-spec: .rotini.spec.yaml:7:7: command demo: config_files "both": sets both `path` and `discover`; exactly one locates the file
-spec: .rotini.spec.yaml:12:7: command demo: config_files "xdgnoapp": `discover` strategy "xdg" needs `app` (the directory under the XDG config root)
-spec: .rotini.spec.yaml:16:7: command demo: config_files "nested": `discover` file "conf/demo.yaml" is not a file name; name the file alone, and the strategy picks the directories searched
-spec: .rotini.spec.yaml:20:7: command demo: config_files "windows": `discover` file "conf\\demo.yaml" is not a file name; name the file alone, and the strategy picks the directories searched
-spec: .rotini.spec.yaml:24:7: command demo: config_files "parent": `discover` file ".." is not a file name; name the file alone, and the strategy picks the directories searched
+spec: .rotini.spec.yaml:8:7: command demo: config_files "both": sets both `path` and `discover`; exactly one locates the file
+spec: .rotini.spec.yaml:13:7: command demo: config_files "xdgnoapp": `discover` strategy "xdg" needs `app` (the directory under the XDG config root)
+spec: .rotini.spec.yaml:17:7: command demo: config_files "nested": `discover` file "conf/demo.yaml" is not a file name; name the file alone, and the strategy picks the directories searched
+spec: .rotini.spec.yaml:21:7: command demo: config_files "windows": `discover` file "conf\\demo.yaml" is not a file name; name the file alone, and the strategy picks the directories searched
+spec: .rotini.spec.yaml:25:7: command demo: config_files "parent": `discover` file ".." is not a file name; name the file alone, and the strategy picks the directories searched
+spec: .rotini.spec.yaml:33:7: command demo: config_files "explicit": the name is reserved for the configuration reader's own layers, so every run that reads configuration would fail; choose another name
+spec: .rotini.spec.yaml:35:7: command demo: config_files "default": the name is reserved for the configuration reader's own layers, so every run that reads configuration would fail; choose another name

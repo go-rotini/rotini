@@ -1,0 +1,36 @@
+# Two inputs on one command path read one environment variable for different keys, so setting it
+# sets both: derived names collide, or a `variable:` names what another input derives.
+version: 0.0.0
+command:
+  name: demo
+  env_prefix: C
+  flags:
+    # a.b_c, a_b.c and a-b.c all derive C_A_B_C.
+    - name: first
+      cascading: true
+      schema: { type: string, key: a.b_c }
+    - name: second
+      schema: { type: string, key: a_b.c }
+    # Correct: the same key twice is one setting. No problem.
+    - name: again
+      schema: { type: string, key: a.b_c }
+    # An explicit variable naming what a key derives.
+    - name: named
+      schema: { type: string, variable: C_A_B_C }
+    # Correct: both name the variable with `variable:`, on purpose. No problem.
+    - name: shared
+      schema: { type: string, variable: SHARED }
+    - name: shared-too
+      schema: { type: string, variable: SHARED }
+  env:
+    # An env input's name derives C_HOST_NAME, as the flag's key does.
+    - name: host_name
+      schema: { type: string }
+  commands:
+    - name: run
+      flags:
+        # Below the root's cascading flag: a-b.c derives C_A_B_C too.
+        - name: third
+          schema: { type: string, key: a-b.c }
+        - name: host
+          schema: { type: string, key: hostName }

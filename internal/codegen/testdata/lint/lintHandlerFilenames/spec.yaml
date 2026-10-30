@@ -1,5 +1,6 @@
 # Two commands resolving to one stub file would have codegen write over itself, and a
-# name the go tool reads specially would silently break the build.
+# name the go tool reads specially would silently break the build. A file name longer than a
+# file system allows can't be created at all.
 version: 0.0.0
 command:
   name: demo
@@ -13,3 +14,4 @@ command:
     # demo_aB.go and demo_ab.go are one file on macOS and Windows.
     - name: aB
     - name: ab
+    - name: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

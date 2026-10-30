@@ -87,6 +87,9 @@ func FileMode(perm fs.FileMode) OutputOption {
 // the rename is retried briefly while another program holds the file open, and a read-only
 // file cannot be replaced.
 //
+// A path whose directory doesn't exist, or that permission denies, is a usage error; any
+// other failure to open or create the file is uncategorised ([CategoryNone]).
+//
 // The file is not synced to disk: Close makes it visible whole, as most tools that write
 // files do, not durable across a power loss.
 func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile, error) {
@@ -112,7 +115,7 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 			return nil, UsageError(&pathError{msg: fmt.Sprintf("output file %s is a symbolic link to a file that doesn't exist", quotePath(path)), err: rerr})
 		}
 		if rerr != nil {
-			return nil, &pathError{msg: fmt.Sprintf("could not follow output file %s", quotePath(path)), err: rerr, detail: true}
+			return nil, outputOpenError(fmt.Sprintf("could not follow output file %s", quotePath(path)), rerr)
 		}
 		target = resolved
 		info, err = os.Stat(target)
@@ -125,7 +128,7 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 		// No O_TRUNC: it does nothing to a device or pipe, and Windows refuses it on NUL.
 		f, err := os.OpenFile(target, os.O_WRONLY, 0)
 		if err != nil {
-			return nil, &pathError{msg: fmt.Sprintf("could not open output file %s", quotePath(path)), err: err, detail: true}
+			return nil, outputOpenError(fmt.Sprintf("could not open output file %s", quotePath(path)), err)
 		}
 		return rtx.trackOutput(&OutputFile{rtx: rtx, name: path, w: f, file: f, target: target}), nil
 	case exists && !cfg.overwrite:
@@ -142,19 +145,30 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	}
 	f, tmp, err := createTemp(target, perm)
 	if err != nil {
-		return nil, &pathError{msg: fmt.Sprintf("could not create output file %s", quotePath(path)), err: err, detail: true}
+		return nil, outputOpenError(fmt.Sprintf("could not create output file %s", quotePath(path)), err)
 	}
 	if keepMode {
 		// The temporary file was created through the umask; give it the replaced file's mode.
 		if err := f.Chmod(perm); err != nil {
 			_ = f.Close()
 			_ = os.Remove(tmp)
-			return nil, &pathError{msg: fmt.Sprintf("could not create output file %s", quotePath(path)), err: err, detail: true}
+			return nil, outputOpenError(fmt.Sprintf("could not create output file %s", quotePath(path)), err)
 		}
 	}
 	return rtx.trackOutput(&OutputFile{
 		rtx: rtx, name: path, w: f, file: f, tmp: tmp, target: target, overwrite: cfg.overwrite,
 	}), nil
+}
+
+// outputOpenError is the error for an output file CreateOutput could not open, create or
+// follow, saying why: a usage error when its directory doesn't exist or permission is denied,
+// which the user can fix, and uncategorised for any other I/O failure.
+func outputOpenError(msg string, err error) error {
+	pe := &pathError{msg: msg, err: err, detail: true}
+	if pathMissing(err) || errors.Is(err, fs.ErrPermission) {
+		return UsageError(pe)
+	}
+	return pe
 }
 
 // createTemp creates a new file beside target, named after it, with perm before the umask.

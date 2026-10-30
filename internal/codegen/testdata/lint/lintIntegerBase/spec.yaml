@@ -1,5 +1,5 @@
-# base: prefixed reads 0x, 0o and 0b integer literals, so it applies to integer inputs and lists
-# of them, and a default or enum value must read under it.
+# base: prefixed reads 0x, 0o and 0b literals, and hexadecimal floats on a float, so it applies to
+# number inputs and lists of them, and a default or enum value must read under it.
 version: 0.0.0
 command:
   name: demo
@@ -25,17 +25,25 @@ command:
         base: prefixed
         enum: ['0x1', '0x2']
         default: 2
-    # Not an integer.
-    - name: name
-      identifiers: [--name]
-      schema:
-        type: string
-        base: prefixed
     - name: ratio
       identifiers: [--ratio]
       schema:
         type: float64
         base: prefixed
+        maximum: 100
+        default: '0x1p4'
+    # Not a number.
+    - name: name
+      identifiers: [--name]
+      schema:
+        type: string
+        base: prefixed
+    # A float without base reads decimal only.
+    - name: plain
+      identifiers: [--plain]
+      schema:
+        type: float64
+        default: '0x1p4'
     # A default that is no literal, and one above the bound.
     - name: bad
       identifiers: [--bad]

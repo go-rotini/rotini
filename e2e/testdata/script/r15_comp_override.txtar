@@ -1,0 +1,238 @@
+# R15 — a parent overrides the commands it mounts, through every layer: a key next to a $ref
+# overrides the mounted command, an entry named like one of its commands overrides that command,
+# and the spec nearest the root wins. Help, man and markdown pages, completion and the contract
+# show it; the child on its own keeps its own text.
+
+gomodinit example.com/acme
+exec rotini init acme
+exec rotini init db
+exec rotini init migrate
+cp migrate.spec.yaml cmd/migrate/.rotini.spec.yaml
+cp db.spec.yaml cmd/db/.rotini.spec.yaml
+cp acme.conf.yaml cmd/acme/.rotini.conf.yaml
+exec rotini generate cmd/migrate/.rotini.spec.yaml --config cmd/migrate/.rotini.conf.yaml
+exec rotini generate cmd/db/.rotini.spec.yaml --config cmd/db/.rotini.conf.yaml
+
+# The guide's example: acme rewords db's footer and replaces the example `db migrate --help`
+# shows, which db's spec writes for its own program.
+concat cmd/acme/.rotini.spec.yaml acme-head.yaml.txt guide.yaml.txt acme-tail.yaml.txt
+exec rotini validate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o acme$exe ./cmd/acme
+exec ./acme$exe db migrate --help
+stdout '^  acme db migrate --steps 2$'
+! stdout '^  (db )?migrate --steps 2$'
+exec ./acme$exe db --help
+stdout '^Run ''acme db help <command>'' for more\.$'
+! stdout '^Run ''db help'
+
+# Three layers, each overriding the one below: acme's keys win over db's, db's over migrate's.
+cp acme.spec.yaml cmd/acme/.rotini.spec.yaml
+exec rotini validate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go build -o acme$exe ./cmd/acme
+exec go build -o db$exe ./cmd/db
+exec ./acme$exe db migrate --help
+stdout '^  acme db migrate --steps 2$'
+stdout '^Run ''migrate help'' for more\.$'
+stdout '^  down +roll migrations back$'
+! stdout '^  up '
+exec ./acme$exe db --help
+stdout '^Effects: read$'
+stdout '^  migrate +the migrations, as db describes them$'
+stdout '^  status +show the schema version$'
+exec ./acme$exe help db status
+stdout '^  acme db status$'
+! stdout '^  db status$'
+exec ./acme$exe db migrate up --help
+stdout '^  acme db migrate up$'
+
+# Completion leaves out the command acme hides, and the pages and contract carry the overrides.
+exec ./acme$exe __complete db migrate ''
+stdout '^down'
+! stdout '^up'
+grep '^acme db migrate \\-\\-steps 2$' share/man/man1/acme-db-migrate.1
+grep '^acme db migrate --steps 2$' internal/cmd/acme/renders/markdown_acme_db_migrate.md
+grep '"summary": "acme hides this"' contract.json
+grep '"hidden": true' contract.json
+
+# db, built on its own, keeps the text its spec and migrate's write.
+exec ./db$exe migrate --help
+stdout '^  db migrate --steps 2$'
+stdout '^  up +apply pending migrations$'
+exec ./db$exe --help
+stdout '^Run ''db help <command>'' for more\.$'
+
+# rotini mount sees the override entry as part of acme's spec, not as a place to mount into.
+exec rotini mount cmd/db/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml
+stdout '0 mounted, 1 already mounted'
+wantexit 1 rotini mount cmd/migrate/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --under 'db migrate'
+stderr 'acme db migrate overrides a command declared in \.\./db/\.rotini\.spec\.yaml; mount into that spec instead'
+
+-- migrate.spec.yaml --
+version: 0.0.0
+command:
+  name: migrate
+  summary: run migrations
+  footer: Run 'migrate help' for more.
+  examples: ["migrate --steps 2"]
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: steps
+      identifiers: [--steps]
+      summary: how many to run
+      schema: { type: int }
+  commands:
+    - name: up
+      summary: apply pending migrations
+    - name: down
+      summary: roll migrations back
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+-- db.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  summary: manage the database
+  footer: Run 'db help <command>' for more.
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: status
+      summary: show the schema version
+      examples: ["db status"]
+    - $ref: ../migrate/.rotini.spec.yaml
+      summary: the migrations, as db describes them
+      examples: ["db migrate --steps 2"]
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+-- acme-head.yaml.txt --
+version: 0.0.0
+command:
+  name: acme
+  summary: the acme platform tool
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+-- guide.yaml.txt --
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+      footer: Run 'acme db help <command>' for more.
+      commands:
+        - name: migrate
+          examples: ["acme db migrate --steps 2"]
+-- acme-tail.yaml.txt --
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+-- acme.spec.yaml --
+version: 0.0.0
+command:
+  name: acme
+  summary: the acme platform tool
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+      footer: Run 'acme db help <command>' for more.
+      effects: { kind: read }
+      commands:
+        - name: status
+          examples: ["acme db status"]
+        - name: migrate
+          examples: ["acme db migrate --steps 2"]
+          commands:
+            - name: up
+              summary: acme hides this
+              hidden: true
+              examples: ["acme db migrate up"]
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+-- acme.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+    - type: man
+      enabled: true
+      install_dir: share
+    - type: markdown
+      enabled: true
+      embed: true
+  contract:
+    file: contract.json

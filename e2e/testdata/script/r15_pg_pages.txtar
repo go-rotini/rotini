@@ -1,0 +1,170 @@
+# R15 — what the generated pages and agent exports say about deprecated commands, secrets that
+# refuse a typed value, list defaults, the root's program-wide exit_status, code in man pages,
+# enum values in markdown, and duration and bytesize bounds.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+# The exit-code check reads the root's exit_status for a command without its own; a command's
+# own list replaces it.
+stderr '^Warning: internal[/\\]cmd[/\\]app[/\\]codes\.go:\d+: "app status" exits with 7, which the exit_status it inherits from "app" doesn''t list$'
+stderr '^Warning: internal[/\\]cmd[/\\]app[/\\]codes\.go:\d+: "app deploy" exits with 3, which its exit_status doesn''t list$'
+! stderr '"app status" exits with 3'
+! stderr 'AppExitBusy'
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# A deprecated command's own page says so, with its message, replacement and releases.
+exec ./app$exe legacy --help
+stdout '^This command is deprecated since 1\.4\.0, removed in 2\.0\.0: renamed; use app deploy instead$'
+grep '^\.SH DESCRIPTION\nThis command is deprecated since 1\.4\.0, removed in 2\.0\.0: renamed; use app\ndeploy instead$' internal/cmd/app/renders/app-legacy.1
+grep '^This command is deprecated since 1\.4\.0, removed in 2\.0\.0: renamed; use app deploy instead$' internal/cmd/app/renders/markdown_app_legacy.md
+! grep 'This command is deprecated' internal/cmd/app/renders/help_app_deploy.txt
+
+# A secret that refuses a typed value says how to pass it, matching its `from`.
+exec ./app$exe deploy --help
+stdout '^      --token string +the deploy token \(@file or - for stdin\)$'
+stdout '^      --key string +the signing key \(@file\)$'
+grep 'the deploy token \(@file or \\- for stdin\)$' internal/cmd/app/renders/app-deploy.1
+grep '^- `--key` `string` — the signing key \(@file\)$' internal/cmd/app/renders/markdown_app_deploy.md
+grep '^- `--pin` `string` — a pin \(- for stdin\)$' internal/cmd/app/renders/markdown_app_status.md
+
+# A list default: terse in help, JSON in man and markdown.
+stdout '^      --label \[\]string +a label \(default \[a,b c"d\]\) \(repeatable\)$'
+grep '^a label \(default \["a,b", "c\\e"d"\]\)$' internal/cmd/app/renders/app-deploy.1
+grep '^- `--label` `\[\]string` — a label \(default `\["a,b", "c\\"d"\]`\)' internal/cmd/app/renders/markdown_app_deploy.md
+grep '^- `--zone` `\[\]string` — zones \(default `\["eu", "us"\]`\)' internal/cmd/app/renders/markdown_app_deploy.md
+
+# Code in a rule is bold in man, without its backticks; enum values are code in markdown.
+grep '^matches \\fB\^\[a\\-z\\\(ga"\]\+\$\\fR$' internal/cmd/app/renders/app-deploy.1
+! grep '\\\(ga\\\(ga' internal/cmd/app/renders/app-deploy.1
+grep '\(one of ``a`b``, `plain`\); matches ``\^\[a-z`"\]\+\$``$' internal/cmd/app/renders/markdown_app_deploy.md
+
+# The root's exit_status is program-wide: status, with none of its own, documents the root's;
+# deploy's own list replaces it.
+grep '^\.SH "EXIT STATUS"\n\.TP\n\\fB0\\fR\ndone\n\.TP\n\\fB3\\fR \(busy\)\nthe fleet is busy \(retryable\)$' internal/cmd/app/renders/app-status.1
+grep '^## Exit Status\n\n- `0` — done\n- `3` \(`busy`\) — the fleet is busy \(retryable\)' internal/cmd/app/renders/markdown_app_status.md
+grep '^## Exit Status\n\n- `0` — shipped\n- `4` \(`rejected`\) — refused\z' internal/cmd/app/renders/markdown_app_deploy.md
+grep '(?s)## `app status`.*- Exit 3 \(busy\): the fleet is busy \(running it again may succeed\)' skills/app/SKILL.md
+grep '(?s)## `app deploy`\n.*- Exit 4 \(rejected\): refused\n' skills/app/SKILL.md
+! grep '(?s)## `app deploy`\n[^#]*Exit 3' skills/app/SKILL.md
+grep 'Exit codes: 0: done; 3 \(busy, retryable\): the fleet is busy\.' tools/mcp.json
+grep 'Exit codes: 0: shipped; 4 \(rejected\): refused\.' tools/mcp.json
+# The contract records each command's own list.
+grep '"exit_status": \[' cli-contract.json
+! grep '"summary": "the fleet is busy"(?s).*"summary": "the fleet is busy"' cli-contract.json
+
+# Duration and bytesize bounds are nanoseconds and bytes in the contract, which keeps them, and
+# left out of every tool schema, where the value is a string.
+grep '"maximum": 3600000000000' cli-contract.json
+grep '"maximum": 10000000' cli-contract.json
+! grep '3600000000000|10000000' tools/mcp.json
+! grep '3600000000000|10000000' tools/openai.json
+! grep '3600000000000|10000000' tools/gemini.json
+grep '"wait": \{\n\s+"description": "how long to wait",\n\s+"type": "string"\n\s+\}' tools/mcp.json
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: run the fleet
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [--help, -h]
+      cascading: true
+      short_circuit: true
+      schema: {type: bool}
+  exit_status:
+    - { code: 0, summary: done }
+    - { code: 3, name: busy, summary: the fleet is busy, retryable: true }
+  commands:
+    - name: deploy
+      summary: ship a service
+      effects: { kind: write }
+      exit_status:
+        - { code: 0, summary: shipped }
+        - { code: 4, name: rejected, summary: refused }
+      flags:
+        - name: token
+          summary: the deploy token
+          identifiers: [--token]
+          schema: {type: string, secret: true, from: [file, stdin]}
+        - name: key
+          summary: the signing key
+          identifiers: [--key]
+          schema: {type: string, secret: true, from: [file]}
+        - name: label
+          summary: a label
+          identifiers: [--label]
+          schema: {type: '[]string', separator: ",", default: ["a,b", 'c"d']}
+        - name: zone
+          summary: zones
+          identifiers: [--zone]
+          schema: {type: '[]string', default: [eu, us]}
+        - name: quote
+          summary: the quoting style
+          identifiers: [--quote]
+          schema: {type: string, pattern: '^[a-z`"]+$', enum: ['a`b', plain]}
+    - name: legacy
+      summary: ship the old way
+      deprecated: renamed
+      deprecated_since: 1.4.0
+      removed_in: 2.0.0
+      replaced_by: deploy
+    - name: status
+      summary: show the fleet
+      effects: { kind: read }
+      flags:
+        - name: wait
+          summary: how long to wait
+          identifiers: [--wait]
+          schema: {type: duration, minimum: 1s, maximum: 1h}
+        - name: max
+          summary: the largest answer
+          identifiers: [--max]
+          schema: {type: bytesize, maximum: 10MB}
+        - name: pin
+          summary: a pin
+          identifiers: [--pin]
+          schema: {type: string, secret: true, from: [stdin]}
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: man
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+      embed: true
+    - type: tools
+      enabled: true
+      targets: [mcp, openai-strict, gemini]
+    - type: skill
+      enabled: true
+-- internal/cmd/app/codes.go --
+package app
+
+import "github.com/go-rotini/rotini"
+
+func (*appStatusHandler) bail(c *rotini.Context) {
+	c.Exit(AppExitBusy)
+	c.Exit(3)
+	c.Exit(7)
+}
+
+func (*appDeployHandler) bail(c *rotini.Context) {
+	c.Exit(3)
+}

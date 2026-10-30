@@ -1,0 +1,116 @@
+# R15 — `help <plugin>` runs the plugin with --help, through the help command `rotini init`
+# writes: a declared plugin by name or alias, a discovered one whose binary is found, with the
+# plugin's output, exit code and timeout passing through, and the program refusing to run itself.
+
+gomodinit example.com/plug
+exec rotini init plug
+grep '^\tif rtx\.PluginHelp\(inputs\.PlugHelp\.Arguments\.Command\.\.\.\) \{\n\t\treturn\n\t\}$' internal/cmd/plug/plug_help.go
+cp plug.spec.yaml cmd/plug/.rotini.spec.yaml
+exec rotini generate cmd/plug/.rotini.spec.yaml --config cmd/plug/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o plug$exe ./cmd/plug
+mkdir plugins
+exec go build -o plugins/plug-sync$exe ./echo
+exec go build -o plugins/plug-lint$exe ./echo
+# Run each plugin once, so its first start isn't timed.
+exec plugins/plug-sync$exe
+exec plugins/plug-lint$exe
+
+# A declared plugin, by name or alias, gets the words after it and --help.
+exec ./plug$exe help sync push
+stdout '^plug-sync(\.exe)? got \["push" "--help"\]$'
+exec ./plug$exe help sy
+stdout '^plug-sync(\.exe)? got \["--help"\]$'
+
+# Its exit code and timeout are those of running it.
+env ECHO_EXIT=3
+wantexit 3 ./plug$exe help sync
+env ECHO_EXIT=
+env ECHO_SLEEP=10s
+wantexit 1 ./plug$exe help sync
+stderr '^Error: sync: timed out after 2s$'
+env ECHO_SLEEP=
+
+# A discovered plugin answers when its binary is found; a word that names nothing doesn't.
+exec ./plug$exe help lint
+stdout '^plug-lint(\.exe)? got \["--help"\]$'
+wantexit 1 ./plug$exe help nope
+stderr '^Error: no help for command "nope"$'
+
+# A declared plugin with no binary, or whose binary is the program itself, fails as running it
+# does.
+wantexit 1 ./plug$exe help gone
+stderr '"plug-gone(\.exe)?" not found; searched next to the binary .*, then the plugin path \./plugins, then PATH$'
+[!windows] symlink plugins/plug-self -> ../plug
+[!windows] wantexit 1 ./plug$exe help self
+[!windows] stderr 'self: .*plugins[/\\]plug-self.* is this program itself'
+
+# The program's own commands still get their pages.
+exec ./plug$exe help version
+stdout '^  plug version$'
+
+-- help-lines.go.txt --
+if rtx.PluginHelp(inputs.PlugHelp.Arguments.Command...) {
+	return
+}
+-- plug.spec.yaml --
+version: 0.0.0
+command:
+  name: plug
+  summary: a host for plugins
+  plugin_path: ./plugins
+  plugins:
+    - name: sync
+      summary: synchronize with the store
+      aliases: [sy]
+      timeout: 2s
+    - name: gone
+      summary: never installed
+    - name: self
+      summary: installed as the program itself
+  plugin_discovery:
+    prefix: plug-
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+-- echo/main.go --
+// echo is a stand-in plugin: it prints its name and arguments, and exits with the code the
+// ECHO_EXIT variable names, after sleeping as long as ECHO_SLEEP says.
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+)
+
+func main() {
+	name := filepath.Base(os.Args[0])
+	fmt.Printf("%s got %q\n", name, os.Args[1:])
+	if d, err := time.ParseDuration(os.Getenv("ECHO_SLEEP")); err == nil {
+		time.Sleep(d)
+	}
+	code, _ := strconv.Atoi(os.Getenv("ECHO_EXIT"))
+	os.Exit(code)
+}

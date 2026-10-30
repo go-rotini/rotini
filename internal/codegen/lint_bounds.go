@@ -104,32 +104,34 @@ func numericBound(v any, elem string) (n *float64, ok bool) {
 
 // boundsProblems reports each pair of bounds on b that leaves no value for elem (the type a
 // value is checked as): a numeric range with nothing in it, minLength above maxLength, and
-// minItems above maxItems. lengths and items say whether those bounds apply to the type.
-func boundsProblems(b *BaseSchema, elem string, lengths, items bool) []string {
-	var out []string
+// minItems above maxItems. lengths and items say whether those bounds apply to the type. Each
+// problem is keyed by the lower bound it names first.
+func boundsProblems(b *BaseSchema, elem string, lengths, items bool) []keyedMsg {
+	var out []keyedMsg
 	if constraintNumericFamily[elem] || measuredTypes[elem] {
-		if msg := rangeProblem(b, elem); msg != "" {
-			out = append(out, msg)
+		if km := rangeProblem(b, elem); km.msg != "" {
+			out = append(out, km)
 		}
 	}
 	if lengths && b.MaxLength != nil && b.MinLength > *b.MaxLength {
-		out = append(out, fmt.Sprintf("`minLength` %d is above `maxLength` %d, so no value can ever be accepted; lower `minLength` or raise `maxLength`", b.MinLength, *b.MaxLength))
+		out = append(out, keyedMsg{"minLength", fmt.Sprintf("`minLength` %d is above `maxLength` %d, so no value can ever be accepted; lower `minLength` or raise `maxLength`", b.MinLength, *b.MaxLength)})
 	}
 	if items && b.MaxItems != nil && b.MinItems > *b.MaxItems {
-		out = append(out, fmt.Sprintf("`minItems` %d is above `maxItems` %d, so no value can ever be accepted; lower `minItems` or raise `maxItems`", b.MinItems, *b.MaxItems))
+		out = append(out, keyedMsg{"minItems", fmt.Sprintf("`minItems` %d is above `maxItems` %d, so no value can ever be accepted; lower `minItems` or raise `maxItems`", b.MinItems, *b.MaxItems)})
 	}
 	return out
 }
 
 // rangeProblem folds the inclusive and exclusive bounds into one lower and one upper bound and
-// reports when no value of elem lies between them. For whole-number types the bounds round
-// inward first, so exclusiveMinimum 1 with exclusiveMaximum 2 holds no integer.
-func rangeProblem(b *BaseSchema, elem string) string {
+// reports, keyed by the lower bound, when no value of elem lies between them. For whole-number
+// types the bounds round inward first, so exclusiveMinimum 1 with exclusiveMaximum 2 holds no
+// integer.
+func rangeProblem(b *BaseSchema, elem string) keyedMsg {
 	var sides [4]*float64
 	for i, v := range []any{b.Minimum, b.ExclusiveMinimum, b.Maximum, b.ExclusiveMaximum} {
 		n, ok := numericBound(v, elem)
 		if !ok {
-			return "" // text that isn't a value of the type: lintConstraintApplicability
+			return keyedMsg{} // text that isn't a value of the type: lintConstraintApplicability
 		}
 		sides[i] = n
 	}
@@ -137,25 +139,25 @@ func rangeProblem(b *BaseSchema, elem string) string {
 	lo := tighterBound(side(sides[0], "minimum", false), side(sides[1], "exclusiveMinimum", true), whole, true)
 	hi := tighterBound(side(sides[2], "maximum", false), side(sides[3], "exclusiveMaximum", true), whole, false)
 	if lo == nil || hi == nil {
-		return ""
+		return keyedMsg{}
 	}
 	empty := effectiveBound(*lo, whole, true) > effectiveBound(*hi, whole, false)
 	if !whole {
 		empty = lo.v > hi.v || (lo.v == hi.v && (lo.excl || hi.excl))
 	}
 	if !empty {
-		return ""
+		return keyedMsg{}
 	}
 	if lo.v > hi.v {
-		return fmt.Sprintf("%#q %s is above %#q %s, so no value can ever be accepted; lower %#q or raise %#q",
-			lo.key, formatBoundIn(elem, lo.v), hi.key, formatBoundIn(elem, hi.v), lo.key, hi.key)
+		return keyedMsg{lo.key, fmt.Sprintf("%#q %s is above %#q %s, so no value can ever be accepted; lower %#q or raise %#q",
+			lo.key, formatBoundIn(elem, lo.v), hi.key, formatBoundIn(elem, hi.v), lo.key, hi.key)}
 	}
 	fix := "widen the range"
 	if lo.excl || hi.excl {
 		fix += " or use `minimum`/`maximum`"
 	}
-	return fmt.Sprintf("%#q %s and %#q %s leave no %s between them; %s",
-		lo.key, formatBoundIn(elem, lo.v), hi.key, formatBoundIn(elem, hi.v), rangeNoun(elem), fix)
+	return keyedMsg{lo.key, fmt.Sprintf("%#q %s and %#q %s leave no %s between them; %s",
+		lo.key, formatBoundIn(elem, lo.v), hi.key, formatBoundIn(elem, hi.v), rangeNoun(elem), fix)}
 }
 
 // effectiveBound is a lower or upper bound as the nearest value a whole-number type can take;
@@ -231,7 +233,7 @@ func inheritedScalarRef(schema *InputSchema, schemas map[string]Schema) string {
 func lintBoundsSatisfiable(spec *Spec) []error {
 	schemas := spec.Command.Schemas
 	var problems []error
-	nodeProblems := func(b BaseSchema, typ string) []string {
+	nodeProblems := func(b BaseSchema, typ string) []keyedMsg {
 		return boundsProblems(&b, typ, stringValued(typ), strings.HasPrefix(typ, "[]") || strings.HasPrefix(typ, "map["))
 	}
 	tree := func(loc, subject, ptr string, root BaseSchema) {
@@ -244,12 +246,12 @@ func lintBoundsSatisfiable(spec *Spec) []error {
 			if path != "" {
 				who = fmt.Sprintf("%s property %q", subject, path)
 			}
-			for _, msg := range nodeProblems(b, typ) {
-				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: loc, msg: who + ": " + msg})
+			for _, km := range nodeProblems(b, typ) {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr + "/" + km.key, loc: loc, msg: who + ": " + km.msg})
 			}
 		})
 	}
-	named := map[string][]string{} // named scalar schema -> its problems, for the input dedupe
+	named := map[string][]keyedMsg{} // named scalar schema -> its problems, for the input dedupe
 	for _, name := range slices.Sorted(maps.Keys(schemas)) {
 		s := schemas[name]
 		if t := namedScalarType(name, schemas); t != "" {
@@ -269,11 +271,11 @@ func lintBoundsSatisfiable(spec *Spec) []error {
 			typ, elem := inputValueType(schema, schemas)
 			items := strings.HasPrefix(typ, "[]") || strings.HasPrefix(typ, "map[")
 			inherited := named[inheritedScalarRef(schema, schemas)]
-			for _, msg := range boundsProblems(&schema.BaseSchema, elem, stringValued(elem), items) {
-				if slices.Contains(inherited, msg) {
+			for _, km := range boundsProblems(&schema.BaseSchema, elem, stringValued(elem), items) {
+				if slices.Contains(inherited, km) {
 					continue
 				}
-				problems = append(problems, inputProblem(ptr, path, channel, name, msg))
+				problems = append(problems, schemaKeyProblem(ptr, km.key, path, channel, name, km.msg))
 			}
 		})
 		for _, s := range outputShapesAt(c.Output, ptr+"/output") {
@@ -283,50 +285,78 @@ func lintBoundsSatisfiable(spec *Spec) []error {
 	return problems
 }
 
+// enumConstraintProblem reports the first enum member of a non-map input that is a value of
+// its type but breaks the input's own bounds, lengths or pattern, so help and completion offer
+// it yet every run refuses it, keyed by the member; or nothing.
+func enumConstraintProblem(schema *InputSchema, typ string) keyedMsg {
+	if strings.HasPrefix(typ, "map[") {
+		return keyedMsg{}
+	}
+	constrained := *schema
+	constrained.Ref, constrained.Items, constrained.Type, constrained.Enum = "", nil, typ, nil
+	for i, m := range enumStrings(schema.Enum) {
+		msg := defaultViolation(&constrained, "`enum` value", m)
+		if msg == "" && measuredTypes[strings.TrimPrefix(typ, "[]")] {
+			if complaint := runtimeRejects(&constrained, []string{m}); complaint != "" {
+				msg = fmt.Sprintf("`enum` value %q breaks the declared bounds (%s)", m, complaint)
+			}
+		}
+		if msg != "" {
+			return keyedMsg{fmt.Sprintf("enum/%d", i), msg + ", so it is offered but always refused; drop the value or change the constraint"}
+		}
+	}
+	return keyedMsg{}
+}
+
 // lintEnumValues rejects enum members that can never be a value of the input's type: a
 // member that doesn't parse as that type (checked with the runtime's own parser), and any
 // enum on a bool, which already takes only true or false. On a map input the enum is checked
-// against each whole key=value pair. It also warns about a member listed twice. A named scalar
+// against each whole key=value pair; on any other, a member must also meet the input's own
+// bounds, lengths and pattern. It also warns about a member listed twice. A named scalar
 // schema is checked once, not again on each input that inherits its members.
 func lintEnumValues(spec *Spec) []error {
 	schemas := spec.Command.Schemas
 	var problems []error
-	check := func(schema *InputSchema, typ string) (errs []string, dup string) {
+	check := func(schema *InputSchema, typ string) (errs []keyedMsg, dup keyedMsg) {
 		seen := map[string]bool{}
-		for _, m := range enumStrings(schema.Enum) {
-			if seen[m] && dup == "" {
-				dup = m
+		for i, m := range enumStrings(schema.Enum) {
+			if seen[m] && dup.msg == "" {
+				dup = keyedMsg{fmt.Sprintf("enum/%d", i), fmt.Sprintf("lists `enum` value %q twice; list each value once", m)}
 			}
 			seen[m] = true
 		}
 		elem := strings.TrimPrefix(typ, "[]")
 		if elem == "bool" {
-			return []string{"sets `enum` on a bool, which already takes only true or false; remove the enum, or make the type string"}, dup
+			return []keyedMsg{{"enum", "sets `enum` on a bool, which already takes only true or false; remove the enum, or make the type string"}}, dup
 		}
 		probe := *schema
 		probe.Ref, probe.Items, probe.Type = "", nil, typ
 		probe.Minimum, probe.Maximum, probe.ExclusiveMinimum, probe.ExclusiveMaximum, probe.MultipleOf = nil, nil, nil, nil, nil
-		for _, m := range enumStrings(schema.Enum) {
+		for i, m := range enumStrings(schema.Enum) {
 			complaint := runtimeRejects(&probe, []string{m})
 			if complaint == "" {
 				continue
 			}
+			at := fmt.Sprintf("enum/%d", i)
 			if strings.HasPrefix(typ, "map[") && !strings.Contains(m, "=") {
-				return []string{fmt.Sprintf("`enum` value %q is not a key=value pair, which every value of a map input is; write members as key=value, or remove the enum", m)}, dup
+				return []keyedMsg{{at, fmt.Sprintf("`enum` value %q is not a key=value pair, which every value of a map input is; write members as key=value, or remove the enum", m)}}, dup
 			}
 			if strings.HasPrefix(complaint, strconv.Quote(m)+" ") {
-				return []string{fmt.Sprintf("`enum` value %s, so no value can match both; fix the value or the type", complaint)}, dup
+				return []keyedMsg{{at, fmt.Sprintf("`enum` value %s, so no value can match both; fix the value or the type", complaint)}}, dup
 			}
-			return []string{fmt.Sprintf("`enum` value %q is not a valid %s (%s), so no value can match both; fix the value or the type", m, typeSpelling(elem), complaint)}, dup
+			return []keyedMsg{{at, fmt.Sprintf("`enum` value %q is not a valid %s (%s), so no value can match both; fix the value or the type", m, typeSpelling(elem), complaint)}}, dup
+		}
+		if km := enumConstraintProblem(schema, typ); km.msg != "" {
+			return []keyedMsg{km}, dup
 		}
 		return nil, dup
 	}
-	report := func(errs []string, dup string, add func(msg string, sev severity)) {
-		for _, msg := range errs {
-			add(msg, severityError)
+	report := func(errs []keyedMsg, dup keyedMsg, add func(km keyedMsg, sev severity)) {
+		for _, km := range errs {
+			add(km, severityError)
 		}
-		if dup != "" {
-			add(fmt.Sprintf("lists `enum` value %q twice; list each value once", dup), severityWarning)
+		if dup.msg != "" {
+			add(dup, severityWarning)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(schemas)) {
@@ -336,8 +366,8 @@ func lintEnumValues(spec *Spec) []error {
 			continue
 		}
 		errs, dup := check(&InputSchema{BaseSchema: s.BaseSchema}, t)
-		report(errs, dup, func(msg string, sev severity) {
-			problems = append(problems, &problem{kind: "spec", ptr: rootPointer + "/schemas/" + name, loc: rootLabel(spec), msg: fmt.Sprintf("schema %q: %s", name, msg), sev: sev})
+		report(errs, dup, func(km keyedMsg, sev severity) {
+			problems = append(problems, &problem{kind: "spec", ptr: rootPointer + "/schemas/" + name + "/" + km.key, loc: rootLabel(spec), msg: fmt.Sprintf("schema %q: %s", name, km.msg), sev: sev})
 		})
 	}
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -350,8 +380,8 @@ func lintEnumValues(spec *Spec) []error {
 			}
 			typ, _ := inputValueType(schema, schemas)
 			errs, dup := check(schema, typ)
-			report(errs, dup, func(msg string, sev severity) {
-				p := inputProblem(ptr, path, channel, name, msg)
+			report(errs, dup, func(km keyedMsg, sev severity) {
+				p := schemaKeyProblem(ptr, km.key, path, channel, name, km.msg)
 				p.sev = sev
 				problems = append(problems, p)
 			})
@@ -370,9 +400,46 @@ func lintRequiredDefault(spec *Spec) []error {
 			if channel == "stdin" || schema == nil || schema.Type == "count" || !schema.Required || schema.Default == nil {
 				return // count: lintCountFlags rejects both keys
 			}
-			problems = append(problems, inputProblem(ptr, path, channel, name,
+			problems = append(problems, schemaKeyProblem(ptr, "default", path, channel, name,
 				"sets `required` and a `default`; the default always supplies a value, so the requirement can never fire. Drop `default` to make it required, or drop `required`"))
 		})
+	})
+	return problems
+}
+
+// lintRequiredVisibility warns about a required flag or argument that is also hidden, which
+// every run must pass though help doesn't show it, or deprecated, which every run must pass
+// though passing it reports it as deprecated. A flag deprecated only in some spellings
+// (`deprecated_identifiers`) is not: its other spellings are the ones to use.
+func lintRequiredVisibility(spec *Spec) []error {
+	var problems []error
+	warn := func(at, path, channel, name, msg string) {
+		p := inputProblem(at, path, channel, name, msg)
+		p.sev = severityWarning
+		problems = append(problems, p)
+	}
+	check := func(at, path, channel, name string, hidden bool, deprecated string, schema *InputSchema) {
+		if schema == nil || !schema.Required {
+			return
+		}
+		if hidden {
+			warn(at+"/hidden", path, channel, name, "is `required` and `hidden`: every run must pass it, but help doesn't show it, so a user can't learn it exists; drop `hidden`, or drop `required`")
+		}
+		if deprecated != "" {
+			warn(at+"/deprecated", path, channel, name, "is `required` and `deprecated`: every run must pass it, but passing it reports it as deprecated, so a user can't stop using it; drop `required` while it is deprecated, or drop `deprecated`")
+		}
+	}
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		for i, f := range c.Flags {
+			deprecated := f.Deprecated
+			if len(f.DeprecatedIdentifiers) > 0 {
+				deprecated = ""
+			}
+			check(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name, f.Hidden, deprecated, f.Schema)
+		}
+		for i, a := range c.Arguments {
+			check(fmt.Sprintf("%s/arguments/%d", ptr, i), path, "argument", a.Name, a.Hidden, a.Deprecated, a.Schema)
+		}
 	})
 	return problems
 }
@@ -386,7 +453,7 @@ func lintSecretDefault(spec *Spec) []error {
 			if channel == "stdin" || schema == nil || schema.Type == "count" || !schema.Secret || schema.Default == nil {
 				return // count: lintCountFlags rejects both keys
 			}
-			p := inputProblem(ptr, path, channel, name,
+			p := schemaKeyProblem(ptr, "default", path, channel, name,
 				"is secret but has a literal `default`, which is compiled into the binary; supply it at run time (an environment variable, a config file, or `from: [file, stdin]` on a flag) and drop the default")
 			p.sev = severityWarning
 			problems = append(problems, p)

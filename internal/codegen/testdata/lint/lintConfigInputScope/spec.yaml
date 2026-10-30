@@ -1,0 +1,30 @@
+# A config input with no config_files entry in scope: the default input reader has no file to read
+# it from.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: build
+      config:
+        - name: color
+          schema: { type: string }
+    # Correct: an entry on the command below reads the input too. No problem.
+    - name: deploy
+      config:
+        - name: region
+          schema: { type: string }
+      commands:
+        - name: prod
+          config_files:
+            - name: prod
+              path: prod.yaml
+    # Correct: an ancestor's entry is in scope. No problem.
+    - name: serve
+      config_files:
+        - name: main
+          path: serve.yaml
+      commands:
+        - name: web
+          config:
+            - name: port
+              schema: { type: int }

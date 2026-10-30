@@ -91,3 +91,13 @@ command:
           agent: true
           role: dry-run
           schema: { type: bool }
+    # Correct: agents aren't offered a command with `agent: false`, or anything under one, so
+    # there is nothing for them to preview or confirm. No problem.
+    - name: nuke
+      agent: false
+      effects: { kind: destructive }
+    - name: admin
+      agent: false
+      commands:
+        - name: reset
+          effects: { kind: destructive }

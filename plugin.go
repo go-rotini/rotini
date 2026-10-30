@@ -135,6 +135,18 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 			return p.settle(ctx, rtx)
 		}
 	}
+	code, perr, err := p.runPlugin(ctx, rtx, chain, r)
+	if perr != nil {
+		return p.pluginFailure(ctx, rtx, perr)
+	}
+	return code, err
+}
+
+// runPlugin runs a resolved plugin dispatch for [Program.execPlugin] and [Context.PluginHelp].
+// perr is rotini's own failure to carry it out (not found, the program itself, a timeout, a
+// start failure); otherwise code is the plugin's exit code, and err its *exec.ExitError when it
+// failed.
+func (p *Program) runPlugin(ctx context.Context, rtx *Context, chain []Command, r *PluginDispatch) (code int, perr *PluginError, err error) {
 	path, err := resolvePluginBinary(r.Def.Binary, r.Dir, rtx.osView())
 	if err != nil {
 		cat := CategoryInternal
@@ -145,17 +157,17 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 				candidates = childCommandNames(&chain[len(chain)-1])
 			}
 		}
-		return p.pluginFailure(ctx, rtx, &PluginError{
+		return 0, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginNotFound,
 			Cause: err, Msg: err.Error(), Candidates: candidates, cat: cat,
-		})
+		}, nil
 	}
 	if isRunningBinary(path) {
-		return p.pluginFailure(ctx, rtx, &PluginError{
+		return 0, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginStartFailed,
 			Msg: fmt.Sprintf("%s: %s is this program itself, so running it as the plugin would start this program again; install the plugin's own binary there", r.Def.Name, quotePath(path)),
 			cat: CategoryInternal,
-		})
+		}, nil
 	}
 
 	// The plugin's own timeout gets its own cause, so a deadline of the caller's context is a
@@ -193,25 +205,25 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command,
 	switch {
 	case err == nil, exited && errors.Is(err, exec.ErrWaitDelay):
 		// The plugin succeeded; a process it left running held the output open past the delay.
-		return 0, nil
+		return 0, nil, nil
 	case errors.Is(context.Cause(pctx), errPluginTimeout):
 		// cat is left unset: a timeout is operational, so CategoryNone.
-		return p.pluginFailure(ctx, rtx, &PluginError{
+		return 0, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginTimeout, Timeout: r.Def.Timeout,
 			Msg: fmt.Sprintf("%s: timed out after %s", r.Def.Name, r.Def.Timeout),
-		})
+		}, nil
 	case exited && ctx.Err() != nil:
 		// The run was canceled and the plugin stopped cleanly when asked.
-		return canceledExitCode(ctx), nil
+		return canceledExitCode(ctx), nil, nil
 	default:
 		if ee, ok := asError[*exec.ExitError](err); ok {
-			return pluginExitCode(ctx, ee), err
+			return pluginExitCode(ctx, ee), nil, err
 		}
-		return p.pluginFailure(ctx, rtx, &PluginError{
+		return 0, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginStartFailed,
 			Cause: err, Msg: fmt.Sprintf("%s: could not start %s: %s", r.Def.Name, quotePath(path), pluginStartProblem(err)),
 			cat: CategoryInternal,
-		})
+		}, nil
 	}
 }
 

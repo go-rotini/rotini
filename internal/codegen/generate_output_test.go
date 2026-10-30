@@ -44,10 +44,10 @@ func TestOutputSection(t *testing.T) {
 				"    healthy boolean    whether it answers its \\\\health check\n" +
 				"    service string     the service .name (required)",
 		},
-		"acme-status.1": {".SH OUTPUT\nOne status per service.\n.PP\nWrites \\fB[]Status\\fR to standard output.\n.SH \"SEE ALSO\""},
+		"acme-status.1": {".SH OUTPUT\nOne status per service.\n.PP\nWrites \\fB[]Status\\fR to standard output.\n.SH \"EXIT STATUS\""},
 		"acme-deploy.1": {
 			".SH OUTPUT\nWrites \\fBStatus\\fR to standard output.\n.TP\n\\fBhealthy\\fR \\fIboolean\\fR\nwhether it answers its \\e\\ehealth check\n" +
-				".TP\n\\fBservice\\fR \\fIstring\\fR\nthe service .name (required)\n.SH \"SEE ALSO\"",
+				".TP\n\\fBservice\\fR \\fIstring\\fR\nthe service .name (required)\n.SH \"EXIT STATUS\"",
 		},
 		"acme.1":                  {".TP\n\\fB3\\fR\nsome deploys failed (writes \\fB[]Status\\fR to standard output)\n"},
 		"markdown_acme_status.md": {"## Output\n\nOne status per service.\n\nWrites `[]Status` to stdout."},

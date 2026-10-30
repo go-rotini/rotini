@@ -8,7 +8,8 @@ import (
 )
 
 // basePrefixed is the value of [FlagDef.Base] and [ArgDef.Base] (and an env or config field's
-// base:"prefixed" tag) that lets an integer input take 0x, 0o and 0b literals.
+// base:"prefixed" tag) that lets a number input take 0x, 0o and 0b literals, and a float input
+// hexadecimal floats and `_` between digits.
 const basePrefixed = "prefixed"
 
 // prefixedDecimal reads s as an integer literal that may carry a base prefix after an optional
@@ -54,12 +55,37 @@ func decimalDigits(s string) bool {
 	return true
 }
 
-// prefixedNumber is [parseNumber] for an input that declares base: prefixed.
+// prefixedNumber is [parseNumber] for an input that declares base: prefixed: it also reads a
+// prefixed integer, a hexadecimal float (0x1p4) and `_` between digits.
 func prefixedNumber(v string) (float64, bool) {
 	if d, ok := prefixedDecimal(v); ok {
 		v = d
 	}
-	return parseNumber(v)
+	n, err := strconv.ParseFloat(v, 64)
+	return n, err == nil
+}
+
+// plainFloatText reports whether s is free of what only base: prefixed lets a float take: a
+// hexadecimal mantissa (0x1p4) and `_` between digits. inf and nan in any case are plain.
+func plainFloatText(s string) bool {
+	if strings.IndexByte(s, '_') >= 0 {
+		return false
+	}
+	body := strings.TrimLeft(s, "+-")
+	return len(body) < 2 || body[0] != '0' || (body[1] != 'x' && body[1] != 'X')
+}
+
+// prefixedFloatText spells v, a float under base: prefixed, as a plain decimal float when it
+// reads as a prefixed integer, a hexadecimal float or digits with `_`, and as written
+// otherwise.
+func prefixedFloatText(v string) string {
+	if plainFloatText(v) {
+		return v
+	}
+	if n, ok := prefixedNumber(v); ok {
+		return strconv.FormatFloat(n, 'g', -1, 64)
+	}
+	return v
 }
 
 // prefixedText spells v in decimal when it reads as a prefixed integer, and as written
@@ -86,8 +112,9 @@ func isPlainInteger(t reflect.Type) bool {
 	return t != durationType && !reflect.PointerTo(t).Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
 }
 
-// coercePrefixed is [coerce] for an integer input that declares base: prefixed: each value is
-// read by [prefixedDecimal] first, and an error names the value as written.
+// coercePrefixed is [coerce] for a number input that declares base: prefixed: each value is
+// read by [prefixedDecimal] (an integer) or [prefixedFloatText] (a float) first, and an error
+// names the value as written.
 func coercePrefixed(f reflect.Value, raw []string, fs *featureSet) error {
 	if f.Kind() == reflect.Slice {
 		out := reflect.MakeSlice(f.Type(), len(raw), len(raw))
@@ -101,6 +128,9 @@ func coercePrefixed(f reflect.Value, raw []string, fs *featureSet) error {
 	}
 	last := raw[len(raw)-1]
 	d, ok := prefixedDecimal(last)
+	if isPlainFloat(f.Type()) {
+		d, ok = prefixedFloatText(last), true
+	}
 	if !ok {
 		return coerce(f, []string{last}, fs)
 	}
@@ -128,6 +158,16 @@ func plainDecimalText(s string) string {
 		return sign + trimmed
 	}
 	return s
+}
+
+// isPlainFloat reports whether t (through pointers and slices) holds a plain float: a float
+// kind that is not a type that parses its own text.
+func isPlainFloat(t reflect.Type) bool {
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
+		t = t.Elem()
+	}
+	return (t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64) &&
+		!reflect.PointerTo(t).Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
 }
 
 // plainIntegerField reports whether t is an integer field, or a list of them, whose text

@@ -1,8 +1,10 @@
 package codegen
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"unicode"
@@ -224,6 +226,121 @@ func missingTagProblems(out *Schema, a kindAnalysis, at, path string) []error {
 			msg: fmt.Sprintf("`oneOf` entry %d has no %#q tagging its kind, which the other kinds have; declare %#q as a string with a `const` naming the kind, and list it in `required`", i+1, best, best)})
 	}
 	return problems
+}
+
+// lintOutputSatisfiable rejects an output shape that no output could pass: an object whose
+// `required` names a property it doesn't declare, or a property whose `const` is not a value
+// of its own type (`const: 3` on a string). It checks a command's output, each kind of a
+// stream's items and each exit status's output; input schemas are not output shapes.
+func lintOutputSatisfiable(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		check := func(subject string, out *Schema, shapes []shapeAt) {
+			for k, s := range shapes {
+				walkOutputShapeAt(s.schema, s.ptr, "", func(node Schema, at, prop string) {
+					who := subject
+					if len(out.OneOf) > 0 {
+						who += fmt.Sprintf(" `oneOf` entry %d", k+1)
+					}
+					if prop != "" {
+						who += " property " + strconv.Quote(prop)
+					}
+					add := func(at, msg string) {
+						problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path, msg: who + ": " + msg})
+					}
+					if len(node.Properties) > 0 {
+						declared := slices.Sorted(maps.Keys(node.Properties))
+						for i, name := range node.Required {
+							if _, ok := node.Properties[name]; !ok {
+								add(fmt.Sprintf("%s/required/%d", at, i), didYouMean(fmt.Sprintf(
+									"`required` names %q, which isn't one of its `properties`, so no output can pass; declare the property, or take it out of `required`", name), name, declared))
+							}
+						}
+					}
+					if msg := constTypeProblem(node); msg != "" {
+						add(at+"/const", msg)
+					}
+				})
+			}
+		}
+		check("output", c.Output, outputShapesAt(c.Output, ptr+"/output"))
+		for i, e := range c.ExitStatus {
+			check(fmt.Sprintf("exit_status %d output", e.Code), e.Output, outputShapesAt(e.Output, fmt.Sprintf("%s/exit_status/%d/output", ptr, i)))
+		}
+	})
+	return problems
+}
+
+// walkOutputShapeAt visits s and every property and list element schema below it, with each
+// one's pointer and dotted property path ("" for s itself).
+func walkOutputShapeAt(s Schema, ptr, path string, visit func(s Schema, ptr, path string)) {
+	visit(s, ptr, path)
+	for _, k := range slices.Sorted(maps.Keys(s.Properties)) {
+		sub := k
+		if path != "" {
+			sub = path + "." + k
+		}
+		walkOutputShapeAt(s.Properties[k], ptr+"/properties/"+k, sub, visit)
+	}
+	if s.Items != nil {
+		walkOutputShapeAt(*s.Items, ptr+"/items", path+"[]", visit)
+	}
+}
+
+// constTypeProblem says why a schema's `const` can't be a value of its declared `type`, or
+// returns "". A type that isn't one of JSON Schema's own or rotini's (a Go type with `import`)
+// is not checked.
+func constTypeProblem(s Schema) string {
+	if s.Const == nil || s.Type == "" || s.Ref != "" {
+		return ""
+	}
+	want, _ := standardType(s.Type, map[string]any{})["type"].(string)
+	got := jsonKind(s.Const)
+	if want == "" || got == "" {
+		return ""
+	}
+	if got == want || (want == "number" && got == "integer") {
+		return ""
+	}
+	shown := fmt.Sprint(s.Const)
+	if text, ok := s.Const.(string); ok {
+		shown = strconv.Quote(text)
+	}
+	return fmt.Sprintf("`const` %s is %s, but the type is %s, so no output can pass; make the `const` a value of the type, or change the type", shown, jsonKindNames[got], displayType(s.Type))
+}
+
+// jsonKind is the JSON Schema type of a decoded value: "integer" for a whole number, "number"
+// for any other, or "" for a value no JSON document holds.
+func jsonKind(v any) string {
+	switch x := v.(type) {
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case int, int64, uint64:
+		return "integer"
+	case float64:
+		if x == math.Trunc(x) && !math.IsInf(x, 0) {
+			return "integer"
+		}
+		return "number"
+	case json.Number:
+		if _, err := x.Int64(); err == nil {
+			return "integer"
+		}
+		return "number"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	}
+	return ""
+}
+
+// jsonKindNames describes each JSON Schema type for a message.
+var jsonKindNames = map[string]string{
+	"string": "a string", "boolean": "a boolean", "integer": "a whole number", "number": "a number",
+	"array": "a list", "object": "an object",
 }
 
 // keysBesideOneOf lists the keys an output declares beside its oneOf, other than description.

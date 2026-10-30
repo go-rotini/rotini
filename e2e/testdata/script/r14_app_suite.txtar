@@ -1,0 +1,502 @@
+# R14 — a platform CLI built end to end from three specs in three formats: acme (YAML) mounts
+# db (TOML) and cache (JSON) with `rotini mount`, declares and discovers plugins, answers under
+# another name (multicall), and ships help topics, man pages, markdown and completion scripts
+# that bash, zsh, fish and PowerShell source and run, through the mounted commands too.
+
+gomodinit example.com/acme
+exec rotini init acme
+exec rotini init db --format toml
+exec rotini init cache --format json
+cp db.spec.toml cmd/db/.rotini.spec.toml
+cp db.conf.toml cmd/db/.rotini.conf.toml
+cp cache.spec.json cmd/cache/.rotini.spec.json
+exec rotini generate cmd/db/.rotini.spec.toml --config cmd/db/.rotini.conf.toml
+exec rotini generate cmd/cache/.rotini.spec.json --config cmd/cache/.rotini.conf.json
+stderr 'command cache/flush: is destructive but has no flag with `role: dry-run` or `role: confirm`'
+
+# mount writes a $ref per child, skips the spec it mounts into, and leaves the rest alone.
+cp acme.spec.yaml cmd/acme/.rotini.spec.yaml
+cp acme.conf.yaml cmd/acme/.rotini.conf.yaml
+exec rotini mount cmd/acme/.rotini.spec.yaml cmd/cache/.rotini.spec.json cmd/db/.rotini.spec.toml --into cmd/acme/.rotini.spec.yaml --group Services
+stdout '^cmd/acme/\.rotini\.spec\.yaml: 2 mounted, 0 already mounted, 0 removed$'
+grep '^    - \$ref: \.\./db/\.rotini\.spec\.toml\n      group: Services$' cmd/acme/.rotini.spec.yaml
+exec rotini mount cmd/db/.rotini.spec.toml --into cmd/acme/.rotini.spec.yaml
+stdout '0 mounted, 1 already mounted'
+exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
+exec go mod tidy
+exec go build -ldflags '-X main.version=2.1.0' -o acme$exe ./cmd/acme
+exec go build -ldflags '-X main.version=0.3.0' -o db$exe ./cmd/db
+mkdir plugins
+exec go build -o plugins/acme-sync$exe ./echo
+exec go build -o plugins/acme-hello$exe ./echo
+
+# Help: groups with their description, the declared plugin, the topic; the child's pages under
+# the parent's name; version for the running program.
+exec ./acme$exe --help
+cmp stdout want-root-help.txt
+exec ./acme$exe db migrate --help
+stdout '^  acme db migrate \[flags\]$'
+stdout '^      --dsn url    the database to connect to$'
+stdout '^                   also set by DB_DSN$'
+exec ./acme$exe help db st
+stdout '^  acme db status$'
+exec ./acme$exe db --version
+stdout '^acme 2\.1\.0$'
+exec ./db$exe --version
+stdout '^db 0\.3\.0$'
+exec ./acme$exe help environment
+cmp stdout want-environment.txt
+
+# The child's inputs and rules work under the parent.
+wantexit 1 ./acme$exe db migrate -n 1 --to 20260101
+stderr '^Error: flags -n and --to are mutually exclusive$'
+env DB_DSN=nota
+wantexit 1 ./acme$exe db status
+stderr '^Error: --dsn: "nota" is not a valid URL .*\(from environment variable DB_DSN\)$'
+env DB_DSN=
+wantexit 1 ./acme$exe cache flush --pattern '[a'
+stderr '^Error: --pattern: '
+
+# Plugins: a declared one under its alias, a discovered one, its exit code passed through, a
+# timeout, and a missing one with the places searched.
+exec ./acme$exe sy a --b
+stdout '^acme-sync(\.exe)? got \["a" "--b"\]$'
+exec ./acme$exe hello x
+stdout '^acme-hello(\.exe)? got \["x"\]$'
+env ECHO_EXIT=3
+wantexit 3 ./acme$exe sync
+env ECHO_EXIT=
+env ECHO_SLEEP=60s
+wantexit 1 ./acme$exe sync
+stderr '^Error: sync: timed out after 5s$'
+env ECHO_SLEEP=
+wantexit 1 ./acme$exe nope
+stderr '^Error: "acme-nope" not found; searched next to the binary .*, then the plugin path \./plugins, then PATH$'
+
+# Multicall: a link named after a command runs it; the pages still show the root's invocation.
+[!windows] symlink deploy -> acme
+[!windows] exec ./deploy web
+[!windows] stdout 'Service:web'
+[!windows] exec ./deploy --help
+[!windows] stdout '^  acme deploy \[flags\] <service>$'
+
+# Pages: man and completion files to package, markdown embedded, all through the children.
+exists share/man/man1/acme-db-migrate.1 share/man/man1/acme-environment.1 share/completions/acme.bash share/completions/_acme share/completions/acme.fish share/completions/acme.ps1
+! exists share/man/man1/acme-sync.1
+grep '^\\fBacme db migrate\\fR \[flags\]$' share/man/man1/acme-db-migrate.1
+grep '^- `--dsn` `url` — the database to connect to' internal/cmd/acme/renders/markdown_acme_db_migrate.md
+
+# Completion through the binary: the mounted child's commands, plugins, enum summaries in order.
+exec ./acme$exe __complete ''
+stdout '^db\tmanage the database$'
+stdout '^hello$'
+stdout '^sy\tsynchronize with the store$'
+exec ./acme$exe __complete db ''
+stdout '^st\tshow which migrations ran$'
+exec ./acme$exe __complete deploy ''
+cmp stdout want-services.txt
+exec ./acme$exe __complete help ''
+stdout '^environment\tthe environment variables acme reads$'
+
+# The scripts, sourced and run by each shell.
+cp share/completions/acme.bash completion.bash
+cp share/completions/_acme completion.zsh
+cp share/completions/acme.fish completion.fish
+cp share/completions/acme.ps1 completion.ps1
+[exec:bash] exec bash drive-bash.sh
+[exec:bash] stdout '^top: cache completion db deploy hello help sy sync version$'
+[exec:bash] stdout '^db: completion help migrate st status version$'
+[exec:bash] stdout '^deploy: web api$'
+[exec:zsh] exec zsh drive-zsh.sh
+[exec:zsh] stdout '^OK: zsh parsed the script and registered _acme$'
+[exec:fish] env HOME=$WORK
+[exec:fish] exec fish drive-fish.fish
+[exec:fish] stdout '^db: completion help migrate st status version$'
+[exec:fish] stdout '^deploy: web\tthe website api\tthe public API$'
+[exec:fish] stdout '^migrate: --dsn --help --steps --to --version$'
+[exec:pwsh] env HOME=$WORK
+[exec:pwsh] env USERPROFILE=$WORK
+[exec:pwsh] env APPDATA=$WORK
+[exec:pwsh] env LOCALAPPDATA=$WORK
+[exec:pwsh] env DOTNET_CLI_HOME=$WORK
+[exec:pwsh] env POWERSHELL_TELEMETRY_OPTOUT=1
+[exec:pwsh] exec pwsh -NoProfile -File drive-pwsh.ps1
+[exec:pwsh] stdout '^db: completion help migrate st status version$'
+-- acme.spec.yaml --
+$schema: ./.rotini-schema.spec.json
+version: 0.0.0
+command:
+  name: acme
+  summary: the acme platform tool
+  description: acme bundles the platform's tools in one binary.
+  footer: Use "acme help <command>" for more information about a command.
+  env_prefix: ACME
+  multicall: true
+  plugin_path: ./plugins
+  plugins:
+    - name: sync
+      summary: synchronize with the store
+      aliases: [sy]
+      timeout: 5s
+  plugin_discovery:
+    prefix: acme-
+  groups:
+    - name: Services
+      description: tools for each service
+  topics:
+    - name: environment
+      summary: the environment variables acme reads
+      generate: environment
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      summary: print help
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [--version]
+      summary: print version
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string', complete: { kind: command } }
+    - name: version
+      summary: print version
+      description: Print the acme version.
+    - name: completion
+      summary: print a shell completion script
+      arguments:
+        - name: shell
+          summary: the shell
+          schema: { type: string, required: true, enum: [bash, zsh, fish, powershell, nushell] }
+    - name: deploy
+      summary: deploy a service
+      arguments:
+        - name: service
+          summary: the service
+          schema:
+            type: string
+            required: true
+            enum:
+              - { value: web, summary: the website }
+              - { value: api, summary: the public API }
+      flags:
+        - name: env
+          identifiers: [-e, --env]
+          summary: the target environment
+          schema: { type: string, default: staging, enum: [staging, prod], variable: ACME_ENV }
+        - name: config
+          identifiers: [--config]
+          summary: a deploy file
+          schema: { type: existingfile, complete: { kind: file, extensions: [yaml, yml] } }
+-- acme.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/acme/main.go
+    - type: cmd
+      file: internal/cmd/acme/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: true
+      install_dir: share
+    - type: man
+      enabled: true
+      install_dir: share
+    - type: markdown
+      enabled: true
+      embed: true
+  contract:
+    file: contract.json
+-- db.spec.toml --
+"$schema" = "./.rotini-schema.spec.json"
+version = "0.0.0"
+
+[command]
+name = "db"
+summary = "manage the database"
+description = "db runs schema migrations against the database DB_DSN names."
+env_prefix = "DB"
+
+[[command.flags]]
+name = "help"
+identifiers = ["-h", "--help"]
+summary = "print help"
+cascading = true
+short_circuit = true
+
+[command.flags.schema]
+type = "bool"
+
+[[command.flags]]
+name = "version"
+identifiers = ["--version"]
+summary = "print version"
+cascading = true
+short_circuit = true
+
+[command.flags.schema]
+type = "bool"
+
+[[command.flags]]
+name = "dsn"
+identifiers = ["--dsn"]
+summary = "the database to connect to"
+cascading = true
+
+[command.flags.schema]
+type = "url"
+key = "dsn"
+
+[[command.commands]]
+name = "help"
+summary = "print help"
+description = "Print help for a command."
+
+[[command.commands.arguments]]
+name = "command"
+summary = "the command path to print help for"
+
+[command.commands.arguments.schema]
+type = "[]string"
+
+[command.commands.arguments.schema.complete]
+kind = "command"
+
+[[command.commands]]
+name = "version"
+summary = "print version"
+description = "Print the db version."
+
+[[command.commands]]
+name = "completion"
+summary = "print a shell completion script"
+
+[[command.commands.arguments]]
+name = "shell"
+summary = "the shell"
+
+[command.commands.arguments.schema]
+type = "string"
+required = true
+enum = ["bash", "zsh", "fish", "powershell"]
+
+[[command.commands]]
+name = "migrate"
+summary = "apply schema migrations"
+examples = ["db migrate --steps 2", "db migrate --to 20261001"]
+
+[[command.commands.flags]]
+name = "steps"
+identifiers = ["-n", "--steps"]
+summary = "how many to apply"
+
+[command.commands.flags.schema]
+type = "int"
+minimum = 1
+
+[[command.commands.flags]]
+name = "to"
+identifiers = ["--to"]
+summary = "the version to migrate to"
+
+[command.commands.flags.schema]
+type = "string"
+pattern = '^\d{8}$'
+
+[[command.commands.flag_groups]]
+kind = "mutually_exclusive"
+flags = ["steps", "to"]
+
+[[command.commands]]
+name = "status"
+summary = "show which migrations ran"
+aliases = ["st"]
+-- db.conf.toml --
+"$schema" = "./.rotini-schema.conf.json"
+version = "0.0.0"
+
+[generate]
+
+[generate.schemas]
+
+[generate.schemas.conf]
+file = "cmd/db/.rotini-schema.conf.json"
+
+[generate.schemas.spec]
+file = "cmd/db/.rotini-schema.spec.json"
+
+[[generate.packages]]
+type = "main"
+file = "cmd/db/main.go"
+
+[[generate.packages]]
+type = "cmd"
+file = "internal/cmd/db/zz_rotini.go"
+
+# help is on so `db --help` works from the first build. The other three
+# are opt-in; flip `enabled` to turn one on.
+[[generate.features]]
+type = "help"
+enabled = true
+
+[[generate.features]]
+type = "completion"
+enabled = true
+
+[[generate.features]]
+type = "man"
+enabled = false
+
+[[generate.features]]
+type = "markdown"
+enabled = false
+
+[validate]
+fail = "collect"
+-- cache.spec.json --
+{
+  "$schema": "./.rotini-schema.spec.json",
+  "version": "0.0.0",
+  "command": {
+    "name": "cache",
+    "summary": "inspect the cache",
+    "flags": [
+      { "name": "help", "identifiers": ["-h", "--help"], "summary": "print help", "cascading": true, "short_circuit": true, "schema": { "type": "bool" } },
+      { "name": "version", "identifiers": ["--version"], "summary": "print version", "cascading": true, "short_circuit": true, "schema": { "type": "bool" } }
+    ],
+    "commands": [
+      { "name": "help", "summary": "print help", "arguments": [ { "name": "command", "schema": { "type": "[]string", "complete": { "kind": "command" } } } ] },
+      { "name": "version", "summary": "print version" },
+      {
+        "name": "flush",
+        "summary": "drop every entry",
+        "effects": { "kind": "destructive" },
+        "flags": [
+          { "name": "pattern", "identifiers": ["--pattern"], "summary": "only keys matching", "schema": { "type": "glob", "default": "*" } }
+        ]
+      },
+      {
+        "name": "get",
+        "summary": "print one entry",
+        "arguments": [ { "name": "key", "summary": "the key", "schema": { "type": "string", "required": true } } ]
+      }
+    ]
+  }
+}
+-- echo/main.go --
+// echo is a stand-in plugin: it prints its name and arguments, and exits with the code the
+// ECHO_EXIT variable names, after sleeping as long as ECHO_SLEEP says.
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+)
+
+func main() {
+	name := filepath.Base(os.Args[0])
+	fmt.Printf("%s got %q\n", name, os.Args[1:])
+	if d, err := time.ParseDuration(os.Getenv("ECHO_SLEEP")); err == nil {
+		time.Sleep(d)
+	}
+	code, _ := strconv.Atoi(os.Getenv("ECHO_EXIT"))
+	os.Exit(code)
+}
+-- drive-bash.sh --
+# Source the installed script and call its completion function the way TAB does.
+export PATH="$PWD:$PATH"
+source ./completion.bash
+COMP_TYPE=9
+complete_line() {
+    COMP_WORDS=("$@")
+    COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
+    COMPREPLY=()
+    _acme_complete
+}
+complete_line acme ""
+echo "top: ${COMPREPLY[*]}"
+complete_line acme db ""
+echo "db: ${COMPREPLY[*]}"
+complete_line acme deploy ""
+echo "deploy: ${COMPREPLY[*]}"
+-- drive-zsh.sh --
+# zsh's completion widgets need a live terminal, so this checks that the script parses and,
+# once loaded under compinit, registers its function for acme.
+set -e
+zsh -n ./completion.zsh
+autoload -Uz compinit
+compinit -u -d ./zcompdump
+source ./completion.zsh
+(( $+functions[_acme] ))
+[[ $_comps[acme] == _acme ]]
+echo "OK: zsh parsed the script and registered _acme"
+-- drive-fish.fish --
+# `complete -C` asks fish for the completions of a command line, as TAB does.
+set -x PATH $PWD $PATH
+source ./completion.fish
+function names
+    string join -- ' ' (for l in (complete -C $argv[1]); string split -f1 \t -- $l; end)
+end
+echo "db: "(names "acme db ")
+echo "deploy: "(string join ' ' (complete -C "acme deploy "))
+echo "migrate: "(names "acme db migrate --")
+-- drive-pwsh.ps1 --
+# Load the script, which registers a native completer for acme, and ask PowerShell for the
+# completions of a line the way TAB does.
+$ErrorActionPreference = 'Stop'
+$env:PATH = $PWD.Path + [IO.Path]::PathSeparator + $env:PATH
+. (Join-Path $PWD 'completion.ps1')
+$line = 'acme db '
+$result = [System.Management.Automation.CommandCompletion]::CompleteInput($line, $line.Length, $null)
+Write-Output ("db: " + (($result.CompletionMatches | ForEach-Object { $_.CompletionText }) -join ' '))
+-- want-root-help.txt --
+acme bundles the platform's tools in one binary.
+
+Usage:
+  acme [flags] <command>
+
+Commands:
+  help          print help
+  version       print version
+  completion    print a shell completion script
+  deploy        deploy a service
+  sync, sy      synchronize with the store
+
+Services:
+  tools for each service
+  cache    inspect the cache
+  db       manage the database
+
+Help Topics:
+  environment    the environment variables acme reads
+
+Flags:
+  -h, --help       print help
+      --version    print version
+
+Use "acme help <command>" for more information about a command.
+-- want-environment.txt --
+the environment variables acme reads
+
+Environment:
+  ACME_ENV string    the target environment (default staging) (used by: acme deploy)
+  DB_DSN url         the database to connect to (used by: acme db)
+-- want-services.txt --
+web	the website
+api	the public API
+:rotini:option keep-order

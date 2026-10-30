@@ -25,10 +25,10 @@ exists internal/cmd/root/root_tools_extra.go
 grep 'kh\.Kit\(\)' internal/cmd/root/zz_root.go
 grep 'kh\.KitWork\(\)' internal/cmd/root/zz_root.go
 
-# Keys the handler depends on can't be set beside a $ref, `use` and `effects` included.
+# Keys the handler depends on can't be set beside a $ref, `use` included; `effects` can.
 ! exec rotini validate cmd/bad/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
 stderr 'bad[/\\]\.rotini\.spec\.yaml:\d+:\d+: .*`use`'
-stderr 'bad[/\\]\.rotini\.spec\.yaml:\d+:\d+: .*`effects`'
+! stderr 'bad[/\\]\.rotini\.spec\.yaml:\d+:\d+: .*`effects`'
 stderr 'bad[/\\]\.rotini\.spec\.yaml:\d+:\d+: .*`stdin`'
 
 # A problem in a spec composed by a relative path is reported at its place in that file.

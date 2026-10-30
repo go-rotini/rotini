@@ -141,7 +141,7 @@
         "idempotentHint": true,
         "readOnlyHint": true
       },
-      "description": "list tasks\n\nEffects: read, idempotent.",
+      "description": "list tasks\n\nEffects: read, idempotent.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -249,7 +249,7 @@
         "destructiveHint": false,
         "readOnlyHint": false
       },
-      "description": "add tasks read from stdin\n\nEffects: write.",
+      "description": "add tasks read from stdin\n\nEffects: write.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -280,10 +280,25 @@
             "sync"
           ],
           "flags": {
+            "max-upload": {
+              "flag": "--max-upload",
+              "kind": "scalar",
+              "type": "bytesize"
+            },
             "prune": {
               "flag": "--prune",
               "kind": "scalar",
               "type": "bool"
+            },
+            "retry-after": {
+              "flag": "--retry-after",
+              "kind": "list",
+              "type": "[]duration"
+            },
+            "timeout": {
+              "flag": "--timeout",
+              "kind": "scalar",
+              "type": "duration"
             },
             "verbose": {
               "flag": "--verbose",
@@ -298,13 +313,28 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "sync with the server\n\nEffects: destructive, open world.\n\nRequires TASKR_KEY in the server's environment.",
+      "description": "sync with the server\n\nEffects: destructive, open world.\n\nRequires TASKR_KEY in the server's environment.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "max-upload": {
+            "description": "the largest batch to send",
+            "type": "string"
+          },
           "prune": {
             "description": "also delete tasks the server doesn't have",
             "type": "boolean"
+          },
+          "retry-after": {
+            "description": "pauses between retries",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timeout": {
+            "description": "how long to wait for the server",
+            "type": "string"
           },
           "verbose": {
             "description": "say more",
@@ -336,7 +366,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "show the server's address\n\nEffects: read.",
+      "description": "show the server's address\n\nEffects: read.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

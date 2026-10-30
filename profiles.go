@@ -194,6 +194,61 @@ func mergeValues(base, over recon.Value) recon.Value {
 	return recon.NewValue(out)
 }
 
+// mapCredits says where each entry of val, the map at key in reg, came from when it was merged
+// from more than one source: a selected profile over its file's shared keys
+// ([profileMapCredits]), or several configuration files, the first declared winning per entry.
+// origin lists each entry's own origin, and overridden holds the entries a higher source
+// replaced. ok is false for a map one source supplied whole, or for any other value.
+func mapCredits(reg *recon.Registry, view *osView, key string, val recon.Value, layerName string, secret bool) (origin string, overridden []InputSource, ok bool) {
+	if origin, overridden, ok = profileMapCredits(reg, view, key, val, layerName, secret); ok {
+		return origin, overridden, true
+	}
+	if val.Kind() != recon.MapKind || reg == nil {
+		return "", nil, false
+	}
+	m, err := val.AsMap()
+	if err != nil {
+		return "", nil, false
+	}
+	var leaves []string
+	flattenMap("", m, &leaves)
+	slices.Sort(leaves)
+	credits := make([]string, 0, len(leaves))
+	sources := map[string]bool{}
+	for _, leaf := range leaves {
+		sub, _, _ := strings.Cut(leaf, "=")
+		full := key + "." + sub
+		per, err := recon.PerSourceFor[recon.Value](reg, full)
+		if err != nil {
+			return "", nil, false
+		}
+		won := false
+		for _, s := range per.Sources {
+			if !s.IsSet || s.Err != nil || s.Value.Kind() == recon.NullKind {
+				continue
+			}
+			if !won {
+				won = true
+				sources[s.Source] = true
+				credits = append(credits, valueOrigin(view, s.Source, "", full))
+				continue
+			}
+			overridden = append(overridden, InputSource{
+				Layer:  layerName,
+				Raw:    redactValue(valueText(s.Value), secret),
+				Origin: valueOrigin(view, s.Source, "", full),
+			})
+		}
+		if !won {
+			return "", nil, false
+		}
+	}
+	if len(sources) < 2 {
+		return "", nil, false // one source supplied the whole map
+	}
+	return strings.Join(credits, ", "), overridden, true
+}
+
 // profileMapCredits says where each entry of val, the map at key in reg, came from when the
 // selected profile's map was merged over the shared one: origin lists each entry's own origin
 // ("config:app#labels.team, config:app#profiles.prod.labels.tier"), and overridden holds the
@@ -224,6 +279,9 @@ func profileMapCredits(reg *recon.Registry, view *osView, key string, val recon.
 			return "", nil, false
 		}
 		shared := per.BySource(file)
+		if !per.BySource(profile).IsSet && !shared.IsSet {
+			return "", nil, false // an entry from another file: credited across every source
+		}
 		if !per.BySource(profile).IsSet {
 			credits = append(credits, valueOrigin(view, file, "", full))
 			continue

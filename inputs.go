@@ -35,11 +35,13 @@ type InputSource struct {
 	// typed), "argv:<target>" (an argument), "env:TASKR_PORT", "env:TASKR_TOKEN_FILE" (read
 	// from the file a variable_file variable names), "env:TASKR_HTTP__*" (a nested env family),
 	// "config:user#deploy.port" (a configuration file's name and key),
-	// "config:user#profiles.prod.port" (a key of the selected profile), "default" or "stdin". A
-	// map merged from the selected profile and the file's shared keys lists each entry's own
-	// origin, by key ("config:user#labels.team, config:user#profiles.prod.labels.tier"), and
-	// each shared entry the profile replaced is in the field's history below it. It is "" for a
-	// hand-built layer, which names itself by Layer.
+	// "config:user#profiles.prod.port" (a key of the selected profile),
+	// "config:dotenv#TASKR_PORT" (a variable a .env file set, by the file's name), "default" or
+	// "stdin". A map merged from the selected profile and the file's shared keys, or from
+	// several configuration files, lists each entry's own origin, by file and key
+	// ("config:user#labels.team, config:user#profiles.prod.labels.tier"), and each entry a
+	// higher source replaced is in the field's history below it. It is "" for a hand-built
+	// layer, which names itself by Layer.
 	Origin string
 }
 
@@ -96,8 +98,9 @@ type layerCore struct {
 // payload, defaults), reconciles them in the standard precedence defaults < files < env < argv,
 // validates the result, and returns it. When a short-circuit flag ([FlagDef.ShortCircuit]) is
 // set on the command line, the declared requirements are waived, so the handler gets the
-// values read so far and can act on the flag. A command line or environment value that can't be
-// read is still an error; a configuration file that can't be read is skipped for that call.
+// values read so far and can act on the flag. Under such a flag, a command line or environment
+// value that can't be read is still an error; a configuration file that can't be read is
+// skipped for that call.
 //
 //	inputs, err := rtx.Inputs[MycliDeployInputs]()
 //
@@ -448,24 +451,45 @@ func (r *InputReport) absorb(core *layerCore) {
 	}
 	r.store.dashedFirst = r.store.dashedFirst || core.store.dashedFirst
 	for i := range core.store.scopes {
-		for name, vals := range core.store.scopes[i].flags {
-			if r.store.scopes[i].flags == nil {
-				r.store.scopes[i].flags = map[string][]string{}
-			}
-			r.store.scopes[i].flags[name] = vals
-			// The winning value's origin travels with it: a fallback layer's names its source,
-			// and a later argv value clears it.
-			recordOrigin(r.store, i, name, core.store.scopes[i].origin[name])
-		}
-		if len(core.store.scopes[i].args) > 0 {
-			r.store.scopes[i].args = core.store.scopes[i].args
-		}
+		r.absorbScope(i, &core.store.scopes[i])
 		for name := range core.store.argvSetAt(i) {
 			if r.store.argvSet[i] == nil {
 				r.store.argvSet[i] = map[string]bool{}
 			}
 			r.store.argvSet[i][name] = true
 		}
+	}
+}
+
+// absorbScope folds one layer's values for chain frame i into the report's store. A later
+// layer's flag value replaces an earlier one's, and carries its origin and the identifier the
+// user typed, which an error about the value names; a later argv value clears a fallback's
+// origin.
+func (r *InputReport) absorbScope(i int, src *scopeInputs) {
+	dst := &r.store.scopes[i]
+	for name, vals := range src.flags {
+		if dst.flags == nil {
+			dst.flags = map[string][]string{}
+		}
+		dst.flags[name] = vals
+		recordOrigin(r.store, i, name, src.origin[name])
+		if t := src.typed[name]; t != "" {
+			if dst.typed == nil {
+				dst.typed = map[string]string{}
+			}
+			dst.typed[name] = t
+		} else {
+			delete(dst.typed, name)
+		}
+	}
+	if len(src.written) > 0 {
+		if dst.written == nil {
+			dst.written = map[string]string{}
+		}
+		maps.Copy(dst.written, src.written)
+	}
+	if len(src.args) > 0 {
+		dst.args = src.args
 	}
 }
 
@@ -534,15 +558,27 @@ func (p *parsedInputs) argvSetAt(idx int) map[string]bool {
 
 // ── channel cores (shared, non-generic) ──────────────────────────────────────.
 
-// layerAnchor is checkFrameFit plus frameAnchor, so no layer can accept a struct that does not
-// describe the running command and return it zeroed with a nil error. Callers invoke it after
-// any parse step, so a malformed command line reports itself first.
+// layerAnchor is checkFrameFit, frameAnchor and checkChainAlignment, so no layer can accept a
+// value that does not describe the running command and return it zeroed with a nil error.
+// Callers invoke it after any parse step, so a malformed command line reports itself first.
 func layerAnchor(rtx *Context, v reflect.Value, chain []Command) (int, error) {
+	if v.Kind() != reflect.Struct {
+		return 0, errNotInputsStruct(v.Type())
+	}
 	self := rtx.frameIndex()
 	if err := checkFrameFit(v, chain, self); err != nil {
 		return 0, err
 	}
-	return frameAnchor(v, chain, self), nil
+	anchor := frameAnchor(v, chain, self)
+	if err := checkChainAlignment(v, chain, anchor); err != nil {
+		return 0, err
+	}
+	return anchor, nil
+}
+
+// errNotInputsStruct is the error for an inputs type that is not a struct.
+func errNotInputsStruct(t reflect.Type) error {
+	return &ParseError{Kind: ParseKindInternal, Msg: fmt.Sprintf("rotini: %s is not a generated inputs struct", t)}
 }
 
 // argvLayer parses argv only (no defaults) into v and records presence.
@@ -996,7 +1032,7 @@ func recordChannelField(set Presence, shadowed map[FieldPath][]InputSource, tag 
 		path := fieldPath(topName, structName, fieldName)
 		secret := reconHasSecret(body)
 		origin := valueOrigin(view, val.Source(), tag.Get("env"), key)
-		if credit, overridden, ok := profileMapCredits(fieldReg, view, key, val, layerName, secret); ok {
+		if credit, overridden, ok := mapCredits(fieldReg, view, key, val, layerName, secret); ok {
 			origin = credit
 			shadowed[path] = overridden
 		}
@@ -1033,7 +1069,7 @@ func recordFlagFallbacks(set Presence, shadowed map[FieldPath][]InputSource, sto
 		path := fieldPath(topName, "Flags", fieldName)
 		valueFrom := fallbackValueOrigin(flagReg, rd.view, tag, key)
 		if val, found, err := flagReg.Get(key); err == nil && found {
-			if credit, overridden, ok := profileMapCredits(flagReg, rd.view, key, val, layerName, fd.Secret); ok {
+			if credit, overridden, ok := mapCredits(flagReg, rd.view, key, val, layerName, fd.Secret); ok {
 				valueFrom = credit
 				shadowed[path] = overridden
 			}
@@ -1064,6 +1100,12 @@ func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 			return nil, err
 		}
 		return leafArgValues(chain, store, name), nil
+	}
+	if _, err := layerAnchor(rtx, v, chain); err != nil {
+		if _, perr := parseArgvTokens(chain, rtx.Argv, rtx.argvAcq()); perr != nil {
+			return nil, nil, perr // a malformed command line reports itself first
+		}
+		return nil, nil, err
 	}
 	if err := b.fillStdin(rtx, v, argvWaived(rtx, chain), args); err != nil {
 		return nil, nil, err

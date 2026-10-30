@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // This file emits the Go source literals in the generated cmd file: the Definition,
@@ -178,13 +179,14 @@ func renderStdinSchemas(b *strings.Builder, schemas map[string]string) {
 	b.WriteString("},\n")
 }
 
-// goRawString renders s as a backtick raw string literal, or a quoted literal when s
-// contains a backtick.
+// goRawString renders s as a backtick raw string literal, or a quoted literal when a raw
+// literal can't hold s exactly: a backtick ends it, Go drops a carriage return from it, and
+// a NUL, a byte order mark or invalid UTF-8 can't appear in Go source at all.
 func goRawString(s string) string {
-	if !strings.Contains(s, "`") {
-		return "`" + s + "`"
+	if strings.ContainsAny(s, "`\r\x00\ufeff") || !utf8.ValidString(s) {
+		return strconv.Quote(s)
 	}
-	return strconv.Quote(s)
+	return "`" + s + "`"
 }
 
 // discoveryLiteral renders the *rotini.PluginDiscoveryDef literal for a command's plugin
@@ -342,6 +344,15 @@ func layoutsFor(schema *InputSchema) []string {
 	if l := declaredLayouts(schema); len(l) > 0 {
 		return l
 	}
+	if timeElemType(schema) == "date" {
+		return []string{"2006-01-02"}
+	}
+	return nil
+}
+
+// timeElemType is the type name schema declares for one value: a list's item or a map's value
+// type, as written ("date", not time.Time).
+func timeElemType(schema *InputSchema) string {
 	t := schema.Type
 	if schema.Items != nil && schema.Items.Type != "" && jsonSchemaTypeToGo(t) == "[]string" {
 		t = schema.Items.Type
@@ -350,10 +361,18 @@ func layoutsFor(schema *InputSchema) []string {
 	if _, v, ok := splitMapType(t); ok {
 		t = v
 	}
-	if t == "date" {
-		return []string{"2006-01-02"}
+	return t
+}
+
+// markDate reports whether a date input needs the runtime told it is a date: a declared layout
+// with a time of day (unix, unixmilli or a Go layout with a clock) would otherwise read a time,
+// not that day's UTC midnight.
+func markDate(schema *InputSchema) bool {
+	if schema == nil || timeElemType(schema) != "date" {
+		return false
 	}
-	return nil
+	l := declaredLayouts(schema)
+	return len(l) > 0 && !isDateOnly(l)
 }
 
 // layoutFor is the first layout a time input is parsed under, "" for RFC 3339; see layoutsFor.
@@ -418,21 +437,49 @@ func withObjectDefault(schema *InputSchema) *InputSchema {
 	return &out
 }
 
-// completionLiteral renders an input's `complete:` hint as the Completion field of its
-// generated FlagDef/ArgDef literal, or "" when it declares none.
+// pathCompleteKinds are the completion kinds the path types imply.
+var pathCompleteKinds = map[string]string{
+	"existingfile": "file", "inputfile": "file", "outputfile": "file", "existingdir": "directory",
+}
+
+// completionHint is the completion hint an input completes with: its `complete:` hint when that
+// declares a kind, else the kind its path type implies (an existingfile, inputfile or
+// outputfile completes files, an existingdir directories), keeping a declared message. An
+// input with fixed values (an enum or values_from) gets no implied kind. nil for none.
+func completionHint(schema *InputSchema) *CompletionHint {
+	if schema == nil {
+		return nil
+	}
+	if schema.Complete != nil && schema.Complete.Kind != "" {
+		return schema.Complete
+	}
+	kind := pathCompleteKinds[strings.TrimPrefix(definitionType(schema, nil), "[]")]
+	if kind == "" || len(enumOrItems(schema)) > 0 || schema.ValuesFrom != "" {
+		return schema.Complete
+	}
+	h := CompletionHint{Kind: kind}
+	if schema.Complete != nil {
+		h.Message = schema.Complete.Message
+	}
+	return &h
+}
+
+// completionLiteral renders an input's completion hint (see completionHint) as the Completion
+// field of its generated FlagDef/ArgDef literal, or "" when it has none.
 func completionLiteral(schema *InputSchema) string {
-	if schema == nil || schema.Complete == nil || (schema.Complete.Kind == "" && schema.Complete.Message == "") {
+	hint := completionHint(schema)
+	if hint == nil || (hint.Kind == "" && hint.Message == "") {
 		return ""
 	}
 	var fields []string
-	if schema.Complete.Kind != "" {
-		fields = append(fields, "Kind: "+strconv.Quote(schema.Complete.Kind))
+	if hint.Kind != "" {
+		fields = append(fields, "Kind: "+strconv.Quote(hint.Kind))
 	}
-	if len(schema.Complete.Extensions) > 0 {
-		fields = append(fields, "Extensions: "+goStringSlice(schema.Complete.Extensions))
+	if len(hint.Extensions) > 0 {
+		fields = append(fields, "Extensions: "+goStringSlice(hint.Extensions))
 	}
-	if schema.Complete.Message != "" {
-		fields = append(fields, "Message: "+strconv.Quote(schema.Complete.Message))
+	if hint.Message != "" {
+		fields = append(fields, "Message: "+strconv.Quote(hint.Message))
 	}
 	return ", Complete: " + rotiniPkgName + ".Completion{" + strings.Join(fields, ", ") + "}"
 }
@@ -637,6 +684,9 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	}
 	if r := relative(schema); r != "" {
 		fmt.Fprintf(b, ", Relative: %q", r)
+	}
+	if markDate(schema) {
+		b.WriteString(", Date: true")
 	}
 	if base := intBase(schema); base != "" {
 		fmt.Fprintf(b, ", Base: %q", base)

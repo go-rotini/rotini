@@ -3,18 +3,22 @@ package codegen
 import "strings"
 
 // acceptsNote says what an input accepts when it is more than the default for its type, for the
-// docs pages: a time input's first declared layout and its relative forms, and an integer
+// docs pages: a time input's first declared layout and its relative forms, and a number
 // input's base prefixes. "" for any other input, and for one that declares none of these.
 //
 //	accepts 02/01/2006
 //	accepts RFC 3339 or a time ago: 2h, 3d, yesterday
 //	accepts 0x, 0o and 0b prefixes
+//	accepts 0x, 0o and 0b prefixes and hex floats
 func acceptsNote(schema *InputSchema) string {
 	if intBase(schema) == prefixedBase {
-		if !isIntegerType(strings.TrimPrefix(getSchemaType(schema), "[]")) {
-			return "" // lint reports a base on a non-integer input
+		switch t := strings.TrimPrefix(getSchemaType(schema), "[]"); {
+		case isIntegerType(t):
+			return "accepts 0x, 0o and 0b prefixes"
+		case isFloatType(t):
+			return "accepts 0x, 0o and 0b prefixes and hex floats"
 		}
-		return "accepts 0x, 0o and 0b prefixes"
+		return "" // lint reports a base on any other input
 	}
 	declared := declaredLayouts(schema)
 	rel := relative(schema)

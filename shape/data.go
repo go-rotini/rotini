@@ -52,7 +52,7 @@ func toData(v reflect.Value, depth int) (any, error) {
 		if v.IsNil() {
 			return nil, nil //nolint:nilnil // JSON null
 		}
-		if v.Type().Elem().Kind() == reflect.Uint8 && !marshalsType(v.Type().Elem()) {
+		if v.Type().Elem().Kind() == reflect.Uint8 && !marshalsType(reflect.PointerTo(v.Type().Elem())) {
 			return base64.StdEncoding.EncodeToString(v.Bytes()), nil
 		}
 		return listData(v, depth)

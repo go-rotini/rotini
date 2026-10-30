@@ -135,6 +135,8 @@ type Program struct {
 	bufferedOutput bool        // WithBufferedOutput: buffer stdout and flush it when the run settles
 
 	feats *featureSet // the features each run has: every one, or NewWiredProgram's and WithFeatures'
+	// pluginHelpFn is pluginHelp, bound once so a run takes it without allocating.
+	pluginHelpFn func(rtx *Context, words []string) bool
 }
 
 // NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
@@ -169,7 +171,7 @@ func (p *Program) WithFeatures(features ...Feature) *Program {
 
 // newProgram builds a Program with its defaults; the exported constructors choose the lookup.
 func newProgram(def Definition, lookup HandlerLookup) *Program {
-	return &Program{
+	p := &Program{
 		args:            os.Args[1:],
 		argv0:           invokedName(),
 		def:             def,
@@ -182,6 +184,8 @@ func newProgram(def Definition, lookup HandlerLookup) *Program {
 		teardownOnPanic: true,
 		panicRecover:    true,
 	}
+	p.pluginHelpFn = p.pluginHelp
+	return p
 }
 
 // WithStdin overrides the program's standard input (default os.Stdin): the reader exposed as
@@ -286,7 +290,7 @@ func (p *Program) WithArgs(args []string) *Program {
 //
 // Cancellation is cooperative: it does not preempt a running hook, but once the context is
 // canceled no further forward hook starts, and the teardown of every begun setup hook runs in
-// reverse. [ExitCause] attaches an exit code; without one the code is resolved as usual.
+// reverse. A context canceled before the run starts runs no hook at all, teardown included. [ExitCause] attaches an exit code; without one the code is resolved as usual.
 //
 // Supplying a context disables rotini's signal trap by default, leaving signals to the caller
 // (typically via [signal.NotifyContext]). [Program.WithSignals] re-enables the trap on top of
@@ -441,6 +445,7 @@ func (p *Program) newRunContext() *Context {
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
 	rtx.meta, rtx.readerFn = p.meta, p.readerFn
 	rtx.version, rtx.parser, rtx.help, rtx.scripts = p.version, p.parser, p.help, p.scripts
+	rtx.pluginHelp = p.pluginHelpFn
 	rtx.outputChecks = p.outputChecks
 	rtx.clock.fn = p.clock
 	rtx.clock.feats = p.feats
@@ -478,7 +483,8 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 // [Program.WithExit]).
 //
 // The returned error joins every [Context.RecordError] value and every captured fault with
-// errors.Join, so errors.Is and errors.As reach each one. It is returned only when the exit
+// errors.Join, so errors.Is and errors.As reach each one; for a plugin that exits non-zero it
+// is the plugin's *exec.ExitError, as [Program.Run] returns it. It is returned only when the exit
 // action returns; under os.Exit the process ends first. The reporter has already reported
 // the outcome by then; the error lets an embedding host act on the failure.
 //
@@ -507,9 +513,10 @@ func (p *Program) Execute() error {
 // Run dispatches one invocation of argv and returns its exit code and error (see
 // [Program.Execute]). It resolves the invoked command, executes a declared or discovered
 // plugin if one was selected, and otherwise runs the lifecycle; inputs are parsed only when a
-// handler calls [Context.Inputs]. Run never ends the process. A plugin that exits non-zero
-// returns its exit code and its *exec.ExitError; it records nothing, so the reporter is not
-// called.
+// handler calls [Context.Inputs]. Run does not end the process, except through rotini's signal
+// trap: a second signal, or the [Program.WithTerminationTimeout] deadline, calls the exit action
+// ([Program.WithExit], os.Exit by default). A plugin that exits non-zero returns its exit code
+// and its *exec.ExitError; it records nothing, so the reporter is not called.
 //
 // Each call gets a fresh [Context]. Dependencies registered with [Program.WithDependency] are
 // seeded into every run; one set with [Context.SetDependency] stays local to its run.
@@ -799,8 +806,8 @@ func (p *Program) resolveHandlers(chain []Command) ([]Handler, *WiringError) {
 //     hard Exit skips what remains, and so does a panic under WithTeardownOnPanic(false).
 //
 // Recovered panics reach the reporter after teardown. A canceled run context becomes a
-// [Context.HaltWithCode] between forward hooks (teardown still runs; the code is the
-// cancellation cause's, or 0). The conversion happens on the dispatch goroutine, so rtx keeps
+// [Context.HaltWithCode] before the first forward hook and between them (teardown still runs
+// for the begun steps; the code is the cancellation cause's, or 0). The conversion happens on the dispatch goroutine, so rtx keeps
 // a single writer. Only the run context counts: one a hook set with [Context.SetContext]
 // reaches the later hooks but never halts the run.
 func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (int, error) {
@@ -846,17 +853,10 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 		call(hookCtx, k, undo)
 	}
 
-	// halt reports whether forward progress should stop, converting a cancellation into
-	// HaltWithCode with the cause's exit code. A trapped signal sets its code even when the hook
-	// already halted (typically with HaltWith of the error the signal caused), unless it
-	// exited, so a run a signal ended exits 128+n.
+	// halt reports whether forward progress should stop, converting a cancellation first
+	// ([haltOnCancel]).
 	halt := func() bool {
-		if ctx.Err() != nil {
-			stopped, now := rtx.stopState()
-			if !stopped || (!now && signalCanceled(ctx)) {
-				rtx.HaltWithCode(canceledExitCode(ctx))
-			}
-		}
+		haltOnCancel(ctx, rtx)
 		stopped, _ := rtx.stopState()
 		return stopped || panicked
 	}
@@ -877,6 +877,11 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	received = received[:nSteps]
 	rtx.enterHook(ctx, false)
 	for i := range nSteps {
+		// A context canceled before the run starts begins no step, so nothing tears down either.
+		if i == 0 && ctx.Err() != nil {
+			halt()
+			break
+		}
 		began++
 		received[i] = rtx.Context() //nolint:fatcontext // one context per step, recorded, not nested
 		// A nil Do is a step with only a teardown.
@@ -905,6 +910,19 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	}
 
 	return p.settle(ctx, rtx)
+}
+
+// haltOnCancel converts a canceled run context into [Context.HaltWithCode] with the cause's
+// exit code. A trapped signal sets its code even when the hook already halted (typically with
+// HaltWith of the error the signal caused), unless it exited, so a run a signal ended exits
+// 128+n.
+func haltOnCancel(ctx context.Context, rtx *Context) {
+	if ctx.Err() == nil {
+		return
+	}
+	if stopped, now := rtx.stopState(); !stopped || (!now && signalCanceled(ctx)) {
+		rtx.HaltWithCode(canceledExitCode(ctx))
+	}
 }
 
 // callStep runs step k's Do, or its Undo when undo is set: one of steps when the program has

@@ -60,7 +60,7 @@ type contractFacts struct {
 	dottedKeys    bool
 	nesting       string
 	relative      string // past, future or both: the input also takes a time measured from now
-	base          string // prefixed: the input also takes 0x, 0o and 0b integer literals
+	base          string // prefixed: the input also takes 0x, 0o and 0b literals (and hex floats on a float)
 	variableFile  string // the variable naming a file that holds the value
 	expand        []string
 	relativeTo    string

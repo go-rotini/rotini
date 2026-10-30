@@ -77,7 +77,8 @@ type ExitStatusDef struct {
 
 // ResponseFilesDef is how a program reads response files (the spec's root `response_files`).
 // Before the first "--", a word starting with Prefix (`@args.rsp`) is replaced by the file's
-// lines, one word per line, kept exactly; blank lines and lines whose first non-blank character is `#` are skipped,
+// lines, one word per line, kept exactly but for a leading byte-order mark and a line's
+// trailing "\r"; blank lines and lines whose first non-blank character is `#` are skipped,
 // a word in the file is never expanded again, and a `--` line ends expansion as one on the
 // command line does. A file over 1 MiB, or one that can't be read, is a usage error. A doubled
 // prefix (`@@x`) stands for the literal word with one prefix (`@x`). Expansion happens once, before command resolution, so every parse sees the
@@ -313,10 +314,14 @@ type FlagDef struct {
 	// (2h or -2h ago, yesterday), "future" (2h or +2h from now, tomorrow) or "both" (a sign is
 	// required), plus now and today. Absolute values are tried first. Empty means absolute only.
 	Relative string
+	// Date marks a `type: date` input whose layout has a time of day (unix, unixmilli, or a Go
+	// layout with a clock): a value lands on that day's UTC midnight, and a relative offset
+	// moves in whole days. Layouts that write only a date need no mark.
+	Date bool
 	// Base "prefixed" lets an integer input (or a list of them) also take 0x, 0o and 0b
-	// literals, with an optional sign and `_` between digits (`0xFF`, `-0b1010`, `1_000`). A
-	// value without a prefix is decimal: `010` is ten. It applies on every channel. Empty means
-	// decimal only.
+	// literals, with an optional sign and `_` between digits (`0xFF`, `-0b1010`, `1_000`), and a
+	// float input those and hexadecimal floats (`0x1p4`, `1_000.5`). A value without a prefix is
+	// decimal: `010` is ten. It applies on every channel. Empty means decimal only.
 	Base string
 	// ObjectSchema is the JSON Schema of an object-valued flag's value — set when the spec's
 	// schema is a named object (`$ref: '#/schemas/DB'`), or a list of them. The flag then
@@ -433,7 +438,9 @@ type ArgDef struct {
 	// [FlagDef.Relative].
 	Layouts  []string
 	Relative string
-	// Base is how an integer argument's value may be written; see [FlagDef.Base].
+	// Date marks a date argument; see [FlagDef.Date].
+	Date bool
+	// Base is how a number argument's value may be written; see [FlagDef.Base].
 	Base string
 	// Deprecated is the argument's deprecation message: supplying it reports a [Deprecation]
 	// carrying it.

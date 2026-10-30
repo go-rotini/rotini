@@ -25,15 +25,10 @@ func raisesEffects(cmd, flag *Effects) bool {
 	return flag.OpenWorld != nil && *flag.OpenWorld && (cmd.OpenWorld == nil || !*cmd.OpenWorld)
 }
 
-// lintEffects checks `effects`: a flag's only raise its command's, which must declare its own,
-// and a `$ref` node takes the child's, since the child's handler is what runs.
+// lintEffects checks `effects`: a flag's only raise its command's, which must declare its own.
 func lintEffects(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, cmdPath, ptr string) {
-		if c.Ref != "" && c.Effects != nil {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/effects", loc: "command " + cmdPath,
-				msg: "sets `effects` on a `$ref` node; the child's handler is what runs, so declare its effects in the child spec"})
-		}
 		for i, f := range c.Flags {
 			if f.Effects == nil {
 				continue
@@ -59,7 +54,7 @@ var pageTypes = []string{"int", "int8", "int16", "int32", "int64", "uint", "uint
 // lintFlagRoles checks the roles a program driving the CLI reads (dry-run, confirm,
 // machine-output, page): their flag types, `role_value`, each at most once per command
 // counting the cascading flags it inherits, and a warning for a destructive command that
-// offers agents neither a preview nor a confirmation.
+// offers agents neither a preview nor a confirmation, unless `agent: false` keeps it from them.
 func lintFlagRoles(spec *Spec) []error {
 	var problems []error
 	walkChainsAt(spec, func(chain []*Command, cmdPath, ptr string) {
@@ -107,7 +102,8 @@ func lintFlagRoles(spec *Spec) []error {
 				}
 			}
 		}
-		if p := unsafeDestructive(c, roleFlags, cmdPath, ptr); p != nil {
+		agentOff := slices.ContainsFunc(chain, func(a *Command) bool { return a.Agent != nil && !*a.Agent })
+		if p := unsafeDestructive(c, roleFlags, cmdPath, ptr); p != nil && !agentOff {
 			problems = append(problems, p)
 		}
 	})
@@ -314,7 +310,7 @@ func lintFeatureKeys(conf *Conf) []error {
 	}
 	var problems []error
 	add := func(i int, f Feature, key string, sev severity, msg string) {
-		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg})
+		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i) + "/" + key, loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg})
 	}
 	for i, f := range conf.Generate.Features {
 		for _, k := range programFeatureKeys {
@@ -333,7 +329,7 @@ func lintFeatureKeys(conf *Conf) []error {
 func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []error {
 	var problems []error
 	add := func(key string, sev severity, msg string) {
-		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg})
+		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i) + "/" + key, loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg})
 	}
 	if clean := path.Clean(filepath.ToSlash(f.File)); f.File != "" && (clean == ".." || strings.HasPrefix(clean, "../")) {
 		add("file", severityError, fmt.Sprintf("%s must resolve under the module root", quotePath(f.File)))
@@ -345,6 +341,9 @@ func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []e
 	case f.TemplateDir != "" && !f.Template:
 		add("template_dir", severityWarning, "is set but `template` is false; `template_dir` is used only when the editable template is seeded (`template: true`); it is otherwise ignored")
 	}
+	if f.Type == "tools" && f.McpRevision != "" && len(f.Targets) > 0 && !slices.Contains(f.Targets, "mcp") {
+		add("mcp_revision", severityError, "sets the revision mcp.json is written for, but `targets` doesn't include mcp, so it would be silently ignored; add mcp or remove `mcp_revision`")
+	}
 	md := conf.Generate.featureOf("markdown")
 	mdOn := md != nil && md.Enabled
 	switch {
@@ -354,6 +353,24 @@ func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []e
 		add("type", severityWarning, "the skill's references/ folder holds the markdown pages, but the markdown feature is off, so the skill has none; turn markdown on (it needn't embed)")
 	case f.Type == "llms" && f.BaseUrl == "" && (!mdOn || !md.Embed):
 		add("base_url", severityWarning, "llms.txt links each command to its markdown page, but without `base_url` the links are relative and the markdown feature doesn't write its pages (it needs `enabled: true` and `embed: true`); set `base_url` to where the pages are published")
+	}
+	return problems
+}
+
+// lintLlmsBaseURL warns about an llms feature `base_url` that doesn't end in "/": llms.txt links
+// each page as `base_url` followed by its file name, so https://x/app would link
+// https://x/appapp-list.md.
+func lintLlmsBaseURL(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	for i, f := range conf.Generate.Features {
+		if f.Type != "llms" || f.BaseUrl == "" || strings.HasSuffix(f.BaseUrl, "/") {
+			continue
+		}
+		problems = append(problems, &problem{kind: "conf", ptr: featurePointer(i) + "/base_url", loc: "generate.features.llms.base_url", sev: severityWarning,
+			msg: fmt.Sprintf("%q doesn't end in \"/\"; each link is `base_url` followed by the page's file name, so links read %q; end it with \"/\"", f.BaseUrl, f.BaseUrl+"<page>.md")})
 	}
 	return problems
 }
@@ -392,7 +409,7 @@ func lintSkillDescription(spec *Spec, conf *Conf) []error {
 // config_example and env_example put text in the binary, so only they take them.
 func embedKnobProblems(i int, f Feature, pf programFeature) []error {
 	at := func(key string, sev severity, msg string) error {
-		return &problem{kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg}
+		return &problem{kind: "conf", ptr: featurePointer(i) + "/" + key, loc: "generate.features." + f.Type + "." + key, sev: sev, msg: msg}
 	}
 	switch {
 	case pf.accessor && f.EmbedDir != "" && !f.Embed:

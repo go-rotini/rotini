@@ -11,7 +11,8 @@ import (
 // triggers when its When flag is set on argv (with one of its Equals values, if any) and none of
 // its Unless flags is; then every flag it Requires must be set and none it Forbids may be. Set
 // follows the same explicit-argv convention as flag groups, and so does the value Equals
-// compares: the command line's, never a default or fallback.
+// compares: the command line's, never a default or fallback. A flag that is set is named as
+// the user typed it.
 func validateFlagDependencies(chain []Command, store *parsedInputs) error {
 	for i := range chain {
 		if !store.covers(i) {
@@ -31,7 +32,7 @@ func validateFlagDependencies(chain []Command, store *parsedInputs) error {
 			}
 			for _, name := range dep.Forbids {
 				if store.setOnArgv(i, name) {
-					forbidden = append(forbidden, dependencyLabel(f, name))
+					forbidden = append(forbidden, typedRuleLabel(f, &store.scopes[i], name))
 				}
 			}
 			if len(missing) > 0 {
@@ -62,9 +63,8 @@ func dependencyTrigger(f Command, i int, store *parsedInputs, dep FlagDependency
 		if !ok || !store.setOnArgv(i, dep.When) {
 			return "", false // an unknown trigger flag is a spec lint error
 		}
-		label := flagLabel(whenFD)
 		if len(dep.Equals) == 0 {
-			parts = append(parts, "when "+label+" is set")
+			parts = append(parts, "when "+typedRuleLabel(f, &store.scopes[i], dep.When)+" is set")
 		} else {
 			got, ok := store.scopes[i].dependencyValue(whenFD)
 			if !ok {
@@ -74,7 +74,7 @@ func dependencyTrigger(f Command, i int, store *parsedInputs, dep FlagDependency
 			if !slices.ContainsFunc(dep.Equals, func(v string) bool { return dependencyCanonical(whenFD, v) == got }) {
 				return "", false
 			}
-			parts = append(parts, "when "+label+" is "+redactValue(got, whenFD.Secret))
+			parts = append(parts, "when "+flagLabel(whenFD)+" is "+redactValue(got, whenFD.Secret))
 		}
 	}
 	if len(dep.Unless) > 0 {
@@ -88,6 +88,15 @@ func dependencyTrigger(f Command, i int, store *parsedInputs, dep FlagDependency
 		parts = append(parts, "unless "+strings.Join(labels, " or ")+" is set")
 	}
 	return strings.Join(parts, ", "), len(parts) > 0
+}
+
+// typedRuleLabel names a flag of frame f that the command line set, in a flag-group or
+// dependency message: as the user typed it, else as [dependencyLabel] does.
+func typedRuleLabel(f Command, si *scopeInputs, name string) string {
+	if t := si.typed[name]; t != "" {
+		return t
+	}
+	return dependencyLabel(f, name)
 }
 
 // dependencyLabel names a flag of frame f in a dependency message.
@@ -130,7 +139,11 @@ func dependencyCanonical(fd FlagDef, v string) string {
 		if n, err := strconv.ParseUint(v, 10, 64); err == nil && isIntegerType(fd.Type) {
 			return strconv.FormatUint(n, 10)
 		}
-		if n, ok := parseNumber(v); ok {
+		parse := parseNumber
+		if fd.Base == basePrefixed {
+			parse = prefixedNumber
+		}
+		if n, ok := parse(v); ok {
 			return formatNum(n)
 		}
 	}

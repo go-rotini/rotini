@@ -49,7 +49,7 @@ func lintHiddenSpellings(spec *Spec) []error {
 			listed := slices.Concat(flagIdentifiers(f), negatedForms(f))
 			for _, h := range f.HiddenIdentifiers {
 				if slices.Contains(listed, h) {
-					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name,
+					problems = append(problems, inputProblem(fmt.Sprintf("%s/flags/%d/hidden_identifiers", ptr, i), path, "flag", f.Name,
 						fmt.Sprintf("`hidden_identifiers` entry %q is already one of its listed spellings; an identifier is either listed or hidden, so remove it from one of the two", h)))
 				}
 			}

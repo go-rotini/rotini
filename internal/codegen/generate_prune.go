@@ -71,10 +71,10 @@ func pruneGoDir(pl *planner, dir string, protected map[string]bool, remove bool,
 		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		if protected[name] {
+		path := filepath.Join(dir, name)
+		if protected[name] || protectedUnderOtherCase(dir, path, name, protected) {
 			continue
 		}
-		path := filepath.Join(dir, name)
 		generated, err := stubLooksGenerated(path)
 		if err != nil {
 			return err
@@ -109,6 +109,26 @@ func pruneGoDir(pl *planner, dir string, protected map[string]bool, remove bool,
 		}
 	}
 	return nil
+}
+
+// protectedUnderOtherCase reports whether the file at path, named name, is a protected file
+// spelled in another case: on a case-insensitive file system (macOS, Windows) a command renamed
+// only in case (Foo to foo) keeps its handler file under the old spelling, and that file is the
+// command's handler, not an orphan.
+func protectedUnderOtherCase(dir, path, name string, protected map[string]bool) bool {
+	for p := range protected {
+		if p == name || !strings.EqualFold(p, name) {
+			continue
+		}
+		a, err := os.Stat(path)
+		if err != nil {
+			return false
+		}
+		if b, err := os.Stat(filepath.Join(dir, p)); err == nil && os.SameFile(a, b) {
+			return true
+		}
+	}
+	return false
 }
 
 // disabledHeader is what disableStub puts at the top of an orphaned stub. The next generate

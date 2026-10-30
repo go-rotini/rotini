@@ -113,9 +113,11 @@
 //     int32, int64 and rune (also integer); the unsigned integers uint, uint8, uint16, uint32,
 //     uint64 and byte; the floats float32 and float64 (also number); and any, which holds the
 //     raw text. complex64, complex128 and uintptr have no parser and are refused.
-//   - An integer is decimal on every channel, leading zeros included (010 is ten). With
-//     `base: prefixed`, an integer or a list of them also takes 0x, 0o and 0b literals
-//     (0xFF, -0b1010, 1_000), and bounds and enums compare the number the value reads as.
+//   - An integer is decimal on every channel, leading zeros included (010 is ten), and a
+//     float is decimal too (1.5, .5, 1e3), or inf or nan in any case. With `base: prefixed`,
+//     an integer or a list of them also takes 0x, 0o and 0b literals (0xFF, -0b1010, 1_000),
+//     a float those and hexadecimal floats (0x1p4, 1_000.5), and bounds and enums compare the
+//     number the value reads as.
 //     A list of uint8 (or byte) is a list of integers on every channel, not raw bytes.
 //   - A typed configuration format (YAML, TOML, JSON, JSONC) holds numbers, not text: a whole
 //     number written as a float (450.0, 1e3) fills an integer input, and 1 or 0 fills a bool.
@@ -143,7 +145,8 @@
 //   - Any other type parses through its own encoding.TextUnmarshaler, with `import:` naming
 //     its package.
 //   - A list or map flag repeats (--tag a --tag b, --label k=v); with `separator:` one value
-//     also splits (--tag a,b), CSV-style, before validation sees the items.
+//     also splits (--tag a,b), CSV-style, before validation sees the items. Any other flag
+//     given twice keeps its last value, and only that value is checked.
 //   - `implicit_value:` makes a flag's value optional: bare --color takes it, --color=never
 //     sets one, and the next word is never consumed.
 //   - An `enum` matches exactly, or regardless of case with `ignore_case:`, binding the
@@ -205,9 +208,12 @@
 // reporter sets with [Context.Exit], which replaces it.
 //
 // Every failure class is errors.Is-able against the [ErrUsage] or [ErrInternal] sentinel, so
-// [CategoryOf] classifies it (except a plugin timeout, which is [CategoryNone]), and
-// errors.As-able to a typed value with structured fields. Rotini's own messages expose no
-// decoder or OS internals and no secret values:
+// [CategoryOf] classifies it, and errors.As-able to a typed value with structured fields. The
+// exceptions are operational failures, which are [CategoryNone]: a plugin timeout, a failed
+// flush of buffered stdout at the end of a run ([Program.WithBufferedOutput]), and an I/O
+// failure [CreateOutput] meets other than a missing directory or a denied permission (those
+// two are usage errors). Rotini's own messages expose no decoder or OS internals and no secret
+// values:
 //
 //   - [*ParseError] — the argv channel. [ParseError.Kind] identifies the failure; Token and
 //     Candidates are the facts a "did you mean" needs.
@@ -219,6 +225,8 @@
 //     a usage error; a missing declared plugin, or a plugin that cannot start, is internal; a
 //     timeout is neither. A missing discovered plugin carries Candidates: the names the
 //     command knows, to rank its Name against.
+//   - [*ArgvError] and every other [ArgvOf] error, and an [AppDirs] error, are internal: the
+//     program asked for something its own definition rules out.
 //   - [*DependencyError] and [*PanicError] arrive as panics, as does a [*WiringError] from the
 //     program's wiring. [Context.Inputs] returns a [*WiringError] as an error instead: config
 //     inputs requested on a program built without an [InputSettings], or an input that needs

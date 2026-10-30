@@ -18,7 +18,7 @@ The service to ship, by its registry name.
 .sp
 Names are lowercase.
 .br
-2 to 63 characters; matches \(ga^[a\-z][a\-z0\-9\-]*$\(ga
+2 to 63 characters; matches \fB^[a\-z][a\-z0\-9\-]*$\fR
 .TP
 \fI[COUNT]\fR
 how many copies
@@ -58,6 +58,27 @@ at least 1s and less than 1h
 extra environment
 .br
 at most 8 values; repeatable
+.TP
+\fB\-\-token\fR \fIstring\fR
+the deploy token (@file or \- for stdin)
+.TP
+\fB\-\-key\fR \fIstring\fR
+the signing key (@file)
+.TP
+\fB\-\-label\fR \fI[]string\fR
+a label to apply (default ["a,b", "c\e"d"])
+.br
+several values per occurrence, separated by ","; repeatable
+.TP
+\fB\-\-zone\fR \fI[]string\fR
+the zones to use (default ["eu", "us"])
+.br
+repeatable
+.TP
+\fB\-\-quote\fR \fIstring\fR
+the quoting style [a\(gab|plain]
+.br
+matches \fB^[a\-z\(ga"]+$\fR
 .SH "GLOBAL OPTIONS"
 .TP
 \fB\-h\fR, \fB\-\-help\fR

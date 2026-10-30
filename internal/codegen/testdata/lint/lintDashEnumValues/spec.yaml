@@ -1,0 +1,28 @@
+# An argument enum value starting with "-": completion offers it, and the parser reads it as an
+# unknown flag unless it comes after "--".
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: four
+      identifiers: ["-4", --four]
+      schema: { type: bool }
+  arguments:
+    - name: sort
+      schema:
+        type: string
+        enum:
+          - asc
+          - -desc
+          # An alias read as a flag too.
+          - { value: reverse, aliases: [-r] }
+          # Correct: a negative number is a value. No problem.
+          - "-1"
+          # A digit option is declared on the command, so -4x is the flag.
+          - -4x
+    - name: rest
+      schema:
+        type: array
+        items:
+          type: string
+          enum: [a, --all]

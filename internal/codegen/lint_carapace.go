@@ -1,6 +1,9 @@
 package codegen
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // lintCarapaceValues warns, when the carapace feature is on, about what the carapace spec
 // can't carry and leaves out: an enum value starting with "$", which carapace would run as a
@@ -14,8 +17,8 @@ func lintCarapaceValues(spec *Spec, conf *Conf) []error {
 		return nil
 	}
 	var problems []error
-	warn := func(at, path, channel, name, msg string) {
-		p := inputProblem(at, path, channel, name, msg)
+	warn := func(at, key, path, channel, name, msg string) {
+		p := schemaKeyProblem(at, key, path, channel, name, msg)
 		p.sev = severityWarning
 		problems = append(problems, p)
 	}
@@ -24,18 +27,18 @@ func lintCarapaceValues(spec *Spec, conf *Conf) []error {
 			if schema == nil || channel == "stdin" {
 				return
 			}
-			for _, v := range enumValues(enumOrItems(schema)) {
+			for j, v := range enumValues(enumOrItems(schema)) {
 				switch {
 				case strings.HasPrefix(v.Value, "$"):
-					warn(at, path, channel, name, "has the enum value "+quoteValue(v.Value)+
+					warn(at, fmt.Sprintf("enum/%d", j), path, channel, name, "has the enum value "+quoteValue(v.Value)+
 						", which the carapace spec leaves out: carapace runs a value starting with \"$\" as a macro")
 				case strings.Contains(v.Value, carapaceModifierSep):
-					warn(at, path, channel, name, "has the enum value "+quoteValue(v.Value)+
+					warn(at, fmt.Sprintf("enum/%d", j), path, channel, name, "has the enum value "+quoteValue(v.Value)+
 						", which the carapace spec leaves out: carapace splits a value at \" ||| \" into modifiers")
 				}
 			}
 			if cm := schema.Complete; cm != nil && strings.Contains(cm.Message, carapaceModifierSep) {
-				warn(at, path, channel, name, "has a completion message holding \" ||| \", which the carapace spec leaves out: carapace would split it into modifiers")
+				warn(at, "complete/message", path, channel, name, "has a completion message holding \" ||| \", which the carapace spec leaves out: carapace would split it into modifiers")
 			}
 		})
 	})

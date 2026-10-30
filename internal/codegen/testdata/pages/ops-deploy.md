@@ -35,12 +35,17 @@ ops deploy [flags] <service> [COUNT]
 - `--tag` `[]string` — a label; 1 to 5 values; each value at most 10 characters; several values per occurrence, separated by ","; repeatable
 - `--timeout` `duration` — how long to wait; at least 1s and less than 1h
 - `-e, --env` `map[string]string` — extra environment; at most 8 values; repeatable
+- `--token` `string` — the deploy token (@file or - for stdin)
+- `--key` `string` — the signing key (@file)
+- `--label` `[]string` — a label to apply (default `["a,b", "c\"d"]`); several values per occurrence, separated by ","; repeatable
+- `--zone` `[]string` — the zones to use (default `["eu", "us"]`); repeatable
+- `--quote` `string` — the quoting style (one of ``a`b``, `plain`); matches ``^[a-z`"]+$``
 
 ## Global Flags
 
 - `-h, --help` — print help
 - `-v, --verbose` — say more; repeat to count: -vvv
-- `--color` `string` — when to color (default `auto`) (one of auto, always, never)
+- `--color` `string` — when to color (default `auto`) (one of `auto`, `always`, `never`)
 
 ## Exit Status
 

@@ -40,7 +40,7 @@ func TestBoundsProblems(t *testing.T) {
 			switch {
 			case tc.want == "" && len(got) > 0:
 				t.Errorf("got %q, want no problem", got)
-			case tc.want != "" && (len(got) != 1 || !strings.Contains(got[0], tc.want)):
+			case tc.want != "" && (len(got) != 1 || !strings.Contains(got[0].msg, tc.want)):
 				t.Errorf("got %q, want one problem containing %q", got, tc.want)
 			}
 		})

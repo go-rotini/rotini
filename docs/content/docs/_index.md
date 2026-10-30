@@ -350,6 +350,10 @@ A command can move that point earlier:
   for a handler that forwards them. `passthrough: true` on the command itself takes every word
   after its name raw, with no flags at all.
 
+A flag that takes a value and has none attached takes the next word, whatever it is: `--out -x`
+sets `-x`, and `--out --` sets `--` rather than ending the flags. A bool, a count and an
+`implicit_value` flag never take the next word.
+
 Other argument shapes:
 
 - **A digit option**, `identifiers: ['-4', --ipv4]` on a bool or count flag, makes `-4` (and
@@ -377,7 +381,9 @@ prefix and the doubled form.
 ### Repeated values
 
 A single-value flag given twice keeps the last value, so a script can override an alias's
-setting. Two schema keys make repeats an error instead:
+setting. Only that last value is checked: `--lim 99 --lim 4` and `--lim x --lim 4` both run with
+4, whatever the type, enum, bounds, pattern or length rules say about the value it replaced. Two
+schema keys make repeats an error instead:
 
 - **`repeatable: false`** on a single-value flag rejects a second occurrence, naming both values:
   `--name was given more than once ("a", then "b"); it takes one value`. `-vv` and
@@ -486,7 +492,9 @@ for _, d := range rotini.Deprecations(rtx) {
   `today` follows the clock's time zone, which is the process's unless the clock says otherwise.
 - **`base: prefixed`** on an integer also accepts `0x1F`, `0o17` and `0b101`, with a sign and `_`
   between digits, wherever the value comes from; a value without a prefix is still decimal, so
-  `010` is ten. Without `base`, every source is decimal-only: `PORT=0x10` is an invalid value.
+  `010` is ten. On a float it accepts those and hexadecimal floats (`0x1p4`, `1_000.5`). Without
+  `base`, every source is decimal-only: `PORT=0x10` and `RATIO=0x1p4` are invalid values. A
+  float always accepts `inf` and `nan` in any case, unless it declares a numeric bound.
 - **Numbers from a config file.** YAML, TOML, JSON and JSONC hold numbers, not text, so a whole
   number written as a float (`450.0`, `1e3`) fills an integer input, and `1` or `0` fills a
   bool. The command line, the environment and `.env` files spell an integer as one. A null list
@@ -593,6 +601,10 @@ Error: flag --delimiter is required when --format is csv
 $ ./todo export --all --limit 5
 Error: flag --limit can't be used when --all is set
 {{< /code >}}
+
+An error names each flag the user set as they typed it, so `-46` on a `mutually_exclusive` group
+of `-4, --ipv4` and `-6, --ipv6` reports `flags -4 and -6 are mutually exclusive`; a flag the user
+didn't set is named by its first long identifier.
 
 Only the command line counts, for groups and dependencies alike: a value from the environment,
 a config file or a default neither triggers a rule nor satisfies one. A short-circuit flag such
@@ -859,7 +871,8 @@ yourself.
 | `xdg-system` | each directory of `$XDG_CONFIG_DIRS` (default `/etc/xdg`), joined with `<app>` |
 
 Declare a system tier as its own entry after the user's: the first declared entry wins per key,
-so the user's file overrides the system one key by key.
+so the user's file overrides the system one key by key. A map both files hold merges entry by
+entry, the user's entries winning; a list is replaced whole.
 
 ### Profiles
 
@@ -1073,10 +1086,11 @@ TodoDeploy.Flags.Token = [redacted] from argv:--token
 
 Each `InputSource` names its origin: `argv:<identifier as typed>`, `argv:<argument>`,
 `env:<VARIABLE>` (`env:TODO_HTTP__*` for a nested family; the `variable_file` variable, such as
-`env:TODO_TOKEN_FILE`, for a value read from its file), `config:<file name>#<key>`, `default` or
-`stdin`. A hand-built layer's origin is empty, and the line names its layer. A streamed stdin
+`env:TODO_TOKEN_FILE`, for a value read from its file), `config:<file name>#<key>`,
+`config:<.env file name>#<VARIABLE>` for a variable a `.env` file set, `default` or `stdin`. A hand-built layer's origin is empty, and the line names its layer. A streamed stdin
 prints `(stream)` and is never read. A map merged from a [profile](#profiles) and the file's
-shared keys names each entry's own key, and lists the shared entries the profile replaced:
+shared keys, or from several config files, names each entry's own file and key, and lists the
+entries a higher source replaced:
 
 ```console
 App.Flags.Labels = "team=core, tier=api" from config:user#labels.team, config:user#profiles.prod.labels.tier; overrides config:user#labels.tier "web"
@@ -1349,7 +1363,10 @@ trapped signal) it leaves out the error the cancellation caused, and the run exi
 Every error carries a category, which `rotini.CategoryOf(err)` returns: `rotini.CategoryUsage`
 for a mistake the user can fix, `rotini.CategoryInternal` for a fault in the program, and
 `rotini.CategoryNone` for an error nobody classified. Parse and validation failures are already
-usage errors. Mark your own with `rotini.UsageError(err)` or `rotini.InternalError(err)`.
+usage errors. Mark your own with `rotini.UsageError(err)` or `rotini.InternalError(err)`. A few
+operational failures are left `CategoryNone` on purpose: a plugin timeout, a failed flush of
+buffered stdout, and an I/O failure `rotini.CreateOutput` meets other than a missing directory
+or a denied permission, which are usage errors.
 
 To give each kind of failure its own exit code, write a reporter. A reporter replaces the default
 entirely: it prints only what it prints, and it sets the exit code with `rtx.Exit`. If it
@@ -1446,18 +1463,20 @@ The `Outcome` also carries `Infos` and `Successes`, from `rtx.RecordInfo` and
 
 For errors that scripts parse, `rotini.StructuredReporter` writes them as JSON lines; see
 [errors scripts can read](#errors-scripts-can-read). Declare `exit_status:` in the spec to
-document a command's codes in its man and markdown pages.
+document a command's codes in its man and markdown pages. The root's list is program-wide: a
+command without its own documents the root's, on its pages, the skill page and its tool
+definitions, and a command's own list replaces it.
 
-Once a command declares `exit_status:`, `rotini generate` checks its handler against it: a code
-the handler passes to `rtx.HaltWithCode` or `rtx.Exit` as a number or a constant, but that the
-list leaves out, is reported as a warning with its file and line. Code 0 needs no entry. A
-command that prints its help when called without a sub-command exits 1, so list 1 for it. (The
-stub `rotini generate` writes for a root or a group command does this, printing the help on
-stderr.) The check reads only the methods of the command's handler type, so it can't see a code
-computed at run time, set in another function or package, or set by a reporter, and it skips a
-command whose handler lives in another package (`handler:`). `rotini validate` also reports a
-code listed twice, and warns about a code above 128, which a process stopped by a signal also
-exits with.
+Once a command declares `exit_status:`, or inherits the root's, `rotini generate` checks its
+handler against it: a code the handler passes to `rtx.HaltWithCode` or `rtx.Exit` as a number or
+a constant, but that the list leaves out, is reported as a warning with its file and line.
+Code 0 needs no entry. A command that prints its help when called without a sub-command exits
+1, so list 1 for it. (The stub `rotini generate` writes for a root or a group command does this,
+printing the help on stderr.) The check reads only the methods of the command's handler type, so
+it can't see a code computed at run time, set in another function or package, or set by a
+reporter, and it skips a command whose handler lives in another package (`handler:`). `rotini
+validate` also reports a code listed twice, and warns about a code above 128, which a process
+stopped by a signal also exits with.
 
 Give a code a `name` and `rotini generate` writes a constant for it, named after the command,
 so a handler doesn't repeat the number:
@@ -2707,7 +2726,7 @@ rules, the skill page), the worst case over the command and its flags is used. A
 
 A command has each role at most once, counting the cascading flags it inherits. `rotini
 validate` warns about a destructive command with neither a `dry-run` nor a `confirm` flag that
-agents are offered.
+agents are offered, unless `agent: false` keeps the command from agents.
 
 ### Keeping things from agents
 
@@ -2787,8 +2806,10 @@ killed after `--grace` (5s by default). Windows has no SIGTERM, so there it is k
   confirm flag instead of a prompt), the exit codes and error kinds, the environment (env
   inputs, and the variables that set flags, secrets named but never their values), and each
   command's details and examples. `allowed-tools` lists the read-only commands. With the
-  markdown feature on, each command's page goes in `references/`. `name` sets the skill's name
-  (the root's, lowercased, by default) and `description` adds when to use it.
+  markdown feature on, each command's page goes in `references/`; a page generate wrote there
+  is removed once its command leaves the spec or is no longer offered to agents, and files you put
+  there stay. `name` sets the skill's name (the root's, lowercased, by default) and
+  `description` adds when to use it.
 - **`llms`** writes an [llms.txt](https://llmstxt.org): the program's name and summary, then a
   link to each command's markdown page at `base_url`.
 
@@ -3076,7 +3097,8 @@ still take:
   `--no-color` sets `--color`). List, map, count and object flags stay, since they repeat.
 - **Flag groups**: once one flag of a `mutually_exclusive` or `one_of` group is set, the others
   are left out, and so are the flags a set flag forbids in `flag_dependencies`. Required flags not
-  yet set come first, including those a group or a `flag_dependencies` entry requires.
+  yet set come first, including those a group or a `flag_dependencies` entry requires. A
+  dependency narrowed by `equals` is left out of both, since completion doesn't read values.
 - **Deprecated** flags, identifiers, commands and aliases are left out. They still work when typed.
 - **Negatable flags** offer their `--no-` form, without the flag's summary, which describes
   setting it.
@@ -3469,6 +3491,19 @@ command:
   after Ctrl+C, which the console has already delivered to it. A plugin token holding a path
   separator, or one that is `.` or `..`, is never a discovered plugin.
 
+`plug help sync` runs `plug-sync --help`, and `plug help sync push` runs `plug-sync push --help`:
+the help command `rotini init` writes calls `rtx.PluginHelp` before `rtx.HelpFor`, and the plugin
+runs as `plug sync` would run it, with the same search, timeout, environment and signal handling,
+its output and exit code passing through. A discovered plugin answers only when its binary is
+found, so `plug help typo` still says there is no such command. A help handler without the call
+answers for plugins with these lines before its `rtx.HelpFor`:
+
+{{< code title="plug_help.go" language="golang" open="true" collapsible="false" copy="true" >}}
+if rtx.PluginHelp(inputs.PlugHelp.Arguments.Command...) {
+	return
+}
+{{< /code >}}
+
 Rotini prints nothing about discovered plugins itself. To list them, in your own help or a
 `plugins` command, call `DiscoveredPlugins()` on the command that has discovery:
 
@@ -3763,7 +3798,7 @@ func TestAddHigh(t *testing.T) {
   on for the run, so a handler that writes a value off its schema fails it.
 - **`ExitDocumented`** fails the test when the exit code isn't one the command lists in its
   `exit_status`. 0 always passes; a command that lists none passes only 0.
-- **`Clock(t)`** fixes the run's clock, so relative times such as `2h` and `today` read the same
+- **`Clock(now)`** fixes the run's clock at `now`, so relative times such as `2h` and `today` read the same
   instant on every run.
 - **`Argv0(name)`** runs a `multicall` program as if invoked as `name`; pass the inputs of the
   command that name runs.
@@ -4029,9 +4064,37 @@ or on what the old contract planned.
 A command can be another CLI's spec: `- $ref: ../db/.rotini.spec.yaml` mounts it as a
 sub-command, and it still builds and ships on its own. To mount a spec from a module your project
 depends on, use `$ref: mod://<module>@<version>/<path>`; it is read from the module cache and
-verified by `go.sum`. Keys set next to the `$ref`, such as a new `name`, `summary` or `group`, adjust
-it for its new parent; see [`$ref`](/specification#ref). [`rotini mount`](/cli#rotini-mount) writes
-the `$ref` entries for you, and can be re-run as CLIs are added or removed.
+verified by `go.sum`. [`rotini mount`](/cli#rotini-mount) writes the `$ref` entries for you, and
+can be re-run as CLIs are added or removed.
+
+A parent overrides, for its own tree, any key of the commands it mounts except those the child's
+handler depends on. A key written next to the `$ref`, such as a new `name`, `summary`, `group` or
+`examples`, overrides the mounted command. An entry of the `commands:` next to the `$ref` that is
+named like one of the child's commands overrides that command, and its own `commands:` reach
+further down; any other entry adds a command. The entry's `name` picks the command, so a
+sub-command can't be renamed this way; the mounted command itself can. Here acme rewords db's footer and replaces the
+example `db migrate --help` shows, which names db's own program:
+
+{{< code title="acme/.rotini.spec.yaml (overrides)" language="yaml" open="true" collapsible="false" copy="true" >}}
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+      footer: Run 'acme db help <command>' for more.
+      commands:
+        - name: migrate
+          examples: ["acme db migrate --steps 2"]
+{{< /code >}}
+
+With several layers, say acme mounts db and db mounts a `migrate` spec, the spec nearest the root
+wins: what acme writes for `db migrate` replaces what db writes next to its own `$ref`, which
+replaces what the `migrate` spec says. A list or map written empty (`see_also: []`) clears the
+child's; text can be replaced but not cleared. The keys the child's handler is built against
+can't be overridden: its inputs, `stdin`, `output`, `plugins`, `plugin_discovery`, `passthrough`
+and `options_first`. Nor can `filename`, since the handler's file is in the child's package, or
+`handler:` in an override entry, and an override can't add a command below it: add commands next
+to the `$ref`, or in the child's spec. Help, man and markdown pages, completion, the contract and
+the agent pages all show the overrides. `rotini validate` reports a problem with an override in
+the parent's file, and parses the parent's examples against the mounted commands; a problem in
+the child's own spec is reported in the child's file.
 
 Help inside a mounted child is the parent's: `acme db --help`, `acme db help migrate` and
 `acme help db migrate` all show the full path, through the handlers `rotini init` writes. Text the
@@ -4070,7 +4133,9 @@ call libraries Rotini doesn't depend on.
 Delete the command from the spec and run `go generate` twice. The first run disables its handler
 file, adding `//go:build ignore` so the program still builds while you move anything you want to
 keep. The second run deletes the file. If the command comes back before then, the file returns to
-the build as it was, and once deleted, a committed file is still in Git's history.
+the build as it was, and once deleted, a committed file is still in Git's history. Renaming a
+command is the same: the old name's file is disabled and a new stub is written for the new name,
+so move the code across before the second run.
 
 #### A dependency opened only when needed
 

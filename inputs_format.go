@@ -26,7 +26,8 @@ func argvFlagOrigin(si scopeInputs, logical string) string {
 
 // valueOrigin names a value recon read: from the environment, the variable that was set
 // (envVars is a field's `env` tag, which may list several) or the variable_file variable whose
-// file it read, else the configuration file's logical name and the key.
+// file it read, or for a variable a .env file set, that file's logical name and the variable;
+// else the configuration file's logical name and the key.
 func valueOrigin(view *osView, source, envVars, key string) string {
 	switch source {
 	case "":
@@ -38,6 +39,9 @@ func valueOrigin(view *osView, source, envVars, key string) string {
 		name := chosenEnv(view, envVars)
 		if file := view.fileVariable(name); file != "" {
 			return "env:" + file
+		}
+		if dotenv := view.dotenvSource(name); dotenv != "" {
+			return "config:" + dotenv + "#" + name
 		}
 		return "env:" + name
 	}

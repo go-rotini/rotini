@@ -1217,6 +1217,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"WRITE-01", "WRITE-02", "WRITE-03", "WRITE-04", "WRITE-05", "WRITE-06", "WRITE-07", "WRITE-08",
 		"FLAG-27", "FLAG-28",
 		"WIRE-01", "WIRE-02", "WIRE-03", "WIRE-04", "WIRE-05",
+		"PREC-07", "FLAG-30",
 	}
 	seen := map[string]int{}
 	for _, c := range conformanceCases() {
@@ -1241,6 +1242,9 @@ func TestConformance_matrixComplete(t *testing.T) {
 		seen[c.id]++
 	}
 	for _, c := range wiringConformanceCases() {
+		seen[c.id]++
+	}
+	for _, c := range argvConformanceCases() {
 		seen[c.id]++
 	}
 	for _, id := range acceptanceMatrixIDs {

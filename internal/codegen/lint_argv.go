@@ -137,6 +137,73 @@ func lintDigitIdentifiers(spec *Spec) []error {
 	return problems
 }
 
+// lintDashEnumValues warns about an argument enum value or alias that starts with "-": the
+// parser reads such a word as a flag, as every argv walker does, so the value can only be given
+// after "--", yet completion offers it before. A negative number ("-5", "-.5") is a value unless
+// a digit option such as -5 is declared on the command path.
+func lintDashEnumValues(spec *Spec) []error {
+	var problems []error
+	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
+		digits := map[string]bool{}
+		for _, a := range chain {
+			for _, f := range a.Flags {
+				for _, id := range f.Identifiers {
+					digits[id] = isDigitIdentifier(id)
+				}
+			}
+		}
+		c := chain[len(chain)-1]
+		for i, a := range c.Arguments {
+			if a.Schema == nil || a.Passthrough {
+				continue
+			}
+			seen := map[string]bool{} // an `items` enum is also hoisted onto the list
+			at := fmt.Sprintf("%s/arguments/%d/schema", ptr, i)
+			if a.Schema.Items != nil {
+				problems = append(problems, dashEnumProblems(at+"/items/enum", path, a.Name, a.Schema.Items.Enum, digits, seen)...)
+			}
+			problems = append(problems, dashEnumProblems(at+"/enum", path, a.Name, a.Schema.Enum, digits, seen)...)
+		}
+	})
+	return problems
+}
+
+// dashEnumProblems warns about each of an argument's enum members, at at, with a value or alias
+// the parser reads as a flag, skipping words already in seen.
+func dashEnumProblems(at, path, name string, members []any, digits, seen map[string]bool) []error {
+	var problems []error
+	for j, v := range enumValues(members) {
+		for _, w := range slices.Concat([]string{v.Value}, v.Aliases, v.DeprecatedAliases) {
+			if seen[w] || !readsAsFlag(w, digits) {
+				continue
+			}
+			seen[w] = true
+			what := "value"
+			if w != v.Value {
+				what = "alias"
+			}
+			p := inputProblem(fmt.Sprintf("%s/%d", at, j), path, "argument", name, fmt.Sprintf(
+				"has `enum` %s %q, which starts with \"-\": completion offers it, but the parser reads it as an unknown flag unless it comes after \"--\"; choose one that doesn't start with \"-\"", what, w))
+			p.sev = severityWarning
+			problems = append(problems, p)
+		}
+	}
+	return problems
+}
+
+// readsAsFlag reports whether the parser reads word w as a flag, as the runtime's isFlag does:
+// a word starting with "-", other than "-", "--" and a negative number ("-5", "-.5"). A word
+// starting with a digit option declared on the command path (digits) is that flag.
+func readsAsFlag(w string, digits map[string]bool) bool {
+	if len(w) <= 1 || w[0] != '-' || w == "--" {
+		return false
+	}
+	if w[1] >= '0' && w[1] <= '9' {
+		return digits[w[:2]]
+	}
+	return len(w) < 3 || w[1] != '.' || w[2] < '0' || w[2] > '9'
+}
+
 // isDigitIdentifier reports whether id is a digit option: one dash and one digit.
 func isDigitIdentifier(id string) bool {
 	return len(id) == 2 && id[0] == '-' && id[1] >= '0' && id[1] <= '9'
@@ -217,12 +284,12 @@ func lintVariadicArguments(spec *Spec) []error {
 	return problems
 }
 
-// completeKind is an input's declared completion kind, "" for none.
+// completeKind is the completion kind an input completes with (see completionHint), "" for none.
 func completeKind(schema *InputSchema) string {
-	if schema == nil || schema.Complete == nil {
-		return ""
+	if h := completionHint(schema); h != nil {
+		return h.Kind
 	}
-	return schema.Complete.Kind
+	return ""
 }
 
 // lintResponseFiles checks response files against the inputs they could take words from: the

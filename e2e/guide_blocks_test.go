@@ -84,6 +84,8 @@ var guideBlocks = []pinnedBlock{
 	{"todo_test.go (in-process)", "r13_guide_testing.txtar", "test-inprocess.go.txt"},
 	{"todo_test.go (environ)", "r13_guide_testing.txtar", "test-environ.go.txt"},
 	{"todo_test.go (typed inputs)", "r13_guide_testing.txtar", "test-typed.go.txt"},
+	{"acme/.rotini.spec.yaml (overrides)", "r15_comp_override.txtar", "guide.yaml.txt"},
+	{"plug_help.go", "r15_comp_help_plugin.txtar", "help-lines.go.txt"},
 }
 
 func TestGuideBlocksMatchScripts(t *testing.T) {

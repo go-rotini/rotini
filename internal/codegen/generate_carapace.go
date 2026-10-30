@@ -264,7 +264,7 @@ func (p *program) carapaceValuesIn(s *InputSchema, paths []rnode) []string {
 		}
 		out = append(out, entry)
 	}
-	if c := s.Complete; c != nil {
+	if c := completionHint(s); c != nil {
 		switch c.Kind {
 		case "file":
 			if len(c.Extensions) > 0 {

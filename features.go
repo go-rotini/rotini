@@ -86,6 +86,7 @@ type pluginHooks struct {
 	exec     func(p *Program, ctx context.Context, rtx *Context, chain []Command, d *PluginDispatch) (int, error)
 	lookPath func(name string) (string, bool) // process PATH: exec.LookPath
 	discover func(d *PluginDiscoveryDef, pluginPath string, view *osView) ([]DiscoveredPlugin, []error)
+	help     func(p *Program, rtx *Context, chain []Command, d *PluginDispatch) bool // Context.PluginHelp
 }
 
 type responseFileHooks struct {

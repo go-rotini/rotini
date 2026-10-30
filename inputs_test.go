@@ -148,6 +148,39 @@ func TestInputsWithReport_errorShapes(t *testing.T) {
 	}
 }
 
+// InputsWithReport names a bad value by the identifier the user typed, as Inputs does, whether or
+// not the flag has an environment fallback.
+func TestInputsWithReport_namesTypedIdentifier(t *testing.T) {
+	type in struct {
+		App struct {
+			Flags struct {
+				Replicas int `rotini:"replicas" recon:"replicas" env:"APP_REPLICAS"`
+				Workers  int `rotini:"workers"`
+			}
+			Arguments struct{}
+		}
+	}
+	one := 1.0
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "replicas", Identifiers: []string{"-r", "--replicas"}, Type: "int", Minimum: &one},
+		{Name: "workers", Identifiers: []string{"-w", "--workers"}, Type: "int", Minimum: &one},
+	}}
+	for flag, want := range map[string]string{
+		"-r":         "-r must be >= 1 (got 0)",
+		"--replicas": "--replicas must be >= 1 (got 0)",
+		"-w":         "-w must be >= 1 (got 0)",
+	} {
+		rtx := NewContextFor(def, []string{flag, "0"}).WithEnviron([]string{"APP_REPLICAS=5"})
+		_, err := rtx.Inputs[in]()
+		_, _, reportErr := rtx.InputsWithReport[in]()
+		for name, err := range map[string]error{"Inputs": err, "InputsWithReport": reportErr} {
+			if err == nil || err.Error() != want {
+				t.Errorf("%s %s 0: %v, want %q", name, flag, err, want)
+			}
+		}
+	}
+}
+
 // ovLayers acquires the four standard layers in precedence order (defaults < files < env <
 // argv), failing the test on any acquisition error.
 func ovLayers(t *testing.T, rtx *Context, meta InputSettings) []InputLayer[ovInputs] {

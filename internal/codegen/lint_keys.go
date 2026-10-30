@@ -12,7 +12,7 @@ type keySite struct {
 	key     string
 	typ     string
 	pin     string // the config_files entry a config input is pinned to; "" reads every file
-	ptr     string
+	ptr     string // the input's `key`, or the input when its name is the key
 	path    string
 	channel string
 	name    string
@@ -95,7 +95,11 @@ func keyNodes(spec *Spec) []keyNode {
 			if t := namedScalarType(typ, schemas); t != "" {
 				typ = t
 			}
-			nodes[idx].sites = append(nodes[idx].sites, keySite{seq: seq, key: key, typ: typ, pin: pin, ptr: ptr, path: path, channel: channel, name: name})
+			at := ptr
+			if schema != nil && schema.Key != "" {
+				at += "/schema/key"
+			}
+			nodes[idx].sites = append(nodes[idx].sites, keySite{seq: seq, key: key, typ: typ, pin: pin, ptr: at, path: path, channel: channel, name: name})
 			seq++
 		})
 		for i := range c.Commands {

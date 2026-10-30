@@ -116,7 +116,7 @@ func TestDependency_setIfAbsentKeepsTheFirst(t *testing.T) {
 	}
 }
 
-// MustGetDependency's panic says which of the two misses it is: nothing registered, or
+// MustGetDependency's panic says which miss it is: nothing registered, a nil, or
 // something of another type.
 func TestDependencyError_saysWhichMissItIs(t *testing.T) {
 	n := NewDependency[int]("n")
@@ -132,6 +132,11 @@ func TestDependencyError_saysWhichMissItIs(t *testing.T) {
 	rtx.SetDependency(NewDependency[any]("n"), any("seven"))
 	if got := miss(rtx); got != `rotini: the dependency "n" is a string, not the int requested` {
 		t.Errorf("wrong type = %q", got)
+	}
+	rtx = newContext()
+	rtx.SetDependency(NewDependency[any]("n"), nil)
+	if got := miss(rtx); got != `rotini: the dependency "n" is registered as nil, not the int requested` {
+		t.Errorf("nil = %q", got)
 	}
 }
 

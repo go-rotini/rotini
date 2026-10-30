@@ -212,9 +212,10 @@ func (e *PanicError) Unwrap() []error {
 // given, or that [Context.CompletionScript] was called on a program with no completion scripts.
 // It is always [CategoryInternal].
 //
-// Command and Handler are set only for a resolved command whose handler is missing or not a
-// [Handler]; they are empty for every other wiring error, including a nil handlers value passed
-// to [NewProgram] and a nil lookup passed to [NewProgramFunc].
+// Handler is set only for a resolved command whose handler is missing or not a [Handler], and
+// Command names that command. Some missing-[Feature] errors also set Command, to the command
+// whose run needed the feature. Both are empty for the other wiring errors, including a nil
+// handlers value passed to [NewProgram] and a nil lookup passed to [NewProgramFunc].
 type WiringError struct {
 	Command string // the command whose handler wiring is broken
 	Handler string // the handler method name the Definition referenced

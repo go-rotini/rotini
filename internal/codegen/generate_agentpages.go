@@ -54,6 +54,7 @@ type templateProgramData struct {
 	Config   []templateProgramInput   // config values the offered commands read
 	JSON     bool                     // some command has a machine-output flag
 	Previews bool                     // some command has a dry-run or confirm flag
+	DryRuns  bool                     // some command has a dry-run flag
 }
 
 // templateProgramCommand is one command on a whole-program page.
@@ -114,6 +115,7 @@ func programData(p *program, a *agentProgram, link func(page string) string) tem
 		d.Commands = append(d.Commands, row)
 		d.JSON = d.JSON || row.JSON != ""
 		d.Previews = d.Previews || row.DryRun != "" || row.Confirm != ""
+		d.DryRuns = d.DryRuns || row.DryRun != ""
 		addEnv := func(in templateProgramInput) {
 			if i, ok := envAt[in.Name]; ok {
 				d.Env[i].Commands = append(d.Env[i].Commands, c.invocation)
@@ -230,6 +232,59 @@ func renderSkill(p *program, f *Feature, a *agentProgram, tmpl *template.Templat
 		}
 	}
 	return files, notices, nil
+}
+
+// skillReferenceLink matches a link SKILL.md makes to one of its reference pages.
+var skillReferenceLink = sync.OnceValue(func() *regexp.Regexp {
+	return regexp.MustCompile(`\(references/([^()/\\\s]+\.md)\)`)
+})
+
+// pruneSkillReferences removes each reference page the previous SKILL.md linked that this run
+// doesn't write, as a renamed or removed command leaves behind. SKILL.md is rotini's, so its
+// links record the pages it wrote. A page is removed only when its name is one rotini gives the
+// program's pages (<root>.md, <root>-*.md) and the skill template doesn't name it, so a file the
+// author wrote or links by hand is kept.
+func (p *program) pruneSkillReferences(base string, files map[string][]byte, f *Feature) error {
+	if p.skipPrune {
+		return nil
+	}
+	skill := ""
+	for rel := range files {
+		if dir, ok := strings.CutSuffix(rel, "/SKILL.md"); ok {
+			skill = dir
+		}
+	}
+	if skill == "" {
+		return nil
+	}
+	dir := filepath.Join(base, filepath.FromSlash(skill))
+	prior, _, exists, err := p.plan.read(filepath.Join(dir, "SKILL.md"))
+	if err != nil || !exists {
+		return err
+	}
+	tmplText := templateSkill
+	if f.Template {
+		src, _, ok, err := p.plan.read(filepath.Join(p.module.root, filepath.FromSlash(f.TemplateDir), skillTemplateName))
+		if err != nil {
+			return err
+		}
+		if ok {
+			tmplText = string(src)
+		}
+	}
+	root := manPageName(p.rootName, nil)
+	for _, m := range skillReferenceLink().FindAllStringSubmatch(string(prior), -1) {
+		name := m[1]
+		page := strings.TrimSuffix(name, ".md")
+		if _, written := files[skill+"/references/"+name]; written || !safePageName(name) ||
+			(page != root && !strings.HasPrefix(page, root+"-")) || strings.Contains(tmplText, "references/"+name) {
+			continue
+		}
+		if err := p.plan.remove(filepath.Join(dir, "references", name)); err != nil {
+			return fmt.Errorf("prune %s: %w", relToWorkdir(filepath.Join(dir, "references", name)), err)
+		}
+	}
+	return nil
 }
 
 // allowedTools is the skill's allowed-tools: a Claude Code Bash rule for every name of every

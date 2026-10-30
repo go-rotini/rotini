@@ -7,10 +7,14 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"regexp/syntax"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -38,16 +42,26 @@ func UniqueItems() Feature {
 func checkValueBounds(label, elem, base string, c Constraints, v string, secret bool) error {
 	switch {
 	case isNumericType(elem) && base == basePrefixed:
-		return checkNumericBounds(label, c, v, secret, prefixedNumber, formatNum)
+		return checkNumericBounds(label, c, v, integerText(elem, prefixedText(v)), secret, prefixedNumber, formatNum)
 	case isNumericType(elem):
-		return checkNumericBounds(label, c, v, secret, parseNumber, formatNum)
+		return checkNumericBounds(label, c, v, integerText(elem, v), secret, parseNumber, formatNum)
 	case measuredFor(elem) != nil:
 		m := measuredFor(elem)
-		return checkNumericBounds(label, c, v, secret, m.parse, m.format)
+		return checkNumericBounds(label, c, v, "", secret, m.parse, m.format)
 	case isPathType(elem), elem == "string":
 		return checkLengthBounds(label, c, v, secret)
 	}
 	return nil
+}
+
+// integerText is v, a value of numeric type elem in decimal, when elem is an integer type, so
+// its bounds compare it exactly; "" for a float.
+func integerText(elem, v string) string {
+	switch elem {
+	case "float32", "float64", "number":
+		return ""
+	}
+	return v
 }
 
 // Patterns wires pattern constraints.
@@ -238,13 +252,57 @@ func parseEmailValue(s string) (reflect.Value, error) {
 	return reflect.ValueOf(*a), nil
 }
 
-// parseTimeZoneValue reads a *time.Location from an IANA name.
+// parseTimeZoneValue reads a *time.Location from an IANA name, matched exactly, or UTC or
+// Local. An empty name is refused, though the time package reads it as UTC.
 func parseTimeZoneValue(s string) (reflect.Value, error) {
+	if s == "" {
+		return reflect.Value{}, errors.New("want an IANA name such as Europe/Berlin, or UTC or Local")
+	}
 	loc, err := time.LoadLocation(s)
+	if err == nil && !exactZoneName(s) {
+		err = errors.New("unknown time zone " + s)
+	}
 	if err != nil {
 		return reflect.Value{}, fmt.Errorf("want an IANA name such as Europe/Berlin: %w", err)
 	}
 	return reflect.ValueOf(loc), nil
+}
+
+// zoneDirs are the directories the time package reads zone files from, beside $ZONEINFO.
+var zoneDirs = []string{"/usr/share/zoneinfo", "/usr/share/lib/zoneinfo", "/usr/lib/locale/TZ", "/etc/zoneinfo"}
+
+// exactZoneName reports whether name, which the time package loaded, is spelled exactly as its
+// zone file is: on a case-insensitive file system the time package also loads "utc" or
+// "europe/berlin". A zone read from a zip archive or the embedded database is matched exactly
+// already.
+func exactZoneName(name string) bool {
+	if name == "UTC" || name == "Local" {
+		return true
+	}
+	dirs := zoneDirs
+	if z := os.Getenv("ZONEINFO"); z != "" {
+		dirs = append([]string{z}, dirs...)
+	}
+	for _, dir := range dirs {
+		//nolint:gosec // name is a zone the time package already loaded; this checks only its case
+		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(name))); err != nil || info.IsDir() {
+			continue
+		}
+		return exactPath(dir, strings.Split(name, "/"))
+	}
+	return true
+}
+
+// exactPath reports whether each of parts names an entry below dir in exactly that case.
+func exactPath(dir string, parts []string) bool {
+	for _, p := range parts {
+		entries, err := os.ReadDir(dir)
+		if err != nil || !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == p }) {
+			return false
+		}
+		dir = filepath.Join(dir, p)
+	}
+	return true
 }
 
 // parseMACValue reads a net.HardwareAddr.

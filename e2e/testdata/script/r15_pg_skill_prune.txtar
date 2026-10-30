@@ -1,0 +1,91 @@
+# R15 — the skill's reference pages follow the spec: generate removes a page it wrote under
+# skills/<name>/references/ once its command is renamed or removed, and keeps every file it
+# didn't write, including one the skill template links by name.
+
+gomodinit example.com/app
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exists skills/app/references/app-deploy.md
+exists skills/app/references/app-status.md
+grep '^- app deploy \[ref\]\(references/app-deploy\.md\)$' skills/app/SKILL.md
+cp guide.md skills/app/references/app-guide.md
+cp guide.md skills/app/references/notes.md
+
+# deploy is renamed ship: its page goes, ship's is written, and the author's files stay.
+cp renamed.yaml cmd/app/.rotini.spec.yaml
+wantexit 2 rotini generate --dry-run cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+stderr '^\d+\. delete skills[/\\]app[/\\]references[/\\]app-deploy\.md$'
+! stderr 'delete .*(app-guide|notes)\.md'
+exists skills/app/references/app-deploy.md
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+! exists skills/app/references/app-deploy.md
+exists skills/app/references/app-ship.md
+exists skills/app/references/app-status.md
+cmp skills/app/references/app-guide.md guide.md
+cmp skills/app/references/notes.md guide.md
+
+# status leaves the spec: its page goes too.
+cp removed.yaml cmd/app/.rotini.spec.yaml
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+! exists skills/app/references/app-status.md
+exists skills/app/references/app-ship.md
+exists skills/app/references/app-guide.md
+exists skills/app/references/notes.md
+
+-- guide.md --
+Written by hand.
+-- templates/skill.md.tmpl --
+---
+name: {{.SkillName}}
+description: {{quote .SkillDescription}}
+---
+
+# {{.Display}}
+
+{{range .Commands}}- {{.Invocation}}{{with .Link}} [ref]({{.}}){{end}}
+{{end}}
+See [the guide](references/app-guide.md).
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: run the fleet
+  commands:
+    - name: deploy
+      summary: ship a service
+    - name: status
+      summary: show the fleet
+-- renamed.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: run the fleet
+  commands:
+    - name: ship
+      summary: ship a service
+    - name: status
+      summary: show the fleet
+-- removed.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: run the fleet
+  commands:
+    - name: ship
+      summary: ship a service
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: markdown
+      enabled: true
+    - type: skill
+      enabled: true
+      template: true
+      template_dir: templates

@@ -31,11 +31,13 @@ type AppDirectories struct {
 //     Elsewhere, the same as "xdg".
 //
 // An XDG variable holding a relative path is ignored, as the XDG spec requires. app must be a
-// single directory name. A missing home directory is an error. A nil rtx reads the process
-// environment. Create a data or state directory with 0o700, as the XDG spec asks.
+// single directory name. A missing home directory is an error, and so is a bad app or
+// strategy; each is a [CategoryInternal] error. A nil rtx reads the process environment. Create
+// a data or state directory with 0o700, as the XDG spec asks.
 func AppDirs(rtx *Context, app, strategy string) (AppDirectories, error) {
 	view := rtx.osView()
-	return appDirsFor(runtime.GOOS, view.getenv, view.home, app, strategy)
+	d, err := appDirsFor(runtime.GOOS, view.getenv, view.home, app, strategy)
+	return d, InternalError(err)
 }
 
 // appDirsFor is AppDirs for goos, over the environment getenv reads and the home directory

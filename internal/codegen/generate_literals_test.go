@@ -1,8 +1,10 @@
 package codegen
 
 import (
+	"go/parser"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -153,6 +155,23 @@ func TestLayoutFor(t *testing.T) {
 	}
 }
 
+// TestMarkDate pins that a date whose layout carries a time of day is marked a date, on the
+// definition and as a struct tag, so its values land on that day's UTC midnight; a date-only
+// layout and a time input are not marked.
+func TestMarkDate(t *testing.T) {
+	in := &Inputs{Flags: []FlagInput{
+		{Name: "day", Identifiers: []string{"--day"}, Schema: &InputSchema{Type: "date", Layout: "unix"}},
+		{Name: "on", Identifiers: []string{"--on"}, Schema: &InputSchema{Type: "date", Layout: "02/01/2006"}},
+		{Name: "at", Identifiers: []string{"--at"}, Schema: &InputSchema{Type: "time", Layout: "unix"}},
+	}}
+	if lit := flagDefsLiteral(in, nil, false); strings.Count(lit, "Date: true") != 1 || !strings.Contains(lit, `Layout: "unix", Date: true`) {
+		t.Errorf("literal:\n%s", lit)
+	}
+	if tags := constraintTags(&InputSchema{Type: "[]date", Layout: "unixmilli"}); tags != `layout:"unixmilli" date:"true"` {
+		t.Errorf("channel tags = %q", tags)
+	}
+}
+
 // TestDefsLiteral_deprecatedMessages pins that `deprecated:` messages reach the flag, argument,
 // and command literals.
 func TestFlagDefsLiteral_shortCircuit(t *testing.T) {
@@ -275,5 +294,20 @@ command:
 	row := rowFor(t, rows, "--config")
 	if row.ConfigKey != "" || !slices.Equal(row.Env, []string{"ACME_CONFIG"}) {
 		t.Errorf("help: --config has Env %v, ConfigKey %q; want [ACME_CONFIG] and no key", row.Env, row.ConfigKey)
+	}
+}
+
+// TestGoRawString checks that every text a spec can hold comes back exactly from its Go
+// literal, and that the literal is valid Go source: a raw literal can't hold a backtick, a NUL
+// or a byte order mark, and Go drops a carriage return from one.
+func TestGoRawString(t *testing.T) {
+	for _, s := range []string{"", "plain", "a `tick`", "cr\rhere", "crlf\r\nhere", "nul\x00here", "bom\xef\xbb\xbfhere", "bad\xffutf8", "tab\there\nline"} {
+		lit := goRawString(s)
+		if _, err := parser.ParseExpr(lit); err != nil {
+			t.Errorf("goRawString(%q) = %s, not valid Go: %v", s, lit, err)
+		}
+		if got, err := strconv.Unquote(lit); err != nil || got != s {
+			t.Errorf("goRawString(%q) = %s, which reads back as %q (%v)", s, lit, got, err)
+		}
 	}
 }

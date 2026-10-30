@@ -174,8 +174,9 @@ var machineFormats = []string{"json", "yaml", "toml"}
 // It returns an internal error, and writes nothing, when the command declares a stream
 // (output_stream), when v is not the type the command declares as its output, when no renderer
 // is passed for a format rotini does not write, or, with [Program.WithOutputChecks], when v does
-// not match the declared shape. A renderer's error is returned unwrapped. A command that declares
-// no output may still use it; nothing is checked.
+// not match the declared shape. A renderer's error is returned unwrapped, and a failed write
+// returns the writer's error, prefixed with the command's name. A command that declares no
+// output may still use it; nothing is checked.
 //
 // v may be a [Selection] made from a value of the declared type by [SelectFields]: it is checked
 // as that type, and against the declared shape with every `required` removed.
@@ -334,8 +335,11 @@ func writeOutputValue(rtx *Context, w io.Writer, v any, t reflect.Type, format s
 	if format == "" {
 		format = "json"
 	}
-	if schema != "" && rtx.outputChecks != nil {
-		if err := rtx.outputChecks(name, schema, v, selected); err != nil {
+	rtx.mu.RLock()
+	check := rtx.outputChecks // Context.WithOutputChecks may change it from another goroutine
+	rtx.mu.RUnlock()
+	if schema != "" && check != nil {
+		if err := check(name, schema, v, selected); err != nil {
 			return err
 		}
 	}
@@ -530,7 +534,8 @@ func outputPath(pointer string) string {
 // DecodeOutput decodes a command's output, as captured from its stdout, into T, checking it
 // against the command's declared schema. T is the generated <Prefix>Output type, which names
 // the command; for output written item by item with [Context.WriteOutputItem], T is a slice of
-// it and every item is decoded. format is json, yaml or toml. It is for tests:
+// it and every item is decoded. format is json, yaml or toml; data holds one json value or yaml
+// document, or one per item for a stream. It is for tests:
 //
 //	var stdout bytes.Buffer
 //	p := cmd.NewProgram().WithStdout(&stdout)
@@ -713,7 +718,13 @@ func decodeOutputDocument(data []byte, format string) (any, error) {
 	case "json":
 		doc, err = unmarshalExact(data)
 	case "yaml":
-		err = yaml.Unmarshal(data, &doc)
+		var docs []any
+		if docs, err = decodeStream(data, format); err == nil && len(docs) > 1 {
+			err = errors.New("more than one yaml document")
+		}
+		if len(docs) > 0 {
+			doc = docs[0]
+		}
 	default:
 		var m map[string]any
 		err = toml.Unmarshal(data, &m)

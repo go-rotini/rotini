@@ -40,7 +40,7 @@ func lintReplacedBy(spec *Spec) []error {
 				continue
 			}
 			add := func(msg string, warn bool) {
-				p := inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name, msg)
+				p := inputProblem(fmt.Sprintf("%s/flags/%d/replaced_by", ptr, i), path, "flag", f.Name, msg)
 				if warn {
 					p.sev = severityWarning
 				}

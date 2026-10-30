@@ -34,6 +34,7 @@ type envValue struct {
 type dotenvLayer struct {
 	vals map[string]string // by view key
 	path string
+	name string // the config_files entry's logical name
 }
 
 // withInputEnv returns a copy of v whose input lookups also read in.
@@ -58,30 +59,42 @@ func (v *osView) inputLookup(name string) (string, bool) {
 	return val, ok
 }
 
-// inputFind is inputLookup plus the .env file the value came from ("" for the run's own
+// inputFind is inputLookup plus the .env file the value came from (nil for the run's own
 // environment or a variable_file file).
-func (v *osView) inputFind(name string) (val, dotenv string, ok bool) {
+func (v *osView) inputFind(name string) (val string, dotenv *dotenvLayer, ok bool) {
 	if v == nil || v.input == nil {
 		val, ok = v.lookup(name)
-		return val, "", ok
+		return val, nil, ok
 	}
 	if fv, ok := v.input.files[v.key(name)]; ok {
-		return fv.val, "", true
+		return fv.val, nil, true
 	}
 	val, ok = v.lookup(name)
 	if val != "" {
-		return val, "", true
+		return val, nil, true
 	}
-	for _, l := range v.input.layers {
+	for i := range v.input.layers {
+		l := &v.input.layers[i]
 		lv, set := l.vals[v.key(name)]
 		switch {
 		case lv != "":
-			return lv, l.path, true
+			return lv, l, true
 		case set && !ok:
-			ok, dotenv = true, l.path
+			ok, dotenv = true, l
 		}
 	}
 	return "", dotenv, ok
+}
+
+// dotenvSource is the logical name of the .env file that supplied name's value, or "".
+func (v *osView) dotenvSource(name string) string {
+	if v == nil || v.input == nil || name == "" {
+		return ""
+	}
+	if _, dotenv, _ := v.inputFind(name); dotenv != nil {
+		return dotenv.name
+	}
+	return ""
 }
 
 // inputGetenv is inputLookup without the presence report.
@@ -99,8 +112,8 @@ func (v *osView) inputOrigin(name string) string {
 	if fv, ok := v.input.files[v.key(name)]; ok {
 		return " (from " + fv.from + ")"
 	}
-	if _, dotenv, _ := v.inputFind(name); dotenv != "" {
-		return " (from " + filepath.Base(dotenv) + ")"
+	if _, dotenv, _ := v.inputFind(name); dotenv != nil {
+		return " (from " + filepath.Base(dotenv.path) + ")"
 	}
 	return ""
 }
@@ -234,7 +247,7 @@ func (b *InputReader) readDotenv(f ConfigFile, overrides map[string]pathOverride
 	if len(keys) == 0 {
 		return nil, nil //nolint:nilnil // an absent or empty file adds nothing
 	}
-	layer := &dotenvLayer{vals: make(map[string]string, len(keys)), path: path}
+	layer := &dotenvLayer{vals: make(map[string]string, len(keys)), path: path, name: f.Name}
 	for _, k := range keys {
 		val, ok, err := src.Get(k)
 		if err != nil || !ok {

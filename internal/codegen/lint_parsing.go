@@ -43,7 +43,7 @@ func lintNegatable(spec *Spec) []error {
 		}
 		for i, f := range c.Flags {
 			for _, msg := range negationProblems(f, declared, negated) {
-				problems = append(problems, inputProblem(flagPtr(i), path, "flag", f.Name, msg))
+				problems = append(problems, schemaKeyProblem(flagPtr(i), "negatable", path, "flag", f.Name, msg))
 			}
 		}
 	})
@@ -89,10 +89,17 @@ func lintArgumentFallback(spec *Spec) []error {
 		seenFallback := ""
 		afterVariadic := false
 		for i, a := range c.Arguments {
-			add := func(msg string) {
-				problems = append(problems, inputProblem(fmt.Sprintf("%s/arguments/%d", ptr, i), path, "argument", a.Name, msg))
-			}
 			fallback := a.Schema != nil && (a.Schema.Key != "" || len(variables(a.Schema)) > 0)
+			at := fmt.Sprintf("%s/arguments/%d", ptr, i)
+			if fallback {
+				at += "/schema/key"
+				if len(variables(a.Schema)) > 0 {
+					at = fmt.Sprintf("%s/arguments/%d/schema/variable", ptr, i)
+				}
+			}
+			add := func(msg string) {
+				problems = append(problems, inputProblem(at, path, "argument", a.Name, msg))
+			}
 			hasDefault := a.Schema != nil && a.Schema.Default != nil
 			switch {
 			case fallback && a.Passthrough:
@@ -126,7 +133,9 @@ func lintRelativeTime(spec *Spec) []error {
 			if relative(schema) == "" {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, "relative", path, channel, name, msg))
+			}
 			if channel == "stdin" {
 				add("sets `relative` on stdin, which is a document, not a time; declare it on a time input")
 				return
@@ -139,7 +148,7 @@ func lintRelativeTime(spec *Spec) []error {
 				absolute := *schema
 				absolute.Relative = ""
 				if runtimeRejects(&absolute, []string{d}) != "" {
-					add(fmt.Sprintf("has a relative `default` %q; an env or config input's default is read as an absolute time, so write one (2026-09-29T14:00:00Z), or give a flag the relative default", d))
+					problems = append(problems, schemaKeyProblem(ptr, "default", path, channel, name, fmt.Sprintf("has a relative `default` %q; an env or config input's default is read as an absolute time, so write one (2026-09-29T14:00:00Z), or give a flag the relative default", d)))
 				}
 			}
 		})
@@ -147,7 +156,7 @@ func lintRelativeTime(spec *Spec) []error {
 	return problems
 }
 
-// lintIntegerBase keeps `base` to integer inputs and lists of them, and checks an env or config
+// lintIntegerBase keeps `base` to number inputs and lists of them, and checks an env or config
 // input's default under it; a flag's or argument's default is lintValuesParse's, and an enum
 // value lintEnumValues', each read the way a run reads them.
 func lintIntegerBase(spec *Spec) []error {
@@ -157,23 +166,33 @@ func lintIntegerBase(spec *Spec) []error {
 			if intBase(schema) == "" {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) { problems = append(problems, schemaKeyProblem(ptr, "base", path, channel, name, msg)) }
 			if channel == "stdin" {
-				add("sets `base` on stdin, which is a document, not an integer; declare it on an integer input")
+				add("sets `base` on stdin, which is a document, not a number; declare it on an integer or float input")
 				return
 			}
-			if !isIntegerType(strings.TrimPrefix(getSchemaType(schema), "[]")) {
-				add(fmt.Sprintf("sets `base` but its type is %s; `base: prefixed` reads 0x, 0o and 0b integer literals, so it applies to the int and uint types and lists of them", displayType(getSchemaType(schema))))
+			if t := strings.TrimPrefix(getSchemaType(schema), "[]"); !isIntegerType(t) && !isFloatType(t) {
+				add(fmt.Sprintf("sets `base` but its type is %s; `base: prefixed` reads 0x, 0o and 0b literals and hexadecimal floats, so it applies to the int, uint and float types and lists of them", displayType(getSchemaType(schema))))
 				return
 			}
 			if d := defaultString(schema.Default); d != "" && (channel == "env" || channel == "config") {
 				if msg := runtimeRejects(schema, []string{d}); msg != "" {
-					add(fmt.Sprintf("`default` %s; %s", msg, defaultFails))
+					problems = append(problems, schemaKeyProblem(ptr, "default", path, channel, name, fmt.Sprintf("`default` %s; %s", msg, defaultFails)))
 				}
 			}
 		})
 	})
 	return problems
+}
+
+// isFloatType reports whether typ, a Go type as getSchemaType resolves it, is a float type,
+// which `base` applies to as well.
+func isFloatType(typ string) bool {
+	switch strings.TrimPrefix(typ, "*") {
+	case "float32", "float64":
+		return true
+	}
+	return false
 }
 
 // isIntegerType reports whether typ, a Go type as getSchemaType resolves it, is an int or uint
@@ -198,15 +217,17 @@ func lintPatternKinds(spec *Spec) []error {
 			if kind == "" {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(key, msg string) {
+				problems = append(problems, schemaKeyProblem(ptr, key, path, channel, name, msg))
+			}
 			if len(schema.Enum) > 0 || (schema.Items != nil && len(schema.Items.Enum) > 0) {
-				add(fmt.Sprintf("sets `enum` on a %s input, which would check the pattern's text, not what it matches; remove it", kind))
+				add("enum", fmt.Sprintf("sets `enum` on a %s input, which would check the pattern's text, not what it matches; remove it", kind))
 			}
 			if kind == "glob" && schema.Glob {
-				add("sets `glob: true` on a glob input: `glob: true` expands a pattern into file names, while `type: glob` keeps the pattern as a value; use one")
+				add("glob", "sets `glob: true` on a glob input: `glob: true` expands a pattern into file names, while `type: glob` keeps the pattern as a value; use one")
 			}
 			if kind == "regexp" && schema.Nullable {
-				add("sets `nullable` on a regexp input, whose field is already a pointer (*regexp.Regexp), nil when unset; remove it")
+				add("nullable", "sets `nullable` on a regexp input, whose field is already a pointer (*regexp.Regexp), nil when unset; remove it")
 			}
 		})
 	})
@@ -256,8 +277,14 @@ func layoutSample(layout string) (string, time.Time) {
 	return s, t
 }
 
-// readLayout reads s under layout as the runtime does.
+// readLayout reads s under layout as the runtime does: a unix layout refuses a leading "+".
 func readLayout(layout, s string) (time.Time, bool) {
+	switch layout {
+	case "unix", "unixmilli":
+		if strings.HasPrefix(s, "+") {
+			return time.Time{}, false
+		}
+	}
 	switch layout {
 	case "unix":
 		secs, err := strconv.ParseFloat(s, 64)
@@ -293,6 +320,7 @@ func withValueForms(fd *rotini.FlagDef, schema *InputSchema) {
 		}
 	}
 	fd.Relative = relative(schema)
+	fd.Date = markDate(schema)
 	fd.Base = intBase(schema)
 }
 
@@ -322,7 +350,7 @@ func lintFrom(spec *Spec) []error {
 			if schema == nil || len(schema.From) == 0 {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
+			add := func(msg string) { problems = append(problems, schemaKeyProblem(ptr, "from", path, channel, name, msg)) }
 			switch channel {
 			case "flag":
 				if getSchemaType(schema) == "bool" {
@@ -383,22 +411,24 @@ func lintEnumValueKeys(spec *Spec) []error {
 			if schema == nil {
 				return
 			}
-			add := func(msg string) { problems = append(problems, inputProblem(iptr, path, channel, name, msg)) }
-			for _, members := range [][]any{schema.Enum, itemsEnum(schema)} {
+			add := func(key, msg string) {
+				problems = append(problems, schemaKeyProblem(iptr, key, path, channel, name, msg))
+			}
+			for k, members := range [][]any{schema.Enum, itemsEnum(schema)} {
 				if !enumHasDetail(members) {
 					continue
 				}
 				if channel == "stdin" {
-					add("gives an `enum` value aliases, `hidden` or `deprecated`; these describe what a user types, so write plain values here")
+					add("enum", "gives an `enum` value aliases, `hidden` or `deprecated`; these describe what a user types, so write plain values here")
 					return
 				}
 				for _, msg := range enumValueProblems(enumValues(members), schema.IgnoreCase) {
-					add(msg)
+					add([]string{"enum", "items/enum"}[k], msg)
 				}
 				if d := defaultString(schema.Default); d != "" {
 					for _, v := range append(defaultList(schema.Default), d) {
 						if to, ok := enumAliases(members)[v]; ok {
-							add(fmt.Sprintf("has a `default` of %q, an alias; write the value %q, not its alias", v, to))
+							add("default", fmt.Sprintf("has a `default` of %q, an alias; write the value %q, not its alias", v, to))
 							break
 						}
 					}

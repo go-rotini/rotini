@@ -1,0 +1,49 @@
+# An output shape no output could pass: `required` names a property that isn't declared, or a
+# `const` isn't a value of its property's type.
+version: 0.0.0
+command:
+  name: demo
+  output:
+    type: object
+    required: [id, nmae]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      # A whole number on a string.
+      version: { type: string, const: 3 }
+      # Correct: a whole number is a number. No problem.
+      ratio: { type: number, const: 2 }
+      # A fraction on an integer.
+      count: { type: int, const: 1.5 }
+      items:
+        type: array
+        items:
+          type: object
+          required: [missing]
+          properties:
+            ok: { type: boolean, const: "yes" }
+  # Correct: an input schema is not an output shape. No problem.
+  stdin:
+    format: json
+    schema:
+      type: object
+  exit_status:
+    - code: 3
+      output:
+        type: object
+        required: [reason]
+        properties:
+          message: { type: string }
+  commands:
+    - name: watch
+      output_stream: true
+      output:
+        oneOf:
+          - type: object
+            required: [kind, done]
+            properties:
+              kind: { type: string, const: progress }
+          - type: object
+            required: [kind]
+            properties:
+              kind: { type: string, const: result }

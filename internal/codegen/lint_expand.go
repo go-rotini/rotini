@@ -20,14 +20,15 @@ func lintExpand(spec *Spec) []error {
 			if schema == nil || (len(schema.Expand) == 0 && schema.RelativeTo == "") {
 				return
 			}
-			add := func(sev severity, msg string) {
-				p := inputProblem(ptr, path, channel, name, msg)
-				p.sev = sev
-				problems = append(problems, p)
-			}
 			key := "expand"
 			if len(schema.Expand) == 0 {
 				key = "relative_to"
+			}
+			at := key
+			add := func(sev severity, msg string) {
+				p := schemaKeyProblem(ptr, at, path, channel, name, msg)
+				p.sev = sev
+				problems = append(problems, p)
 			}
 			typ := definitionType(schema, nil)
 			switch {
@@ -48,10 +49,12 @@ func lintExpand(spec *Spec) []error {
 			}
 			readsConfig := channel == "config" || ((channel == "flag" || channel == "argument") && flagReconKey(name, schema) != "")
 			if schema.RelativeTo != "" && !readsConfig {
+				at = "relative_to"
 				add(severityError, "sets `relative_to: config`, but nothing is read from a configuration file to resolve; use a config input, or give the flag or argument a configuration fallback with `key:`")
 			}
 			readsEnv := channel == "env" || ((channel == "flag" || channel == "argument") && flagReconKey(name, schema) != "")
 			if slices.Contains(schema.Expand, "env") && ((walkUpConfig && readsConfig) || (walkUpEnv && readsEnv)) {
+				at = "expand"
 				add(severityWarning, "sets `expand: [env]` on an input a walk-up discovered file can set; a project file in a cloned repository could write the user's environment (a token, say) into this path, so prefer `expand: [home]`")
 			}
 		})

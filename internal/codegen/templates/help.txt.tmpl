@@ -49,6 +49,11 @@
                           releases that deprecated the item and will remove it ("" when not
                           planned); deprecation .Deprecated .DeprecatedSince .RemovedIn renders
                           "deprecated since 1.4.0, removed in 2.0.0: <message>"
+         .Deprecated      on the page: the command's own deprecation message, ending "; use
+                          <replacement> instead" when it declares replaced_by, "" when it is not
+                          deprecated; .DeprecatedSince and .RemovedIn as on a row
+         .ExitStatus[]    {.Code .Name .Summary .Retryable .Output .DocsURL} — the command's
+                          exit_status, else the root's, which is program-wide
          .Environment[]   {.Var .Summary .Type .Required .Default .Enum .EnumValues .Deprecated
                           .Constraints .Rules}
          .Configuration[] {.Name .Location .Summary .Type .Required .Default .Enum
@@ -65,6 +70,8 @@
          .Description     on argument, flag, env and config rows too: the input's longer text,
                           paragraphs separated by blank lines ("" for none). Help shows .Summary
                           only; man and markdown show both
+         .Default         on argument, flag, env and config rows: the default as help shows it
+                          ("" for none); man and markdown write a list or map default as JSON
          .Stability       on command, argument, flag, env and config rows: "experimental", "beta"
                           or "" (stable), as declared. On the page itself: the command's
                           stability, inherited from its ancestors; stabilityNote .Stability
@@ -90,6 +97,9 @@
        that declares only a summary still says what it does on its own page. */ -}}
 {{- $prose := .Description}}{{if not $prose}}{{$prose = .Summary}}{{end -}}
 {{- with $prose}}{{.}}
+
+{{end -}}
+{{- if .Deprecated}}This command is {{deprecation .Deprecated .DeprecatedSince .RemovedIn}}
 
 {{end -}}
 {{- with .Stability}}{{stabilityNote .}}

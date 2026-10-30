@@ -19,6 +19,7 @@ func Plugins() Feature {
 				return p, err == nil
 			},
 			discover: discoverPlugins,
+			help:     (*Program).runPluginHelp,
 		}
 	}}
 }

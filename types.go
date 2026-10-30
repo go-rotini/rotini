@@ -310,7 +310,7 @@ func parseBool(s string) (bool, error) {
 }
 
 // Time layouts beyond Go's reference-time layouts: a Unix timestamp in seconds (fractions
-// allowed) or in milliseconds.
+// allowed) or in milliseconds, each with an optional leading "-" and never a "+".
 const (
 	layoutUnix      = "unix"
 	layoutUnixMilli = "unixmilli"
@@ -332,7 +332,7 @@ func parseTimeLayout(s, layout string) (time.Time, error) {
 		return t, nil
 	case layoutUnixMilli:
 		ms, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
+		if err != nil || strings.HasPrefix(s, "+") {
 			return time.Time{}, errors.New("want a Unix timestamp in milliseconds, e.g. 1759104000000")
 		}
 		return time.UnixMilli(ms).UTC(), nil

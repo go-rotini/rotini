@@ -1,0 +1,97 @@
+# R14 — what the generated program's __complete answers at the edges the shell matrix doesn't
+# reach: command aliases (a hidden alias still routes, a deprecated one is left out), bundled
+# short flags, a value after a bundle that ends in a flag taking one, `--opt=` and the words
+# after `--`, which are arguments, never flags.
+gomodinit example.com/app
+exec rotini generate cmd/app/.rotini.spec.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# ── aliases ─────────────────────────────────────────────────────────────────
+exec ./app$exe __complete rem ''
+cmp stdout want.rem.txt
+# A deprecated alias isn't offered, and neither is a hidden one.
+exec ./app$exe __complete rem d
+stdout '^:rotini:none$'
+! stdout 'del'
+exec ./app$exe __complete rem z
+! stdout 'zap'
+# Both still route: completion below them answers as for the command itself.
+exec ./app$exe __complete rem zap --f
+stdout '^--force\tskip the prompt$'
+exec ./app$exe __complete rem del --f
+stdout '^--force\tskip the prompt$'
+
+# ── bundled shorts and attached values ──────────────────────────────────────
+exec ./app$exe __complete bundle -abo ''
+cmp stdout want.out.txt
+exec ./app$exe __complete bundle --out=
+stdout '^--out=xml$'
+stdout '^--out=y z$'
+
+# ── after --, every word is an argument ─────────────────────────────────────
+exec ./app$exe __complete bundle -- ''
+stdout '^alpha$'
+! stdout '^--'
+exec ./app$exe __complete bundle -- -
+! stdout '^--all'
+exec ./app$exe __complete bundle -- alpha --
+stdout '^:rotini:none$'
+! stdout '^--'
+
+-- want.rem.txt --
+add	add a remote
+remove	remove a remote
+rm	remove a remote
+-- want.out.txt --
+xml
+y z
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: completion edges
+  commands:
+    - name: remote
+      summary: manage remotes
+      aliases: [rem]
+      commands:
+        - name: add
+          summary: add a remote
+        - name: remove
+          summary: remove a remote
+          aliases: [rm, del]
+          deprecated_identifiers: [del]
+          hidden_aliases: [zap]
+          flags:
+            - name: force
+              summary: skip the prompt
+              identifiers: [--force]
+              schema: {type: bool}
+    - name: bundle
+      summary: bundled shorts
+      flags:
+        - name: all
+          summary: all
+          identifiers: [-a, --all]
+          schema: {type: bool}
+        - name: brief
+          summary: brief
+          identifiers: [-b, --brief]
+          schema: {type: bool}
+        - name: out
+          summary: output kind
+          identifiers: [-o, --out]
+          schema: {type: string, enum: [xml, "y z"]}
+      arguments:
+        - name: item
+          summary: an item
+          schema: {type: string, enum: [alpha, beta]}
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_rotini.go

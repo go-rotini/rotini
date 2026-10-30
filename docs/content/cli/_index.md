@@ -691,14 +691,17 @@ at the end of the commands list, and every other line of the spec is kept as it 
 Running it again is safe: a spec that is already mounted is left alone, and the `--into` spec
 itself is skipped, so a shell wildcard can name every CLI each time. A command name or alias
 that two entries would share is an error naming both, and nothing is written. `--prune` also
-removes the entries whose spec file no longer exists, which `generate` would fail on; an entry
-is never removed for any other reason. Regenerate the parent afterwards.
+removes the entries whose spec file no longer exists, which `generate` would fail on, with the
+comment lines directly above each, as [`fmt`](#rotini-fmt) attaches them; a comment separated from
+the entry by a blank line is a heading and stays. An entry is never removed for any other reason.
+Regenerate the parent afterwards.
 
 `--under` mounts below a command of the `--into` spec instead of its root, named by its path
 from the root: `--under db` or `--under "db migrate"`. The path can go through any command
 written in that spec. Under a command mounted with `$ref`, the new entries are added to that
 CLI's own sub-commands, so they can't reuse a name that CLI already has. A command declared
-inside the `$ref`'d spec isn't written in the `--into` spec; mount into that spec instead.
+inside the `$ref`'d spec isn't written in the `--into` spec, even where the `--into` spec
+overrides it; mount into that spec instead.
 Already-mounted checks and `--prune` cover the commands list being mounted into.
 
 Here `rotini mount --prune cmd/*/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --group tools`
@@ -730,8 +733,9 @@ A spec that is already mounted is left alone, and the --into spec itself is skip
 a shell wildcard such as cmd/*/.rotini.spec.yaml can name every cli each time. A command
 name or alias that two entries would share is an error, and nothing is written.
 --prune also removes the entries, in the commands list being mounted into, whose spec
-file no longer exists. Regenerate the parent afterwards. Only YAML specs can be mounted
-into for now.
+file no longer exists, with the comment lines directly above each; a comment above a
+blank line stays. Regenerate the parent afterwards. Only YAML specs can be mounted into
+for now.
 
 Usage:
   rotini mount [flags] [specs...]

@@ -106,7 +106,7 @@ type contractArgument struct {
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
 	Relative        string                       `json:"relative,omitempty"`
-	Base            string                       `json:"base,omitempty"`          // prefixed: also takes 0x, 0o and 0b integer literals
+	Base            string                       `json:"base,omitempty"`          // prefixed: also takes 0x, 0o and 0b literals (and hex floats on a float)
 	VariableFile    string                       `json:"variable_file,omitempty"` // a variable naming a file that holds the fallback value
 	Expand          []string                     `json:"expand,omitempty"`
 	RelativeTo      string                       `json:"relative_to,omitempty"`
@@ -147,7 +147,7 @@ type contractFlag struct {
 	DottedKeys            bool                         `json:"dotted_keys,omitempty"`
 	Layouts               []string                     `json:"layouts,omitempty"`
 	Relative              string                       `json:"relative,omitempty"`
-	Base                  string                       `json:"base,omitempty"` // prefixed: also takes 0x, 0o and 0b integer literals
+	Base                  string                       `json:"base,omitempty"` // prefixed: also takes 0x, 0o and 0b literals (and hex floats on a float)
 	Expand                []string                     `json:"expand,omitempty"`
 	RelativeTo            string                       `json:"relative_to,omitempty"`
 	Secret                bool                         `json:"secret,omitempty"`
@@ -191,7 +191,7 @@ type contractEnv struct {
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
 	Relative        string                       `json:"relative,omitempty"`
-	Base            string                       `json:"base,omitempty"` // prefixed: also takes 0x, 0o and 0b integer literals
+	Base            string                       `json:"base,omitempty"` // prefixed: also takes 0x, 0o and 0b literals (and hex floats on a float)
 	Expand          []string                     `json:"expand,omitempty"`
 	RelativeTo      string                       `json:"relative_to,omitempty"`
 	Hidden          bool                         `json:"hidden,omitempty"`
@@ -217,7 +217,7 @@ type contractConfig struct {
 	IgnoreCase      bool                         `json:"ignore_case,omitempty"`
 	Layouts         []string                     `json:"layouts,omitempty"`
 	Relative        string                       `json:"relative,omitempty"`
-	Base            string                       `json:"base,omitempty"` // prefixed: also takes 0x, 0o and 0b integer literals
+	Base            string                       `json:"base,omitempty"` // prefixed: also takes 0x, 0o and 0b literals (and hex floats on a float)
 	Expand          []string                     `json:"expand,omitempty"`
 	RelativeTo      string                       `json:"relative_to,omitempty"`
 	Secret          bool                         `json:"secret,omitempty"`
@@ -939,29 +939,35 @@ func typedEnum(s map[string]any) {
 // sign, then a 0x, 0o or 0b literal or decimal digits, with `_` between digits.
 const prefixedPattern = `^[+-]?(0[xX](_?[0-9a-fA-F])+|0[oO](_?[0-7])+|0[bB](_?[01])+|[0-9](_?[0-9])*)$`
 
+// prefixedFloatPattern matches the text a `base: prefixed` float input reads: a
+// prefixedPattern integer, a decimal or hexadecimal float with `_` between digits, or inf or
+// nan in any case.
+const prefixedFloatPattern = `^[+-]?(0[xX](_?[0-9a-fA-F])*(\.([0-9a-fA-F](_?[0-9a-fA-F])*)?)?[pP][+-]?[0-9](_?[0-9])*|0[xX](_?[0-9a-fA-F])+|0[oO](_?[0-7])+|0[bB](_?[01])+|([0-9](_?[0-9])*(\.([0-9](_?[0-9])*)?)?|\.[0-9](_?[0-9])*)([eE][+-]?[0-9](_?[0-9])*)?|[iI][nN][fF]([iI][nN][iI][tT][yY])?|[nN][aA][nN])$`
+
 // allowPrefixedText lets a `base: prefixed` input's value, or each value of a list, be a
-// string matching prefixedPattern as well as an integer. The pattern is a value constraint, so
-// a list's moves onto its items with the rest.
+// string matching prefixedPattern (prefixedFloatPattern for a float) as well as a number. The
+// pattern is a value constraint, so a list's moves onto its items with the rest.
 func allowPrefixedText(doc map[string]any) {
 	target := doc
 	if items, ok := doc["items"].(map[string]any); ok {
 		target = items
 	}
+	var types []any
 	switch t := target["type"].(type) {
 	case string:
-		if t != "integer" {
-			return // lint reports a base on a non-integer input
-		}
-		target["type"] = []any{"integer", "string"}
+		types = []any{t}
 	case []any:
-		if !slices.Contains(t, any("integer")) {
-			return
-		}
-		target["type"] = append(slices.Clone(t), "string")
-	default:
-		return
+		types = t
 	}
-	doc["pattern"] = prefixedPattern
+	switch {
+	case slices.Contains(types, any("integer")):
+		doc["pattern"] = prefixedPattern
+	case slices.Contains(types, any("number")):
+		doc["pattern"] = prefixedFloatPattern
+	default:
+		return // lint reports a base on any other input
+	}
+	target["type"] = append(slices.Clone(types), "string")
 }
 
 // valueConstraints are the keys that constrain each value, not the list or map holding them.

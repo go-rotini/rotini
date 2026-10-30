@@ -580,12 +580,12 @@ func checkTypedConstraints(fs *featureSet, label, typ string, c Constraints, cou
 		switch {
 		case isNumericType(elem):
 			if n, ok := typedNumber(e); ok {
-				err = checkNumberBounds(label, c, n, redactValue(typedText(e), secret), formatNum)
+				err = checkNumberBounds(label, c, n, typedInteger(e), redactValue(typedText(e), secret), formatNum)
 			}
 		case measuredFor(elem) != nil:
 			if n, ok := typedNumber(e); ok {
 				m := measuredFor(elem)
-				err = checkNumberBounds(label, c, n, redactValue(m.format(n), secret), m.format)
+				err = checkNumberBounds(label, c, n, "", redactValue(m.format(n), secret), m.format)
 			}
 		case isPathType(elem):
 			s := typedText(e)
@@ -667,6 +667,18 @@ func typedNumber(e reflect.Value) (float64, bool) {
 		return typedFloat(e), true
 	}
 	return 0, false
+}
+
+// typedInteger is an integer value in decimal, so its bounds compare it exactly; "" for any
+// other kind.
+func typedInteger(e reflect.Value) string {
+	switch e.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(e.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(e.Uint(), 10)
+	}
+	return ""
 }
 
 // typedText renders one typed value as the text a user would have typed for it.

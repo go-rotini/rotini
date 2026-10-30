@@ -1,0 +1,894 @@
+# R14 — a cloud ops CLI built end to end from a JSONC spec: a user config with profiles, a
+# walk-up project TOML, a .env file and a --config file, each losing to the environment and the
+# command line; explained provenance; bounds, enums, durations, sizes and times; a secret that
+# only comes from a file or stdin; flag dependencies; output formats with field selection and
+# sorting; config set/unset/path; structured errors and a named exit code; and the agent files.
+
+gomodinit example.com/ops
+exec rotini init opsctl --format jsonc
+cp spec.jsonc cmd/opsctl/.rotini.spec.jsonc
+cp conf.jsonc cmd/opsctl/.rotini.conf.jsonc
+exec rotini generate cmd/opsctl/.rotini.spec.jsonc --config cmd/opsctl/.rotini.conf.jsonc
+stderr '^Warning: tools: "opsctl login" is left out of the tool definitions: its required flag "token" is a secret'
+stderr '^Warning: tools: "opsctl deploy" is left out of openai\.json: it has a map'
+cp main.go.txt cmd/opsctl/main.go
+cp deploy.go.txt internal/cmd/opsctl/opsctl_deploy.go
+cp pods.go.txt internal/cmd/opsctl/opsctl_pods.go
+cp delete.go.txt internal/cmd/opsctl/opsctl_delete.go
+cp login.go.txt internal/cmd/opsctl/opsctl_login.go
+cp set.go.txt internal/cmd/opsctl/opsctl_config_set.go
+cp unset.go.txt internal/cmd/opsctl/opsctl_config_unset.go
+cp path.go.txt internal/cmd/opsctl/opsctl_config_path.go
+exec go mod tidy
+exec go build -o opsctl$exe ./cmd/opsctl
+exec go vet ./...
+# Regenerating the same spec changes nothing.
+exec rotini generate --dry-run cmd/opsctl/.rotini.spec.jsonc --config cmd/opsctl/.rotini.conf.jsonc
+
+env XDG_CONFIG_HOME=$WORK/xdg
+mkdir proj/sub xdg/opsctl
+cp user.yaml xdg/opsctl/config.yaml
+cp project.toml proj/.opsctl.toml
+cp dotenv proj/sub/.env
+cd proj/sub
+
+# Precedence: the .env file beats the project file, which beats the user file (declared after it),
+# which beats the default; the project file's 3.0 fills an integer.
+exec $WORK/opsctl$exe deploy api --explain-inputs
+stdout '^OpsctlDeploy\.Flags\.Replicas = "5" from config:dotenv#OPS_DEPLOY_REPLICAS; overrides config:project#deploy\.replicas "3", default "2"$'
+stdout '^OpsctlDeploy\.Flags\.Timeout = "20m" from config:project#deploy\.timeout; overrides default "5m"$'
+stdout '^Opsctl\.Env\.Token = \[redacted\] from config:dotenv#OPS_TOKEN$'
+! stdout 'from-dotenv'
+# The real environment beats the .env file, and the command line beats both.
+env OPS_DEPLOY_REPLICAS=6
+exec $WORK/opsctl$exe deploy api -o json
+stdout '"replicas": 6'
+exec $WORK/opsctl$exe deploy api -r 8 -o json
+stdout '"replicas": 8'
+env OPS_DEPLOY_REPLICAS=
+
+# A profile's keys win over the shared ones; a map merges per key.
+exec $WORK/opsctl$exe deploy api --profile prod --explain-inputs
+stdout '^OpsctlDeploy\.Flags\.Region = "us-east-1" from config:user#profiles\.prod\.region$'
+stdout '^OpsctlDeploy\.Flags\.Label = "team=core, tier=api" from config:user#deploy\.labels\.team, config:user#profiles\.prod\.deploy\.labels\.tier; overrides config:user#deploy\.labels\.tier "web"$'
+env OPS_PROFILE=lcoal
+wantexit 1 $WORK/opsctl$exe deploy api
+stderr '^Error: OPS_PROFILE: profile "lcoal" is not defined in configuration file .*config\.yaml \(profiles: default, prod\)$'
+env OPS_PROFILE=
+
+# A value names the identifier the user typed, also when the handler asks for a report and the
+# flag has fallbacks, and says where a value from elsewhere came from.
+wantexit 1 $WORK/opsctl$exe deploy api -r 0
+stderr '^Error: -r must be >= 1 \(got 0\)$'
+wantexit 1 $WORK/opsctl$exe deploy api -l x
+stderr '^Error: -l expects key=value pairs \(got "x"\)$'
+env OPS_REGION=mars
+wantexit 1 $WORK/opsctl$exe deploy api
+stderr '^Error: invalid value "mars" for --region \(one of: eu-west-1, us-east-1\) \(from environment variable OPS_REGION\)$'
+env OPS_REGION=
+env AWS_REGION=US-EAST-1
+exec $WORK/opsctl$exe deploy api -o yml
+stdout '^region: us-east-1$'
+env AWS_REGION=
+
+# Durations, sizes, times and dependencies.
+wantexit 1 $WORK/opsctl$exe deploy api --timeout 2h
+stderr '^Error: --timeout must be <= 1h \(got 2h\)$'
+wantexit 1 $WORK/opsctl$exe deploy api --max-size 3Gi
+stderr '^Error: --max-size must be <= 2Gi \(got 3Gi\)$'
+exec $WORK/opsctl$exe deploy api --max-size 1.5GiB
+stderr 'max-size=1536Mi'
+wantexit 1 $WORK/opsctl$exe deploy api --at yesterday
+stderr '^Error: --at: "yesterday" is not a valid time \(yesterday is in the past; this input takes future times\)$'
+wantexit 1 $WORK/opsctl$exe deploy api --strategy canary
+stderr '^Error: flag --canary-percent is required when --strategy is canary$'
+wantexit 1 $WORK/opsctl$exe deploy api --canary-percent 5
+stderr '^Error: flag --strategy is required when --canary-percent is set$'
+wantexit 1 $WORK/opsctl$exe delete svc --grace 1500ms
+stderr '^Error: --grace must be a multiple of 1s \(got 1500ms\)$'
+
+# --config names a JSON file, which must exist and is read before the files it replaces.
+cp $WORK/alt.json alt.json
+exec $WORK/opsctl$exe deploy api --config alt.json -o json
+stdout '"region": "us-east-1"'
+stderr '^timeout=1m0s '
+wantexit 1 $WORK/opsctl$exe deploy api --config nope.json
+stderr '^Error: could not open configuration file .*nope\.json: no such file$'
+wantexit 1 $WORK/opsctl$exe deploy api --config=
+stderr '^Error: --config was given an empty path; name a configuration file$'
+
+# Output: a table by default, the declared formats, sorting and field selection.
+exec $WORK/opsctl$exe pods api --sort-by restarts --reverse
+cmp stdout $WORK/want-pods.txt
+exec $WORK/opsctl$exe pods api --fields name,status --sort-by name
+cmp stdout $WORK/want-fields.json
+wantexit 1 $WORK/opsctl$exe pods api --fields bogus
+stderr '^Error: invalid value "bogus" for --fields \(one of: name, restarts, started, status\)$'
+exec $WORK/opsctl$exe pods api --limit 0b1 -o yaml
+stdout '^total: 1$'
+
+# The secret comes only from a file or stdin.
+wantexit 1 $WORK/opsctl$exe login --token sk_live
+stderr '^Error: --token takes @file or -, not a value$'
+cp $WORK/tok.txt tok.txt
+exec $WORK/opsctl$exe login --token @tok.txt
+stdout 'a 7-character token'
+stdin tok.txt
+exec $WORK/opsctl$exe login --token -
+stdout 'a 7-character token'
+
+# Exit codes: a usage error and a named code, plain and as structured lines.
+wantexit 1 $WORK/opsctl$exe delete svc
+stderr '^Error: refusing to delete without --yes$'
+wantexit 75 $WORK/opsctl$exe rm busy -y
+stderr '^Error: the cluster is busy$'
+env OPS_AGENT=1
+wantexit 75 $WORK/opsctl$exe delete busy -y
+stderr '^\{"schema_version":1,"error":\{"category":"none","command":"opsctl delete","exit_code":75,"message":"the cluster is busy"\}\}$'
+wantexit 1 $WORK/opsctl$exe deploi
+stderr '"kind":"unknown-command"'
+stderr '"candidates":\["help","version","deploy","pods","delete","rm","login","config"\]'
+env OPS_AGENT=
+
+# config set writes the user file in place, into the selected profile, and checks the value.
+exec $WORK/opsctl$exe config set deploy.replicas 12
+grep '^      replicas: 12$' $WORK/xdg/opsctl/config.yaml
+grep '^# user settings$' $WORK/xdg/opsctl/config.yaml
+exec $WORK/opsctl$exe --profile prod config set region eu-west-1
+grep '^    region: eu-west-1$' $WORK/xdg/opsctl/config.yaml
+wantexit 1 $WORK/opsctl$exe config set deploy.timeout forever
+stderr 'deploy\.timeout'
+exec $WORK/opsctl$exe config unset deploy.replicas
+! grep 'replicas: 12' $WORK/xdg/opsctl/config.yaml
+grep '^  default:' $WORK/xdg/opsctl/config.yaml
+exec $WORK/opsctl$exe config path
+stdout '^user .*[/\\]xdg[/\\]opsctl[/\\]config\.yaml exists=true$'
+stdout '^project .*[/\\]proj[/\\]\.opsctl\.toml exists=true$'
+cd $WORK
+
+# The agent files, from the spec: read commands allowed, destructive ones asking first.
+grep '^allowed-tools: "Bash\(opsctl pods \*\)"$' skills/opsctl/SKILL.md
+grep '^- Confirm without a prompt: `--yes`$' skills/opsctl/SKILL.md
+grep '^- JSON output: add `--output=json`$' skills/opsctl/SKILL.md
+grep '"Bash\(opsctl rm \*\)"' agents/claude-settings.json
+grep '^- \[opsctl deploy\]\(internal/cmd/opsctl/renders/markdown_opsctl_deploy\.md\): deploy a service$' llms.txt
+exists tools/mcp.json tools/gemini.json schemas/output/opsctl-pods.output.json share/man/man1/opsctl-deploy.1
+grep '"destructiveHint": true' tools/mcp.json
+grep '^# OPS_DEPLOY_REPLICAS=2$' .env.example
+
+# A config file named after a layer the configuration reader keeps for itself fails validate,
+# instead of every run.
+wantexit 1 rotini validate reserved.spec.yaml
+stderr 'config_files "explicit": the name is reserved'
+stderr 'config_files "default": the name is reserved'
+-- spec.jsonc --
+{
+  "$schema": "./.rotini-schema.spec.json",
+  "version": "0.0.0",
+  "command": {
+    "name": "opsctl",
+    "summary": "operate services in the cloud",
+    "description": "opsctl deploys and inspects services.",
+    "env_prefix": "OPS",
+    // the file --config names, then the project's, then the user's: the first declared wins
+    "config_files": [
+      {
+        "name": "override",
+        "path": "opsctl.json",
+        "format": "json"
+      },
+      {
+        "name": "project",
+        "discover": { "strategy": "walk-up", "file": ".opsctl.toml" }
+      },
+      {
+        "name": "user",
+        "discover": { "strategy": "xdg", "app": "opsctl", "file": "config.yaml" },
+        "profiles": { "under": "profiles", "select": "profile", "default": "default" }
+      },
+      {
+        "name": "dotenv",
+        "path": ".env",
+        "format": "dotenv",
+        "as": "env"
+      }
+    ],
+    "schemas": {
+      "Pod": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": { "type": "string" },
+          "status": { "type": "string", "enum": ["running", "pending", "failed"] },
+          "restarts": { "type": "integer" },
+          "started": { "type": "string", "description": "when it started, RFC 3339" }
+        }
+      }
+    },
+    "exit_status": [
+      { "code": 0, "name": "ok", "summary": "done" },
+      { "code": 1, "name": "failed", "summary": "the operation failed" },
+      { "code": 75, "name": "unavailable", "summary": "the cluster is busy; try again", "retryable": true }
+    ],
+    "flags": [
+      {
+        "name": "help",
+        "identifiers": ["-h", "--help"],
+        "summary": "print help",
+        "cascading": true,
+        "short_circuit": true,
+        "schema": { "type": "bool" }
+      },
+      {
+        "name": "version",
+        "identifiers": ["--version"],
+        "summary": "print version",
+        "cascading": true,
+        "short_circuit": true,
+        "schema": { "type": "bool" }
+      },
+      {
+        "name": "profile",
+        "identifiers": ["--profile"],
+        "summary": "the configuration profile to use",
+        "cascading": true,
+        "schema": { "type": "string", "variable": "OPS_PROFILE" }
+      },
+      {
+        "name": "config",
+        "identifiers": ["--config"],
+        "summary": "read settings from this JSON file",
+        "cascading": true,
+        "schema": { "type": "string", "config_source": "override", "variable": "OPS_CONFIG" }
+      },
+      {
+        "name": "output",
+        "identifiers": ["-o", "--output"],
+        "summary": "how to write the result",
+        "cascading": true,
+        "role": "machine-output",
+        "role_value": "json",
+        "schema": {
+          "type": "string",
+          "default": "table",
+          "enum": [
+            { "value": "table", "summary": "aligned columns for people" },
+            { "value": "json", "summary": "one JSON document" },
+            { "value": "yaml", "aliases": ["yml"] }
+          ]
+        }
+      }
+    ],
+    "env": [
+      {
+        "name": "token",
+        "summary": "the API token",
+        "schema": { "type": "string", "variable": "OPS_TOKEN", "variable_file": "OPS_TOKEN_FILE", "secret": true }
+      }
+    ],
+    "commands": [
+      {
+        "name": "help",
+        "summary": "print help",
+        "description": "Print help for a command.",
+        "arguments": [
+          {
+            "name": "command",
+            "summary": "the command path to print help for",
+            "schema": { "type": "[]string", "complete": { "kind": "command" } }
+          }
+        ]
+      },
+      {
+        "name": "version",
+        "summary": "print version",
+        "description": "Print the opsctl version."
+      },
+      {
+        "name": "deploy",
+        "summary": "deploy a service",
+        "effects": { "kind": "write", "idempotent": true, "open_world": true },
+        "examples": ["opsctl deploy api --replicas 3", "opsctl deploy api --strategy canary --canary-percent 10"],
+        "arguments": [
+          {
+            "name": "service",
+            "summary": "the service to deploy",
+            "schema": { "type": "string", "required": true, "pattern": "^[a-z][a-z0-9-]*$", "pattern_message": "must be a lowercase name" }
+          }
+        ],
+        "flags": [
+          {
+            "name": "replicas",
+            "identifiers": ["-r", "--replicas"],
+            "summary": "how many instances",
+            "schema": { "type": "int", "minimum": 1, "maximum": 100, "default": 2, "key": "deploy.replicas" }
+          },
+          {
+            "name": "timeout",
+            "identifiers": ["--timeout"],
+            "summary": "how long to wait",
+            "schema": { "type": "duration", "default": "5m", "maximum": "1h", "key": "deploy.timeout" }
+          },
+          {
+            "name": "region",
+            "identifiers": ["--region"],
+            "summary": "where to deploy",
+            "schema": {
+              "type": "string",
+              "variable": ["OPS_REGION", "AWS_REGION"],
+              "key": "region",
+              "ignore_case": true,
+              "enum": [
+                { "value": "eu-west-1", "summary": "Ireland" },
+                { "value": "us-east-1", "summary": "Virginia" }
+              ]
+            }
+          },
+          {
+            "name": "strategy",
+            "identifiers": ["--strategy"],
+            "summary": "how to roll out",
+            "schema": { "type": "string", "default": "rolling", "enum": ["rolling", "canary", "recreate"] }
+          },
+          {
+            "name": "canary-percent",
+            "identifiers": ["--canary-percent"],
+            "summary": "share of traffic for the canary",
+            "schema": { "type": "int", "exclusiveMinimum": 0, "maximum": 50 }
+          },
+          {
+            "name": "max-size",
+            "identifiers": ["--max-size"],
+            "summary": "the largest image to accept",
+            "schema": { "type": "bytesize", "default": "512Mi", "maximum": "2Gi" }
+          },
+          {
+            "name": "at",
+            "identifiers": ["--at"],
+            "summary": "when to start",
+            "schema": { "type": "datetime", "relative": "future" }
+          },
+          {
+            "name": "label",
+            "identifiers": ["-l", "--label"],
+            "summary": "a label for the release",
+            "schema": { "type": "map[string]string", "separator": ",", "key": "deploy.labels" }
+          },
+          {
+            "name": "dry-run",
+            "identifiers": ["--dry-run"],
+            "summary": "show the plan and change nothing",
+            "role": "dry-run",
+            "schema": { "type": "bool" }
+          },
+          {
+            "name": "explain-inputs",
+            "identifiers": ["--explain-inputs"],
+            "summary": "print where each value came from",
+            "hidden": true,
+            "short_circuit": true,
+            "schema": { "type": "bool" }
+          }
+        ],
+        "flag_dependencies": [
+          { "when": "strategy", "equals": ["canary"], "requires": ["canary-percent"] },
+          { "when": "canary-percent", "requires": ["strategy"] }
+        ],
+        "output": {
+          "type": "object",
+          "description": "The release that was made.",
+          "required": ["service", "replicas", "region"],
+          "properties": {
+            "service": { "type": "string" },
+            "replicas": { "type": "integer" },
+            "region": { "type": "string" },
+            "dry_run": { "type": "boolean" }
+          }
+        }
+      },
+      {
+        "name": "pods",
+        "summary": "list a service's pods",
+        "effects": { "kind": "read", "open_world": true },
+        "arguments": [
+          { "name": "service", "summary": "the service", "schema": { "type": "string", "required": true } }
+        ],
+        "flags": [
+          {
+            "name": "fields",
+            "identifiers": ["--fields"],
+            "summary": "write only these fields",
+            "role": "fields",
+            "schema": { "type": "[]string", "separator": ",", "values_from": "output.pods" }
+          },
+          {
+            "name": "sort-by",
+            "identifiers": ["--sort-by"],
+            "summary": "sort by this field",
+            "role": "sort",
+            "schema": { "type": "string", "values_from": "output.pods" }
+          },
+          {
+            "name": "reverse",
+            "identifiers": ["--reverse"],
+            "summary": "sort in descending order",
+            "schema": { "type": "bool" }
+          },
+          {
+            "name": "limit",
+            "identifiers": ["--limit"],
+            "summary": "at most this many",
+            "schema": { "type": "uint8", "base": "prefixed" }
+          }
+        ],
+        "output": {
+          "type": "object",
+          "required": ["pods"],
+          "properties": {
+            "pods": { "type": "array", "items": { "$ref": "#/schemas/Pod" } },
+            "total": { "type": "integer" }
+          }
+        }
+      },
+      {
+        "name": "delete",
+        "summary": "delete a service",
+        "aliases": ["rm"],
+        "effects": { "kind": "destructive", "open_world": true },
+        "arguments": [
+          { "name": "service", "summary": "the service", "schema": { "type": "string", "required": true } }
+        ],
+        "flags": [
+          {
+            "name": "yes",
+            "identifiers": ["-y", "--yes"],
+            "summary": "do not ask",
+            "role": "confirm",
+            "schema": { "type": "bool" }
+          },
+          {
+            "name": "grace",
+            "identifiers": ["--grace"],
+            "summary": "how long to let it drain",
+            "schema": { "type": "duration", "default": "30s", "multipleOf": "1s", "minimum": "0s" }
+          }
+        ]
+      },
+      {
+        "name": "login",
+        "summary": "store credentials",
+        "flags": [
+          {
+            "name": "token",
+            "identifiers": ["--token"],
+            "summary": "the token, from a file or stdin",
+            "schema": { "type": "string", "secret": true, "from": ["file", "stdin"], "required": true }
+          },
+          {
+            "name": "user",
+            "identifiers": ["--user"],
+            "summary": "who you are",
+            "schema": { "type": "email" }
+          }
+        ]
+      },
+      {
+        "name": "config",
+        "summary": "read and write settings",
+        "commands": [
+          {
+            "name": "set",
+            "summary": "set a setting",
+            "arguments": [
+              { "name": "key", "schema": { "type": "string", "required": true, "enum": ["deploy.replicas", "deploy.timeout", "region"] } },
+              { "name": "value", "schema": { "type": "string", "required": true } }
+            ]
+          },
+          {
+            "name": "unset",
+            "summary": "remove a setting",
+            "arguments": [
+              { "name": "key", "schema": { "type": "string", "required": true } }
+            ]
+          },
+          {
+            "name": "path",
+            "summary": "print the settings file path"
+          },
+          {
+            "name": "list",
+            "summary": "list settings and where they came from"
+          }
+        ]
+      }
+    ]
+  }
+}
+-- conf.jsonc --
+{
+  "$schema": "./.rotini-schema.conf.json",
+  "version": "0.0.0",
+  "generate": {
+    "schemas": {
+      "conf": { "file": "cmd/opsctl/.rotini-schema.conf.json" },
+      "spec": { "file": "cmd/opsctl/.rotini-schema.spec.json" },
+      "config": { "dir": "schemas/config" },
+      "output": { "dir": "schemas/output" }
+    },
+    "contract": { "file": "contract.json", "go": true },
+    "packages": [
+      { "type": "main", "file": "cmd/opsctl/main.go" },
+      { "type": "cmd", "file": "internal/cmd/opsctl/zz_rotini.go" }
+    ],
+    "features": [
+      { "type": "help", "enabled": true },
+      { "type": "completion", "enabled": true, "messages": "all", "descriptions_env": "OPS_COMPLETION_DESCRIPTIONS" },
+      { "type": "man", "enabled": true, "embed": true, "install_dir": "share" },
+      { "type": "markdown", "enabled": true, "embed": true },
+      { "type": "tools", "enabled": true, "targets": ["mcp", "openai-strict", "gemini"] },
+      { "type": "skill", "enabled": true, "description": "Use to deploy and inspect services." },
+      { "type": "llms", "enabled": true },
+      { "type": "permissions", "enabled": true },
+      { "type": "config_example", "enabled": true },
+      { "type": "env_example", "enabled": true },
+      { "type": "carapace", "enabled": true }
+    ]
+  },
+  "validate": { "fail": "collect" }
+}
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.jsonc --config ./.rotini.conf.jsonc
+package main
+
+import (
+	"os"
+
+	cmd "example.com/ops/internal/cmd/opsctl"
+	"github.com/go-rotini/rotini"
+)
+
+// go build -ldflags "-X main.version=1.2.3" ./cmd/...
+var version = "0.0.0"
+
+func main() {
+	cmd.NewProgram().
+		WithVersion(version).
+		WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool { return os.Getenv("OPS_AGENT") == "1" })).
+		Execute()
+}
+-- deploy.go.txt --
+package opsctl
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"maps"
+	"slices"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*opsctlDeployHandler)(nil)
+
+type opsctlDeployHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*opsctlDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, report, err := rtx.InputsWithReport[OpsctlDeployInputs]()
+	if inputs.OpsctlDeploy.Flags.ExplainInputs {
+		_ = report.Format(rtx.Stdout)
+		return
+	}
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := inputs.OpsctlDeploy.Flags
+	out := OpsctlDeployOutput{
+		Service:  inputs.OpsctlDeploy.Arguments.Service,
+		Replicas: f.Replicas,
+		Region:   f.Region,
+		DryRun:   f.DryRun,
+	}
+	fmt.Fprintf(rtx.Stderr, "timeout=%s max-size=%s strategy=%s canary=%d labels=%v at=%v token-set=%t\n",
+		f.Timeout, f.MaxSize, f.Strategy, f.CanaryPercent, labels(f.Label), !f.At.IsZero(), inputs.Opsctl.Env.Token != "")
+	if err := rtx.WriteOutput(out, inputs.Opsctl.Flags.Output, renderDeploy); err != nil {
+		rtx.HaltWith(err)
+	}
+}
+
+func labels(m map[string]string) []string {
+	var out []string
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		out = append(out, k+"="+m[k])
+	}
+	return out
+}
+
+func renderDeploy(w io.Writer, format string, v OpsctlDeployOutput) error {
+	verb := "deployed"
+	if v.DryRun {
+		verb = "would deploy"
+	}
+	_, err := fmt.Fprintf(w, "%s %s x%d to %s\n", verb, v.Service, v.Replicas, v.Region)
+	return err
+}
+-- pods.go.txt --
+package opsctl
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*opsctlPodsHandler)(nil)
+
+type opsctlPodsHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*opsctlPodsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[OpsctlPodsInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := inputs.OpsctlPods.Flags
+	svc := inputs.OpsctlPods.Arguments.Service
+	out := OpsctlPodsOutput{Pods: []Pod{
+		{Name: svc + "-b", Status: "running", Restarts: 2, Started: "2026-10-01T10:00:00Z"},
+		{Name: svc + "-a", Status: "pending"},
+		{Name: svc + "-c", Status: "failed", Restarts: 7, Started: "2026-09-30T08:00:00Z"},
+	}}
+	if f.SortBy != "" {
+		if err := rotini.SortBy(out.Pods, f.SortBy, f.Reverse); err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+	}
+	if f.Limit > 0 && int(f.Limit) < len(out.Pods) {
+		out.Pods = out.Pods[:f.Limit]
+	}
+	out.Total = len(out.Pods)
+	if len(f.Fields) > 0 {
+		sel, err := rotini.SelectFields(out, "pods", f.Fields)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		rtx.HaltWith(rtx.WriteOutput(sel, "json", nil))
+		return
+	}
+	rtx.HaltWith(rtx.WriteOutput(out, inputs.Opsctl.Flags.Output, renderPods))
+}
+
+func renderPods(w io.Writer, format string, v OpsctlPodsOutput) error {
+	fmt.Fprintf(w, "%-8s %-8s %s\n", "NAME", "STATUS", "RESTARTS")
+	for _, p := range v.Pods {
+		fmt.Fprintf(w, "%-8s %-8s %d\n", p.Name, p.Status, p.Restarts)
+	}
+	return nil
+}
+-- delete.go.txt --
+package opsctl
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*opsctlDeleteHandler)(nil)
+
+type opsctlDeleteHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*opsctlDeleteHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[OpsctlDeleteInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	in := inputs.OpsctlDelete
+	if !in.Flags.Yes {
+		rtx.HaltWith(rotini.UsageError(errors.New("refusing to delete without --yes")))
+		return
+	}
+	if in.Arguments.Service == "busy" {
+		rtx.RecordError(errors.New("the cluster is busy"))
+		rtx.HaltWithCode(OpsctlExitUnavailable)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "deleted %s (grace %s)\n", in.Arguments.Service, in.Flags.Grace)
+}
+-- login.go.txt --
+package opsctl
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*opsctlLoginHandler)(nil)
+
+type opsctlLoginHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*opsctlLoginHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[OpsctlLoginInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	f := inputs.OpsctlLogin.Flags
+	fmt.Fprintf(rtx.Stdout, "logged in as %q with a %d-character token\n", f.User.Address, len(f.Token))
+}
+-- set.go.txt --
+package opsctl
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*opsctlConfigSetHandler)(nil)
+
+type opsctlConfigSetHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*opsctlConfigSetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[OpsctlConfigSetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	a := inputs.OpsctlConfigSet.Arguments
+	rtx.HaltWith(rotini.SetConfigValue(rtx, "user", a.Key, a.Value))
+}
+-- unset.go.txt --
+package opsctl
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*opsctlConfigUnsetHandler)(nil)
+
+type opsctlConfigUnsetHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*opsctlConfigUnsetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[OpsctlConfigUnsetInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	rtx.HaltWith(rotini.UnsetConfigValue(rtx, "user", inputs.OpsctlConfigUnset.Arguments.Key))
+}
+-- path.go.txt --
+package opsctl
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*opsctlConfigPathHandler)(nil)
+
+type opsctlConfigPathHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*opsctlConfigPathHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rtx.Inputs[OpsctlConfigPathInputs](); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	for _, name := range []string{"user", "project", "override"} {
+		path, exists, err := rotini.ConfigFilePath(rtx, name)
+		if err != nil {
+			rtx.HaltWith(err)
+			return
+		}
+		fmt.Fprintf(rtx.Stdout, "%s %s exists=%t\n", name, path, exists)
+	}
+}
+-- user.yaml --
+# user settings
+deploy:
+  replicas: 4
+  timeout: 10m
+  labels:
+    team: core
+    tier: web
+region: eu-west-1
+profiles:
+  default: {}
+  prod:
+    region: us-east-1
+    deploy:
+      replicas: 9
+      labels:
+        tier: api
+-- project.toml --
+[deploy]
+timeout = "20m"
+replicas = 3.0
+-- dotenv --
+OPS_TOKEN=from-dotenv
+OPS_DEPLOY_REPLICAS=5
+-- alt.json --
+{"deploy": {"replicas": 7, "timeout": "1m"}, "region": "us-east-1"}
+-- tok.txt --
+tok-123
+-- want-pods.txt --
+NAME     STATUS   RESTARTS
+api-c    failed   7
+api-b    running  2
+api-a    pending  0
+-- want-fields.json --
+{
+  "pods": [
+    {
+      "name": "api-a",
+      "status": "pending"
+    },
+    {
+      "name": "api-b",
+      "status": "running"
+    },
+    {
+      "name": "api-c",
+      "status": "failed"
+    }
+  ],
+  "total": 3
+}
+-- reserved.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  config_files:
+    - name: explicit
+      path: ./override.json
+    - name: default
+      path: ./app.yaml

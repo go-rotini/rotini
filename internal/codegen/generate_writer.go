@@ -29,11 +29,15 @@ type planner struct {
 	// created lists, in order, each create-once file the run created: files the author owns
 	// from then on.
 	created []string
+
+	// names holds, by directory, the file names in it as the plan so far leaves them, read
+	// once per directory to see the case a generated file is spelled with on disk.
+	names map[string]map[string]bool
 }
 
 // newPlanner returns a planner that applies each operation (dry false) or only records it.
 func newPlanner(dry bool) *planner {
-	return &planner{dry: dry, plan: fs.NewPlan(), pending: map[string][]byte{}, removed: map[string]bool{}}
+	return &planner{dry: dry, plan: fs.NewPlan(), pending: map[string][]byte{}, removed: map[string]bool{}, names: map[string]map[string]bool{}}
 }
 
 // generatedPerm is the mode of a file rotini creates.
@@ -44,7 +48,18 @@ const generatedPerm = 0o644
 func (pl *planner) write(path string, content []byte) error {
 	current, mode, exists, err := pl.read(path)
 	if err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+		return fmt.Errorf("write %s: %w", relToWorkdir(path), err)
+	}
+	if exists {
+		// A file spelled in another case, as a command renamed only in case leaves on a
+		// case-insensitive file system, is replaced by one spelled as the spec now says: that
+		// spelling is what a case-sensitive checkout of the repository sees.
+		if old := pl.spelledAs(path); old != "" {
+			if err := pl.apply(fs.PlanOp{Action: fs.PlanActionDelete, Path: old}); err != nil {
+				return err
+			}
+			return pl.apply(fs.PlanOp{Action: fs.PlanActionCreate, Path: path, Data: content, Perm: mode})
+		}
 	}
 	switch {
 	case !exists:
@@ -111,6 +126,9 @@ func (pl *planner) read(path string) (content []byte, mode os.FileMode, exists b
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("stat %s: %w", path, err)
 	}
+	if info.IsDir() {
+		return nil, 0, false, errors.New("it is a directory, not a file")
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("read %s: %w", path, err)
@@ -129,6 +147,13 @@ func (pl *planner) apply(op fs.PlanOp) error {
 		}
 	}
 	pl.plan.Ops = append(pl.plan.Ops, op)
+	if names, ok := pl.names[filepath.Dir(op.Path)]; ok {
+		if op.Action == fs.PlanActionDelete {
+			delete(names, filepath.Base(op.Path))
+		} else {
+			names[filepath.Base(op.Path)] = true
+		}
+	}
 	if pl.dry {
 		switch op.Action {
 		case fs.PlanActionDelete:
@@ -144,6 +169,38 @@ func (pl *planner) apply(op fs.PlanOp) error {
 		return fmt.Errorf("%s %s: %w", op.Action, op.Path, err)
 	}
 	return nil
+}
+
+// spelledAs returns the path of the file a lookup of path finds when its name differs from
+// path's only in case, which happens on a case-insensitive file system; else "".
+func (pl *planner) spelledAs(path string) string {
+	dir, base := filepath.Dir(path), filepath.Base(path)
+	names := pl.dirNames(dir)
+	if names[base] {
+		return ""
+	}
+	for name := range names {
+		if strings.EqualFold(name, base) {
+			return filepath.Join(dir, name)
+		}
+	}
+	return ""
+}
+
+// dirNames returns the file names in dir as the plan so far leaves them.
+func (pl *planner) dirNames(dir string) map[string]bool {
+	if names, ok := pl.names[dir]; ok {
+		return names
+	}
+	names := map[string]bool{}
+	// A directory that can't be read holds nothing to respell; writing into it reports why.
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			names[e.Name()] = true
+		}
+	}
+	pl.names[dir] = names
+	return names
 }
 
 // fileAncestor returns the nearest ancestor of path that exists, on disk or in the plan, when

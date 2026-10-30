@@ -10,6 +10,7 @@
          roffIndented  the same, with .sp breaks, for text inside a .TP paragraph
          roffLines  lines kept as written, for inside .nf … .fi
          roffArg    one quoted argument of a request such as .TH or .SH
+         roffCode   like roff, with markdown code spans (`x`) set in bold, for .Rules
 
        After rendering, rotini drops blank lines (in roff they are stray space, not
        paragraph breaks) and trailing whitespace, and ends the page with a newline.
@@ -37,7 +38,11 @@
          .Type, one item at a time. An exit status row carries .Name (its snake_case name, or
          "") and .Retryable. Command, argument, flag, env and config rows carry
          .DeprecatedSince and .RemovedIn; deprecation .Deprecated .DeprecatedSince .RemovedIn
-         renders "deprecated since 1.4.0, removed in 2.0.0: <message>".
+         renders "deprecated since 1.4.0, removed in 2.0.0: <message>". The page's own
+         .Deprecated is the command's deprecation message, ending "; use <replacement> instead"
+         when it declares replaced_by ("" when it is not deprecated), with .DeprecatedSince and
+         .RemovedIn. .ExitStatus is the command's exit_status, else the root's, which is
+         program-wide. A row's .Default writes a list or map default as JSON.
          Argument, flag, env and config rows carry .Description (the input's longer text,
          paragraphs separated by blank lines; roffIndented keeps it inside the option's .TP)
          and .Stability ("experimental", "beta" or "" for stable, as declared), and command rows
@@ -52,13 +57,13 @@
          .Topic is true: .Summary and .Description are the topic's, .Environment holds a
          generated environment topic's rows, each with .Commands (the commands that read it),
          and the rest is empty.
-       HELPERS: roff, roffBlock, roffIndented, roffLines, roffArg, join, upper, lower, title,
-                trim, trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
+       HELPERS: roff, roffBlock, roffIndented, roffLines, roffArg, roffCode, join, upper, lower,
+                title, trim, trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
                 hasPrefix, hasSuffix, first, last, alsoSetBy, deprecation, stabilityNote, listed,
                 described. */ -}}
 {{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Accepts}} ({{roff .}}){{end}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}{{end -}}
 {{- define "rules"}}{{with .Rules}}.br
-{{roff (join . "; ")}}
+{{roffCode (join . "; ")}}
 {{end}}{{end -}}
 {{- define "values"}}{{with .EnumValues}}.RS
 .RS 2
@@ -89,13 +94,15 @@ Every word after \fB{{roff .}}\fR is passed through as written, so options go be
 {{end}}{{with .ResponseFiles}}.PP
 A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\fR), whose lines are read as arguments, one per line, until \fB\-\-\fR; to pass a word starting with \fB{{roff .}}\fR, double it (\fB{{roff .}}{{roff .}}x\fR).
 {{end}}
-{{if or .Header .Description .Stability .Effects}}.SH DESCRIPTION
+{{if or .Header .Description .Deprecated .Stability .Effects}}.SH DESCRIPTION
 {{with .Header}}{{roffBlock .}}
 {{end}}{{with .Description}}{{if $.Header}}.PP
 {{end}}{{roffBlock .}}
-{{end}}{{with .Stability}}{{if or $.Header $.Description}}.PP
+{{end}}{{if .Deprecated}}{{if or .Header .Description}}.PP
+{{end}}This command is {{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}
+{{end}}{{with .Stability}}{{if or $.Header $.Description $.Deprecated}}.PP
 {{end}}{{roff (stabilityNote .)}}
-{{end}}{{with .Effects}}{{if or $.Header $.Description $.Stability}}.PP
+{{end}}{{with .Effects}}{{if or $.Header $.Description $.Deprecated $.Stability}}.PP
 {{end}}Effects: {{.}}
 {{end}}{{end}}
 {{range .CommandGroups}}.SH {{roffArg (upper (default "Commands" .Title))}}

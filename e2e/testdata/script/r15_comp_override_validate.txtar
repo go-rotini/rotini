@@ -1,0 +1,91 @@
+# R15 — validate places what is wrong with an override in the parent's file, at the entry: a key
+# the mounted command's handler depends on, an entry naming no command, a spec mounted inside an
+# override, and an example that doesn't parse against the mounted command. A problem of the
+# child's own is reported in the child's file, once.
+
+exec rotini validate app/.rotini.spec.yaml
+! stderr .
+
+cp bad.spec.yaml app/.rotini.spec.yaml
+cp db-bad.spec.yaml db/.rotini.spec.yaml
+wantexit 1 rotini validate app/.rotini.spec.yaml
+stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:11:18: command app/db/status: overrides the mounted command `app db status`, so it can''t set `stdin`; '
+stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:13:15: command app/db/status: overrides `app db status`, which declares no command "deep"; '
+stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:15:21: command app/db/status: mounts "\.\./db/\.rotini\.spec\.yaml" inside an override of a mounted command; '
+stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:7:18: command app: \$ref "\.\./db/\.rotini\.spec\.yaml": example "app db status --bogus" does not parse: unknown flag "--bogus"$'
+stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:8:17: command app: \$ref "\.\./db/\.rotini\.spec\.yaml": sets `filename` on a `\$ref` node; '
+stderr '^Error: spec: db[/\\]\.rotini\.spec\.yaml:7:25: command db/status: sets `deprecated_since` without `deprecated`; '
+! stderr 'app[/\\]\.rotini\.spec\.yaml:1[0-9]:[0-9]+: .*deprecated_since'
+
+# An override's deprecated_identifiers name an alias the mounted spec gives the command.
+cp db-good.spec.yaml db/.rotini.spec.yaml
+cp aliased.spec.yaml app/.rotini.spec.yaml
+exec rotini validate app/.rotini.spec.yaml
+
+-- db/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  commands:
+    - name: status
+      aliases: [st]
+      flags:
+        - name: verbose
+          identifiers: [-v, --verbose]
+          schema: { type: bool }
+-- db-good.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  commands:
+    - name: status
+      aliases: [st]
+      flags:
+        - name: verbose
+          identifiers: [-v, --verbose]
+          schema: { type: bool }
+-- db-bad.spec.yaml --
+version: 0.0.0
+command:
+  name: db
+  commands:
+    - name: status
+      aliases: [st]
+      deprecated_since: 1.0.0
+      flags:
+        - name: verbose
+          identifiers: [-v, --verbose]
+          schema: { type: bool }
+-- app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  examples: ["app db status -v"]
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+-- bad.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+      summary: the database
+      examples: ["app db status --bogus"]
+      filename: app_db.go
+      commands:
+        - name: status
+          stdin: { format: text }
+          commands:
+            - name: deep
+              summary: no such command
+            - $ref: ../db/.rotini.spec.yaml
+-- aliased.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  commands:
+    - $ref: ../db/.rotini.spec.yaml
+      commands:
+        - name: status
+          deprecated: renamed
+          deprecated_identifiers: [st]

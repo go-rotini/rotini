@@ -33,6 +33,45 @@ func lintToolStdinClash(spec *Spec, conf *Conf) []error {
 	return problems
 }
 
+// lintToolNames rejects, when the tools feature is enabled, a command offered to agents whose
+// tool name (the root's name and the command path joined with "_") is longer than one of the
+// feature's targets allows.
+func lintToolNames(spec *Spec, conf *Conf) []error {
+	if spec == nil || conf == nil || conf.Generate == nil {
+		return nil
+	}
+	f := conf.Generate.featureOf("tools")
+	if f == nil || !f.Enabled {
+		return nil
+	}
+	targets := f.Targets
+	if len(targets) == 0 {
+		targets = []string{"mcp"}
+	}
+	var problems []error
+	walkChainsAt(spec, func(chain []*Command, cmdPath, ptr string) {
+		names := make([]string, 0, len(chain))
+		for _, c := range chain {
+			if c.Name == "" {
+				return // a $ref taking its name from the composed spec: generate checks it
+			}
+			names = append(names, c.Name)
+		}
+		if !toolCommandOffered(chain) {
+			return
+		}
+		name := strings.Join(names, "_")
+		for _, target := range targets {
+			if limit, ok := toolNameLimits[target]; ok && len(name) > limit {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + cmdPath,
+					msg: fmt.Sprintf("makes the tool name %q, %d characters, longer than %s allows (%d); shorten a name on its path, or keep it from agents with `agent: false`", name, len(name), target, limit)})
+				return
+			}
+		}
+	})
+	return problems
+}
+
 // toolCommandOffered reports whether the last command of chain is offered to agents, as
 // agentProgram decides it from the contract.
 func toolCommandOffered(chain []*Command) bool {

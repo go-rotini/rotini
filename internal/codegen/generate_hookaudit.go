@@ -493,19 +493,26 @@ func exitCodesOf(entries []ExitStatusEntry) []int {
 	return codes
 }
 
-// exitContract is what a handler type's command documents: how it is typed, and its codes.
+// exitContract is what a handler type's command documents: how it is typed, its codes, and the
+// command whose exit_status lists them (the root's when the command inherits it).
 type exitContract struct {
 	invocation string
 	codes      []int
+	owner      string
 }
 
-// exitContracts maps each generated handler type whose command declares exit_status to that
-// contract. A command without exit_status documents nothing, so it is not audited.
+// exitContracts maps each generated handler type to the exit_status its command documents: its
+// own, else the root's, which is program-wide. A command with neither documents nothing, so
+// it is not audited.
 func (p *program) exitContracts() map[string]exitContract {
 	out := map[string]exitContract{}
 	for _, c := range p.ownCommands() {
-		if c.handler != "" && len(c.exitCodes) > 0 {
-			out[c.handler] = exitContract{invocation: c.invocation, codes: c.exitCodes}
+		contract := exitContract{invocation: c.invocation, codes: c.exitCodes, owner: c.invocation}
+		if len(c.exitCodes) == 0 {
+			contract.codes, contract.owner = p.root.exitCodes, p.root.invocation
+		}
+		if c.handler != "" && len(contract.codes) > 0 {
+			out[c.handler] = contract
 		}
 	}
 	return out
@@ -619,13 +626,16 @@ func undocumentedExitCodes(fset *token.FileSet, files map[string]*ast.File, cont
 func exitCodeProblem(arg ast.Expr, f *ast.File, contract exitContract, named namedExitCodes, consts map[string]int) string {
 	code, known := intValue(arg, consts)
 	if c, ok := named.lookup(arg, f); ok {
-		if c.owner != contract.invocation {
+		if c.owner != contract.owner {
 			return fmt.Sprintf("%s, which belongs to %q; declare the code on this command and use its own constant", c.name, c.owner)
 		}
 		code, known = c.code, true
 	}
 	if !known || code == 0 || slices.Contains(contract.codes, code) {
 		return ""
+	}
+	if contract.owner != contract.invocation {
+		return fmt.Sprintf("%d, which the exit_status it inherits from %q doesn't list", code, contract.owner)
 	}
 	return fmt.Sprintf("%d, which its exit_status doesn't list", code)
 }

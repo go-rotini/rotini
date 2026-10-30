@@ -23,7 +23,8 @@ type enumValue struct {
 
 // detailed reports whether the member declares more than its value and summary.
 func (v enumValue) detailed() bool {
-	return len(v.Aliases) > 0 || v.Hidden || v.Deprecated != ""
+	return len(v.Aliases) > 0 || len(v.DeprecatedAliases) > 0 || v.Hidden || v.Deprecated != "" ||
+		v.DeprecatedSince != "" || v.RemovedIn != "" || v.ReplacedBy != ""
 }
 
 // listed reports whether help's short list, completion and error messages offer the value:

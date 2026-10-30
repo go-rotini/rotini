@@ -19,5 +19,12 @@ when to color (default auto) [auto|always|never]
 The tasks to import.
 .PP
 Reads a \fByaml\fR document (\fBTaskList\fR) from standard input. Required.
+.SH "EXIT STATUS"
+.TP
+\fB0\fR
+done
+.TP
+\fB3\fR (unreachable)
+the fleet did not answer (retryable)
 .SH "SEE ALSO"
 \fBops\fR(1)

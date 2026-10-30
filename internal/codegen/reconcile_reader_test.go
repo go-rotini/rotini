@@ -59,6 +59,45 @@ func TestReadSpec_formatsAndTags(t *testing.T) {
 	}
 }
 
+// TestReconcileSpec_byteOrderMark reads a spec that starts with a byte order mark, as some
+// Windows editors write it, in every format, and reports positions on its first line as an
+// editor shows them.
+func TestReconcileSpec_byteOrderMark(t *testing.T) {
+	const bom = "\xef\xbb\xbf"
+	docs := map[string]string{
+		".yaml":  "version: 0.0.0\ncommand:\n  name: demo\n",
+		".json":  `{"version": "0.0.0", "command": {"name": "demo"}}`,
+		".jsonc": "// c\n{\"version\": \"0.0.0\", \"command\": {\"name\": \"demo\"}}",
+		".toml":  "version = \"0.0.0\"\n[command]\nname = \"demo\"\n",
+	}
+	for ext, doc := range docs {
+		t.Run(ext, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".rotini.spec"+ext)
+			if err := os.WriteFile(path, []byte(bom+doc), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rs, err := reconcileSpec(path)
+			if err != nil {
+				t.Fatalf("reconcileSpec: %v", err)
+			}
+			if rs.spec.Command.Name != "demo" {
+				t.Errorf("command name %q, want demo", rs.spec.Command.Name)
+			}
+		})
+	}
+	path := filepath.Join(t.TempDir(), ".rotini.spec.json")
+	if err := os.WriteFile(path, []byte(bom+`{"version": "0.0.0", "command": {"name": "demo"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rs, err := reconcileSpec(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line, col, _ := rs.locate("/command"); line != 1 || col != 33 {
+		t.Errorf("/command is at %d:%d, want 1:33", line, col)
+	}
+}
+
 func TestReadFile_errors(t *testing.T) {
 	// Unsupported extension.
 	if _, err := readSpec(filepath.Join(t.TempDir(), "spec.xml")); !errors.Is(err, errUnsupportedFormat) {
@@ -272,7 +311,7 @@ func TestSourceLocators(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			line, col, ok := tc.locator([]byte(tc.doc))("/command/name")
+			line, col, ok := tc.locator([]byte(tc.doc))(tc.pointer)
 			if !ok {
 				t.Fatalf("%s locator could not resolve %s", tc.name, tc.pointer)
 			}
@@ -280,6 +319,38 @@ func TestSourceLocators(t *testing.T) {
 				t.Errorf("%s locator = line %d col %d, want line %d and a positive column", tc.name, line, col, tc.line)
 			}
 		})
+	}
+}
+
+// TestTOMLLocator_arraysOfTables pins that a pointer into the i-th [[name]] entry, a
+// sub-table header under it, an inline table or an inline array lands on that value's start.
+func TestTOMLLocator_arraysOfTables(t *testing.T) {
+	doc := "[command]\nname = \"x\"\na.b = 1\n\n[[command.flags]]\nname = \"a\"\n\n[command.flags.schema]\n" +
+		"minimum = \"x\"\n\n[[command.flags]]\nname = \"b\"\nschema = {type = \"int\", minimum = 2}\n" +
+		"list = [1, {q = 2}]\n\n[[command.commands]]\nname = \"c\"\n\n[[command.commands.flags]]\nname = \"cf\"\n"
+	locate := tomlLocator([]byte(doc))
+	for pointer, want := range map[string][2]int{
+		"/command/name":                    {2, 8},
+		"/command/a/b":                     {3, 7},
+		"/command/flags":                   {5, 1},
+		"/command/flags/0":                 {5, 1},
+		"/command/flags/0/name":            {6, 8},
+		"/command/flags/0/schema":          {8, 1},
+		"/command/flags/0/schema/minimum":  {9, 11},
+		"/command/flags/1/name":            {12, 8},
+		"/command/flags/1/schema/minimum":  {13, 35},
+		"/command/flags/1/list/1/q":        {14, 17},
+		"/command/commands/0/flags/0/name": {20, 8},
+	} {
+		line, col, ok := locate(pointer)
+		if !ok || line != want[0] || col != want[1] {
+			t.Errorf("tomlLocator(%s) = %d:%d (ok %v), want %d:%d", pointer, line, col, ok, want[0], want[1])
+		}
+	}
+	for _, pointer := range []string{"/command/flags/2", "/command/flags/x", "/command/name/0", "/command/nope"} {
+		if line, col, ok := locate(pointer); ok {
+			t.Errorf("tomlLocator(%s) = %d:%d, want no position", pointer, line, col)
+		}
 	}
 }
 

@@ -191,9 +191,10 @@ stdout '^Tok=hello$'
 stderr '--pin must match .*\[redacted\]'
 ! stderr hunter
 
-# layout lists are tried in order and an error names them all; relative times.
+# layout lists are tried in order and an error names them all; a date read as a Unix timestamp
+# is that day's UTC midnight; relative times.
 exec ./vals$exe show --lay 1700000000
-stdout '^Lay=2023-11-14 22:13:20 \+0000 UTC$'
+stdout '^Lay=2023-11-14 00:00:00 \+0000 UTC$'
 ! exec ./vals$exe show --lay 01/02/2026
 stderr 'write it as 2006-01-02 or a Unix timestamp'
 exec ./vals$exe show --since yesterday
@@ -329,7 +330,7 @@ stdout '^ +json +machine readable$'
 ! stdout 'secret|xml|yml'
 stdout '--jobs int +parallel jobs \(default the number of CPUs\)'
 stdout '--file PATH +where to read'
-stdout '--token string +api token$'
+stdout '--token string +api token \(@file\)$'
 ! stdout s3cr3t
 stdout '--limit bytesize'
 stdout '--sizes \[\]bytesize'

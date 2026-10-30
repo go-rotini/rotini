@@ -34,6 +34,15 @@ command:
           - {value: slow, deprecated_aliases: [s]}
           - {value: safe, deprecated_since: 1.0.0}
           - {value: old, deprecated: gone, deprecated_since: 2.0.0, removed_in: 1.0.0, replaced_by: new}
+    # The same mistakes on an enum that declares no aliases, hidden value or deprecation.
+    - name: tier
+      identifiers: [--tier]
+      schema:
+        type: string
+        enum:
+          - {value: gold, deprecated_aliases: [g]}
+          - {value: silver, deprecated_since: 1.0.0}
+          - {value: bronze, replaced_by: gold}
     # Nothing left to offer.
     - name: level
       identifiers: [--level]

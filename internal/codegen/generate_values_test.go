@@ -169,7 +169,7 @@ func TestPages_valueKeys(t *testing.T) {
 	}
 	md := render("markdown", templateMarkdown, false)
 	for _, want := range []string{
-		"(one of json, yaml)",
+		"(one of `json`, `yaml`)",
 		"- `yaml` — human-friendly (also yml)",
 		"- `ini` (deprecated since 1.4.0, removed in 2.0.0: going away; use json instead)",
 	} {

@@ -23,6 +23,7 @@
                           commands read from the environment and config files; .Flag is
                           the flag an environment variable sets, "" for an env input
          .JSON .Previews  some command has a JSON flag; some has a dry-run or confirm flag
+         .DryRuns         some command has a dry-run flag
        HELPERS: quote (a YAML/JSON string), join, upper, lower, title, trim, trimPrefix,
                 trimSuffix, replace, indent, repeat, default, contains, hasPrefix, hasSuffix,
                 first, last. */ -}}
@@ -49,7 +50,7 @@ allowed-tools: {{quote .}}
 {{- if .JSON}}
 - For output you can parse, add the command's JSON flag, listed below. It writes JSON to stdout; messages and errors go to stderr.
 {{- end}}
-{{- if .Previews}}
+{{- if .DryRuns}}
 - Before running a destructive command, run it with its dry-run flag to see what it would do.
 {{- end}}
 - Effects say what a command does: read changes nothing, write creates or changes things, and destructive deletes or overwrites what can't be got back. A command with no effects listed may do any of these.

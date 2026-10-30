@@ -306,7 +306,7 @@ command:
 `
 	dir, _ := emitModule(t, spec, conf)
 	md := readEmitted(t, dir, "internal/cmd/acme/renders/markdown_acme.md")
-	for _, want := range []string{"- `--format` `string` (one of json, yaml)\n", "- `--count` `int`; also set by `ACME_COUNT`", "- `[target]`\n"} {
+	for _, want := range []string{"- `--format` `string` (one of `json`, `yaml`)\n", "- `--count` `int`; also set by `ACME_COUNT`", "- `[target]`\n"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown lacks %q:\n%s", want, md)
 		}

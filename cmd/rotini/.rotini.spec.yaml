@@ -511,8 +511,9 @@ command:
         a shell wildcard such as cmd/*/.rotini.spec.yaml can name every cli each time. A command
         name or alias that two entries would share is an error, and nothing is written.
         --prune also removes the entries, in the commands list being mounted into, whose spec
-        file no longer exists. Regenerate the parent afterwards. Only YAML specs can be mounted
-        into for now.
+        file no longer exists, with the comment lines directly above each; a comment above a
+        blank line stays. Regenerate the parent afterwards. Only YAML specs can be mounted into
+        for now.
       examples:
         - rotini mount cmd/db/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml
         - rotini mount cmd/*/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml --group tools

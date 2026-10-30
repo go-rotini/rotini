@@ -562,6 +562,8 @@ type templateDocArgumentRow struct {
 	ConfigKey   string   // the config fallback key; "" for none, or when the page's command reads no config files
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
+
+	defaultJSON string // a list or map default as JSON, which man and markdown show in place of Default; "" otherwise
 }
 
 type templateDocFlagRow struct {
@@ -589,9 +591,10 @@ type templateDocFlagRow struct {
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 
-	key  string   // the config fallback key whether or not the page reads config files
-	ids  []string // every identifier the flag answers to, to tell when a nearer flag shadows it
-	name string   // the flag's name
+	defaultJSON string   // see templateDocArgumentRow
+	key         string   // the config fallback key whether or not the page reads config files
+	ids         []string // every identifier the flag answers to, to tell when a nearer flag shadows it
+	name        string   // the flag's name
 }
 
 // templateDocFlagGroup is one bucket of flags in the Flags section. Title is the `group` value;
@@ -623,6 +626,8 @@ type templateDocEnvRow struct {
 	Rules       []string // the declared constraints as sentences, for man and markdown
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
+
+	defaultJSON string // see templateDocArgumentRow
 }
 
 type templateDocConfigRow struct {
@@ -642,6 +647,8 @@ type templateDocConfigRow struct {
 	Rules       []string // the declared constraints as sentences, for man and markdown
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
+
+	defaultJSON string // see templateDocArgumentRow
 }
 
 type templateDocExitRow struct {
@@ -702,6 +709,10 @@ type templateHelpData struct {
 	// Effects describes what running the command does, stating only what the spec states
 	// ("destructive, not idempotent"); "" when it declares no effects.
 	Effects string
+	// Deprecated is the command's own deprecation message, with "use <replacement> instead"
+	// when it declares replaced_by; "" when the command is not deprecated as a whole.
+	// DeprecatedSince and RemovedIn are its planned lifecycle, "" when not planned.
+	Deprecated, DeprecatedSince, RemovedIn string
 }
 
 // parseDocTemplate parses doc-template text with the shared FuncMap.
@@ -821,6 +832,7 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 	clean := func(s string) string {
 		return strings.ReplaceAll(strings.ReplaceAll(s, "\t", " "), "\n", " ")
 	}
+	d.Deprecated = clean(d.Deprecated)
 	d.CommandGroups = append([]templateDocCommandGroup(nil), d.CommandGroups...)
 	for i := range d.CommandGroups {
 		d.CommandGroups[i].Description = untab(d.CommandGroups[i].Description)
@@ -1007,6 +1019,7 @@ func templateFuncMap() template.FuncMap {
 		"roffBlock":    roffBlock,
 		"roffIndented": roffIndented,
 		"roffArg":      roffArg,
+		"roffCode":     roffCode,
 	}
 }
 

@@ -26,6 +26,13 @@ command:
     - name: workers
       identifiers: [--workers]
       schema: {type: int, maximum: 1s}
+    # Element types belong to lists, and a bool flag has no value to name.
+    - name: port
+      identifiers: [--port]
+      schema: {type: string, items: {type: int}}
+    - name: quiet
+      identifiers: [--quiet]
+      schema: {type: bool, placeholder: YES}
     # Fine: bounds in the type's spelling, and bytes as a number.
     - name: timeout
       identifiers: [--timeout]

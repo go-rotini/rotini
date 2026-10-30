@@ -40,6 +40,7 @@
 //	r11  a lean runtime: linked packages, binary size
 //	r12  the guide's recipes: each recipe's code, built and run
 //	r13  the guide's other claims: stated behaviour, defaults and shown output, per section
+//	r14  whole CLIs built as a user would, from init to the shell, covering many areas at once
 package e2e
 
 import (

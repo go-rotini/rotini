@@ -202,6 +202,66 @@ func TestStubDisabled_noteMustFollowTheConstraint(t *testing.T) {
 	}
 }
 
+// TestGenerate_caseOnlyRename renames a command only in case (Foo to foo) on a case-insensitive
+// file system, where the handler file keeps its old spelling: it stays the command's handler,
+// not an orphan disabled on one run and restored on the next, and each generated page is
+// written under the spelling the spec now gives, which a case-sensitive checkout reads.
+func TestGenerate_caseOnlyRename(t *testing.T) {
+	probe := t.TempDir()
+	writeTestFile(t, probe, "Ab", "")
+	if _, err := os.Stat(filepath.Join(probe, "aB")); err != nil {
+		t.Skip("the file system is case-sensitive")
+	}
+	const conf = `version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/app/zz_rotini.go
+  features:
+    - type: help
+      enabled: true
+      embed: true
+    - type: markdown
+      enabled: true
+      embed: true
+`
+	spec := func(name string) string {
+		return "version: 0.0.0\ncommand:\n  name: app\n  commands:\n    - name: " + name + "\n"
+	}
+	dir := generateSpecModule(t, spec("Foo"), conf)
+	cmdDir := filepath.Join(dir, "internal", "cmd", "app")
+	writeTestFile(t, dir, ".rotini.spec.yaml", spec("foo"))
+	for range 2 {
+		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(_ string, e error) {
+			if e != nil {
+				t.Fatal(e)
+			}
+		}, func([]error) {}); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(cmdDir, "app_Foo.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stubDisabled(body) {
+			t.Fatalf("the handler was disabled:\n%s", body)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(cmdDir, "renders"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	for _, want := range []string{"help_app_foo.txt", "markdown_app_foo.md"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("renders holds %v, want %s", names, want)
+		}
+	}
+}
+
 func TestBuildIgnored_negatedPlatformStillBuilds(t *testing.T) {
 	if buildIgnored([]byte("//go:build !linux\n\npackage demo\n")) {
 		t.Error("a !linux file was treated as out of every build")

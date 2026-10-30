@@ -20,7 +20,7 @@ func lintShortCircuitScope(spec *Spec) []error {
 			if len(missing) == 0 {
 				continue
 			}
-			p := inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name, fmt.Sprintf(
+			p := inputProblem(fmt.Sprintf("%s/flags/%d/short_circuit", ptr, i), path, "flag", f.Name, fmt.Sprintf(
 				"is short_circuit but not cascading, so it applies only to %q: `%s %s %s` is a usage error; set `cascading: true` so every sub-command answers it",
 				c.Name, c.Name, missing[0], longForm(f)))
 			p.sev = severityWarning
@@ -64,7 +64,7 @@ func lintRequiredFlagScope(spec *Spec) []error {
 			if f.Cascading || f.ShortCircuit || f.Schema == nil || !f.Schema.Required {
 				continue
 			}
-			p := inputProblem(fmt.Sprintf("%s/flags/%d", ptr, i), path, "flag", f.Name, fmt.Sprintf(
+			p := inputProblem(fmt.Sprintf("%s/flags/%d/schema/required", ptr, i), path, "flag", f.Name, fmt.Sprintf(
 				"is required but isn't cascading, so it applies only when %#q itself runs, not to its sub-commands%s; set `cascading: true` if the sub-commands need it too",
 				invocation, example))
 			p.sev = severityWarning

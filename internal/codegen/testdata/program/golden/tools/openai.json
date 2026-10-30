@@ -100,7 +100,7 @@
     "type": "function"
   },
   {
-    "description": "add tasks read from stdin\n\nEffects: write.",
+    "description": "add tasks read from stdin\n\nEffects: write.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
     "name": "taskr_import",
     "parameters": {
       "additionalProperties": false,
@@ -129,15 +129,39 @@
     "type": "function"
   },
   {
-    "description": "sync with the server\n\nEffects: destructive, open world.\n\nRequires TASKR_KEY in the server's environment.",
+    "description": "sync with the server\n\nEffects: destructive, open world.\n\nRequires TASKR_KEY in the server's environment.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
     "name": "taskr_remote_sync",
     "parameters": {
       "additionalProperties": false,
       "properties": {
+        "max-upload": {
+          "description": "the largest batch to send",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "prune": {
           "description": "also delete tasks the server doesn't have",
           "type": [
             "boolean",
+            "null"
+          ]
+        },
+        "retry-after": {
+          "description": "pauses between retries",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "timeout": {
+          "description": "how long to wait for the server",
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -151,7 +175,10 @@
         }
       },
       "required": [
+        "max-upload",
         "prune",
+        "retry-after",
+        "timeout",
         "verbose"
       ],
       "type": "object"
@@ -160,7 +187,7 @@
     "type": "function"
   },
   {
-    "description": "show the server's address\n\nEffects: read.",
+    "description": "show the server's address\n\nEffects: read.\n\nExit codes: 0: done; 69 (offline, retryable): the server can't be reached.",
     "name": "taskr_remote_show",
     "parameters": {
       "additionalProperties": false,

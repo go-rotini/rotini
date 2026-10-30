@@ -136,6 +136,9 @@ func constraintTags(schema *InputSchema) string {
 	if r := relative(schema); r != "" {
 		parts = append(parts, "relative:"+strconv.Quote(r))
 	}
+	if markDate(schema) {
+		parts = append(parts, `date:"true"`)
+	}
 	if base := intBase(schema); base != "" {
 		parts = append(parts, "base:"+strconv.Quote(base))
 	}

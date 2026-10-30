@@ -128,7 +128,9 @@ another package can import them, declare a `models` target under the conf's
 
 Renaming a command, or changing its `filename:`, is a removal and an addition: the old handler
 file is disabled and then deleted, and a new, empty one is created. Move your code across
-before the second `go generate`, or recover it from git afterwards.
+before the second `go generate`, or recover it from git afterwards. A rename that changes
+only letter case (`Deploy` to `deploy`) on a case-insensitive file system, as on macOS and
+Windows, keeps the handler file under its old spelling, since both names are the same file.
 
 What rotini rewrites on every run, and never asks you to edit:
 

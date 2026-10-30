@@ -326,3 +326,23 @@ status	show status
 typed-path	the program typed
 == directory-unique
 ./src	/w/src
+== path-type-file
+'./sp ace.yaml'	/w/sp ace.yaml
+./a.yaml	/w/a.yaml
+./b.yml	/w/b.yml
+./bin	/w/bin
+./c.txt	/w/c.txt
+./cases.txt	/w/cases.txt
+./completion_bash.sh	/w/completion_bash.sh
+./completion_fish.fish	/w/completion_fish.fish
+./completion_nushell.nu	/w/completion_nushell.nu
+./completion_powershell.ps1	/w/completion_powershell.ps1
+./completion_zsh.zsh	/w/completion_zsh.zsh
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub
+== path-type-directory
+./bin	/w/bin
+./drivers	/w/drivers
+./src	/w/src
+./sub	/w/sub

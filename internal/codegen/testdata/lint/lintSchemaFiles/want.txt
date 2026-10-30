@@ -1,1 +1,5 @@
-conf: .rotini.conf.yaml:7:13: generate.schemas.spec.file: "../../outside.spec.json" must resolve under the module root
+conf: .rotini.conf.yaml:8:13: generate.schemas.spec.file: "../../outside.spec.json" must resolve under the module root
+conf: .rotini.conf.yaml:10:13: generate.schemas.conf.file: "../../outside.spec.json" must resolve under the module root
+conf: .rotini.conf.yaml:10:13: generate.schemas.conf.file: "../../outside.spec.json" is also generate.schemas.spec.file; each schema needs its own file, or the second overwrites the first
+conf: .rotini.conf.yaml:12:11: generate.contract.file: "../contract.json" must resolve under the module root
+conf: .rotini.conf.yaml:15:13: generate.packages.cmd.file: "../cmd/demo/zz_rotini.go" must resolve under the module root
