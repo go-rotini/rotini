@@ -1,4 +1,4 @@
-FROM ghcr.io/nushell/nushell:0.116.1-alpine@sha256:3cd347f3cb5c6cdb06098c33be0fc2e5d3dc603e313d46c31c6fc4fe9ce80351
+FROM ghcr.io/nushell/nushell:0.116.1-alpine@sha256:a4d8b18a68d629d24d8e70f6616c99f4dc55627ef9c79bac73283fafb892d3cd
 USER root
 RUN addgroup -S rotinigroup && adduser -S -D -H -G rotinigroup rotiniuser
 ENTRYPOINT []
