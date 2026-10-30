@@ -53,6 +53,11 @@ type parsedInputs struct {
 	// first. nil when none.
 	lateFlag *string
 
+	// spelled records the first single-dash word that spells out the long name of the short
+	// flag it starts with (-name for -n/--name). POSIX reads the word as -n with the value
+	// "ame", so an error that follows from that says so. nil when none.
+	spelled *spelling
+
 	// dir is the run's injected working directory, which relative existingfile and existingdir
 	// values are checked against; "" is the process's.
 	dir string
@@ -119,6 +124,78 @@ func (p *parsedInputs) lateFlagHint(extra []string) string {
 		return ""
 	}
 	return "; flags go before its first argument (it takes options first): " + *p.lateFlag
+}
+
+// spelling is a single-dash word read as a short flag with an attached value although it spells
+// out that flag's long name: the hint saying so, the short flag, and the word after it.
+type spelling struct {
+	hint, flag, next string
+	hasNext          bool
+}
+
+// spelledHint is the hint an unexpected-positional error carries when one of the extra words
+// directly followed a single-dash spelling of a long flag, else "".
+func (p *parsedInputs) spelledHint(extra []string) string {
+	if p == nil || p.spelled == nil || !p.spelled.hasNext || !slices.Contains(extra, p.spelled.next) {
+		return ""
+	}
+	return p.spelled.hint
+}
+
+// valueHint appends the spelled-long-flag hint to a [*ParseError] in err about the value of the
+// short flag that word was read as, and returns err.
+func (p *parsedInputs) valueHint(err error) error {
+	if pe, ok := asError[*ParseError](err); ok && p != nil && p.spelled != nil && pe.Flag == p.spelled.flag {
+		pe.Msg += p.spelled.hint
+	}
+	return err
+}
+
+// spelledLongHint is the hint for a short cluster tok that spells out the long name of the
+// short flag it starts with, as -name does for -n/--name: "; -name was read as -n "ame"". It
+// is "" for any other token. short is the flag the word was read as.
+func spelledLongHint(chain []Command, tok string) (hint, short string) {
+	name, inline, hasInline := splitFlag(tok)
+	if !isShortCluster(name) {
+		return "", ""
+	}
+	if _, _, _, ok := findFlagRef(chain, name); ok {
+		return "", ""
+	}
+	_, w := utf8.DecodeRuneInString(name[1:])
+	short = name[:1+w]
+	fd, _, _, ok := findFlagRef(chain, short)
+	if !ok || fd.Type == "bool" || fd.Type == "count" || !slices.Contains(fd.Identifiers, "-"+name) {
+		return "", ""
+	}
+	value := name[1+w:]
+	if hasInline {
+		value += "=" + inline
+	}
+	return fmt.Sprintf("; %s was read as %s %s", tok, short, redactValue(strconv.Quote(value), fd.Secret)), short
+}
+
+// noteSpelled records tok, the flag token argv[i] ended at, when it spells out a long flag
+// with one dash. See parsedInputs.spelled.
+func noteSpelled(store *parsedInputs, chain []Command, tok string, argv []string, i int) {
+	if store.spelled != nil || len(tok) < 3 || tok[1] == '-' {
+		return
+	}
+	if hint, short := spelledLongHint(chain, tok); hint != "" {
+		s := &spelling{hint: hint, flag: short}
+		if i+1 < len(argv) {
+			s.next, s.hasNext = argv[i+1], true
+		}
+		store.spelled = s
+	}
+}
+
+// withHint appends hint to the message of a [*ParseError] in err.
+func withHint(err error, hint string) error {
+	if pe, ok := asError[*ParseError](err); ok && hint != "" {
+		pe.Msg += hint
+	}
+	return err
 }
 
 // covers reports whether chain frame i is one this validation pass judges.
@@ -274,15 +351,53 @@ func (k ParseKind) String() string {
 //	}
 type ParseError struct {
 	Kind       ParseKind // what went wrong, for branching without matching Msg (zero = ParseKindUnspecified)
-	Msg        string    // the human-readable failure
+	Msg        string    // the human-readable failure, without the command it happened in
 	Command    string    // the command in whose scope parsing failed ("" when not command-scoped)
 	Flag       string    // the flag involved, by the identifier or label used ("" when not flag-related)
 	Token      string    // the offending argv token or value ("" when none)
 	Candidates []string  // the vocabulary Token failed against — sibling commands, declared flags, enum members (nil when none applies)
+
+	path string // the command path the failure is reported against, which Error prints first
 }
 
-// Error renders the parse failure as a single, user-facing line.
-func (e *ParseError) Error() string { return e.Msg }
+// Error renders the parse failure as a single, user-facing line: the path of the command that
+// rejected the input, as typed (`taskr add`), then Msg.
+func (e *ParseError) Error() string {
+	if e.path == "" {
+		return e.Msg
+	}
+	return e.path + ": " + e.Msg
+}
+
+// atCommand reports each [*ParseError] and usage [*InputError] in err's tree against chain's
+// command path, unless it already names one. An internal error is the program's mistake, not
+// the user's input, so it is left as it is.
+func atCommand(err error, chain []Command) error {
+	if len(chain) > 0 {
+		atPath(err, pathOf(chain))
+	}
+	return err
+}
+
+func atPath(err error, path string) {
+	switch e := err.(type) { //nolint:errorlint // inspects this node; the cases below walk the wrapped ones
+	case nil:
+	case *ParseError:
+		if e.path == "" && e.Kind != ParseKindInternal {
+			e.path = path
+		}
+	case *InputError:
+		if e.path == "" && e.usage {
+			e.path = path // Error never prints Cause, so the cause needs no path of its own
+		}
+	case interface{ Unwrap() []error }:
+		for _, inner := range e.Unwrap() {
+			atPath(inner, path)
+		}
+	case interface{ Unwrap() error }:
+		atPath(e.Unwrap(), path)
+	}
+}
 
 // Unwrap returns the category sentinel: [ErrInternal] for [ParseKindInternal] and [ErrUsage]
 // for every other kind.
@@ -333,9 +448,9 @@ func NewParser() *Parser {
 func (p *Parser) Parse(rtx *Context, out any) error {
 	store, chain, err := p.parseBind(rtx, out)
 	if err != nil {
-		return err
+		return rtx.withPath(err)
 	}
-	return validateStore(rtx.features(), chain, store)
+	return rtx.withPath(validateStore(rtx.features(), chain, store))
 }
 
 // parseBind parses argv into a store, expands the values of inputs that declare `expand`, and
@@ -356,7 +471,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []Command, err
 		return nil, nil, err
 	}
 	if err := bindInputs(v, store, chain, anchor); err != nil {
-		return nil, nil, err
+		return nil, nil, store.valueHint(err)
 	}
 	return store, chain, nil
 }
@@ -623,10 +738,13 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 			// name belongs to one of its ancestors, never to it.
 			extra, err := consumeFlagToken(chain[:depth], tok, argv, i, addFlag)
 			if err != nil {
-				return nil, argvFlagError(err, chain, depth, store)
+				hint, _ := spelledLongHint(chain[:depth], tok)
+				err = withHint(err, hint)
+				return nil, atCommand(argvFlagError(err, chain, depth, store), chain[:depth])
 			}
 			i += extra
 			noteDetached(store, chain[:depth], tok, argv, i)
+			noteSpelled(store, chain[:depth], tok, argv, i)
 			continue
 		}
 
@@ -651,7 +769,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 			}
 		}
 		if err := addArg(tok); err != nil {
-			return nil, err
+			return nil, atCommand(err, chain)
 		}
 		leafWords++
 		if chain[leaf].OptionsFirst && depth == len(chain) && !terminated {
@@ -701,10 +819,11 @@ func (p *parsedInputs) recordScopedFlag(chain []Command, idx int, fd *FlagDef, v
 func localFlagError(chain []Command, idx int, typed string) error {
 	return &ParseError{
 		Kind:    ParseKindMisplacedFlag,
-		Msg:     fmt.Sprintf("%s belongs to %q, not %q", typed, pathOf(chain[:idx+1]), pathOf(chain)),
+		Msg:     fmt.Sprintf("%s belongs to %q", typed, pathOf(chain[:idx+1])),
 		Command: chain[len(chain)-1].Name,
 		Flag:    typed,
 		Token:   typed,
+		path:    pathOf(chain), // the invoked command refuses it, wherever it was typed
 	}
 }
 
@@ -936,7 +1055,7 @@ func strayCommand(leaf *Command, si *scopeInputs, store *parsedInputs) error {
 	if store != nil && store.dashedFirst && namesChild(leaf, tok) {
 		return &ParseError{
 			Kind:       ParseKindUnknownCommand,
-			Msg:        fmt.Sprintf("%q after \"--\" is not read as a command, and %q takes no arguments", tok, leaf.Name),
+			Msg:        fmt.Sprintf("takes no arguments, got %q after \"--\", which ends command lookup", tok),
 			Command:    leaf.Name,
 			Token:      tok,
 			Candidates: slices.DeleteFunc(childCommandNames(leaf), func(n string) bool { return n == tok }),
@@ -949,7 +1068,7 @@ func strayCommand(leaf *Command, si *scopeInputs, store *parsedInputs) error {
 	}
 	return &ParseError{
 		Kind:       ParseKindUnknownCommand,
-		Msg:        fmt.Sprintf("unknown command %s for %q", shown, leaf.Name) + store.detachedHint(si.args[:1]),
+		Msg:        "unknown command " + shown + store.detachedHint(si.args[:1]) + store.spelledHint(si.args[:1]),
 		Command:    leaf.Name,
 		Token:      tok,
 		Candidates: childCommandNames(leaf),
@@ -964,16 +1083,16 @@ func extraPositionals(chain []Command, si *scopeInputs, store *parsedInputs) err
 	if hasVariadicArg(leaf.Arguments) || len(si.args) <= n {
 		return nil
 	}
-	hint := store.detachedHint(si.args[n:]) + store.lateFlagHint(si.args[n:]) // only a word that is one too many
+	hint := store.detachedHint(si.args[n:]) + store.lateFlagHint(si.args[n:]) + store.spelledHint(si.args[n:]) // only a word that is one too many
 	if n == 0 {
 		word := redactValue(si.args[0], store.secretWord(si.args[0]))
 		got := strconv.Quote(word)
 		if more := len(si.args) - 1; more > 0 {
 			got += fmt.Sprintf(" and %d more", more)
 		}
-		return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%s takes no arguments, got %s", pathOf(chain), got) + hint, Command: leaf.Name, Token: word}
+		return &ParseError{Kind: ParseKindNoArguments, Msg: "takes no arguments, got " + got + hint, Command: leaf.Name, Token: word}
 	}
-	return &ParseError{Kind: ParseKindTooManyArguments, Msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", pathOf(chain), n, plural("argument", n), len(si.args)) + hint, Command: leaf.Name}
+	return &ParseError{Kind: ParseKindTooManyArguments, Msg: fmt.Sprintf("accepts at most %d %s (got %d)", n, plural("argument", n), len(si.args)) + hint, Command: leaf.Name}
 }
 
 // validate enforces the chain's declarations against a parsed store, limited to the frames the

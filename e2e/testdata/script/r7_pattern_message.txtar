@@ -15,7 +15,7 @@ stdout 'output=json'
 
 # A flag: the sentence follows the name the user typed.
 ! exec ./app$exe -o bogus
-stderr '^Error: -o must be json, yaml or custom-columns=<spec> \(got "bogus"\)$'
+stderr '^Error: app: -o must be json, yaml or custom-columns=<spec> \(got "bogus"\)$'
 ! stderr 'must match'
 
 # Each element of a list, from `items`.

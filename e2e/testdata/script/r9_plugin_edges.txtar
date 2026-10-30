@@ -38,13 +38,13 @@ stdout '^exit$'
 exec go build -o bin/host-ST$exe ./plugins/shadow
 exec go build -o bin/host-SYNC$exe ./plugins/echo
 wantexit 1 bin/host$exe ST
-stderr '^host: error: unknown command "ST" for "host"$'
+stderr '^host: error: host: unknown command "ST"$'
 ! stdout .
 wantexit 1 bin/host$exe SYNC a
-stderr '^host: error: unknown command "SYNC" for "host"$'
+stderr '^host: error: host: unknown command "SYNC"$'
 ! stdout .
 wantexit 1 bin/host$exe Sy
-stderr '^host: error: unknown command "Sy" for "host"$'
+stderr '^host: error: host: unknown command "Sy"$'
 exec bin/host$exe st
 stdout '^own status$'
 

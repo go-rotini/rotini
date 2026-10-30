@@ -17,7 +17,7 @@ stdout '^hello, ada$'
 # Stdin from a file is not a terminal: no prompt, and the missing input is a usage error.
 stdin answer.txt
 wantexit 1 ./promptdemo$exe greet
-stderr '^Error: missing required input: --name$'
+stderr '^Error: promptdemo greet: missing required input: --name$'
 ! stderr 'Name:'
 ! stdout .
 

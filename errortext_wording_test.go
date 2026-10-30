@@ -19,8 +19,28 @@ func wordingDef() Definition {
 		},
 		Commands: []CommandDef{
 			{Name: "greet", Handler: "Greet", Arguments: []ArgDef{{Name: "who", Type: "string"}}},
-			{Name: "ping", Handler: "Ping"},
+			{Name: "ping", Handler: "Ping", Flags: []FlagDef{
+				{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int"},
+				{Name: "user", Identifiers: []string{"-u", "--user"}, Type: "string"},
+				{Name: "token", Identifiers: []string{"-t", "--token"}, Type: "string", Secret: true},
+			}},
 		},
+	}
+}
+
+// wordingPingInputs binds ping's flags, so a value that doesn't read is an error.
+type wordingPingInputs struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+	}
+	AppPing struct {
+		Flags struct {
+			Count int    `rotini:"count"`
+			User  string `rotini:"user"`
+			Token string `rotini:"token"`
+		}
+		Arguments struct{}
 	}
 }
 
@@ -35,32 +55,38 @@ type wordingCfgInputs struct {
 	}
 }
 
-// TestUsageErrorWording pins the text of each usage error: names the program declares appear
-// bare (flags as the user typed them, variables, config keys, command paths), tokens the user
-// typed appear quoted.
+// TestUsageErrorWording pins the text of each usage error: a parse error starts with the path of
+// the command that rejected it; names the program declares appear bare (flags as the user typed
+// them, variables, config keys, command paths), tokens the user typed appear quoted.
 func TestUsageErrorWording(t *testing.T) {
 	parse := []struct {
 		name string
 		argv []string
 		want string
 	}{
-		{"a long flag needs a value", []string{"--name"}, "--name needs a value"},
-		{"a short flag needs a value", []string{"-n"}, "-n needs a value"},
-		{"a clustered flag needs a value", []string{"-an"}, "-n needs a value"},
-		{"a count flag takes no value", []string{"--verbose=3"}, "--verbose counts occurrences and takes no value"},
-		{"digits after a count flag", []string{"-v3"}, `-v counts occurrences and takes no value; repeat it instead (-vvv), not "-v3"`},
-		{"digits after a clustered count flag", []string{"-av2"}, `-v counts occurrences and takes no value; repeat it instead (-vv), not "-v2"`},
-		{"many digits after a count flag", []string{"-vvv10"}, `-v counts occurrences and takes no value; repeat it instead (-vvv), not "-v10"`},
-		{"digits after a bool flag", []string{"-a3"}, `-a takes no value (got "-a3")`},
-		{"digits then letters keep the unknown-flag error", []string{"-v3x"}, `unknown flag "-3"`},
-		{"a negated form takes no value", []string{"--no-color=x"}, "--no-color is the negated form and takes no value; use --color to set one"},
-		{"a map value needs key=value", []string{"--label", "v"}, `--label expects key=value pairs (got "v")`},
-		{"a map key must not be empty", []string{"--label", "=v"}, `--label needs a key before "=" (got "=v")`},
-		{"a map key must not be whitespace", []string{"--label", " =v"}, `--label needs a key before "=" (got " =v")`},
-		{"too many arguments name the command path", []string{"greet", "ann", "bob"}, "app greet accepts at most 1 argument (got 2)"},
-		{"no arguments name the command path and quote the word", []string{"ping", "x"}, `app ping takes no arguments, got "x"`},
-		{"no arguments count the other words", []string{"ping", "x", "y", "z"}, `app ping takes no arguments, got "x" and 2 more`},
-		{"an unknown flag is quoted", []string{"--nope"}, `unknown flag "--nope"`},
+		{"a long flag needs a value", []string{"--name"}, "app: --name needs a value"},
+		{"a short flag needs a value", []string{"-n"}, "app: -n needs a value"},
+		{"a clustered flag needs a value", []string{"-an"}, "app: -n needs a value"},
+		{"a count flag takes no value", []string{"--verbose=3"}, "app: --verbose counts occurrences and takes no value"},
+		{"digits after a count flag", []string{"-v3"}, `app: -v counts occurrences and takes no value; repeat it instead (-vvv), not "-v3"`},
+		{"digits after a clustered count flag", []string{"-av2"}, `app: -v counts occurrences and takes no value; repeat it instead (-vv), not "-v2"`},
+		{"many digits after a count flag", []string{"-vvv10"}, `app: -v counts occurrences and takes no value; repeat it instead (-vvv), not "-v10"`},
+		{"digits after a bool flag", []string{"-a3"}, `app: -a takes no value (got "-a3")`},
+		{"digits then letters keep the unknown-flag error", []string{"-v3x"}, `app: unknown flag "-3"`},
+		{"a negated form takes no value", []string{"--no-color=x"}, "app: --no-color is the negated form and takes no value; use --color to set one"},
+		{"a map value needs key=value", []string{"--label", "v"}, `app: --label expects key=value pairs (got "v")`},
+		{"a map key must not be empty", []string{"--label", "=v"}, `app: --label needs a key before "=" (got "=v")`},
+		{"a map key must not be whitespace", []string{"--label", " =v"}, `app: --label needs a key before "=" (got " =v")`},
+		{"too many arguments", []string{"greet", "ann", "bob"}, "app greet: accepts at most 1 argument (got 2)"},
+		{"no arguments quote the word", []string{"ping", "x"}, `app ping: takes no arguments, got "x"`},
+		{"no arguments count the other words", []string{"ping", "x", "y", "z"}, `app ping: takes no arguments, got "x" and 2 more`},
+		{"an unknown flag is quoted", []string{"--nope"}, `app: unknown flag "--nope"`},
+		{"a flag error names the command that rejected it", []string{"ping", "--nope"}, `app ping: unknown flag "--nope"`},
+		{"a flag before a sub-command is the ancestor's", []string{"--nope", "ping"}, `app: unknown flag "--nope"`},
+		{"an unknown command names its parent", []string{"pnig"}, `app: unknown command "pnig"`},
+		{"a long flag with one dash says how it was read", []string{"ping", "-user", "x"}, `app ping: takes no arguments, got "x"; -user was read as -u "ser"`},
+		{"a secret value stays out of the hint", []string{"ping", "-token", "x"}, `app ping: takes no arguments, got "x"; -token was read as -t [redacted]`},
+		{"no hint when the word is not the flag's long name", []string{"ping", "-uname", "x"}, `app ping: takes no arguments, got "x"`},
 	}
 	for _, tc := range parse {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,14 +100,22 @@ func TestUsageErrorWording(t *testing.T) {
 		})
 	}
 
+	t.Run("a value error says how a one-dash long flag was read", func(t *testing.T) {
+		var in wordingPingInputs
+		err := NewParser().Parse(NewContextFor(wordingDef(), []string{"ping", "-count"}), &in)
+		if want := `app ping: -c: "ount" is not a valid integer; -count was read as -c "ount"`; err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
+
 	env := []struct {
 		name string
 		env  []string
 		want string
 	}{
-		{"a required env input names every variable", nil, "environment variable APP_REGION (or REGION) is required"},
-		{"env coercion names the variable set", []string{"REGION=us", "APP_PORT=abc"}, `environment variable APP_PORT: "abc" is not a valid integer`},
-		{"an env map key must not be whitespace", []string{"APP_REGION=us", "APP_LABELS= =v"}, `environment variable APP_LABELS needs a key before "=" (got "=v")`},
+		{"a required env input names every variable", nil, "app: environment variable APP_REGION (or REGION) is required"},
+		{"env coercion names the variable set", []string{"REGION=us", "APP_PORT=abc"}, `app: environment variable APP_PORT: "abc" is not a valid integer`},
+		{"an env map key must not be whitespace", []string{"APP_REGION=us", "APP_LABELS= =v"}, `app: environment variable APP_LABELS needs a key before "=" (got "=v")`},
 	}
 	for _, tc := range env {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,9 +128,9 @@ func TestUsageErrorWording(t *testing.T) {
 	config := []struct {
 		name, file, want string
 	}{
-		{"config coercion names the key and file", "api:\n  port: abc\n", `config key api.port: "abc" is not a valid integer (from configuration file %s)`},
-		{"a config constraint names the key and file", "api:\n  port: 500\n", "config key api.port must be <= 100 (got 500) (from configuration file %s)"},
-		{"a config enum names the key and file", "tier: bronze\n", `invalid value "bronze" for config key tier (one of: gold, silver) (from configuration file %s)`},
+		{"config coercion names the key and file", "api:\n  port: abc\n", `app: config key api.port: "abc" is not a valid integer (from configuration file %s)`},
+		{"a config constraint names the key and file", "api:\n  port: 500\n", "app: config key api.port must be <= 100 (got 500) (from configuration file %s)"},
+		{"a config enum names the key and file", "tier: bronze\n", `app: invalid value "bronze" for config key tier (one of: gold, silver) (from configuration file %s)`},
 	}
 	for _, tc := range config {
 		t.Run(tc.name, func(t *testing.T) {

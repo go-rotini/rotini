@@ -36,7 +36,7 @@ stderr 'broken\.yaml'
 # A pinned input is not satisfied by a key another file holds, even when required; the error
 # names the pinned file.
 ! exec ./cfg$exe pin
-stderr '^Error: config key onlyproj is required in configuration file .*[/\\]user\.yaml$'
+stderr '^Error: cfg pin: config key onlyproj is required in configuration file .*[/\\]user\.yaml$'
 
 # A load-time schema rejects a non-conforming file, naming it; an absent file passes.
 ! exec ./cfg$exe schemed

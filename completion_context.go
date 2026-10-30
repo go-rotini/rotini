@@ -79,6 +79,11 @@ func (rtx *Context) SetCompletionFallback(fallback Completion) {
 // Outside a completion request it reads the whole of [Context.Argv]. The error is a wiring
 // mistake: no resolved command, or a T that doesn't describe the running command.
 func (rtx *Context) PartialInputs[T any]() (T, Presence, error) {
+	t, set, err := readPartialInputs[T](rtx)
+	return t, set, rtx.withPath(err)
+}
+
+func readPartialInputs[T any](rtx *Context) (T, Presence, error) {
 	var zero T
 	chain, err := layerChain(rtx)
 	if err != nil {

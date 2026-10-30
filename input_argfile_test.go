@@ -35,10 +35,10 @@ func TestVariableFile_argument(t *testing.T) {
 	}
 	_, err = bind([]string{"APP_TARGET=x", "APP_TARGET_FILE=target"})
 	var ie *InputError
-	if err == nil || err.Error() != "set APP_TARGET or APP_TARGET_FILE, not both" || !errors.As(err, &ie) || ie.Channel != channelArgument {
+	if err == nil || err.Error() != "app: set APP_TARGET or APP_TARGET_FILE, not both" || !errors.As(err, &ie) || ie.Channel != channelArgument {
 		t.Errorf("both set = %v", err)
 	}
-	if _, err = bind([]string{"APP_TARGET_FILE=missing"}); err == nil || !strings.HasPrefix(err.Error(), "APP_TARGET_FILE: ") {
+	if _, err = bind([]string{"APP_TARGET_FILE=missing"}); err == nil || !strings.HasPrefix(err.Error(), "app: APP_TARGET_FILE: ") {
 		t.Errorf("unreadable = %v", err)
 	}
 }

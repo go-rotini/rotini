@@ -80,20 +80,20 @@ cmp stderr want/acme-bogus.txt
 wantexit 1 ./kid$exe work --bogus
 cmp stderr want/kid-bogus.txt
 
-# An unknown command is the child's, reported the same both ways.
+# An unknown command is the child's, both ways; the path is the one the user typed.
 wantexit 1 ./acme$exe kid nope
-stderr 'unknown command "nope" for "kid"'
+stderr 'kid: unknown command "nope"'
 wantexit 1 ./kid$exe nope
-stderr 'unknown command "nope" for "kid"'
+stderr 'kid: unknown command "nope"'
 
 # The child's flags are local by default, through the parent too: accepted only when the
 # child's root is the command run, wherever they are written.
 wantexit 1 ./acme$exe kid work --klocal
-stderr '^Error: --klocal belongs to "acme kid", not "acme kid work"$'
+stderr '^Error: acme kid work: --klocal belongs to "acme kid"$'
 wantexit 1 ./acme$exe kid --klocal work
-stderr '^Error: --klocal belongs to "acme kid", not "acme kid work"$'
+stderr '^Error: acme kid work: --klocal belongs to "acme kid"$'
 wantexit 1 ./kid$exe --klocal work
-stderr '^Error: --klocal belongs to "kid", not "kid work"$'
+stderr '^Error: kid work: --klocal belongs to "kid"$'
 exec ./acme$exe kid --klocal --help
 
 # ── hidden: not listed, still runs ──
@@ -166,11 +166,11 @@ hook: acme CascadingPostRun
 -- want/acme-bogus.txt --
 hook: acme CascadingPreRun
 hook: acme CascadingPostRun
-Error: unknown flag "--bogus"
+Error: acme kid work: unknown flag "--bogus"
 -- want/kid-bogus.txt --
 hook: kid CascadingPreRun
 hook: kid CascadingPostRun
-Error: unknown flag "--bogus"
+Error: kid work: unknown flag "--bogus"
 -- cmd/acme/.rotini.spec.yaml --
 version: 0.0.0
 command:

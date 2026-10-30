@@ -45,6 +45,10 @@ import (
 //		return
 //	}
 func (rtx *Context) CheckInputs[T any](v T, set Presence) error {
+	return rtx.withPath(checkInputs(rtx, v, set))
+}
+
+func checkInputs[T any](rtx *Context, v T, set Presence) error {
 	chain, err := layerChain(rtx)
 	if err != nil {
 		return err

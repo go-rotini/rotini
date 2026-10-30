@@ -679,9 +679,9 @@ func TestCLI_suggestsNearestSpelling(t *testing.T) {
 		argv []string
 		want string // "" means no hint
 	}{
-		{argv: []string{"genrate"}, want: `unknown command "genrate" for "rotini"; did you mean "generate"?`},
+		{argv: []string{"genrate"}, want: `Error: rotini: unknown command "genrate"; did you mean "generate"?`},
 		{argv: []string{"hlep"}, want: `did you mean "help"?`},
-		{argv: []string{"validate", "--fial", "fast"}, want: `unknown flag "--fial"; did you mean "--fail"?`},
+		{argv: []string{"validate", "--fial", "fast"}, want: `Error: rotini validate: unknown flag "--fial"; did you mean "--fail"?`},
 		{argv: []string{"init", "x", "--format", "jsn"}, want: `did you mean "json"?`},
 		{argv: []string{"help", "genrate"}, want: `no help for command "genrate"; did you mean "generate"?`},
 		{argv: []string{"man", "genrate"}, want: `no man page for command "genrate"; did you mean "generate"?`},

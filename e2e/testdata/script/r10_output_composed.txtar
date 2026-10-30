@@ -34,7 +34,7 @@ env APP_STRUCTURED=1
 ! stdout .
 stderr '^\{"schema_version":1,"error":\{"category":"internal","command":"app db get","exit_code":1,"message":"app db get: output does not match its contract: output.state: [^"]*"\}\}$'
 ! exec ./app$exe db get --nope
-stderr '^\{"schema_version":1,"error":\{"candidates":\[[^]]*"--bad"[^]]*\],"category":"usage","command":"app db get","exit_code":1,"flag":"--nope","kind":"unknown-flag","message":"unknown flag \\"--nope\\"","token":"--nope"\}\}$'
+stderr '^\{"schema_version":1,"error":\{"candidates":\[[^]]*"--bad"[^]]*\],"category":"usage","command":"app db get","exit_code":1,"flag":"--nope","kind":"unknown-flag","message":"app db get: unknown flag \\"--nope\\"","token":"--nope"\}\}$'
 env APP_STRUCTURED=
 env APP_CHECKS=
 

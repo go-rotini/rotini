@@ -132,7 +132,7 @@ that runs the program is checked. A word with `$`, a backtick or a glob, and a `
 stands for any value. Words after a composed command or a plugin aren't checked.
 
 {{< code title="a stale example" language="text" open="true" collapsible="false" copy="false" >}}
-Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst" does not parse: unknown command "lst" for "todo"
+Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst" does not parse: todo: unknown command "lst"
 {{< /code >}}
 
 ### Importing a Cobra CLI
@@ -310,7 +310,7 @@ rules:
   An empty value (`--name ""`, `--name=`, `''`) counts as given; add `minLength: 1` to refuse it.
 - **A flag applies to its own command** unless it is `cascading: true`. Given with a
   sub-command, before or after its name, it is a usage error naming the command it belongs to
-  (`--init belongs to "app", not "app db migrate"`).
+  (`app db migrate: --init belongs to "app"`).
 - **`cascading: true` makes a flag apply to every command below its own**: it works anywhere
   after its command's name, a sub-command's handler reads it through its generated inputs, and
   sub-commands' help lists it under "Global Flags" (GLOBAL OPTIONS in man pages). Rename the
@@ -323,13 +323,13 @@ Mistakes are reported before your code runs:
 
 {{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
 $ ./todo add "buy milk" -p urgent
-Error: invalid value "urgent" for -p (one of: low, normal, high)
+Error: todo add: invalid value "urgent" for -p (one of: low, normal, high)
 $ ./todo add
-Error: missing required input: <title>
+Error: todo add: missing required input: <title>
 $ ./todo add "buy milk" --loud
-Error: unknown flag "--loud"
+Error: todo add: unknown flag "--loud"
 $ ./todo ad "buy milk" --loud
-Error: unknown command "ad" for "todo"
+Error: todo: unknown command "ad"
 {{< /code >}}
 
 A mistyped command is reported before any flag after it, because those flags were checked
@@ -597,9 +597,9 @@ flag_dependencies:
 
 {{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
 $ ./todo export --format csv
-Error: flag --delimiter is required when --format is csv
+Error: todo export: flag --delimiter is required when --format is csv
 $ ./todo export --all --limit 5
-Error: flag --limit can't be used when --all is set
+Error: todo export: flag --limit can't be used when --all is set
 {{< /code >}}
 
 An error names each flag the user set as they typed it, so `-46` on a `mutually_exclusive` group
@@ -848,7 +848,7 @@ flags:
 
 {{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
 $ ./todo login --token sk_live_123
-Error: --token takes @file or -, not a value
+Error: todo login: --token takes @file or -, not a value
 $ ./todo login --token @token.txt
 $ ./todo login --token - < token.txt
 {{< /code >}}
@@ -995,7 +995,7 @@ config:
 {{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
 $ ./todo add --file '~/notes.txt'
 $ ./todo add --file '$NOTES/today.txt'
-Error: --file: $NOTES is not set (in "$NOTES/today.txt")
+Error: todo add: --file: $NOTES is not set (in "$NOTES/today.txt")
 {{< /code >}}
 
 - An unset or empty variable is an error, and so are shell operators such as `${NAME:-x}`.
@@ -1731,7 +1731,7 @@ func ReportWithUsage(ctx context.Context, rtx *rotini.Context, out rotini.Outcom
 
 ```console
 $ todo add
-Error: missing required input: <title>
+Error: todo add: missing required input: <title>
 Usage: todo add [flags] <title>
 Run 'todo add --help' for more.
 ```
@@ -2351,7 +2351,7 @@ cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context
 
 ```console
 $ todo list --bogus --json id
-{"schema_version":1,"error":{"candidates":["--json","--sort-by","--reverse","-h","--help","--version","-o","--output","--format"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
+{"schema_version":1,"error":{"candidates":["--json","--sort-by","--reverse","-h","--help","--version","-o","--output","--format"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"todo list: unknown flag \"--bogus\"","token":"--bogus"}}
 ```
 
 Exit codes are decided exactly as the default reporter decides them. Each line's shape is
@@ -5389,7 +5389,7 @@ left as it was:
 
 ```text
 $ cfgctl config set level loud
-Error: invalid value "loud" for config key level (one of: debug, info, warn)
+Error: cfgctl config set: invalid value "loud" for config key level (one of: debug, info, warn)
 ```
 
 #### Reloading config on SIGHUP

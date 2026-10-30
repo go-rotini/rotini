@@ -165,16 +165,16 @@ func TestVariableFile(t *testing.T) {
 	}
 
 	_, err = idSecretBind(t, dir, []string{"APP_TOKEN=plain", "APP_TOKEN_FILE=token"})
-	if err == nil || err.Error() != "set APP_TOKEN or APP_TOKEN_FILE, not both" || !errors.Is(err, ErrUsage) {
+	if err == nil || err.Error() != "app: set APP_TOKEN or APP_TOKEN_FILE, not both" || !errors.Is(err, ErrUsage) {
 		t.Errorf("both set = %v", err)
 	}
 	_, err = idSecretBind(t, dir, []string{"DB_PASSWORD=x", "APP_PASSWORD_FILE=pw"})
-	if err == nil || err.Error() != "set DB_PASSWORD or APP_PASSWORD_FILE, not both" {
+	if err == nil || err.Error() != "app: set DB_PASSWORD or APP_PASSWORD_FILE, not both" {
 		t.Errorf("any of the names set = %v", err)
 	}
 
 	_, err = idSecretBind(t, dir, []string{"APP_TOKEN_FILE=missing"})
-	if err == nil || err.Error() != `APP_TOKEN_FILE: no such file: "missing"` {
+	if err == nil || err.Error() != `app: APP_TOKEN_FILE: no such file: "missing"` {
 		t.Errorf("unreadable = %v", err)
 	}
 	if _, err := idSecretBind(t, dir, []string{"APP_TOKEN_FILE=missing"}, "--help"); err != nil {
@@ -311,7 +311,7 @@ func TestDotenvLayer_precedence(t *testing.T) {
 func TestDotenvLayer_errors(t *testing.T) {
 	dir := t.TempDir()
 	idWrite(t, dir, ".env", "APP_ENDPOINT=x\nAPP_TOKEN=a\nAPP_TOKEN_FILE=b\n")
-	if _, err := idEnvBind(t, dir, nil); err == nil || err.Error() != "set APP_TOKEN or APP_TOKEN_FILE, not both" {
+	if _, err := idEnvBind(t, dir, nil); err == nil || err.Error() != "app: set APP_TOKEN or APP_TOKEN_FILE, not both" {
 		t.Errorf("a pair within one .env = %v", err)
 	}
 	if _, err := idEnvBind(t, dir, []string{"APP_TOKEN=real"}); err != nil {

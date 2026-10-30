@@ -169,8 +169,8 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 // JSON object per line, and leaves stdout alone, so a partial result there is never
 // interleaved with an error:
 //
-//	{"schema_version":1,"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"missing required input: <title>"}}
-//	{"schema_version":1,"error":{"candidates":["add","list","done"],"category":"usage","command":"taskr","exit_code":1,"kind":"unknown-command","message":"unknown command \"lst\" for \"taskr\"","token":"lst"}}
+//	{"schema_version":1,"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"taskr add: missing required input: <title>"}}
+//	{"schema_version":1,"error":{"candidates":["add","list","done"],"category":"usage","command":"taskr","exit_code":1,"kind":"unknown-command","message":"taskr: unknown command \"lst\"","token":"lst"}}
 //	{"schema_version":1,"warning":{"command":"taskr list","message":"the cache is stale"}}
 //
 // Infos and successes are written the same way, as {"info":{…}} and {"success":{…}}. A field

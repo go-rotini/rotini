@@ -16,7 +16,7 @@ exec go build -o app$exe ./cmd/app
 # A .env file's bad value, under the command line and the real environment.
 cp dotenv.txt .env
 ! exec ./app$exe
-stderr '^Error: --port: "abc" is not a valid integer \(from environment variable APP_SERVER_PORT \(from .env\)\)$'
+stderr '^Error: app: --port: "abc" is not a valid integer \(from environment variable APP_SERVER_PORT \(from .env\)\)$'
 exec ./app$exe --port 6
 stdout '^port=6 '
 exec ./app$exe --port 6 --plain
@@ -41,11 +41,11 @@ stdout '^App.Flags.Port = "1" from argv:--port; overrides default "8080"$'
 
 # Left out on the command line, the bad variable wins and is reported, by both readers.
 ! exec ./app$exe --port 1 x
-stderr '^Error: <n>: "abc" is not a valid integer \(from environment variable APP_N\)$'
+stderr '^Error: app: <n>: "abc" is not a valid integer \(from environment variable APP_N\)$'
 ! exec ./app$exe --plain --port 1 x
-stderr '^Error: <n>: "abc" is not a valid integer \(from environment variable APP_N\)$'
+stderr '^Error: app: <n>: "abc" is not a valid integer \(from environment variable APP_N\)$'
 ! exec ./app$exe x 2
-stderr '^Error: --port: "abc" is not a valid integer \(from environment variable APP_SERVER_PORT\)$'
+stderr '^Error: app: --port: "abc" is not a valid integer \(from environment variable APP_SERVER_PORT\)$'
 env APP_SERVER_PORT=
 env APP_N=
 
@@ -57,14 +57,14 @@ exec ./app$exe --conf bad.yaml --plain
 stdout '^port=3 '
 env APP_SERVER_PORT=
 ! exec ./app$exe --conf bad.yaml
-stderr '^Error: --port: "abc" is not a valid integer \(from configuration file .*bad.yaml, key server.port\)$'
+stderr '^Error: app: --port: "abc" is not a valid integer \(from configuration file .*bad.yaml, key server.port\)$'
 
 # An enum is checked on the value that wins, wherever it came from.
 env APP_LEVEL=loud
 exec ./app$exe --level warn
 stdout 'level=warn'
 ! exec ./app$exe
-stderr '^Error: invalid value "loud" for --level \(one of: debug, info, warn\) \(from environment variable APP_LEVEL\)$'
+stderr '^Error: app: invalid value "loud" for --level \(one of: debug, info, warn\) \(from environment variable APP_LEVEL\)$'
 env APP_LEVEL=
 
 # ── profiles ─────────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ stdout '^App.Flags.Small = "1" from config:main#small$'
 
 # The chosen profile's bad value names the profile.
 ! exec ./app$exe --conf prof.yaml --profile broken
-stderr '^Error: --small: "300" is not a valid int8 \(out of range: -128 to 127\) \(from configuration file .*prof.yaml \(profile broken\), key small\)$'
+stderr '^Error: app: --small: "300" is not a valid int8 \(out of range: -128 to 127\) \(from configuration file .*prof.yaml \(profile broken\), key small\)$'
 env APP_PROFILE=
 
 # ── a configuration value the input's type can't hold ────────────────────────
@@ -96,17 +96,17 @@ env APP_PROFILE=
 # Each is a usage error naming the file and the key, and the number that a config file writes
 # as a float but is whole fills an integer.
 ! exec ./app$exe --conf types.yaml
-stderr '^Error: --small: "200" is not a valid int8 \(out of range: -128 to 127\) \(from configuration file .*types.yaml, key small\)$'
+stderr '^Error: app: --small: "200" is not a valid int8 \(out of range: -128 to 127\) \(from configuration file .*types.yaml, key small\)$'
 ! exec ./app$exe --conf uint.yaml
-stderr '^Error: --count: "-1" is not a valid uint'
+stderr '^Error: app: --count: "-1" is not a valid uint'
 ! exec ./app$exe --conf float.yaml
-stderr '^Error: --port: "1.5" is not a valid integer \(from configuration file .*float.yaml, key server.port\)$'
+stderr '^Error: app: --port: "1.5" is not a valid integer \(from configuration file .*float.yaml, key server.port\)$'
 exec ./app$exe --conf whole.yaml
 stdout '^port=1000 '
 ! exec ./app$exe --conf duration.yaml
-stderr '^Error: --timeout: "30" is not a valid duration \(from configuration file .*duration.yaml, key timeout\)$'
+stderr '^Error: app: --timeout: "30" is not a valid duration \(from configuration file .*duration.yaml, key timeout\)$'
 ! exec ./app$exe --conf nullitem.yaml
-stderr '^Error: --tag: list item 2 is null \(from configuration file .*nullitem.yaml, key tags\)$'
+stderr '^Error: app: --tag: list item 2 is null \(from configuration file .*nullitem.yaml, key tags\)$'
 ! exec ./app$exe --conf dup.yaml
 stderr 'duplicate key "port"'
 ! exec ./app$exe --conf list.yaml
@@ -118,7 +118,7 @@ stdout '^port=8080 small=0 level=info '
 
 # A secret's bad value is never echoed, whichever source it came from.
 ! exec ./app$exe --conf secret.yaml
-stderr '^Error: --token must be at least 8 characters long \(got \[redacted\]\) \(from configuration file .*secret.yaml, key token\)$'
+stderr '^Error: app: --token must be at least 8 characters long \(got \[redacted\]\) \(from configuration file .*secret.yaml, key token\)$'
 ! stderr hunter
 env APP_TOKEN=hunter
 ! exec ./app$exe

@@ -215,7 +215,7 @@ func TestOverride_validatePositions(t *testing.T) {
 	for _, want := range []string{
 		root + ":10:18: command acme/db/status: overrides the mounted command `acme db status`, so it can't set `stdin`",
 		root + ":14:15: command acme/db/migrate: overrides `acme db migrate`, which declares no command \"down\"",
-		root + `:7:18: command acme: $ref "../db/.rotini.spec.yaml": example "acme db migrate --bogus" does not parse: unknown flag "--bogus"`,
+		root + `:7:18: command acme: $ref "../db/.rotini.spec.yaml": example "acme db migrate --bogus" does not parse: acme db migrate: unknown flag "--bogus"`,
 		mig + ":15:21: command mig: sets `deprecated_since` without `deprecated`",
 	} {
 		if !strings.Contains(err.Error(), want) {

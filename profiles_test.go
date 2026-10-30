@@ -186,11 +186,11 @@ func TestProfiles_unknown(t *testing.T) {
 		want string
 	}{
 		{"argv", nil, []string{"--profile", "prdo"},
-			`--profile: profile "prdo" is not defined in configuration file ` + path + ` (profiles: bad, default, prod)`},
+			`app: --profile: profile "prdo" is not defined in configuration file ` + path + ` (profiles: bad, default, prod)`},
 		{"short identifier", nil, []string{"-p", "prdo"},
-			`-p: profile "prdo" is not defined in configuration file ` + path + ` (profiles: bad, default, prod)`},
+			`app: -p: profile "prdo" is not defined in configuration file ` + path + ` (profiles: bad, default, prod)`},
 		{"variable", []string{"APP_PROFILE=prdo"}, nil,
-			`APP_PROFILE: profile "prdo" is not defined in configuration file ` + path + ` (profiles: bad, default, prod)`},
+			`app: APP_PROFILE: profile "prdo" is not defined in configuration file ` + path + ` (profiles: bad, default, prod)`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -212,7 +212,7 @@ func TestProfiles_unknown(t *testing.T) {
 func TestProfiles_unknownWithoutAFile(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "absent.yaml")
 	_, err := pfRead(t, nil, pfSettings(pfFileAt(missing)), "--profile", "prod")
-	if want := `--profile: profile "prod" is not defined: no configuration file defines profiles`; err == nil || err.Error() != want {
+	if want := `app: --profile: profile "prod" is not defined: no configuration file defines profiles`; err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %s", err, want)
 	}
 	// Defaulted, it is silent.
@@ -237,7 +237,7 @@ func TestProfiles_malformed(t *testing.T) {
 	for _, body := range []string{"profiles: [a, b]\n", "profiles: {prod: 3}\n", "profiles: text\n"} {
 		path := pfWrite(t, t.TempDir(), "app.yaml", body)
 		_, err := pfRead(t, nil, pfSettings(pfFileAt(path)))
-		want := "configuration file " + path + `: "profiles" must map profile names to sections`
+		want := "app: configuration file " + path + `: "profiles" must map profile names to sections`
 		if err == nil || err.Error() != want {
 			t.Errorf("%q: err = %v", body, err)
 		}
@@ -291,7 +291,7 @@ func TestProfiles_unionAcrossFiles(t *testing.T) {
 		t.Fatalf("region = %q, %v", in.App.Flags.Region, err)
 	}
 	_, err = pfRead(t, nil, files, "--profile", "stage")
-	want := `--profile: profile "stage" is not defined in configuration files ` + project + ", " + user + " (profiles: dev, prod)"
+	want := `app: --profile: profile "stage" is not defined in configuration files ` + project + ", " + user + " (profiles: dev, prod)"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v\nwant %s", err, want)
 	}

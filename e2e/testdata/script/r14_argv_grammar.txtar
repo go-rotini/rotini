@@ -24,7 +24,7 @@ stdout '^Out="v"$'
 exec ./gram$exe run --out=
 stdout '^$'
 ! exec ./gram$exe run -o
-stderr '^Error: -o needs a value$'
+stderr '^Error: gram run: -o needs a value$'
 
 # A value-taking flag takes the next word, whatever it is; `--` after it is its value.
 exec ./gram$exe run -o --all
@@ -43,7 +43,7 @@ stdout '^All=true$'
 ! exec ./gram$exe run -vv=3
 stderr 'does not take a value'
 ! exec ./gram$exe run -ax
-stderr '^Error: unknown flag "-x"$'
+stderr '^Error: gram run: unknown flag "-x"$'
 exec ./gram$exe run -c-5
 stdout '^Count=-5$'
 
@@ -51,7 +51,7 @@ stdout '^Count=-5$'
 exec ./gram$exe run --count -5 -1.5 -.5 -5s
 stdout '^Count=-5 First="-1.5" Rest=\["-.5","-5s"\]$'
 ! exec ./gram$exe run -Inf
-stderr '^Error: unknown flag "-I"$'
+stderr '^Error: gram run: unknown flag "-I"$'
 exec ./gram$exe run - --
 stdout '^First="-"$'
 exec ./gram$exe run -- -a --
@@ -79,23 +79,23 @@ stdout '^Opt="yes" First="x"$'
 
 # Unknown and misplaced flags at every level; a root-only flag can't follow a sub-command.
 ! exec ./gram$exe --nope
-stderr '^Error: unknown flag "--nope"$'
+stderr '^Error: gram: unknown flag "--nope"$'
 ! exec ./gram$exe run deep --nope
-stderr '^Error: unknown flag "--nope"$'
+stderr '^Error: gram run deep: unknown flag "--nope"$'
 ! exec ./gram$exe --top x run
-stderr '^Error: --top belongs to "gram", not "gram run"$'
+stderr '^Error: gram run: --top belongs to "gram"$'
 ! exec ./gram$exe run deep --out x
-stderr '^Error: --out belongs to "gram run", not "gram run deep"$'
+stderr '^Error: gram run deep: --out belongs to "gram run"$'
 ! exec ./gram$exe -o x run
-stderr '^Error: unknown flag "-o"$'
+stderr '^Error: gram: unknown flag "-o"$'
 
 # Aliases match exactly; no case folding, no prefixes; a name after an argument is an argument.
 exec ./gram$exe r -a
 stdout '^All=true$'
 ! exec ./gram$exe R
-stderr '^Error: unknown command "R" for "gram"$'
+stderr '^Error: gram: unknown command "R"$'
 ! exec ./gram$exe ru
-stderr '^Error: unknown command "ru" for "gram"$'
+stderr '^Error: gram: unknown command "ru"$'
 exec ./gram$exe run x deep
 stdout '^First="x" Rest=\["deep"\]$'
 
@@ -105,7 +105,7 @@ stdout '^First="—out"$'
 ! exec ./gram$exe run --out​
 stderr 'unknown flag'
 ! exec ./gram$exe run --OUT x
-stderr '^Error: unknown flag "--OUT"$'
+stderr '^Error: gram run: unknown flag "--OUT"$'
 
 # A passthrough argument keeps every word from its first one on, as typed.
 exec ./gram$exe exec --region eu ls -la --help
@@ -113,7 +113,7 @@ stdout '^Region="eu" Cmd=\["ls","-la","--help"\]$'
 exec ./gram$exe exec -- -x --region y
 stdout '^Cmd=\["-x","--region","y"\]$'
 ! exec ./gram$exe exec -x
-stderr '^Error: unknown flag "-x"$'
+stderr '^Error: gram exec: unknown flag "-x"$'
 
 # Response files: one word per line, kept exactly; comments and blank lines skipped; words
 # from a file aren't expanded again; @@ is a literal @; nothing after `--` is expanded.
@@ -126,7 +126,7 @@ stdout '^First="@inner.rsp"$'
 ! exec ./gram$exe @missing.rsp
 stderr '^Error: could not read response file "missing.rsp": no such file$'
 ! exec ./gram$exe @loop.rsp
-stderr '^Error: unknown command "@loop.rsp" for "gram"$'
+stderr '^Error: gram: unknown command "@loop.rsp"$'
 
 # Integer bounds compare exactly past 2^53.
 exec ./gram$exe run --count 9007199254740992
@@ -156,7 +156,7 @@ stdout '^GramRun.Flags.Label = "z=1" from argv:--label; overrides '
 # A bad value names its source; a configuration file's names the file and key.
 env GRAM_RUN_COUNT=0x10
 ! exec ../gram$exe run
-stderr '^Error: --count: "0x10" is not a valid integer \(from environment variable GRAM_RUN_COUNT\)$'
+stderr '^Error: gram run: --count: "0x10" is not a valid integer \(from environment variable GRAM_RUN_COUNT\)$'
 env GRAM_RUN_COUNT=
 cd ../badcfg
 ! exec ../gram$exe run

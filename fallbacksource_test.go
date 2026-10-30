@@ -46,11 +46,11 @@ func TestFallbackSource_namedInValueErrors(t *testing.T) {
 		want string // "" = no error
 	}{
 		{"env bound", map[string]string{"PORT": "500"}, nil,
-			"--port must be <= 100 (got 500) (from environment variable PORT)"},
+			"app: --port must be <= 100 (got 500) (from environment variable PORT)"},
 		{"env enum", map[string]string{"MODE": "fastest"}, nil,
-			`invalid value "fastest" for --mode (one of: fast, slow) (from environment variable MODE)`},
+			`app: invalid value "fastest" for --mode (one of: fast, slow) (from environment variable MODE)`},
 		{"argv bound names no source", nil, []string{"--port", "500"},
-			"--port must be <= 100 (got 500)"},
+			"app: --port must be <= 100 (got 500)"},
 		{"argv overrides an env value", map[string]string{"PORT": "500"}, []string{"--port", "5"}, ""},
 	}
 	for _, tt := range tests {
@@ -221,8 +221,8 @@ func fsConfigRead(t *testing.T, cfg string, in any) error {
 // with a message that says so; it is never read as empty text.
 func TestFallbackSource_nullListItem(t *testing.T) {
 	for body, want := range map[string]string{
-		"tags: [a, null]\n": "--tags: list item 2 is null (from configuration file %s, key tags)",
-		"nums: [1, ~]\n":    "config key nums: list item 2 is null (from configuration file %s)",
+		"tags: [a, null]\n": "app: --tags: list item 2 is null (from configuration file %s, key tags)",
+		"nums: [1, ~]\n":    "app: config key nums: list item 2 is null (from configuration file %s)",
 	} {
 		cfg := writeConfig(t, body)
 		want = fmt.Sprintf(want, cfg)

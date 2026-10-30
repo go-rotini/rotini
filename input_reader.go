@@ -100,7 +100,7 @@ func NewInputReader(meta InputSettings) *InputReader {
 // others, with the recon cause reachable via errors.As, or a [*WiringError] when a command
 // declares config inputs but the program has no [InputSettings], or when reading needs a
 // [Feature] the program built with [NewWiredProgram] does not wire (its Feature names it).
-func (b *InputReader) Read(rtx *Context, out any) error { return b.bind(rtx, out) }
+func (b *InputReader) Read(rtx *Context, out any) error { return rtx.withPath(b.bind(rtx, out)) }
 
 func (b *InputReader) bind(rtx *Context, out any) error {
 	if b == nil {
@@ -150,7 +150,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		return err
 	}
 	if err := bindInputs(v, store, chain, anchor); err != nil {
-		return err
+		return store.valueHint(err)
 	}
 
 	// An unknown profile is reported before any value is read or checked: a value it would have
@@ -2609,11 +2609,18 @@ type InputError struct {
 	Token      string
 	Candidates []string
 
-	usage bool // true → CategoryUsage (ErrUsage); false → CategoryInternal
+	usage bool   // true → CategoryUsage (ErrUsage); false → CategoryInternal
+	path  string // the command path a usage error is reported against, which Error prints first
 }
 
-// Error returns Msg.
-func (e *InputError) Error() string { return e.Msg }
+// Error returns Msg, after the path of the command the input belongs to when the user's input
+// is at fault (`taskr add: environment variable TASKR_PORT: ...`).
+func (e *InputError) Error() string {
+	if e.path == "" {
+		return e.Msg
+	}
+	return e.path + ": " + e.Msg
+}
 
 // Unwrap returns Cause, when set, and the category sentinel, [ErrUsage] or [ErrInternal].
 func (e *InputError) Unwrap() []error {

@@ -10,7 +10,7 @@ exec go build -o todo$exe ./cmd/todo
 
 # A missing argument: the reporter adds the invoked command's usage line.
 ! exec ./todo$exe add
-stderr '^Error: missing required input: <title>'
+stderr '^Error: todo add: missing required input: <title>'
 stderr '^Usage: todo add \[flags\] <title>$'
 stderr '^Run ''todo add --help'' for more\.$'
 

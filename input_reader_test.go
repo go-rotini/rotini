@@ -644,7 +644,7 @@ func TestInputReader_envNestingConflicts(t *testing.T) {
 		{"ACME_HTTP__RETRY__MAX=9", "ACME_HTTP__RETRY=1"},
 	} {
 		_, err := NewContextFor(tbAppDef(), nil).WithEnviron(env).Inputs[tbNestInputs]()
-		if err == nil || err.Error() != "environment variables ACME_HTTP__RETRY and ACME_HTTP__RETRY__MAX both set retry" || CategoryOf(err) != CategoryUsage {
+		if err == nil || err.Error() != "app: environment variables ACME_HTTP__RETRY and ACME_HTTP__RETRY__MAX both set retry" || CategoryOf(err) != CategoryUsage {
 			t.Errorf("%q: %v, want a usage error naming both variables", env, err)
 		}
 	}
@@ -1270,7 +1270,7 @@ func TestInputError_envCoercion_isCleanUsage(t *testing.T) {
 	// Names the input in plain language and words the value as the command line does, never
 	// echoing recon internals.
 	msg := err.Error()
-	if msg != `environment variable LOUD: "junk" is not a valid boolean` {
+	if msg != `app: environment variable LOUD: "junk" is not a valid boolean` {
 		t.Errorf("message = %q, want the command line's phrasing", msg)
 	}
 	if strings.Contains(msg, "recon") {
@@ -1802,7 +1802,7 @@ func TestInputReader_channelEnumEnforced(t *testing.T) {
 	t.Run("config rejects a non-member", func(t *testing.T) {
 		cfg := writeConfig(t, "tier: bronze\n")
 		_, err := bind(t, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
-		if err == nil || !strings.HasPrefix(err.Error(), `invalid value "bronze" for config key tier (one of: gold, silver) (from configuration file `+cfg+")") {
+		if err == nil || !strings.HasPrefix(err.Error(), `app: invalid value "bronze" for config key tier (one of: gold, silver) (from configuration file `+cfg+")") {
 			t.Fatalf("err = %v, want an enum violation for tier", err)
 		}
 	})
@@ -2232,14 +2232,14 @@ func TestInputReader_envIntegerWording(t *testing.T) {
 		}
 	}
 	for env, want := range map[string]string{
-		"APP_N=0x10":                 `environment variable APP_N: "0x10" is not a valid integer`,
-		"APP_N= 5":                   `environment variable APP_N: " 5" is not a valid integer`,
-		"APP_N=99999999999999999999": fmt.Sprintf(`environment variable APP_N: "99999999999999999999" is not a valid int (out of range: %d to %d)`, math.MinInt, math.MaxInt),
-		"APP_U8=256":                 `environment variable APP_U8: "256" is not a valid uint8 (out of range: 0 to 255)`,
-		"APP_U8=-1":                  `environment variable APP_U8: "-1" is not a valid uint8 (out of range: 0 to 255)`,
-		"APP_PIN=12x4":               `environment variable APP_PIN: "[redacted]" is not a valid integer`,
-		"APP_PORTS=1,x":              `environment variable APP_PORTS: "x" is not a valid integer`,
-		"APP_PINS=1,300":             `environment variable APP_PINS: "300" is not a valid uint8 (out of range: 0 to 255)`,
+		"APP_N=0x10":                 `app: environment variable APP_N: "0x10" is not a valid integer`,
+		"APP_N= 5":                   `app: environment variable APP_N: " 5" is not a valid integer`,
+		"APP_N=99999999999999999999": fmt.Sprintf(`app: environment variable APP_N: "99999999999999999999" is not a valid int (out of range: %d to %d)`, math.MinInt, math.MaxInt),
+		"APP_U8=256":                 `app: environment variable APP_U8: "256" is not a valid uint8 (out of range: 0 to 255)`,
+		"APP_U8=-1":                  `app: environment variable APP_U8: "-1" is not a valid uint8 (out of range: 0 to 255)`,
+		"APP_PIN=12x4":               `app: environment variable APP_PIN: "[redacted]" is not a valid integer`,
+		"APP_PORTS=1,x":              `app: environment variable APP_PORTS: "x" is not a valid integer`,
+		"APP_PINS=1,300":             `app: environment variable APP_PINS: "300" is not a valid uint8 (out of range: 0 to 255)`,
 	} {
 		for reader, err := range readerErrors[in](NewContextFor(tbAppDef(), nil).WithEnviron([]string{env}), "env") {
 			if err == nil || err.Error() != want {
@@ -2281,12 +2281,12 @@ func TestInputReader_configValueWording(t *testing.T) {
 		"b: 1\n":            "",
 		"b: 0\n":            "",
 		"pins: \"1,2\"\n":   "",
-		"b: 2\n":            `config key b: "2" is not a valid boolean`,
-		"i8: 200\n":         `config key i8: "200" is not a valid int8 (out of range: -128 to 127)`,
-		"i8: 1.5\n":         `config key i8: "1.5" is not a valid integer`,
-		"l8: [1, 200]\n":    `config key l8: "200" is not a valid int8 (out of range: -128 to 127)`,
-		"pins: [1, 300]\n":  `config key pins: "300" is not a valid uint8 (out of range: 0 to 255)`,
-		"pins: \"1,300\"\n": `config key pins: "300" is not a valid uint8 (out of range: 0 to 255)`,
+		"b: 2\n":            `app: config key b: "2" is not a valid boolean`,
+		"i8: 200\n":         `app: config key i8: "200" is not a valid int8 (out of range: -128 to 127)`,
+		"i8: 1.5\n":         `app: config key i8: "1.5" is not a valid integer`,
+		"l8: [1, 200]\n":    `app: config key l8: "200" is not a valid int8 (out of range: -128 to 127)`,
+		"pins: [1, 300]\n":  `app: config key pins: "300" is not a valid uint8 (out of range: 0 to 255)`,
+		"pins: \"1,300\"\n": `app: config key pins: "300" is not a valid uint8 (out of range: 0 to 255)`,
 	} {
 		cfg := writeConfig(t, body)
 		if want != "" {
@@ -2439,7 +2439,7 @@ func TestConfigFileProblem_readFailures(t *testing.T) {
 	}
 	err = NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: big}}}).
 		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
-	if want := fmt.Sprintf("could not open configuration file %s: is larger than the %d MiB limit", big, recon.MaxFileSize>>20); err == nil || err.Error() != want {
+	if want := fmt.Sprintf("app: could not open configuration file %s: is larger than the %d MiB limit", big, recon.MaxFileSize>>20); err == nil || err.Error() != want {
 		t.Errorf("too large: %v\nwant %s", err, want)
 	}
 

@@ -23,7 +23,7 @@ func TestMaxLengthZero(t *testing.T) {
 		}
 	}
 	err := NewParser().Parse(NewContextFor(def, []string{"--name", "x"}), &in)
-	if want := "--name must be at most 0 characters long (got 1)"; err == nil || err.Error() != want {
+	if want := "app: --name must be at most 0 characters long (got 1)"; err == nil || err.Error() != want {
 		t.Errorf("--name x: err = %v, want %q", err, want)
 	}
 	if err := NewParser().Parse(NewContextFor(def, []string{"--name", ""}), &in); err != nil {

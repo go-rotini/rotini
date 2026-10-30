@@ -349,7 +349,7 @@ func TestRun_discoveryIgnoresCaseVariantsOfDeclaredNames(t *testing.T) {
 			if !slices.Equal(pe.Candidates, []string{"status", "sync", "sy"}) {
 				t.Errorf("Candidates = %q", pe.Candidates)
 			}
-			if want := "Error: unknown command \"" + w + "\" for \"app\"\n"; errb.String() != want {
+			if want := "Error: app: unknown command \"" + w + "\"\n"; errb.String() != want {
 				t.Errorf("stderr = %q, want %q", errb.String(), want)
 			}
 			if _, err := os.Stat(marker); err == nil {

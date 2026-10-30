@@ -127,7 +127,7 @@ type layerCore struct {
 func (rtx *Context) Inputs[T any]() (T, error) {
 	var t T
 	err := readerFor(rtx).Read(rtx, &t)
-	return t, err
+	return t, rtx.withPath(err)
 }
 
 // InputsWithReport is [Context.Inputs] with provenance: the same reconciled, validated inputs
@@ -136,6 +136,11 @@ func (rtx *Context) Inputs[T any]() (T, error) {
 // the zero T; a validation error returns the merged inputs and report alongside it, so the
 // caller can see which layer supplied the offending value.
 func (rtx *Context) InputsWithReport[T any]() (T, InputReport, error) {
+	t, report, err := inputsWithReport[T](rtx)
+	return t, report, rtx.withPath(err)
+}
+
+func inputsWithReport[T any](rtx *Context) (T, InputReport, error) {
 	var zero T
 	defaults, err := rtx.DefaultInputs[T]()
 	if err != nil {
@@ -184,7 +189,7 @@ func (rtx *Context) InputsWithReport[T any]() (T, InputReport, error) {
 func (rtx *Context) ArgvInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := argvLayer(rtx, reflect.ValueOf(&t).Elem())
-	return InputLayer[T]{Name: "argv", Values: t, Set: set, core: core}, err
+	return InputLayer[T]{Name: "argv", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
 // EnvInputs acquires the environment channel: every Env input, by its explicit variable or the
@@ -193,7 +198,7 @@ func (rtx *Context) ArgvInputs[T any]() (InputLayer[T], error) {
 func (rtx *Context) EnvInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := envLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem(), layerShadow{})
-	return InputLayer[T]{Name: "env", Values: t, Set: set, core: core}, err
+	return InputLayer[T]{Name: "env", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
 // FileInputs acquires the configuration-files channel: every Config input from the
@@ -203,7 +208,7 @@ func (rtx *Context) EnvInputs[T any]() (InputLayer[T], error) {
 func (rtx *Context) FileInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := filesLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem(), layerShadow{})
-	return InputLayer[T]{Name: "files", Values: t, Set: set, core: core}, err
+	return InputLayer[T]{Name: "files", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
 // StdinInputs acquires the stdin channel: the leaf command's typed payload, decoded per its
@@ -211,7 +216,7 @@ func (rtx *Context) FileInputs[T any]() (InputLayer[T], error) {
 func (rtx *Context) StdinInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := stdinLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())
-	return InputLayer[T]{Name: "stdin", Values: t, Set: set, core: core}, err
+	return InputLayer[T]{Name: "stdin", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
 // DefaultInputs synthesizes the spec's declared defaults as an explicit layer, conventionally
@@ -220,7 +225,7 @@ func (rtx *Context) StdinInputs[T any]() (InputLayer[T], error) {
 func (rtx *Context) DefaultInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := defaultsLayer(rtx, reflect.ValueOf(&t).Elem())
-	return InputLayer[T]{Name: "defaults", Values: t, Set: set, core: core}, err
+	return InputLayer[T]{Name: "defaults", Values: t, Set: set, core: core}, rtx.withPath(err)
 }
 
 // ── overlay ──────────────────────────────────────────────────────────────────.

@@ -928,7 +928,7 @@ func conformanceCases() []inputCase {
 				var in acDeployInputs
 				err := NewInputReader(meta).Read(rtx, &in)
 				pe, ok := errors.AsType[*ParseError](err)
-				if !ok || !strings.Contains(pe.Msg, `"deploy" after "--" is not read as a command`) {
+				if !ok || !strings.Contains(pe.Msg, `takes no arguments, got "deploy" after "--", which ends command lookup`) {
 					t.Fatalf("err = %v, want the ended-lookup message", err)
 				}
 				if slices.Contains(pe.Candidates, "deploy") {
@@ -1064,7 +1064,7 @@ func conformanceCases() []inputCase {
 				// a flag without it keeps the last value.
 				var in acSetInputs
 				err := NewInputReader(meta).Read(NewContextFor(acSetDef(), []string{"--name", "a", "--name", "b"}), &in)
-				if err == nil || err.Error() != `--name was given more than once ("a", then "b"); it takes one value` || CategoryOf(err) != CategoryUsage {
+				if err == nil || err.Error() != `set: --name was given more than once ("a", then "b"); it takes one value` || CategoryOf(err) != CategoryUsage {
 					t.Errorf("err = %v, want the repeat usage error", err)
 				}
 				if err := NewInputReader(meta).Read(NewContextFor(acmeDef(), []string{"deploy", "--env", "dev", "--env", "prod"}), &acDeployInputs{}); err != nil {
@@ -1076,7 +1076,7 @@ func conformanceCases() []inputCase {
 				// uniqueItems compares values as the type reads them: 01 is 1.
 				var in acSetInputs
 				err := NewInputReader(meta).Read(NewContextFor(acSetDef(), []string{"--port", "1", "--port", "01"}), &in)
-				if err == nil || err.Error() != `--port must not repeat a value (got "01" twice)` || CategoryOf(err) != CategoryUsage {
+				if err == nil || err.Error() != `set: --port must not repeat a value (got "01" twice)` || CategoryOf(err) != CategoryUsage {
 					t.Errorf("err = %v, want the duplicate usage error", err)
 				}
 			}},

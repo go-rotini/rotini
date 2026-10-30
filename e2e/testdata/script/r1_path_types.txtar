@@ -45,7 +45,7 @@ mkdir adir.yaml
 stderr '--config: "adir\.yaml" is a directory, not a file'
 # Typed short, reported short: the label is whatever the user wrote.
 ! exec ./paths$exe scan . -c adir.yaml
-stderr '^Error: -c: "adir\.yaml" is a directory, not a file'
+stderr '^Error: paths scan: -c: "adir\.yaml" is a directory, not a file'
 
 # A path type is still a string, so a declared pattern applies to it, and applies first, so a
 # path that could never be valid is rejected on its shape rather than on its absence.

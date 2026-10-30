@@ -191,7 +191,7 @@ func TestSchemaCheck_unfinishedObjectAndStdin(t *testing.T) {
 		t.Errorf("object flag: %v", err)
 	}
 	_, err := ssRead[stDocInputs](t, strings.NewReader(`{"name":"a"}`), InputSettings{StdinSchemas: map[string]string{"stDocStdin": schema}})
-	if err == nil || err.Error() != stdinUnfinished {
+	if err == nil || err.Error() != "app: "+stdinUnfinished {
 		t.Errorf("stdin document: %v", err)
 	}
 }

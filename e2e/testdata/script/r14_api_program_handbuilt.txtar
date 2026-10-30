@@ -42,7 +42,7 @@ wantexit 1 ./gen$exe greet
 cp stderr gen.txt
 wantexit 1 ./hand$exe greet
 cmp stderr gen.txt
-stderr '^Error: missing required input: <who>$'
+stderr '^Error: app greet: missing required input: <who>$'
 
 wantexit 1 ./gen$exe greet -c 0 ada
 cp stderr gen.txt
@@ -62,7 +62,7 @@ wantexit 1 ./gen$exe nope
 cp stderr gen.txt
 wantexit 1 ./hand$exe nope
 cmp stderr gen.txt
-stderr '^Error: unknown command "nope" for "app"$'
+stderr '^Error: app: unknown command "nope"$'
 
 -- cmd/app/.rotini.spec.yaml --
 version: 0.0.0

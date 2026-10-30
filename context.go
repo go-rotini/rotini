@@ -261,6 +261,15 @@ func (rtx *Context) commandName() string {
 	return strings.Join(names, " ")
 }
 
+// withPath reports each [*ParseError] in err that names no command against the run's command
+// path, so every parse error says which command it is about, and returns err.
+func (rtx *Context) withPath(err error) error {
+	if err != nil && rtx != nil {
+		atPath(err, rtx.commandName())
+	}
+	return err
+}
+
 // markInvoked sets Invoked on the last command of chain and clears it on the others, whoever
 // built the chain.
 func markInvoked(chain []Command) {
@@ -523,6 +532,7 @@ func (rtx *Context) RecordError(err error) {
 	if err == nil {
 		return
 	}
+	err = rtx.withPath(err)
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
 	rtx.errs = append(rtx.errs, err)

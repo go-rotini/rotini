@@ -50,7 +50,7 @@ stdout '^added "from the prompt" \(priority normal\)$'
 exec ./todo$exe add 'typed'
 stdout '^added "typed" \(priority normal\)$'
 wantexit 1 ./todo$exe add 'x' -p urgent
-stderr '^Error: invalid value "urgent" for --priority \(one of: low, normal, high\)$'
+stderr '^Error: todo add: invalid value "urgent" for --priority \(one of: low, normal, high\)$'
 
 # The vault layer's values are checked with rotini's own when the merged report validates.
 env USE_VAULT=1

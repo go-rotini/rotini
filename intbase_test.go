@@ -141,19 +141,19 @@ func TestPrefixedBase_rejects(t *testing.T) {
 		argv []string
 		want string
 	}{
-		{[]string{"--n", "1__0"}, `--n: "1__0" is not a valid integer`},
-		{[]string{"--n", "_1"}, `--n: "_1" is not a valid integer`},
-		{[]string{"--n", "1_"}, `--n: "1_" is not a valid integer`},
-		{[]string{"--n=-_1"}, `--n: "-_1" is not a valid integer`},
-		{[]string{"--n", "0x"}, `--n: "0x" is not a valid integer`},
-		{[]string{"--n", "0b2"}, `--n: "0b2" is not a valid integer`},
-		{[]string{"--u8", "0x100"}, `--u8: "0x100" is not a valid uint8 (out of range: 0 to 255)`},
-		{[]string{"--u8=-0x1"}, `--u8: "-0x1" is not a valid uint8 (out of range: 0 to 255)`},
-		{[]string{"--n", "0x10000000000000000"}, `--n: "0x10000000000000000" is not a valid integer`},
-		{[]string{"--ids", "0x1,0x1FF"}, `--ids: "0x1FF" is not a valid uint8 (out of range: 0 to 255)`},
-		{[]string{"--", "0xZ"}, `<nums>: "0xZ" is not a valid integer`},
-		{[]string{"--raw", "0x10"}, `--raw: "0x10" is not a valid integer`},
-		{[]string{"--raw", "1_000"}, `--raw: "1_000" is not a valid integer`},
+		{[]string{"--n", "1__0"}, `app: --n: "1__0" is not a valid integer`},
+		{[]string{"--n", "_1"}, `app: --n: "_1" is not a valid integer`},
+		{[]string{"--n", "1_"}, `app: --n: "1_" is not a valid integer`},
+		{[]string{"--n=-_1"}, `app: --n: "-_1" is not a valid integer`},
+		{[]string{"--n", "0x"}, `app: --n: "0x" is not a valid integer`},
+		{[]string{"--n", "0b2"}, `app: --n: "0b2" is not a valid integer`},
+		{[]string{"--u8", "0x100"}, `app: --u8: "0x100" is not a valid uint8 (out of range: 0 to 255)`},
+		{[]string{"--u8=-0x1"}, `app: --u8: "-0x1" is not a valid uint8 (out of range: 0 to 255)`},
+		{[]string{"--n", "0x10000000000000000"}, `app: --n: "0x10000000000000000" is not a valid integer`},
+		{[]string{"--ids", "0x1,0x1FF"}, `app: --ids: "0x1FF" is not a valid uint8 (out of range: 0 to 255)`},
+		{[]string{"--", "0xZ"}, `app: <nums>: "0xZ" is not a valid integer`},
+		{[]string{"--raw", "0x10"}, `app: --raw: "0x10" is not a valid integer`},
+		{[]string{"--raw", "1_000"}, `app: --raw: "1_000" is not a valid integer`},
 	} {
 		if _, err := ibParse(t, tt.argv...); err == nil || err.Error() != tt.want {
 			t.Errorf("%q: err = %v, want %s", tt.argv, err, tt.want)
@@ -172,12 +172,12 @@ func TestPrefixedBase_rules(t *testing.T) {
 		argv []string
 		want string
 	}{
-		{[]string{"--n", "0x1002"}, "--n must be <= 4096 (got 0x1002)"},
-		{[]string{"--n", "0b11"}, "--n must be a multiple of 2 (got 0b11)"},
-		{[]string{"--ptr=-0x1"}, "--ptr must be > 0 (got -0x1)"},
-		{[]string{"--", "-0x65"}, "<nums> must be >= -100 (got -0x65)"},
-		{[]string{"--mask", "0x10", "--mask", "16"}, `--mask must not repeat a value (got "16" twice)`},
-		{[]string{"--level", "0x2"}, `invalid value "0x2" for --level (one of: 1, 0x10)`},
+		{[]string{"--n", "0x1002"}, "app: --n must be <= 4096 (got 0x1002)"},
+		{[]string{"--n", "0b11"}, "app: --n must be a multiple of 2 (got 0b11)"},
+		{[]string{"--ptr=-0x1"}, "app: --ptr must be > 0 (got -0x1)"},
+		{[]string{"--", "-0x65"}, "app: <nums> must be >= -100 (got -0x65)"},
+		{[]string{"--mask", "0x10", "--mask", "16"}, `app: --mask must not repeat a value (got "16" twice)`},
+		{[]string{"--level", "0x2"}, `app: invalid value "0x2" for --level (one of: 1, 0x10)`},
 	} {
 		if _, err := ibParse(t, tt.argv...); err == nil || err.Error() != tt.want {
 			t.Errorf("%q: err = %v, want %s", tt.argv, err, tt.want)
@@ -212,7 +212,7 @@ func TestPrefixedBase_shortCircuit(t *testing.T) {
 	if err := NewParser().Parse(NewContextFor(def, []string{"--help", "0x10"}), &in); err != nil || in.App.Flags.Mode != 0o644 || in.App.Arguments.N != 16 {
 		t.Errorf("--help 0x10: %+v, %v", in.App, err)
 	}
-	if err := NewParser().Parse(NewContextFor(def, []string{"--help", "--mode", "0x"}), &in); err == nil || err.Error() != `--mode: "0x" is not a valid non-negative integer` {
+	if err := NewParser().Parse(NewContextFor(def, []string{"--help", "--mode", "0x"}), &in); err == nil || err.Error() != `app: --mode: "0x" is not a valid non-negative integer` {
 		t.Errorf("--help --mode 0x: %v", err)
 	}
 }

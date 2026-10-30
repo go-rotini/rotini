@@ -15,7 +15,7 @@ exec go build -o bin/todo$exe ./cmd/todo
 
 # A usage error exits 2 and points at help.
 wantexit 2 bin/todo$exe add
-stderr '^Error: missing required input: <title>$'
+stderr '^Error: todo add: missing required input: <title>$'
 stderr '^Run ''todo add --help'' for usage.$'
 
 # A declared plugin that isn't installed exits 127.

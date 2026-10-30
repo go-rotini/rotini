@@ -86,7 +86,7 @@ stdout '^kubeconfig=\[a b c\]$'
 # An error about a fallback value names the variable it came from.
 env DEPLOY_ENV=x
 ! exec ./todo$exe deploy
-stderr '^Error: invalid value "x" for <env> \(one of: prod, dev\) \(from environment variable DEPLOY_ENV\)$'
+stderr '^Error: todo deploy: invalid value "x" for <env> \(one of: prod, dev\) \(from environment variable DEPLOY_ENV\)$'
 
 # validate asks for a fallback or a default on an argument after one with a fallback.
 ! exec rotini validate bad-args.yaml

@@ -213,7 +213,7 @@ func TestConfigSource_emptyPathAndDirectory(t *testing.T) {
 	for _, argv := range [][]string{{"--config="}, {"--config", ""}} {
 		rtx := NewContextFor(configPathDef(filepath.Join(dir, "dflt.yaml")), argv).WithInputSettings(configPathSettings()).WithEnviron(env)
 		_, err := rtx.Inputs[configPathInputs]()
-		if err == nil || err.Error() != "--config was given an empty path; name a configuration file" || !errors.Is(err, ErrUsage) {
+		if err == nil || err.Error() != "app: --config was given an empty path; name a configuration file" || !errors.Is(err, ErrUsage) {
 			t.Errorf("%q: %v", argv, err)
 		}
 		if _, _, err := ConfigFilePath(rtx, "c"); err == nil || !errors.Is(err, ErrUsage) {

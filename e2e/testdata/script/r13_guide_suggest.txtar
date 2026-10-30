@@ -37,12 +37,12 @@ env TODO_TOKEN=
 
 # The default reporter prints the error and no suggestion.
 ! exec ./plain$exe lsit
-stderr '^Error: unknown command "lsit" for "todo"$'
+stderr '^Error: todo: unknown command "lsit"$'
 ! stderr 'Did you mean'
 ! stderr '"list"'
 
 -- command.txt --
-Error: unknown command "lsit" for "todo"
+Error: todo: unknown command "lsit"
 Did you mean "list"?
 Did you mean "list"?
 -- report_head.go.txt --

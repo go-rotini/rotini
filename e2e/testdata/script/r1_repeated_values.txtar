@@ -12,13 +12,13 @@ exec ./repdemo$exe push --name a --port 1 --port 2
 ! stderr .
 
 wantexit 1 ./repdemo$exe push --name a --name b
-stderr '^Error: --name was given more than once \("a", then "b"\); it takes one value$'
+stderr '^Error: repdemo push: --name was given more than once \("a", then "b"\); it takes one value$'
 
 # Without repeatable: false, the last value wins.
 exec ./repdemo$exe push --tag a --tag b
 
 wantexit 1 ./repdemo$exe push --port 1 --port 01
-stderr '^Error: --port must not repeat a value \(got "01" twice\)$'
+stderr '^Error: repdemo push: --port must not repeat a value \(got "01" twice\)$'
 
 env HOSTS=a,b,a
 wantexit 1 ./repdemo$exe push
