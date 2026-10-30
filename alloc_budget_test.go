@@ -171,6 +171,9 @@ func TestGuard_allocBudgets(t *testing.T) {
 	if testing.Short() {
 		t.Skip("allocation budgets are measured in full runs only")
 	}
+	if raceEnabled {
+		t.Skip("allocation budgets are measured without -race")
+	}
 	for _, row := range guardAllocBudgets {
 		for _, legacy := range []bool{false, true} {
 			name, budget := row.name, row.budget
