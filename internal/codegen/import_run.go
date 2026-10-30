@@ -24,7 +24,7 @@ import (
 
 // ImporterVersion is the github.com/go-rotini/import release `rotini import` runs unless
 // --importer-version names another.
-const ImporterVersion = "v0.2.1"
+const ImporterVersion = "v0.2.2"
 
 // importerModule is the importer's module; each framework's importer is a package in it
 // (importerModule + "/cobra").

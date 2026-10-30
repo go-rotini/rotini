@@ -28,7 +28,7 @@ func TestImportEdgeCases(t *testing.T) {
 			{args: []string{"-p", "dev", "server", "start", "fast", "--port", "1", "--insecure", "--tls-cert", "c"}, want: "--insecure", fail: true},
 			{args: []string{"-p", "dev", "server", "start", "fast", "--port", "1"}, want: "--insecure", fail: true},
 			{args: []string{"-p", "dev", "server", "start", "fast", "--port", "1", "--insecure", "--token", "t"}, want: "--token-file", fail: true},
-			{args: []string{"-p", "dev", "server", "start", "slow", "--port", "1", "--insecure"}, want: "slow", fail: true},
+			{args: []string{"-p", "dev", "server", "start", "slow", "--port", "1", "--insecure"}, want: "Mode:slow"}, // ExactArgs doesn't check ValidArgs
 			{args: []string{"-p", "dev", "copy", "a"}, want: "dst", fail: true},
 			{args: []string{"-p", "dev", "server", "stop", "extra"}, want: `takes no arguments, got "extra"`, fail: true},
 			{args: []string{"-p", "dev", "experimental"}, want: "experimental", fail: true},

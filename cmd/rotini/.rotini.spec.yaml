@@ -48,7 +48,7 @@ command:
         - name: importer_version
           identifiers:
             - --importer-version
-          summary: the github.com/go-rotini/import version to run (default v0.2.1), or the path of a local checkout, absolute or starting with .
+          summary: the github.com/go-rotini/import version to run (default v0.2.2), or the path of a local checkout, absolute or starting with .
           schema:
             type: string
         - name: force
