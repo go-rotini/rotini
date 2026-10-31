@@ -73,7 +73,7 @@ func TestDefaultSignals_customReporterReceivesTheSignalError(t *testing.T) {
 	}
 }
 
-// The reporter sees the trapped signal and the code it set, and SignalCaused picks out the
+// The reporter sees the trapped signal and the code it set, and CausedBySignal picks out the
 // error the signal caused, so a custom reporter can drop it and print the rest.
 func TestDefaultSignals_outcomeCarriesTheSignal(t *testing.T) {
 	defer swapTrapSignals(syscall.SIGUSR1)()
@@ -88,7 +88,7 @@ func TestDefaultSignals_outcomeCarriesTheSignal(t *testing.T) {
 		WithReporter(func(ctx context.Context, _ *Context, out Outcome) {
 			got = out
 			for _, err := range out.Errors {
-				if !SignalCaused(ctx, err) {
+				if !CausedBySignal(ctx, err) {
 					kept = append(kept, err)
 				}
 			}

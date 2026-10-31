@@ -23,13 +23,13 @@ func (*appDeployHandler) CompleteArgValue(rtx *rotini.Context, arg, partial stri
 	services := []string{"web\tthe web tier", "api\tthe public API", "db\tthe database"}
 	switch {
 	case strings.HasPrefix(partial, "./"):
-		rtx.SetCompletionFallback(rotini.Completion{Kind: "file", Extensions: []string{"yaml", "yml"}})
+		rtx.SetCompletionFallback(rotini.CompletionHint{Kind: "file", Extensions: []string{"yaml", "yml"}})
 	case strings.HasPrefix(partial, "s"), strings.HasPrefix(partial, "d"):
-		rtx.SetCompletionFallback(rotini.Completion{Kind: "directory"})
+		rtx.SetCompletionFallback(rotini.CompletionHint{Kind: "directory"})
 	case strings.HasPrefix(partial, "b"):
-		rtx.SetCompletionFallback(rotini.Completion{Kind: "none"})
+		rtx.SetCompletionFallback(rotini.CompletionHint{Kind: "none"})
 	case strings.HasPrefix(partial, "c"):
-		rtx.SetCompletionFallback(rotini.Completion{Kind: "file"})
+		rtx.SetCompletionFallback(rotini.CompletionHint{Kind: "file"})
 	}
 	return services
 }

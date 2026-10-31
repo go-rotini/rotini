@@ -80,7 +80,7 @@ var configCallArgsOnce lazy[map[string][2]int]
 
 // undeclaredConfigNames warns about a config file, key or profile a handler names, as a string
 // literal or a generated name constant, in a call to rotini's SetConfigValue, UnsetConfigValue,
-// ConfigFilePath, ConfigProfiles or ToProfile, that the spec doesn't declare: the call fails at
+// ConfigFilePath, ConfigProfiles or ConfigToProfile, that the spec doesn't declare: the call fails at
 // run time, where generate can see it now. A name computed at run time isn't checked.
 func undeclaredConfigNames(fset *token.FileSet, files map[string]*ast.File, names configNames, moduleRoot string) []error {
 	var found []auditFinding
@@ -116,7 +116,7 @@ func undeclaredConfigNames(fset *token.FileSet, files map[string]*ast.File, name
 // check judges a call to rotini's fn with args: what follows "rotini.<fn>" in a warning, or ""
 // when it names nothing undeclared.
 func (n configNames) check(fn string, args []ast.Expr) string {
-	if fn == "ToProfile" {
+	if fn == "ConfigToProfile" || fn == "ToProfile" {
 		if len(args) == 1 && n.profiles != nil {
 			if v, ok := n.literal(args[0]); ok && !slices.Contains(n.profiles, v) {
 				return fmt.Sprintf("names the profile %q, which no profile selector's enum lists (%s)", v, quotedList(n.profiles))

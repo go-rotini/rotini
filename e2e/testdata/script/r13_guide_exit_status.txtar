@@ -147,7 +147,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoGetHandler)(nil)
+var _ rotini.HandlerE = (*todoGetHandler)(nil)
 
 type todoGetHandler struct{ rotini.NoHooksE }
 
@@ -168,7 +168,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoPushHandler)(nil)
+var _ rotini.HandlerE = (*todoPushHandler)(nil)
 
 type todoPushHandler struct{ rotini.NoHooksE }
 

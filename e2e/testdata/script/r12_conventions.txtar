@@ -187,7 +187,7 @@ type todoListHandler struct {
 }
 
 func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	style := rtx.MustGetDependency(styleDep)
+	style := rtx.MustDependency(styleDep)
 	if style.Format == "json" {
 		fmt.Fprintln(rtx.Stdout, `{"tasks":["write docs"]}`)
 		return

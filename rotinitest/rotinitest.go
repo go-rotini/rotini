@@ -14,11 +14,12 @@
 //	}
 //
 // [Run] writes the inputs value as a command line with [rotini.ArgvOf], so the program parses
-// it exactly as it would a user's. Each run gets its own environment and working directory
-// ([rotini.Program.WithEnviron], [rotini.Program.WithDir]): only the variables the inputs set
-// and those [Env] adds, plus HOME, USERPROFILE and XDG_CONFIG_HOME pointing into a temporary
-// directory. A developer's own variables and configuration files never leak in, and tests can
-// call t.Parallel.
+// it exactly as it would a user's. Each run gets its own environment
+// ([rotini.Program.WithEnviron]) and its own directory, a new temporary one
+// ([rotini.Program.WithDir], which handlers read as [rotini.Context.Dir]). The environment
+// holds only the variables the inputs set and those [Env] adds, plus HOME, USERPROFILE and
+// XDG_CONFIG_HOME pointing into a temporary directory. A developer's own variables and
+// configuration files never leak in, and tests can call t.Parallel.
 //
 // [Result.Outcome] is what the run recorded, so a test reads a [rotini.Channel]'s records with
 // res.Outcome.Records(ch) instead of parsing stderr.
@@ -26,7 +27,7 @@
 // Limits:
 //   - Pass a fresh program to every call, built as main builds it (with the dependencies main
 //     adds). Run sets its streams and environment, so a program shared between tests, such as
-//     the generated package's Program variable, leaks state between them.
+//     one held in a package-level variable, leaks state between them.
 //   - Config inputs come from configuration files the test writes first, into the directory it
 //     passes as the run's ([Dir]) or as XDG_CONFIG_HOME ([Env]); putting one in the inputs
 //     value fails the test.
@@ -119,7 +120,7 @@ func Env(kv ...string) Option {
 	return func(c *config) { c.env = append(c.env, kv...) }
 }
 
-// Dir is the run's working directory, in place of a new temporary one; a test that writes a
+// Dir is the run's directory ([rotini.Context.Dir]), in place of a new temporary one; a test that writes a
 // configuration file there first passes it.
 func Dir(dir string) Option {
 	return func(c *config) { c.dir = dir }

@@ -154,9 +154,9 @@ func TestPinnedConfig_expandedInEveryReader(t *testing.T) {
 	if err != nil || show(in) != want {
 		t.Errorf("InputsWithReport: %q, %v; want %q", show(in), err, want)
 	}
-	layer, err := rtx.FileInputs[pinnedExpandInputs]()
+	layer, err := rtx.ConfigInputs[pinnedExpandInputs]()
 	if err != nil || show(layer.Values) != want {
-		t.Errorf("FileInputs: %q, %v; want %q", show(layer.Values), err, want)
+		t.Errorf("ConfigInputs: %q, %v; want %q", show(layer.Values), err, want)
 	}
 }
 

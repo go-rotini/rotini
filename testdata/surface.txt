@@ -1,10 +1,10 @@
 const CategoryInternal
 const CategoryNone Category
 const CategoryUsage
-const ClassError
-const ClassInfo ChannelClass
-const ClassSuccess
-const ClassWarning
+const ChannelClassError
+const ChannelClassInfo ChannelClass
+const ChannelClassSuccess
+const ChannelClassWarning
 const FlagGroupAtLeastOne FlagGroupKind
 const FlagGroupMutuallyExclusive FlagGroupKind
 const FlagGroupOneOf FlagGroupKind
@@ -48,7 +48,7 @@ field AppDirectories.Config string
 field AppDirectories.Data string
 field AppDirectories.State string
 field ArgDef.Base string
-field ArgDef.Complete Completion
+field ArgDef.Complete CompletionHint
 field ArgDef.Constraints
 field ArgDef.Date bool
 field ArgDef.Default string
@@ -74,6 +74,11 @@ field ArgDef.Type string
 field ArgDef.Variadic bool
 field ArgvError.Field FieldPath
 field ArgvError.Reason string
+field ArgvFlag.Name string
+field ArgvFlag.Typed string
+field ArgvFlag.Value string
+field ArgvValues.Args []string
+field ArgvValues.Flags []ArgvFlag
 field Command.Arguments []ArgDef
 field Command.Commands []CommandDef
 field Command.Deprecated string
@@ -129,17 +134,17 @@ field CommandDef.ReplacedBy string
 field CommandDef.Stability string
 field CommandDef.Summary string
 field CommandDef.Usage string
-field Completion.Extensions []string
-field Completion.Kind string
-field Completion.Message string
 field CompletionCandidate.Description string
 field CompletionCandidate.Value string
 field CompletionDescriptionsDef.Env string
+field CompletionHint.Extensions []string
+field CompletionHint.Kind string
+field CompletionHint.Message string
 field CompletionMessagesDef.Env string
 field CompletionOptions.KeepOrder bool
 field CompletionOptions.NoSpace bool
 field CompletionResult.Candidates []CompletionCandidate
-field CompletionResult.Hint Completion
+field CompletionResult.Hint CompletionHint
 field CompletionResult.IgnoreCase bool
 field CompletionResult.KeepOrder bool
 field CompletionResult.Messages []string
@@ -238,7 +243,7 @@ field ExitStatusDef.Name string
 field ExitStatusDef.Retryable bool
 field ExitStatusDef.Summary string
 field FlagDef.Base string
-field FlagDef.Complete Completion
+field FlagDef.Complete CompletionHint
 field FlagDef.Constraints
 field FlagDef.Date bool
 field FlagDef.Default string
@@ -391,13 +396,18 @@ func ArgvSecrets() ArgvOption
 func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func Bounds() Feature
 func CategoryOf(err error) Category
+func CausedBySignal(ctx context.Context, err error) bool
 func Chdir() Feature
 func Codec(name string, decode func(data []byte) (any, error), opts ...CodecOption) Feature
 func CodecExtensions(exts ...string) CodecOption
 func CodecLocate(locate func(data []byte, path []string) (line, col int, ok bool)) CodecOption
-func ConfigFilePath(rtx *Context, file string) (path string, exists bool, err error)
+func ConfigAllowSecretWrite() ConfigWriteOption
+func ConfigFilePath(rtx *Context, name string) (path string, exists bool, err error)
 func ConfigFiles() Feature
-func ConfigProfiles(rtx *Context, file string) ([]string, error)
+func ConfigProfiles(rtx *Context, name string) ([]string, error)
+func ConfigToProfile(name string) ConfigWriteOption
+func ConfigToSharedKeys() ConfigWriteOption
+func ConfigValueCheck(fn func(raw string) error) ConfigWriteOption
 func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile, error)
 func DecodeOutput[T any](p *Program, data []byte, format string) (T, error)
 func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep
@@ -405,6 +415,7 @@ func DefaultReporter(ctx context.Context, rtx *Context, out Outcome)
 func DefaultResolver(def Definition, argv []string) (Resolution, error)
 func Deprecations(rtx *Context) []Deprecation
 func Dotenv() Feature
+func EffectsOf(rtx *Context) Effects
 func EmailValues() Feature
 func Env() Feature
 func EnvFamilies() Feature
@@ -414,7 +425,7 @@ func Fallbacks() Feature
 func FileMode(perm fs.FileMode) OutputOption
 func FlagDependencies() Feature
 func FlagGroups() Feature
-func FromErrorHandler(h ErrorHandler) Handler
+func FromHandlerE(h HandlerE) Handler
 func IPValues() Feature
 func InternalError(err error) error
 func IsTerminal(stream any) bool
@@ -423,19 +434,22 @@ func JSONC() Feature
 func MACValues() Feature
 func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport)
 func MergeInputs[T any](layers ...InputLayer[T]) T
-func MissingCommand(rtx *Context) *ParseError
+func MissingCommandError(rtx *Context) *ParseError
 func Multicall() Feature
 func NewChannel[T any](name string, class ChannelClass) Channel[T]
 func NewContextFor(def Definition, argv []string) *Context
 func NewDependency[T any](name string) Dependency[T]
-func NewInputReader(meta InputSettings) *InputReader
+func NewInputReader(settings InputSettings) *InputReader
 func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
 func NewProgramFunc(def Definition, lookup HandlerLookup) *Program
-func NewSuggestor() *Suggestor
+func NewSuggester() *Suggester
+func NewSuggestor() *Suggester
 func NewWiredProgram(def Definition, lookup HandlerLookup, features ...Feature) *Program
 func ObjectFlags() Feature
 func OpenInput(rtx *Context, path string) (io.ReadCloser, error)
+func OutputFileMode(perm fs.FileMode) OutputOption
+func OutputOverwrite(enabled bool) OutputOption
 func Overwrite(enabled bool) OutputOption
 func ParseConfigValue(fn func(raw string) error) ConfigWriteOption
 func PathExpansion() Feature
@@ -444,14 +458,11 @@ func PluginCompletion(w io.Writer, result CompletionResult) error
 func Plugins() Feature
 func PresenceOf[T any](v T) Presence
 func Profiles() Feature
-func Ptr[T any](v T) *T
 func RegexpValues() Feature
 func ResponseFiles() Feature
-func RunEffects(rtx *Context) Effects
 func Schemas() Feature
 func SelectFields(v any, at string, fields []string) (Selection, error)
-func SetConfigValue(rtx *Context, file, key, raw string, opts ...ConfigWriteOption) error
-func SignalCaused(ctx context.Context, err error) bool
+func SetConfigValue(rtx *Context, name, key, raw string, opts ...ConfigWriteOption) error
 func SortBy[E any](items []E, field string, desc bool) error
 func Stdin(formats ...string) Feature
 func StreamPaths() Feature
@@ -466,15 +477,15 @@ func ToSharedKeys() ConfigWriteOption
 func URLValues() Feature
 func UniqueItems() Feature
 func UnknownCommandError(def Definition, path ...string) *ParseError
-func UnsetConfigValue(rtx *Context, file, key string, opts ...ConfigWriteOption) error
+func UnsetConfigValue(rtx *Context, name, key string, opts ...ConfigWriteOption) error
 func UsageError(err error) error
 func UserHomes() Feature
 func WithDependency[T any](dep Dependency[T], value T) Option
-func WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Context) (T, error)) Option
 func YAML() Feature
 method ArgValueCompleter.CompleteArgValue(rtx *Context, arg, partial string) []string
 method ArgvError.Error() string
 method ArgvError.Unwrap() error
+method ArgvParser.ParseArgv(rtx *Context) (ArgvValues, error)
 method Base64Bytes.MarshalText() ([]byte, error)
 method Base64Bytes.String() string
 method Base64Bytes.UnmarshalText(text []byte) error
@@ -497,6 +508,7 @@ method Context.Command() Command
 method Context.CommandChain() []Command
 method Context.CommandPath() string
 method Context.CompletionScript(shell string) (string, error)
+method Context.ConfigInputs[T any]() (InputLayer[T], error)
 method Context.Context() context.Context
 method Context.DashIndex() (int, bool)
 method Context.DefaultInputs[T any]() (InputLayer[T], error)
@@ -516,10 +528,12 @@ method Context.HelpFor(path ...string) (string, error)
 method Context.InputsWithReport[T any]() (T, InputReport, error)
 method Context.Inputs[T any]() (T, error)
 method Context.InvokedHelp() (string, error)
+method Context.LookupDependency[T any](dep Dependency[T]) (T, bool)
 method Context.LookupEnv(name string) (string, bool)
+method Context.MustDependency[T any](dep Dependency[T]) T
 method Context.MustGetDependency[T any](dep Dependency[T]) T
 method Context.Now() time.Time
-method Context.Parser() *Parser
+method Context.Parser() ArgvParser
 method Context.PartialInputs[T any]() (T, Presence, error)
 method Context.PluginHelp(path ...string) bool
 method Context.RecordError(err error)
@@ -527,7 +541,7 @@ method Context.RecordInfo(msg string)
 method Context.RecordSuccess(msg string)
 method Context.RecordWarning(warn error)
 method Context.Record[T any](ch Channel[T], v T)
-method Context.SetCompletionFallback(fallback Completion)
+method Context.SetCompletionFallback(fallback CompletionHint)
 method Context.SetCompletionOptions(opts CompletionOptions)
 method Context.SetContext(ctx context.Context)
 method Context.SetDependencyIfAbsent[T any](dep Dependency[T], value T)
@@ -542,9 +556,9 @@ method Context.WithDir(dir string) *Context
 method Context.WithEnviron(env []string) *Context
 method Context.WithHelp(help HelpFunc) *Context
 method Context.WithInputReader(fn func(InputSettings) *InputReader) *Context
-method Context.WithInputSettings(meta InputSettings) *Context
+method Context.WithInputSettings(settings InputSettings) *Context
 method Context.WithOutputChecks(enabled bool) *Context
-method Context.WithParser(parser *Parser) *Context
+method Context.WithParser(parser ArgvParser) *Context
 method Context.WithStderr(w io.Writer) *Context
 method Context.WithStdin(r io.Reader) *Context
 method Context.WithStdout(w io.Writer) *Context
@@ -558,11 +572,6 @@ method Dependency.String() string
 method DependencyError.Error() string
 method DependencyError.Unwrap() []error
 method Deprecation.Error() string
-method ErrorHandler.CascadingPostRun(ctx context.Context, rtx *Context) error
-method ErrorHandler.CascadingPreRun(ctx context.Context, rtx *Context) error
-method ErrorHandler.PostRun(ctx context.Context, rtx *Context) error
-method ErrorHandler.PreRun(ctx context.Context, rtx *Context) error
-method ErrorHandler.Run(ctx context.Context, rtx *Context) error
 method Feature.String() string
 method FlagValueCompleter.CompleteFlagValue(rtx *Context, flag, partial string) []string
 method Glob.MarshalText() ([]byte, error)
@@ -573,6 +582,11 @@ method Handler.CascadingPreRun(ctx context.Context, rtx *Context)
 method Handler.PostRun(ctx context.Context, rtx *Context)
 method Handler.PreRun(ctx context.Context, rtx *Context)
 method Handler.Run(ctx context.Context, rtx *Context)
+method HandlerE.CascadingPostRun(ctx context.Context, rtx *Context) error
+method HandlerE.CascadingPreRun(ctx context.Context, rtx *Context) error
+method HandlerE.PostRun(ctx context.Context, rtx *Context) error
+method HandlerE.PreRun(ctx context.Context, rtx *Context) error
+method HandlerE.Run(ctx context.Context, rtx *Context) error
 method HexBytes.MarshalText() ([]byte, error)
 method HexBytes.String() string
 method HexBytes.UnmarshalText(text []byte) error
@@ -582,12 +596,12 @@ method InputError.Path() string
 method InputError.Unwrap() []error
 method InputErrorKind.String() string
 method InputReader.Read(rtx *Context, out any) error
+method InputReport.DeclaredSources(path FieldPath) []string
 method InputReport.Explain(w io.Writer) error
 method InputReport.Fields() []FieldPath
 method InputReport.Format(w io.Writer) error
 method InputReport.History(path FieldPath) []InputSource
 method InputReport.Label(path FieldPath) string
-method InputReport.Sources(path FieldPath) []string
 method InputReport.UnreadConfigKeys() []UnreadConfigKey
 method InputReport.Validate() error
 method InputReport.Winner(path FieldPath) (InputSource, bool)
@@ -613,6 +627,7 @@ method ParseError.Path() string
 method ParseError.Unwrap() error
 method ParseKind.String() string
 method Parser.Parse(rtx *Context, out any) error
+method Parser.ParseArgv(rtx *Context) (ArgvValues, error)
 method PluginError.Error() string
 method PluginError.Unwrap() []error
 method PluginErrorKind.String() string
@@ -629,6 +644,7 @@ method Program.WithBufferedOutput(enabled bool) *Program
 method Program.WithClock(now func() time.Time) *Program
 method Program.WithCompletion(format CompletionFormat) *Program
 method Program.WithCompletionDescriptions(fn func(rtx *Context) bool) *Program
+method Program.WithCompletionFormat(format CompletionFormat) *Program
 method Program.WithCompletionMessages(fn func(rtx *Context) bool) *Program
 method Program.WithCompletionScript(fn CompletionScriptFunc) *Program
 method Program.WithContext(ctx context.Context) *Program
@@ -639,13 +655,13 @@ method Program.WithExit(fn func(int)) *Program
 method Program.WithFeatures(features ...Feature) *Program
 method Program.WithHelp(help HelpFunc) *Program
 method Program.WithInputReader(fn func(InputSettings) *InputReader) *Program
-method Program.WithInputSettings(meta InputSettings) *Program
+method Program.WithInputSettings(settings InputSettings) *Program
 method Program.WithLifecycle(fn Lifecycle) *Program
 method Program.WithMiddleware(mw ...Middleware) *Program
 method Program.WithOutputChecks(enabled bool) *Program
 method Program.WithPanicRecover(enabled bool) *Program
-method Program.WithParser(parser *Parser) *Program
-method Program.WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Context) (T, error)) *Program
+method Program.WithParser(parser ArgvParser) *Program
+method Program.WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Context) (T, func() error, error)) *Program
 method Program.WithReporter(fn Reporter) *Program
 method Program.WithResolver(fn Resolver) *Program
 method Program.WithSignals(sigs ...os.Signal) *Program
@@ -659,18 +675,21 @@ method Program.WithoutSignalHandling() *Program
 method Selection.MarshalJSON() ([]byte, error)
 method Selection.MarshalTOML() (any, error)
 method Selection.MarshalYAML() (any, error)
-method Suggestor.Closest(input string, candidates []string) (suggestion string, ok bool)
-method Suggestor.For(err error) []string
-method Suggestor.Suggest(input string, candidates []string) []string
-method Suggestor.WithMaxResults(n int) *Suggestor
-method Suggestor.WithMinScore(score float64) *Suggestor
+method Suggester.Closest(input string, candidates []string) (suggestion string, ok bool)
+method Suggester.For(err error) []string
+method Suggester.Suggest(input string, candidates []string) []string
+method Suggester.WithMaxResults(n int) *Suggester
+method Suggester.WithMinScore(score float64) *Suggester
 method WiringError.Error() string
 method WiringError.Unwrap() error
 type AppDirectories struct
 type ArgDef struct
 type ArgValueCompleter interface
 type ArgvError struct
+type ArgvFlag struct
 type ArgvOption func(*argvConfig)
+type ArgvParser interface
+type ArgvValues struct
 type Base64Bytes []byte
 type ByteSize int64
 type Category int
@@ -679,10 +698,11 @@ type Channel[T any] struct
 type CodecOption func(*codecEntry)
 type Command struct
 type CommandDef struct
-type Completion struct
+type Completion = CompletionHint
 type CompletionCandidate struct
 type CompletionDescriptionsDef struct
 type CompletionFormat func(w io.Writer, result CompletionResult) error
+type CompletionHint struct
 type CompletionMessagesDef struct
 type CompletionOptions struct
 type CompletionResult struct
@@ -700,7 +720,6 @@ type DiscoverDef struct
 type DiscoveredPlugin struct
 type Effects struct
 type EnumValue struct
-type ErrorHandler interface
 type ExitStatusDef struct
 type Feature struct
 type FieldPath string
@@ -711,6 +730,7 @@ type FlagGroupKind string
 type FlagValueCompleter interface
 type Glob string
 type Handler interface
+type HandlerE interface
 type HandlerLookup func(name string) (Handler, bool)
 type HelpFunc func(path ...string) (string, error)
 type HexBytes []byte
@@ -763,7 +783,8 @@ type Resolution struct
 type Resolver func(def Definition, argv []string) (Resolution, error)
 type ResponseFilesDef struct
 type Selection struct
-type Suggestor struct
+type Suggester struct
+type Suggestor = Suggester
 type TopicDef struct
 type UnreadConfigKey struct
 type WiringError struct

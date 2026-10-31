@@ -28,7 +28,7 @@ stderr '^Warning: spec: dash\.jsonc:9:55: command app: argument "order": has `en
 
 # A config input with no config_files entry in scope.
 exec rotini validate config.yaml
-stderr '^Warning: spec: config\.yaml:5:7: command app: config "color": no `config_files` entry is in scope \(on this command, an ancestor or a command below it\), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless an input reader set with WithInputReader supplies it$'
+stderr '^Warning: spec: config\.yaml:5:7: command app: config "color": no `config_files` entry is in scope \(on this command, an ancestor or a command below it\), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless a source added to InputSettings.Sources supplies it$'
 exec rotini validate config.json
 stderr '^Warning: spec: config\.json:6:7: command app: config "color": no `config_files` entry is in scope \(on this command, an ancestor or a command below it\), so no configuration file is read for it; '
 # With an entry, nothing to say.

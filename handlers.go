@@ -91,7 +91,7 @@ type NoHooks struct {
 	NoCascadingPostRun
 }
 
-// ErrorHandler is [Handler] with hooks that return an error. A non-nil error is recorded as
+// HandlerE is [Handler] with hooks that return an error. A non-nil error is recorded as
 // [Context.RecordError] records it; from CascadingPreRun or PreRun it also stops forward
 // progress, as [Context.HaltWith] does. Teardown still runs, and an error from PostRun or
 // CascadingPostRun does not stop the rest of it.
@@ -110,10 +110,10 @@ type NoHooks struct {
 // [Context.HaltWithCode] sets a code before a `return nil`.
 //
 // A type is one shape or the other, since Go allows only one Run method per type. Wrap an
-// ErrorHandler with [FromErrorHandler] where a Handler is expected; generated wiring does this
-// for stubs that assert ErrorHandler, and [NewProgram] does it for a method that returns one.
+// HandlerE with [FromHandlerE] where a Handler is expected; generated wiring does this
+// for stubs that assert HandlerE, and [NewProgram] does it for a method that returns one.
 // Embed the No*E types below to declare only the hooks a command uses.
-type ErrorHandler interface {
+type HandlerE interface {
 	// CascadingPreRun runs for every command in the chain, root first, before the invoked
 	// command's PreRun.
 	CascadingPreRun(ctx context.Context, rtx *Context) error
@@ -128,36 +128,36 @@ type ErrorHandler interface {
 	CascadingPostRun(ctx context.Context, rtx *Context) error
 }
 
-// NoCascadingPreRunE is an embeddable no-op [ErrorHandler.CascadingPreRun]. [NoHooksE] embeds
+// NoCascadingPreRunE is an embeddable no-op [HandlerE.CascadingPreRun]. [NoHooksE] embeds
 // all four no-ops at once.
 type NoCascadingPreRunE struct{}
 
 // CascadingPreRun does nothing.
 func (NoCascadingPreRunE) CascadingPreRun(ctx context.Context, rtx *Context) error { return nil }
 
-// NoPreRunE is an embeddable no-op [ErrorHandler.PreRun]. [NoHooksE] embeds all four no-ops at
+// NoPreRunE is an embeddable no-op [HandlerE.PreRun]. [NoHooksE] embeds all four no-ops at
 // once.
 type NoPreRunE struct{}
 
 // PreRun does nothing.
 func (NoPreRunE) PreRun(ctx context.Context, rtx *Context) error { return nil }
 
-// NoPostRunE is an embeddable no-op [ErrorHandler.PostRun]. [NoHooksE] embeds all four no-ops
+// NoPostRunE is an embeddable no-op [HandlerE.PostRun]. [NoHooksE] embeds all four no-ops
 // at once.
 type NoPostRunE struct{}
 
 // PostRun does nothing.
 func (NoPostRunE) PostRun(ctx context.Context, rtx *Context) error { return nil }
 
-// NoCascadingPostRunE is an embeddable no-op [ErrorHandler.CascadingPostRun]. [NoHooksE] embeds
+// NoCascadingPostRunE is an embeddable no-op [HandlerE.CascadingPostRun]. [NoHooksE] embeds
 // all four no-ops at once.
 type NoCascadingPostRunE struct{}
 
 // CascadingPostRun does nothing.
 func (NoCascadingPostRunE) CascadingPostRun(ctx context.Context, rtx *Context) error { return nil }
 
-// NoHooksE is [NoHooks] for an [ErrorHandler]: the four no-op hooks, leaving Run to the outer
-// type, so a missing or misspelled Run fails the `var _ rotini.ErrorHandler` assertion.
+// NoHooksE is [NoHooks] for an [HandlerE]: the four no-op hooks, leaving Run to the outer
+// type, so a missing or misspelled Run fails the `var _ rotini.HandlerE` assertion.
 type NoHooksE struct {
 	NoCascadingPreRunE
 	NoPreRunE
@@ -165,34 +165,34 @@ type NoHooksE struct {
 	NoCascadingPostRunE
 }
 
-// FromErrorHandler returns h as a [Handler], applying the rules [ErrorHandler] describes to
+// FromHandlerE returns h as a [Handler], applying the rules [HandlerE] describes to
 // each returned error. A nil h returns nil.
-func FromErrorHandler(h ErrorHandler) Handler {
+func FromHandlerE(h HandlerE) Handler {
 	if h == nil {
 		return nil
 	}
-	return errorHandler{h}
+	return handlerE{h}
 }
 
-// errorHandler adapts an ErrorHandler to the Handler the engine runs.
-type errorHandler struct{ h ErrorHandler }
+// handlerE adapts a HandlerE to the Handler the engine runs.
+type handlerE struct{ h HandlerE }
 
-func (a errorHandler) CascadingPreRun(ctx context.Context, rtx *Context) {
+func (a handlerE) CascadingPreRun(ctx context.Context, rtx *Context) {
 	rtx.returned(a.h.CascadingPreRun(ctx, rtx), true)
 }
 
-func (a errorHandler) PreRun(ctx context.Context, rtx *Context) {
+func (a handlerE) PreRun(ctx context.Context, rtx *Context) {
 	rtx.returned(a.h.PreRun(ctx, rtx), true)
 }
 
-func (a errorHandler) Run(ctx context.Context, rtx *Context) {
+func (a handlerE) Run(ctx context.Context, rtx *Context) {
 	rtx.returned(a.h.Run(ctx, rtx), true)
 }
 
-func (a errorHandler) PostRun(ctx context.Context, rtx *Context) {
+func (a handlerE) PostRun(ctx context.Context, rtx *Context) {
 	rtx.returned(a.h.PostRun(ctx, rtx), false)
 }
 
-func (a errorHandler) CascadingPostRun(ctx context.Context, rtx *Context) {
+func (a handlerE) CascadingPostRun(ctx context.Context, rtx *Context) {
 	rtx.returned(a.h.CascadingPostRun(ctx, rtx), false)
 }

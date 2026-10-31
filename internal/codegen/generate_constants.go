@@ -291,7 +291,7 @@ func nameGroups(spec *Spec, envPrefix string) []constGroup {
 		declaredPrefix: spec.Command.EnvPrefix,
 		files:          constGroup{names: true, comment: "// The configuration files, by the name rotini.SetConfigValue, rotini.UnsetConfigValue,\n// rotini.ConfigFilePath and rotini.ConfigProfiles take."},
 		keys:           constGroup{names: true, comment: "// The keys the configuration files hold, as rotini.SetConfigValue and\n// rotini.UnsetConfigValue take them."},
-		profiles:       constGroup{names: true, comment: "// The profiles the spec names, for rotini.ToProfile."},
+		profiles:       constGroup{names: true, comment: "// The profiles the spec names, for rotini.ConfigToProfile."},
 		env:            constGroup{names: true, comment: "// The environment variables the program reads, env_prefix applied."},
 	}
 	for _, oc := range ownCommandsOf(spec) {

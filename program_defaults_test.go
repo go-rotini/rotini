@@ -126,7 +126,7 @@ func TestProgram_withCompletionScriptNilIsAWiringError(t *testing.T) {
 func TestProgram_withParserReachesTheRun(t *testing.T) {
 	t.Parallel()
 	parser := NewParser()
-	var got *Parser
+	var got ArgvParser
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.Parser() }}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	if _, err := p.WithParser(parser).Run(p.args); err != nil || got != parser {
@@ -180,7 +180,8 @@ func TestContext_nilReceiverExceptions(t *testing.T) {
 		"PartialInputs":    func() error { _, _, err := nilCtx.PartialInputs[in](); return err },
 		"ArgvInputs":       func() error { _, err := nilCtx.ArgvInputs[in](); return err },
 		"EnvInputs":        func() error { _, err := nilCtx.EnvInputs[in](); return err },
-		"FileInputs":       func() error { _, err := nilCtx.FileInputs[in](); return err },
+		"ConfigInputs":     func() error { _, err := nilCtx.ConfigInputs[in](); return err },
+		"FileInputs":       func() error { _, err := nilCtx.FileInputs[in](); return err }, // deprecated forwarder
 		"StdinInputs":      func() error { _, err := nilCtx.StdinInputs[in](); return err },
 		"DefaultInputs":    func() error { _, err := nilCtx.DefaultInputs[in](); return err },
 		"CheckInputs":      func() error { return nilCtx.CheckInputs(in{}, nil) },

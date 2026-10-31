@@ -117,7 +117,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*deployHandler)(nil)
+var _ rotini.HandlerE = (*deployHandler)(nil)
 
 type deployHandler struct {
 	rotini.NoCascadingPreRunE
@@ -221,7 +221,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoAddHandler)(nil)
+var _ rotini.HandlerE = (*todoAddHandler)(nil)
 
 type todoAddHandler struct {
 	rotini.NoCascadingPreRunE
@@ -300,7 +300,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoSyncHandler)(nil)
+var _ rotini.HandlerE = (*todoSyncHandler)(nil)
 
 type todoSyncHandler struct {
 	rotini.NoCascadingPreRunE
@@ -365,7 +365,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*logsGrepHandler)(nil)
+var _ rotini.HandlerE = (*logsGrepHandler)(nil)
 
 type logsGrepHandler struct {
 	rotini.NoCascadingPreRunE

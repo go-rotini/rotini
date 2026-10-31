@@ -233,7 +233,7 @@ func TestGenerateFeatures_inline(t *testing.T) {
 		"HelpAcme", "HelpAcmeDeploy", // per-command help vars
 		"ManAcme", "MarkdownAcme", // the other doc features
 		"CompletionBash", "CompletionZsh", "CompletionFish", "CompletionPowershell",
-		"func Help(", "func Man(", "func Markdown(", "func Completion(", // the resolvers
+		"func Help(", "func Man(", "func Markdown(", "func CompletionScript(", // the resolvers
 	} {
 		if !strings.Contains(gen, want) {
 			t.Errorf("generated file missing %q", want)

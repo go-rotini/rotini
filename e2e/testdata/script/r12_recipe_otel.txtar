@@ -82,7 +82,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*tracedemoWorkHandler)(nil)
+var _ rotini.HandlerE = (*tracedemoWorkHandler)(nil)
 
 type tracedemoWorkHandler struct {
 	rotini.NoCascadingPreRunE
@@ -107,7 +107,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*tracedemoFailHandler)(nil)
+var _ rotini.HandlerE = (*tracedemoFailHandler)(nil)
 
 type tracedemoFailHandler struct {
 	rotini.NoCascadingPreRunE

@@ -10,7 +10,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.ErrorHandler = (*rotiniMountHandler)(nil)
+var _ rotini.HandlerE = (*rotiniMountHandler)(nil)
 
 type rotiniMountHandler struct {
 	rotini.NoCascadingPreRunE
@@ -34,7 +34,7 @@ func (*rotiniMountHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 
 	rtx.SetDependencyIfAbsent(mountDep, codegen.Mount)
-	res, err := rtx.MustGetDependency(mountDep)(flags.Into, specs, codegen.MountOptions{
+	res, err := rtx.MustDependency(mountDep)(flags.Into, specs, codegen.MountOptions{
 		Under:  strings.Fields(flags.Under),
 		Group:  flags.Group,
 		Prune:  flags.Prune,

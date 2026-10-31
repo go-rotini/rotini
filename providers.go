@@ -3,40 +3,41 @@ package rotini
 import (
 	"context"
 	"fmt"
-	"io"
 	"reflect"
 	"runtime/debug"
 	"slices"
 	"sync"
 )
 
-// WithProvider returns an [Option] that registers fn as the provider of dep; it is the
-// composable form of [Program.WithProvider], for use with [Program.With]:
-//
-//	// in the cmd package, so main.go and the tests share it
-//	var WithStore = rotini.WithProvider(Store, openStore)
-//
-//	cmd.NewProgram().With(cmd.WithStore).Execute()
-func WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Context) (T, error)) Option {
-	return func(p *Program) { p.WithProvider(dep, fn) }
-}
-
 // WithProvider registers fn as the provider of dep and returns p for chaining. A provider
-// builds the dependency for one run, on the first request for it in that run:
+// builds the dependency for one run, on the first request for it in that run, and returns
+// the value, the cleanup that releases it after the run (nil when there is nothing to
+// release), and an error:
 //
-//	func openStore(ctx context.Context, rtx *rotini.Context) (*store.Store, error) {
+//	func openStore(ctx context.Context, rtx *rotini.Context) (*store.Store, func() error, error) {
 //		in, err := rtx.Inputs[TodoInputs]()
 //		if err != nil {
-//			return nil, err
+//			return nil, nil, err
 //		}
-//		return store.Open(ctx, in.Todo.Flags.Database)
+//		s, err := store.Open(ctx, in.Todo.Flags.Database)
+//		if err != nil {
+//			return nil, nil, err
+//		}
+//		return s, s.Close, nil
 //	}
 //
 //	cmd.NewProgram().WithProvider(cmd.Store, openStore).Execute()
 //
+// A provider that hands out a value it does not own, such as a pool opened in main.go,
+// returns a nil cleanup, so the value outlives the run:
+//
+//	p.WithProvider(cmd.DB, func(context.Context, *rotini.Context) (*sql.DB, func() error, error) {
+//		return db, nil, nil
+//	})
+//
 // The rules:
 //   - Lazy: fn runs only when a hook asks for dep ([Context.Dependency],
-//     [Context.GetDependency] or [Context.MustGetDependency]), so a run that never asks, such
+//     [Context.LookupDependency] or [Context.MustDependency]), so a run that never asks, such
 //     as a --help that halts in the root's CascadingPreRun, never builds it.
 //   - Once per run: concurrent requests in one run wait for a single call and share its value
 //     or its error, and every run gets its own value. fn receives the context of the hook that
@@ -44,26 +45,28 @@ func WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Co
 //   - A set value wins: a value registered with [Program.WithDependency],
 //     [Context.SetDependency] or [Context.SetDependencyIfAbsent] is returned instead, and fn
 //     is not called, so a test's double needs nothing more.
-//   - Closed after teardown: a value fn built that implements [io.Closer] is closed once
-//     every hook has finished, before the reporter runs, in reverse order of construction. A
-//     Close error is recorded as an error. Values fn did not build are never closed.
+//   - Cleaned up after teardown: the cleanup fn returned is called once every hook has
+//     finished, before the reporter runs, in reverse order of construction. A cleanup error
+//     is recorded as an error and a cleanup panic as a fault. Rotini releases nothing else:
+//     a value with a nil cleanup is left as it is. When fn returns an error, its value and
+//     cleanup are discarded, so a provider that fails releases what it built itself.
 //   - Errors keep their category: [Context.Dependency] returns fn's error as is, so
 //     [UsageError] from fn is a usage error.
 //
 // A later registration under the same name replaces an earlier one, and a nil fn removes it.
 // A provider that asks for its own dependency, directly or through another provider,
 // deadlocks.
-func (p *Program) WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Context) (T, error)) *Program {
+func (p *Program) WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Context) (T, func() error, error)) *Program {
 	if fn == nil {
 		p.deps.provide(dep.name, nil)
 		return p
 	}
-	p.deps.provide(dep.name, func(rtx *Context) (any, error) {
-		v, err := fn(rtx.Context(), rtx) // the context of the hook that asked
+	p.deps.provide(dep.name, func(rtx *Context) (any, func() error, error) {
+		v, cleanup, err := fn(rtx.Context(), rtx) // the context of the hook that asked
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return v, nil
+		return v, cleanup, nil
 	})
 	return p
 }
@@ -110,7 +113,7 @@ func lookupDependency[T any](rtx *Context, dep Dependency[T]) (_ T, failed bool,
 }
 
 // providerFunc is a provider with its value type erased, called with the run's Context.
-type providerFunc func(rtx *Context) (any, error)
+type providerFunc func(rtx *Context) (any, func() error, error)
 
 // providedValue is one provider's result in one run.
 type providedValue struct {
@@ -119,10 +122,10 @@ type providedValue struct {
 	err  error
 }
 
-// providedCloser is a provider-built value to close when the run settles.
-type providedCloser struct {
-	name string
-	c    io.Closer
+// providedCleanup is a provider's cleanup to call when the run settles.
+type providedCleanup struct {
+	name    string
+	cleanup func() error
 }
 
 // resolveDependency returns what name resolves to in this run: a value set on the run (seeded
@@ -153,56 +156,45 @@ func (rtx *Context) resolveDependency(name string) (v any, found bool, err error
 	return pv.v, true, pv.err
 }
 
-// provide runs fn for name and keeps its result in pv, queueing a value that implements
-// io.Closer for closing. A provider that panics leaves an internal error behind for the
-// requests after it; the panic itself reaches the hook that asked.
+// provide runs fn for name and keeps its result in pv, queueing its cleanup, if any. A
+// provider that panics leaves an internal error behind for the requests after it; the panic
+// itself reaches the hook that asked.
 func (rtx *Context) provide(name string, fn providerFunc, pv *providedValue) {
 	pv.err = InternalError(fmt.Errorf("rotini: the provider of the dependency %q panicked", name))
-	v, err := fn(rtx)
+	v, cleanup, err := fn(rtx)
 	if err != nil {
 		pv.err = err
 		return
 	}
 	pv.v, pv.err = v, nil
-	if c, ok := v.(io.Closer); ok && !isNilValue(v) {
+	if cleanup != nil {
 		rtx.mu.Lock()
-		rtx.closers = append(rtx.closers, providedCloser{name: name, c: c})
+		rtx.cleanups = append(rtx.cleanups, providedCleanup{name: name, cleanup: cleanup})
 		rtx.mu.Unlock()
 	}
 }
 
-// isNilValue reports whether v holds a nil pointer, map, slice, channel or func, which a
-// method call on would likely fault.
-func isNilValue(v any) bool {
-	switch rv := reflect.ValueOf(v); rv.Kind() {
-	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
-		return rv.IsNil()
-	default:
-		return false
-	}
-}
-
-// closeProvided closes the values the run's providers built that implement io.Closer, in
-// reverse order of construction, recording each Close error as an error and each Close panic
-// as a fault. Each value is closed at most once.
-func (rtx *Context) closeProvided() {
+// cleanUpProvided calls the cleanups the run's providers returned, in reverse order of
+// construction, recording each error as an error and each panic as a fault. Each cleanup is
+// called at most once.
+func (rtx *Context) cleanUpProvided() {
 	rtx.mu.Lock()
-	closers := rtx.closers
-	rtx.closers = nil
+	cleanups := rtx.cleanups
+	rtx.cleanups = nil
 	rtx.mu.Unlock()
-	for _, pc := range slices.Backward(closers) {
-		rtx.closeOne(pc)
+	for _, pc := range slices.Backward(cleanups) {
+		rtx.cleanUpOne(pc)
 	}
 }
 
-func (rtx *Context) closeOne(pc providedCloser) {
+func (rtx *Context) cleanUpOne(pc providedCleanup) {
 	defer func() {
 		if r := recover(); r != nil {
 			rtx.recordFault(&PanicError{Value: r, Stack: debug.Stack()})
 		}
 	}()
-	if err := pc.c.Close(); err != nil {
-		rtx.RecordError(fmt.Errorf("closing the dependency %q: %w", pc.name, err))
+	if err := pc.cleanup(); err != nil {
+		rtx.RecordError(fmt.Errorf("cleaning up the dependency %q: %w", pc.name, err))
 	}
 }
 

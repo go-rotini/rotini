@@ -97,7 +97,7 @@ func (*reportHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.HaltWith(err)
 		return
 	}
-	out, err := rotini.CreateOutput(rtx, in.Report.Flags.To, rotini.Overwrite(true))
+	out, err := rotini.CreateOutput(rtx, in.Report.Flags.To, rotini.OutputOverwrite(true))
 	if err != nil {
 		rtx.HaltWith(err)
 		return

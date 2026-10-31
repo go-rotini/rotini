@@ -472,7 +472,7 @@ type scStrayInputs struct {
 
 type scStrayHandlers struct{ optOut bool }
 
-func (h scStrayHandlers) App() Handler        { return FromErrorHandler(&scStrayRoot{optOut: h.optOut}) }
+func (h scStrayHandlers) App() Handler        { return FromHandlerE(&scStrayRoot{optOut: h.optOut}) }
 func (scStrayHandlers) AppAdd() Handler       { return ocNoop{} }
 func (scStrayHandlers) AppConfig() Handler    { return ocNoop{} }
 func (scStrayHandlers) AppConfigSet() Handler { return ocNoop{} }

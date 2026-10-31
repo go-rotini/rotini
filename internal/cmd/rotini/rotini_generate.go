@@ -10,7 +10,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.ErrorHandler = (*rotiniGenerateHandler)(nil)
+var _ rotini.HandlerE = (*rotiniGenerateHandler)(nil)
 
 type rotiniGenerateHandler struct {
 	rotini.NoCascadingPreRunE
@@ -48,7 +48,7 @@ func (*rotiniGenerateHandler) Run(ctx context.Context, rtx *rotini.Context) erro
 	version := rtx.Version()
 	if dryRun {
 		rtx.SetDependencyIfAbsent(generateDryRunDep, codegen.NewProcessor(version).GenerateDryRun)
-		planned, err := rtx.MustGetDependency(generateDryRunDep)(spec, conf, printWarnings(rtx))
+		planned, err := rtx.MustDependency(generateDryRunDep)(spec, conf, printWarnings(rtx))
 		if err != nil {
 			return problems(rtx, err)
 		}
@@ -56,7 +56,7 @@ func (*rotiniGenerateHandler) Run(ctx context.Context, rtx *rotini.Context) erro
 	}
 
 	rtx.SetDependencyIfAbsent(generateDep, codegen.NewProcessor(version).Generate)
-	generate := rtx.MustGetDependency(generateDep)
+	generate := rtx.MustDependency(generateDep)
 
 	// Warnings are validate's, plus each pruned file and the handler audit's findings.
 	if err := generate(spec, conf, flags.Watch, printResult(rtx), printWarnings(rtx)); err != nil {

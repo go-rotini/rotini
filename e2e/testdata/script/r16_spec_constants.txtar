@@ -41,7 +41,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoListHandler)(nil)
+var _ rotini.HandlerE = (*todoListHandler)(nil)
 
 type todoListHandler struct {
 	rotini.NoCascadingPreRunE
@@ -66,7 +66,7 @@ func save(rtx *rotini.Context) error {
 	if err := rotini.SetConfigValue(rtx, "usr", TodoConfigKeyServerPort, "8080"); err != nil {
 		return err
 	}
-	return rotini.SetConfigValue(rtx, TodoConfigFileUser, "server.prot", "8080", rotini.ToProfile(TodoProfileProd))
+	return rotini.SetConfigValue(rtx, TodoConfigFileUser, "server.prot", "8080", rotini.ConfigToProfile(TodoProfileProd))
 }
 -- states.go.txt --
 package todo

@@ -227,7 +227,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoEchoHandler)(nil)
+var _ rotini.HandlerE = (*todoEchoHandler)(nil)
 
 type todoEchoHandler struct{ rotini.NoHooksE }
 
@@ -249,7 +249,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoHandler)(nil)
+var _ rotini.HandlerE = (*todoHandler)(nil)
 
 type todoHandler struct {
 	rotini.NoPreRunE

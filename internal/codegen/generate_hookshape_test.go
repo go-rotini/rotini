@@ -12,7 +12,7 @@ import (
 
 // TestErrorHooks_stubsCompile generates each error-shaped stub case into a module on this
 // rotini and vets it, so every seeded body (help, version, completion, secret, bare groups)
-// type-checks as an ErrorHandler and the wiring wraps it.
+// type-checks as a HandlerE and the wiring wraps it.
 func TestErrorHooks_stubsCompile(t *testing.T) {
 	skipUnlessCompiling(t)
 	cases, _ := filepath.Glob(filepath.Join("testdata", "stubshapes", "error-*"))
@@ -31,7 +31,7 @@ func TestErrorHooks_stubsCompile(t *testing.T) {
 			}
 			dir := hookShapeModule(t, string(spec), string(conf), nil)
 			zz := readTestFile(t, filepath.Join(dir, "internal/cmd/demo/zz_demo.go"))
-			if !strings.Contains(zz, "return rotini.FromErrorHandler(&demoHandler{})") {
+			if !strings.Contains(zz, "return rotini.FromHandlerE(&demoHandler{})") {
 				t.Errorf("the root's wiring is not wrapped:\n%s", zz)
 			}
 			vet(t, dir)
@@ -41,7 +41,7 @@ func TestErrorHooks_stubsCompile(t *testing.T) {
 
 // TestErrorHooks_existingStubKeepsItsShape pins that the conf decides only new stubs: a void
 // stub already on disk is wired as a Handler, while the stubs generate seeds now are
-// ErrorHandlers, and the mixed package builds.
+// HandlerE stubs, and the mixed package builds.
 func TestErrorHooks_existingStubKeepsItsShape(t *testing.T) {
 	skipUnlessCompiling(t)
 	spec := readTestFile(t, filepath.Join("testdata", "stubshapes", "error-v1.4-seed", "spec.yaml"))
@@ -64,8 +64,8 @@ func (*demoRemoteAddHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 	zz := readTestFile(t, filepath.Join(dir, "internal/cmd/demo/zz_demo.go"))
 	for _, want := range []string{
 		"return &demoRemoteAddHandler{}",
-		"return rotini.FromErrorHandler(&demoRemoteHandler{})",
-		"return rotini.FromErrorHandler(&demoHandler{})",
+		"return rotini.FromHandlerE(&demoRemoteHandler{})",
+		"return rotini.FromHandlerE(&demoHandler{})",
 	} {
 		if !strings.Contains(zz, want) {
 			t.Errorf("wiring lacks %q:\n%s", want, zz)
@@ -82,7 +82,7 @@ func (*demoRemoteAddHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 func TestErrorHooks_noConfKeepsVoidWiring(t *testing.T) {
 	spec := readTestFile(t, filepath.Join("testdata", "stubshapes", "v1.4-seed", "spec.yaml"))
 	for name, body := range emitInModule(t, spec, stubShapesConf) {
-		if strings.Contains(body, "ErrorHandler") || strings.Contains(body, "RunE") {
+		if strings.Contains(body, "HandlerE") || strings.Contains(body, "RunE") {
 			t.Errorf("%s mentions the error shape:\n%s", name, body)
 		}
 	}
@@ -111,7 +111,7 @@ func (helper) Other() error { return nil }
 		t.Errorf("plain = %v, %v; want known and void", returns, ok)
 	}
 	if !shapes["errs"] {
-		t.Error("errs is not an ErrorHandler")
+		t.Error("errs is not a HandlerE")
 	}
 	for _, typ := range []string{"helper", "gone", "tested"} {
 		if _, ok := shapes[typ]; ok {

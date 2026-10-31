@@ -144,7 +144,7 @@ func (p *program) renderStubs() error {
 	}
 	if len(unmarked) > 0 {
 		p.auditWarnings = append(p.auditWarnings, fmt.Errorf(
-			"stub_template %s renders no `var _ rotini.ErrorHandler = (*T)(nil)` or `var _ rotini.Handler = (*T)(nil)` line, so generate will never retire the handler files it seeds (%s) when their commands leave the spec; add the line to the template to let it",
+			"stub_template %s renders no `var _ rotini.HandlerE = (*T)(nil)` or `var _ rotini.Handler = (*T)(nil)` line, so generate will never retire the handler files it seeds (%s) when their commands leave the spec; add the line to the template to let it",
 			lay.stubTemplate, strings.Join(unmarked, ", ")))
 	}
 	return nil

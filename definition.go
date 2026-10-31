@@ -166,7 +166,8 @@ type FlagDependency struct {
 }
 
 // PluginDef describes a co-located sub-command, kubectl/git plugin style: invoking it execs
-// the sibling Binary with the remaining arguments passed through.
+// Binary with the remaining arguments passed through. Binary is looked up next to the host
+// binary, then in the command's PluginPath, then on PATH ([Command.PluginBinary]).
 type PluginDef struct {
 	Name    string        // the sub-command name that dispatches to the plugin
 	Aliases []string      // other names that dispatch to it
@@ -176,7 +177,8 @@ type PluginDef struct {
 }
 
 // PluginDiscoveryDef enables plugin discovery on a command: an unmatched token execs the
-// sibling binary Prefix+<token>, and `<Prefix>*` executables are offered as completion
+// binary Prefix+<token>, looked up where a declared plugin's is (next to the host binary, then
+// the command's PluginPath, then PATH), and `<Prefix>*` executables are offered as completion
 // candidates unless Hidden. A nil pointer means discovery is off for that command.
 type PluginDiscoveryDef struct {
 	Prefix string // executable-name prefix, e.g. "acme-"
@@ -254,7 +256,8 @@ type CommandDef struct {
 // Constraints carries the validation bounds a spec may declare on a flag or argument. Rotini
 // enforces them on a value from any channel, so one from the environment or config is checked
 // too. The numeric bounds and the two maximums are pointers, nil meaning unset, so `minimum: 0`
-// and `maxItems: 0` are enforced bounds. For the two minimums 0 means unset.
+// and `maxItems: 0` are enforced bounds; set one with the built-in new, as in
+// Constraints{Minimum: new(0.0)}. For the two minimums 0 means unset.
 type Constraints struct {
 	Minimum          *float64 // inclusive numeric lower bound; nil = unset
 	Maximum          *float64 // inclusive numeric upper bound; nil = unset
@@ -271,13 +274,6 @@ type Constraints struct {
 	// argument). Values compare as their type reads them, so `01` and `1` are the same int.
 	UniqueItems bool
 }
-
-// Ptr returns a pointer to v, for the pointer [Constraints] bounds:
-// Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0. Prefer the built-in new(v);
-// go fix inlines Ptr to it.
-//
-//go:fix inline
-func Ptr[T any](v T) *T { return new(v) }
 
 // takesValue reports whether a flag consumes a value token: every type but bool (which takes
 // a value only in the inline form) and count.
@@ -381,7 +377,7 @@ type FlagDef struct {
 	From       []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
 	// Complete is the declarative shell-completion hint for this flag's value (spec
 	// complete:). The zero value means no hint.
-	Complete Completion
+	Complete CompletionHint
 	Constraints
 	// Role is what the flag means to a program driving the CLI (spec role:), "" for none.
 	// One role changes what the runtime does: "chdir" names the root flag whose directory the
@@ -389,19 +385,19 @@ type FlagDef struct {
 	Role string
 	// Effects is what giving the flag adds to its command's effects (spec effects:); nil when
 	// undeclared. A run's effect is the highest of its command's and every given flag's; see
-	// [RunEffects].
+	// [EffectsOf].
 	Effects *Effects
 	// Metadata is the flag's own labels (spec metadata:), as written; rotini never reads them.
 	// nil when undeclared.
 	Metadata map[string]string
 }
 
-// Completion is a declarative hint about what an input's value is, for the shell to complete.
+// CompletionHint is a declarative hint about what an input's value is, for the shell to complete.
 // It reaches the shell as a directive on the last line of the hidden __complete output, and
 // each generated script translates it into that shell's own path completion. A dynamic
 // completer ([FlagValueCompleter], [ArgValueCompleter]) wins when it answers; the hint is the
 // fallback.
-type Completion struct {
+type CompletionHint struct {
 	// Kind is what the value is. Empty means no hint: the shell applies its own default, which
 	// for bash and zsh is file completion, except on an input with an enum or a map's declared
 	// keys, which completes nothing but those.
@@ -425,6 +421,9 @@ type Completion struct {
 	// summary. It is set only when completion messages are on.
 	Message string
 }
+
+// Deprecated: use [CompletionHint].
+type Completion = CompletionHint
 
 // ArgDef describes a single positional argument of a command.
 type ArgDef struct {
@@ -459,7 +458,7 @@ type ArgDef struct {
 	DeprecatedSince string
 	RemovedIn       string
 	// Complete is the declarative shell-completion hint for this argument's value.
-	Complete Completion
+	Complete CompletionHint
 	Secret   bool // when true, the value is redacted in usage/validation error output
 	Hidden   bool // omitted from completion candidates (it still parses); help omission happens at codegen
 	// Passthrough marks the last argument as where raw words start: flags before it parse as

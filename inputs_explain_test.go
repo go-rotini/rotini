@@ -46,8 +46,8 @@ func TestInputReportLabelAndSources(t *testing.T) {
 		if got := rep.Label(tc.path); got != tc.label {
 			t.Errorf("Label(%s) = %q, want %q", tc.path, got, tc.label)
 		}
-		if got := rep.Sources(tc.path); !slices.Equal(got, tc.sources) {
-			t.Errorf("Sources(%s) = %q, want %q", tc.path, got, tc.sources)
+		if got := rep.DeclaredSources(tc.path); !slices.Equal(got, tc.sources) {
+			t.Errorf("DeclaredSources(%s) = %q, want %q", tc.path, got, tc.sources)
 		}
 	}
 }
@@ -109,8 +109,8 @@ APP_REGION = "us" from default
 		"App.Config.Host":      {"db.host", "default"},
 		"App.Config.Pinned":    {"pinned in app.yaml"},
 	} {
-		if got := rep.Sources(path); !slices.Equal(got, sources) {
-			t.Errorf("Sources(%s) = %q, want %q", path, got, sources)
+		if got := rep.DeclaredSources(path); !slices.Equal(got, sources) {
+			t.Errorf("DeclaredSources(%s) = %q, want %q", path, got, sources)
 		}
 	}
 	if got := rep.Label("App.Flags.Profile"); got != "--profile" {
@@ -130,8 +130,8 @@ func TestInputReportExplain_handBuiltOnly(t *testing.T) {
 	if want := "App.Flags.Name = \"ada\" from prompt\n"; b.String() != want {
 		t.Errorf("Explain = %q, want %q", b.String(), want)
 	}
-	if rep.Label("App.Flags.Name") != "" || rep.Sources("App.Flags.Name") != nil {
-		t.Errorf("a hand-built report named an input: %q %q", rep.Label("App.Flags.Name"), rep.Sources("App.Flags.Name"))
+	if rep.Label("App.Flags.Name") != "" || rep.DeclaredSources("App.Flags.Name") != nil {
+		t.Errorf("a hand-built report named an input: %q %q", rep.Label("App.Flags.Name"), rep.DeclaredSources("App.Flags.Name"))
 	}
 }
 
@@ -141,7 +141,7 @@ func TestInputReportExplain_emptyAndWriteError(t *testing.T) {
 	if err := (InputReport{}).Explain(&b); err != nil || b.Len() != 0 {
 		t.Errorf("empty report wrote %q, %v", b.String(), err)
 	}
-	if (InputReport{}).Label("A.Flags.B") != "" || (InputReport{}).Sources("A.Flags.B") != nil {
+	if (InputReport{}).Label("A.Flags.B") != "" || (InputReport{}).DeclaredSources("A.Flags.B") != nil {
 		t.Error("the zero report named an input")
 	}
 	rep := formatFixture(t, "deploy")

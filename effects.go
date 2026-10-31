@@ -15,7 +15,7 @@ type Effects struct {
 	OpenWorld *bool
 }
 
-// RunEffects is what this run does: the invoked command's [Command.Effects] combined with the
+// EffectsOf returns what this run does: the invoked command's [Command.Effects] combined with the
 // effects of every flag given on the command line, of the invoked command or a cascading flag
 // of an ancestor. A bool flag counts only when it is set true, so --no-force adds nothing. The
 // rule is the spec's:
@@ -27,10 +27,10 @@ type Effects struct {
 // What nothing states stays unset: a zero Kind or a nil field means the spec doesn't say,
 // which a caller deciding what to ask first should treat as the worst case.
 //
-// RunEffects reads the resolved chain and the command line from rtx and never reads a file or
-// stdin. When the command line doesn't parse, it returns the invoked command's effects alone.
+// EffectsOf reads the resolved chain and the command line from rtx (through the program's
+// [ArgvParser] when it sets one) and never reads a file or stdin. When the command line doesn't parse, it returns the invoked command's effects alone.
 // A nil rtx, or one with no resolved command, returns the zero Effects.
-func RunEffects(rtx *Context) Effects {
+func EffectsOf(rtx *Context) Effects {
 	if rtx == nil {
 		return Effects{}
 	}
@@ -40,7 +40,7 @@ func RunEffects(rtx *Context) Effects {
 	}
 	var out effectsSum
 	out.add(chain[len(chain)-1].Effects)
-	store := quietParse(chain, rtx.Argv)
+	store := rtx.quietArgv(chain)
 	if store == nil {
 		return out.Effects
 	}
@@ -59,7 +59,7 @@ func RunEffects(rtx *Context) Effects {
 	return out.Effects
 }
 
-// effectsSum combines stated effects by the rule [RunEffects] documents.
+// effectsSum combines stated effects by the rule [EffectsOf] documents.
 type effectsSum struct {
 	Effects
 

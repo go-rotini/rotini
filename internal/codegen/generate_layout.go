@@ -128,7 +128,7 @@ type layout struct {
 	cmdFile    string // basename of the generated file, e.g. "zz_rotini.go"
 	cmdImport  string // cmd package import path
 
-	// cmdErrorHooks is the cmd target's `hook_returns: error`: new stubs are ErrorHandlers.
+	// cmdErrorHooks is the cmd target's `hook_returns: error`: new stubs are HandlerE stubs.
 	cmdErrorHooks bool
 
 	// stubTemplate and stubTestTemplate are the cmd target's module-root-relative

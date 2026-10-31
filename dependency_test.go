@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,12 +20,12 @@ var demoStoreDep = NewDependency[demoStore]("demo-store")
 
 func TestDependency_programWideAndGet(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		store := rtx.MustGetDependency(demoStoreDep)
+		store := rtx.MustDependency(demoStoreDep)
 		if got := store.All(); len(got) != 2 {
 			t.Errorf("store.All() = %v, want 2 items", got)
 		}
-		if _, ok := rtx.GetDependency(demoStoreDep); !ok {
-			t.Error("GetDependency reported the dependency as missing")
+		if _, ok := rtx.LookupDependency(demoStoreDep); !ok {
+			t.Error("LookupDependency reported the dependency as missing")
 		}
 	}}
 	p, _, _ := newTestProgram(h, nil)
@@ -39,10 +40,10 @@ func TestDependency_programWideAndGet(t *testing.T) {
 // from a computed name reaches what main.go registered.
 func TestDependency_handlesShareByName(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		if _, ok := rtx.GetDependency(NewDependency[demoStore](demoStoreDep.Name())); !ok {
+		if _, ok := rtx.LookupDependency(NewDependency[demoStore](demoStoreDep.Name())); !ok {
 			t.Error("a handle rebuilt from the name did not reach the registered value")
 		}
-		if v, ok := rtx.GetDependency(NewDependency[any](demoStoreDep.Name())); !ok || v == nil {
+		if v, ok := rtx.LookupDependency(NewDependency[any](demoStoreDep.Name())); !ok || v == nil {
 			t.Error("a Dependency[any] handle did not reach the registered value")
 		}
 	}}
@@ -56,10 +57,10 @@ func TestDependency_handlesShareByName(t *testing.T) {
 func TestDependency_anyHandleKeepsThePreciseType(t *testing.T) {
 	rtx := newContext()
 	rtx.SetDependency(NewDependency[any]("buf"), any(&bytes.Buffer{}))
-	if _, ok := rtx.GetDependency(NewDependency[*bytes.Buffer]("buf")); !ok {
+	if _, ok := rtx.LookupDependency(NewDependency[*bytes.Buffer]("buf")); !ok {
 		t.Error("a value set through Dependency[any] is not readable with its precise type")
 	}
-	if _, ok := rtx.GetDependency(NewDependency[*int]("buf")); ok {
+	if _, ok := rtx.LookupDependency(NewDependency[*int]("buf")); ok {
 		t.Error("a value of another type read back as *int")
 	}
 }
@@ -67,7 +68,7 @@ func TestDependency_anyHandleKeepsThePreciseType(t *testing.T) {
 // A missing dependency routes to the reporter as a fault rather than a nil dereference.
 func TestDependency_missingReachesTheReporter(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		_ = rtx.MustGetDependency(demoStoreDep) // never registered
+		_ = rtx.MustDependency(demoStoreDep) // never registered
 	}}
 	p, _, errb := newTestProgram(h, nil)
 
@@ -84,7 +85,7 @@ func TestDependency_missingReachesTheReporter(t *testing.T) {
 func TestDependency_setIsPerRun(t *testing.T) {
 	var seen []bool
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		_, ok := rtx.GetDependency(demoStoreDep)
+		_, ok := rtx.LookupDependency(demoStoreDep)
 		seen = append(seen, ok)
 		rtx.SetDependency(demoStoreDep, demoStore(memDemoStore{}))
 	}}
@@ -105,24 +106,24 @@ func TestDependency_setIfAbsentKeepsTheFirst(t *testing.T) {
 	rtx := newContext()
 	rtx.SetDependency(buf, injected)
 	rtx.SetDependencyIfAbsent(buf, def)
-	if rtx.MustGetDependency(buf) != injected {
+	if rtx.MustDependency(buf) != injected {
 		t.Error("SetDependencyIfAbsent overwrote an existing value")
 	}
 
 	other := NewDependency[*bytes.Buffer]("other")
 	rtx.SetDependencyIfAbsent(other, def)
-	if rtx.MustGetDependency(other) != def {
+	if rtx.MustDependency(other) != def {
 		t.Error("SetDependencyIfAbsent did not set a missing value")
 	}
 }
 
-// MustGetDependency's panic says which miss it is: nothing registered, a nil, or
+// MustDependency's panic says which miss it is: nothing registered, a nil, or
 // something of another type.
 func TestDependencyError_saysWhichMissItIs(t *testing.T) {
 	n := NewDependency[int]("n")
 	miss := func(rtx *Context) (msg string) {
 		defer func() { msg = recover().(*DependencyError).Error() }()
-		rtx.MustGetDependency(n)
+		rtx.MustDependency(n)
 		return ""
 	}
 	if got := miss(newContext()); got != `rotini: no dependency registered as "n"` {
@@ -152,7 +153,7 @@ func TestDependencyError_isMatchable(t *testing.T) {
 			t.Errorf("errors.As = %v, want a *DependencyError naming %q", de, "missing")
 		}
 	}()
-	_ = newContext().MustGetDependency(NewDependency[*bytes.Buffer]("missing"))
+	_ = newContext().MustDependency(NewDependency[*bytes.Buffer]("missing"))
 }
 
 func TestDependency_nameAndString(t *testing.T) {
@@ -179,7 +180,7 @@ func TestWithDependency_chains(t *testing.T) {
 
 	var got string
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		got = rtx.MustGetDependency(storeDep).name + "/" + strconv.Itoa(rtx.MustGetDependency(clientDep).id)
+		got = rtx.MustDependency(storeDep).name + "/" + strconv.Itoa(rtx.MustDependency(clientDep).id)
 	}}
 	p, _, _ := newTestProgram(h, nil)
 
@@ -204,7 +205,7 @@ func TestWithDependency_lastWins(t *testing.T) {
 	dep := NewDependency[string]("p2.order")
 
 	var got string
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.MustGetDependency(dep) }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.MustDependency(dep) }}
 	p, _, _ := newTestProgram(h, nil)
 
 	if code, err := p.With(WithDependency(dep, "first"), WithDependency(dep, "second")).Run([]string{"run", "x"}); err != nil || code != 0 {
@@ -264,5 +265,50 @@ func TestWith_carriesAnArbitraryOption(t *testing.T) {
 	}
 	if out.String() != "hello" {
 		t.Errorf("stdout = %q, want the option's writer to have been installed", out.String())
+	}
+}
+
+// TestDeprecatedForwarders pins that each name kept for compatibility does exactly what the
+// name that replaced it does.
+func TestDeprecatedForwarders(t *testing.T) {
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		if got := rtx.MustGetDependency(demoStoreDep).All(); len(got) != 1 {
+			t.Errorf("MustGetDependency = %v, want 1 item", got)
+		}
+		if _, ok := rtx.GetDependency(demoStoreDep); !ok {
+			t.Error("GetDependency reported the dependency as missing")
+		}
+		if _, ok := rtx.GetDependency(NewDependency[int]("absent")); ok {
+			t.Error("GetDependency found an absent dependency")
+		}
+	}}
+	p, _, _ := newTestProgram(h, nil)
+	p.WithDependency(demoStoreDep, demoStore(memDemoStore{items: []string{"a"}}))
+	if code, err := p.Run([]string{"run", "x"}); code != 0 || err != nil {
+		t.Fatalf("Run = (%d, %v), want (0, nil)", code, err)
+	}
+
+	var w configWrite
+	for _, o := range []ConfigWriteOption{AllowSecretWrite(), ToProfile("stage"), ToSharedKeys(), ParseConfigValue(func(string) error { return nil })} {
+		o(&w)
+	}
+	if !w.allowSecret || w.profile != "stage" || !w.toProfile || !w.shared || w.parse == nil {
+		t.Errorf("config write options = %+v", w)
+	}
+	var oc outputConfig
+	Overwrite(true)(&oc)
+	FileMode(0o600)(&oc)
+	if !oc.overwrite || oc.mode != 0o600 || !oc.modeSet {
+		t.Errorf("output options = %+v", oc)
+	}
+
+	format := func(io.Writer, CompletionResult) error { return nil }
+	if q := NewProgram(Definition{}, nil).WithCompletion(format); q.completion == nil {
+		t.Error("WithCompletion set no format")
+	}
+	hint := Completion{Kind: "file"}
+	s := NewSuggestor()
+	if hint.Kind != "file" || s == nil || s.maxResults != NewSuggester().maxResults {
+		t.Errorf("hint %+v, suggester %+v", hint, s)
 	}
 }

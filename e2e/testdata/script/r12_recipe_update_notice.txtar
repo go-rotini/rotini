@@ -120,7 +120,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*updemoHandler)(nil)
+var _ rotini.HandlerE = (*updemoHandler)(nil)
 
 type updemoHandler struct {
 	rotini.NoPreRunE
@@ -170,7 +170,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*updemoHelloHandler)(nil)
+var _ rotini.HandlerE = (*updemoHelloHandler)(nil)
 
 type updemoHelloHandler struct {
 	rotini.NoCascadingPreRunE

@@ -209,7 +209,7 @@ func TestStdinState_plainCancelIsNotASignal(t *testing.T) {
 	rtx.bindRun(ctx)
 	time.AfterFunc(20*time.Millisecond, cancel)
 	_, err = rtx.slurpStdin()
-	if !errors.Is(err, context.Canceled) || SignalCaused(ctx, err) {
+	if !errors.Is(err, context.Canceled) || CausedBySignal(ctx, err) {
 		t.Errorf("err = %v, want context.Canceled and no signal cause", err)
 	}
 	if rtx.code() != 0 {

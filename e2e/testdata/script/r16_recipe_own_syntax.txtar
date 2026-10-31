@@ -1,0 +1,174 @@
+# R16 — the guide's "Your own command-line syntax": main.go sets an ArgvParser that reads
+# `name=value` words as flags. The command line is read the new way; the environment, the config
+# file, defaults, validation and provenance are rotini's as before. The parser and main.go are
+# the ones the guide shows.
+
+gomodinit example.com/shipit
+
+exec rotini generate cmd/shipit/.rotini.spec.yaml --config cmd/shipit/.rotini.conf.yaml
+cp syntax.go.txt internal/cmd/shipit/syntax.go
+cp main.go.txt cmd/shipit/main.go
+exec go mod tidy
+exec go build -o shipit$exe ./cmd/shipit
+
+# Words of the new syntax set flags; what they leave out comes from the defaults.
+exec ./shipit$exe deploy web replicas=3
+stdout '^deploy web: 3 replicas in eu \(region from default\)$'
+exec ./shipit$exe deploy web replicas=3 region=us
+cmp stdout deploy.txt
+
+# Rotini's own flag words still parse, through the same parser.
+exec ./shipit$exe deploy web --replicas=2
+stdout '^deploy web: 2 replicas in eu'
+exec ./shipit$exe deploy --help
+stdout '^Usage:'
+stdout 'shipit deploy'
+
+# The config file and the environment fill a flag the command line leaves out, and the command
+# line still wins over both.
+cp settings.yaml shipit.yaml
+exec ./shipit$exe deploy web
+stdout '^deploy web: 1 replicas in us \(region from config:user#region\)$'
+env SHIPIT_REGION=eu
+exec ./shipit$exe deploy web
+stdout '^deploy web: 1 replicas in eu \(region from env:SHIPIT_REGION\)$'
+exec ./shipit$exe deploy web region=us
+stdout '^deploy web: 1 replicas in us \(region from argv:region\)$'
+env SHIPIT_REGION=
+
+# Every declared check applies to the new syntax's values, and errors name the word as typed.
+! exec ./shipit$exe deploy web replicas=0
+stderr '^Error: shipit deploy: replicas must be >= 1 \(got 0\)$'
+! exec ./shipit$exe deploy web region=mars
+stderr 'region'
+stderr 'mars'
+! exec ./shipit$exe deploy web colour=red
+stderr '^Error: shipit deploy: unknown flag "colour"$'
+! exec ./shipit$exe deploy web api
+stderr 'accepts at most 1 argument'
+
+-- deploy.txt --
+deploy web: 3 replicas in us (region from argv:region)
+-- settings.yaml --
+region: us
+-- syntax.go.txt --
+package shipit
+
+import (
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+// Syntax reads the words after the command names: `name=value` sets a flag, a word starting
+// with a dash is a flag as rotini spells it (--help, --replicas=2), and any other word is an
+// argument.
+type Syntax struct{}
+
+func (Syntax) ParseArgv(rtx *rotini.Context) (rotini.ArgvValues, error) {
+	var vals rotini.ArgvValues
+	for _, word := range rtx.Argv[len(rtx.CommandChain())-1:] {
+		name, value, _ := strings.Cut(word, "=")
+		switch {
+		case strings.HasPrefix(word, "-"):
+			vals.Flags = append(vals.Flags, rotini.ArgvFlag{Name: name, Value: value})
+		case strings.Contains(word, "="):
+			vals.Flags = append(vals.Flags, rotini.ArgvFlag{Name: name, Value: value, Typed: name})
+		default:
+			vals.Args = append(vals.Args, word)
+		}
+	}
+	return vals, nil
+}
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	cmd "example.com/shipit/internal/cmd/shipit"
+)
+
+var version = "1.0.0"
+
+func main() {
+	cmd.NewProgram().
+		WithVersion(version).
+		WithParser(cmd.Syntax{}).
+		Execute()
+}
+-- internal/cmd/shipit/shipit_deploy.go --
+package shipit
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*shipitDeployHandler)(nil)
+
+type shipitDeployHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*shipitDeployHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, report, err := rtx.InputsWithReport[ShipitDeployInputs]()
+	if err != nil {
+		return err
+	}
+	region, _ := report.Winner("ShipitDeploy.Flags.Region")
+	flags := in.ShipitDeploy.Flags
+	_, err = fmt.Fprintf(rtx.Stdout, "deploy %s: %d replicas in %s (region from %s)\n",
+		in.ShipitDeploy.Arguments.Service, flags.Replicas, flags.Region, region.Origin)
+	return err
+}
+-- cmd/shipit/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: shipit
+  summary: deploy services
+  env_prefix: SHIPIT
+  config_files:
+    - name: user
+      path: shipit.yaml
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: deploy
+      summary: deploy a service
+      arguments:
+        - name: service
+          summary: the service to deploy
+          schema: { type: string }
+      flags:
+        - name: replicas
+          summary: how many copies to run
+          identifiers: [--replicas]
+          schema: { type: int, default: 1, minimum: 1 }
+        - name: region
+          summary: where to deploy
+          identifiers: [--region]
+          schema: { type: string, default: eu, enum: [eu, us], key: region }
+-- cmd/shipit/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/shipit/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/shipit/zz_shipit.go
+      package: shipit
+      hook_returns: error
+  features:
+    - type: help
+      enabled: true

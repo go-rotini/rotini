@@ -35,7 +35,7 @@ func TestNilContextContract(t *testing.T) {
 		"InputsWithReport": func() error { _, _, err := rtx.InputsWithReport[ciInputs](); return err },
 		"ArgvInputs":       func() error { _, err := rtx.ArgvInputs[ciInputs](); return err },
 		"EnvInputs":        func() error { _, err := rtx.EnvInputs[ciInputs](); return err },
-		"FileInputs":       func() error { _, err := rtx.FileInputs[ciInputs](); return err },
+		"ConfigInputs":     func() error { _, err := rtx.ConfigInputs[ciInputs](); return err },
 		"StdinInputs":      func() error { _, err := rtx.StdinInputs[ciInputs](); return err },
 		"DefaultInputs":    func() error { _, err := rtx.DefaultInputs[ciInputs](); return err },
 		"CheckInputs":      func() error { return rtx.CheckInputs(ciInputs{}, nil) },
@@ -61,22 +61,22 @@ func TestNilContextContract(t *testing.T) {
 	}
 }
 
-// TestDependencyContract pins the Dependency docs: GetDependency never panics, a different
-// type is a miss, and MustGetDependency's panic is a *DependencyError in CategoryInternal that
+// TestDependencyContract pins the Dependency docs: LookupDependency never panics, a different
+// type is a miss, and MustDependency's panic is a *DependencyError in CategoryInternal that
 // unwraps to ErrDependencyNotFound.
 func TestDependencyContract(t *testing.T) {
 	rtx := NewContextFor(ciDef(), nil)
 	num := NewDependency[int]("n")
 	str := NewDependency[string]("n")
 	rtx.SetDependency(num, 3)
-	if v, ok := rtx.GetDependency(num); !ok || v != 3 {
-		t.Fatalf("GetDependency = %v, %v", v, ok)
+	if v, ok := rtx.LookupDependency(num); !ok || v != 3 {
+		t.Fatalf("LookupDependency = %v, %v", v, ok)
 	}
-	if _, ok := rtx.GetDependency(str); ok {
-		t.Fatal("GetDependency under the wrong type reported a hit")
+	if _, ok := rtx.LookupDependency(str); ok {
+		t.Fatal("LookupDependency under the wrong type reported a hit")
 	}
 	rtx.SetDependencyIfAbsent(num, 4)
-	if v, _ := rtx.GetDependency(num); v != 3 {
+	if v, _ := rtx.LookupDependency(num); v != 3 {
 		t.Fatalf("SetDependencyIfAbsent replaced a registered value: %v", v)
 	}
 	mustPanic := func(f func()) (de *DependencyError) {
@@ -89,10 +89,10 @@ func TestDependencyContract(t *testing.T) {
 		f()
 		return nil
 	}
-	if de := mustPanic(func() { rtx.MustGetDependency(str) }); de.Name != "n" {
+	if de := mustPanic(func() { rtx.MustDependency(str) }); de.Name != "n" {
 		t.Errorf("Name = %q", de.Name)
 	}
-	mustPanic(func() { rtx.MustGetDependency(NewDependency[int]("missing")) })
+	mustPanic(func() { rtx.MustDependency(NewDependency[int]("missing")) })
 	if NewDependency[int]("x").String() != "x" || (Dependency[int]{}).Name() != "" {
 		t.Error("Name/String")
 	}

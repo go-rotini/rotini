@@ -44,7 +44,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*demoHandler)(nil)
+var _ rotini.HandlerE = (*demoHandler)(nil)
 
 // demoHandler is what an author's stub looks like once they have replaced the seeded body:
 // the embeds kept, Run rewritten. Regenerating must not touch a byte of it.

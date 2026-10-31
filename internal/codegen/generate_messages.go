@@ -7,7 +7,7 @@ import (
 
 // Completion messages: lines a shell shows while a value is being completed and there is
 // nothing to offer. The conf's completion feature turns them on with `messages`, and generate
-// bakes each input's line into its Completion literal, so the runtime never reads the conf.
+// bakes each input's line into its CompletionHint literal, so the runtime never reads the conf.
 
 // completionMessages returns the completion feature's `messages` mode ("declared" or "all")
 // and its `messages_env`, or "" when the feature is off or declares no messages.

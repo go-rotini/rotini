@@ -7,7 +7,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*rotiniHelpHandler)(nil)
+var _ rotini.HandlerE = (*rotiniHelpHandler)(nil)
 
 type rotiniHelpHandler struct {
 	rotini.NoCascadingPreRunE

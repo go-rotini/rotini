@@ -118,8 +118,8 @@ func TestOutcome_exitCodeFromAnExitCause(t *testing.T) {
 	}
 }
 
-// TestSignalCaused: only an error the trap's own cancellation caused counts.
-func TestSignalCaused(t *testing.T) {
+// TestCausedBySignal: only an error the trap's own cancellation caused counts.
+func TestCausedBySignal(t *testing.T) {
 	t.Parallel()
 	sig := signalCtx(130)
 	plain, cancel := context.WithCancel(context.Background())
@@ -146,8 +146,8 @@ func TestSignalCaused(t *testing.T) {
 		"another code's exit cause":  {sig, ExitCause(3), false},
 		"canceled joined with other": {sig, errors.Join(errors.New("x"), context.Canceled), true},
 	} {
-		if got := SignalCaused(c.ctx, c.err); got != c.want {
-			t.Errorf("%s: SignalCaused = %v, want %v", name, got, c.want)
+		if got := CausedBySignal(c.ctx, c.err); got != c.want {
+			t.Errorf("%s: CausedBySignal = %v, want %v", name, got, c.want)
 		}
 	}
 	if s := runSignal(sig); s == nil {

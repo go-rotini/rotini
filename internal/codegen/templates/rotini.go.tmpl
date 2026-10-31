@@ -198,7 +198,7 @@ func (*handlers) {{.Method}}() rotini.Handler {
 {{- else if .Composed}}
 	return {{.DelegateAlias}}.Handlers().{{.DelegateMethod}}()
 {{- else if .ErrorHooks}}
-	return rotini.FromErrorHandler(&{{.HandlerType}}{})
+	return rotini.FromHandlerE(&{{.HandlerType}}{})
 {{- else}}
 	return &{{.HandlerType}}{}
 {{- end}}

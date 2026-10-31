@@ -209,7 +209,7 @@ func (*filesEmitHandler) Run(ctx context.Context, rtx *rotini.Context) {
 }
 
 func emit(rtx *rotini.Context, path, name string, force bool) error {
-	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
+	out, err := rotini.CreateOutput(rtx, path, rotini.OutputOverwrite(force))
 	if err != nil {
 		return err
 	}

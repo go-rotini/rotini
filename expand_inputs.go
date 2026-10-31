@@ -15,29 +15,52 @@ import (
 // channel supplies, before they are checked and bound. The rule is read from the generated
 // field's tags; see expandRule.
 
-// parseArgvStore parses argv against the resolved chain into a store, not yet bound: the front
-// half of [Parser.parseBind], which the input reader also calls so it can build its view of the
-// environment before expanding and binding the values.
+// parseArgvStore parses argv with rotini's grammar against the resolved chain into a store, not
+// yet bound: the front half of [Parser.parseBind].
 func parseArgvStore(p *Parser, rtx *Context, out any) (*parsedInputs, []Command, error) {
 	if p == nil {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil parser"}
 	}
-	if rtx == nil {
-		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: parse on nil context"}
-	}
-	rv := reflect.ValueOf(out)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
-	}
-	chain := rtx.chainRef()
-	if len(chain) == 0 {
-		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
+	chain, err := argvTarget(rtx, out)
+	if err != nil {
+		return nil, nil, err
 	}
 	store, err := parseInto(chain, rtx.Argv, rtx.argvAcq())
 	if err != nil {
 		return nil, nil, err
 	}
 	return store, chain, nil
+}
+
+// readArgvStore is parseArgvStore through the run's parser ([Context.Parser]), which the input
+// reader calls so it can build its view of the environment before expanding and binding the
+// values.
+func readArgvStore(rtx *Context, out any) (*parsedInputs, []Command, error) {
+	chain, err := argvTarget(rtx, out)
+	if err != nil {
+		return nil, nil, err
+	}
+	store, err := rtx.argvStore(chain)
+	if err != nil {
+		return nil, nil, err
+	}
+	return store, chain, nil
+}
+
+// argvTarget checks a parse's context and out argument, returning the resolved chain.
+func argvTarget(rtx *Context, out any) ([]Command, error) {
+	if rtx == nil {
+		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: parse on nil context"}
+	}
+	rv := reflect.ValueOf(out)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
+	}
+	chain := rtx.chainRef()
+	if len(chain) == 0 {
+		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
+	}
+	return chain, nil
 }
 
 // expandInputs is [expandStore] through the path-expansion hook, given the run's features: the
@@ -330,7 +353,7 @@ func expandDefault(d string, tag reflect.StructTag, view *osView) string {
 
 // layerView is the view a per-channel layer expands values through: the run's own, with the
 // .env files and variable_file values in scope layered in as [InputReader.Read] reads them.
-// Files that cannot be read are skipped here; the env and files layers report them.
+// Files that cannot be read are skipped here; the env and config layers report them.
 func layerView(rtx *Context, chain []Command, v reflect.Value, store *parsedInputs) *osView {
 	view := rtx.osView()
 	b := readerFor(rtx)

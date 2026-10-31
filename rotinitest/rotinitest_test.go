@@ -463,7 +463,7 @@ func TestRunDir(t *testing.T) {
 }
 
 // skipped is a test channel: files a run left alone.
-var skipped = rotini.NewChannel[string]("skipped", rotini.ClassWarning)
+var skipped = rotini.NewChannel[string]("skipped", rotini.ChannelClassWarning)
 
 // outcomeTool records an info, a channel record and an error, then halts with code 3.
 func outcomeTool() *rotini.Program {

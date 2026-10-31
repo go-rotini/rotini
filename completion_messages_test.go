@@ -15,12 +15,12 @@ func msgDef(env string) Definition {
 	return Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
-			{Name: "env", Identifiers: []string{"--env"}, Type: "string", Enum: []string{"dev", "prod"}, Complete: Completion{Kind: "none", Message: "--env string: which environment"}},
+			{Name: "env", Identifiers: []string{"--env"}, Type: "string", Enum: []string{"dev", "prod"}, Complete: CompletionHint{Kind: "none", Message: "--env string: which environment"}},
 			{Name: "verbose", Identifiers: []string{"--verbose"}, Type: "bool"},
 		},
 		Commands: []CommandDef{{
 			Name: "deploy", Handler: "AppDeploy",
-			Arguments: []ArgDef{{Name: "service", Type: "string", Complete: Completion{Kind: "none", Message: "a service name from deploy.yaml"}}},
+			Arguments: []ArgDef{{Name: "service", Type: "string", Complete: CompletionHint{Kind: "none", Message: "a service name from deploy.yaml"}}},
 		}},
 		CompletionMessages: &CompletionMessagesDef{Env: env},
 	}
@@ -174,12 +174,12 @@ func TestCompletionMessages_noFeatureIsUnchanged(t *testing.T) {
 // a directory or file-extension hint still sets its directive.
 func TestPluginCompletion_messagesKeepTheHint(t *testing.T) {
 	for _, tt := range []struct {
-		hint Completion
+		hint CompletionHint
 		want string
 	}{
-		{Completion{Kind: "directory"}, "_activeHelp_ pick a folder\n:16\n"},
-		{Completion{Kind: "file", Extensions: []string{"yaml"}}, "yaml\n_activeHelp_ pick a folder\n:8\n"},
-		{Completion{Kind: "none"}, "_activeHelp_ pick a folder\n:4\n"},
+		{CompletionHint{Kind: "directory"}, "_activeHelp_ pick a folder\n:16\n"},
+		{CompletionHint{Kind: "file", Extensions: []string{"yaml"}}, "yaml\n_activeHelp_ pick a folder\n:8\n"},
+		{CompletionHint{Kind: "none"}, "_activeHelp_ pick a folder\n:4\n"},
 	} {
 		var out bytes.Buffer
 		if err := PluginCompletion(&out, CompletionResult{Hint: tt.hint, Messages: []string{"pick a folder"}}); err != nil {

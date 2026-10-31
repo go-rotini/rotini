@@ -20,10 +20,10 @@ type conflictError struct{ Key string }
 func (e *conflictError) Error() string { return "conflict on " + e.Key }
 
 var (
-	chSkipped  = NewChannel[skippedFile]("skipped", ClassInfo)
-	chDone     = NewChannel[string]("done", ClassSuccess)
-	chStale    = NewChannel[string]("stale", ClassWarning)
-	chConflict = NewChannel[*conflictError]("conflict", ClassError)
+	chSkipped  = NewChannel[skippedFile]("skipped", ChannelClassInfo)
+	chDone     = NewChannel[string]("done", ChannelClassSuccess)
+	chStale    = NewChannel[string]("stale", ChannelClassWarning)
+	chConflict = NewChannel[*conflictError]("conflict", ChannelClassError)
 )
 
 // runChannels runs a one-command program whose Run calls run, with reporter in place of the
@@ -88,7 +88,7 @@ func TestChannels_errorClassAloneFails(t *testing.T) {
 		failed = rtx.Failed()
 	}, nil)
 	if code != 1 || err == nil || !failed {
-		t.Errorf("code=%d err=%v Failed=%v; a ClassError record is a failure", code, err, failed)
+		t.Errorf("code=%d err=%v Failed=%v; a ChannelClassError record is a failure", code, err, failed)
 	}
 }
 
@@ -142,8 +142,8 @@ func TestChannels_onlyChannelRecordsReachReporter(t *testing.T) {
 func TestChannels_nilIgnoredAndMismatchFaults(t *testing.T) {
 	t.Parallel()
 	var nilConflict *conflictError
-	errCh := NewChannel[error]("errs", ClassError)
-	sameName := NewChannel[int]("skipped", ClassInfo)
+	errCh := NewChannel[error]("errs", ChannelClassError)
+	sameName := NewChannel[int]("skipped", ChannelClassInfo)
 	var out Outcome
 	code, _, _ := runChannels(t, func(rtx *Context) {
 		rtx.Record(errCh, nil)
@@ -203,10 +203,10 @@ func TestChannels_structuredReporter(t *testing.T) {
 func TestNewChannel_panics(t *testing.T) {
 	t.Parallel()
 	for name, fn := range map[string]func(){
-		"empty name":           func() { NewChannel[string]("", ClassInfo) },
-		"built-in name":        func() { NewChannel[string]("warning", ClassInfo) },
-		"unknown class":        func() { NewChannel[string]("x", ChannelClass(9)) },
-		"ClassError non-error": func() { NewChannel[string]("x", ClassError) },
+		"empty name":                  func() { NewChannel[string]("", ChannelClassInfo) },
+		"built-in name":               func() { NewChannel[string]("warning", ChannelClassInfo) },
+		"unknown class":               func() { NewChannel[string]("x", ChannelClass(9)) },
+		"ChannelClassError non-error": func() { NewChannel[string]("x", ChannelClassError) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -223,13 +223,13 @@ func TestNewChannel_panics(t *testing.T) {
 func TestChannelClass_String(t *testing.T) {
 	t.Parallel()
 	for c, want := range map[ChannelClass]string{
-		ClassInfo: "info", ClassSuccess: "success", ClassWarning: "warning", ClassError: "error", 7: "ChannelClass(7)",
+		ChannelClassInfo: "info", ChannelClassSuccess: "success", ChannelClassWarning: "warning", ChannelClassError: "error", 7: "ChannelClass(7)",
 	} {
 		if got := c.String(); got != want {
 			t.Errorf("%d.String() = %q, want %q", c, got, want)
 		}
 	}
-	if chSkipped.Name() != "skipped" || chSkipped.String() != "skipped" || chSkipped.Class() != ClassInfo {
+	if chSkipped.Name() != "skipped" || chSkipped.String() != "skipped" || chSkipped.Class() != ChannelClassInfo {
 		t.Error("channel accessors")
 	}
 }

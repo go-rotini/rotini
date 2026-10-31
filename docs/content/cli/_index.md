@@ -25,7 +25,7 @@ $ go tool rotini genrate
 Error: rotini: unknown command "genrate"; did you mean "generate"?
 {{< /code >}}
 
-The companion CLI opts into these suggestions with rotini's `Suggestor`. A CLI you build with
+The companion CLI opts into these suggestions with rotini's `Suggester`. A CLI you build with
 rotini suggests nothing unless you opt in the same way; see
 [suggesting a correction](/docs#suggesting-a-correction).
 
@@ -796,7 +796,7 @@ Use "rotini help <command>" for more information about a command.
 ## rotini completion
 
 Prints the shell completion script for bash, zsh, fish, PowerShell or Nushell, using the same generated
-`Completion(shell)` function any rotini CLI gets with the `completion` feature on. While a value
+`CompletionScript(shell)` function any rotini CLI gets with the `completion` feature on. While a value
 with nothing to offer is being completed, such as the name `init` takes, zsh and bash 4.4 or later show a line
 saying what it is; set `ROTINI_COMPLETION_MESSAGES=off` to hide those lines.
 

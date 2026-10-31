@@ -8,7 +8,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.ErrorHandler = (*rotiniTreeHandler)(nil)
+var _ rotini.HandlerE = (*rotiniTreeHandler)(nil)
 
 type rotiniTreeHandler struct {
 	rotini.NoCascadingPreRunE
@@ -24,7 +24,7 @@ func (*rotiniTreeHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 
 	rtx.SetDependencyIfAbsent(treeDep, codegen.NewProcessor(rtx.Version()).Tree)
-	tree, err := rtx.MustGetDependency(treeDep)(inputs.RotiniTree.Arguments.SpecFilePath)
+	tree, err := rtx.MustDependency(treeDep)(inputs.RotiniTree.Arguments.SpecFilePath)
 	if err != nil {
 		return problems(rtx, err)
 	}

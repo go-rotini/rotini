@@ -77,7 +77,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoAddHandler)(nil)
+var _ rotini.HandlerE = (*todoAddHandler)(nil)
 
 type todoAddHandler struct{ rotini.NoHooksE }
 
@@ -185,7 +185,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoSilentHandler)(nil)
+var _ rotini.HandlerE = (*todoSilentHandler)(nil)
 
 type todoSilentHandler struct{ rotini.NoHooksE }
 
@@ -202,7 +202,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoFirstHandler)(nil)
+var _ rotini.HandlerE = (*todoFirstHandler)(nil)
 
 type todoFirstHandler struct {
 	rotini.NoCascadingPreRunE
@@ -231,7 +231,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoMultiHandler)(nil)
+var _ rotini.HandlerE = (*todoMultiHandler)(nil)
 
 type todoMultiHandler struct{ rotini.NoHooksE }
 
@@ -251,7 +251,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoKeepHandler)(nil)
+var _ rotini.HandlerE = (*todoKeepHandler)(nil)
 
 type todoKeepHandler struct{ rotini.NoHooksE }
 
@@ -271,7 +271,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoCatHandler)(nil)
+var _ rotini.HandlerE = (*todoCatHandler)(nil)
 
 type todoCatHandler struct{ rotini.NoHooksE }
 
@@ -296,7 +296,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoBoomHandler)(nil)
+var _ rotini.HandlerE = (*todoBoomHandler)(nil)
 
 type todoBoomHandler struct {
 	rotini.NoCascadingPreRunE

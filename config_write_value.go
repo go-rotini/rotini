@@ -67,7 +67,7 @@ func checkConfigKey(k ConfigKey, raw string, view *osView, parse func(string) er
 			return checkedValue{}, configValueError(k.Key, coerceFailure(label, "", err, k.Secret))
 		}
 	} else if parse == nil {
-		return checkedValue{}, internalBind(channelConfig, k.Key, fmt.Sprintf("%s has a custom type (%s); pass rotini.ParseConfigValue to check its value", label, k.Type), nil)
+		return checkedValue{}, internalBind(channelConfig, k.Key, fmt.Sprintf("%s has a custom type (%s); pass rotini.ConfigValueCheck to check its value", label, k.Type), nil)
 	}
 	if parse != nil {
 		if err := parse(raw); err != nil {

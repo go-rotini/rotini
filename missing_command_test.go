@@ -17,14 +17,14 @@ func (mcHandlers) AppConfigGet() Handler    { return funcHandler{run: func(*Cont
 func (mcHandlers) AppConfigSet() Handler    { return funcHandler{run: func(*Context) {}} }
 func (mcHandlers) AppConfigSecret() Handler { return funcHandler{run: func(*Context) {}} }
 
-// mcGroup is a group's seeded stub: it prints the help and halts with MissingCommand.
+// mcGroup is a group's seeded stub: it prints the help and halts with MissingCommandError.
 type mcGroup struct {
 	NoHooks
 	seen *error
 }
 
 func (g mcGroup) Run(_ context.Context, rtx *Context) {
-	err := MissingCommand(rtx)
+	err := MissingCommandError(rtx)
 	*g.seen = err
 	rtx.HaltWith(err)
 }
@@ -63,7 +63,7 @@ func TestMissingCommand(t *testing.T) {
 
 // A command with no sub-commands to name still says one is required.
 func TestMissingCommand_noChildren(t *testing.T) {
-	err := MissingCommand(NewContextFor(Definition{Name: "app", Handler: "App"}, nil))
+	err := MissingCommandError(NewContextFor(Definition{Name: "app", Handler: "App"}, nil))
 	if err.Error() != "app: a command is required" || err.Candidates != nil {
 		t.Errorf("err = %q, candidates %v", err, err.Candidates)
 	}

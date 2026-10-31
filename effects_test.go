@@ -52,14 +52,14 @@ func TestRunEffects(t *testing.T) {
 		{"a command line that doesn't parse", []string{"rm", "--force", "--nope"}, Effects{Kind: "write", Idempotent: yes, OpenWorld: no}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := RunEffects(NewContextFor(effectsDef(), tc.argv))
+			got := EffectsOf(NewContextFor(effectsDef(), tc.argv))
 			if !sameEffects(got, tc.want) {
-				t.Errorf("RunEffects(%v) = %s, want %s", tc.argv, effectsString(got), effectsString(tc.want))
+				t.Errorf("EffectsOf(%v) = %s, want %s", tc.argv, effectsString(got), effectsString(tc.want))
 			}
 		})
 	}
-	if got := RunEffects(nil); !sameEffects(got, Effects{}) {
-		t.Errorf("RunEffects(nil) = %s, want zero", effectsString(got))
+	if got := EffectsOf(nil); !sameEffects(got, Effects{}) {
+		t.Errorf("EffectsOf(nil) = %s, want zero", effectsString(got))
 	}
 }
 
@@ -68,7 +68,7 @@ func TestRunEffects(t *testing.T) {
 func TestRunEffects_commandLineOnly(t *testing.T) {
 	def := effectsDef()
 	rtx := NewContextFor(def, []string{"rm"}).WithEnviron([]string{"APP_FORCE=true"})
-	if got := RunEffects(rtx); got.Kind != "write" {
+	if got := EffectsOf(rtx); got.Kind != "write" {
 		t.Errorf("Kind = %q, want write", got.Kind)
 	}
 }

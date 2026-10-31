@@ -42,7 +42,7 @@ func claimProgram(run func(rtx *Context)) (*Program, *bytes.Buffer, *bytes.Buffe
 func TestProgramClaims_nilArgumentsRestoreDefaults(t *testing.T) {
 	t.Parallel()
 	var help string
-	var parser *Parser
+	var parser ArgvParser
 	var stdout, stderr, stdin any
 	p, _, _ := claimProgram(func(rtx *Context) {
 		help, parser = rtx.Help(), rtx.Parser()
@@ -51,7 +51,7 @@ func TestProgramClaims_nilArgumentsRestoreDefaults(t *testing.T) {
 	var noContext context.Context // nil, which WithContext reads as "restore the default"
 	p.With(nil).
 		WithHelp(nil).WithParser(nil).WithInputReader(nil).WithLifecycle(nil).WithResolver(nil).
-		WithCompletion(nil).WithClock(nil).WithExit(nil).WithCompletionScript(nil).
+		WithCompletionFormat(nil).WithClock(nil).WithExit(nil).WithCompletionScript(nil).
 		WithCompletionMessages(nil).WithCompletionDescriptions(nil).WithContext(noContext).WithReporter(nil).
 		WithStdout(nil).WithStderr(nil).WithStdin(nil).WithoutSignalHandling()
 	if code, err := p.Run([]string{"go"}); code != 0 || err != nil {
@@ -224,7 +224,7 @@ func TestProgramClaims_nilDependencyIsRegistered(t *testing.T) {
 	t.Parallel()
 	dep := NewDependency[*int]("p")
 	var ok bool
-	p, _, _ := claimProgram(func(rtx *Context) { _, ok = rtx.GetDependency(dep) })
+	p, _, _ := claimProgram(func(rtx *Context) { _, ok = rtx.LookupDependency(dep) })
 	if _, err := p.WithDependency(dep, nil).Run([]string{"go"}); err != nil || !ok {
 		t.Errorf("registered %v, err %v", ok, err)
 	}
@@ -261,7 +261,7 @@ func TestProgramClaims_concurrentRuns(t *testing.T) {
 	t.Parallel()
 	dep := NewDependency[int]("n")
 	run := func(rtx *Context) {
-		v := rtx.MustGetDependency(dep)
+		v := rtx.MustDependency(dep)
 		rtx.SetDependency(dep, v+1)
 		rtx.RecordWarning(errors.New("w"))
 		rtx.RecordInfo("i")

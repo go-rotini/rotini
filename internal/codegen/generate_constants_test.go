@@ -256,8 +256,9 @@ func TestConfigNamesCheck(t *testing.T) {
 		{`rotini.UnsetConfigValue(rtx, "user", "server.port")`, ""},
 		{`rotini.ConfigFilePath(rtx, "nope")`, `names the config file "nope"`},
 		{`rotini.ConfigProfiles(rtx, name)`, ""},
-		{`rotini.ToProfile("stage")`, `names the profile "stage", which no profile selector's enum lists ("dev", "prod")`},
-		{`rotini.ToProfile("prod")`, ""},
+		{`rotini.ConfigToProfile("stage")`, `names the profile "stage", which no profile selector's enum lists ("dev", "prod")`},
+		{`rotini.ConfigToProfile("prod")`, ""},
+		{`rotini.ToProfile("stage")`, `names the profile "stage"`},
 	} {
 		call := parseCallForTest(t, tt.src)
 		sel := call.Fun.(*ast.SelectorExpr)
@@ -266,7 +267,7 @@ func TestConfigNamesCheck(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", tt.src, got, tt.want)
 		}
 	}
-	if got := (configNames{keys: n.keys}).check("ToProfile", parseCallForTest(t, `rotini.ToProfile("any")`).Args); got != "" {
+	if got := (configNames{keys: n.keys}).check("ConfigToProfile", parseCallForTest(t, `rotini.ConfigToProfile("any")`).Args); got != "" {
 		t.Errorf("profiles not all declared, yet: %q", got)
 	}
 }

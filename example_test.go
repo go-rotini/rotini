@@ -78,20 +78,20 @@ func ExampleInputReader_Read() {
 	// Output: port: 9090
 }
 
-// A typed handle names a dependency once, and every read is typed. GetDependency reports
-// absence; MustGetDependency panics, and in a hook that panic reaches the reporter as a
+// A typed handle names a dependency once, and every read is typed. LookupDependency reports
+// absence; MustDependency panics, and in a hook that panic reaches the reporter as a
 // *PanicError after teardown.
-func ExampleContext_MustGetDependency() {
+func ExampleContext_MustDependency() {
 	type apiClient struct{ baseURL string }
 	api := NewDependency[*apiClient]("api")
 
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.SetDependency(api, &apiClient{baseURL: "https://api.example"})
 
-	client := rtx.MustGetDependency(api)
+	client := rtx.MustDependency(api)
 	fmt.Println(client.baseURL)
 
-	if _, ok := rtx.GetDependency(NewDependency[*apiClient]("other")); !ok {
+	if _, ok := rtx.LookupDependency(NewDependency[*apiClient]("other")); !ok {
 		fmt.Println("nothing registered as \"other\"")
 	}
 	// Output:

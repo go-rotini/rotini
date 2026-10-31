@@ -4,7 +4,7 @@
 gomodinit example.com/mycli
 exec rotini init mycli
 exec go mod tidy
-grep -count=1 'return rotini.MissingCommand\(rtx\)' internal/cmd/mycli/mycli.go
+grep -count=1 'return rotini.MissingCommandError\(rtx\)' internal/cmd/mycli/mycli.go
 exec go build -o mycli$exe ./cmd/mycli
 
 wantexit 1 ./mycli$exe

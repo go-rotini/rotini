@@ -40,7 +40,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoListHandler)(nil)
+var _ rotini.HandlerE = (*todoListHandler)(nil)
 
 type todoListHandler struct {
 	rotini.NoCascadingPreRunE
@@ -63,7 +63,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoPurgeHandler)(nil)
+var _ rotini.HandlerE = (*todoPurgeHandler)(nil)
 
 type todoPurgeHandler struct {
 	rotini.NoCascadingPreRunE
@@ -96,7 +96,7 @@ func Confirm(h rotini.Hook, next rotini.HookFunc) rotini.HookFunc {
 		return next
 	}
 	return func(ctx context.Context, rtx *rotini.Context) error {
-		if rotini.RunEffects(rtx).Kind != "destructive" {
+		if rotini.EffectsOf(rtx).Kind != "destructive" {
 			return next(ctx, rtx)
 		}
 		if !rotini.IsTerminal(rtx.Stdin) {

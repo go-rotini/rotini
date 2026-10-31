@@ -233,8 +233,8 @@ type inputNames struct {
 }
 
 // namesFor is the reader's inputNames for chain, with the files read so far.
-func (b *InputReader) namesFor(chain []Command, paths map[string]string, view *osView) *inputNames {
-	n := &inputNames{envPrefix: b.envPrefix, files: b.chainConfigFiles(chain), paths: paths}
+func (r *InputReader) namesFor(chain []Command, paths map[string]string, view *osView) *inputNames {
+	n := &inputNames{envPrefix: r.envPrefix, files: r.chainConfigFiles(chain), paths: paths}
 	if dir, err := view.getwd(); err == nil {
 		n.dir = dir // with no directory, a file keeps the path it was read from
 	}
@@ -430,15 +430,15 @@ func (r InputReport) envVars(tag reflect.StructTag) []string {
 	return []string{recon.SnakeUpperPrefixTransform(prefix)(recon.ParsePath(key))}
 }
 
-// Sources returns every place the spec declares for the input at path to take its value from,
-// highest precedence first, in the user's words: the flag or <argument>, its environment
-// variables, the file a variable_file variable names, its configuration key (when a
-// configuration file is in scope; "<key> in <file>" for an input pinned to one file), and
+// DeclaredSources returns every place the spec declares for the input at path to take its
+// value from, highest precedence first, in the user's words: the flag or <argument>, its
+// environment variables, the file a variable_file variable names, its configuration key (when
+// a configuration file is in scope; "<key> in <file>" for an input pinned to one file), and
 // default when it declares one. It returns nil when [InputReport.Label] would return "".
 //
-//	report.Sources("CfgctlDeploy.Flags.Replicas")
+//	report.DeclaredSources("CfgctlDeploy.Flags.Replicas")
 //	// ["--replicas", "CFGCTL_DEPLOY_REPLICAS", "deploy.replicas", "default"]
-func (r InputReport) Sources(path FieldPath) []string {
+func (r InputReport) DeclaredSources(path FieldPath) []string {
 	in, ok := r.input(path)
 	if !ok {
 		return nil

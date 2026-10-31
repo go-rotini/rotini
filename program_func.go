@@ -55,8 +55,8 @@ func reflectLookup(handlers any) HandlerLookup {
 			return nil, false
 		}
 		v := m.Call(nil)[0]
-		if eh, ok := reflect.TypeAssert[ErrorHandler](v); ok {
-			return FromErrorHandler(eh), true
+		if eh, ok := reflect.TypeAssert[HandlerE](v); ok {
+			return FromHandlerE(eh), true
 		}
 		h, _ := reflect.TypeAssert[Handler](v)
 		return h, true

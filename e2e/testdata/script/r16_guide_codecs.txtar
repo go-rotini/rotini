@@ -94,7 +94,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*inidemoLoadHandler)(nil)
+var _ rotini.HandlerE = (*inidemoLoadHandler)(nil)
 
 type inidemoLoadHandler struct {
 	rotini.NoCascadingPreRunE
@@ -210,7 +210,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*inidemoGreetHandler)(nil)
+var _ rotini.HandlerE = (*inidemoGreetHandler)(nil)
 
 type inidemoGreetHandler struct {
 	rotini.NoCascadingPreRunE
@@ -240,7 +240,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*inidemoShowHandler)(nil)
+var _ rotini.HandlerE = (*inidemoShowHandler)(nil)
 
 type inidemoShowHandler struct {
 	rotini.NoCascadingPreRunE
@@ -267,7 +267,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*inidemoCheckHandler)(nil)
+var _ rotini.HandlerE = (*inidemoCheckHandler)(nil)
 
 type inidemoCheckHandler struct {
 	rotini.NoCascadingPreRunE

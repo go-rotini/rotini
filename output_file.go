@@ -20,7 +20,7 @@ import (
 // commits what was written and Abort discards it. Both are idempotent, and Close after Abort
 // does nothing. The idiom commits only on success:
 //
-//	out, err := rotini.CreateOutput(rtx, in.Flags.Output, rotini.Overwrite(in.Flags.Force))
+//	out, err := rotini.CreateOutput(rtx, in.Flags.Output, rotini.OutputOverwrite(in.Flags.Force))
 //	if err != nil {
 //		return err
 //	}
@@ -51,21 +51,27 @@ type outputConfig struct {
 	modeSet   bool
 }
 
-// Overwrite lets [CreateOutput] replace an existing file. Without it, or with
-// Overwrite(false), an existing file is a usage error. A command usually passes the value of
+// OutputOverwrite lets [CreateOutput] replace an existing file. Without it, or with
+// OutputOverwrite(false), an existing file is a usage error. A command usually passes the value of
 // a --force flag it declares:
 //
-//	rotini.CreateOutput(rtx, in.Flags.Output, rotini.Overwrite(in.Flags.Force))
-func Overwrite(enabled bool) OutputOption {
+//	rotini.CreateOutput(rtx, in.Flags.Output, rotini.OutputOverwrite(in.Flags.Force))
+func OutputOverwrite(enabled bool) OutputOption {
 	return func(c *outputConfig) { c.overwrite = enabled }
 }
 
-// FileMode sets the permissions of a file [CreateOutput] creates or replaces, before the
+// OutputFileMode sets the permissions of a file [CreateOutput] creates or replaces, before the
 // umask. The default is 0644 for a new file, and the replaced file's own permissions when
-// overwriting; FileMode(0o600) keeps secret output private.
-func FileMode(perm fs.FileMode) OutputOption {
+// overwriting; OutputFileMode(0o600) keeps secret output private.
+func OutputFileMode(perm fs.FileMode) OutputOption {
 	return func(c *outputConfig) { c.mode, c.modeSet = perm.Perm(), true }
 }
+
+// Deprecated: use [OutputOverwrite].
+func Overwrite(enabled bool) OutputOption { return OutputOverwrite(enabled) }
+
+// Deprecated: use [OutputFileMode].
+func FileMode(perm fs.FileMode) OutputOption { return OutputFileMode(perm) }
 
 // CreateOutput opens an output-file value for writing (a spec's `type: outputfile`):
 //
@@ -78,7 +84,7 @@ func FileMode(perm fs.FileMode) OutputOption {
 //   - An existing file that is not a regular file, such as /dev/null, a named pipe or NUL on
 //     Windows, is written directly, not atomically.
 //
-// An existing regular file is replaced only with [Overwrite](true); otherwise CreateOutput
+// An existing regular file is replaced only with [OutputOverwrite](true); otherwise CreateOutput
 // returns a usage error that matches [fs.ErrExist]. The check is repeated before the rename,
 // but a file created in between is still replaced. A symbolic link is followed, so the file
 // it points to is replaced and the link is kept; a link to a file that doesn't exist is a usage
@@ -206,7 +212,7 @@ func (f *OutputFile) Name() string { return f.name }
 // Close commits the file: the temporary file is closed and renamed into place. If a write
 // failed, or closing or renaming fails (a full disk often shows only here), the temporary file
 // is removed, an existing file is left as it was, and the error is returned. Without
-// [Overwrite], a file that appeared at the path since [CreateOutput] is not replaced and Close
+// [OutputOverwrite], a file that appeared at the path since [CreateOutput] is not replaced and Close
 // returns the same usage error CreateOutput would. A file written directly (a device or a named
 // pipe) is only closed. Close on stdout, or after Close or Abort, does nothing.
 func (f *OutputFile) Close() error {

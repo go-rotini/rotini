@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -269,6 +270,32 @@ func TestCodec_extensionsLaterWins(t *testing.T) {
 	c, err := s.codecFor("", filepath.Join("x", "app.JSON"))
 	if err != nil || c == nil || c.name != "own-json" {
 		t.Errorf("codecFor = %v, %v; want the codec wired last", c, err)
+	}
+}
+
+// An extension given with or without its dot, in any case, is stored dotted and lower-case,
+// and a file with that extension is read with the codec.
+func TestCodec_extensionsWithOrWithoutDot(t *testing.T) {
+	c := &codecEntry{}
+	CodecExtensions("ini", ".INI", "Cfg", "", ".")(c)
+	if want := []string{".ini", ".cfg"}; !slices.Equal(c.exts, want) {
+		t.Errorf("exts = %q, want %q", c.exts, want)
+	}
+	for _, ext := range []string{"ini", ".ini"} {
+		t.Run(ext, func(t *testing.T) {
+			dir := t.TempDir()
+			path := pfWrite(t, dir, "app.INI", acINI)
+			files := []ConfigFile{{Name: "app", Path: path}}
+			rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithDir(dir).WithInputSettings(InputSettings{ConfigFiles: files})
+			rtx = wired(rtx, ConfigFiles(), Schemas(), Codec("ini", decodeINI, CodecExtensions(ext)))
+			var in acInputs
+			if err := NewInputReader(InputSettings{ConfigFiles: files}).Read(rtx, &in); err != nil {
+				t.Fatal(err)
+			}
+			if in.App.Config.Replicas != 3 || in.App.Config.Region != "eu" {
+				t.Errorf("config = %+v", in.App.Config)
+			}
+		})
 	}
 }
 

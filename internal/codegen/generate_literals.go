@@ -473,7 +473,7 @@ func completionHint(schema *InputSchema) *CompletionHint {
 	return &h
 }
 
-// completionLiteral renders an input's completion hint (see completionHint) as the Completion
+// completionLiteral renders an input's completion hint (see completionHint) as the Complete
 // field of its generated FlagDef/ArgDef literal, or "" when it has none.
 func completionLiteral(schema *InputSchema) string {
 	hint := completionHint(schema)
@@ -490,7 +490,7 @@ func completionLiteral(schema *InputSchema) string {
 	if hint.Message != "" {
 		fields = append(fields, "Message: "+strconv.Quote(hint.Message))
 	}
-	return ", Complete: " + rotiniPkgName + ".Completion{" + strings.Join(fields, ", ") + "}"
+	return ", Complete: " + rotiniPkgName + ".CompletionHint{" + strings.Join(fields, ", ") + "}"
 }
 
 // keyPaths lists the sorted keys shell completion offers before a map flag's '=': dotted
@@ -712,7 +712,7 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 
 // constraintFields renders a schema's declared bounds as the promoted rotini.Constraints fields of
 // a FlagDef, ArgDef or ConfigKey literal, or "" when none are set. Numeric bounds are emitted as
-// rotini.Ptr literals, so a declared 0 is kept; length and count bounds treat 0 as unset.
+// new(v) literals, so a declared 0 is kept; length and count bounds treat 0 as unset.
 func constraintFields(schema *InputSchema) string {
 	var parts []string
 	eachConstraint(schema, func(_, field, _, litVal string) {

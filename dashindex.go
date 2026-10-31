@@ -12,7 +12,7 @@ package rotini
 // isn't counted: one after a passthrough argument has started (`app exec ls -- x`), after an
 // options_first command's first argument, or anywhere after a passthrough command's name. It
 // reads only the command line, never a file or stdin, and reports (0, false) when the command
-// line doesn't parse.
+// line doesn't parse, or when the program reads it with an [ArgvParser] of its own.
 func (rtx *Context) DashIndex() (int, bool) {
 	if rtx == nil {
 		return 0, false
@@ -21,7 +21,7 @@ func (rtx *Context) DashIndex() (int, bool) {
 	if len(chain) == 0 {
 		return 0, false
 	}
-	store := quietParse(chain, rtx.Argv)
+	store := rtx.quietArgv(chain)
 	if store == nil || !store.dashSeen {
 		return 0, false
 	}

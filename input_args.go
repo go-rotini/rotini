@@ -150,7 +150,7 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 }
 
 // recordArgFallbacks is reconcileArgs for the per-channel layers ([Context.EnvInputs],
-// [Context.FileInputs]): each argument whose fallback this layer supplies is bound, recorded as
+// [Context.ConfigInputs]): each argument whose fallback this layer supplies is bound, recorded as
 // present, and noted by position for the merged report, which places positionals in order.
 // origins names where each argument's value came from, by argument index.
 func recordArgFallbacks(set Presence, ci reflect.Value, frame Command, topName, layerName string, reg *recon.Registry, rd fallbackRead) (placed, origins map[int]string, err error) {

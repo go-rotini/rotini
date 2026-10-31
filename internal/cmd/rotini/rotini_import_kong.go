@@ -7,7 +7,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.ErrorHandler = (*rotiniImportKongHandler)(nil)
+var _ rotini.HandlerE = (*rotiniImportKongHandler)(nil)
 
 type rotiniImportKongHandler struct {
 	rotini.NoCascadingPreRunE

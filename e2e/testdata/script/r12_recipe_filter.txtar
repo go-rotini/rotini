@@ -81,7 +81,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*logsGrepHandler)(nil)
+var _ rotini.HandlerE = (*logsGrepHandler)(nil)
 
 type logsGrepHandler struct {
 	rotini.NoCascadingPreRunE

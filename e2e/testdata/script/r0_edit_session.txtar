@@ -116,7 +116,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*demoGreetHandler)(nil)
+var _ rotini.HandlerE = (*demoGreetHandler)(nil)
 
 type demoGreetHandler struct {
 	rotini.NoCascadingPreRunE

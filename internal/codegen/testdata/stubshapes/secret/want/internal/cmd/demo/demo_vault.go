@@ -23,5 +23,5 @@ func (*demoVaultHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	rtx.HaltWith(rotini.MissingCommand(rtx))
+	rtx.HaltWith(rotini.MissingCommandError(rtx))
 }

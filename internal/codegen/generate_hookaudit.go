@@ -344,14 +344,14 @@ func returnsHandler(fn *ast.FuncDecl) bool {
 	return false
 }
 
-// assertsHandler reports whether t names the Handler or ErrorHandler interface, under any
+// assertsHandler reports whether t names the Handler or HandlerE interface, under any
 // package qualifier (rotini.Handler, rt.Handler) or none (a dot import).
 func assertsHandler(t ast.Expr) bool {
 	switch v := t.(type) {
 	case *ast.SelectorExpr:
-		return v.Sel != nil && (v.Sel.Name == "Handler" || v.Sel.Name == "ErrorHandler")
+		return v.Sel != nil && (v.Sel.Name == "Handler" || v.Sel.Name == "HandlerE")
 	case *ast.Ident:
-		return v.Name == "Handler" || v.Name == "ErrorHandler"
+		return v.Name == "Handler" || v.Name == "HandlerE"
 	}
 	return false
 }
@@ -367,7 +367,7 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 
 	var found []auditFinding
 
-	// An ErrorHandler's no-ops are the No*E types: a type is one when a hook, or the
+	// A HandlerE's no-ops are the No*E types: a type is one when a hook, or the
 	// misspelled method itself, returns a result.
 	errorShaped := map[string]bool{}
 	for _, f := range files {
@@ -436,7 +436,7 @@ func inputsMethods() map[string]bool {
 	return inputsMethodsOnce.value(func() map[string]bool {
 		return map[string]bool{
 			"Inputs": true, "InputsWithReport": true,
-			"DefaultInputs": true, "ArgvInputs": true, "EnvInputs": true, "FileInputs": true, "StdinInputs": true,
+			"DefaultInputs": true, "ArgvInputs": true, "EnvInputs": true, "FileInputs": true, "ConfigInputs": true, "StdinInputs": true,
 		}
 	})
 }

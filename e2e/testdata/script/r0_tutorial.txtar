@@ -143,7 +143,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoAddHandler)(nil)
+var _ rotini.HandlerE = (*todoAddHandler)(nil)
 
 type todoAddHandler struct {
 	rotini.NoCascadingPreRunE

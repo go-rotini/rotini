@@ -228,7 +228,7 @@ func (*handlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.Halt()
 		return
 	}
-	name, _ := rtx.GetDependency(ComponentDep)
+	name, _ := rtx.LookupDependency(ComponentDep)
 	if name == "" {
 		name = rtx.CommandChain()[0].Name
 	}

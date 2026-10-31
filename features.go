@@ -22,11 +22,10 @@ import (
 //   - program — [Plugins], [ResponseFiles], [Chdir], [Multicall]
 //   - input channels — [Stdin], [Env], [EnvFamilies], [ConfigFiles], [Profiles], [EnvFiles],
 //     [Fallbacks], [PathExpansion], [UserHomes], [ObjectFlags], [Schemas]
-//   - document formats — [JSON], [YAML], [TOML], [JSONC], [Dotenv]
-//   - validation — [Bounds], [UniqueItems], [Patterns], [FlagGroups], [FlagDependencies],
-//     [StreamPaths]
+//   - document formats — [JSON], [YAML], [TOML], [JSONC], [Dotenv], and an author's own [Codec]
+//   - validation — [Bounds], [UniqueItems], [Patterns], [FlagGroups], [FlagDependencies]
 //   - value types — [TimeValues], [URLValues], [EmailValues], [TimeZoneValues], [MACValues],
-//     [IPValues], [RegexpValues]
+//     [IPValues], [RegexpValues], [StreamPaths]
 //
 // A run that needs a feature its program was not given fails with a [*WiringError] whose
 // Feature names it.
@@ -109,7 +108,7 @@ type chdirHooks struct {
 
 type multicallHooks struct {
 	route func(def Definition, argv0 string, argv []string, goos string) ([]string, bool)
-	// completion answers a routed completion request when [Program.WithCompletion] set none.
+	// completion answers a routed completion request when [Program.WithCompletionFormat] set none.
 	completion CompletionFormat
 }
 

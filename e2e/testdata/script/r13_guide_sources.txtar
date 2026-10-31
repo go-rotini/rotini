@@ -155,7 +155,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoShowHandler)(nil)
+var _ rotini.HandlerE = (*todoShowHandler)(nil)
 
 type todoShowHandler struct {
 	rotini.NoCascadingPreRunE

@@ -8,7 +8,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.ErrorHandler = (*rotiniFmtHandler)(nil)
+var _ rotini.HandlerE = (*rotiniFmtHandler)(nil)
 
 // formatDep is the codegen entry point `rotini fmt` calls. The handler registers the real one
 // with SetDependencyIfAbsent, so a test that registered a double first keeps it.
@@ -40,7 +40,7 @@ func (*rotiniFmtHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 
 	rtx.SetDependencyIfAbsent(formatDep, codegen.FormatFiles)
-	changed, err := rtx.MustGetDependency(formatDep)(files, flags.Kind, flags.Check)
+	changed, err := rtx.MustDependency(formatDep)(files, flags.Kind, flags.Check)
 	if flags.Check {
 		for _, f := range changed {
 			fmt.Fprintln(rtx.Stderr, "would reformat", f)

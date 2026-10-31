@@ -30,7 +30,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*mandemoManHandler)(nil)
+var _ rotini.HandlerE = (*mandemoManHandler)(nil)
 
 type mandemoManHandler struct {
 	rotini.NoCascadingPreRunE

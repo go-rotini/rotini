@@ -9,7 +9,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.ErrorHandler = (*rotiniExplainHandler)(nil)
+var _ rotini.HandlerE = (*rotiniExplainHandler)(nil)
 
 type rotiniExplainHandler struct {
 	rotini.NoCascadingPreRunE
@@ -24,7 +24,7 @@ func (*rotiniExplainHandler) Run(_ context.Context, rtx *rotini.Context) error {
 		return inputError(err)
 	}
 	rtx.SetDependencyIfAbsent(explainDep, codegen.NewProcessor(rtx.Version()).Explain)
-	explain := rtx.MustGetDependency(explainDep)
+	explain := rtx.MustDependency(explainDep)
 	infos, err := explain(inputs.RotiniExplain.Arguments.Key)
 	if err != nil {
 		return rotini.UsageError(err)

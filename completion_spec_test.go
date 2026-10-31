@@ -222,7 +222,7 @@ func TestComplete_leavesDeprecatedOut(t *testing.T) {
 // helpDef has a help command whose argument completes command paths, a composed-looking
 // child with its own help, hidden, deprecated and plugin children.
 func helpDef() Definition {
-	helpArg := []ArgDef{{Name: "command", Type: "[]string", Variadic: true, Complete: Completion{Kind: "command"}}}
+	helpArg := []ArgDef{{Name: "command", Type: "[]string", Variadic: true, Complete: CompletionHint{Kind: "command"}}}
 	return Definition{
 		Name: "app", Handler: "App",
 		Commands: []CommandDef{
@@ -429,7 +429,7 @@ func TestCompletionDescriptions_switch(t *testing.T) {
 func TestCompletionHint_nativeKinds(t *testing.T) {
 	for _, kind := range []string{"executable", "user", "group", "host"} {
 		def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
-			{Name: "who", Identifiers: []string{"--who"}, Type: "string", Complete: Completion{Kind: kind}},
+			{Name: "who", Identifiers: []string{"--who"}, Type: "string", Complete: CompletionHint{Kind: kind}},
 		}}
 		if got := completionHint(def, []string{"--who", ""}); got != ":rotini:"+kind {
 			t.Errorf("%s: hint = %q", kind, got)
@@ -443,7 +443,7 @@ func TestCompletionHint_nativeKinds(t *testing.T) {
 // TestCompletionHint_afterTerminator pins that the argument's hint still applies after "--".
 func TestCompletionHint_afterTerminator(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", Arguments: []ArgDef{
-		{Name: "files", Type: "[]string", Variadic: true, Complete: Completion{Kind: "file", Extensions: []string{"go"}}},
+		{Name: "files", Type: "[]string", Variadic: true, Complete: CompletionHint{Kind: "file", Extensions: []string{"go"}}},
 	}}
 	if got := completionHint(def, []string{"--", ""}); got != ":rotini:file go" {
 		t.Errorf("after --: hint = %q, want :rotini:file go", got)
@@ -467,7 +467,7 @@ func TestComplete_passthroughArgument(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{
 		Name: "exec", Handler: "AppExec",
 		Flags:     []FlagDef{{Name: "quiet", Identifiers: []string{"-q"}, Type: "bool"}},
-		Arguments: []ArgDef{{Name: "cmd", Type: "[]string", Variadic: true, Passthrough: true, Complete: Completion{Kind: "executable"}}},
+		Arguments: []ArgDef{{Name: "cmd", Type: "[]string", Variadic: true, Passthrough: true, Complete: CompletionHint{Kind: "executable"}}},
 		Commands:  []CommandDef{{Name: "sub", Handler: "AppExecSub"}},
 	}}}
 	lookup := reflectLookup(passHandlers{})
@@ -654,7 +654,7 @@ func TestPartialInputs(t *testing.T) {
 	if got.in.App.Flags.Store != "memory" {
 		t.Errorf("default: store = %q, want memory", got.in.App.Flags.Store)
 	}
-	if src, ok := got.set["App.Flags.Store"]; !ok || src.Layer != "defaults" {
+	if src, ok := got.set["App.Flags.Store"]; !ok || src.Layer != "default" {
 		t.Errorf("presence of the default: %+v", got.set)
 	}
 
@@ -712,7 +712,7 @@ func TestComplete_lenientRecipeWithPartialInputs(t *testing.T) {
 // word is "=" itself, so nothing is offered and the hint is the value's.
 func TestComplete_bashGlueAsTheWord(t *testing.T) {
 	def := mapDef()
-	def.Flags = append(def.Flags, FlagDef{Name: "out", Identifiers: []string{"--out"}, Type: "string", Complete: Completion{Kind: "directory"}})
+	def.Flags = append(def.Flags, FlagDef{Name: "out", Identifiers: []string{"--out"}, Type: "string", Complete: CompletionHint{Kind: "directory"}})
 	for _, c := range []struct {
 		words []string
 		hint  string

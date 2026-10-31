@@ -24,7 +24,7 @@ For a spec with a `todo` root command and an `add` sub-command, the file holds:
 | the command tree | a `rotini.Definition` the runtime parses against |
 | every command | a method on the `ProgramHandlers` interface, which returns the command's handler (`todoAddHandler`) |
 | configuration files and the env prefix | `InputSettings`, which tells the runtime where values come from |
-| the conf's `generate.features:` | `Help(path...)`, and `Completion(shell)`, `Man(path...)` and `Markdown(path...)` when those features are on |
+| the conf's `generate.features:` | `Help(path...)`, and `CompletionScript(shell)`, `Man(path...)` and `Markdown(path...)` when those features are on |
 | every command's usage line | `Usage(path...)`, generated whether or not the help feature is on |
 | each enum value of a string input | a constant: `TodoAddPriorityHigh = "high"`, its `summary` as the doc comment |
 | each value of a string schema under `schemas:` | a constant of the schema's type: `StatusOpen Status = "open"` |
@@ -123,7 +123,7 @@ its command (or flag set, or schema), the input and the value. When two spelling
 (`dry-run` and `dry_run`), or the name is taken, `rotini validate` warns and that constant is
 left out; one that a file of yours already declares is left to you. `go generate` also warns
 about a file, key or profile name written into a `rotini.SetConfigValue`, `UnsetConfigValue`,
-`ConfigFilePath`, `ConfigProfiles` or `ToProfile` call that the spec doesn't declare.
+`ConfigFilePath`, `ConfigProfiles` or `ConfigToProfile` call that the spec doesn't declare.
 
 To put the input and output types in a package of their own, for example so a handler in
 another package can import them, declare a `models` target under the conf's
@@ -135,7 +135,7 @@ another package can import them, declare a `models` target under the conf's
   its command appears in the spec and is never overwritten. When you remove a command from the
   spec, the next `go generate` disables its handler file by adding `//go:build ignore` at the
   top, so it is out of the build but your code is still there, and the one after deletes it,
-  edits and all. Each step is reported. To keep the file, delete its `var _ rotini.ErrorHandler`
+  edits and all. Each step is reported. To keep the file, delete its `var _ rotini.HandlerE`
   (or `rotini.Handler`) line, or list it under the conf's [`keep`](/configuration#keep).
 - **`main.go`**, created once and never touched again.
 - **Any other file you add to the package**, such as a test or a file declaring a dependency.

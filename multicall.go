@@ -18,7 +18,7 @@ type MulticallDef struct {
 	Prefix string
 	// Complete answers shell completion for the root when the invoked name starts with it
 	// (kubectl's "kubectl_complete-"): the arguments are the words to complete, answered in the
-	// format [Program.WithCompletion] sets, else [PluginCompletion].
+	// format [Program.WithCompletionFormat] sets, else [PluginCompletion].
 	Complete string
 }
 

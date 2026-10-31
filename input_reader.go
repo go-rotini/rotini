@@ -20,7 +20,7 @@ import (
 )
 
 // InputReader is the default multi-source input reader. It fills a command's typed inputs from
-// argv (via a default [Parser]) and from the non-argv channels — environment variables,
+// argv (via the run's [ArgvParser], see [Context.Parser]) and from the non-argv channels — environment variables,
 // configuration files, and the leaf command's typed stdin payload — reconciled and decoded by
 // recon. It is the engine behind [Context.Inputs]; [Context.ArgvInputs] and its siblings expose
 // the channels individually.
@@ -33,7 +33,6 @@ import (
 // two channels use independent registries, so an env var never leaks into a config field or the
 // reverse. Flags and arguments may also fall back to env and config.
 type InputReader struct {
-	parser       *Parser
 	configFiles  []ConfigFile
 	stdinSchemas map[string]string // "<Prefix>Stdin" type name → JSON Schema for payload validation
 	envPrefix    string            // InputSettings.EnvPrefix: scopes derived env-var names
@@ -85,10 +84,10 @@ func bindSettings(meta InputSettings) *boundSettings {
 // NewInputReader returns the default input reader, configured from the generated
 // [InputSettings]. It carries no features of its own: a read uses the features of the
 // [Context] it reads, so a reader set with [Program.WithInputReader] reads with the program's.
-func NewInputReader(meta InputSettings) *InputReader {
+func NewInputReader(settings InputSettings) *InputReader {
 	return &InputReader{
-		parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas,
-		envPrefix: meta.EnvPrefix, sources: meta.Sources, described: true,
+		configFiles: settings.ConfigFiles, stdinSchemas: settings.StdinSchemas,
+		envPrefix: settings.EnvPrefix, sources: settings.Sources, described: true,
 	}
 }
 
@@ -100,10 +99,10 @@ func NewInputReader(meta InputSettings) *InputReader {
 // others, with the recon cause reachable via errors.As, or a [*WiringError] when a command
 // declares config inputs but the program has no [InputSettings], or when reading needs a
 // [Feature] the program built with [NewWiredProgram] does not wire (its Feature names it).
-func (b *InputReader) Read(rtx *Context, out any) error { return rtx.withPath(b.bind(rtx, out)) }
+func (r *InputReader) Read(rtx *Context, out any) error { return rtx.withPath(r.bind(rtx, out)) }
 
-func (b *InputReader) bind(rtx *Context, out any) error {
-	if b == nil {
+func (r *InputReader) bind(rtx *Context, out any) error {
+	if r == nil {
 		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil input reader"}
 	}
 	rv := reflect.ValueOf(out)
@@ -115,7 +114,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	}
 
 	// 1. argv → a store, without validation: step 3 checks the reconciled store.
-	store, chain, err := parseArgvStore(b.parser, rtx, out)
+	store, chain, err := readArgvStore(rtx, out)
 	if err != nil {
 		return err
 	}
@@ -132,14 +131,14 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	// profile selector names the profile it reads. The .env files in scope join the environment
 	// inputs read (under the run's own), and variable_file variables are read, before any other
 	// config_source path is looked up or any profile selected.
-	boot := fileBootstrap{paths: b.pathOverrides(chain, store, view)}
-	if view, err = b.envFileView(fs, chain, v, boot.paths, waived, view); err != nil {
+	boot := fileBootstrap{paths: r.pathOverrides(chain, store, view)}
+	if view, err = r.envFileView(fs, chain, v, boot.paths, waived, view); err != nil {
 		return err
 	}
 	if view.hasInputEnv() {
-		boot.paths = b.pathOverrides(chain, store, view)
+		boot.paths = r.pathOverrides(chain, store, view)
 	}
-	if boot.profiles, err = b.selectProfiles(fs, chain, store, view); err != nil {
+	if boot.profiles, err = r.selectProfiles(fs, chain, store, view); err != nil {
 		return err
 	}
 
@@ -156,7 +155,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	// An unknown profile is reported before any value is read or checked: a value it would have
 	// supplied, a required one included, is otherwise reported in its place.
 	if fs.profiles != nil {
-		if err := fs.profiles.check(b, v, chain, boot, waived, view); err != nil {
+		if err := fs.profiles.check(r, v, chain, boot, waived, view); err != nil {
 			return err
 		}
 	}
@@ -167,7 +166,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		if fs.fallbacks == nil {
 			return missingIn(chain, "fallbacks", "Fallbacks()", fallbackSubject(v))
 		}
-		if err := fs.fallbacks.reconcile(b, v, chain, store, boot, anchor, waived, view); err != nil {
+		if err := fs.fallbacks.reconcile(r, v, chain, store, boot, anchor, waived, view); err != nil {
 			return err
 		}
 	}
@@ -188,7 +187,7 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 		return err
 	}
 
-	if err := b.readChannels(fs, chain, boot, v, waived, view); err != nil {
+	if err := r.readChannels(fs, chain, boot, v, waived, view); err != nil {
 		return err
 	}
 
@@ -196,25 +195,25 @@ func (b *InputReader) bind(rtx *Context, out any) error {
 	if _, _, ok := stdinTarget(v, waived); !ok {
 		return nil // before fillStdin, so no closure is built for a command without stdin
 	}
-	return b.fillStdin(rtx, v, waived, func(name string) ([]string, error) { return leafArgValues(chain, store, name), nil })
+	return r.fillStdin(rtx, v, waived, func(name string) ([]string, error) { return leafArgValues(chain, store, name), nil })
 }
 
 // readChannels is step 4 of a read: env + config → the Env/Config sub-structs, from
 // independent registries. A registry is built only when v describes inputs of that channel.
-func (b *InputReader) readChannels(fs *featureSet, chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) error {
+func (r *InputReader) readChannels(fs *featureSet, chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) error {
 	var err error
 	var envReg *recon.Registry
 	if hasEnvChannel(v) {
 		if fs.env == nil {
 			return missingIn(chain, "env", "Env()", fmt.Sprintf("command %q declares env inputs", pathOf(chain)))
 		}
-		if envReg, err = fs.env.registry(v, b.envPrefix, view); err != nil {
+		if envReg, err = fs.env.registry(v, r.envPrefix, view); err != nil {
 			return internalBind(channelEnv, "", "could not build the environment registry", err)
 		}
 		defer envReg.Close()
 	}
 
-	if err := b.checkDescribed(v); err != nil {
+	if err := r.checkDescribed(v); err != nil {
 		return err
 	}
 
@@ -223,14 +222,14 @@ func (b *InputReader) readChannels(fs *featureSet, chain []Command, boot fileBoo
 		if fs.config == nil {
 			return missingIn(chain, "config-files", "ConfigFiles()", fmt.Sprintf("command %q declares config inputs", pathOf(chain)))
 		}
-		if cfg, err = fs.config.regs(b, chain, boot, v, waived, view); err != nil {
+		if cfg, err = fs.config.regs(r, chain, boot, v, waived, view); err != nil {
 			return err
 		}
 		defer cfg.Close()
 	}
 
 	if envReg != nil || cfg != nil {
-		labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
+		labels := channelLabels{env: envNames(v, "Env", r.envPrefix), view: view}
 		if err := fs.channels.fill(v, envReg, cfg, waived, labels); err != nil {
 			return err
 		}
@@ -285,13 +284,13 @@ func trimAcquiredPayload(s string) string {
 // are untouched. Each reconciled value is written back into store so the deferred validate
 // pass sees it as present. A profile selector flag is never read from a configuration file: it
 // takes the profile the bootstrap selected.
-func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *parsedInputs, boot fileBootstrap, anchor int, waived bool, view *osView) error {
+func (r *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *parsedInputs, boot fileBootstrap, anchor int, waived bool, view *osView) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
 	fs := view.clockRef().features()
-	cfgFiles := b.chainFiles(chain, false)
-	files, err := b.wiredFileSources(fs, chain, cfgFiles, boot, waived, view)
+	cfgFiles := r.chainFiles(chain, false)
+	files, err := r.wiredFileSources(fs, chain, cfgFiles, boot, waived, view)
 	if err != nil {
 		return err
 	}
@@ -303,11 +302,11 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 	if len(files) == 0 && plainFallbackKeys(v) {
 		// The environment is the only source, and no key is read but its own: the argv layer
 		// holds only keys of flags set on argv, which are never read again.
-		env := flagEnv(v, b.envPrefix, view)
+		env := flagEnv(v, r.envPrefix, view)
 		reg = fallbackLookup{env: &env}
 	} else {
 		srcs := make([]recon.Source, 0, 2+len(files))
-		srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, b.envPrefix, view))
+		srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, store, anchor)), flagEnvSource(v, r.envPrefix, view))
 		srcs = append(srcs, files...)
 		r, err := newRegistry(fs, recon.WithoutWatch(), recon.WithSources(srcs...))
 		if err != nil {
@@ -324,7 +323,7 @@ func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 	paths := pathFlags(cfgFiles)
 	envReg := reg
 	if paths != nil && len(files) > 0 {
-		env := flagEnv(v, b.envPrefix, view)
+		env := flagEnv(v, r.envPrefix, view)
 		envReg = fallbackLookup{env: &env}
 	}
 	for i := range v.NumField() {
@@ -414,7 +413,7 @@ func reconcileFlag(reg fallbackLookup, field reflect.Value, sf reflect.StructFie
 
 // bindFlagFallback reads one flag's fallback from reg and binds it into field, returning the
 // argv-shaped values it bound, or nil when no source supplies one. The InputReader and the
-// overlay's env and files layers share it: a list binds item by item, a map from its leaves, a
+// overlay's env and config layers share it: a list binds item by item, a map from its leaves, a
 // string splits on the flag's separator, a case-insensitive enum binds its declared spelling,
 // and a value the type cannot hold is an error naming where it came from. With rd.waiveFiles,
 // such a value from a configuration file is skipped instead, and the field keeps what it held.
@@ -863,8 +862,8 @@ func findFlagDef(defs []FlagDef, name string) (FlagDef, bool) {
 // program was built without any [InputSettings], which would otherwise leave every
 // configuration value silently zero. An empty InputSettings is legal: it declares that the
 // program has no configuration sources.
-func (b *InputReader) checkDescribed(v reflect.Value) error {
-	if b.described || !hasConfigChannel(v) {
+func (r *InputReader) checkDescribed(v reflect.Value) error {
+	if r.described || !hasConfigChannel(v) {
 		return nil
 	}
 	return &WiringError{Msg: "this command declares config: inputs, but the program " +
@@ -896,8 +895,8 @@ func configChannelOf(v reflect.Value) bool {
 // configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. boot carries any config_source-supplied paths and the
 // selected profiles. A map several sources hold merges entry by entry ([mapMergeSource]).
-func (b *InputReader) configRegistry(files []ConfigFile, boot fileBootstrap, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
-	srcs, err := b.fileSources(files, boot, waived, view)
+func (r *InputReader) configRegistry(files []ConfigFile, boot fileBootstrap, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
+	srcs, err := r.fileSources(files, boot, waived, view)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -997,33 +996,33 @@ type cfgRegs struct {
 // configRegs builds the merged config registry and the lazy per-file cache over the sources in
 // scope for chain. waived marks a short-circuited run ([shortCircuited]): a file that cannot be
 // read or parsed is skipped, and none is checked against its schema.
-func (b *InputReader) configRegs(chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) (*cfgRegs, error) {
-	files := b.chainFiles(chain, false)
+func (r *InputReader) configRegs(chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) (*cfgRegs, error) {
+	files := r.chainFiles(chain, false)
 	keys := channelValueKeys(v, "Config")
-	merged, paths, err := b.configRegistry(files, boot, keys, waived, view)
+	merged, paths, err := r.configRegistry(files, boot, keys, waived, view)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{reader: b, files: files, boot: boot, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived, view: view, paths: paths}, nil
+	return &cfgRegs{reader: r, files: files, boot: boot, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}, waived: waived, view: view, paths: paths}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
 // nearest-wins: the invoked command's sources first, then each ancestor up to the root, each
 // command's own declared order preserved. Off-branch sources are excluded; an unscoped source
 // is always in scope and appended last.
-func (b *InputReader) chainConfigFiles(chain []Command) []ConfigFile {
-	if len(b.configFiles) == 0 {
+func (r *InputReader) chainConfigFiles(chain []Command) []ConfigFile {
+	if len(r.configFiles) == 0 {
 		return nil
 	}
 	var out []ConfigFile
 	for n := len(chain); n > 0; n-- { // leaf → root
-		for _, f := range b.configFiles {
+		for _, f := range r.configFiles {
 			if scopeIs(f.Scope, chain[:n]) {
 				out = append(out, f)
 			}
 		}
 	}
-	for _, f := range b.configFiles {
+	for _, f := range r.configFiles {
 		if f.Scope == "" {
 			out = append(out, f)
 		}
@@ -1347,15 +1346,15 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 // containing the file winning. A path supplied through config_source is not optional, so a
 // missing one is an error. Custom InputSettings.Sources follow the declared files and so rank
 // below them.
-func (b *InputReader) fileSources(files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
-	srcs := make([]recon.Source, 0, len(files)+len(b.sources))
+func (r *InputReader) fileSources(files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+	srcs := make([]recon.Source, 0, len(files)+len(r.sources))
 	for _, f := range files {
 		var err error
-		if srcs, err = b.readFileSource(srcs, f, boot, waived, view); err != nil {
+		if srcs, err = r.readFileSource(srcs, f, boot, waived, view); err != nil {
 			return nil, err
 		}
 	}
-	return append(srcs, b.sources...), nil
+	return append(srcs, r.sources...), nil
 }
 
 // namedSource renames a recon source to its config_files logical name, since recon source
@@ -1415,8 +1414,8 @@ func sourcePaths(srcs []recon.Source) map[string]string {
 
 // wiredFileSources is [InputReader.fileSources] through the configuration files hook: no
 // sources when no file is in scope and no custom source is declared.
-func (b *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
-	if len(files) == 0 && len(b.sources) == 0 {
+func (r *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+	if len(files) == 0 && len(r.sources) == 0 {
 		return nil, nil
 	}
 	if fs.config == nil {
@@ -1426,7 +1425,7 @@ func (b *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []
 		}
 		return nil, missingIn(chain, "config-files", "ConfigFiles()", subject)
 	}
-	return fs.config.fileSources(b, files, boot, waived, view)
+	return fs.config.fileSources(r, files, boot, waived, view)
 }
 
 // readFileSource builds the recon sources for one config_files entry, schema-checked: paths
@@ -1435,7 +1434,7 @@ func (b *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []
 // then the shared keys. In a short-circuited run (waived) a file that cannot be located, read
 // or parsed is skipped, standing in as an empty source under its own name so precedence holds,
 // and no file is checked against its schema.
-func (b *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+func (r *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
 	skipped := func() []recon.Source {
 		return append(dst, namedSource{Source: recon.NewMapSource(f.Name, nil), name: f.Name})
 	}
@@ -1443,7 +1442,7 @@ func (b *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot file
 	if f.Profiles != nil && fs.profiles == nil {
 		return nil, profilesMissing(f)
 	}
-	src, path, err := b.openFileSource(f, boot.paths, view)
+	src, path, err := r.openFileSource(f, boot.paths, view)
 	if err != nil {
 		if waived && !isWiringError(err) {
 			return skipped(), nil
@@ -1488,7 +1487,7 @@ func isWiringError(err error) bool {
 // openFileSource locates and parses one config_files entry, returning the source and the file
 // it resolved to. Rotini expands the path and runs the discover search itself, from the run's
 // view, so recon reads exactly the absolute path it is given.
-func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOverride, view *osView) (recon.Source, string, error) {
+func (r *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOverride, view *osView) (recon.Source, string, error) {
 	opts := []recon.FileOption{recon.WithPathExpansion(false)}
 	if f.Format != "" {
 		opts = append(opts, recon.WithFileFormat(f.Format))
@@ -1901,9 +1900,9 @@ func violationValue(m map[string]any, ve *recon.ValidationError, f ConfigFile) s
 // pathOverrides resolves each ConfigFile's config_source inputs to the path they supply: the
 // flag explicitly set on argv, then the env variable, then the flag's default. An entry none
 // of them supplies keeps its own path or discover strategy.
-func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *osView) map[string]pathOverride {
+func (r *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *osView) map[string]pathOverride {
 	var out map[string]pathOverride // made by the first override: read-only, so nil serves none
-	for _, f := range b.chainConfigFiles(chain) {
+	for _, f := range r.chainConfigFiles(chain) {
 		pf := f.PathFrom
 		if pf == nil {
 			continue

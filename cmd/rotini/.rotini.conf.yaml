@@ -23,7 +23,7 @@ generate:
       embed: false
       template: false
     # completion and man are inline, like help: `rotini completion` and `rotini man` print
-    # what the generated Completion and Man return, and `rotini man --dir` writes ManPages.
+    # what the generated CompletionScript and Man return, and `rotini man --dir` writes ManPages.
     - type: completion
       enabled: true
       embed: false

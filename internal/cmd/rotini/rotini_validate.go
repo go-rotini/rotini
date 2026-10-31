@@ -7,7 +7,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.ErrorHandler = (*rotiniValidateHandler)(nil)
+var _ rotini.HandlerE = (*rotiniValidateHandler)(nil)
 
 type rotiniValidateHandler struct {
 	rotini.NoCascadingPreRunE
@@ -39,7 +39,7 @@ func (*rotiniValidateHandler) Run(ctx context.Context, rtx *rotini.Context) erro
 
 	version := rtx.Version()
 	rtx.SetDependencyIfAbsent(validateDep, codegen.NewProcessor(version).Validate)
-	validate := rtx.MustGetDependency(validateDep)
+	validate := rtx.MustDependency(validateDep)
 
 	// Warnings never fail the run.
 	if err := validate(spec, conf, flags.Watch, flags.Fail, release, printResult(rtx), printWarnings(rtx)); err != nil {

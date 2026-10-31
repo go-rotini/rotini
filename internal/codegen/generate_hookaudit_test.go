@@ -74,7 +74,7 @@ func (*demoBuildHandler) Prerun(ctx context.Context, rtx *rotini.Context) {}
 	}
 }
 
-// TestHookAudit_errorShapeNamesTheENoOp pins that a misspelled hook on an ErrorHandler names
+// TestHookAudit_errorShapeNamesTheENoOp pins that a misspelled hook on a HandlerE names
 // the No*E embed that supplies the hook, since the plain No* one is not in an error stub.
 func TestHookAudit_errorShapeNamesTheENoOp(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
@@ -86,7 +86,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*demoBuildHandler)(nil)
+var _ rotini.HandlerE = (*demoBuildHandler)(nil)
 
 type demoBuildHandler struct{ rotini.NoHooksE }
 

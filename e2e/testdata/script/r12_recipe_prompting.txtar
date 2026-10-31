@@ -52,7 +52,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*promptdemoGreetHandler)(nil)
+var _ rotini.HandlerE = (*promptdemoGreetHandler)(nil)
 
 type promptdemoGreetHandler struct {
 	rotini.NoCascadingPreRunE

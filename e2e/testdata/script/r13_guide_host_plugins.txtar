@@ -74,7 +74,7 @@ var version = "1.2.3"
 func main() {
 	cmd.NewProgram().
 		WithVersion(version).
-		WithCompletion(rotini.PluginCompletion).
+		WithCompletionFormat(rotini.PluginCompletion).
 		Execute()
 }
 -- docker/cmd/where/.rotini.spec.yaml --
@@ -122,7 +122,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dockerWhereHandler)(nil)
+var _ rotini.HandlerE = (*dockerWhereHandler)(nil)
 
 type dockerWhereHandler struct {
 	rotini.NoPreRunE
@@ -158,7 +158,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dockerWhereWhereHandler)(nil)
+var _ rotini.HandlerE = (*dockerWhereWhereHandler)(nil)
 
 type dockerWhereWhereHandler struct {
 	rotini.NoCascadingPreRunE
@@ -185,7 +185,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dockerWhereDockerCliPluginMetadataHandler)(nil)
+var _ rotini.HandlerE = (*dockerWhereDockerCliPluginMetadataHandler)(nil)
 
 type dockerWhereDockerCliPluginMetadataHandler struct {
 	rotini.NoCascadingPreRunE
@@ -274,7 +274,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*kubectlCtxHandler)(nil)
+var _ rotini.HandlerE = (*kubectlCtxHandler)(nil)
 
 type kubectlCtxHandler struct {
 	rotini.NoPreRunE
@@ -310,7 +310,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*kubectlCtxUseHandler)(nil)
+var _ rotini.HandlerE = (*kubectlCtxUseHandler)(nil)
 
 type kubectlCtxUseHandler struct {
 	rotini.NoCascadingPreRunE

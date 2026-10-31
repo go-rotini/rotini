@@ -7,7 +7,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*demoOtherCompletionHandler)(nil)
+var _ rotini.HandlerE = (*demoOtherCompletionHandler)(nil)
 
 type demoOtherCompletionHandler struct {
 	rotini.NoCascadingPreRunE

@@ -37,7 +37,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*logdemoHandler)(nil)
+var _ rotini.HandlerE = (*logdemoHandler)(nil)
 
 // Logger is the run's logger, set by the root's CascadingPreRun before any command runs.
 var Logger = rotini.NewDependency[*slog.Logger]("logdemo.logger")
@@ -90,7 +90,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*logdemoRunHandler)(nil)
+var _ rotini.HandlerE = (*logdemoRunHandler)(nil)
 
 type logdemoRunHandler struct {
 	rotini.NoCascadingPreRunE
@@ -100,7 +100,7 @@ type logdemoRunHandler struct {
 }
 
 func (*logdemoRunHandler) Run(ctx context.Context, rtx *rotini.Context) error {
-	log := rtx.MustGetDependency(Logger)
+	log := rtx.MustDependency(Logger)
 	log.Debug("loading tasks", "file", "tasks.json")
 	log.Info("3 tasks to run")
 	log.Warn("the cache is stale")

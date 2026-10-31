@@ -7,7 +7,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*rotiniCompletionHandler)(nil)
+var _ rotini.HandlerE = (*rotiniCompletionHandler)(nil)
 
 type rotiniCompletionHandler struct {
 	rotini.NoCascadingPreRunE
@@ -22,7 +22,7 @@ func (*rotiniCompletionHandler) Run(ctx context.Context, rtx *rotini.Context) er
 		return inputError(err)
 	}
 
-	script, err := Completion(inputs.RotiniCompletion.Arguments.Shell)
+	script, err := CompletionScript(inputs.RotiniCompletion.Arguments.Shell)
 	if err != nil {
 		return rotini.UsageError(err)
 	}

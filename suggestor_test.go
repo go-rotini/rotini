@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// The corpora below measure both failure modes of the Suggestor's defaults: silence on a real
+// The corpora below measure both failure modes of the Suggester's defaults: silence on a real
 // typo, and a suggestion for a word that is not one.
 
 // cliVocabulary is a realistic command-and-flag namespace with genuine near-collisions.
@@ -60,10 +60,10 @@ var shortNotTypos = []string{
 	"exec", "sync", "watch", "tail", "make", "test", "bash", "grep", "sed", "awk", "cat", "cp", "ls",
 }
 
-// TestSuggestor_defaultsAreCorrectOnBothAxes pins the default algorithm and threshold against
+// TestSuggester_defaultsAreCorrectOnBothAxes pins the default algorithm and threshold against
 // the long corpus: every typo suggested correctly, no non-typo matched.
-func TestSuggestor_defaultsAreCorrectOnBothAxes(t *testing.T) {
-	s := NewSuggestor()
+func TestSuggester_defaultsAreCorrectOnBothAxes(t *testing.T) {
+	s := NewSuggester()
 
 	var missed []string
 	for typo, want := range cliTypos {
@@ -91,10 +91,10 @@ func TestSuggestor_defaultsAreCorrectOnBothAxes(t *testing.T) {
 	}
 }
 
-// TestSuggestor_shortCommandsAreNotABlindSpot pins that the default threshold catches typos of
+// TestSuggester_shortCommandsAreNotABlindSpot pins that the default threshold catches typos of
 // short commands (`hlep` → `help`), missing at most one, without false positives.
-func TestSuggestor_shortCommandsAreNotABlindSpot(t *testing.T) {
-	s := NewSuggestor()
+func TestSuggester_shortCommandsAreNotABlindSpot(t *testing.T) {
+	s := NewSuggester()
 
 	var missed []string
 	for typo, want := range shortTypos {
@@ -123,9 +123,9 @@ func TestSuggestor_shortCommandsAreNotABlindSpot(t *testing.T) {
 	}
 }
 
-// TestSuggestor_aSingleEditFloorIsWorseThanAThreshold pins that a fixed one-edit floor, unlike
+// TestSuggester_aSingleEditFloorIsWorseThanAThreshold pins that a fixed one-edit floor, unlike
 // the score threshold, produces false positives on short words ("cp" → "up").
-func TestSuggestor_aSingleEditFloorIsWorseThanAThreshold(t *testing.T) {
+func TestSuggester_aSingleEditFloorIsWorseThanAThreshold(t *testing.T) {
 	withinOneEdit := func(input string, candidates []string) (string, bool) {
 		for _, c := range candidates {
 			if c != input && optimalStringAlignment(fold(input), fold(c)) <= 1 {
@@ -146,11 +146,11 @@ func TestSuggestor_aSingleEditFloorIsWorseThanAThreshold(t *testing.T) {
 	}
 }
 
-// TestSuggestor_thresholdIsNotACliff pins that minimum scores near the default (0.70–0.85)
+// TestSuggester_thresholdIsNotACliff pins that minimum scores near the default (0.70–0.85)
 // invent no matches, and that 0.70 still catches every long-corpus typo.
-func TestSuggestor_thresholdIsNotACliff(t *testing.T) {
+func TestSuggester_thresholdIsNotACliff(t *testing.T) {
 	for _, score := range []float64{0.7, 0.75, 0.8, 0.85} {
-		s := NewSuggestor().WithMinScore(score)
+		s := NewSuggester().WithMinScore(score)
 		var invented int
 		for _, word := range notTypos {
 			if _, ok := s.Closest(word, cliVocabulary); ok {
@@ -166,7 +166,7 @@ func TestSuggestor_thresholdIsNotACliff(t *testing.T) {
 			t.Errorf("min score %.2f invented %d match(es) for non-typos", score, invented)
 		}
 	}
-	s := NewSuggestor().WithMinScore(0.7)
+	s := NewSuggester().WithMinScore(0.7)
 	for typo, want := range cliTypos {
 		if got, ok := s.Closest(typo, cliVocabulary); !ok || got != want {
 			t.Errorf("min score 0.70: %q → %q, want %q", typo, got, want)
@@ -174,10 +174,10 @@ func TestSuggestor_thresholdIsNotACliff(t *testing.T) {
 	}
 }
 
-// TestSuggestor_caseIsNeverTheUsersProblem pins case-insensitive matching, including a
+// TestSuggester_caseIsNeverTheUsersProblem pins case-insensitive matching, including a
 // case-only typo ("--VERBOSE"), which the exact-match check must not silence.
-func TestSuggestor_caseIsNeverTheUsersProblem(t *testing.T) {
-	s := NewSuggestor()
+func TestSuggester_caseIsNeverTheUsersProblem(t *testing.T) {
+	s := NewSuggester()
 	for input, want := range map[string]string{
 		"--VERBOSE": "--verbose", // case only
 		"--Verbose": "--verbose",
@@ -196,10 +196,10 @@ func TestSuggestor_caseIsNeverTheUsersProblem(t *testing.T) {
 	}
 }
 
-// TestSuggestor_exactMatchIsNotATypo pins that a token matching a candidate byte-for-byte gets
+// TestSuggester_exactMatchIsNotATypo pins that a token matching a candidate byte-for-byte gets
 // no suggestion.
-func TestSuggestor_exactMatchIsNotATypo(t *testing.T) {
-	s := NewSuggestor()
+func TestSuggester_exactMatchIsNotATypo(t *testing.T) {
+	s := NewSuggester()
 	for _, input := range []string{"install", "--verbose", "schedule"} {
 		if got, ok := s.Closest(input, cliVocabulary); ok {
 			t.Errorf("%q suggested %q — it was spelled correctly", input, got)
@@ -209,36 +209,36 @@ func TestSuggestor_exactMatchIsNotATypo(t *testing.T) {
 
 // ── For: the ParseError adapter ──────────────────────────────────────────────
 
-// TestSuggestorFor_closesTheLoop pins that For ranks a ParseError's Token against its
+// TestSuggesterFor_closesTheLoop pins that For ranks a ParseError's Token against its
 // Candidates.
-func TestSuggestorFor_closesTheLoop(t *testing.T) {
+func TestSuggesterFor_closesTheLoop(t *testing.T) {
 	err := &ParseError{
 		Kind:       ParseKindUnknownCommand,
 		Msg:        `unknown command "instal"`,
 		Token:      "instal",
 		Candidates: []string{"install", "uninstall", "list"},
 	}
-	got := NewSuggestor().For(err)
+	got := NewSuggester().For(err)
 	if len(got) == 0 || got[0] != "install" {
 		t.Errorf("For() = %v, want install first", got)
 	}
 }
 
-// TestSuggestorFor_wrappedErrorsStillResolve pins that For finds a *ParseError inside a joined
+// TestSuggesterFor_wrappedErrorsStillResolve pins that For finds a *ParseError inside a joined
 // or wrapped error.
-func TestSuggestorFor_wrappedErrorsStillResolve(t *testing.T) {
+func TestSuggesterFor_wrappedErrorsStillResolve(t *testing.T) {
 	inner := &ParseError{Kind: ParseKindUnknownFlag, Token: "--vebose", Candidates: []string{"--verbose"}}
 	wrapped := UsageError(errors.New("wrapping: " + inner.Error()))
 	_ = wrapped // the interesting case is a real wrap, below
 
-	if got := NewSuggestor().For(errors.Join(errors.New("context"), inner)); len(got) != 1 || got[0] != "--verbose" {
+	if got := NewSuggester().For(errors.Join(errors.New("context"), inner)); len(got) != 1 || got[0] != "--verbose" {
 		t.Errorf("For(joined) = %v, want [--verbose]", got)
 	}
 }
 
-// TestSuggestorFor_offeringNothingIsARealAnswer pins every way For declines with an empty
+// TestSuggesterFor_offeringNothingIsARealAnswer pins every way For declines with an empty
 // result.
-func TestSuggestorFor_offeringNothingIsARealAnswer(t *testing.T) {
+func TestSuggesterFor_offeringNothingIsARealAnswer(t *testing.T) {
 	cases := map[string]error{
 		"nil error":            nil,
 		"not a ParseError":     errors.New("something else"),
@@ -249,7 +249,7 @@ func TestSuggestorFor_offeringNothingIsARealAnswer(t *testing.T) {
 	}
 	for name, err := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := NewSuggestor().For(err); len(got) != 0 {
+			if got := NewSuggester().For(err); len(got) != 0 {
 				t.Errorf("For() = %v, want nothing", got)
 			}
 		})
@@ -258,66 +258,66 @@ func TestSuggestorFor_offeringNothingIsARealAnswer(t *testing.T) {
 
 // ── ranking mechanics ────────────────────────────────────────────────────────
 
-// TestSuggestor_ranksAndCaps pins that several close candidates are offered and that
+// TestSuggester_ranksAndCaps pins that several close candidates are offered and that
 // WithMaxResults caps them.
-func TestSuggestor_ranksAndCaps(t *testing.T) {
+func TestSuggester_ranksAndCaps(t *testing.T) {
 	candidates := []string{"--version", "--verbose", "--verify", "--quiet"}
 
-	all := NewSuggestor().WithMinScore(0.5).WithMaxResults(0).Suggest("--vers", candidates)
+	all := NewSuggester().WithMinScore(0.5).WithMaxResults(0).Suggest("--vers", candidates)
 	if len(all) < 2 {
 		t.Fatalf("Suggest = %v, want several close candidates offered", all)
 	}
-	if capped := NewSuggestor().WithMinScore(0.5).WithMaxResults(2).Suggest("--vers", candidates); len(capped) != 2 {
+	if capped := NewSuggester().WithMinScore(0.5).WithMaxResults(2).Suggest("--vers", candidates); len(capped) != 2 {
 		t.Errorf("WithMaxResults(2) returned %d", len(capped))
 	}
 }
 
-// TestSuggestor_isDeterministic pins the tie-break (longer shared prefix, then lexicographic)
+// TestSuggester_isDeterministic pins the tie-break (longer shared prefix, then lexicographic)
 // so the same input always yields the same order.
-func TestSuggestor_isDeterministic(t *testing.T) {
+func TestSuggester_isDeterministic(t *testing.T) {
 	candidates := []string{"bravo", "alpha", "brava", "bravx"}
-	first := NewSuggestor().WithMinScore(0.5).WithMaxResults(0).Suggest("bravz", candidates)
+	first := NewSuggester().WithMinScore(0.5).WithMaxResults(0).Suggest("bravz", candidates)
 	for range 20 {
-		if got := NewSuggestor().WithMinScore(0.5).WithMaxResults(0).Suggest("bravz", candidates); !slices.Equal(got, first) {
+		if got := NewSuggester().WithMinScore(0.5).WithMaxResults(0).Suggest("bravz", candidates); !slices.Equal(got, first) {
 			t.Fatalf("Suggest is unstable: %v then %v", first, got)
 		}
 	}
 }
 
-// TestSuggestor_skipsEmptyAndDuplicateCandidates pins that empty and case-folded duplicate
+// TestSuggester_skipsEmptyAndDuplicateCandidates pins that empty and case-folded duplicate
 // candidates never reach the output.
-func TestSuggestor_skipsEmptyAndDuplicateCandidates(t *testing.T) {
-	got := NewSuggestor().Suggest("instal", []string{"", "install", "install", "INSTALL", ""})
+func TestSuggester_skipsEmptyAndDuplicateCandidates(t *testing.T) {
+	got := NewSuggester().Suggest("instal", []string{"", "install", "install", "INSTALL", ""})
 	if len(got) != 1 || got[0] != "install" {
 		t.Errorf("Suggest = %v, want exactly one install", got)
 	}
 }
 
-// TestSuggestor_nilAndEmptyInputs pins that a nil Suggestor, an empty input and no candidates
+// TestSuggester_nilAndEmptyInputs pins that a nil Suggester, an empty input and no candidates
 // all return nothing without panicking.
-func TestSuggestor_nilAndEmptyInputs(t *testing.T) {
-	var nilSuggestor *Suggestor
-	if got := nilSuggestor.Suggest("instal", cliVocabulary); got != nil {
-		t.Errorf("nil Suggestor returned %v", got)
+func TestSuggester_nilAndEmptyInputs(t *testing.T) {
+	var nilSuggester *Suggester
+	if got := nilSuggester.Suggest("instal", cliVocabulary); got != nil {
+		t.Errorf("nil Suggester returned %v", got)
 	}
-	if _, ok := nilSuggestor.Closest("instal", cliVocabulary); ok {
-		t.Error("nil Suggestor reported a hit")
+	if _, ok := nilSuggester.Closest("instal", cliVocabulary); ok {
+		t.Error("nil Suggester reported a hit")
 	}
-	if got := nilSuggestor.For(&ParseError{Token: "instal", Candidates: cliVocabulary}); got != nil {
-		t.Errorf("nil Suggestor.For returned %v", got)
+	if got := nilSuggester.For(&ParseError{Token: "instal", Candidates: cliVocabulary}); got != nil {
+		t.Errorf("nil Suggester.For returned %v", got)
 	}
-	if got := NewSuggestor().Suggest("", cliVocabulary); got != nil {
+	if got := NewSuggester().Suggest("", cliVocabulary); got != nil {
 		t.Errorf("empty input returned %v", got)
 	}
-	if got := NewSuggestor().Suggest("instal", nil); got != nil {
+	if got := NewSuggester().Suggest("instal", nil); got != nil {
 		t.Errorf("no candidates returned %v", got)
 	}
 }
 
-// TestSuggestor_withMinScoreRejectsNonsense pins that a score outside [0,1] is ignored.
-func TestSuggestor_withMinScoreRejectsNonsense(t *testing.T) {
+// TestSuggester_withMinScoreRejectsNonsense pins that a score outside [0,1] is ignored.
+func TestSuggester_withMinScoreRejectsNonsense(t *testing.T) {
 	for _, bad := range []float64{-1, 1.5} {
-		s := NewSuggestor().WithMinScore(bad)
+		s := NewSuggester().WithMinScore(bad)
 		if s.minScore != defaultMinScore {
 			t.Errorf("WithMinScore(%v) took effect: %v", bad, s.minScore)
 		}
@@ -369,7 +369,7 @@ func FuzzSuggest(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, token, list string, maxResults int, minScore float64) {
 		candidates := strings.Split(list, ",")
-		s := NewSuggestor().WithMaxResults(maxResults).WithMinScore(minScore)
+		s := NewSuggester().WithMaxResults(maxResults).WithMinScore(minScore)
 		got := s.Suggest(token, candidates)
 
 		if again := s.Suggest(token, candidates); !slices.Equal(got, again) {

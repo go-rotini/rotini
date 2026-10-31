@@ -169,14 +169,14 @@ const envFileCap = 1 << 20
 //
 // A .env file's own config_source is read from the command line and the run's environment
 // only; overrides holds those paths.
-func (b *InputReader) inputView(chain []Command, v reflect.Value, overrides map[string]pathOverride, waived bool, view *osView) (*osView, error) {
-	if !readsEnv(v) && !b.envPathSource(chain) {
+func (r *InputReader) inputView(chain []Command, v reflect.Value, overrides map[string]pathOverride, waived bool, view *osView) (*osView, error) {
+	if !readsEnv(v) && !r.envPathSource(chain) {
 		return view, nil
 	}
 	in := &inputEnv{}
 	layered := view.withInputEnv(in)
-	for _, f := range b.chainFiles(chain, true) {
-		layer, err := b.readDotenv(f, overrides, waived, layered)
+	for _, f := range r.chainFiles(chain, true) {
+		layer, err := r.readDotenv(f, overrides, waived, layered)
 		if err != nil {
 			return nil, err
 		}
@@ -197,8 +197,8 @@ func (b *InputReader) inputView(chain []Command, v reflect.Value, overrides map[
 
 // envFileView is [InputReader.inputView] through the env-files hook. With no .env file in scope
 // and no input reading a variable_file, the view is the run's own.
-func (b *InputReader) envFileView(fs *featureSet, chain []Command, v reflect.Value, overrides map[string]pathOverride, waived bool, view *osView) (*osView, error) {
-	files := b.chainFiles(chain, true)
+func (r *InputReader) envFileView(fs *featureSet, chain []Command, v reflect.Value, overrides map[string]pathOverride, waived bool, view *osView) (*osView, error) {
+	files := r.chainFiles(chain, true)
 	if len(files) == 0 && !hasFileVars(v) {
 		return view, nil
 	}
@@ -209,7 +209,7 @@ func (b *InputReader) envFileView(fs *featureSet, chain []Command, v reflect.Val
 		}
 		return nil, missingIn(chain, "env-files", "EnvFiles()", subject)
 	}
-	return fs.envFiles.view(b, chain, v, overrides, waived, view)
+	return fs.envFiles.view(r, chain, v, overrides, waived, view)
 }
 
 // readsEnv reports whether the inputs struct v reads an environment variable: an env input, or
@@ -221,15 +221,15 @@ func readsEnv(v reflect.Value) bool {
 // envPathSource reports whether a configuration file in scope takes its path from an
 // environment variable (config_source on an env input), or its profile (a profile selector's
 // variables).
-func (b *InputReader) envPathSource(chain []Command) bool {
-	return slices.ContainsFunc(b.chainConfigFiles(chain), func(f ConfigFile) bool {
+func (r *InputReader) envPathSource(chain []Command) bool {
+	return slices.ContainsFunc(r.chainConfigFiles(chain), func(f ConfigFile) bool {
 		return (f.PathFrom != nil && f.PathFrom.Env != "") || (f.Profiles != nil && f.Profiles.Env != "")
 	})
 }
 
 // readDotenv reads one .env file into a layer, or nil when the file is absent.
-func (b *InputReader) readDotenv(f ConfigFile, overrides map[string]pathOverride, waived bool, view *osView) (*dotenvLayer, error) {
-	src, path, err := b.openFileSource(f, overrides, view)
+func (r *InputReader) readDotenv(f ConfigFile, overrides map[string]pathOverride, waived bool, view *osView) (*dotenvLayer, error) {
+	src, path, err := r.openFileSource(f, overrides, view)
 	if err != nil {
 		if waived && !isWiringError(err) {
 			return nil, nil //nolint:nilnil // a short-circuited run skips a file it can't read
@@ -401,8 +401,8 @@ func readEnvFile(view *osView, variable, path string) (string, error) {
 
 // chainFiles is [InputReader.chainConfigFiles] narrowed to the files read as environment
 // (asEnv) or to the configuration files.
-func (b *InputReader) chainFiles(chain []Command, asEnv bool) []ConfigFile {
-	all := b.chainConfigFiles(chain)
+func (r *InputReader) chainFiles(chain []Command, asEnv bool) []ConfigFile {
+	all := r.chainConfigFiles(chain)
 	out := all[:0:0]
 	for _, f := range all {
 		if (f.As == "env") == asEnv {

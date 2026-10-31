@@ -33,7 +33,7 @@ type ConfigFile struct {
 	// unscoped, in scope for every command; generated descriptors always set it.
 	Scope    string
 	Path     string       // fixed file path (may contain ~)
-	Format   string       // "json", "yaml", "toml", "jsonc" or "dotenv"; "" infers it from the file extension
+	Format   string       // a format name: "json", "yaml", "toml", "jsonc", "dotenv" or a [Codec]'s; "" infers it from the file extension
 	Discover *DiscoverDef // run-time location strategy, instead of a fixed Path
 	PathFrom *PathFromDef // runtime inputs that supply/override the path (spec config_source)
 	// Schema is the self-contained JSON Schema the input reader validates the loaded document
@@ -64,8 +64,8 @@ type ProfilesDef struct {
 }
 
 // PathFromDef names the runtime inputs that supply a [ConfigFile]'s path — the declarative
-// two-phase parse, where argv and env are read first and the file channel then opens whatever
-// they pointed at. Precedence: the flag set on argv, then the first variable of Env that is set,
+// two-phase parse, where argv and env are read first and the config channel then opens
+// whatever they pointed at. Precedence: the flag set on argv, then the first variable of Env that is set,
 // then the flag's default, then the entry's own path or discover. A path supplied this way must
 // exist. A path given on argv or in a variable has a leading ~ expanded (~user too, with
 // [PathExpansion]) and is otherwise used as written, so $VAR stays literal; the flag's default

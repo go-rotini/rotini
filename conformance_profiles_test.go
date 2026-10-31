@@ -106,7 +106,7 @@ func profileConformanceCases() []dataCase {
 				t.Fatalf("winner = %+v, %v", w, err)
 			}
 			h := rep.History("App.Config.Labels")
-			if len(h) < 2 || h[len(h)-2] != (InputSource{Layer: "files", Raw: "web", Origin: "config:app#labels.tier"}) {
+			if len(h) < 2 || h[len(h)-2] != (InputSource{Layer: "config", Raw: "web", Origin: "config:app#labels.tier"}) {
 				t.Errorf("history = %+v, want the shared tier the profile overrode below the winner", h)
 			}
 		}},

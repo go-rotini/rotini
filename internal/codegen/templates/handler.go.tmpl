@@ -186,7 +186,7 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 {{- else if and .PrintHelpWhenBare .NewShape}}
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	rtx.HaltWith(rotini.MissingCommand(rtx))
+	rtx.HaltWith(rotini.MissingCommandError(rtx))
 {{- else if .PrintHelpWhenBare}}
 	if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
 		rtx.HaltWith(err)

@@ -19,13 +19,13 @@ func TestGet_typed(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rtx.SetDependency(NewDependency[any]("buf"), any(buf))
 
-	if got, ok := rtx.GetDependency(NewDependency[*bytes.Buffer]("buf")); !ok || got != buf {
+	if got, ok := rtx.LookupDependency(NewDependency[*bytes.Buffer]("buf")); !ok || got != buf {
 		t.Fatalf("Get[*bytes.Buffer] = (%v, %v), want the bound buffer", got, ok)
 	}
-	if _, ok := rtx.GetDependency(NewDependency[*bytes.Buffer]("missing")); ok {
+	if _, ok := rtx.LookupDependency(NewDependency[*bytes.Buffer]("missing")); ok {
 		t.Error("Get of an unbound key should be ok=false")
 	}
-	if _, ok := rtx.GetDependency(NewDependency[*int]("buf")); ok {
+	if _, ok := rtx.LookupDependency(NewDependency[*int]("buf")); ok {
 		t.Error("Get of a wrong-typed binding should be ok=false")
 	}
 }
@@ -37,13 +37,13 @@ func TestSetDependencyIfAbsent_keepsExistingElseSetsDefault(t *testing.T) {
 	// A prior binding (e.g. a test's double) is kept — SetDependencyIfAbsent no-ops.
 	rtx.SetDependency(NewDependency[any]("buf"), any(injected))
 	rtx.SetDependencyIfAbsent(NewDependency[any]("buf"), any(def))
-	if rtx.MustGetDependency(NewDependency[*bytes.Buffer]("buf")) != injected {
+	if rtx.MustDependency(NewDependency[*bytes.Buffer]("buf")) != injected {
 		t.Error("SetDependencyIfAbsent must not overwrite an existing value")
 	}
 
 	// An absent key gets the default registered into the registry.
 	rtx.SetDependencyIfAbsent(NewDependency[any]("other"), any(def))
-	if rtx.MustGetDependency(NewDependency[*bytes.Buffer]("other")) != def {
+	if rtx.MustDependency(NewDependency[*bytes.Buffer]("other")) != def {
 		t.Error("SetDependencyIfAbsent should register the default when none is registered")
 	}
 }
@@ -52,12 +52,12 @@ func TestMustGet_returnsBoundService(t *testing.T) {
 	rtx := newContext()
 	buf := &bytes.Buffer{}
 	rtx.SetDependency(NewDependency[any]("buf"), any(buf))
-	if rtx.MustGetDependency(NewDependency[*bytes.Buffer]("buf")) != buf {
+	if rtx.MustDependency(NewDependency[*bytes.Buffer]("buf")) != buf {
 		t.Fatal("MustGet did not return the bound service")
 	}
 }
 
-func TestMustGetDependency_panicsDependencyError(t *testing.T) {
+func TestMustDependency_panicsDependencyError(t *testing.T) {
 	rtx := newContext() // nothing bound
 
 	defer func() {
@@ -75,7 +75,7 @@ func TestMustGetDependency_panicsDependencyError(t *testing.T) {
 		}
 	}()
 
-	_ = rtx.MustGetDependency(NewDependency[*bytes.Buffer]("missing")) // panics → recovered above
+	_ = rtx.MustDependency(NewDependency[*bytes.Buffer]("missing")) // panics → recovered above
 }
 
 func TestMustGet_panicsOnWrongType(t *testing.T) {
@@ -88,7 +88,7 @@ func TestMustGet_panicsOnWrongType(t *testing.T) {
 		}
 	}()
 
-	_ = rtx.MustGetDependency(NewDependency[*int]("buf")) // bound, but not an *int → panics
+	_ = rtx.MustDependency(NewDependency[*int]("buf")) // bound, but not an *int → panics
 }
 
 // TestContext_concurrentRegistry sets and reads dependencies from many goroutines; under
@@ -109,7 +109,7 @@ func TestContext_concurrentRegistry(t *testing.T) {
 			for range iters {
 				rtx.SetDependency(NewDependency[any](key), any(w))
 				_, _ = rtx.dependency(key)
-				_, _ = rtx.GetDependency(NewDependency[int](key))
+				_, _ = rtx.LookupDependency(NewDependency[int](key))
 			}
 		}(w)
 	}

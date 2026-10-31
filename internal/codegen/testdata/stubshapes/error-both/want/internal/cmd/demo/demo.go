@@ -7,7 +7,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*demoHandler)(nil)
+var _ rotini.HandlerE = (*demoHandler)(nil)
 
 type demoHandler struct {
 	rotini.NoPreRunE
@@ -63,5 +63,5 @@ func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	return rotini.MissingCommand(rtx)
+	return rotini.MissingCommandError(rtx)
 }

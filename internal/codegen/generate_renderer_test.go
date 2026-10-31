@@ -116,7 +116,7 @@ func TestStubBody_newShapeForms(t *testing.T) {
 	}
 	for _, want := range []string{
 		"fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version)",
-		"fmt.Fprintln(rtx.Stderr, rtx.Help())\n\trtx.HaltWith(rotini.MissingCommand(rtx))",
+		"fmt.Fprintln(rtx.Stderr, rtx.Help())\n\trtx.HaltWith(rotini.MissingCommandError(rtx))",
 	} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("stub missing %q:\n%s", want, out)
@@ -188,7 +188,7 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 				Cases: []templateFeatureCase{{PathsLiteral: `""`, Var: "HelpApp"}},
 			},
 			{
-				Resolver: "Completion", Noun: "completion", PerShell: true,
+				Resolver: "CompletionScript", Noun: "completion", PerShell: true,
 				Vars:  []templateFeatureVar{{Name: "CompletionBash", Embed: "completion/bash.txt"}},
 				Cases: []templateFeatureCase{{PathsLiteral: `"bash"`, Var: "CompletionBash"}},
 			},

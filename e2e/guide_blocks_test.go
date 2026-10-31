@@ -56,6 +56,8 @@ var guideBlocks = []pinnedBlock{
 	{"client.go", "r12_runtime_control.txtar", "client.go.txt"},
 	{"middleware.go", "r16_guide_middleware.txtar", "middleware.go.txt"},
 	{"main.go (middleware)", "r16_guide_middleware.txtar", "main.go.txt"},
+	{"syntax.go (own syntax)", "r16_recipe_own_syntax.txtar", "syntax.go.txt"},
+	{"main.go (own syntax)", "r16_recipe_own_syntax.txtar", "main.go.txt"},
 	{"conventions.go", "r12_conventions.txtar", "conventions.go.txt"},
 	{"report_debug.go", "r12_conventions.txtar", "report_debug.go.txt"},
 	{"main.go (build info)", "r12_recipe_version.txtar", "main.go.txt"},

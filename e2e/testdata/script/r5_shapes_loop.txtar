@@ -106,7 +106,7 @@ import (
 type loopBumpHandler struct{ base }
 
 func (*loopBumpHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintf(rtx.Stdout, "count=%d\n", rtx.MustGetDependency(CounterDep).Bump())
+	fmt.Fprintf(rtx.Stdout, "count=%d\n", rtx.MustDependency(CounterDep).Bump())
 }
 -- internal/cmd/loop/loop_explode.go --
 package loop

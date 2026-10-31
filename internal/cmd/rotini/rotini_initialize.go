@@ -12,7 +12,7 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.ErrorHandler = (*rotiniInitializeHandler)(nil)
+var _ rotini.HandlerE = (*rotiniInitializeHandler)(nil)
 
 type rotiniInitializeHandler struct {
 	rotini.NoCascadingPreRunE
@@ -39,7 +39,7 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) er
 	opt := codegen.InitOptions{Format: flags.Format, Template: flags.Template, Force: flags.Force}
 	if flags.DryRun {
 		rtx.SetDependencyIfAbsent(initializeDryRunDep, codegen.NewProcessor(version).InitializeDryRun)
-		planned, err := rtx.MustGetDependency(initializeDryRunDep)(args.Name, opt)
+		planned, err := rtx.MustDependency(initializeDryRunDep)(args.Name, opt)
 		if err != nil {
 			return err
 		}
@@ -51,7 +51,7 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) er
 	}
 
 	rtx.SetDependencyIfAbsent(initializeDep, codegen.NewProcessor(version).Initialize)
-	initialize := rtx.MustGetDependency(initializeDep)
+	initialize := rtx.MustDependency(initializeDep)
 
 	written, err := initialize(args.Name, opt)
 	if err != nil {

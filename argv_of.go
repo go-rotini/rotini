@@ -62,9 +62,9 @@ func ArgvPath(names ...string) ArgvOption {
 	return func(c *argvConfig) { c.path, c.hasPath = names, true }
 }
 
-// ArgvOf turns a typed inputs value back into the command line that supplies it: argv (without
-// the program name, as [Program.Run] takes it) and env, the KEY=value variables for its env
-// inputs, ready for [Program.WithEnviron]. It is the inverse of parsing, for tests and for
+// ArgvOf turns a typed inputs value back into the argv and environment that supply it: argv
+// (without the program name, as [Program.Run] takes it) and env, the KEY=value variables for
+// its env inputs, ready for [Program.WithEnviron]. It is the inverse of parsing, for tests and for
 // tools that drive a CLI:
 //
 //	in := cmd.TaskrAddInputs{}

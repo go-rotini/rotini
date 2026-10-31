@@ -51,7 +51,7 @@ func TestComplete_localAncestorPendingValue(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Local: true,
-			Enum: []string{"fast", "slow"}, Complete: Completion{Kind: "directory"},
+			Enum: []string{"fast", "slow"}, Complete: CompletionHint{Kind: "directory"},
 		}},
 		Commands: []CommandDef{{Name: "sub", Handler: "Sub"}},
 	}

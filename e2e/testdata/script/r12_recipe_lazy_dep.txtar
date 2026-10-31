@@ -72,14 +72,14 @@ type Store struct{ values map[string]string }
 
 var storeDep = rotini.NewDependency[*Store]("lazydemo.store")
 
-// WithStore provides the store: a run opens it the first time a command asks for it, and a
-// run that never asks never opens it.
-var WithStore = rotini.WithProvider(storeDep, openStore)
+// WithStore, a rotini.Option, provides the store: a run opens it the first time a command
+// asks for it, and a run that never asks never opens it.
+func WithStore(p *rotini.Program) { p.WithProvider(storeDep, openStore) }
 
-func openStore(ctx context.Context, rtx *rotini.Context) (*Store, error) {
+func openStore(ctx context.Context, rtx *rotini.Context) (*Store, func() error, error) {
 	data, err := os.ReadFile(filepath.Join(rtx.Dir(), "store.txt"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	s := &Store{values: map[string]string{}}
 	for line := range strings.Lines(string(data)) {
@@ -87,7 +87,7 @@ func openStore(ctx context.Context, rtx *rotini.Context) (*Store, error) {
 			s.values[k] = v
 		}
 	}
-	return s, nil
+	return s, nil, nil // the file is read and closed, so nothing is left to clean up
 }
 -- get.go.txt --
 package lazydemo
@@ -99,7 +99,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*lazydemoGetHandler)(nil)
+var _ rotini.HandlerE = (*lazydemoGetHandler)(nil)
 
 type lazydemoGetHandler struct {
 	rotini.NoCascadingPreRunE
@@ -142,7 +142,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*lazydemoHandler)(nil)
+var _ rotini.HandlerE = (*lazydemoHandler)(nil)
 
 type lazydemoHandler struct {
 	rotini.NoPreRunE
@@ -178,7 +178,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*lazydemoHelloHandler)(nil)
+var _ rotini.HandlerE = (*lazydemoHelloHandler)(nil)
 
 type lazydemoHelloHandler struct {
 	rotini.NoCascadingPreRunE

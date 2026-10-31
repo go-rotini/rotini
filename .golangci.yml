@@ -45,6 +45,10 @@ linters:
     - err113
     - goconst
   settings:
+    dupword:
+      # `return nil, nil, err` in a doc-comment sample is Go, not a repeated word.
+      ignore:
+        - "nil,"
     cyclop:
       max-complexity: 25
     gocognit:

@@ -617,8 +617,8 @@ func TestWalkers_argvInputsAndPluginHost(t *testing.T) {
 func TestComplete_pastTheBoundary(t *testing.T) {
 	def := boundaryDef()
 	def.Commands[2].Arguments[1].Enum = []string{"ls", "top"}
-	def.Commands[2].Arguments[1].Complete = Completion{Kind: "none"}
-	def.Commands[0].Arguments[0].Complete = Completion{Kind: "file"}
+	def.Commands[2].Arguments[1].Complete = CompletionHint{Kind: "none"}
+	def.Commands[0].Arguments[0].Complete = CompletionHint{Kind: "file"}
 
 	if got := complete(def, []string{"ssh", "host", ""}, nil, nil); !slices.Equal(got, []string{"ls", "top"}) {
 		t.Errorf("ssh host <TAB> = %q, want the argument's enum", got)

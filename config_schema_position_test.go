@@ -49,7 +49,8 @@ func TestConfigSchema_positionAndValue(t *testing.T) {
 			if err == nil || err.Error() != want {
 				t.Fatalf("err = %v\nwant %s", err, want)
 			}
-			if strings.Contains(tt.name, "secret") && strings.Contains(err.Error(), "42") {
+			// The temp dir's random name can hold "42"; look only at the message around it.
+			if strings.Contains(tt.name, "secret") && strings.Contains(strings.ReplaceAll(err.Error(), dir, ""), "42") {
 				t.Errorf("err = %v, shows a secret value", err)
 			}
 			wantKind(t, err, channelConfig, InputErrorKindSchemaViolation)

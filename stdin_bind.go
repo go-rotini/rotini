@@ -26,7 +26,7 @@ import (
 // streamed field is an iterator over the run's one shared stream, read as the handler ranges
 // over it. A read of piped stdin ends when the run is canceled, or when the context the hook
 // holds ([Context.Context]) ends, with an [*InputError] whose cause is the cancellation's.
-func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argValues func(name string) ([]string, error)) error {
+func (r *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argValues func(name string) ([]string, error)) error {
 	sf, raw, ok := stdinTarget(v, waived)
 	if !ok {
 		return nil
@@ -39,7 +39,7 @@ func (b *InputReader) fillStdin(rtx *Context, v reflect.Value, waived bool, argV
 		we.Command = path
 		return we
 	}
-	return fs.stdin.fill(b, rtx, sf, tag, argValues)
+	return fs.stdin.fill(r, rtx, sf, tag, argValues)
 }
 
 // stdinSubject names the running command's stdin in a wiring error.
@@ -49,7 +49,7 @@ func stdinSubject(rtx *Context) string {
 
 // bindStdin reads stdin into the leaf's Stdin field sf per its tag: everything fillStdin does
 // once it knows the field reads stdin.
-func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, argValues func(name string) ([]string, error)) error {
+func (r *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, argValues func(name string) ([]string, error)) error {
 	if skip, err := tag.fileGiven(argValues); skip || err != nil {
 		return err // the file argument is the input; stdin is not read
 	}
@@ -59,7 +59,7 @@ func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, ar
 	}
 
 	if tag.stream {
-		return b.bindStdinStream(rtx, sf, tag)
+		return r.bindStdinStream(rtx, sf, tag)
 	}
 
 	text, err := rtx.slurpStdin()
@@ -84,17 +84,17 @@ func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, ar
 		return bindRawStdin(sf, tag, text)
 	}
 	if tag.format == "jsonl" {
-		return bindJSONL(fs, sf, text, b.stdinSchemas, tag)
+		return bindJSONL(fs, sf, text, r.stdinSchemas, tag)
 	}
-	return b.bindStdinDocument(rtx, sf, tag.format, text)
+	return r.bindStdinDocument(rtx, sf, tag.format, text)
 }
 
 // bindStdinDocument decodes a stdin document into the Stdin field, checking it against the
 // command's stdin schema first.
-func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, text string) error {
+func (r *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, text string) error {
 	fs := rtx.features()
 	data := stripBOM([]byte(text))
-	js := b.stdinSchemas[sf.Type().Elem().Name()]
+	js := r.stdinSchemas[sf.Type().Elem().Name()]
 	c := fs.codec(format)
 	if c == nil {
 		return missingCodec(format, stdinSubject(rtx)+" is "+format)
@@ -142,7 +142,7 @@ func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, 
 // bindStdinStream sets a streamed Stdin field to its iterator. Nothing is read here: with
 // nothing that can be piped (a terminal, or no reader) the field stays nil, or a required
 // stdin is a usage error.
-func (b *InputReader) bindStdinStream(rtx *Context, sf reflect.Value, tag stdinTag) error {
+func (r *InputReader) bindStdinStream(rtx *Context, sf reflect.Value, tag stdinTag) error {
 	if sf.Kind() != reflect.Func {
 		return internalBind(channelStdin, "", "a streamed stdin needs an iterator payload type", nil)
 	}
@@ -166,7 +166,7 @@ func (b *InputReader) bindStdinStream(rtx *Context, sf reflect.Value, tag stdinT
 		if yieldType.NumIn() == 1 && yieldType.In(0).Kind() == reflect.Func && yieldType.In(0).NumIn() == 2 {
 			name = yieldType.In(0).In(0).Name()
 		}
-		fn, ok := rtx.streamJSONL(sf.Type(), tag, b.stdinSchemas[name])
+		fn, ok := rtx.streamJSONL(sf.Type(), tag, r.stdinSchemas[name])
 		if !ok {
 			return internalBind(channelStdin, "", "stdin format jsonl with stream needs an iter.Seq2[<record>, error] payload type", nil)
 		}

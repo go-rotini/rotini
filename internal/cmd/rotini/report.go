@@ -11,14 +11,14 @@ import (
 // Shared helpers for announcing resolved inputs and reporting pass results, so every command's
 // output has the same shape.
 
-// suggestor ranks a mistyped command, flag or value against what the rotini CLI accepts.
+// suggester ranks a mistyped command, flag or value against what the rotini CLI accepts.
 // The framework suggests nothing by default; this program opts in.
-var suggestor = rotini.NewSuggestor()
+var suggester = rotini.NewSuggester()
 
 // inputError is an input error naming the nearest accepted spelling when one is close:
 // `rotini: unknown command "genrate"; did you mean "generate"?`.
 func inputError(err error) error {
-	return withSuggestion(err, suggestor.For(err))
+	return withSuggestion(err, suggester.For(err))
 }
 
 // withSuggestion appends the first of hits to err's message, keeping err unwrappable so its

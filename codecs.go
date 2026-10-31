@@ -168,13 +168,18 @@ func Codec(name string, decode func(data []byte) (any, error), opts ...CodecOpti
 // CodecOption configures a format wired with [Codec].
 type CodecOption func(*codecEntry)
 
-// CodecExtensions lists the file extensions, with their dot (".ini"), that a configuration file
-// with no declared format is read with the codec for. A later codec claiming an extension wins
-// over an earlier one, and over a built-in format.
+// CodecExtensions lists the file extensions that a configuration file with no declared format
+// is read with the codec for. An extension may be given with or without its dot, in any case:
+// "ini", ".ini" and ".INI" all mean .ini. A later codec claiming an extension wins over an
+// earlier one, and over a built-in format.
 func CodecExtensions(exts ...string) CodecOption {
 	return func(c *codecEntry) {
 		for _, e := range exts {
-			if e = strings.ToLower(e); e != "" && !slices.Contains(c.exts, e) {
+			e = strings.TrimPrefix(strings.ToLower(e), ".")
+			if e == "" {
+				continue
+			}
+			if e = "." + e; !slices.Contains(c.exts, e) {
 				c.exts = append(c.exts, e)
 			}
 		}

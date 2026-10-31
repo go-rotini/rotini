@@ -3,7 +3,7 @@ package codegen
 import "testing"
 
 // The suggestion helpers give spec authors "did you mean" hints at validate time. They are
-// separate from the runtime's opt-in, end-user-facing Suggestor.
+// separate from the runtime's opt-in, end-user-facing Suggester.
 
 func TestLevenshtein(t *testing.T) {
 	cases := []struct {

@@ -835,7 +835,7 @@ func conformanceCases() []inputCase {
 				// history beneath it.
 				rtx.WithInputSettings(acmeMeta(filepath.Dir(mustGetwd(t))))
 				defaults, _ := rtx.DefaultInputs[acDeployInputs]()
-				files, _ := rtx.FileInputs[acDeployInputs]()
+				files, _ := rtx.ConfigInputs[acDeployInputs]()
 				env, _ := rtx.EnvInputs[acDeployInputs]()
 				argv, _ := rtx.ArgvInputs[acDeployInputs]()
 				_, rep := MergeInputsWithReport(defaults, files, env, argv)
@@ -847,7 +847,7 @@ func conformanceCases() []inputCase {
 				for _, p := range rep.History("Deploy.Flags.Env") {
 					layers = append(layers, p.Layer)
 				}
-				if want := []string{"defaults", "files", "env", "argv"}; !reflect.DeepEqual(layers, want) {
+				if want := []string{"default", "config", "env", "argv"}; !reflect.DeepEqual(layers, want) {
 					t.Errorf("history = %v, want %v", layers, want)
 				}
 			}},
@@ -1121,7 +1121,7 @@ func conformanceCases() []inputCase {
 			}},
 		{id: "FILE-03", args: []string{"deploy"},
 			check: func(t *testing.T, _ *Context, _ InputSettings) {
-				// "-" as an outputfile is stdout; an existing file is kept without Overwrite.
+				// "-" as an outputfile is stdout; an existing file is kept without OutputOverwrite.
 				fileOutput(t)
 			}},
 

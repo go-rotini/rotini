@@ -121,7 +121,7 @@ type todoPingHandler struct {
 }
 
 func (*todoPingHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, rtx.MustGetDependency(clientDep).Endpoint)
+	fmt.Fprintln(rtx.Stdout, rtx.MustDependency(clientDep).Endpoint)
 }
 -- internal/cmd/todo/todo_test.go --
 package todo

@@ -1361,7 +1361,7 @@ func lintConfigInputScope(spec *Spec) []error {
 		}
 		for i, in := range cmd.Config {
 			p := inputProblem(fmt.Sprintf("%s/config/%d", ptr, i), path, "config", in.Name,
-				"no `config_files` entry is in scope (on this command, an ancestor or a command below it), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless an input reader set with WithInputReader supplies it")
+				"no `config_files` entry is in scope (on this command, an ancestor or a command below it), so no configuration file is read for it; declare a `config_files` entry, or remove the input unless a source added to InputSettings.Sources supplies it")
 			p.sev = severityWarning
 			problems = append(problems, p)
 		}

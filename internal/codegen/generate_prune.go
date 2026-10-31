@@ -205,9 +205,9 @@ func buildIgnored(src []byte) bool {
 // identifies a file as rotini-written; deleting the line claims the file for the author.
 const stubMarker = "var _ rotini.Handler = ("
 
-// errorStubMarker is stubMarker for a stub seeded as an ErrorHandler
+// errorStubMarker is stubMarker for a stub seeded as a HandlerE
 // (templates/handler_error.go.tmpl).
-const errorStubMarker = "var _ rotini.ErrorHandler = ("
+const errorStubMarker = "var _ rotini.HandlerE = ("
 
 // legacyStubMarker is stubMarker as written before v1.2.0, when the interface was Handlers.
 // Recognizing it keeps those stubs prunable after an upgrade.

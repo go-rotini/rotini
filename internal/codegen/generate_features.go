@@ -80,7 +80,7 @@ var (
 	// completionFeatureDesc is keyed by shell, with no doc-data, template or verbatim page.
 	// Scripts come from completionScript.
 	completionFeatureDesc = docFeature{
-		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "Completion",
+		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "CompletionScript",
 		ext: ".txt", filePrefix: "completion_", perShell: true,
 	}
 )

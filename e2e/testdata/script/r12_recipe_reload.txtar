@@ -38,7 +38,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*reloaddemoServeHandler)(nil)
+var _ rotini.HandlerE = (*reloaddemoServeHandler)(nil)
 
 type reloaddemoServeHandler struct {
 	rotini.NoCascadingPreRunE

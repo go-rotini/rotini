@@ -359,7 +359,7 @@ func TestInjectedDir_argvPaths(t *testing.T) {
 	}
 	var in inputs
 	rtx := NewContextFor(def, []string{"--token", "@token.txt", "--manifest", "token.txt"}).WithDir(dir)
-	if err := rtx.Parser().Parse(rtx, &in); err != nil {
+	if err := NewParser().Parse(rtx, &in); err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	if in.App.Flags.Token != "s3cret" || in.App.Flags.Manifest != "token.txt" {
@@ -367,11 +367,11 @@ func TestInjectedDir_argvPaths(t *testing.T) {
 	}
 
 	rtx = NewContextFor(def, []string{"--token", "@missing.txt"}).WithDir(dir)
-	if err := rtx.Parser().Parse(rtx, &in); err == nil || !strings.Contains(err.Error(), `"missing.txt"`) {
+	if err := NewParser().Parse(rtx, &in); err == nil || !strings.Contains(err.Error(), `"missing.txt"`) {
 		t.Errorf("Parse(@missing.txt) = %v, want the path as typed", err)
 	}
 	rtx = NewContextFor(def, []string{"--manifest", "missing.txt"}).WithDir(dir)
-	if err := rtx.Parser().Parse(rtx, &in); err == nil {
+	if err := NewParser().Parse(rtx, &in); err == nil {
 		t.Error("Parse(--manifest missing.txt) succeeded")
 	}
 

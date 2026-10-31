@@ -925,7 +925,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*vcsHandler)(nil)
+var _ rotini.HandlerE = (*vcsHandler)(nil)
 
 type vcsHandler struct {
 	rotini.NoPreRunE
@@ -1000,7 +1000,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*vcsCommitHandler)(nil)
+var _ rotini.HandlerE = (*vcsCommitHandler)(nil)
 
 type vcsCommitHandler struct {
 	rotini.NoCascadingPreRunE
@@ -1060,7 +1060,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*vcsDiffHandler)(nil)
+var _ rotini.HandlerE = (*vcsDiffHandler)(nil)
 
 type vcsDiffHandler struct {
 	rotini.NoCascadingPreRunE
@@ -1094,7 +1094,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*vcsInitHandler)(nil)
+var _ rotini.HandlerE = (*vcsInitHandler)(nil)
 
 type vcsInitHandler struct {
 	rotini.NoCascadingPreRunE
@@ -1134,7 +1134,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*vcsLogHandler)(nil)
+var _ rotini.HandlerE = (*vcsLogHandler)(nil)
 
 type vcsLogHandler struct {
 	rotini.NoCascadingPreRunE
@@ -1192,7 +1192,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*vcsManHandler)(nil)
+var _ rotini.HandlerE = (*vcsManHandler)(nil)
 
 type vcsManHandler struct {
 	rotini.NoCascadingPreRunE
@@ -1229,7 +1229,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*vcsRunHandler)(nil)
+var _ rotini.HandlerE = (*vcsRunHandler)(nil)
 
 type vcsRunHandler struct {
 	rotini.NoCascadingPreRunE

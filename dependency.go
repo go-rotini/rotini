@@ -18,7 +18,7 @@ import (
 //	cmd.NewProgram().WithDependency(tasks.Store, store.New()).Execute()
 //
 //	// any handler
-//	s := rtx.MustGetDependency(tasks.Store)
+//	s := rtx.MustDependency(tasks.Store)
 //
 // Registration happens at run time, so a missing registration is not a compile error; it is
 // reported when a handler requests the dependency.
@@ -28,7 +28,7 @@ import (
 //     every run
 //   - one run: [Context.SetDependency] or [Context.SetDependencyIfAbsent] from a hook, visible
 //     to the hooks that run after it, or a provider registered with [Program.WithProvider],
-//     which builds the run's value on first request and closes it after teardown
+//     which builds the run's value on first request and cleans it up after teardown
 //
 // A handle whose name is known only at run time can be built as
 // rotini.NewDependency[any](name).
@@ -88,7 +88,7 @@ func (p *Program) WithDependency[T any](dep Dependency[T], value T) *Program {
 }
 
 // ErrDependencyNotFound is the sentinel for a dependency that is not registered or provided,
-// or is registered as a different type. [Context.MustGetDependency] panics with a
+// or is registered as a different type. [Context.MustDependency] panics with a
 // [*DependencyError] wrapping it, which the runtime recovers and routes to the reporter.
 var ErrDependencyNotFound = errors.New("rotini: dependency not found")
 
@@ -132,24 +132,29 @@ func (e *DependencyError) Unwrap() []error {
 	return []error{ErrDependencyNotFound, ErrInternal}
 }
 
-// GetDependency returns the value of dep in this run and whether one is available as type T,
+// LookupDependency returns the value of dep in this run and whether one is available as type T,
 // building it with dep's provider ([Program.WithProvider]) on first request. A provider's
 // error reads as unavailable and is not recorded; use [Context.Dependency] to get it.
 //
-//	client, ok := rtx.GetDependency(tasks.Client)
-func (rtx *Context) GetDependency[T any](dep Dependency[T]) (T, bool) {
+//	client, ok := rtx.LookupDependency(tasks.Client)
+func (rtx *Context) LookupDependency[T any](dep Dependency[T]) (T, bool) {
 	v, _, err := lookupDependency(rtx, dep)
 	return v, err == nil
 }
 
-// MustGetDependency returns the value of dep in this run, building it with dep's provider
+// Deprecated: use [Context.LookupDependency].
+func (rtx *Context) GetDependency[T any](dep Dependency[T]) (T, bool) {
+	return rtx.LookupDependency(dep)
+}
+
+// MustDependency returns the value of dep in this run, building it with dep's provider
 // ([Program.WithProvider]) on first request, or panics with a [*DependencyError] when it is
 // missing, not a T, or its provider failed; for a failed provider the DependencyError wraps
 // the provider's error, which errors.As reaches. The runtime recovers the panic during
 // dispatch and routes it to the reporter.
 //
-//	s := rtx.MustGetDependency(tasks.Store)
-func (rtx *Context) MustGetDependency[T any](dep Dependency[T]) T {
+//	s := rtx.MustDependency(tasks.Store)
+func (rtx *Context) MustDependency[T any](dep Dependency[T]) T {
 	v, failed, err := lookupDependency(rtx, dep)
 	switch {
 	case failed:
@@ -159,6 +164,9 @@ func (rtx *Context) MustGetDependency[T any](dep Dependency[T]) T {
 	}
 	return v
 }
+
+// Deprecated: use [Context.MustDependency].
+func (rtx *Context) MustGetDependency[T any](dep Dependency[T]) T { return rtx.MustDependency(dep) }
 
 // SetDependency registers value under dep for this run, replacing any existing value, so hooks
 // that run later see it. Use it for per-run values such as a client built from the inputs;
@@ -172,7 +180,7 @@ func (rtx *Context) SetDependency[T any](dep Dependency[T], value T) {
 // that registered a double under the same name keeps the double.
 //
 //	rtx.SetDependencyIfAbsent(Clock, time.Now)
-//	now := rtx.MustGetDependency(Clock)
+//	now := rtx.MustDependency(Clock)
 func (rtx *Context) SetDependencyIfAbsent[T any](dep Dependency[T], value T) {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()

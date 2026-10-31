@@ -31,7 +31,7 @@ type Outcome struct {
 	// It is 0 when none was set. It is information only: the reporter sets the final code with
 	// [Context.Exit].
 	ExitCode int
-	// Signal is the signal rotini's trap caught that stopped the run, or nil. See [SignalCaused]
+	// Signal is the signal rotini's trap caught that stopped the run, or nil. See [CausedBySignal]
 	// for the errors it caused.
 	Signal os.Signal
 
@@ -46,9 +46,9 @@ func (o Outcome) Empty() bool {
 	return len(o.Infos)+len(o.Successes)+len(o.Warnings)+len(o.Errors)+len(o.Panics)+len(o.channels) == 0
 }
 
-// Failed reports whether the run recorded an error, a panic or a record in a [ClassError]
-// channel, the condition for the default reporter's exit floor (which leaves out an error the
-// run's own signal caused).
+// Failed reports whether the run recorded an error, a panic or a record in a
+// [ChannelClassError] channel, the condition for the default reporter's exit floor (which
+// leaves out an error the run's own signal caused).
 func (o Outcome) Failed() bool {
 	return len(o.Errors) > 0 || len(o.Panics) > 0 || failedChannel(o.channels)
 }
@@ -61,6 +61,12 @@ func (o Outcome) Failed() bool {
 //
 // The error [Program.Run] returns is built before the reporter is called, so modifying the
 // Outcome does not change it. Records made inside the reporter are dropped.
+//
+// A run that records nothing has an empty Outcome, and the reporter is not called. A program
+// that reports something on every run, such as a closing {"ok":true} line or the run's
+// timing, does it in the root command's CascadingPostRun (the last hook of every run that
+// reaches the hooks) or in a [Middleware] around that hook: it writes there directly, or
+// records a value its reporter handles, which makes the Outcome non-empty.
 //
 // A panic inside a reporter is not recovered. A reporter that can fail handles its own
 // failure, for example by writing to rtx.Stderr and setting a code with [Context.Exit].
@@ -111,9 +117,9 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	if _, exitNow := rtx.stopState(); !exitNow && signalCanceled(ctx) {
 		rtx.HaltWithCode(canceledExitCode(ctx))
 	}
-	// Every hook has finished: close what the run's providers built, so a Close error reaches
-	// the reporter.
-	rtx.closeProvided()
+	// Every hook has finished: clean up what the run's providers built, so a cleanup error
+	// reaches the reporter.
+	rtx.cleanUpProvided()
 
 	rtx.endStdin()
 	rtx.abortOutputs()
@@ -166,8 +172,11 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 //
 // It applies an exit floor: a recorded error or panic exits 1 unless a non-zero code was
 // already set ([Outcome.ExitCode]). It leaves out an error the run's own signal caused
-// ([SignalCaused]), since a signal is a graceful stop and the exit code, 128+n, already says why
+// ([CausedBySignal]), since a signal is a graceful stop and the exit code, 128+n, already says why
 // the run ended.
+//
+// Like any reporter, it is not called for an empty Outcome, so a clean run that recorded
+// nothing prints nothing; see [Reporter].
 //
 // A custom reporter calls it to keep the default report and add to it; see
 // [Program.WithReporter].
@@ -182,13 +191,13 @@ func writeText(ctx context.Context, rtx *Context, w io.Writer, out Outcome) {
 	for _, s := range out.Infos {
 		fmt.Fprintln(w, s)
 	}
-	for _, v := range out.channelValues(ClassInfo) {
+	for _, v := range out.channelValues(ChannelClassInfo) {
 		fmt.Fprintln(w, v)
 	}
 	for _, warn := range out.Warnings {
 		fmt.Fprintf(w, "Warning: %s\n", warn.Error())
 	}
-	for _, v := range out.channelValues(ClassWarning) {
+	for _, v := range out.channelValues(ChannelClassWarning) {
 		fmt.Fprintf(w, "Warning: %v\n", v)
 	}
 	for _, e := range errs {
@@ -200,20 +209,20 @@ func writeText(ctx context.Context, rtx *Context, w io.Writer, out Outcome) {
 	for _, s := range out.Successes {
 		fmt.Fprintln(w, s)
 	}
-	for _, v := range out.channelValues(ClassSuccess) {
+	for _, v := range out.channelValues(ChannelClassSuccess) {
 		fmt.Fprintln(w, v)
 	}
 }
 
 // settleReported returns the recorded errors rotini's reporters print, leaving out those the
-// run's own signal caused, followed by the records of every [ClassError] channel, and applies
-// the exit floor to that list: a reported error or a panic exits 1 unless a code was already
-// set. A run whose only errors came from its signal keeps the signal's code. It returns the
+// run's own signal caused, followed by the records of every [ChannelClassError] channel, and
+// applies the exit floor to that list: a reported error or a panic exits 1 unless a code was
+// already set. A run whose only errors came from its signal keeps the signal's code. It returns the
 // resulting exit code.
 func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, int) {
 	errs := out.Errors
 	if signalCanceled(ctx) {
-		errs = slices.DeleteFunc(slices.Clone(errs), func(err error) bool { return SignalCaused(ctx, err) })
+		errs = slices.DeleteFunc(slices.Clone(errs), func(err error) bool { return CausedBySignal(ctx, err) })
 	}
 	kept := len(errs)
 	if custom := out.channelErrors(); len(custom) > 0 {
@@ -229,9 +238,8 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 
 // StructuredReporter returns a [Reporter] for programs whose output scripts read. When
 // structured reports true for the run, it writes each thing the run recorded to the run's
-// stderr ([Context.Stderr]) as one
-// JSON object per line, and leaves stdout alone, so a partial result there is never
-// interleaved with an error:
+// stderr ([Context.Stderr]) as one JSON object per line, and leaves stdout alone, so a partial
+// result there is never interleaved with an error:
 //
 //	{"schema_version":1,"error":{"category":"usage","command":"taskr add","exit_code":1,"kind":"missing-required","message":"taskr add: missing required input: <title>"}}
 //	{"schema_version":1,"error":{"candidates":["add","list","done"],"category":"usage","command":"taskr","exit_code":1,"kind":"unknown-command","message":"taskr: unknown command \"lst\"","token":"lst"}}
@@ -241,11 +249,11 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 // [Channel]'s records are written as lines of their class's kind, with the record's text (its
 // Error, String or %v) as the message, so a reader sees no kinds beyond these four. A field
 // is present only when rotini knows it: kind, flag and token come from a [*ParseError], kind
-// from a [*PluginError] too, and token from any error [SuggestionFacts] reads. With such a
-// token, candidates lists the words it was checked against, as SuggestionFacts returns them,
-// unranked: a tool can offer the nearest, while rotini itself suggests nothing. Each line's
-// shape is described by schema-error.json in the rotini repository, and the contract document
-// includes it.
+// from an [*InputError] or a [*PluginError] too, and token from any error [SuggestionFacts]
+// reads. With such a token, candidates lists the words it was checked against, as
+// SuggestionFacts returns them, unranked: a tool can offer the nearest, while rotini itself
+// suggests nothing. Each line's shape is described by schema-error.json in the rotini
+// repository, and the contract document includes it.
 //
 // When structured reports false, or is nil, it reports with [DefaultReporter]. Either way the
 // exit code follows DefaultReporter's rule, and an error the run's own signal caused is left
@@ -318,13 +326,13 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 	for _, s := range out.Infos {
 		lines = append(lines, message("info", s))
 	}
-	for _, v := range out.channelValues(ClassInfo) {
+	for _, v := range out.channelValues(ChannelClassInfo) {
 		lines = append(lines, message("info", fmt.Sprint(v)))
 	}
 	for _, w := range out.Warnings {
 		lines = append(lines, message("warning", w.Error()))
 	}
-	for _, v := range out.channelValues(ClassWarning) {
+	for _, v := range out.channelValues(ChannelClassWarning) {
 		lines = append(lines, message("warning", fmt.Sprint(v)))
 	}
 	for _, e := range errs {
@@ -336,7 +344,7 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 	for _, s := range out.Successes {
 		lines = append(lines, message("success", s))
 	}
-	for _, v := range out.channelValues(ClassSuccess) {
+	for _, v := range out.channelValues(ChannelClassSuccess) {
 		lines = append(lines, message("success", fmt.Sprint(v)))
 	}
 	for _, line := range lines {

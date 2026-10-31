@@ -25,7 +25,7 @@ func validateJSON(rtx *rotini.Context, specPath string, flags RotiniValidateFlag
 		return rotini.UsageError(err)
 	}
 	rtx.SetDependencyIfAbsent(validateDep, codegen.NewProcessor(rtx.Version()).Validate)
-	validate := rtx.MustGetDependency(validateDep)
+	validate := rtx.MustDependency(validateDep)
 
 	var warnings []error
 	failed := validate(spec, conf, false, flags.Fail, release, func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })

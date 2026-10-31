@@ -113,7 +113,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*helloworldHelloHandler)(nil)
+var _ rotini.HandlerE = (*helloworldHelloHandler)(nil)
 
 type helloworldHelloHandler struct {
 	rotini.NoCascadingPreRunE

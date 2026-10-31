@@ -110,13 +110,13 @@ func TestProgram_multicallCompletes(t *testing.T) {
 		t.Errorf("completion output = %q, want cat then a :directive line", out.String())
 	}
 
-	// WithCompletion's format wins over the plugin hosts' default.
+	// WithCompletionFormat's format wins over the plugin hosts' default.
 	out.Reset()
-	p.WithCompletion(func(w io.Writer, _ CompletionResult) error {
+	p.WithCompletionFormat(func(w io.Writer, _ CompletionResult) error {
 		_, err := w.Write([]byte("custom\n"))
 		return err
 	})
 	if _, err := p.Run([]string{"c"}); err != nil || out.String() != "custom\n" {
-		t.Errorf("with WithCompletion: %q, %v", out.String(), err)
+		t.Errorf("with WithCompletionFormat: %q, %v", out.String(), err)
 	}
 }

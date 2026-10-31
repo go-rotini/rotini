@@ -26,7 +26,7 @@ func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOpti
 		dep, run = importDryRunDep, processor.ImportDryRun
 	}
 	rtx.SetDependencyIfAbsent(dep, run)
-	imported, err := rtx.MustGetDependency(dep)(ctx, opts)
+	imported, err := rtx.MustDependency(dep)(ctx, opts)
 
 	// The loss report comes first, whether or not the spec could be written.
 	for _, note := range imported.Notes {

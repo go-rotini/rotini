@@ -40,11 +40,11 @@ const (
 )
 
 // Program is a rotini CLI ready to run: the compiled command tree ([Definition]), the
-// handlers that implement it, and the settings around them. The generated entrypoint builds one
-// with [NewWiredProgram] and calls [Program.Execute]. Every With method returns the receiver, so
-// calls chain.
+// handlers that implement it, and the settings around them. The generated NewProgram builds one
+// with [NewWiredProgram], and the generated main.go calls [Program.Execute] on it. Every With
+// method returns the receiver, so calls chain.
 //
-// The surface groups into eight jobs:
+// The surface groups into nine jobs:
 //
 //   - run — [Program.Execute] exits, [Program.Run] returns the code, [Program.RunContext]
 //     scopes one invocation, [Program.Complete] answers a completion request in a
@@ -52,7 +52,7 @@ const (
 //   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr], and
 //     [Program.WithBufferedOutput] to buffer stdout
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
-//     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion],
+//     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletionFormat],
 //     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions]; the environment
 //     and working directory a run reads, [Program.WithEnviron] and [Program.WithDir]; the clock
 //     relative times read, [Program.WithClock]; [Program.WithTerminationTimeout] bounds the
@@ -63,10 +63,11 @@ const (
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
 //   - the program's dependencies — [Program.WithDependency], or [Program.With] with the
-//     [WithDependency] option to register several at once; [Program.WithProvider] (or the
-//     [WithProvider] option) for one built per run on first use
-//   - rotini's own settings — [Program.WithVersion], [Program.WithParser], [Program.WithInputReader],
-//     and the ones the generated code sets, [Program.WithInputSettings], [Program.WithHelp] and
+//     [WithDependency] option to register several at once; [Program.WithProvider]
+//     for one built per run on first use
+//   - rotini's own settings — [Program.WithVersion], [Program.WithParser] (the [ArgvParser]
+//     that reads the command line), [Program.WithInputReader] (deprecated), and the ones the
+//     generated code sets, [Program.WithInputSettings], [Program.WithHelp] and
 //     [Program.WithCompletionScript];
 //     [Program.WithFeatures] adds runtime features to a program built with [NewWiredProgram]
 //   - phase replacement — [Program.WithResolver], [Program.WithLifecycle]
@@ -111,7 +112,7 @@ type Program struct {
 	panicRecover    bool             // is a panic reported or re-raised? See WithPanicRecover.
 	signalMode      signalTrapMode   // see WithSignals / WithoutSignalHandling
 	signalSet       []os.Signal      // signals trapped when on; empty → trapSignals
-	completion      CompletionFormat // the format __complete answers in; nil → rotini's own. See WithCompletion.
+	completion      CompletionFormat // the format __complete answers in; nil → rotini's own. See WithCompletionFormat.
 
 	terminationTimeout time.Duration // WithTerminationTimeout: 0 → wait for teardown or a second signal
 	argv0              string        // WithArgv0: the name the program was invoked as; read only for multicall
@@ -131,7 +132,7 @@ type Program struct {
 	version  string                           // WithVersion
 	help     HelpFunc                         // WithHelp: nil → no pages
 	scripts  CompletionScriptFunc             // WithCompletionScript: nil → no scripts
-	parser   *Parser                          // WithParser: nil → a default, built per run
+	parser   ArgvParser                       // WithParser: nil → rotini's own
 	view     *osView                          // WithEnviron, WithDir: nil → the process environment and directory
 	clock    func() time.Time                 // WithClock: nil → time.Now
 
@@ -143,7 +144,7 @@ type Program struct {
 
 // NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
 // calls the method of handlers named by each [CommandDef.Handler] (and [Definition.Handler]) in def to obtain that
-// command's [Handler], or an [ErrorHandler], which it wraps with [FromErrorHandler]. A nil
+// command's [Handler], or an [HandlerE], which it wraps with [FromHandlerE]. A nil
 // handlers value is accepted here; a run that reaches dispatch then fails with a [*WiringError].
 //
 // NewProgram finds the methods by reflection, which keeps every exported method of the
@@ -376,8 +377,8 @@ func (p *Program) With(opts ...Option) *Program {
 // WithInputSettings supplies the generated input descriptor: the configuration sources, the
 // env prefix and the stdin schemas [Context.Inputs] reads from. The generated NewProgram calls
 // it; a hand-built program calls it to enable those channels.
-func (p *Program) WithInputSettings(meta InputSettings) *Program {
-	p.meta = bindSettings(meta)
+func (p *Program) WithInputSettings(settings InputSettings) *Program {
+	p.meta = bindSettings(settings)
 	return p
 }
 
@@ -391,6 +392,12 @@ func (p *Program) WithInputSettings(meta InputSettings) *Program {
 //	})
 //
 // A nil fn restores the default, [NewInputReader].
+//
+// Deprecated: use WithInputSettings with a modified copy of the generated InputSettings:
+//
+//	settings := cmd.InputSettings
+//	settings.Sources = append(slices.Clone(settings.Sources), mySource)
+//	cmd.NewProgram().WithInputSettings(settings)
 func (p *Program) WithInputReader(fn func(InputSettings) *InputReader) *Program {
 	p.readerFn = fn
 	return p
@@ -425,11 +432,11 @@ func (p *Program) WithHelp(help HelpFunc) *Program {
 }
 
 // CompletionScriptFunc returns the completion script for shell, or an error when there is none
-// for it. Codegen generates a Completion function of this type.
+// for it. Codegen generates a CompletionScript function of this type.
 type CompletionScriptFunc func(shell string) (string, error)
 
 // WithCompletionScript sets where [Context.CompletionScript] finds a shell's completion script.
-// The generated NewProgram passes its own Completion function.
+// The generated NewProgram passes its own CompletionScript function.
 //
 // It is a program-level setting so that a completion command composed from another spec prints
 // the script of the program it runs in, which completes that program's name and commands.
@@ -440,11 +447,15 @@ func (p *Program) WithCompletionScript(fn CompletionScriptFunc) *Program {
 	return p
 }
 
-// WithParser sets the [Parser] that [Context.Parser] returns. [Parser] has no options, so every
-// Parser behaves like [NewParser]'s and this setting changes nothing today; [Context.Inputs] and
-// the [InputReader] always use the default parser. A nil parser restores the default.
-func (p *Program) WithParser(parser *Parser) *Program {
-	p.parser = parser
+// WithParser sets the [ArgvParser] that reads the command line for [Context.Inputs],
+// [Context.InputsWithReport], [Context.ArgvInputs] and the other readers, so a program can take
+// its own command-line syntax and keep rotini's environment, configuration, stdin, defaults,
+// precedence, validation and provenance. [Context.Parser] returns it. A nil parser restores
+// rotini's own [*Parser].
+//
+//	cmd.NewProgram().WithParser(keyValueParser{}) // app deploy replicas=3 region=eu
+func (p *Program) WithParser(parser ArgvParser) *Program {
+	p.parser = settledParser(parser)
 	return p
 }
 
@@ -497,10 +508,11 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 // [Program.Run] and passes the resulting code to the exit action ([os.Exit] by default; see
 // [Program.WithExit]).
 //
-// The returned error joins every [Context.RecordError] value and every captured fault with
-// errors.Join, so errors.Is and errors.As reach each one; for a plugin that exits non-zero it
-// is the plugin's *exec.ExitError, as [Program.Run] returns it. It is returned only when the exit
-// action returns; under os.Exit the process ends first. The reporter has already reported
+// The returned error joins every [Context.RecordError] value, every record of a
+// [ChannelClassError] channel and every captured fault with errors.Join, so errors.Is and
+// errors.As reach each one; for a plugin that exits non-zero it is the plugin's
+// *exec.ExitError, as [Program.Run] returns it. It is returned only when the exit action
+// returns; under os.Exit the process ends first. The reporter has already reported
 // the outcome by then; the error lets an embedding host act on the failure.
 //
 // # Signals

@@ -87,7 +87,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*cfgctlConfigSetHandler)(nil)
+var _ rotini.HandlerE = (*cfgctlConfigSetHandler)(nil)
 
 type cfgctlConfigSetHandler struct {
 	rotini.NoCascadingPreRunE
@@ -133,7 +133,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*cfgctlConfigUnsetHandler)(nil)
+var _ rotini.HandlerE = (*cfgctlConfigUnsetHandler)(nil)
 
 type cfgctlConfigUnsetHandler struct {
 	rotini.NoCascadingPreRunE
@@ -163,7 +163,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*cfgctlConfigPathHandler)(nil)
+var _ rotini.HandlerE = (*cfgctlConfigPathHandler)(nil)
 
 type cfgctlConfigPathHandler struct {
 	rotini.NoCascadingPreRunE
@@ -242,7 +242,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*cfgctlHandler)(nil)
+var _ rotini.HandlerE = (*cfgctlHandler)(nil)
 
 type cfgctlHandler struct {
 	rotini.NoCascadingPreRunE

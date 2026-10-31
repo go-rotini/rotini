@@ -722,18 +722,18 @@ func completionHintDef() Definition {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "config", Identifiers: []string{"-c", "--config"}, Type: "string",
-				Complete: Completion{Kind: "file", Extensions: []string{"yaml", "yml"}}},
+				Complete: CompletionHint{Kind: "file", Extensions: []string{"yaml", "yml"}}},
 			{Name: "out", Identifiers: []string{"--out"}, Type: "string",
-				Complete: Completion{Kind: "directory"}},
+				Complete: CompletionHint{Kind: "directory"}},
 			{Name: "id", Identifiers: []string{"--id"}, Type: "string", From: []string{"file"},
-				Complete: Completion{Kind: "none"}},
+				Complete: CompletionHint{Kind: "none"}},
 			{Name: "plain", Identifiers: []string{"--plain"}, Type: "string"},
 			{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
 			{Name: "mode", Identifiers: []string{"-m", "--mode"}, Type: "string", Enum: []string{"fast", "slow"}},
 		},
 		Commands: []CommandDef{{
 			Name: "open", Handler: "AppOpen",
-			Arguments: []ArgDef{{Name: "path", Type: "string", From: []string{"file"}, Complete: Completion{Kind: "file"}}},
+			Arguments: []ArgDef{{Name: "path", Type: "string", From: []string{"file"}, Complete: CompletionHint{Kind: "file"}}},
 		}},
 	}
 }
@@ -856,7 +856,7 @@ func TestPluginCompletion_flagsAndUncompletedKinds(t *testing.T) {
 		return out.String()
 	}
 	for _, kind := range []string{"command", "executable", "user", "group", "host"} {
-		if got := write(CompletionResult{Hint: Completion{Kind: kind}}); got != ":4\n" {
+		if got := write(CompletionResult{Hint: CompletionHint{Kind: kind}}); got != ":4\n" {
 			t.Errorf("kind %s = %q, want :4", kind, got)
 		}
 	}
@@ -864,7 +864,7 @@ func TestPluginCompletion_flagsAndUncompletedKinds(t *testing.T) {
 	if got := write(both); got != "a\n:34\n" {
 		t.Errorf("NoSpace and KeepOrder = %q, want a then :34", got)
 	}
-	if got := write(CompletionResult{Hint: Completion{Kind: "directory"}, NoSpace: true}); got != ":18\n" {
+	if got := write(CompletionResult{Hint: CompletionHint{Kind: "directory"}, NoSpace: true}); got != ":18\n" {
 		t.Errorf("directory with NoSpace = %q, want :18", got)
 	}
 }
@@ -877,11 +877,11 @@ func TestPluginCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "config", Identifiers: []string{"--config"}, Type: "string", Enum: []string{"base.yaml"},
-				Complete: Completion{Kind: "file", Extensions: []string{"yaml"}}},
+				Complete: CompletionHint{Kind: "file", Extensions: []string{"yaml"}}},
 			{Name: "out", Identifiers: []string{"--out"}, Type: "string", Enum: []string{"dist"},
-				Complete: Completion{Kind: "directory"}},
+				Complete: CompletionHint{Kind: "directory"}},
 			{Name: "id", Identifiers: []string{"--id"}, Type: "string", Enum: []string{"a1"},
-				Complete: Completion{Kind: "none"}},
+				Complete: CompletionHint{Kind: "none"}},
 		},
 	}
 	for words, want := range map[string]string{
@@ -955,10 +955,10 @@ func TestComplete_formatError(t *testing.T) {
 	}
 }
 
-// TestWithCompletion pins that the setter switches the format __complete writes and nil
+// TestWithCompletionFormat pins that the setter switches the format __complete writes and nil
 // restores rotini's own. With no hint, rotini's format ends on a candidate, which a plugin host
 // would read as the directive.
-func TestWithCompletion(t *testing.T) {
+func TestWithCompletionFormat(t *testing.T) {
 	run := func(p *Program, argv ...string) string {
 		t.Helper()
 		out := &bytes.Buffer{}
@@ -973,14 +973,14 @@ func TestWithCompletion(t *testing.T) {
 	if got := run(NewProgram(def, nil), "__complete", "op"); got != "open\n" {
 		t.Errorf("default __complete = %q, want rotini's format (no directive without a hint)", got)
 	}
-	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion), "__complete", "op"); got != "open\n:0\n" {
-		t.Errorf("WithCompletion(PluginCompletion) __complete = %q, want the plugin hosts' format", got)
+	if got := run(NewProgram(def, nil).WithCompletionFormat(PluginCompletion), "__complete", "op"); got != "open\n:0\n" {
+		t.Errorf("WithCompletionFormat(PluginCompletion) __complete = %q, want the plugin hosts' format", got)
 	}
-	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion), "__complete", "--id", ""); got != ":4\n" {
-		t.Errorf("WithCompletion(PluginCompletion) hint = %q, want NoFileComp", got)
+	if got := run(NewProgram(def, nil).WithCompletionFormat(PluginCompletion), "__complete", "--id", ""); got != ":4\n" {
+		t.Errorf("WithCompletionFormat(PluginCompletion) hint = %q, want NoFileComp", got)
 	}
-	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion).WithCompletion(nil), "__complete", "op"); got != "open\n" {
-		t.Errorf("WithCompletion(nil) = %q, want rotini's own restored", got)
+	if got := run(NewProgram(def, nil).WithCompletionFormat(PluginCompletion).WithCompletionFormat(nil), "__complete", "op"); got != "open\n" {
+		t.Errorf("WithCompletionFormat(nil) = %q, want rotini's own restored", got)
 	}
 }
 

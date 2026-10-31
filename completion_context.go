@@ -40,18 +40,18 @@ func (rtx *Context) SetCompletionOptions(opts CompletionOptions) {
 // shell falls back to for this request, in place of the input's declared `complete:` hint.
 // Kind and Extensions mean what they mean there: "file", optionally narrowed to Extensions,
 // "directory", "none", and the shell's own "executable", "user", "group" and "host". The zero
-// Completion leaves the fallback to the shell's own default. Message is not used; a completer
+// CompletionHint leaves the fallback to the shell's own default. Message is not used; a completer
 // adds messages with [Context.AddCompletionMessage].
 //
 //	if remotes := listRemotes(partial); len(remotes) > 0 {
 //		return remotes
 //	}
-//	rtx.SetCompletionFallback(rotini.Completion{Kind: "file"})
+//	rtx.SetCompletionFallback(rotini.CompletionHint{Kind: "file"})
 //	return []string{}
 //
 // It combines with any candidates exactly as the declared hint does. The last call wins. It does
 // nothing outside a completion request.
-func (rtx *Context) SetCompletionFallback(fallback Completion) {
+func (rtx *Context) SetCompletionFallback(fallback CompletionHint) {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
 	if rtx.completionOptions != nil {
@@ -74,7 +74,8 @@ func (rtx *Context) SetCompletionFallback(fallback Completion) {
 // It is lenient: nothing is validated or required, an unknown or half-typed flag is skipped,
 // and a value that doesn't convert leaves its field unset. It never reads stdin or a file: a
 // `-` or `@file` value is kept as typed, and configuration files are not read. The Presence
-// names every field a layer supplied, defaults included.
+// names every field a layer supplied, defaults included. It reads the command line with
+// rotini's own grammar, as completion does, even when the program sets an [ArgvParser].
 //
 // Outside a completion request it reads the whole of [Context.Argv]. The error is a wiring
 // mistake: no resolved command, or a T that doesn't describe the running command.

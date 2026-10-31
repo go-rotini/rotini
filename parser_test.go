@@ -63,9 +63,9 @@ func TestParse_viaContextParser(t *testing.T) {
 	supplied := NewParser()
 	rtx.WithParser(supplied)
 
-	parser := rtx.Parser()
-	if parser != supplied {
-		t.Fatalf("Parser() = %p, want the supplied %p", parser, supplied)
+	parser, ok := rtx.Parser().(*Parser)
+	if !ok || parser != supplied {
+		t.Fatalf("Parser() = %v, want the supplied %p", rtx.Parser(), supplied)
 	}
 	var in runInputs
 	if err := parser.Parse(rtx, &in); err != nil {
@@ -2079,7 +2079,7 @@ func TestParse_negatedFormIsSuggestable(t *testing.T) {
 	if !slices.Contains(pe.Candidates, "--no-color") {
 		t.Errorf("candidates %v do not include the negated form", pe.Candidates)
 	}
-	if got := NewSuggestor().Suggest(pe.Token, pe.Candidates); !slices.Contains(got, "--no-color") {
+	if got := NewSuggester().Suggest(pe.Token, pe.Candidates); !slices.Contains(got, "--no-color") {
 		t.Errorf("suggestions %v do not offer --no-color for %q", got, pe.Token)
 	}
 }

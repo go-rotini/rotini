@@ -64,7 +64,7 @@ import (
 	{{.RuntimeImport}}
 )
 
-var _ rotini.ErrorHandler = (*{{.HandlerType}})(nil)
+var _ rotini.HandlerE = (*{{.HandlerType}})(nil)
 
 // {{.HandlerType}} runs `{{.Invocation}}`.
 type {{.HandlerType}} struct {

@@ -76,10 +76,11 @@
 //
 // # The runtime
 //
-// The generated entrypoint builds a [Program] with [NewWiredProgram], passing the runtime
-// features its spec uses, and calls [Program.Execute], which resolves the invoked command from
-// argv, runs its handler's hooks, and exits. Each invocation carries a [Context]: the argv, the
-// resolved chain, the program's streams and its dependencies. A handler is an [ErrorHandler],
+// The generated main.go calls the generated package's NewProgram, which builds a [Program]
+// with [NewWiredProgram] (through NewProgramWith), passing the runtime features its spec uses,
+// and then calls [Program.Execute], which resolves the invoked command from argv, runs its
+// handler's hooks, and exits. Each invocation carries a [Context]: the argv, the
+// resolved chain, the program's streams and its dependencies. A handler is an [HandlerE],
 // whose hooks fail by returning an error, or a [Handler], whose hooks return nothing and fail
 // with [Context.HaltWith]; `rotini init` seeds the first (conf `hook_returns: error`), and one
 // program may mix both. A handler stops with a returned error, [Context.HaltWith],
@@ -90,12 +91,13 @@
 // confirmation before a destructive run, is a [Middleware] the program installs with
 // [Program.WithMiddleware]. It wraps every hook invocation, sees the error a hook returns, and
 // may return its own or skip the hook. [Context.Command] carries the command's declared
-// effects, exit statuses and stability, and [RunEffects] adds what the given flags declare.
+// effects, exit statuses and stability, and [EffectsOf] adds what the given flags declare.
 //
 // The runtime resolves only which command was invoked. Flags and arguments are parsed and
 // validated when a handler calls [Context.Inputs] (or the per-channel [Context.ArgvInputs],
-// [Context.EnvInputs], [Context.FileInputs] and [Context.StdinInputs]), which the generated
-// stubs do first. A handler that never calls it reads the raw [Context.Argv] and gets no
+// [Context.EnvInputs], [Context.ConfigInputs] and [Context.StdinInputs]), which the generated
+// stubs do first, reading the command line with rotini's grammar or the program's own
+// [ArgvParser]. A handler that never calls it reads the raw [Context.Argv] and gets no
 // validation; [Context.CheckInputs] checks inputs it collects another way. A flag marked
 // short_circuit in the spec ([FlagDef.ShortCircuit]), such as --help, waives every declared
 // requirement when it is set on the command line, so the handler can act on it. A flag of a
@@ -190,17 +192,17 @@
 //   - [Context.RecordSuccess] — what succeeded.
 //   - [Context.RecordWarning] — non-fatal: a deprecation, a fallback. Never changes the code.
 //   - [Context.RecordError] — the end user's failures: a bad input, a domain error. An error
-//     an [ErrorHandler] hook returns is recorded here.
+//     an [HandlerE] hook returns is recorded here.
 //   - Recovered panics and rotini-detected faults, captured by the runtime; there is no record
 //     call for them.
 //   - [Context.Record] — a [Channel] of the author's own, holding typed values the reporter
 //     reads back with [Outcome.Records]. Its [ChannelClass] says how rotini's reporters print
-//     it, and a [ClassError] channel counts as a failure, as recorded errors do.
+//     it, and a [ChannelClassError] channel counts as a failure, as recorded errors do.
 //
 // An author channel is declared once and used from both ends; rotini's own records always go
 // to the built-in channels:
 //
-//	var Skipped = rotini.NewChannel[SkippedFile]("skipped", rotini.ClassInfo)
+//	var Skipped = rotini.NewChannel[SkippedFile]("skipped", rotini.ChannelClassInfo)
 //
 //	rtx.Record(Skipped, SkippedFile{Path: path, Reason: "binary"}) // in a hook
 //	for _, s := range out.Records(Skipped) { … }                   // in the reporter
@@ -210,7 +212,7 @@
 //
 // A handler stops in one of these ways:
 //
-//   - An [ErrorHandler] hook returns an error: it is recorded, and from CascadingPreRun or
+//   - An [HandlerE] hook returns an error: it is recorded, and from CascadingPreRun or
 //     PreRun forward progress stops. It is the usual way for a hook to fail.
 //   - [Context.HaltWith] records an error and stops forward progress, setting no code: the
 //     same failure from a [Handler] hook, or from inside a helper.
@@ -226,7 +228,7 @@
 // successes, each followed by the records of the author channels of that class, all to stderr
 // so stdout carries only what handlers write, then applies the exit floor: a recorded error or
 // fault exits 1 unless a handler already set a non-zero code. It leaves out an error the run's
-// own signal trap caused ([SignalCaused]), since that run exits 128+n anyway. A custom reporter
+// own signal trap caused ([CausedBySignal]), since that run exits 128+n anyway. A custom reporter
 // receives every record and applies no floor: the run exits with the code a handler set
 // ([Outcome.ExitCode]), or with the one the reporter sets with [Context.Exit], which replaces
 // it. [Outcome.Signal] is the trapped signal that stopped the run. A custom reporter that only
@@ -294,24 +296,29 @@
 //		Execute()
 //
 //	// any handler
-//	s := rtx.MustGetDependency(tasks.Store)
+//	s := rtx.MustDependency(tasks.Store)
 //
-// [Context.GetDependency] reports a miss instead of routing it to the reporter, and
+// [Context.LookupDependency] reports a miss instead of routing it to the reporter, and
 // [Context.SetDependency] sets one for the rest of this run only.
 //
 // A dependency that is costly to open, or built from the command line, is provided instead:
 // [Program.WithProvider] registers a function that builds it on the first request in a run,
-// once for that run, and closes it after teardown when it is an [io.Closer]. A command that
-// never asks, or a --help that halts first, never builds it. [Context.Dependency] returns the
-// provider's error as is, so a [UsageError] stays a usage error, and a value registered with
-// WithDependency or SetDependency, such as a test's double, wins over the provider:
+// once for that run, and calls the cleanup the function returns after teardown (nil for none).
+// A command that never asks, or a --help that halts first, never builds it.
+// [Context.Dependency] returns the provider's error as is, so a [UsageError] stays a usage
+// error, and a value registered with WithDependency or SetDependency, such as a test's double,
+// wins over the provider:
 //
-//	func openStore(ctx context.Context, rtx *rotini.Context) (*store.Store, error) {
+//	func openStore(ctx context.Context, rtx *rotini.Context) (*store.Store, func() error, error) {
 //		in, err := rtx.Inputs[TasksInputs]()
 //		if err != nil {
-//			return nil, err
+//			return nil, nil, err
 //		}
-//		return store.Open(ctx, in.Tasks.Flags.Database)
+//		s, err := store.Open(ctx, in.Tasks.Flags.Database)
+//		if err != nil {
+//			return nil, nil, err
+//		}
+//		return s, s.Close, nil
 //	}
 //
 //	cmd.NewProgram().WithProvider(tasks.Store, openStore).Execute()
@@ -327,7 +334,7 @@
 //
 // Everything else is a function or type a handler calls when it needs it, with nothing to
 // register. Rotini's own settings are typed options, not dependencies, so a dependency can
-// never shadow one: [Program.WithInputSettings], [Program.WithInputReader], [Program.WithParser],
+// never shadow one: [Program.WithInputSettings], [Program.WithParser],
 // [Program.WithVersion] and [Program.WithHelp] set them; [Context.Parser], [Context.Version] and
 // [Context.Help] read them.
 //
@@ -340,11 +347,13 @@
 //     prints where each value came from ([InputSource.Origin]). Both use the
 //     [InputSettings] the generated NewProgram supplies via [Program.WithInputSettings].
 //
-//   - [Parser] parses and validates the argv channel alone (GNU/POSIX grammar, typed
-//     coercion, enum and constraint checks), failing with a [*ParseError]. [InputReader] is the
-//     engine behind [Context.Inputs], for callers who hold the settings explicitly. Neither needs
-//     to be supplied; [Program.WithParser] replaces only the parser [Context.Parser] returns,
-//     which has no options.
+//   - [Parser] is rotini's argv parser (GNU/POSIX grammar, typed coercion, enum and constraint
+//     checks), failing with a [*ParseError]; [Parser.Parse] binds the command line alone.
+//     [Program.WithParser] replaces it with an [ArgvParser] of the program's own for every
+//     inputs method, so a CLI can take its own command-line syntax while the environment,
+//     configuration, stdin, defaults, precedence, validation and provenance stay rotini's.
+//     [InputReader] is the engine behind [Context.Inputs], for callers who hold the settings
+//     explicitly.
 //
 //   - [Deprecations] reports each deprecated command, alias, flag identifier, argument and
 //     enum value this invocation used.
@@ -363,7 +372,7 @@
 //     stdout and checks the final flush.
 //
 //   - The per-channel methods ([Context.ArgvInputs], [Context.EnvInputs],
-//     [Context.FileInputs], [Context.StdinInputs], [Context.DefaultInputs], merged by
+//     [Context.ConfigInputs], [Context.StdinInputs], [Context.DefaultInputs], merged by
 //     [MergeInputs] or [MergeInputsWithReport]) read channels one at a time, for programs
 //     with custom precedence.
 //
@@ -377,13 +386,13 @@
 //     inputs type in a test.
 //
 //   - [SuggestionFacts] reads the rejected token and its candidates from any error that carries
-//     them, and [Suggestor] ranks them into "did you mean" suggestions; [Suggestor.For] does
+//     them, and [Suggester] ranks them into "did you mean" suggestions; [Suggester.For] does
 //     both in one call.
 //
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve and run phases.
 //     [FlagValueCompleter] and [ArgValueCompleter] supply dynamic completion, and
 //     [Program.Complete] answers it in a host's [CompletionFormat]: [PluginCompletion] for a
-//     plugin host such as kubectl completing a rotini plugin. [Program.WithCompletion] makes
+//     plugin host such as kubectl completing a rotini plugin. [Program.WithCompletionFormat] makes
 //     __complete answer in that format, for hosts that call it (Docker, Flux). When the conf
 //     turns completion messages on, a completer adds its own with
 //     [Context.AddCompletionMessage], and [Program.WithCompletionMessages] decides when they

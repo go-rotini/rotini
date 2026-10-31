@@ -46,7 +46,7 @@ func TestConfigMap_mergesPerEntryAcrossFiles(t *testing.T) {
 		t.Errorf("labels origin = %q", w.Origin)
 	}
 	h := rep.History("App.Config.Labels")
-	if len(h) < 2 || h[len(h)-2] != (InputSource{Layer: "files", Raw: "web", Origin: "config:system#labels.tier"}) {
+	if len(h) < 2 || h[len(h)-2] != (InputSource{Layer: "config", Raw: "web", Origin: "config:system#labels.tier"}) {
 		t.Errorf("history = %+v, want the system tier the user file overrode", h)
 	}
 }

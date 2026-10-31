@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// provClient is a provided value that logs its Close.
+// provClient is a provided value whose Close, used as its cleanup, logs its name.
 type provClient struct {
 	name     string
 	closeLog *[]string
@@ -36,18 +36,18 @@ func TestProvider_lazyOncePerRun(t *testing.T) {
 			log = append(log, "pre:"+strconv.Itoa(int(calls.Load())))
 		},
 		"c1.Run": func(_ context.Context, rtx *Context) {
-			a := rtx.MustGetDependency(dep)
+			a := rtx.MustDependency(dep)
 			b, err := rtx.Dependency(dep)
-			c, ok := rtx.GetDependency(dep)
+			c, ok := rtx.LookupDependency(dep)
 			if err != nil || !ok || a != b || b != c {
 				t.Errorf("the three accessors disagree: %p %p %p, %v, %v", a, b, c, err, ok)
 			}
 			seen = append(seen, a)
 		},
 	})
-	p.WithProvider(dep, func(context.Context, *Context) (*strings.Builder, error) {
+	p.WithProvider(dep, func(context.Context, *Context) (*strings.Builder, func() error, error) {
 		calls.Add(1)
-		return &strings.Builder{}, nil
+		return &strings.Builder{}, nil, nil
 	})
 	for range 2 {
 		if code, err := p.Run(argv); code != 0 || err != nil {
@@ -70,7 +70,7 @@ func TestProvider_concurrentRequestsShareOneCall(t *testing.T) {
 		var wg sync.WaitGroup
 		got := make([]*int, 32)
 		for i := range got {
-			wg.Go(func() { got[i] = rtx.MustGetDependency(dep) })
+			wg.Go(func() { got[i] = rtx.MustDependency(dep) })
 		}
 		wg.Wait()
 		for _, v := range got {
@@ -88,9 +88,9 @@ func TestProvider_concurrentRequestsShareOneCall(t *testing.T) {
 		}
 		return h, true
 	}).WithStdout(io.Discard).WithStderr(io.Discard)
-	p.WithProvider(dep, func(context.Context, *Context) (*int, error) {
+	p.WithProvider(dep, func(context.Context, *Context) (*int, func() error, error) {
 		calls.Add(1)
-		return new(int), nil
+		return new(int), nil, nil
 	})
 	var wg sync.WaitGroup
 	for range 4 {
@@ -110,10 +110,13 @@ func TestProvider_concurrentRequestsShareOneCall(t *testing.T) {
 func TestProvider_setValueWins(t *testing.T) {
 	dep := NewDependency[string]("prov.s")
 	called := false
-	provide := func(context.Context, *Context) (string, error) { called = true; return "provided", nil }
+	provide := func(context.Context, *Context) (string, func() error, error) {
+		called = true
+		return "provided", nil, nil
+	}
 
 	var got string
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.MustGetDependency(dep) }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.MustDependency(dep) }}
 	p, _, _ := newTestProgram(h, nil)
 	p.WithDependency(dep, "double").WithProvider(dep, provide)
 	p.Run([]string{"run", "x"})
@@ -133,7 +136,7 @@ func TestProvider_setValueWins(t *testing.T) {
 
 	// A nil provider removes the registration.
 	p, argv, _, _ = comboTree(1, map[string]comboHook{
-		"c0.Run": func(_ context.Context, rtx *Context) { _, ok := rtx.GetDependency(dep); called = ok },
+		"c0.Run": func(_ context.Context, rtx *Context) { _, ok := rtx.LookupDependency(dep); called = ok },
 	})
 	p.WithProvider(dep, provide).WithProvider(dep, nil)
 	p.Run(argv)
@@ -142,31 +145,38 @@ func TestProvider_setValueWins(t *testing.T) {
 	}
 }
 
-// Provided closers are closed after every hook, before the reporter, in reverse order of
-// construction; set values and values the run never built are not closed.
-func TestProvider_closedAfterTeardownInReverse(t *testing.T) {
+// Cleanups run after every hook, before the reporter, in reverse order of construction; set
+// values, values the run never built, and values provided with a nil cleanup are left alone,
+// even when they have a Close method.
+func TestProvider_cleanedUpAfterTeardownInReverse(t *testing.T) {
 	var log []string
 	a, b, c := NewDependency[*provClient]("a"), NewDependency[*provClient]("b"), NewDependency[*provClient]("unused")
-	set := NewDependency[*provClient]("set")
-	mk := func(name string) func(context.Context, *Context) (*provClient, error) {
-		return func(context.Context, *Context) (*provClient, error) {
-			return &provClient{name: name, closeLog: &log}, nil
+	set, shared := NewDependency[*provClient]("set"), NewDependency[*provClient]("shared")
+	mk := func(name string) func(context.Context, *Context) (*provClient, func() error, error) {
+		return func(context.Context, *Context) (*provClient, func() error, error) {
+			pc := &provClient{name: name, closeLog: &log}
+			return pc, pc.Close, nil
 		}
 	}
 	p, argv, _, _ := comboTree(2, map[string]comboHook{
 		"c1.Run": func(_ context.Context, rtx *Context) {
-			rtx.MustGetDependency(a)
-			rtx.MustGetDependency(b)
-			rtx.MustGetDependency(set)
+			rtx.MustDependency(a)
+			rtx.MustDependency(b)
+			rtx.MustDependency(set)
+			rtx.MustDependency(shared)
 			rtx.RecordSuccess("done") // so the reporter runs
 		},
 		"c0.CascadingPostRun": func(_ context.Context, rtx *Context) {
-			rtx.MustGetDependency(a) // still open in the last teardown hook
+			rtx.MustDependency(a) // still open in the last teardown hook
 			log = append(log, "teardown")
 		},
 	})
 	p.WithProvider(a, mk("a")).WithProvider(b, mk("b")).WithProvider(c, mk("unused"))
 	p.WithDependency(set, &provClient{name: "set", closeLog: &log})
+	sharedClient := &provClient{name: "shared", closeLog: &log}
+	p.WithProvider(shared, func(context.Context, *Context) (*provClient, func() error, error) {
+		return sharedClient, nil, nil
+	})
 	p.WithReporter(func(context.Context, *Context, Outcome) { log = append(log, "reporter") })
 	if code, err := p.Run(argv); code != 0 || err != nil {
 		t.Fatalf("Run = %d, %v", code, err)
@@ -176,87 +186,143 @@ func TestProvider_closedAfterTeardownInReverse(t *testing.T) {
 	}
 }
 
-// A provider that asks for another provided dependency is built after it, so it closes first.
-func TestProvider_nestedClosesOuterFirst(t *testing.T) {
-	var log []string
-	inner, outer := NewDependency[*provClient]("inner"), NewDependency[*provClient]("outer")
+// sharedDB is a value opened once, outside any run, that breaks once closed.
+type sharedDB struct{ closed atomic.Bool }
+
+func (db *sharedDB) Close() error { db.closed.Store(true); return nil }
+
+func (db *sharedDB) Query() error {
+	if db.closed.Load() {
+		return errors.New("the database is closed")
+	}
+	return nil
+}
+
+// A provider that hands out a shared value with a nil cleanup leaves it open, so a second run
+// of the same program can still use it.
+func TestProvider_sharedValueSurvivesRuns(t *testing.T) {
+	db := &sharedDB{}
+	dep := NewDependency[*sharedDB]("prov.db")
+	var queryErrs []error
 	p, argv, _, _ := comboTree(1, map[string]comboHook{
-		"c0.Run": func(_ context.Context, rtx *Context) { rtx.MustGetDependency(outer) },
+		"c0.Run": func(_ context.Context, rtx *Context) {
+			queryErrs = append(queryErrs, rtx.MustDependency(dep).Query())
+		},
 	})
-	p.WithProvider(inner, func(context.Context, *Context) (*provClient, error) {
-		return &provClient{name: "inner", closeLog: &log}, nil
-	})
-	p.WithProvider(outer, func(_ context.Context, rtx *Context) (*provClient, error) {
-		if _, err := rtx.Dependency(inner); err != nil {
-			return nil, err
+	p.WithProvider(dep, func(context.Context, *Context) (*sharedDB, func() error, error) { return db, nil, nil })
+	for range 2 {
+		if code, err := p.Run(argv); code != 0 || err != nil {
+			t.Fatalf("Run = %d, %v", code, err)
 		}
-		return &provClient{name: "outer", closeLog: &log}, nil
-	})
-	p.Run(argv)
-	if want := []string{"outer", "inner"}; !slices.Equal(log, want) {
-		t.Errorf("close order = %q, want %q", log, want)
+	}
+	if len(queryErrs) != 2 || queryErrs[0] != nil || queryErrs[1] != nil || db.closed.Load() {
+		t.Errorf("queries = %v, closed %v; want the shared value open and usable in both runs", queryErrs, db.closed.Load())
 	}
 }
 
-// A Close error is recorded as an error, reaching the reporter and the exit floor, and keeps
-// its category.
-func TestProvider_closeErrorRecorded(t *testing.T) {
+// A provider that fails has its value and cleanup discarded: the cleanup is never called.
+func TestProvider_failedProviderCleanupDiscarded(t *testing.T) {
+	errDial := errors.New("dial failed")
+	dep := NewDependency[*provClient]("prov.fail")
+	cleaned := false
+	p, argv, _, _ := comboTree(1, map[string]comboHook{
+		"c0.Run": func(_ context.Context, rtx *Context) { _, _ = rtx.Dependency(dep) },
+	})
+	p.WithProvider(dep, func(context.Context, *Context) (*provClient, func() error, error) {
+		return &provClient{}, func() error { cleaned = true; return nil }, errDial
+	})
+	if code, err := p.Run(argv); code != 0 || err != nil || cleaned {
+		t.Errorf("Run = %d, %v, cleanup called %v; want a clean run and no cleanup", code, err, cleaned)
+	}
+}
+
+// A provider that asks for another provided dependency is built after it, so it is cleaned up
+// first.
+func TestProvider_nestedCleansUpOuterFirst(t *testing.T) {
+	var log []string
+	inner, outer := NewDependency[*provClient]("inner"), NewDependency[*provClient]("outer")
+	p, argv, _, _ := comboTree(1, map[string]comboHook{
+		"c0.Run": func(_ context.Context, rtx *Context) { rtx.MustDependency(outer) },
+	})
+	p.WithProvider(inner, func(context.Context, *Context) (*provClient, func() error, error) {
+		pc := &provClient{name: "inner", closeLog: &log}
+		return pc, pc.Close, nil
+	})
+	p.WithProvider(outer, func(_ context.Context, rtx *Context) (*provClient, func() error, error) {
+		if _, err := rtx.Dependency(inner); err != nil {
+			return nil, nil, err
+		}
+		pc := &provClient{name: "outer", closeLog: &log}
+		return pc, pc.Close, nil
+	})
+	p.Run(argv)
+	if want := []string{"outer", "inner"}; !slices.Equal(log, want) {
+		t.Errorf("cleanup order = %q, want %q", log, want)
+	}
+}
+
+// A cleanup error is recorded as an error, reaching the reporter and the exit floor, and
+// keeps its category.
+func TestProvider_cleanupErrorRecorded(t *testing.T) {
 	var log []string
 	errClose := errors.New("flush failed")
 	dep := NewDependency[*provClient]("db")
 	p, argv, _, errs := comboTree(1, map[string]comboHook{
-		"c0.Run": func(_ context.Context, rtx *Context) { rtx.MustGetDependency(dep) },
+		"c0.Run": func(_ context.Context, rtx *Context) { rtx.MustDependency(dep) },
 	})
-	p.WithProvider(dep, func(context.Context, *Context) (*provClient, error) {
-		return &provClient{name: "db", closeLog: &log, closeErr: UsageError(errClose)}, nil
+	p.WithProvider(dep, func(context.Context, *Context) (*provClient, func() error, error) {
+		pc := &provClient{name: "db", closeLog: &log, closeErr: UsageError(errClose)}
+		return pc, pc.Close, nil
 	})
 	code, err := p.Run(argv)
 	if code != 1 || !errors.Is(err, errClose) || CategoryOf(err) != CategoryUsage {
-		t.Errorf("Run = %d, %v; want 1 and the usage-category close error", code, err)
+		t.Errorf("Run = %d, %v; want 1 and the usage-category cleanup error", code, err)
 	}
-	if got := errs.String(); !strings.Contains(got, `closing the dependency "db": flush failed`) {
+	if got := errs.String(); !strings.Contains(got, `cleaning up the dependency "db": flush failed`) {
 		t.Errorf("stderr = %q", got)
 	}
 }
 
-// A Close that panics is a fault; the other values still close.
-func TestProvider_closePanicIsAFault(t *testing.T) {
+// A cleanup that panics is a fault; the other cleanups still run.
+func TestProvider_cleanupPanicIsAFault(t *testing.T) {
 	var log []string
-	ok, bad := NewDependency[*provClient]("ok"), NewDependency[panicCloser]("bad")
+	ok, bad := NewDependency[*provClient]("ok"), NewDependency[int]("bad")
 	p, argv, _, _ := comboTree(1, map[string]comboHook{
 		"c0.Run": func(_ context.Context, rtx *Context) {
-			rtx.MustGetDependency(ok)
-			rtx.MustGetDependency(bad)
+			rtx.MustDependency(ok)
+			rtx.MustDependency(bad)
 		},
 	})
-	p.WithProvider(ok, func(context.Context, *Context) (*provClient, error) {
-		return &provClient{name: "ok", closeLog: &log}, nil
+	p.WithProvider(ok, func(context.Context, *Context) (*provClient, func() error, error) {
+		pc := &provClient{name: "ok", closeLog: &log}
+		return pc, pc.Close, nil
 	})
-	p.WithProvider(bad, func(context.Context, *Context) (panicCloser, error) { return panicCloser{}, nil })
+	p.WithProvider(bad, func(context.Context, *Context) (int, func() error, error) {
+		return 1, func() error { panic("cleanup boom") }, nil
+	})
 	code, err := p.Run(argv)
 	var pe *PanicError
-	if code != 1 || !errors.As(err, &pe) || !slices.Equal(log, []string{"ok"}) {
-		t.Errorf("Run = %d, %v, closed %q; want a fault and ok closed", code, err, log)
+	if code != 1 || !errors.As(err, &pe) || pe.Value != "cleanup boom" || !slices.Equal(log, []string{"ok"}) {
+		t.Errorf("Run = %d, %v, cleaned up %q; want a fault and ok cleaned up", code, err, log)
 	}
 }
 
-type panicCloser struct{}
-
-func (panicCloser) Close() error { panic("close boom") }
-
 // A provider's error is returned as is, keeps its category, is cached for the run, and is
-// not recorded unless the handler returns it; MustGetDependency wraps it in a
+// not recorded unless the handler returns it; MustDependency wraps it in a
 // *DependencyError that errors.As and CategoryOf see through.
 func TestProvider_errors(t *testing.T) {
 	errBad := errors.New("the server URL is malformed")
 	dep := NewDependency[*int]("client")
 	var calls int
-	provide := func(context.Context, *Context) (*int, error) { calls++; return nil, UsageError(errBad) }
+	provide := func(context.Context, *Context) (*int, func() error, error) {
+		calls++
+		return nil, nil, UsageError(errBad)
+	}
 
 	p, argv, _, _ := comboTree(1, map[string]comboHook{
 		"c0.Run": func(_ context.Context, rtx *Context) {
-			if v, ok := rtx.GetDependency(dep); ok || v != nil {
-				t.Errorf("GetDependency = %v, %v; want unavailable", v, ok)
+			if v, ok := rtx.LookupDependency(dep); ok || v != nil {
+				t.Errorf("LookupDependency = %v, %v; want unavailable", v, ok)
 			}
 			_, err := rtx.Dependency(dep)
 			if !errors.Is(err, errBad) || CategoryOf(err) != CategoryUsage {
@@ -270,7 +336,7 @@ func TestProvider_errors(t *testing.T) {
 	}
 
 	p, argv, _, _ = comboTree(1, map[string]comboHook{
-		"c0.Run": func(_ context.Context, rtx *Context) { rtx.MustGetDependency(dep) },
+		"c0.Run": func(_ context.Context, rtx *Context) { rtx.MustDependency(dep) },
 	})
 	p.WithProvider(dep, provide)
 	code, err := p.Run(argv)
@@ -296,7 +362,7 @@ func TestProvider_errors(t *testing.T) {
 			}
 		},
 	})
-	p.WithProvider(dep, func(context.Context, *Context) (*int, error) { return nil, plain })
+	p.WithProvider(dep, func(context.Context, *Context) (*int, func() error, error) { return nil, nil, plain })
 	if code, err := p.Run(argv); code != 1 || !errors.Is(err, plain) || CategoryOf(err) != CategoryNone {
 		t.Errorf("Run = %d, %v (%v); want the plain error, uncategorized", code, err, CategoryOf(err))
 	}
@@ -322,7 +388,7 @@ func TestProvider_dependencyMissingAndMistyped(t *testing.T) {
 			}
 		},
 	})
-	p.WithProvider(NewDependency[string]("p"), func(context.Context, *Context) (string, error) { return "x", nil })
+	p.WithProvider(NewDependency[string]("p"), func(context.Context, *Context) (string, func() error, error) { return "x", nil, nil })
 	p.Run(argv)
 }
 
@@ -333,9 +399,12 @@ func TestProvider_notBuiltWhenNeverAsked(t *testing.T) {
 	called := false
 	p, argv, _, _ := comboTree(2, map[string]comboHook{
 		"c0.CascadingPreRun": func(_ context.Context, rtx *Context) { rtx.HaltWithCode(0) },
-		"c1.Run":             func(_ context.Context, rtx *Context) { rtx.MustGetDependency(dep) },
+		"c1.Run":             func(_ context.Context, rtx *Context) { rtx.MustDependency(dep) },
 	})
-	p.WithProvider(dep, func(context.Context, *Context) (*provClient, error) { called = true; return &provClient{}, nil })
+	p.WithProvider(dep, func(context.Context, *Context) (*provClient, func() error, error) {
+		called = true
+		return &provClient{}, nil, nil
+	})
 	if code, err := p.Run(argv); code != 0 || err != nil || called {
 		t.Errorf("Run = %d, %v, provider called %v; want a clean halt and no build", code, err, called)
 	}
@@ -348,18 +417,18 @@ func TestProvider_contextInputsAndPanic(t *testing.T) {
 	dep := NewDependency[string]("ctx")
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.SetContext(context.WithValue(rtx.Context(), key{}, "hook"))
-		if v := rtx.MustGetDependency(dep); v != "hook/alice" {
+		if v := rtx.MustDependency(dep); v != "hook/alice" {
 			t.Errorf("provided %q, want the hook's context value and the argument", v)
 		}
 	}}
 	p, _, _ := newTestProgram(h, nil)
-	p.WithProvider(dep, func(ctx context.Context, rtx *Context) (string, error) {
+	p.WithProvider(dep, func(ctx context.Context, rtx *Context) (string, func() error, error) {
 		in, err := rtx.Inputs[provRunInputs]()
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		v, _ := ctx.Value(key{}).(string)
-		return v + "/" + in.AppRun.Arguments.Name, nil
+		return v + "/" + in.AppRun.Arguments.Name, nil, nil
 	})
 	if code, err := p.Run([]string{"run", "alice"}); code != 0 || err != nil {
 		t.Fatalf("Run = %d, %v", code, err)
@@ -368,12 +437,12 @@ func TestProvider_contextInputsAndPanic(t *testing.T) {
 	boom := NewDependency[int]("boom")
 	var second error
 	p, argv, _, _ := comboTree(2, map[string]comboHook{
-		"c1.Run": func(_ context.Context, rtx *Context) { rtx.MustGetDependency(boom) },
+		"c1.Run": func(_ context.Context, rtx *Context) { rtx.MustDependency(boom) },
 		"c0.CascadingPostRun": func(_ context.Context, rtx *Context) {
 			_, second = rtx.Dependency(boom)
 		},
 	})
-	p.WithProvider(boom, func(context.Context, *Context) (int, error) { panic("provider boom") })
+	p.WithProvider(boom, func(context.Context, *Context) (int, func() error, error) { panic("provider boom") })
 	code, err := p.Run(argv)
 	var pe *PanicError
 	if code != 1 || !errors.As(err, &pe) || pe.Value != "provider boom" {
@@ -399,19 +468,5 @@ type provRunInputs struct {
 			Name string   `rotini:"name"`
 			Rest []string `rotini:"rest"`
 		}
-	}
-}
-
-// The Option form registers the same provider.
-func TestProvider_option(t *testing.T) {
-	dep := NewDependency[string]("opt")
-	var got string
-	p, argv, _, _ := comboTree(1, map[string]comboHook{
-		"c0.Run": func(_ context.Context, rtx *Context) { got = rtx.MustGetDependency(dep) },
-	})
-	p.With(WithProvider(dep, func(context.Context, *Context) (string, error) { return "opt", nil }))
-	p.Run(argv)
-	if got != "opt" {
-		t.Errorf("got %q", got)
 	}
 }

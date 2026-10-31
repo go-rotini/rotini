@@ -14,8 +14,8 @@ import (
 var hookNames = []string{"CascadingPreRun", "PreRun", "Run", "PostRun", "CascadingPostRun"}
 
 // hookShapes reports, for each type in dir that declares a lifecycle hook, whether its hooks
-// return a result: an ErrorHandler, which the generated wiring wraps with
-// rotini.FromErrorHandler. A type that declares no hook is absent. Unreadable files, files that
+// return a result: a HandlerE, which the generated wiring wraps with
+// rotini.FromHandlerE. A type that declares no hook is absent. Unreadable files, files that
 // don't parse, test files and files out of the build (a disabled stub) are skipped.
 func hookShapes(dir string) map[string]bool {
 	entries, err := os.ReadDir(dir)
@@ -59,7 +59,7 @@ func addHookShapes(shapes map[string]bool, fset *token.FileSet, name string, src
 	}
 }
 
-// errorHooks reports whether handler type typ is an ErrorHandler: by its own methods when
+// errorHooks reports whether handler type typ is a HandlerE: by its own methods when
 // shapes knows it, else by the conf's hook_returns.
 func errorHooks(shapes map[string]bool, typ string, confError bool) bool {
 	if returns, known := shapes[typ]; known {

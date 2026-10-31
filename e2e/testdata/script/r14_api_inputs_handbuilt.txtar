@@ -99,7 +99,7 @@ func (*shopOrderHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 	defaults, _ := rtx.DefaultInputs[ShopOrderInputs]()
-	files, _ := rtx.FileInputs[ShopOrderInputs]()
+	files, _ := rtx.ConfigInputs[ShopOrderInputs]()
 	env, _ := rtx.EnvInputs[ShopOrderInputs]()
 	argv, _ := rtx.ArgvInputs[ShopOrderInputs]()
 	layered, layeredReport := rotini.MergeInputsWithReport(defaults, files, env, argv)

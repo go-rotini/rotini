@@ -101,9 +101,9 @@ func TestProgram_Run_isReentrant(t *testing.T) {
 func TestProgram_Run_seedsBoundServicesPerRun(t *testing.T) {
 	var seeded, leaked []bool
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		_, ok := rtx.GetDependency(NewDependency[string]("seeded"))
+		_, ok := rtx.LookupDependency(NewDependency[string]("seeded"))
 		seeded = append(seeded, ok)
-		_, ok = rtx.GetDependency(NewDependency[string]("per-run"))
+		_, ok = rtx.LookupDependency(NewDependency[string]("per-run"))
 		leaked = append(leaked, ok)
 		rtx.SetDependency(NewDependency[any]("per-run"), any("bound during this run"))
 	}}
@@ -562,7 +562,7 @@ func TestProgram_handlerCancelsViaBoundCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
-		rtx.MustGetDependency(NewDependency[context.CancelFunc]("cancel"))()
+		rtx.MustDependency(NewDependency[context.CancelFunc]("cancel"))()
 	}}
 	code, err := newLifeProgram(h).WithContext(ctx).WithDependency(NewDependency[any]("cancel"), any(cancel)).Run(nil)
 	if err != nil {
@@ -581,7 +581,7 @@ func TestProgram_handlerCancelsWithExitCode(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
-		rtx.MustGetDependency(NewDependency[context.CancelCauseFunc]("cancel"))(ExitCause(3))
+		rtx.MustDependency(NewDependency[context.CancelCauseFunc]("cancel"))(ExitCause(3))
 	}}
 	code, _ := newLifeProgram(h).WithContext(ctx).WithDependency(NewDependency[any]("cancel"), any(cancel)).Run(nil)
 	if code != 3 {
@@ -1082,7 +1082,7 @@ func (h *concurrentHandler) Run(_ context.Context, rtx *Context) {
 		return
 	}
 	// A dependency registered before any run is visible to every run.
-	if v, ok := rtx.GetDependency(NewDependency[string]("shared")); !ok || v != "bound once" {
+	if v, ok := rtx.LookupDependency(NewDependency[string]("shared")); !ok || v != "bound once" {
 		h.seen <- "missing shared service"
 		return
 	}

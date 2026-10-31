@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// mwHandler is an ErrorHandler that logs "<command>.<hook>" for every hook it runs and returns
+// mwHandler is a HandlerE that logs "<command>.<hook>" for every hook it runs and returns
 // the error set for that hook, if any.
 type mwHandler struct {
 	name string
@@ -65,7 +65,7 @@ func mwProgram(log *[]string, errs map[string]error, do map[string]func(context.
 				d[hook] = fn
 			}
 		}
-		return FromErrorHandler(&mwHandler{name: name, log: log, errs: e, do: d}), true
+		return FromHandlerE(&mwHandler{name: name, log: log, errs: e, do: d}), true
 	}
 	return NewProgramFunc(def, lookup).WithStdout(&bytes.Buffer{}).WithStderr(&bytes.Buffer{}).WithoutSignalHandling()
 }
@@ -218,7 +218,7 @@ func TestMiddleware_refuseWithoutRunning(t *testing.T) {
 	}
 }
 
-// next returns an ErrorHandler hook's error before it is recorded, and the error is recorded
+// next returns a HandlerE hook's error before it is recorded, and the error is recorded
 // once after the chain.
 func TestMiddleware_seesHookErrorBeforeRecording(t *testing.T) {
 	hookErr := errors.New("hook failed")

@@ -27,7 +27,7 @@ func main() {
 |---|---|
 | `WithVersion(v)` | set the version `rtx.Version()` returns, which the `--version` flag and `version` command that `rotini init` declares print |
 | `WithDependency(dep, v)` | give handlers a dependency, such as a store or an API client |
-| `WithProvider(dep, fn)` | give handlers a dependency built per run the first time one asks, and closed after the run; see [per-run dependencies](/docs#per-run-dependencies) |
+| `WithProvider(dep, fn)` | give handlers a dependency built per run the first time one asks, and cleaned up after the run by the cleanup `fn` returns; see [per-run dependencies](/docs#per-run-dependencies) |
 | `WithStdin` / `WithStdout` / `WithStderr` | replace the program's streams |
 | `WithReporter(fn)` | replace how recorded outcomes are printed and which exit code is used |
 | `WithoutSignalHandling()` | turn off the default Ctrl+C and SIGTERM handling |
@@ -41,7 +41,7 @@ func main() {
 | `WithMiddleware(mw...)` | wrap every hook, to trace or time it or to refuse a run; see [middleware](/docs#middleware) |
 | `WithClock(now)` | set the clock relative times such as `2h` and `today` are read against, for tests |
 | `WithOutputChecks(true)` | check every structured output against its declared shape before writing it; see [check it](/docs#check-it) |
-| `WithCompletion(format)` / `Complete(words, format)` | answer completion requests in another program's format; see [tab completion](/docs#tab-completion) |
+| `WithCompletionFormat(format)` / `Complete(words, format)` | answer completion requests in another program's format; see [tab completion](/docs#tab-completion) |
 | `WithCompletionMessages(fn)` / `WithCompletionDescriptions(fn)` | decide when completion shows messages and descriptions |
 | `WithExit(fn)` / `WithArgs(argv)` | replace `os.Exit` and `os.Args` for `Execute`, for an embedding host |
 | `With(opts...)` | apply `rotini.Option` values, such as `rotini.WithDependency(dep, v)` |
@@ -80,7 +80,7 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.Stdout` / `rtx.Stderr` / `rtx.Stdin` | the program's streams; write to these, not `os.Stdout`, so tests can capture output |
 | `rtx.Argv` | the raw arguments, for a handler that parses its own |
 | `rtx.LookupEnv(name)` / `rtx.Environ()` / `rtx.Dir()` | the run's environment and working directory; pass `rtx.Environ()` to a child process's `Env`, and open a relative path with `filepath.Join(rtx.Dir(), path)` |
-| `rtx.MustGetDependency(dep)` | a dependency registered in `main.go` |
+| `rtx.MustDependency(dep)` | a dependency registered in `main.go` |
 | `rtx.Dependency(dep)` | a dependency, building a provided one on first use, with the provider's error |
 | `rtx.RecordSuccess` / `rtx.RecordWarning` / `rtx.RecordInfo` | record an outcome; the reporter prints it once, after the teardown hooks |
 | `rtx.HaltWith(err)` | fail: record the error and stop |
@@ -91,20 +91,20 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.InputsWithReport[T]()` | the inputs plus where each value came from; `report.Explain(w)` prints it for users, `report.Format(w)` by field path; see [explaining where values came from](/docs#explaining-where-values-came-from). `report.UnreadConfigKeys()` lists the config file keys no input reads; see [typos in config files](/docs#typos-in-config-files) |
 | `rtx.WriteOutput(v, format, render)` | write a command's [structured output](/docs#structured-output) |
 | `shape.Render(t)` | a renderer for `WriteOutput` that runs a `--format '{{…}}'` template, from the opt-in package `github.com/go-rotini/rotini/shape`; see [templates](/docs#templates) |
-| `rotini.OpenInput(rtx, path)` / `rotini.CreateOutput(rtx, path)` | open an `inputfile` or `outputfile` value, where `-` is stdin or stdout, with `rotini.Overwrite(true)` and `rotini.FileMode(0o600)` as `CreateOutput`'s options; see [files and the standard streams](/docs#files-and-the-standard-streams) |
+| `rotini.OpenInput(rtx, path)` / `rotini.CreateOutput(rtx, path)` | open an `inputfile` or `outputfile` value, where `-` is stdin or stdout, with `rotini.OutputOverwrite(true)` and `rotini.OutputFileMode(0o600)` as `CreateOutput`'s options; see [files and the standard streams](/docs#files-and-the-standard-streams) |
 | `rotini.IsTerminal(rtx.Stdout)` | whether a stream is a terminal, to pick a default format or skip a prompt |
-| `rtx.SetDependency(dep, v)` / `rtx.SetDependencyIfAbsent(dep, v)` / `rtx.GetDependency(dep)` | set a dependency for this run only, or read one that may be missing; see [per-run dependencies](/docs#per-run-dependencies) |
+| `rtx.SetDependency(dep, v)` / `rtx.SetDependencyIfAbsent(dep, v)` / `rtx.LookupDependency(dep)` | set a dependency for this run only, or read one that may be missing; see [per-run dependencies](/docs#per-run-dependencies) |
 | `rtx.SetContext(ctx)` / `rtx.Context()` | hand a derived context, with a deadline or a span, to the hooks after this one; see [passing a context on](/docs#passing-a-context-on) |
-| `rtx.ArgvInputs[T]()`, `EnvInputs`, `FileInputs`, `StdinInputs`, `DefaultInputs` | one source's values, to merge with a source of your own with `rotini.MergeInputsWithReport` |
+| `rtx.ArgvInputs[T]()`, `EnvInputs`, `ConfigInputs`, `StdinInputs`, `DefaultInputs` | one source's values, to merge with a source of your own with `rotini.MergeInputsWithReport` |
 | `rtx.CheckInputs(v, rotini.PresenceOf(v))` | check values you collected yourself against the spec; see [checking inputs you collected yourself](/docs#checking-inputs-you-collected-yourself) |
 | `rtx.PartialInputs[T]()` | what has been typed so far, in a completer; see [completers](/docs#completers) |
 | `rtx.SetCompletionOptions(rotini.CompletionOptions{…})` | ask the shell, from a completer, to add no space after the candidate (`NoSpace`) or keep the answer's order (`KeepOrder`); see [completers](/docs#completers) |
-| `rtx.SetCompletionFallback(rotini.Completion{…})` | choose, from a completer, what the shell falls back to for this request (files, directories, none, file extensions); see [completers](/docs#completers) |
+| `rtx.SetCompletionFallback(rotini.CompletionHint{…})` | choose, from a completer, what the shell falls back to for this request (files, directories, none, file extensions); see [completers](/docs#completers) |
 | `rtx.CommandChain()` / `rtx.CommandPath()` | the commands from the root to the invoked one |
 | `rtx.DashIndex()` | how many arguments came before a `--` the user typed |
 | `rtx.Now()` | the run's one clock reading, the one relative times are measured from |
 | `rotini.Deprecations(rtx)` | the deprecated spellings this run used; see [deprecating a command or flag](/docs#deprecating-a-command-or-flag) |
-| `rotini.RunEffects(rtx)` | what this run does: the command's `effects` raised by the flags given; see [effects](/docs#effects) |
+| `rotini.EffectsOf(rtx)` | what this run does: the command's `effects` raised by the flags given; see [effects](/docs#effects) |
 | `rotini.AppDirs(rtx, app, strategy)` | the config, data, cache and state directories; see [files your program keeps](/docs#files-your-program-keeps) |
 | `rotini.ConfigProfiles(rtx, file)` | the profiles a config file defines, for a completer; see [profiles](/docs#profiles) |
 | `rotini.SortBy(items, field, desc)` / `rotini.SelectFields(v, at, fields)` | sort a command's output by a field and keep the fields the user chose; see [choosing fields and order](/docs#choosing-fields-and-order) |
@@ -116,7 +116,7 @@ func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := rtx.MustGetDependency(Store).Add(in.TodoAdd.Arguments.Title); err != nil {
+	if err := rtx.MustDependency(Store).Add(in.TodoAdd.Arguments.Title); err != nil {
 		return err
 	}
 	rtx.RecordSuccess("task added")
@@ -161,7 +161,7 @@ and `rotini.ErrDependencyNotFound` is what a `*rotini.DependencyError` unwraps t
 `*rotini.InputError` (environment, config files and stdin), `*rotini.PluginError`,
 `*rotini.WiringError`, `*rotini.DependencyError` and `*rotini.PanicError`; reach them with
 `errors.As`. `rotini.SuggestionFacts(err)` returns the word the user typed and what it could have
-been, and `rotini.NewSuggestor().For(err)` ranks them; see
+been, and `rotini.NewSuggester().For(err)` ranks them; see
 [suggesting a correction](/docs#suggesting-a-correction). To end a run with your own code from
 outside its hooks, cancel its context with `rotini.ExitCause(code)`; see
 [signals and cancellation](/docs#signals-and-cancellation).
@@ -230,11 +230,11 @@ Generated code and most programs never need these, but they are supported:
 | `WiringError.Feature` | the feature a run needed but its program does not wire |
 | `Program.WithResolver` / `rotini.DefaultResolver` | replace how the command line is resolved to a command or a plugin |
 | `Program.WithLifecycle` / `rotini.DefaultLifecycle` / `rotini.AsCommand` | replace which hooks run and in what order |
-| `Program.WithParser` / `rotini.NewParser`, `rtx.Parser()` | parse the command line into a struct yourself |
-| `Program.WithInputReader` / `rotini.NewInputReader`, `Program.WithInputSettings` | replace how environment, config and stdin are read |
+| `Program.WithParser` / `rotini.ArgvParser`, `rtx.Parser()` | read the command line in a syntax of your own, keeping env, config, defaults and validation |
+| `rotini.NewParser().Parse` | bind the command line alone into a struct |
+| `Program.WithInputSettings` (a modified copy of the generated `InputSettings`), `rotini.NewInputReader` | add config sources or change how environment, config and stdin are read |
 | `Program.WithHelp` | replace where `rtx.Help()` finds a command's page |
 | `Program.WithCompletionScript` | replace where `rtx.CompletionScript(shell)` finds a shell's script |
 | `rotini.MergeInputs` / `rotini.MergeInputsWithReport` | merge input layers, your own included, in precedence order |
 | `rotini.ArgvOf` with `rotini.ArgvPath`, `rotini.ArgvSecrets` | turn an inputs value into a command line; see [turning inputs back into a command line](/docs#turning-inputs-back-into-a-command-line) |
 | `rotini.StripANSI(text)` | remove ANSI escapes, as Rotini does for man and markdown pages |
-| `rotini.Ptr(v)` | a pointer to `v`, for the bounds in a hand-built `rotini.Constraints` |

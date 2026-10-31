@@ -6,22 +6,22 @@ import (
 	"strings"
 )
 
-// defaultMinScore is the cutoff a [Suggestor] keeps candidates at or above. 0.75 is the highest
+// defaultMinScore is the cutoff a [Suggester] keeps candidates at or above. 0.75 is the highest
 // threshold that tolerates one edit in a four-character word (`hlep` → `help`); lower values
 // start suggesting unrelated words. Three-character commands are left unmatched.
 const defaultMinScore = 0.75
 
-// Suggestor ranks a possibly-mistyped token against a list of candidates by optimal string
+// Suggester ranks a possibly-mistyped token against a list of candidates by optimal string
 // alignment distance. It prints nothing and holds no state beyond its configuration. Rotini
-// never suggests on its own; a program opts in by calling a Suggestor, typically from its
-// reporter with [Suggestor.For]:
+// never suggests on its own; a program opts in by calling a Suggester, typically from its
+// reporter with [Suggester.For]:
 //
-//	var suggestor = rotini.NewSuggestor()
+//	var suggester = rotini.NewSuggester()
 //
 //	func reporter(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
 //		for _, err := range out.Errors {
 //			fmt.Fprintf(rtx.Stderr, "Error: %s\n", err)
-//			if hits := suggestor.For(err); len(hits) > 0 {
+//			if hits := suggester.For(err); len(hits) > 0 {
 //				fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", hits[0])
 //			}
 //		}
@@ -30,32 +30,38 @@ const defaultMinScore = 0.75
 // For reads its token and candidates with [SuggestionFacts]; a program with its own ranking
 // calls SuggestionFacts directly instead.
 //
-// Matching is always case-insensitive. A configured Suggestor is safe for concurrent use;
+// Matching is always case-insensitive. A configured Suggester is safe for concurrent use;
 // finish configuring it before sharing it across goroutines.
-type Suggestor struct {
+type Suggester struct {
 	minScore   float64
 	maxResults int
 }
 
-// NewSuggestor returns a [Suggestor] with a minimum score of 0.75 and at most 3 results. The
+// NewSuggester returns a [Suggester] with a minimum score of 0.75 and at most 3 results. The
 // With methods return the receiver, so they chain. The zero value is not usable.
-func NewSuggestor() *Suggestor {
-	return &Suggestor{minScore: defaultMinScore, maxResults: 3}
+func NewSuggester() *Suggester {
+	return &Suggester{minScore: defaultMinScore, maxResults: 3}
 }
+
+// Deprecated: use [Suggester].
+type Suggestor = Suggester
+
+// Deprecated: use [NewSuggester].
+func NewSuggestor() *Suggester { return NewSuggester() }
 
 // WithMinScore sets the similarity a candidate must reach to be offered, in [0,1]. A value
 // outside that range is ignored. Below about 0.7 the ranker starts offering unrelated words;
 // above 0.75 it no longer matches one-edit typos of four-character commands.
-func (s *Suggestor) WithMinScore(score float64) *Suggestor {
+func (s *Suggester) WithMinScore(score float64) *Suggester {
 	if score >= 0 && score <= 1 {
 		s.minScore = score
 	}
 	return s
 }
 
-// WithMaxResults caps how many suggestions [Suggestor.Suggest] and [Suggestor.For] return
+// WithMaxResults caps how many suggestions [Suggester.Suggest] and [Suggester.For] return
 // (default 3). Zero or less means no cap.
-func (s *Suggestor) WithMaxResults(n int) *Suggestor {
+func (s *Suggester) WithMaxResults(n int) *Suggester {
 	s.maxResults = n
 	return s
 }
@@ -64,7 +70,7 @@ func (s *Suggestor) WithMaxResults(n int) *Suggestor {
 // nearest first. It reads them with [SuggestionFacts], so it works for a [*ParseError], an
 // [*InputError] and a [*PluginError]. It returns nil when err carries no facts and when the
 // token is near nothing.
-func (s *Suggestor) For(err error) []string {
+func (s *Suggester) For(err error) []string {
 	if s == nil {
 		return nil
 	}
@@ -82,7 +88,7 @@ func (s *Suggestor) For(err error) []string {
 // ([*PluginError], whose Name is the token). It searches err's tree in order, through wrapped
 // and joined errors, and returns the first error that carries both. ok is false when none
 // does; an error whose token was redacted, because the input is secret, never counts. It ranks
-// nothing: pass the result to a [Suggestor] or to a ranking of your own.
+// nothing: pass the result to a [Suggester] or to a ranking of your own.
 //
 //	if token, candidates, ok := rotini.SuggestionFacts(err); ok {
 //		if best := closest(token, candidates); best != "" {
@@ -123,7 +129,7 @@ func SuggestionFacts(err error) (token string, candidates []string, ok bool) {
 // Ties prefer the candidate sharing the longer common prefix with input, then break
 // lexicographically, so the result is deterministic. Empty candidates are skipped and
 // duplicates collapse to the first occurrence.
-func (s *Suggestor) Suggest(input string, candidates []string) []string {
+func (s *Suggester) Suggest(input string, candidates []string) []string {
 	if s == nil {
 		return nil
 	}
@@ -185,7 +191,7 @@ func (s *Suggestor) Suggest(input string, candidates []string) []string {
 
 // Closest returns the single best suggestion for input, or ok=false when input exactly matches
 // a candidate or nothing clears the minimum score.
-func (s *Suggestor) Closest(input string, candidates []string) (suggestion string, ok bool) {
+func (s *Suggester) Closest(input string, candidates []string) (suggestion string, ok bool) {
 	if hits := s.Suggest(input, candidates); len(hits) > 0 {
 		return hits[0], true
 	}

@@ -134,7 +134,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dpHandler)(nil)
+var _ rotini.HandlerE = (*dpHandler)(nil)
 
 type dpHandler struct {
 	rotini.NoPreRunE
@@ -205,7 +205,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dpConvertHandler)(nil)
+var _ rotini.HandlerE = (*dpConvertHandler)(nil)
 
 type dpConvertHandler struct {
 	rotini.NoCascadingPreRunE
@@ -233,7 +233,7 @@ func (*dpConvertHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return rotini.UsageError(err)
 	}
-	out, err := rotini.CreateOutput(rtx, in.Flags.Out, rotini.Overwrite(in.Flags.Force))
+	out, err := rotini.CreateOutput(rtx, in.Flags.Out, rotini.OutputOverwrite(in.Flags.Force))
 	if err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dpCountHandler)(nil)
+var _ rotini.HandlerE = (*dpCountHandler)(nil)
 
 type dpCountHandler struct {
 	rotini.NoCascadingPreRunE
@@ -333,7 +333,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dpFailHandler)(nil)
+var _ rotini.HandlerE = (*dpFailHandler)(nil)
 
 type dpFailHandler struct {
 	rotini.NoCascadingPreRunE
@@ -377,7 +377,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dpSlowHandler)(nil)
+var _ rotini.HandlerE = (*dpSlowHandler)(nil)
 
 type dpSlowHandler struct {
 	rotini.NoCascadingPreRunE
@@ -395,7 +395,7 @@ func (*dpSlowHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 		return err
 	}
 	in := inputs.DpSlow
-	out, err := rotini.CreateOutput(rtx, in.Arguments.Out, rotini.Overwrite(true))
+	out, err := rotini.CreateOutput(rtx, in.Arguments.Out, rotini.OutputOverwrite(true))
 	if err != nil {
 		return err
 	}
@@ -425,7 +425,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dpStatsHandler)(nil)
+var _ rotini.HandlerE = (*dpStatsHandler)(nil)
 
 type dpStatsHandler struct {
 	rotini.NoCascadingPreRunE
@@ -459,7 +459,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*dpSumHandler)(nil)
+var _ rotini.HandlerE = (*dpSumHandler)(nil)
 
 type dpSumHandler struct {
 	rotini.NoCascadingPreRunE

@@ -128,7 +128,7 @@ func TestInputReader_customSources(t *testing.T) {
 	t.Run("per-channel surface sees sources via InputSettings", func(t *testing.T) {
 		rtx := NewContextFor(tbDef(), nil)
 		rtx.WithInputSettings(InputSettings{Sources: []recon.Source{vault()}})
-		files, err := rtx.FileInputs[tbInputs]()
+		files, err := rtx.ConfigInputs[tbInputs]()
 		if err != nil {
 			t.Fatalf("FileInputs: %v", err)
 		}
@@ -2258,7 +2258,7 @@ func readerErrors[T any](rtx *Context, layer string) map[string]error {
 	if layer == "env" {
 		_, errs["EnvInputs"] = rtx.EnvInputs[T]()
 	} else {
-		_, errs["FileInputs"] = rtx.FileInputs[T]()
+		_, errs["ConfigInputs"] = rtx.ConfigInputs[T]()
 	}
 	return errs
 }

@@ -47,7 +47,7 @@ type Hook struct {
 }
 
 // HookFunc runs a hook, or the rest of the middleware chain around it, and returns its error:
-// what an [ErrorHandler] hook returned, or nil for a [Handler] hook, which records through rtx.
+// what an [HandlerE] hook returned, or nil for a [Handler] hook, which records through rtx.
 type HookFunc func(ctx context.Context, rtx *Context) error
 
 // Middleware wraps a hook invocation: it returns the function rotini calls in place of next.
@@ -63,14 +63,15 @@ type HookFunc func(ctx context.Context, rtx *Context) error
 // An error a hook has just recorded itself, with [Context.HaltWith] or [Context.RecordError],
 // isn't recorded twice when a middleware returns it.
 //
-// A middleware with nothing to do for a hook returns next itself:
+// A middleware with nothing to do for a hook returns next itself; it never returns nil, which
+// panics:
 //
 //	func confirmDestructive(h rotini.Hook, next rotini.HookFunc) rotini.HookFunc {
 //		if h.Kind != rotini.HookRun {
 //			return next
 //		}
 //		return func(ctx context.Context, rtx *rotini.Context) error {
-//			if rotini.RunEffects(rtx).Kind == "destructive" && !confirmed(rtx) {
+//			if rotini.EffectsOf(rtx).Kind == "destructive" && !confirmed(rtx) {
 //				return errors.New("refusing a destructive run without --yes")
 //			}
 //			return next(ctx, rtx)
@@ -103,7 +104,7 @@ func (p *Program) WithMiddleware(mw ...Middleware) *Program {
 }
 
 // callWrapped runs hook kind of h inside the run's middleware, then applies its error as an
-// [ErrorHandler]'s is applied, so the middleware sees the error before it is recorded.
+// [HandlerE]'s is applied, so the middleware sees the error before it is recorded.
 func callWrapped(ctx context.Context, rtx *Context, h Handler, kind HookKind) {
 	next := HookFunc(func(ctx context.Context, rtx *Context) error {
 		restore := rtx.hookContext(ctx)
@@ -120,9 +121,9 @@ func callWrapped(ctx context.Context, rtx *Context, h Handler, kind HookKind) {
 }
 
 // invokeHook calls hook kind of h and returns its error, without recording it: an
-// [ErrorHandler] adapted by [FromErrorHandler] returns its own, a [Handler] nil.
+// [HandlerE] adapted by [FromHandlerE] returns its own, a [Handler] nil.
 func invokeHook(ctx context.Context, rtx *Context, h Handler, kind HookKind) error {
-	if eh, ok := h.(errorHandler); ok {
+	if eh, ok := h.(handlerE); ok {
 		switch kind {
 		case HookCascadingPreRun:
 			return eh.h.CascadingPreRun(ctx, rtx) //nolint:wrapcheck // the hook's own error, as it returned it

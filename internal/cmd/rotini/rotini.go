@@ -26,7 +26,7 @@ var (
 	pseudoVersionRe = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(?:\+[0-9A-Za-z.-]+)?$`) })
 )
 
-var _ rotini.ErrorHandler = (*rotiniHandler)(nil)
+var _ rotini.HandlerE = (*rotiniHandler)(nil)
 
 type rotiniHandler struct {
 	rotini.NoPreRunE

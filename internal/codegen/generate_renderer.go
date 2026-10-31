@@ -31,7 +31,7 @@ var (
 	//go:embed templates/handler.go.tmpl
 	templateHandlerStub string
 	//go:embed templates/handler_error.go.tmpl
-	templateErrorHandlerStub string
+	templateHandlerEStub string
 	//go:embed templates/rotini.go.tmpl
 	templateRotini string
 
@@ -309,7 +309,7 @@ type templateHandlerData struct {
 	Invocation    string // how a user types the command, e.g. "rotini generate"
 	Prefix        string // this command's frame inside the inputs type, e.g. inputs.RotiniGenerate
 	RuntimeImport string
-	ErrorHooks    bool // seed an ErrorHandler (conf hook_returns: error), from templates/handler_error.go.tmpl
+	ErrorHooks    bool // seed a HandlerE (conf hook_returns: error), from templates/handler_error.go.tmpl
 
 	// The seeded Run body, derived from the spec and conf (a --help flag with the help
 	// feature on, a --version flag, a `help` command with a variadic path argument).
@@ -339,7 +339,7 @@ type templateHandlerData struct {
 
 func renderHandlerStubFile(data templateHandlerData) ([]byte, error) {
 	if data.ErrorHooks {
-		return renderGoFileWithHeader(data.Header, "handler", templateErrorHandlerStub, data)
+		return renderGoFileWithHeader(data.Header, "handler", templateHandlerEStub, data)
 	}
 	return renderGoFileWithHeader(data.Header, "handler", templateHandlerStub, data)
 }
@@ -357,7 +357,7 @@ type templateHandlersMethod struct {
 	Composed       bool
 	Passthrough    bool   // delegate via alias.method() instead of alias.Handlers().method()
 	HandlerType    string // own commands: the local handler struct name
-	ErrorHooks     bool   // own commands: the handler is an ErrorHandler, wrapped in FromErrorHandler
+	ErrorHooks     bool   // own commands: the handler is a HandlerE, wrapped in FromHandlerE
 	DelegateAlias  string // composed commands: the child import alias
 	DelegateMethod string // composed commands: the child's ProgramHandlers method, or the convention
 }
@@ -440,7 +440,7 @@ type templateFeatureCase struct {
 
 // templateFeature is one feature's vars, resolver and optional page list in the generated file.
 type templateFeature struct {
-	Resolver string // resolver func name, e.g. "Help", "Man", "Completion"
+	Resolver string // resolver func name, e.g. "Help", "Man", "CompletionScript"
 	Noun     string // word used in the doc comment and error, e.g. "help"
 	PerShell bool   // completion: resolver takes a shell string, not a command path
 	Section  string // man: the section the pages were generated for, emitted as ManSection; "" otherwise
@@ -479,7 +479,7 @@ type templateRotiniData struct {
 	// HelpResolver is "Help" when the help feature is on, else "". NewProgram passes it to
 	// WithHelp so [rotini.Context.Help] can find the running command's page.
 	HelpResolver string
-	// CompletionResolver is "Completion" when the completion feature is on, else "". NewProgram
+	// CompletionResolver is "CompletionScript" when the completion feature is on, else "". NewProgram
 	// passes it to WithCompletionScript so [rotini.Context.CompletionScript] prints the running
 	// program's script.
 	CompletionResolver string

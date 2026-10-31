@@ -100,6 +100,16 @@ type argvAcq struct {
 	clock *runClock // what relative time values are measured from; nil reads time.Now
 	// goos is the operating system whose rules glob arguments follow; "" is the running one.
 	goos string
+	// capture, when set, collects each flag occurrence and positional as read, before any
+	// acquisition: [Parser.ParseArgv]'s result.
+	capture *ArgvValues
+}
+
+// captureArg collects a positional word for [Parser.ParseArgv], when capturing.
+func (a argvAcq) captureArg(word string) {
+	if a.capture != nil {
+		a.capture.Args = append(a.capture.Args, word)
+	}
 }
 
 // detachedHint is the hint an unexpected-positional error carries when one of the extra
@@ -301,7 +311,7 @@ const (
 	ParseKindTooManyArguments              // more positionals than the command's declared (non-variadic) arity
 	ParseKindInternal                      // a parser API misuse: nil parser/context, a bad out argument, or an inputs type that does not describe the running command
 	ParseKindMisplacedFlag                 // a flag was typed where it can't apply: before a plugin's name, or a local flag while running a command below its own
-	ParseKindMissingCommand                // a command that only groups others was run without one of them (see [MissingCommand])
+	ParseKindMissingCommand                // a command that only groups others was run without one of them (see [MissingCommandError])
 )
 
 // String renders the kind as a short, stable label (for logs and tests).
@@ -338,7 +348,7 @@ func (k ParseKind) String() string {
 
 // ParseError is a parse-time failure caused by bad input. Its message carries no suggestions
 // or usage text; the structured fields let a handler compose its own response: switch on Kind,
-// pass Token and Candidates to a [Suggestor], or render help for Command. It unwraps to
+// pass Token and Candidates to a [Suggester], or render help for Command. It unwraps to
 // [ErrUsage] ([ErrInternal] for [ParseKindInternal]), so [CategoryOf] can classify it. The
 // default reporter exits 1; a program wanting exit code 2 for usage errors maps it in its own
 // reporter (see [Category]).
@@ -347,7 +357,7 @@ func (k ParseKind) String() string {
 //	if errors.As(err, &pe) {
 //	    switch pe.Kind {
 //	    case rotini.ParseKindUnknownFlag, rotini.ParseKindUnknownCommand:
-//	        // pe.Token + pe.Candidates feed a Suggestor's "did you mean"
+//	        // pe.Token + pe.Candidates feed a Suggester's "did you mean"
 //	    case rotini.ParseKindMissingRequired:
 //	        // prompt, or point at the help for pe.Command
 //	    }
@@ -422,12 +432,12 @@ func (e *ParseError) Unwrap() error {
 // resolved chain declares (GNU/POSIX grammar, typed coercion, enum and constraint checks),
 // failing with a [*ParseError].
 //
-// Parsing is opt-in: a CLI that wants raw argv reads [Context.Argv] instead. A handler reads
-// the parser with [Context.Parser]:
+// It is the [ArgvParser] every inputs method reads the command line with unless the program sets
+// its own with [Program.WithParser]. Parsing is opt-in: a CLI that wants raw argv reads
+// [Context.Argv] instead. [Parser.Parse] binds the command line alone:
 //
-//	parser := rtx.Parser()
 //	var in MycliInputs
-//	err := parser.Parse(rtx, &in)
+//	err := rotini.NewParser().Parse(rtx, &in)
 type Parser struct{}
 
 // NewParser returns rotini's default [Parser].
@@ -465,8 +475,8 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 
 // parseBind parses argv into a store, expands the values of inputs that declare `expand`, and
 // binds the store into out without validating — that is [validate]'s job. It returns the store
-// and chain for that deferred pass. The [InputReader] runs the same steps with its own view of
-// the environment in between (see [parseArgvStore]).
+// and chain for that deferred pass. The [InputReader] runs the same steps through the run's
+// parser, with its own view of the environment in between (see [readArgvStore]).
 func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []Command, error) {
 	store, chain, err := parseArgvStore(p, rtx, out)
 	if err != nil {
@@ -548,7 +558,7 @@ func flagTokenWidth(chain []Command, argv []string, i int) int {
 //
 // A token matching no declared identifier is retried as a POSIX short cluster (-vh → -v -h,
 // -n5 → -n 5). Long flags never cluster, so an unmatched one is an unknown-flag error carrying
-// the chain's vocabulary for a [Suggestor].
+// the chain's vocabulary for a [Suggester].
 func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag func(int, *FlagDef, string, string) error) (int, error) {
 	name, inline, hasInline := splitFlag(tok)
 
@@ -598,6 +608,9 @@ func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag
 // user typed (for error labels), the value resolved through the flag's acquisition modes and
 // split on its separator, and the fact that argv set it.
 func (p *parsedInputs) recordArgvFlag(idx int, fd *FlagDef, value, typed string, acq argvAcq) error {
+	if acq.capture != nil {
+		acq.capture.Flags = append(acq.capture.Flags, ArgvFlag{Name: fd.Name, Value: value, Typed: typed})
+	}
 	si := &p.scopes[idx]
 	if si.typed == nil {
 		si.typed = map[string]string{}
@@ -652,6 +665,7 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd *FlagDef, value, typed string,
 // argument it lands in, if that declares one. A variadic followed by fixed arguments splits
 // nothing, since where it ends is known only once every word is in.
 func (p *parsedInputs) recordArg(leaf Command, idx int, value string, acq argvAcq) error {
+	acq.captureArg(value)
 	if ad, ok := acquiringArg(leaf.Arguments, len(p.scopes[idx].args)); ok {
 		if err := refuseSecretLiteral(ad.Secret, ad.From, "<"+ad.Name+">", "", value); err != nil {
 			return err
@@ -732,6 +746,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 
 		if raw || passthrough() {
 			store.scopes[leaf].args = append(store.scopes[leaf].args, tok)
+			acq.captureArg(tok)
 			continue
 		}
 
@@ -770,6 +785,7 @@ func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs
 		if depth == len(chain) && leafWords == pt {
 			raw = true // the passthrough argument's first word
 			store.scopes[leaf].args = append(store.scopes[leaf].args, tok)
+			acq.captureArg(tok)
 			continue
 		}
 		if optionsDone && store.lateFlag == nil && isFlag(chain[:depth], tok) {
@@ -1054,7 +1070,7 @@ func missingBounds(label string) *WiringError {
 }
 
 // strayCommand reports a positional on a command that branches but takes no arguments: a
-// mistyped sub-command. The error carries the sibling vocabulary for a [Suggestor]. A command's
+// mistyped sub-command. The error carries the sibling vocabulary for a [Suggester]. A command's
 // own name typed after "--" is not mistyped: "--" ended command lookup, which the message says,
 // and the name is left out of the vocabulary.
 func strayCommand(leaf *Command, si *scopeInputs, store *parsedInputs) error {
@@ -1133,14 +1149,14 @@ func UnknownCommandError(def Definition, path ...string) *ParseError {
 	}
 }
 
-// MissingCommand is the error for running a command that groups others without naming one of
+// MissingCommandError is the error for running a command that groups others without naming one of
 // them: a [ParseKindMissingCommand] error reported against the running command's path, with its
 // visible sub-commands and declared plugins (and their aliases) as Candidates. A seeded group
 // stub prints the command's help and returns it:
 //
 //	fmt.Fprintln(rtx.Stderr, rtx.Help())
-//	return rotini.MissingCommand(rtx) // cfgctl config: a command is required (one of: get, set, unset)
-func MissingCommand(rtx *Context) *ParseError {
+//	return rotini.MissingCommandError(rtx) // cfgctl config: a command is required (one of: get, set, unset)
+func MissingCommandError(rtx *Context) *ParseError {
 	cmd := rtx.Command()
 	var names []string
 	for _, c := range cmd.Commands {

@@ -192,7 +192,7 @@ func TestSetConfigValue_secrets(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "new", "app.yaml")
 	rtx := cwContext(dir, nil, cwFile(path))
-	if err := SetConfigValue(rtx, "app", "token", "s3cr3t", AllowSecretWrite()); err != nil {
+	if err := SetConfigValue(rtx, "app", "token", "s3cr3t", ConfigAllowSecretWrite()); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
@@ -204,7 +204,7 @@ func TestSetConfigValue_secrets(t *testing.T) {
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := SetConfigValue(rtx, "app", "token", "other", AllowSecretWrite())
+	err := SetConfigValue(rtx, "app", "token", "other", ConfigAllowSecretWrite())
 	if err == nil || !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), "is readable by others (0644); chmod 600 it first") {
 		t.Errorf("a world-readable file: %v", err)
 	}
@@ -394,10 +394,10 @@ func TestSetConfigValue_profiles(t *testing.T) {
 	if err := SetConfigValue(rtx, "app", "db.host", "db.prod"); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetConfigValue(rtx, "app", "region", "ap", ToProfile("stage")); err != nil {
+	if err := SetConfigValue(rtx, "app", "region", "ap", ConfigToProfile("stage")); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetConfigValue(rtx, "app", "region", "af", ToSharedKeys()); err != nil {
+	if err := SetConfigValue(rtx, "app", "region", "af", ConfigToSharedKeys()); err != nil {
 		t.Fatal(err)
 	}
 	want := "region: af\nprofiles:\n  prod:\n    region: us\n    db:\n      host: db.prod\n  stage:\n    region: ap\n"
@@ -419,20 +419,20 @@ func TestSetConfigValue_profiles(t *testing.T) {
 	}
 
 	// Removing a profile's last key keeps the profile.
-	if err := UnsetConfigValue(rtx, "app", "region", ToProfile("stage")); err != nil {
+	if err := UnsetConfigValue(rtx, "app", "region", ConfigToProfile("stage")); err != nil {
 		t.Fatal(err)
 	}
 	if got := cwRead(t, path); !strings.Contains(got, "  stage: {}\n") {
 		t.Errorf("file:\n%s", got)
 	}
 
-	for _, opts := range [][]ConfigWriteOption{{ToProfile("a"), ToSharedKeys()}, {ToProfile("")}} {
+	for _, opts := range [][]ConfigWriteOption{{ConfigToProfile("a"), ConfigToSharedKeys()}, {ConfigToProfile("")}} {
 		if err := SetConfigValue(rtx, "app", "region", "x", opts...); !errors.Is(err, ErrInternal) {
 			t.Errorf("contradicting options: %v", err)
 		}
 	}
 	plain := ConfigFile{Name: "app", Path: path, Keys: keys}
-	if err := SetConfigValue(cwContext(dir, nil, plain), "app", "region", "x", ToProfile("a")); !errors.Is(err, ErrInternal) {
+	if err := SetConfigValue(cwContext(dir, nil, plain), "app", "region", "x", ConfigToProfile("a")); !errors.Is(err, ErrInternal) {
 		t.Errorf("ToProfile on a file without profiles: %v", err)
 	}
 }
@@ -461,10 +461,10 @@ func TestSetConfigValue_customTypes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "app.yaml")
 	rtx := cwContext(dir, nil, cwFile(path))
-	if err := SetConfigValue(rtx, "app", "owner", "ada"); !errors.Is(err, ErrInternal) || !strings.Contains(err.Error(), "pass rotini.ParseConfigValue") {
+	if err := SetConfigValue(rtx, "app", "owner", "ada"); !errors.Is(err, ErrInternal) || !strings.Contains(err.Error(), "pass rotini.ConfigValueCheck") {
 		t.Errorf("a custom type without a parser: %v", err)
 	}
-	check := ParseConfigValue(func(raw string) error {
+	check := ConfigValueCheck(func(raw string) error {
 		if !strings.Contains(raw, "@") {
 			return errors.New("want an email address")
 		}

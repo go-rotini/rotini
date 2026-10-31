@@ -91,8 +91,8 @@ func TestCompletionMessages_literals(t *testing.T) {
 	on := messagesProgram(t, "all", "APP_COMPLETION_MESSAGES")
 	lit := renderDefinition(on)
 	for _, want := range []string{
-		`Complete: rotini.Completion{Kind: "none", Message: "a service name from deploy.yaml"}`,
-		`Complete: rotini.Completion{Message: "--replicas int: how many instances"}`,
+		`Complete: rotini.CompletionHint{Kind: "none", Message: "a service name from deploy.yaml"}`,
+		`Complete: rotini.CompletionHint{Message: "--replicas int: how many instances"}`,
 		`CompletionMessages: &rotini.CompletionMessagesDef{Env: "APP_COMPLETION_MESSAGES"}`,
 	} {
 		if !strings.Contains(lit, want) {

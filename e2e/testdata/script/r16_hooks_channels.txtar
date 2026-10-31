@@ -1,5 +1,5 @@
 # R16 — the two hook shapes and the author's own outcome channels, built and run. A parent
-# composes one child seeded as ErrorHandlers (hook_returns: error) and one seeded as plain
+# composes one child seeded as HandlerE stubs (hook_returns: error) and one seeded as plain
 # Handlers (no key): each child's wiring follows its own handlers, and both fail, tear down and
 # report the same way under the parent. Then the guide's channel blocks: records printed by the
 # default reporter, then read back typed by a reporter of the author's own. scan.go.txt and
@@ -10,12 +10,12 @@ gomodinit example.com/demo
 exec rotini init acme
 exec rotini generate cmd/errkid/.rotini.spec.yaml --config cmd/errkid/.rotini.conf.yaml
 exec rotini generate cmd/voidkid/.rotini.spec.yaml --config cmd/voidkid/.rotini.conf.yaml
-grep '^var _ rotini.ErrorHandler = \(\*errkidHelloHandler\)\(nil\)$' internal/cmd/errkid/errkid_hello.go
+grep '^var _ rotini.HandlerE = \(\*errkidHelloHandler\)\(nil\)$' internal/cmd/errkid/errkid_hello.go
 grep '^var _ rotini.Handler = \(\*voidkidHelloHandler\)\(nil\)$' internal/cmd/voidkid/voidkid_hello.go
 cp errkid_hello.go.txt internal/cmd/errkid/errkid_hello.go
 cp voidkid_hello.go.txt internal/cmd/voidkid/voidkid_hello.go
-grep 'return rotini.FromErrorHandler\(&errkidHelloHandler\{\}\)' internal/cmd/errkid/zz_rotini.go
-! grep FromErrorHandler internal/cmd/voidkid/zz_rotini.go
+grep 'return rotini.FromHandlerE\(&errkidHelloHandler\{\}\)' internal/cmd/errkid/zz_rotini.go
+! grep FromHandlerE internal/cmd/voidkid/zz_rotini.go
 
 exec rotini mount cmd/errkid/.rotini.spec.yaml cmd/voidkid/.rotini.spec.yaml --into cmd/acme/.rotini.spec.yaml
 exec rotini generate cmd/acme/.rotini.spec.yaml --config cmd/acme/.rotini.conf.yaml
@@ -39,7 +39,7 @@ wantexit 1 ./acme$exe voidkid hello --fail
 stderr '^voidkid: teardown$'
 stderr -count=1 '^Error: voidkid failed$'
 
-# An inputs error returned from an ErrorHandler keeps its command path.
+# An inputs error returned from a HandlerE keeps its command path.
 wantexit 1 ./acme$exe errkid hello --nope
 stderr -count=1 '^Error: acme errkid hello: unknown flag "--nope"$'
 
@@ -48,10 +48,10 @@ cp voidkid_hello_error.go.txt internal/cmd/voidkid/voidkid_hello.go
 ! exec go build -o acme$exe ./cmd/acme
 stderr 'zz_rotini.go'
 exec rotini generate cmd/voidkid/.rotini.spec.yaml --config cmd/voidkid/.rotini.conf.yaml
-grep 'return rotini.FromErrorHandler\(&voidkidHelloHandler\{\}\)' internal/cmd/voidkid/zz_rotini.go
+grep 'return rotini.FromHandlerE\(&voidkidHelloHandler\{\}\)' internal/cmd/voidkid/zz_rotini.go
 exec go build -o acme$exe ./cmd/acme
 exec ./acme$exe voidkid hello
-stdout '^hello from voidkid, now an ErrorHandler$'
+stdout '^hello from voidkid, now a HandlerE$'
 
 # ── the guide's channel blocks ───────────────────────────────────────────────
 cd $WORK/scan
@@ -130,7 +130,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*errkidHelloHandler)(nil)
+var _ rotini.HandlerE = (*errkidHelloHandler)(nil)
 
 type errkidHelloHandler struct {
 	rotini.NoCascadingPreRunE
@@ -201,7 +201,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*voidkidHelloHandler)(nil)
+var _ rotini.HandlerE = (*voidkidHelloHandler)(nil)
 
 type voidkidHelloHandler struct{ rotini.NoHooksE }
 
@@ -209,7 +209,7 @@ func (*voidkidHelloHandler) Run(ctx context.Context, rtx *rotini.Context) error 
 	if _, err := rtx.Inputs[VoidkidHelloInputs](); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintln(rtx.Stdout, "hello from voidkid, now an ErrorHandler")
+	_, err := fmt.Fprintln(rtx.Stdout, "hello from voidkid, now a HandlerE")
 	return err
 }
 -- scan/cmd/scan/.rotini.spec.yaml --
@@ -245,9 +245,9 @@ type Skipped struct{ Path, Reason string }
 
 func (s Skipped) String() string { return "skipped " + s.Path + ": " + s.Reason }
 
-var SkippedFiles = rotini.NewChannel[Skipped]("skipped", rotini.ClassInfo)
+var SkippedFiles = rotini.NewChannel[Skipped]("skipped", rotini.ChannelClassInfo)
 
-var _ rotini.ErrorHandler = (*scanHandler)(nil)
+var _ rotini.HandlerE = (*scanHandler)(nil)
 
 type scanHandler struct{ rotini.NoHooksE }
 

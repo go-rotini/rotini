@@ -62,7 +62,7 @@ type Command struct {
 	Metadata map[string]string
 
 	// Effects is what running the command does; nil when undeclared. See [CommandDef.Effects],
-	// and [RunEffects] for what this run's flags add.
+	// and [EffectsOf] for what this run's flags add.
 	Effects *Effects
 
 	// ExitStatus lists the exit codes the command documents: its own, else the root's. See

@@ -11,29 +11,30 @@ import (
 type ChannelClass uint8
 
 const (
-	// ClassInfo records print with the infos: neutral output, no bearing on the exit code.
-	ClassInfo ChannelClass = iota
-	// ClassSuccess records print with the successes.
-	ClassSuccess
-	// ClassWarning records print with the warnings, prefixed "Warning:", and never raise the
-	// exit code.
-	ClassWarning
-	// ClassError records are failures, as [Context.RecordError] records are: they print with
-	// the errors, prefixed "Error:", and count for the default exit code, [Context.Failed] and
-	// the error [Program.Run] returns. A ClassError channel's type must implement error.
-	ClassError
+	// ChannelClassInfo records print with the infos: neutral output, no bearing on the exit code.
+	ChannelClassInfo ChannelClass = iota
+	// ChannelClassSuccess records print with the successes.
+	ChannelClassSuccess
+	// ChannelClassWarning records print with the warnings, prefixed "Warning:", and never raise
+	// the exit code.
+	ChannelClassWarning
+	// ChannelClassError records are failures, as [Context.RecordError] records are: they print
+	// with the errors, prefixed "Error:", and count for the default exit code, [Context.Failed]
+	// and the error [Program.Run] returns. A ChannelClassError channel's type must implement
+	// error.
+	ChannelClassError
 )
 
 // String returns the class's name: info, success, warning or error.
 func (c ChannelClass) String() string {
 	switch c {
-	case ClassInfo:
+	case ChannelClassInfo:
 		return "info"
-	case ClassSuccess:
+	case ChannelClassSuccess:
 		return "success"
-	case ClassWarning:
+	case ChannelClassWarning:
 		return "warning"
-	case ClassError:
+	case ChannelClassError:
 		return "error"
 	}
 	return fmt.Sprintf("ChannelClass(%d)", uint8(c))
@@ -44,7 +45,7 @@ func (c ChannelClass) String() string {
 // reads it back, typed, with [Outcome.Records]. Declare one per kind of record, once, as a
 // package-level value:
 //
-//	var Skipped = rotini.NewChannel[SkippedFile]("skipped", rotini.ClassInfo)
+//	var Skipped = rotini.NewChannel[SkippedFile]("skipped", rotini.ChannelClassInfo)
 //
 //	// in a hook
 //	rtx.Record(Skipped, SkippedFile{Path: path, Reason: "binary"})
@@ -61,9 +62,9 @@ type Channel[T any] struct {
 
 // NewChannel returns the channel named name, of class class. It panics when name is empty or
 // is one of the built-in outcome names (info, success, warning, error, panic), when class is
-// not a declared ChannelClass, or when class is [ClassError] and T does not implement error.
-// A channel is identified by its name: two channels with one name must have the same type and
-// class, or recording into the second is a [*WiringError].
+// not a declared ChannelClass, or when class is [ChannelClassError] and T does not implement
+// error. A channel is identified by its name: two channels with one name must have the same
+// type and class, or recording into the second is a [*WiringError].
 func NewChannel[T any](name string, class ChannelClass) Channel[T] {
 	switch name {
 	case "":
@@ -71,11 +72,11 @@ func NewChannel[T any](name string, class ChannelClass) Channel[T] {
 	case "info", "success", "warning", "error", "panic":
 		panic(fmt.Sprintf("rotini: NewChannel: %q is a built-in outcome name", name))
 	}
-	if class > ClassError {
+	if class > ChannelClassError {
 		panic(fmt.Sprintf("rotini: NewChannel %q: unknown class %s", name, class))
 	}
-	if class == ClassError && !reflect.TypeFor[T]().Implements(reflect.TypeFor[error]()) {
-		panic(fmt.Sprintf("rotini: NewChannel %q: a ClassError channel needs a type that implements error, not %s",
+	if class == ChannelClassError && !reflect.TypeFor[T]().Implements(reflect.TypeFor[error]()) {
+		panic(fmt.Sprintf("rotini: NewChannel %q: a ChannelClassError channel needs a type that implements error, not %s",
 			name, reflect.TypeFor[T]()))
 	}
 	return Channel[T]{name: name, class: class}
@@ -99,8 +100,9 @@ type channelRecords struct {
 }
 
 // Record records v into ch for the reporter, in recording order. A nil v (a nil error or other
-// nil interface value) is ignored, as the built-in record methods ignore one. It is safe for
-// concurrent use.
+// nil interface value) is ignored, as the built-in record methods ignore one, and so is any v
+// recorded into the zero Channel, one [NewChannel] did not make. It is safe for concurrent
+// use.
 //
 // Recording into a channel whose name another channel of a different type or class already
 // used in this run records a [*WiringError] fault instead.
@@ -154,10 +156,10 @@ func (rtx *Context) copyChannels() []*channelRecords {
 	return out
 }
 
-// failedChannel reports whether any ClassError channel holds a record.
+// failedChannel reports whether any ChannelClassError channel holds a record.
 func failedChannel(channels []*channelRecords) bool {
 	for _, c := range channels {
-		if c.class == ClassError && len(c.values) > 0 {
+		if c.class == ChannelClassError && len(c.values) > 0 {
 			return true
 		}
 	}
@@ -192,15 +194,15 @@ func (o Outcome) channelValues(class ChannelClass) []any {
 	return out
 }
 
-// channelErrors returns the records of every ClassError channel, as errors.
+// channelErrors returns the records of every ChannelClassError channel, as errors.
 func (o Outcome) channelErrors() []error {
-	values := o.channelValues(ClassError)
+	values := o.channelValues(ChannelClassError)
 	if len(values) == 0 {
 		return nil
 	}
 	out := make([]error, 0, len(values))
 	for _, v := range values {
-		out = append(out, v.(error)) //nolint:forcetypeassert // NewChannel requires an error type for ClassError
+		out = append(out, v.(error)) //nolint:forcetypeassert // NewChannel requires an error type for ChannelClassError
 	}
 	return out
 }

@@ -39,35 +39,47 @@ type configWrite struct {
 	parse       func(raw string) error
 }
 
-// AllowSecretWrite lets [SetConfigValue] write a key declared secret. The file must not be
+// ConfigAllowSecretWrite lets [SetConfigValue] write a key declared secret. The file must not be
 // readable by other users: a new file is created with mode 0600, and an existing file readable
 // by its group or by others is refused, not changed. On Windows, where file modes don't
 // control who can read a file, neither check applies: the file gets its directory's access
 // control list, so keep it in a directory only its user can read, such as the user's profile.
-func AllowSecretWrite() ConfigWriteOption {
+func ConfigAllowSecretWrite() ConfigWriteOption {
 	return func(w *configWrite) { w.allowSecret = true }
 }
 
-// ToProfile writes into the named profile of a file that declares profiles, creating the
+// ConfigToProfile writes into the named profile of a file that declares profiles, creating the
 // profile when the file doesn't define it yet, instead of the profile the run selects.
-func ToProfile(name string) ConfigWriteOption {
+func ConfigToProfile(name string) ConfigWriteOption {
 	return func(w *configWrite) { w.profile, w.toProfile = name, true }
 }
 
-// ToSharedKeys writes the file's top-level keys, which every profile shares, instead of the
+// ConfigToSharedKeys writes the file's top-level keys, which every profile shares, instead of the
 // profile the run selects.
-func ToSharedKeys() ConfigWriteOption {
+func ConfigToSharedKeys() ConfigWriteOption {
 	return func(w *configWrite) { w.shared = true }
 }
 
-// ParseConfigValue checks the raw value of a key whose type rotini can't parse itself, one a
+// ConfigValueCheck checks the raw value of a key whose type rotini can't parse itself, one a
 // spec takes from `import:`; the value is then written as the string given. For any other key
 // fn runs after rotini's own checks. An error from fn is reported as an invalid value.
-func ParseConfigValue(fn func(raw string) error) ConfigWriteOption {
+func ConfigValueCheck(fn func(raw string) error) ConfigWriteOption {
 	return func(w *configWrite) { w.parse = fn }
 }
 
-// SetConfigValue writes raw as key's value in the configuration file declared as file (its
+// Deprecated: use [ConfigAllowSecretWrite].
+func AllowSecretWrite() ConfigWriteOption { return ConfigAllowSecretWrite() }
+
+// Deprecated: use [ConfigToProfile].
+func ToProfile(name string) ConfigWriteOption { return ConfigToProfile(name) }
+
+// Deprecated: use [ConfigToSharedKeys].
+func ToSharedKeys() ConfigWriteOption { return ConfigToSharedKeys() }
+
+// Deprecated: use [ConfigValueCheck].
+func ParseConfigValue(fn func(raw string) error) ConfigWriteOption { return ConfigValueCheck(fn) }
+
+// SetConfigValue writes raw as key's value in the configuration file declared as name (its
 // config_files name), for a command such as `config set <key> <value>`. It writes nothing on
 // any failure.
 //
@@ -75,7 +87,7 @@ func ParseConfigValue(fn func(raw string) error) ConfigWriteOption {
 // reads from the file, raw is split on the key's separator for a list (map entries are
 // key=value) and must parse as the key's type, and the enum, bounds, pattern and item counts
 // apply. An enum value is written in its declared spelling, numbers and booleans as such, and
-// everything else as a string. A key declared secret is refused without [AllowSecretWrite].
+// everything else as a string. A key declared secret is refused without [ConfigAllowSecretWrite].
 // When the file declares a schema, the edited file must still match it.
 //
 // The file is the one the command reads: its config_source path, else its fixed path or its
@@ -92,34 +104,34 @@ func ParseConfigValue(fn func(raw string) error) ConfigWriteOption {
 // writing the same file at once can lose one of the changes.
 //
 // In a file that declares profiles, the value goes into the profile the run selects, unless
-// [ToProfile] or [ToSharedKeys] says otherwise; with no profile selected it goes into the
+// [ConfigToProfile] or [ConfigToSharedKeys] says otherwise; with no profile selected it goes into the
 // shared keys. A value written to the shared keys that the selected profile overrides is
 // recorded as a warning.
 //
 // Errors are [*InputError] values: a usage error for what the user can fix (an unknown key,
 // an invalid value, a file that can't be parsed or written), an internal one for the author's
-// mistakes (an unknown file name, a key of a custom type without [ParseConfigValue]). A
+// mistakes (an unknown file name, a key of a custom type without [ConfigValueCheck]). A
 // feature the write needs that the program doesn't wire ([ConfigFiles], the file's codec,
 // [Schemas]) is a [*WiringError].
-func SetConfigValue(rtx *Context, file, key, raw string, opts ...ConfigWriteOption) error {
-	return writeConfigValue(rtx, file, key, &raw, opts)
+func SetConfigValue(rtx *Context, name, key, raw string, opts ...ConfigWriteOption) error {
+	return writeConfigValue(rtx, name, key, &raw, opts)
 }
 
-// UnsetConfigValue removes key from the configuration file declared as file, as
+// UnsetConfigValue removes key from the configuration file declared as name, as
 // [SetConfigValue] would write it: from the selected profile of a file with profiles, unless
-// [ToProfile] or [ToSharedKeys] says otherwise. Comment lines above the key stay, and mappings
+// [ConfigToProfile] or [ConfigToSharedKeys] says otherwise. Comment lines above the key stay, and mappings
 // the removal leaves empty are removed, except a profile and the key holding the profiles.
 // Removing a key the file doesn't hold, or from a file that doesn't exist, is not an error.
-func UnsetConfigValue(rtx *Context, file, key string, opts ...ConfigWriteOption) error {
-	return writeConfigValue(rtx, file, key, nil, opts)
+func UnsetConfigValue(rtx *Context, name, key string, opts ...ConfigWriteOption) error {
+	return writeConfigValue(rtx, name, key, nil, opts)
 }
 
-// ConfigFilePath reports the file the configuration file declared as file resolves to for
+// ConfigFilePath reports the file the configuration file declared as name resolves to for
 // this run, the one [SetConfigValue] writes, and whether it exists. It suits a
 // `config path` command. A file found in the system configuration directories is an error,
 // as it is for writing.
-func ConfigFilePath(rtx *Context, file string) (path string, exists bool, err error) {
-	t, err := configTarget(rtx, file)
+func ConfigFilePath(rtx *Context, name string) (path string, exists bool, err error) {
+	t, err := configTarget(rtx, name)
 	if err != nil {
 		return "", false, err
 	}
@@ -204,7 +216,7 @@ func writeConfigValue(rtx *Context, file, key string, raw *string, opts []Config
 func (w configWrite) checkTarget(f ConfigFile) error {
 	switch {
 	case w.toProfile && w.shared:
-		return internalBind(channelConfig, f.Name, "ToProfile and ToSharedKeys can't be used together", nil)
+		return internalBind(channelConfig, f.Name, "ToProfile and ConfigToSharedKeys can't be used together", nil)
 	case w.toProfile && f.Profiles == nil:
 		return internalBind(channelConfig, f.Name, fmt.Sprintf("configuration file %q declares no profiles", f.Name), nil)
 	case w.toProfile && w.profile == "":

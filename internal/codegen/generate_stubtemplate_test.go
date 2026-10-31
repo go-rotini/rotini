@@ -54,7 +54,7 @@ import (
 	{{.RuntimeImport}}
 )
 
-var _ rotini.ErrorHandler = (*{{.HandlerType}})(nil)
+var _ rotini.HandlerE = (*{{.HandlerType}})(nil)
 
 // {{.HandlerType}} runs ` + "`{{.Invocation}}`" + `.
 type {{.HandlerType}} struct {
@@ -354,8 +354,8 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {}
 		t.Fatal(err)
 	}
 	gen := readText(t, filepath.Join(dir, "internal", "cmd", "demo", "zz_demo.go"))
-	if strings.Contains(gen, "FromErrorHandler(&demoShipHandler") {
-		t.Errorf("the wiring wraps a rotini.Handler stub as an ErrorHandler:\n%s", gen)
+	if strings.Contains(gen, "FromHandlerE(&demoShipHandler") {
+		t.Errorf("the wiring wraps a rotini.Handler stub as a HandlerE:\n%s", gen)
 	}
 	if !strings.Contains(gen, "&demoShipHandler{}") {
 		t.Errorf("the wiring doesn't return the stub:\n%s", gen)
@@ -368,7 +368,7 @@ func TestStubTemplate_warnsWithoutMarker(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
 	writeTestFile(t, dir, ".rotini.spec.yaml", stubTemplateSpec)
-	writeTestFile(t, dir, "stub.tmpl", strings.Replace(teamStub, "var _ rotini.ErrorHandler = (*{{.HandlerType}})(nil)\n", "", 1))
+	writeTestFile(t, dir, "stub.tmpl", strings.Replace(teamStub, "var _ rotini.HandlerE = (*{{.HandlerType}})(nil)\n", "", 1))
 	writeTestFile(t, dir, ".rotini.conf.yaml", stubTemplateConf("stub.tmpl", ""))
 	t.Chdir(dir)
 	var warnings []error
@@ -381,7 +381,7 @@ func TestStubTemplate_warnsWithoutMarker(t *testing.T) {
 	}
 	var found bool
 	for _, w := range warnings {
-		found = found || strings.Contains(w.Error(), "stub_template stub.tmpl renders no `var _ rotini.ErrorHandler") && strings.Contains(w.Error(), "(demo.go, demo_ship.go)")
+		found = found || strings.Contains(w.Error(), "stub_template stub.tmpl renders no `var _ rotini.HandlerE") && strings.Contains(w.Error(), "(demo.go, demo_ship.go)")
 	}
 	if !found {
 		t.Errorf("warnings = %v, want the missing-marker notice", warnings)

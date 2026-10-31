@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// errHooks is an ErrorHandler that logs each hook and returns the error configured for it.
+// errHooks is a HandlerE that logs each hook and returns the error configured for it.
 type errHooks struct {
 	name string
 	log  *[]string
@@ -37,7 +37,7 @@ func (h *errHooks) CascadingPostRun(_ context.Context, rtx *Context) error {
 	return h.hook("CascadingPostRun", rtx)
 }
 
-var _ ErrorHandler = (*errHooks)(nil)
+var _ HandlerE = (*errHooks)(nil)
 
 // runErrHooks runs `app sub` with the root's and sub's handlers, returning the exit code, the
 // run's error and stderr.
@@ -59,7 +59,7 @@ func runErrHooks(t *testing.T, root, sub Handler) (code int, err error, stderr s
 	return code, err, e.String()
 }
 
-func TestErrorHandler_returnedErrors(t *testing.T) {
+func TestHandlerE_returnedErrors(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("boom")
 	full := []string{
@@ -83,8 +83,8 @@ func TestErrorHandler_returnedErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var log []string
-			root := FromErrorHandler(&errHooks{name: "app", log: &log})
-			sub := FromErrorHandler(&errHooks{name: "sub", log: &log, errs: map[string]error{tt.at: boom}})
+			root := FromHandlerE(&errHooks{name: "app", log: &log})
+			sub := FromHandlerE(&errHooks{name: "sub", log: &log, errs: map[string]error{tt.at: boom}})
 			code, err, stderr := runErrHooks(t, root, sub)
 			if !slices.Equal(log, tt.wantLog) {
 				t.Errorf("hooks ran\n  %v\nwant\n  %v", log, tt.wantLog)
@@ -99,20 +99,20 @@ func TestErrorHandler_returnedErrors(t *testing.T) {
 	}
 }
 
-func TestErrorHandler_nilReturnsRunEverything(t *testing.T) {
+func TestHandlerE_nilReturnsRunEverything(t *testing.T) {
 	t.Parallel()
 	var log []string
 	code, err, stderr := runErrHooks(t,
-		FromErrorHandler(&errHooks{name: "app", log: &log}),
-		FromErrorHandler(&errHooks{name: "sub", log: &log}))
+		FromHandlerE(&errHooks{name: "app", log: &log}),
+		FromHandlerE(&errHooks{name: "sub", log: &log}))
 	if code != 0 || err != nil || stderr != "" || len(log) != 7 {
 		t.Errorf("code=%d err=%v stderr=%q hooks=%v; want a clean run of all seven hooks", code, err, stderr, log)
 	}
 }
 
-// TestErrorHandler_noDoubleRecord pins that a hook returning the error it just recorded
+// TestHandlerE_noDoubleRecord pins that a hook returning the error it just recorded
 // reports it once, and that a different error is recorded as well.
-func TestErrorHandler_noDoubleRecord(t *testing.T) {
+func TestHandlerE_noDoubleRecord(t *testing.T) {
 	t.Parallel()
 	first, second := errors.New("first"), errors.New("second")
 	tests := []struct {
@@ -134,7 +134,7 @@ func TestErrorHandler_noDoubleRecord(t *testing.T) {
 			var log []string
 			sub := &errHooks{name: "sub", log: &log,
 				errs: map[string]error{"Run": tt.ret}, do: map[string]func(*Context){"Run": tt.record}}
-			_, _, stderr := runErrHooks(t, FromErrorHandler(&errHooks{name: "app", log: &log}), FromErrorHandler(sub))
+			_, _, stderr := runErrHooks(t, FromHandlerE(&errHooks{name: "app", log: &log}), FromHandlerE(sub))
 			if stderr != tt.want {
 				t.Errorf("stderr = %q, want %q", stderr, tt.want)
 			}
@@ -147,44 +147,44 @@ type uncomparableErr struct{ parts []string }
 
 func (e uncomparableErr) Error() string { return strings.Join(e.parts, ",") }
 
-func TestErrorHandler_uncomparableErrors(t *testing.T) {
+func TestHandlerE_uncomparableErrors(t *testing.T) {
 	t.Parallel()
 	var log []string
 	e := uncomparableErr{parts: []string{"a", "b"}}
 	sub := &errHooks{name: "sub", log: &log,
 		errs: map[string]error{"Run": e}, do: map[string]func(*Context){"Run": func(rtx *Context) { rtx.RecordError(e) }}}
-	code, _, stderr := runErrHooks(t, FromErrorHandler(&errHooks{name: "app", log: &log}), FromErrorHandler(sub))
+	code, _, stderr := runErrHooks(t, FromHandlerE(&errHooks{name: "app", log: &log}), FromHandlerE(sub))
 	// An uncomparable value can't be told apart from a different one, so both are kept.
 	if code != 1 || stderr != "Error: a,b\nError: a,b\n" {
 		t.Errorf("code=%d stderr=%q", code, stderr)
 	}
 }
 
-func TestErrorHandler_codeWithoutError(t *testing.T) {
+func TestHandlerE_codeWithoutError(t *testing.T) {
 	t.Parallel()
 	var log []string
 	root := &errHooks{name: "app", log: &log,
 		do: map[string]func(*Context){"CascadingPreRun": func(rtx *Context) { rtx.HaltWithCode(0) }}}
-	code, err, _ := runErrHooks(t, FromErrorHandler(root), FromErrorHandler(&errHooks{name: "sub", log: &log}))
+	code, err, _ := runErrHooks(t, FromHandlerE(root), FromHandlerE(&errHooks{name: "sub", log: &log}))
 	if code != 0 || err != nil || slices.Contains(log, "sub.Run") {
 		t.Errorf("code=%d err=%v hooks=%v; want a clean stop before Run", code, err, log)
 	}
 }
 
-// TestErrorHandler_mixedShapes runs a void root over an error-returning sub-command, as a
+// TestHandlerE_mixedShapes runs a void root over an error-returning sub-command, as a
 // parent composing children of either shape does.
-func TestErrorHandler_mixedShapes(t *testing.T) {
+func TestHandlerE_mixedShapes(t *testing.T) {
 	t.Parallel()
 	var log []string
 	root := &actHandler{name: "app", log: &log}
-	sub := FromErrorHandler(&errHooks{name: "sub", log: &log, errs: map[string]error{"PreRun": errors.New("no")}})
+	sub := FromHandlerE(&errHooks{name: "sub", log: &log, errs: map[string]error{"PreRun": errors.New("no")}})
 	code, _, stderr := runErrHooks(t, root, sub)
 	if code != 1 || stderr != "Error: no\n" || slices.Contains(log, "sub.Run") || !slices.Contains(log, "app.CascadingPostRun") {
 		t.Errorf("code=%d stderr=%q hooks=%v", code, stderr, log)
 	}
 }
 
-func TestErrorHandler_embedsAndNil(t *testing.T) {
+func TestHandlerE_embedsAndNil(t *testing.T) {
 	t.Parallel()
 	var h NoHooksE
 	ctx, rtx := context.Background(), NewContextFor(Definition{Name: "app"}, nil)
@@ -195,19 +195,19 @@ func TestErrorHandler_embedsAndNil(t *testing.T) {
 			t.Errorf("a no-op hook returned %v", err)
 		}
 	}
-	if FromErrorHandler(nil) != nil {
-		t.Error("FromErrorHandler(nil) is not nil")
+	if FromHandlerE(nil) != nil {
+		t.Error("FromHandlerE(nil) is not nil")
 	}
 }
 
-// errSet is a handler set for NewProgram whose method returns an ErrorHandler.
+// errSet is a handler set for NewProgram whose method returns a HandlerE.
 type errSet struct{ log *[]string }
 
-func (s errSet) App() ErrorHandler {
+func (s errSet) App() HandlerE {
 	return &errHooks{name: "app", log: s.log, errs: map[string]error{"Run": errors.New("from reflection")}}
 }
 
-func TestNewProgram_acceptsErrorHandler(t *testing.T) {
+func TestNewProgram_acceptsHandlerE(t *testing.T) {
 	t.Parallel()
 	var log []string
 	p := NewProgram(Definition{Name: "app", Handler: "App"}, errSet{log: &log})
@@ -219,18 +219,18 @@ func TestNewProgram_acceptsErrorHandler(t *testing.T) {
 	}
 }
 
-// errCompleter is an ErrorHandler that also completes its argument.
+// errCompleter is a HandlerE that also completes its argument.
 type errCompleter struct{ NoHooksE }
 
 func (errCompleter) Run(context.Context, *Context) error { return nil }
 
 func (errCompleter) CompleteArgValue(*Context, string, string) []string { return []string{"alpha"} }
 
-// TestFromErrorHandler_keepsCompleters pins that wrapping a handler doesn't hide the completer
+// TestFromHandlerE_keepsCompleters pins that wrapping a handler doesn't hide the completer
 // methods completion looks for.
-func TestFromErrorHandler_keepsCompleters(t *testing.T) {
+func TestFromHandlerE_keepsCompleters(t *testing.T) {
 	t.Parallel()
-	lookup := func(string) (Handler, bool) { return FromErrorHandler(errCompleter{}), true }
+	lookup := func(string) (Handler, bool) { return FromHandlerE(errCompleter{}), true }
 	c, ok := resolveHandler[ArgValueCompleter](lookup, "App")
 	if !ok || !slices.Equal(c.CompleteArgValue(nil, "", ""), []string{"alpha"}) {
 		t.Errorf("the wrapped handler's ArgValueCompleter was not found")

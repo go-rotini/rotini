@@ -222,7 +222,7 @@ func load() []Task { return []Task{{ID: 1, Title: "write docs", Status: "open"}}
 
 -- export.go.txt --
 func export(rtx *rotini.Context, path string, force bool) error {
-	out, err := rotini.CreateOutput(rtx, path, rotini.Overwrite(force))
+	out, err := rotini.CreateOutput(rtx, path, rotini.OutputOverwrite(force))
 	if err != nil {
 		return err
 	}

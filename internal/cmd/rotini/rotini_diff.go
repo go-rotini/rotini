@@ -12,7 +12,7 @@ import (
 	"github.com/go-rotini/rotini/internal/contractdiff"
 )
 
-var _ rotini.ErrorHandler = (*rotiniDiffHandler)(nil)
+var _ rotini.HandlerE = (*rotiniDiffHandler)(nil)
 
 // diffDep is the codegen entry point the diff handler calls; see dependencies.go.
 var diffDep = rotini.NewDependency[codegen.DiffFn]("rotini.diff")
@@ -54,7 +54,7 @@ func (*rotiniDiffHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 
 	rtx.SetDependencyIfAbsent(diffDep, codegen.NewProcessor(rtx.Version()).Diff)
-	report, err := rtx.MustGetDependency(diffDep)(spec, conf, args.Old, args.New, release)
+	report, err := rtx.MustDependency(diffDep)(spec, conf, args.Old, args.New, release)
 	if err != nil {
 		return problems(rtx, err)
 	}

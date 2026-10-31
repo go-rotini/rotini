@@ -7,7 +7,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*demoRemoteHandler)(nil)
+var _ rotini.HandlerE = (*demoRemoteHandler)(nil)
 
 type demoRemoteHandler struct {
 	rotini.NoCascadingPreRunE
@@ -22,5 +22,5 @@ func (*demoRemoteHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	return rotini.MissingCommand(rtx)
+	return rotini.MissingCommandError(rtx)
 }

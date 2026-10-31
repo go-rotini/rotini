@@ -36,7 +36,7 @@ stderr '^panic: boom'
 stderr 'todoBoomHandler\)\.Run'
 env TODO_PANIC=
 
-# A dependency MustGetDependency can't find reaches the reporter as a panic.
+# A dependency MustDependency can't find reaches the reporter as a panic.
 wantexit 1 ./todo$exe dep
 stderr '^Fatal Error: .*todo\.store'
 
@@ -61,7 +61,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoHandler)(nil)
+var _ rotini.HandlerE = (*todoHandler)(nil)
 
 -- timeout.go.txt --
 type todoHandler struct {
@@ -152,7 +152,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoBoomHandler)(nil)
+var _ rotini.HandlerE = (*todoBoomHandler)(nil)
 
 type todoBoomHandler struct {
 	rotini.NoCascadingPreRunE
@@ -178,14 +178,14 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoDepHandler)(nil)
+var _ rotini.HandlerE = (*todoDepHandler)(nil)
 
 var storeDep = rotini.NewDependency[string]("todo.store")
 
 type todoDepHandler struct{ rotini.NoHooksE }
 
 func (*todoDepHandler) Run(ctx context.Context, rtx *rotini.Context) error {
-	_ = rtx.MustGetDependency(storeDep)
+	_ = rtx.MustDependency(storeDep)
 	return nil
 }
 -- internal/cmd/todo/todo_deadline.go --
@@ -198,7 +198,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoDeadlineHandler)(nil)
+var _ rotini.HandlerE = (*todoDeadlineHandler)(nil)
 
 type todoDeadlineHandler struct{ rotini.NoHooksE }
 
@@ -218,7 +218,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*todoWaitHandler)(nil)
+var _ rotini.HandlerE = (*todoWaitHandler)(nil)
 
 type todoWaitHandler struct{ rotini.NoHooksE }
 

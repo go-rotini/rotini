@@ -40,7 +40,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*profdemoHandler)(nil)
+var _ rotini.HandlerE = (*profdemoHandler)(nil)
 
 type profdemoHandler struct {
 	rotini.NoPreRunE
@@ -116,7 +116,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.ErrorHandler = (*profdemoWorkHandler)(nil)
+var _ rotini.HandlerE = (*profdemoWorkHandler)(nil)
 
 type profdemoWorkHandler struct {
 	rotini.NoCascadingPreRunE

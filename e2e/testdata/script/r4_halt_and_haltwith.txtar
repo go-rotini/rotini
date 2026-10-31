@@ -163,7 +163,7 @@ type haltWorkHandler struct {
 func (*haltWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "WORK RAN")
 
-	if mode, _ := rtx.GetDependency(modeDep); mode == "halt-in-run" {
+	if mode, _ := rtx.LookupDependency(modeDep); mode == "halt-in-run" {
 		// Inert. Run is the last forward step, so there is nothing left to stop — the
 		// teardown that follows is not forward progress and Halt does not touch it.
 		rtx.Halt()
