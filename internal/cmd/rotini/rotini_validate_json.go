@@ -9,24 +9,20 @@ import (
 
 // validateJSON runs `rotini validate --format json`: one JSON object listing every problem on
 // stdout, nothing else there, and exit 1 when any problem is an error.
-func validateJSON(rtx *rotini.Context, specPath string, flags RotiniValidateFlags) {
+func validateJSON(rtx *rotini.Context, specPath string, flags RotiniValidateFlags) error {
 	if flags.Watch {
-		rtx.HaltWith(rotini.UsageError(errors.New("--format json can't be combined with --watch; a watch reports each pass as it happens")))
-		return
+		return rotini.UsageError(errors.New("--format json can't be combined with --watch; a watch reports each pass as it happens"))
 	}
 	if err := notDirectories(specPath, flags.ConfFilePath); err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return
+		return rotini.UsageError(err)
 	}
 	spec, conf, err := codegen.ResolvePaths(specPath, flags.ConfFilePath)
 	if err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return
+		return rotini.UsageError(err)
 	}
 	release, err := releaseOf(rtx, spec, conf, flags.Release)
 	if err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return
+		return rotini.UsageError(err)
 	}
 	rtx.SetDependencyIfAbsent(validateDep, codegen.NewProcessor(rtx.Version()).Validate)
 	validate := rtx.MustGetDependency(validateDep)
@@ -50,12 +46,12 @@ func validateJSON(rtx *rotini.Context, specPath string, flags RotiniValidateFlag
 		add(w, true)
 	}
 	if err := rtx.WriteOutput(out, "json", nil); err != nil {
-		haltWithWriteError(rtx, err)
-		return
+		return writeError(err)
 	}
 	if failed != nil {
 		rtx.HaltWithCode(1)
-		return
+		return nil //nolint:nilerr // the problems are in the JSON on stdout; the exit code alone says it failed
 	}
 	rtx.HaltWithCode(0)
+	return nil
 }

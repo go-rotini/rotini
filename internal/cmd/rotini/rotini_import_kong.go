@@ -7,24 +7,23 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handler = (*rotiniImportKongHandler)(nil)
+var _ rotini.ErrorHandler = (*rotiniImportKongHandler)(nil)
 
 type rotiniImportKongHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniImportKongHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniImportKongHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniImportKongInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 	args := inputs.RotiniImportKong.Arguments
 	flags := inputs.RotiniImportKong.Flags
-	runImport(ctx, rtx, codegen.ImportOptions{
+	return runImport(ctx, rtx, codegen.ImportOptions{
 		Framework: codegen.FrameworkKong,
 		Package:   args.Package,
 		Root:      flags.Root,

@@ -30,6 +30,8 @@ var (
 	templateMain string
 	//go:embed templates/handler.go.tmpl
 	templateHandlerStub string
+	//go:embed templates/handler_error.go.tmpl
+	templateErrorHandlerStub string
 	//go:embed templates/rotini.go.tmpl
 	templateRotini string
 
@@ -307,6 +309,7 @@ type templateHandlerData struct {
 	Invocation    string // how a user types the command, e.g. "rotini generate"
 	Prefix        string // this command's frame inside the inputs type, e.g. inputs.RotiniGenerate
 	RuntimeImport string
+	ErrorHooks    bool // seed an ErrorHandler (conf hook_returns: error), from templates/handler_error.go.tmpl
 
 	// The seeded Run body, derived from the spec and conf (a --help flag with the help
 	// feature on, a --version flag, a `help` command with a variadic path argument).
@@ -334,6 +337,9 @@ type templateHandlerData struct {
 }
 
 func renderHandlerStubFile(data templateHandlerData) ([]byte, error) {
+	if data.ErrorHooks {
+		return renderGoFileWithHeader(data.Header, "handler", templateErrorHandlerStub, data)
+	}
 	return renderGoFileWithHeader(data.Header, "handler", templateHandlerStub, data)
 }
 
@@ -350,6 +356,7 @@ type templateHandlersMethod struct {
 	Composed       bool
 	Passthrough    bool   // delegate via alias.method() instead of alias.Handlers().method()
 	HandlerType    string // own commands: the local handler struct name
+	ErrorHooks     bool   // own commands: the handler is an ErrorHandler, wrapped in FromErrorHandler
 	DelegateAlias  string // composed commands: the child import alias
 	DelegateMethod string // composed commands: the child's ProgramHandlers method, or the convention
 }

@@ -286,14 +286,14 @@ func returnsHandler(fn *ast.FuncDecl) bool {
 	return false
 }
 
-// assertsHandler reports whether t names the Handler interface, under any
+// assertsHandler reports whether t names the Handler or ErrorHandler interface, under any
 // package qualifier (rotini.Handler, rt.Handler) or none (a dot import).
 func assertsHandler(t ast.Expr) bool {
 	switch v := t.(type) {
 	case *ast.SelectorExpr:
-		return v.Sel != nil && v.Sel.Name == "Handler"
+		return v.Sel != nil && (v.Sel.Name == "Handler" || v.Sel.Name == "ErrorHandler")
 	case *ast.Ident:
-		return v.Name == "Handler"
+		return v.Name == "Handler" || v.Name == "ErrorHandler"
 	}
 	return false
 }
@@ -308,6 +308,18 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 	}
 
 	var found []auditFinding
+
+	// An ErrorHandler's no-ops are the No*E types: a type is one when a hook, or the
+	// misspelled method itself, returns a result.
+	errorShaped := map[string]bool{}
+	for _, f := range files {
+		for _, d := range f.Decls {
+			if fd, ok := d.(*ast.FuncDecl); ok && fd.Recv != nil && len(fd.Recv.List) > 0 && hook[fd.Name.Name] &&
+				fd.Type.Results != nil && len(fd.Type.Results.List) > 0 {
+				errorShaped[receiverTypeName(fd.Recv.List[0].Type)] = true
+			}
+		}
+	}
 
 	for _, f := range files {
 		for _, d := range f.Decls {
@@ -327,10 +339,14 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 			if match == "" {
 				continue
 			}
+			embed := "No" + match
+			if errorShaped[recv] || (fd.Type.Results != nil && len(fd.Type.Results.List) > 0) {
+				embed += "E"
+			}
 			at := findingAt(fset, fd.Name.Pos(), moduleRoot)
 			at.msg = didYouMean(fmt.Sprintf(
-				"%s:%d: method %q on %s is not a lifecycle hook, so it will never run; rotini.No%s is what supplies %s",
-				at.file, at.line, name, recv, match, match,
+				"%s:%d: method %q on %s is not a lifecycle hook, so it will never run; rotini.%s is what supplies %s",
+				at.file, at.line, name, recv, embed, match,
 			), name, auditedHooks)
 			found = append(found, at)
 		}

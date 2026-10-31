@@ -12,20 +12,19 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handler = (*rotiniInitializeHandler)(nil)
+var _ rotini.ErrorHandler = (*rotiniInitializeHandler)(nil)
 
 type rotiniInitializeHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniInitializeInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 	args := inputs.RotiniInitialize.Arguments
 	flags := inputs.RotiniInitialize.Flags
@@ -33,8 +32,7 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	// The name becomes the generated Go package's name, which a keyword can't be, and main
 	// can't be imported.
 	if token.IsKeyword(args.Name) || args.Name == "main" {
-		rtx.HaltWith(rotini.UsageError(fmt.Errorf("invalid CLI name %q: it would name the generated Go package, and %s; choose another name", args.Name, reservedWhy(args.Name))))
-		return
+		return rotini.UsageError(fmt.Errorf("invalid CLI name %q: it would name the generated Go package, and %s; choose another name", args.Name, reservedWhy(args.Name)))
 	}
 
 	version := rtx.Version()
@@ -43,16 +41,13 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SetDependencyIfAbsent(initializeDryRunDep, codegen.NewProcessor(version).InitializeDryRun)
 		planned, err := rtx.MustGetDependency(initializeDryRunDep)(args.Name, opt)
 		if err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 		printWarnings(rtx)(planned.Notices)
 		if _, err := fmt.Fprint(rtx.Stdout, seedLines(planned)); err != nil {
-			haltWithWriteError(rtx, err)
-			return
+			return writeError(err)
 		}
-		reportPlanned(rtx, planned.Result, planned.Changes)
-		return
+		return reportPlanned(rtx, planned.Result, planned.Changes)
 	}
 
 	rtx.SetDependencyIfAbsent(initializeDep, codegen.NewProcessor(version).Initialize)
@@ -60,15 +55,13 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 
 	written, err := initialize(args.Name, opt)
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 
 	// The notices are generate's: validation warnings, and each handler disabled or restored.
 	printWarnings(rtx)(written.Notices)
 	if _, err := fmt.Fprintf(rtx.Stdout, "%s%s\n", seedLines(written), written.Result); err != nil {
-		haltWithWriteError(rtx, err)
-		return
+		return writeError(err)
 	}
 
 	// init does not edit go.mod, so it warns when the module does not yet require the runtime
@@ -76,6 +69,7 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if !requiresRuntime(".") {
 		rtx.RecordWarning(missingRuntime(".", "building ./cmd/"+args.Name))
 	}
+	return nil
 }
 
 func reservedWhy(name string) string {

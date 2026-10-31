@@ -66,7 +66,7 @@
 //
 //	// package parent, in its CascadingPreRun
 //	in, err := rtx.Inputs[ParentInputs]()
-//	if err != nil { rtx.HaltWith(err); return }
+//	if err != nil { return err }
 //	rtx.SetDependency(child.Kubeconfig, in.Parent.Flags.Kubeconfig)
 //
 // `rotini validate` follows refs, validates each locally composed spec as its own document and
@@ -78,11 +78,13 @@
 //
 // The generated entrypoint builds a [Program] with [NewWiredProgram], passing the runtime
 // features its spec uses, and calls [Program.Execute], which resolves the invoked command from
-// argv, runs its [Handler] hooks, and exits. Each invocation carries a [Context]: the argv, the
-// resolved chain, the program's streams and its dependencies. A handler stops with
-// [Context.HaltWith], [Context.Halt], [Context.HaltWithCode] or [Context.Exit]; recorded
-// errors, recovered panics and detected faults are reported once, after teardown, by the
-// outcome reporter.
+// argv, runs its handler's hooks, and exits. Each invocation carries a [Context]: the argv, the
+// resolved chain, the program's streams and its dependencies. A handler is an [ErrorHandler],
+// whose hooks fail by returning an error, or a [Handler], whose hooks return nothing and fail
+// with [Context.HaltWith]; `rotini init` seeds the first (conf `hook_returns: error`), and one
+// program may mix both. A handler stops with a returned error, [Context.HaltWith],
+// [Context.Halt], [Context.HaltWithCode] or [Context.Exit]; recorded errors, recovered panics
+// and detected faults are reported once, after teardown, by the outcome reporter.
 //
 // The runtime resolves only which command was invoked. Flags and arguments are parsed and
 // validated when a handler calls [Context.Inputs] (or the per-channel [Context.ArgvInputs],
@@ -176,22 +178,36 @@
 // # Outcomes
 //
 // A handler does not print its outcome; it records it, and one reporter ([Program.WithReporter])
-// receives all five channels as an [Outcome] once the lifecycle finishes:
+// receives every channel as an [Outcome] once the lifecycle finishes:
 //
 //   - [Context.RecordInfo] — neutral informational output.
 //   - [Context.RecordSuccess] — what succeeded.
 //   - [Context.RecordWarning] — non-fatal: a deprecation, a fallback. Never changes the code.
-//   - [Context.RecordError] — the end user's failures: a bad input, a domain error.
+//   - [Context.RecordError] — the end user's failures: a bad input, a domain error. An error
+//     an [ErrorHandler] hook returns is recorded here.
 //   - Recovered panics and rotini-detected faults, captured by the runtime; there is no record
 //     call for them.
+//   - [Context.Record] — a [Channel] of the author's own, holding typed values the reporter
+//     reads back with [Outcome.Records]. Its [ChannelClass] says how rotini's reporters print
+//     it, and a [ClassError] channel counts as a failure, as recorded errors do.
+//
+// An author channel is declared once and used from both ends; rotini's own records always go
+// to the built-in channels:
+//
+//	var Skipped = rotini.NewChannel[SkippedFile]("skipped", rotini.ClassInfo)
+//
+//	rtx.Record(Skipped, SkippedFile{Path: path, Reason: "binary"}) // in a hook
+//	for _, s := range out.Records(Skipped) { … }                   // in the reporter
 //
 // Recording does not stop the run. The reporter is called only when some channel is non-empty,
 // so a run that records nothing exits silently with code 0 unless a handler set one.
 //
-// A handler stops in one of four ways:
+// A handler stops in one of these ways:
 //
-//   - [Context.HaltWith] records an error and stops forward progress, setting no code. It is
-//     the usual way for a hook to fail.
+//   - An [ErrorHandler] hook returns an error: it is recorded, and from CascadingPreRun or
+//     PreRun forward progress stops. It is the usual way for a hook to fail.
+//   - [Context.HaltWith] records an error and stops forward progress, setting no code: the
+//     same failure from a [Handler] hook, or from inside a helper.
 //   - [Context.Halt] stops forward progress without recording anything or setting a code.
 //   - [Context.HaltWithCode] stops and sets a code, when the code carries meaning: a filter
 //     reporting "no match" as 1, a wrapper passing through a child's status.
@@ -200,7 +216,8 @@
 // A hook that records a failure without stopping lets the next hook run, often repeating the
 // same failure.
 //
-// The default reporter prints infos, warnings, errors, panics, then successes, all to stderr so
+// The default reporter prints infos, warnings, errors, panics, then successes, each followed by
+// the records of the author channels of that class, all to stderr so
 // stdout carries only what handlers write, then applies the exit floor: a recorded error or
 // fault exits 1 unless a handler already set a non-zero code. It leaves out an error the run's
 // own signal trap caused, since that run exits 128+n anyway. A custom reporter receives every

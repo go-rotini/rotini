@@ -155,22 +155,22 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoShowHandler)(nil)
+var _ rotini.ErrorHandler = (*todoShowHandler)(nil)
 
 type todoShowHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*todoShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoShowHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoShowInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	s := in.TodoShow
 	fmt.Fprintf(rtx.Stdout, "region=%s\nfile=%s\nnote=%s\ngreeting=%s\nzone=%s\ndir=%s\n",
 		s.Flags.Region, s.Flags.File, s.Flags.Note, s.Env.Greeting, s.Config.Zone, rtx.Dir())
+	return nil
 }

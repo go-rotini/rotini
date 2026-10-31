@@ -1,0 +1,185 @@
+package {{.Package}}
+
+import (
+	"context"
+	"fmt"
+
+	{{.RuntimeImport}}
+)
+
+var _ rotini.ErrorHandler = (*{{.HandlerType}})(nil)
+
+type {{.HandlerType}} struct {
+{{- if not .RootHook}}
+	rotini.NoCascadingPreRunE
+{{- end}}
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+{{- if .RootHook}}
+
+func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
+	argv, err := rtx.ArgvInputs[{{.InputsType}}]()
+	if err != nil {
+		return err
+	}
+	inputs := argv.Values
+{{- if .RootHelpFlag}}
+
+	if inputs.{{.Prefix}}.Flags.{{.RootHelpFlag}} {
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			return err
+		}
+
+		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
+			return err
+		}
+
+		rtx.HaltWithCode(0)
+		return nil
+	}
+{{- end}}
+{{- if .RootVersionFlag}}
+
+	if inputs.{{.Prefix}}.Flags.{{.RootVersionFlag}} {
+		version := rtx.Version()
+		if version == "" {
+			version = "unknown"
+		}
+{{if .NewShape}}
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+{{- else}}
+		if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
+{{- end}}
+			return err
+		}
+
+		rtx.HaltWithCode(0)
+		return nil
+	}
+{{- end}}
+
+	return nil
+}
+{{- end}}
+
+func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) error {
+{{- if and .HelpFlag .VersionFlag}}
+	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil {
+		if argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
+			if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
+				return err
+			}
+
+			rtx.HaltWithCode(0)
+			return nil
+		}
+
+		if argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
+			version := rtx.Version()
+			if version == "" {
+				version = "unknown"
+			}
+{{if .NewShape}}
+			if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+{{- else}}
+			if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
+{{- end}}
+				return err
+			}
+
+			rtx.HaltWithCode(0)
+			return nil
+		}
+	}
+{{else if .HelpFlag}}
+	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil && argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
+			return err
+		}
+
+		rtx.HaltWithCode(0)
+		return nil
+	}
+{{else if .VersionFlag}}
+	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil && argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
+		version := rtx.Version()
+		if version == "" {
+			version = "unknown"
+		}
+{{if .NewShape}}
+		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
+{{- else}}
+		if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
+{{- end}}
+			return err
+		}
+
+		rtx.HaltWithCode(0)
+		return nil
+	}
+{{end}}
+{{- if .NeedsInputs}}
+{{- if .UsesInputs}}
+	inputs, err := rtx.Inputs[{{.InputsType}}]()
+	if err != nil {
+		return err
+	}
+{{else}}
+	if _, err := rtx.Inputs[{{.InputsType}}](); err != nil {
+		return err
+	}
+{{end}}
+{{- end}}
+{{- if .HelpPathArg}}
+	if rtx.PluginHelp(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...) {
+		return nil
+	}
+
+	page, err := rtx.HelpFor(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintln(rtx.Stdout, page)
+	return err
+{{- else if .CompletionArg}}
+	script, err := rtx.CompletionScript(inputs.{{.Prefix}}.Arguments.{{.CompletionArg}})
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprint(rtx.Stdout, script)
+	return err
+{{- else if .VersionOnly}}
+	version := rtx.Version()
+	if version == "" {
+		version = "unknown"
+	}
+{{if .NewShape}}
+	_, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version)
+{{- else}}
+	_, err := fmt.Fprintln(rtx.Stdout, version)
+{{- end}}
+	return err
+{{- else if and .PrintHelpWhenBare .NewShape}}
+	fmt.Fprintln(rtx.Stderr, rtx.Help())
+	rtx.HaltWithCode(1)
+	return nil
+{{- else if .PrintHelpWhenBare}}
+	if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
+		return err
+	}
+
+	rtx.HaltWithCode(1)
+	return nil
+{{- else if .Redact}}
+	_, err := fmt.Fprintln(rtx.Stdout, "{{.Invocation}}")
+	return err
+{{- else}}
+	_, err = fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "{{.Invocation}}", inputs)
+	return err
+{{- end}}
+}

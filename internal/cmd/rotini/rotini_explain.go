@@ -9,27 +9,25 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handler = (*rotiniExplainHandler)(nil)
+var _ rotini.ErrorHandler = (*rotiniExplainHandler)(nil)
 
 type rotiniExplainHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniExplainHandler) Run(_ context.Context, rtx *rotini.Context) {
+func (*rotiniExplainHandler) Run(_ context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniExplainInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 	rtx.SetDependencyIfAbsent(explainDep, codegen.NewProcessor(rtx.Version()).Explain)
 	explain := rtx.MustGetDependency(explainDep)
 	infos, err := explain(inputs.RotiniExplain.Arguments.Key)
 	if err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return
+		return rotini.UsageError(err)
 	}
 	var b strings.Builder
 	for i, info := range infos {
@@ -39,8 +37,10 @@ func (*rotiniExplainHandler) Run(_ context.Context, rtx *rotini.Context) {
 		writeKeyInfo(&b, info)
 	}
 	if _, err := fmt.Fprint(rtx.Stdout, b.String()); err != nil {
-		haltWithWriteError(rtx, err)
+		return writeError(err)
 	}
+
+	return nil
 }
 
 // CompleteArgValue completes a key path one segment at a time: a key with keys below it ends

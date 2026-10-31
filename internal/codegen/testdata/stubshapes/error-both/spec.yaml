@@ -1,0 +1,29 @@
+# The shape `rotini init` seeds from v1.3: --help cascades and both flags are short_circuit, so
+# the root's CascadingPreRun answers them and the other stubs carry no help code.
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [-v, --version]
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: build
+      summary: build it
+      arguments:
+        - name: target
+          schema: { type: string, required: true }
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          schema: { type: '[]string' }
+    - name: version
+      summary: print version

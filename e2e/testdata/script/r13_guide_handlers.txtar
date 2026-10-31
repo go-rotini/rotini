@@ -117,13 +117,13 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*deployHandler)(nil)
+var _ rotini.ErrorHandler = (*deployHandler)(nil)
 
 type deployHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
 -- deploy/plan.go.txt --
@@ -133,17 +133,17 @@ type deployHandler struct {
 //     short_circuit: true
 //     schema: { type: bool }
 
-func (*deployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*deployHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[DeployInputs]() // succeeds even with <service> missing
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if in.Deploy.Flags.PrintPlan {
 		fmt.Fprintf(rtx.Stdout, "%+v\n", in.Deploy)
-		return
+		return nil
 	}
 	// … deploy
+	return nil
 }
 -- deploy/cmd/deploy/.rotini.spec.yaml --
 version: 0.0.0
@@ -174,6 +174,7 @@ generate:
     - type: cmd
       file: internal/cmd/deploy/zz_rotini.go
       package: deploy
+      hook_returns: error
 -- todo/cmd/todo/.rotini.spec.yaml --
 version: 0.0.0
 command:
@@ -208,6 +209,7 @@ generate:
     - type: cmd
       file: internal/cmd/todo/zz_rotini.go
       package: todo
+      hook_returns: error
 -- todo/add_head.go.txt --
 package todo
 
@@ -219,13 +221,13 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoAddHandler)(nil)
+var _ rotini.ErrorHandler = (*todoAddHandler)(nil)
 
 type todoAddHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
 func askForMissing(_ *rotini.Context, in TodoAddInputs) TodoAddInputs {
@@ -249,33 +251,31 @@ func fromVault() TodoAddInputs {
 
 var vaultSet = rotini.PresenceOf(fromVault())
 
-func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if os.Getenv("USE_VAULT") != "" {
-		vaultRun(rtx)
-		return
+		return vaultRun(rtx)
 	}
-	promptedRun(rtx)
+	return promptedRun(rtx)
 }
 
-func promptedRun(rtx *rotini.Context) {
+func promptedRun(rtx *rotini.Context) error {
 -- todo/prompted.go.txt --
 argv, err := rtx.ArgvInputs[TodoAddInputs]()
 if err != nil {
-	rtx.HaltWith(err)
-	return
+	return err
 }
 
 in := askForMissing(rtx, argv.Values) // your own prompting code
 
 if err := rtx.CheckInputs(in, rotini.PresenceOf(in)); err != nil {
-	rtx.HaltWith(err)
-	return
+	return err
 }
 -- todo/add_tail.go.txt --
 	fmt.Fprintf(rtx.Stdout, "added %q (priority %s)\n", in.TodoAdd.Arguments.Title, in.TodoAdd.Flags.Priority)
+	return nil
 }
 
-func vaultRun(rtx *rotini.Context) {
+func vaultRun(rtx *rotini.Context) error {
 -- todo/layer.go.txt --
 argv, _ := rtx.ArgvInputs[TodoAddInputs]()
 env, _ := rtx.EnvInputs[TodoAddInputs]()
@@ -283,11 +283,11 @@ vault := rotini.InputLayer[TodoAddInputs]{Name: "vault", Values: fromVault(), Se
 
 merged, report := rotini.MergeInputsWithReport(env, vault, argv)
 if err := report.Validate(); err != nil {
-	rtx.HaltWith(err)
-	return
+	return err
 }
 -- todo/merge_tail.go.txt --
 	fmt.Fprintf(rtx.Stdout, "merged %q (priority %s)\n", merged.TodoAdd.Arguments.Title, merged.TodoAdd.Flags.Priority)
+	return nil
 }
 -- todo/sync_head.go.txt --
 package todo
@@ -300,32 +300,30 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoSyncHandler)(nil)
+var _ rotini.ErrorHandler = (*todoSyncHandler)(nil)
 
 type todoSyncHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*todoSyncHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoSyncHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if _, err := rtx.Inputs[TodoSyncInputs](); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 -- todo/sync.go.txt --
 dirs, err := rotini.AppDirs(rtx, "todo", "xdg")
 if err != nil {
-	rtx.HaltWith(err)
-	return
+	return err
 }
 if err := os.MkdirAll(dirs.State, 0o700); err != nil {
-	rtx.HaltWith(err)
-	return
+	return err
 }
 -- todo/sync_tail.go.txt --
 	fmt.Fprintf(rtx.Stdout, "state=%s\n", dirs.State)
+	return nil
 }
 -- logs/app.log --
 error: disk full
@@ -355,6 +353,7 @@ generate:
     - type: cmd
       file: internal/cmd/logs/zz_rotini.go
       package: logs
+      hook_returns: error
 -- logs/grep_head.go.txt --
 package logs
 
@@ -366,34 +365,33 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*logsGrepHandler)(nil)
+var _ rotini.ErrorHandler = (*logsGrepHandler)(nil)
 
 type logsGrepHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*logsGrepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*logsGrepHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 -- logs/logs_grep.go.txt --
 in, err := rtx.Inputs[LogsGrepInputs]()
 if err != nil {
-	rtx.HaltWith(err)
-	return
+	return err
 }
 if in.LogsGrep.Stdin == nil {
 	// Files were given (or stdin is a terminal): read in.LogsGrep.Arguments.Files.
-	return
+	return nil
 }
 for line, err := range in.LogsGrep.Stdin {
 	if err != nil {
-		rtx.HaltWith(err) // a read error, or Ctrl-C: the run exits 130
-		return
+		return err // a read error, or Ctrl-C: the run exits 130
 	}
 	if strings.Contains(line, in.LogsGrep.Arguments.Pattern) {
 		fmt.Fprintln(rtx.Stdout, line)
 	}
 }
 -- logs/grep_tail.go.txt --
+	return nil
 }

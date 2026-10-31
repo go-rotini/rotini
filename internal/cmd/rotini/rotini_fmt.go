@@ -8,31 +8,30 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handler = (*rotiniFmtHandler)(nil)
+var _ rotini.ErrorHandler = (*rotiniFmtHandler)(nil)
 
 // formatDep is the codegen entry point `rotini fmt` calls. The handler registers the real one
 // with SetDependencyIfAbsent, so a test that registered a double first keeps it.
 var formatDep = rotini.NewDependency[codegen.FormatFn]("rotini.fmt")
 
 type rotiniFmtHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniFmtHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniFmtHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniFmtInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 	flags := inputs.RotiniFmt.Flags
 	files := inputs.RotiniFmt.Arguments.Files
 	if len(files) == 0 {
-		spec, conf, ok := resolveInputs(rtx, "", "")
-		if !ok {
-			return
+		spec, conf, err := resolveInputs(rtx, "", "")
+		if err != nil {
+			return err
 		}
 		files = append(files, spec)
 		if conf != "" {
@@ -49,14 +48,12 @@ func (*rotiniFmtHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	} else {
 		for _, f := range changed {
 			if _, werr := fmt.Fprintln(rtx.Stdout, "formatted", f); werr != nil {
-				haltWithWriteError(rtx, werr)
-				return
+				return writeError(werr)
 			}
 		}
 	}
 	if err != nil {
-		haltWithProblems(rtx, err)
-		return
+		return problems(rtx, err)
 	}
 	if flags.Check && len(changed) > 0 {
 		noun := "files"
@@ -65,7 +62,8 @@ func (*rotiniFmtHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		}
 		fmt.Fprintf(rtx.Stderr, "check: %d %s not formatted\n", len(changed), noun)
 		rtx.HaltWithCode(exitWouldChange)
-		return
+		return nil
 	}
 	rtx.HaltWithCode(0)
+	return nil
 }

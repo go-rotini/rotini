@@ -52,24 +52,24 @@ import (
 )
 
 type todoDeployHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
 -- deploy.go.txt --
-func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, report, err := rtx.InputsWithReport[TodoDeployInputs]()
 	if in.TodoDeploy.Flags.ExplainInputs {
 		_ = report.Format(rtx.Stdout)
-		return
+		return nil
 	}
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	// …
+	return nil
 }
 -- cmd/todo/.rotini.spec.yaml --
 version: 0.0.0
@@ -109,3 +109,4 @@ generate:
     - type: cmd
       file: internal/cmd/todo/zz_todo.go
       package: todo
+      hook_returns: error

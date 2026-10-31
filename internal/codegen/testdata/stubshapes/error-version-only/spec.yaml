@@ -1,0 +1,13 @@
+# Only --version, short_circuit: the root hook answers version alone, and nothing answers help.
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: version
+      identifiers: [-v, --version]
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: build
+      summary: build it

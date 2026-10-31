@@ -38,20 +38,19 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*reloaddemoServeHandler)(nil)
+var _ rotini.ErrorHandler = (*reloaddemoServeHandler)(nil)
 
 type reloaddemoServeHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*reloaddemoServeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*reloaddemoServeHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[ReloaddemoServeInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	cfg := in.ReloaddemoServe.Config
 
@@ -65,7 +64,7 @@ func (*reloaddemoServeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		select {
 		case <-ctx.Done():
 			fmt.Fprintln(rtx.Stdout, "stopped")
-			return
+			return nil
 		case <-hup:
 			next, err := rtx.Inputs[ReloaddemoServeInputs]()
 			if err != nil {
@@ -155,6 +154,7 @@ generate:
     - type: cmd
       file: internal/cmd/reloaddemo/zz_reloaddemo.go
       package: reloaddemo
+      hook_returns: error
   features:
     - type: help
       enabled: true

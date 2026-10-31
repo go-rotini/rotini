@@ -198,6 +198,10 @@ func buildIgnored(src []byte) bool {
 // identifies a file as rotini-written; deleting the line claims the file for the author.
 const stubMarker = "var _ rotini.Handler = ("
 
+// errorStubMarker is stubMarker for a stub seeded as an ErrorHandler
+// (templates/handler_error.go.tmpl).
+const errorStubMarker = "var _ rotini.ErrorHandler = ("
+
 // legacyStubMarker is stubMarker as written before v1.2.0, when the interface was Handlers.
 // Recognizing it keeps those stubs prunable after an upgrade.
 const legacyStubMarker = "var _ rotini.Handlers = ("
@@ -212,7 +216,8 @@ func stubLooksGenerated(path string) (bool, error) {
 		}
 		return false, fmt.Errorf("read %s to decide whether it is a generated stub: %w", path, err)
 	}
-	return strings.Contains(string(body), stubMarker) || strings.Contains(string(body), legacyStubMarker), nil
+	return strings.Contains(string(body), stubMarker) || strings.Contains(string(body), errorStubMarker) ||
+		strings.Contains(string(body), legacyStubMarker), nil
 }
 
 // owns reports whether a file in the feature's embed_dir is one this feature writes, and so

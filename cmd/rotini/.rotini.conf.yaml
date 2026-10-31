@@ -16,6 +16,7 @@ generate:
     - type: cmd
       file: internal/cmd/rotini/zz_rotini.go
       package: rotini
+      hook_returns: error
   features:
     - type: help
       enabled: true

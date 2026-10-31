@@ -8,19 +8,18 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*{{.Handler}})(nil)
+var _ rotini.ErrorHandler = (*{{.Handler}})(nil)
 
 type {{.Handler}} struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*{{.Handler}}) Run(ctx context.Context, rtx *rotini.Context) {
+func (*{{.Handler}}) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[{{.Inputs}}]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	flags := inputs.{{.Frame}}.Flags
 
@@ -35,18 +34,16 @@ func (*{{.Handler}}) Run(ctx context.Context, rtx *rotini.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case now := <-ticker.C:
 			if _, err := fmt.Fprintln(rtx.Stdout, "working at", now.Format(time.RFC3339)); err != nil {
-				rtx.HaltWith(err)
-				return
+				return err
 			}
 		}
 	}
 }
 
-func (*{{.Handler}}) PostRun(ctx context.Context, rtx *rotini.Context) {
-	if _, err := fmt.Fprintln(rtx.Stderr, "{{.Name}} serve: stopped"); err != nil {
-		rtx.HaltWith(err)
-	}
+func (*{{.Handler}}) PostRun(ctx context.Context, rtx *rotini.Context) error {
+	_, err := fmt.Fprintln(rtx.Stderr, "{{.Name}} serve: stopped")
+	return err
 }

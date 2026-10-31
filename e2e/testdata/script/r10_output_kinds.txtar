@@ -132,13 +132,12 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type runrDeployHandler struct{ rotini.NoHooks }
+type runrDeployHandler struct{ rotini.NoHooksE }
 
-func (*runrDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*runrDeployHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[RunrDeployInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	items := []RunrDeployOutput{
 		RunrDeployOutputProgress{Percent: 50},
@@ -147,10 +146,11 @@ func (*runrDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	for _, item := range items {
 		if err := rtx.WriteOutputItem(item, in.Runr.Flags.Output, nil); err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 	}
+
+	return nil
 }
 -- internal/cmd/runr/runr_mislabel.go --
 package runr

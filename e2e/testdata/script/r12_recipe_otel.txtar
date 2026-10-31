@@ -42,13 +42,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-var _ rotini.Handler = (*tracedemoHandler)(nil)
+var _ rotini.ErrorHandler = (*tracedemoHandler)(nil)
 
 var tracer = otel.Tracer("example.com/tracedemo")
 
 type tracedemoHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
 
 	// span is the run's span. CascadingPostRun receives the context this handler's
 	// CascadingPreRun received, not the one it set, so the span is kept here to end it.
@@ -57,25 +57,28 @@ type tracedemoHandler struct {
 
 // CascadingPreRun starts the run's span, named after the invoked command, and hands its
 // context to every later hook.
-func (h *tracedemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (h *tracedemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	var names []string
 	for _, c := range rtx.CommandChain() {
 		names = append(names, c.Name)
 	}
 	ctx, h.span = tracer.Start(ctx, strings.Join(names, " "))
 	rtx.SetContext(ctx)
+	return nil
 }
 
-func (h *tracedemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (h *tracedemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) error {
 	if rtx.Failed() {
 		h.span.SetStatus(codes.Error, "the command failed")
 	}
 	h.span.End()
+	return nil
 }
 
-func (*tracedemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*tracedemoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
+	return nil
 }
 -- work.go.txt --
 package tracedemo
@@ -87,19 +90,20 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*tracedemoWorkHandler)(nil)
+var _ rotini.ErrorHandler = (*tracedemoWorkHandler)(nil)
 
 type tracedemoWorkHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*tracedemoWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*tracedemoWorkHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	_, span := tracer.Start(ctx, "load")
 	defer span.End()
 	fmt.Fprintln(rtx.Stdout, "worked")
+	return nil
 }
 -- internal/cmd/tracedemo/tracedemo_fail.go --
 package tracedemo
@@ -111,17 +115,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*tracedemoFailHandler)(nil)
+var _ rotini.ErrorHandler = (*tracedemoFailHandler)(nil)
 
 type tracedemoFailHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*tracedemoFailHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	rtx.HaltWith(errors.New("no luck"))
+func (*tracedemoFailHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	return errors.New("no luck")
 }
 -- internal/cmd/tracedemo/printer.go --
 package tracedemo
@@ -189,6 +193,7 @@ generate:
     - type: cmd
       file: internal/cmd/tracedemo/zz_tracedemo.go
       package: tracedemo
+      hook_returns: error
   features:
     - type: help
       enabled: true

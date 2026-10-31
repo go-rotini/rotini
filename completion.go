@@ -712,7 +712,7 @@ func dynamicArgValues(lookup HandlerLookup, rtx *Context, chain []Command, words
 }
 
 // resolveHandler resolves handlerName through the program's lookup — the same one dispatch
-// uses — and reports whether the handler implements T.
+// uses — and reports whether the handler implements T, looking inside a [FromErrorHandler] wrapper.
 func resolveHandler[T any](lookup HandlerLookup, handlerName string) (T, bool) {
 	var zero T
 	if lookup == nil || handlerName == "" {
@@ -721,6 +721,10 @@ func resolveHandler[T any](lookup HandlerLookup, handlerName string) (T, bool) {
 	h, ok := lookup(handlerName)
 	if !ok {
 		return zero, false
+	}
+	if eh, wrapped := h.(errorHandler); wrapped { // a FromErrorHandler wrapper: ask the handler inside
+		completer, ok := any(eh.h).(T)
+		return completer, ok
 	}
 	completer, ok := any(h).(T)
 	return completer, ok

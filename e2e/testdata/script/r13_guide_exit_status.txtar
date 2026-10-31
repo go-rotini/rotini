@@ -147,18 +147,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoGetHandler)(nil)
+var _ rotini.ErrorHandler = (*todoGetHandler)(nil)
 
-type todoGetHandler struct{ rotini.NoHooks }
+type todoGetHandler struct{ rotini.NoHooksE }
 
-func (*todoGetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoGetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoGetInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	err = fmt.Errorf("no such task %s", in.TodoGet.Arguments.ID)
-	rtx.HaltWith(&ExitError{Code: TodoGetExitNotFound, Err: err})
+	return &ExitError{Code: TodoGetExitNotFound, Err: err}
 }
 -- internal/cmd/todo/todo_push.go --
 package todo
@@ -169,15 +168,16 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoPushHandler)(nil)
+var _ rotini.ErrorHandler = (*todoPushHandler)(nil)
 
-type todoPushHandler struct{ rotini.NoHooks }
+type todoPushHandler struct{ rotini.NoHooksE }
 
-func (*todoPushHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoPushHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if len(rtx.Argv) > 0 {
 		rtx.Exit(0)
 	}
 	rtx.HaltWithCode(5)
+	return nil
 }
 -- internal/cmd/todo/report_links.go --
 package todo
@@ -190,8 +190,8 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-// ExitError ends a command with one of its documented exit codes:
-// rtx.HaltWith(&ExitError{Code: TodoGetExitNotFound, Err: err}).
+// ExitError ends a command with one of its documented exit codes, returned from a hook:
+// return &ExitError{Code: TodoGetExitNotFound, Err: err}.
 type ExitError struct {
 	Code int
 	Err  error

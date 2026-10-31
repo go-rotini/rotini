@@ -30,22 +30,23 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*mandemoManHandler)(nil)
+var _ rotini.ErrorHandler = (*mandemoManHandler)(nil)
 
 type mandemoManHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*mandemoManHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*mandemoManHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	for _, page := range ManPages() {
 		if _, err := fmt.Fprint(rtx.Stdout, page.Content); err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 	}
+
+	return nil
 }
 -- cmd/mandemo/.rotini.spec.yaml --
 version: 0.0.0
@@ -67,6 +68,7 @@ generate:
     - type: cmd
       file: internal/cmd/mandemo/zz_mandemo.go
       package: mandemo
+      hook_returns: error
   features:
     - type: man
       enabled: true

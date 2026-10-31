@@ -8,29 +8,29 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handler = (*rotiniTreeHandler)(nil)
+var _ rotini.ErrorHandler = (*rotiniTreeHandler)(nil)
 
 type rotiniTreeHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniTreeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniTreeHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniTreeInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 
 	rtx.SetDependencyIfAbsent(treeDep, codegen.NewProcessor(rtx.Version()).Tree)
 	tree, err := rtx.MustGetDependency(treeDep)(inputs.RotiniTree.Arguments.SpecFilePath)
 	if err != nil {
-		haltWithProblems(rtx, err)
-		return
+		return problems(rtx, err)
 	}
 	if _, err := fmt.Fprint(rtx.Stdout, tree); err != nil {
-		haltWithWriteError(rtx, err)
+		return writeError(err)
 	}
+
+	return nil
 }

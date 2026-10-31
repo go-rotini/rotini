@@ -15,10 +15,10 @@ import (
 // The framework suggests nothing by default; this program opts in.
 var suggestor = rotini.NewSuggestor()
 
-// haltWithInputError halts on an input error, naming the nearest accepted spelling when one is
-// close: `unknown command "genrate" for "rotini"; did you mean "generate"?`.
-func haltWithInputError(rtx *rotini.Context, err error) {
-	rtx.HaltWith(withSuggestion(err, suggestor.For(err)))
+// inputError is an input error naming the nearest accepted spelling when one is close:
+// `rotini: unknown command "genrate"; did you mean "generate"?`.
+func inputError(err error) error {
+	return withSuggestion(err, suggestor.For(err))
 }
 
 // withSuggestion appends the first of hits to err's message, keeping err unwrappable so its
@@ -53,27 +53,23 @@ func commandNames() []string {
 }
 
 // resolveInputs resolves and prints the spec and conf paths a generate or validate reads. When
-// no conf is found it prints "conf: none (defaults)". A resolution failure halts with a usage
-// error.
-func resolveInputs(rtx *rotini.Context, specPath, confPath string) (spec, conf string, ok bool) {
+// no conf is found it prints "conf: none (defaults)". A resolution failure is a usage error.
+func resolveInputs(rtx *rotini.Context, specPath, confPath string) (spec, conf string, err error) {
 	if err := notDirectories(specPath, confPath); err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return "", "", false
+		return "", "", rotini.UsageError(err)
 	}
-	spec, conf, err := codegen.ResolvePaths(specPath, confPath)
+	spec, conf, err = codegen.ResolvePaths(specPath, confPath)
 	if err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return "", "", false
+		return "", "", rotini.UsageError(err)
 	}
 	shown := "none (defaults)"
 	if conf != "" {
 		shown = conf
 	}
 	if _, err := fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", spec, shown); err != nil {
-		haltWithWriteError(rtx, err)
-		return "", "", false
+		return "", "", writeError(err)
 	}
-	return spec, conf, true
+	return spec, conf, nil
 }
 
 // notDirectories returns an error naming the first of paths that is a directory, where a file
@@ -87,13 +83,8 @@ func notDirectories(paths ...string) error {
 	return nil
 }
 
-// haltWithWriteError halts on a failed write to stdout, so a full disk or a closed pipe fails
-// the run instead of leaving a short file behind and exiting 0.
-func haltWithWriteError(rtx *rotini.Context, err error) {
-	rtx.HaltWith(writeError(err))
-}
-
-// writeError names a failed write to stdout: `write output: no space left on device`.
+// writeError names a failed write to stdout, so a full disk or a closed pipe fails the run
+// instead of leaving a short file behind and exiting 0: `write output: no space left on device`.
 func writeError(err error) error { return fmt.Errorf("write output: %w", err) }
 
 // printResult returns a pass's result callback: it prints the result line to stdout on success
@@ -130,14 +121,14 @@ func printWarnings(rtx *rotini.Context) func([]error) {
 	}
 }
 
-// haltWithProblems records each leaf of a joined err as its own error and halts with the last,
-// so the reporter prints one "Error:" line per problem.
-func haltWithProblems(rtx *rotini.Context, err error) {
-	problems := flatten(err)
-	for _, problem := range problems[:len(problems)-1] {
+// problems records each leaf of a joined err but the last as its own error and returns the
+// last, for the hook to return, so the reporter prints one "Error:" line per problem.
+func problems(rtx *rotini.Context, err error) error {
+	leaves := flatten(err)
+	for _, problem := range leaves[:len(leaves)-1] {
 		rtx.RecordError(problem)
 	}
-	rtx.HaltWith(problems[len(problems)-1])
+	return leaves[len(leaves)-1]
 }
 
 // flatten expands an errors.Join tree into its leaves. A non-joined error is its only leaf.

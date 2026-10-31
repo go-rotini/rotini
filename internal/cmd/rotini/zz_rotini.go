@@ -848,71 +848,71 @@ func Handlers() ProgramHandlers {
 }
 
 func (*handlers) Rotini() rotini.Handler {
-	return &rotiniHandler{}
+	return rotini.FromErrorHandler(&rotiniHandler{})
 }
 
 func (*handlers) RotiniCompletion() rotini.Handler {
-	return &rotiniCompletionHandler{}
+	return rotini.FromErrorHandler(&rotiniCompletionHandler{})
 }
 
 func (*handlers) RotiniDiff() rotini.Handler {
-	return &rotiniDiffHandler{}
+	return rotini.FromErrorHandler(&rotiniDiffHandler{})
 }
 
 func (*handlers) RotiniExplain() rotini.Handler {
-	return &rotiniExplainHandler{}
+	return rotini.FromErrorHandler(&rotiniExplainHandler{})
 }
 
 func (*handlers) RotiniFmt() rotini.Handler {
-	return &rotiniFmtHandler{}
+	return rotini.FromErrorHandler(&rotiniFmtHandler{})
 }
 
 func (*handlers) RotiniGenerate() rotini.Handler {
-	return &rotiniGenerateHandler{}
+	return rotini.FromErrorHandler(&rotiniGenerateHandler{})
 }
 
 func (*handlers) RotiniHelp() rotini.Handler {
-	return &rotiniHelpHandler{}
+	return rotini.FromErrorHandler(&rotiniHelpHandler{})
 }
 
 func (*handlers) RotiniImport() rotini.Handler {
-	return &rotiniImportHandler{}
+	return rotini.FromErrorHandler(&rotiniImportHandler{})
 }
 
 func (*handlers) RotiniImportCobra() rotini.Handler {
-	return &rotiniImportCobraHandler{}
+	return rotini.FromErrorHandler(&rotiniImportCobraHandler{})
 }
 
 func (*handlers) RotiniImportKong() rotini.Handler {
-	return &rotiniImportKongHandler{}
+	return rotini.FromErrorHandler(&rotiniImportKongHandler{})
 }
 
 func (*handlers) RotiniImportUrfave() rotini.Handler {
-	return &rotiniImportUrfaveHandler{}
+	return rotini.FromErrorHandler(&rotiniImportUrfaveHandler{})
 }
 
 func (*handlers) RotiniInitialize() rotini.Handler {
-	return &rotiniInitializeHandler{}
+	return rotini.FromErrorHandler(&rotiniInitializeHandler{})
 }
 
 func (*handlers) RotiniMan() rotini.Handler {
-	return &rotiniManHandler{}
+	return rotini.FromErrorHandler(&rotiniManHandler{})
 }
 
 func (*handlers) RotiniMount() rotini.Handler {
-	return &rotiniMountHandler{}
+	return rotini.FromErrorHandler(&rotiniMountHandler{})
 }
 
 func (*handlers) RotiniTree() rotini.Handler {
-	return &rotiniTreeHandler{}
+	return rotini.FromErrorHandler(&rotiniTreeHandler{})
 }
 
 func (*handlers) RotiniValidate() rotini.Handler {
-	return &rotiniValidateHandler{}
+	return rotini.FromErrorHandler(&rotiniValidateHandler{})
 }
 
 func (*handlers) RotiniVersion() rotini.Handler {
-	return &rotiniVersionHandler{}
+	return rotini.FromErrorHandler(&rotiniVersionHandler{})
 }
 
 var HelpRotini = "The companion CLI for Rotini, the spec-first Go CLI framework: scaffold, validate and generate a CLI from its spec.\n\nDocumentation: https://rotini.dev\n\nUsage:\n  rotini [flags] <command>\n\nCommands:\n  initialize, init    scaffold a cli program\n  import              build a rotini spec from an existing cli\n  generate, gen       generate a cli program\n  validate, val       validate a spec and conf\n  tree                print a spec's command tree\n  explain             describe a spec or conf key\n  fmt                 format a spec and conf\n  mount               mount cli specs as sub-commands of another\n  help                print help\n  version             print version\n  completion          print a shell completion script\n  man                 print or install the man pages\n  diff                compare two versions of a cli's contract\n\nFlags:\n      --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."

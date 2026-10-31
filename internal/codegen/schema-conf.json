@@ -185,6 +185,15 @@
                 "// Copyright 2026 Acme, Inc.\n// SPDX-License-Identifier: Apache-2.0"
               ]
             },
+            "hook_returns": {
+              "type": "string",
+              "enum": [
+                "none",
+                "error"
+              ],
+              "default": "none",
+              "description": "Only for type 'cmd': whether the handler stubs `generate` seeds have hooks that return an error. 'none' (the default) seeds rotini.Handler stubs, whose hooks return nothing and fail with rtx.HaltWith(err). 'error' seeds rotini.ErrorHandler stubs, whose hooks fail with `return err`. It decides only the shape of a stub when it is first written: a handler file you already have keeps its shape, and the generated wiring follows each handler type's own methods, so one package may mix both. `rotini init` writes 'error'."
+            },
             "keep": {
               "type": "array",
               "items": {
@@ -192,6 +201,29 @@
                 "pattern": "^[^/\\\\].*$", "examples": ["extra.go"]
               },
               "description": "Package-relative paths (e.g. 'helpers.go') that rotini must never remove.\n\nYou rarely need it: rotini only ever removes files it wrote that no longer match the spec, such as a handler file whose command has left the spec (identified by the generated marker it carries), and it reports each one. A handler file goes in two steps: the next generate disables it with `//go:build ignore`, and the one after deletes it. A file you wrote is never removed, whatever it is named, and neither are test files or the editable feature templates. Use 'keep' when you have kept a handler file whose command is gone and left its marker in place, or to protect a rendered output file under an embed_dir."
+            }
+          }
+        },
+        {
+          "$comment": "hook_returns shapes handler stubs, which only the cmd target has.",
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "main",
+                  "models"
+                ]
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "hook_returns"
+              ]
             }
           }
         },

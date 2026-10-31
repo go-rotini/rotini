@@ -1,0 +1,32 @@
+# Secret inputs: a stub whose inputs (its own or an ancestor's) hold a secret prints only its
+# command path, never the inputs; a stub without one still prints them.
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: deploy
+      summary: deploy it
+      flags:
+        - name: token
+          identifiers: [--token]
+          schema: { type: string, secret: true }
+    - name: list
+      summary: list them
+    - name: vault
+      summary: use the vault
+      env:
+        - name: vault-key
+          schema: { type: string, secret: true }
+      commands:
+        - name: read
+          summary: read a value
+          arguments:
+            - name: key
+              schema: { type: string, required: true }

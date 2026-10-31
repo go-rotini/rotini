@@ -66,8 +66,8 @@ hooks also run when any command beneath it is invoked: `CascadingPreRun` from th
 sub-commands need and tear it down afterward. The teardown hooks, `PostRun` and
 `CascadingPostRun`, run even after a halt or a panic, for exactly the hooks whose setup ran.
 
-A generated handler embeds `rotini.NoCascadingPreRun`, `rotini.NoPreRun`, `rotini.NoPostRun`
-and `rotini.NoCascadingPostRun`, which do nothing. To use a hook, declare the method on your
+A generated handler embeds `rotini.NoCascadingPreRunE`, `rotini.NoPreRunE`, `rotini.NoPostRunE`
+and `rotini.NoCascadingPostRunE`, which do nothing. To use a hook, declare the method on your
 handler type.
 
 Every hook receives a `*rotini.Context`, conventionally named `rtx`:
@@ -107,17 +107,16 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.WriteOutputTo(w, v, …)` / `rtx.WriteOutputItemTo(w, item, …)` | write structured output, or one item of a stream, to another writer |
 
 {{< code title="todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
-func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoAddInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if err := rtx.MustGetDependency(Store).Add(in.TodoAdd.Arguments.Title); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	rtx.RecordSuccess("task added")
+	return nil
 }
 {{< /code >}}
 
@@ -125,7 +124,7 @@ func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
 
 | To | Call |
 |---|---|
-| fail and stop | `rtx.HaltWith(err)` |
+| fail and stop | `return err`, or `rtx.HaltWith(err)` |
 | record an error and keep going | `rtx.RecordError(err)` |
 | stop without failing | `rtx.Halt()` |
 | stop with a specific exit code | `rtx.HaltWithCode(n)` |

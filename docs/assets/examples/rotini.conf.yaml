@@ -18,6 +18,7 @@ generate:
       file: internal/cmd/deploy/zz_rotini.go
       package: deploy
       header: "// Copyright 2026 Example, Inc."
+      hook_returns: error
       keep: [store.go]
     - type: models
       file: internal/models/zz_models.go

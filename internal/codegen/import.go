@@ -251,6 +251,7 @@ generate:
       file: cmd/%[2]s/main.go
     - type: cmd
       file: internal/cmd/%[2]s/zz_rotini.go
+      hook_returns: error
   features:
     - type: help
       enabled: true

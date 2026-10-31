@@ -20,7 +20,7 @@ cp without-greet.yaml cmd/hello/.rotini.spec.yaml
 exec go generate ./...
 stderr 'pruned hello_greet\.go \(disabled; removed by the next generate\)'
 grep '^//go:build ignore$' internal/cmd/hello/hello_greet.go
-grep 'var _ rotini\.Handler' internal/cmd/hello/hello_greet.go
+grep 'var _ rotini\.ErrorHandler' internal/cmd/hello/hello_greet.go
 exec go build ./...
 exec go vet ./...
 
@@ -29,7 +29,7 @@ cp with-greet.yaml cmd/hello/.rotini.spec.yaml
 exec go generate ./...
 stderr 'restored hello_greet\.go; its command is back in the spec'
 ! grep 'go:build ignore' internal/cmd/hello/hello_greet.go
-grep 'var _ rotini\.Handler' internal/cmd/hello/hello_greet.go
+grep 'var _ rotini\.ErrorHandler' internal/cmd/hello/hello_greet.go
 exec go build ./...
 
 # ── remove it again: disabled, then ──────────────────────────────────────────

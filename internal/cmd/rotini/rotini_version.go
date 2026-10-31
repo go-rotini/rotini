@@ -8,30 +8,28 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*rotiniVersionHandler)(nil)
+var _ rotini.ErrorHandler = (*rotiniVersionHandler)(nil)
 
 type rotiniVersionHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniVersionHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniVersionHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniVersionInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 
 	version := "v" + rtx.Version()
 	if inputs.RotiniVersion.Flags.Format != "json" {
 		if _, err := fmt.Fprintln(rtx.Stdout, version); err != nil {
-			haltWithWriteError(rtx, err)
-			return
+			return writeError(err)
 		}
 		rtx.HaltWithCode(0)
-		return
+		return nil
 	}
 
 	out := RotiniVersionOutput{Version: version, GoVersion: runtime.Version()}
@@ -39,6 +37,8 @@ func (*rotiniVersionHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		out.ModulePath, out.ModuleVersion = info.Main.Path, info.Main.Version
 	}
 	if err := rtx.WriteOutput(out, "json", nil); err != nil {
-		rtx.HaltWith(err)
+		return err
 	}
+
+	return nil
 }

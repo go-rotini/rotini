@@ -77,11 +77,11 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoAddHandler)(nil)
+var _ rotini.ErrorHandler = (*todoAddHandler)(nil)
 
-type todoAddHandler struct{ rotini.NoHooks }
+type todoAddHandler struct{ rotini.NoHooksE }
 
-func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 -- branch.go.txt --
 inputs, err := rtx.Inputs[TodoAddInputs]()
 if err != nil {
@@ -94,12 +94,13 @@ if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(2)
 	default:
-		rtx.HaltWith(err)
+		return err
 	}
-	return
+	return nil
 }
 -- add_tail.go.txt --
 	fmt.Fprintln(rtx.Stdout, "added", inputs.TodoAdd.Arguments.Title)
+	return nil
 }
 -- cmd/todo/.rotini.spec.yaml --
 version: 0.0.0
@@ -135,6 +136,7 @@ generate:
     - type: cmd
       file: internal/cmd/todo/zz_todo.go
       package: todo
+      hook_returns: error
 -- cmd/todo/main.go --
 package main
 
@@ -183,12 +185,13 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoSilentHandler)(nil)
+var _ rotini.ErrorHandler = (*todoSilentHandler)(nil)
 
-type todoSilentHandler struct{ rotini.NoHooks }
+type todoSilentHandler struct{ rotini.NoHooksE }
 
-func (*todoSilentHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoSilentHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	rtx.HaltWithCode(2)
+	return nil
 }
 -- internal/cmd/todo/todo_first.go --
 package todo
@@ -199,21 +202,23 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoFirstHandler)(nil)
+var _ rotini.ErrorHandler = (*todoFirstHandler)(nil)
 
 type todoFirstHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*todoFirstHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoFirstHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	rtx.HaltWithCode(3)
 	rtx.HaltWithCode(5)
+	return nil
 }
 
-func (*todoFirstHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+func (*todoFirstHandler) PostRun(ctx context.Context, rtx *rotini.Context) error {
 	rtx.HaltWithCode(6)
+	return nil
 }
 -- internal/cmd/todo/todo_multi.go --
 package todo
@@ -226,14 +231,15 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoMultiHandler)(nil)
+var _ rotini.ErrorHandler = (*todoMultiHandler)(nil)
 
-type todoMultiHandler struct{ rotini.NoHooks }
+type todoMultiHandler struct{ rotini.NoHooksE }
 
-func (*todoMultiHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoMultiHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	rtx.RecordError(errors.New("one"))
 	rtx.RecordError(errors.New("two"))
 	fmt.Fprintln(rtx.Stdout, "failed:", rtx.Failed())
+	return nil
 }
 -- internal/cmd/todo/todo_keep.go --
 package todo
@@ -245,13 +251,14 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoKeepHandler)(nil)
+var _ rotini.ErrorHandler = (*todoKeepHandler)(nil)
 
-type todoKeepHandler struct{ rotini.NoHooks }
+type todoKeepHandler struct{ rotini.NoHooksE }
 
-func (*todoKeepHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoKeepHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	rtx.RecordError(errors.New("kept"))
 	rtx.HaltWithCode(4)
+	return nil
 }
 -- internal/cmd/todo/todo_cat.go --
 package todo
@@ -264,11 +271,11 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoCatHandler)(nil)
+var _ rotini.ErrorHandler = (*todoCatHandler)(nil)
 
-type todoCatHandler struct{ rotini.NoHooks }
+type todoCatHandler struct{ rotini.NoHooksE }
 
-func (*todoCatHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoCatHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	_, perr := rtx.Inputs[TodoCatInputs]()
 	fmt.Fprintln(rtx.Stdout, "parse:", rotini.CategoryOf(perr))
 	base := errors.New("base")
@@ -277,6 +284,7 @@ func (*todoCatHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	i := rotini.InternalError(base)
 	fmt.Fprintln(rtx.Stdout, "internal:", rotini.CategoryOf(i), errors.Is(i, base))
 	fmt.Fprintln(rtx.Stdout, "plain:", rotini.CategoryOf(base))
+	return nil
 }
 -- internal/cmd/todo/todo_boom.go --
 package todo
@@ -288,18 +296,20 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoBoomHandler)(nil)
+var _ rotini.ErrorHandler = (*todoBoomHandler)(nil)
 
 type todoBoomHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*todoBoomHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoBoomHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	panic("boom")
+	return nil
 }
 
-func (*todoBoomHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+func (*todoBoomHandler) PostRun(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stdout, "teardown")
+	return nil
 }

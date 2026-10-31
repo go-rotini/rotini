@@ -52,26 +52,24 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*promptdemoGreetHandler)(nil)
+var _ rotini.ErrorHandler = (*promptdemoGreetHandler)(nil)
 
 type promptdemoGreetHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*promptdemoGreetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*promptdemoGreetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	// Read what was given, without checking it: a missing input is not an error yet.
 	argv, err := rtx.ArgvInputs[PromptdemoGreetInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	env, err := rtx.EnvInputs[PromptdemoGreetInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	in := rotini.MergeInputs(env, argv)
 
@@ -83,10 +81,10 @@ func (*promptdemoGreetHandler) Run(ctx context.Context, rtx *rotini.Context) {
 
 	// Check the result against the spec, as if every value had been typed.
 	if err := rtx.CheckInputs(in, rotini.PresenceOf(in)); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintf(rtx.Stdout, "hello, %s\n", flags.Name)
+	return nil
 }
 
 // ask writes the prompt to stderr, so stdout keeps only the command's output, and reads one line.
@@ -130,6 +128,7 @@ generate:
     - type: cmd
       file: internal/cmd/promptdemo/zz_promptdemo.go
       package: promptdemo
+      hook_returns: error
   features:
     - type: help
       enabled: true

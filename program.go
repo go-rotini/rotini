@@ -141,8 +141,8 @@ type Program struct {
 
 // NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
 // calls the method of handlers named by each [CommandDef.Handler] (and [Definition.Handler]) in def to obtain that
-// command's [Handler]. A nil handlers value is accepted here; a run that reaches dispatch then
-// fails with a [*WiringError].
+// command's [Handler], or an [ErrorHandler], which it wraps with [FromErrorHandler]. A nil
+// handlers value is accepted here; a run that reaches dispatch then fails with a [*WiringError].
 //
 // NewProgram finds the methods by reflection, which keeps every exported method of the
 // program's types in the binary. Generated code uses [NewWiredProgram], and a hand-written handler

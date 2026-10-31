@@ -108,6 +108,7 @@ generate:
     - type: cmd
       file: internal/cmd/where/zz_where.go
       package: where
+      hook_returns: error
   features:
     - type: help
       enabled: true
@@ -121,32 +122,32 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dockerWhereHandler)(nil)
+var _ rotini.ErrorHandler = (*dockerWhereHandler)(nil)
 
 type dockerWhereHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*dockerWhereHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*dockerWhereHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[DockerWhereInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if in.DockerWhere.Flags.Help {
 		page, err := rtx.InvokedHelp()
 		if err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 		fmt.Fprintln(rtx.Stdout, page)
 		rtx.HaltWithCode(0)
 	}
+
+	return nil
 }
 
-func (*dockerWhereHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*dockerWhereHandler) Run(ctx context.Context, rtx *rotini.Context) error { return nil }
 -- docker/internal/cmd/where/docker_where_where.go --
 package where
 
@@ -157,22 +158,22 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dockerWhereWhereHandler)(nil)
+var _ rotini.ErrorHandler = (*dockerWhereWhereHandler)(nil)
 
 type dockerWhereWhereHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*dockerWhereWhereHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*dockerWhereWhereHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[DockerWhereWhereInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintln(rtx.Stdout, "context", in.DockerWhere.Flags.Context)
+	return nil
 }
 -- docker/metadata-head.go.txt --
 package where
@@ -184,17 +185,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dockerWhereDockerCliPluginMetadataHandler)(nil)
+var _ rotini.ErrorHandler = (*dockerWhereDockerCliPluginMetadataHandler)(nil)
 
 type dockerWhereDockerCliPluginMetadataHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
 -- docker/metadata.go.txt --
-func (*dockerWhereDockerCliPluginMetadataHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*dockerWhereDockerCliPluginMetadataHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	meta := map[string]string{
 		"SchemaVersion":    "0.1.0",
 		"Vendor":           "example",
@@ -202,8 +203,10 @@ func (*dockerWhereDockerCliPluginMetadataHandler) Run(ctx context.Context, rtx *
 		"ShortDescription": "Show which context and daemon endpoint docker would use",
 	}
 	if err := json.NewEncoder(rtx.Stdout).Encode(meta); err != nil {
-		rtx.HaltWith(err)
+		return err
 	}
+
+	return nil
 }
 -- kubectl/cmd/ctx/.rotini.spec.yaml --
 version: 0.0.0
@@ -257,6 +260,7 @@ generate:
     - type: cmd
       file: internal/cmd/ctx/zz_ctx.go
       package: ctx
+      hook_returns: error
   features:
     - type: help
       enabled: true
@@ -270,32 +274,32 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*kubectlCtxHandler)(nil)
+var _ rotini.ErrorHandler = (*kubectlCtxHandler)(nil)
 
 type kubectlCtxHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*kubectlCtxHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*kubectlCtxHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[KubectlCtxInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if in.KubectlCtx.Flags.Help {
 		page, err := rtx.InvokedHelp()
 		if err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 		fmt.Fprintln(rtx.Stdout, page)
 		rtx.HaltWithCode(0)
 	}
+
+	return nil
 }
 
-func (*kubectlCtxHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*kubectlCtxHandler) Run(ctx context.Context, rtx *rotini.Context) error { return nil }
 -- kubectl/internal/cmd/ctx/kubectl_ctx_use.go --
 package ctx
 
@@ -306,21 +310,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*kubectlCtxUseHandler)(nil)
+var _ rotini.ErrorHandler = (*kubectlCtxUseHandler)(nil)
 
 type kubectlCtxUseHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*kubectlCtxUseHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*kubectlCtxUseHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[KubectlCtxUseInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	f := in.KubectlCtx.Flags
 	fmt.Fprintf(rtx.Stdout, "namespace=%s selector=%s output=%s all=%t watch=%t\n", f.Namespace, f.Selector, f.Output, f.AllNamespaces, f.Watch)
+	return nil
 }

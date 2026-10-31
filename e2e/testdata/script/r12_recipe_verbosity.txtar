@@ -37,22 +37,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*logdemoHandler)(nil)
+var _ rotini.ErrorHandler = (*logdemoHandler)(nil)
 
 // Logger is the run's logger, set by the root's CascadingPreRun before any command runs.
 var Logger = rotini.NewDependency[*slog.Logger]("logdemo.logger")
 
 type logdemoHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*logdemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*logdemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[LogdemoInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	flags := inputs.Logdemo.Flags
 
@@ -72,11 +71,14 @@ func (*logdemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context)
 		fmt.Fprintln(rtx.Stdout, rtx.Help())
 		rtx.HaltWithCode(0)
 	}
+
+	return nil
 }
 
-func (*logdemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*logdemoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
+	return nil
 }
 -- run.go.txt --
 package logdemo
@@ -88,21 +90,22 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*logdemoRunHandler)(nil)
+var _ rotini.ErrorHandler = (*logdemoRunHandler)(nil)
 
 type logdemoRunHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*logdemoRunHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*logdemoRunHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	log := rtx.MustGetDependency(Logger)
 	log.Debug("loading tasks", "file", "tasks.json")
 	log.Info("3 tasks to run")
 	log.Warn("the cache is stale")
 	fmt.Fprintln(rtx.Stdout, "done")
+	return nil
 }
 -- cmd/logdemo/.rotini.spec.yaml --
 version: 0.0.0
@@ -134,6 +137,7 @@ generate:
     - type: cmd
       file: internal/cmd/logdemo/zz_logdemo.go
       package: logdemo
+      hook_returns: error
   features:
     - type: help
       enabled: true

@@ -101,27 +101,26 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*lazydemoGetHandler)(nil)
+var _ rotini.ErrorHandler = (*lazydemoGetHandler)(nil)
 
 type lazydemoGetHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*lazydemoGetHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*lazydemoGetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[LazydemoGetInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	store, err := rtx.MustGetDependency(storeDep)()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintln(rtx.Stdout, store.values[inputs.LazydemoGet.Arguments.Key])
+	return nil
 }
 -- root.go.txt --
 package lazydemo
@@ -133,31 +132,33 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*lazydemoHandler)(nil)
+var _ rotini.ErrorHandler = (*lazydemoHandler)(nil)
 
 type lazydemoHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*lazydemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*lazydemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	registerStore(rtx)
 
 	inputs, err := rtx.Inputs[LazydemoInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if inputs.Lazydemo.Flags.Help {
 		fmt.Fprintln(rtx.Stdout, rtx.Help())
 		rtx.HaltWithCode(0)
 	}
+
+	return nil
 }
 
-func (*lazydemoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*lazydemoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
+	return nil
 }
 -- internal/cmd/lazydemo/lazydemo_hello.go --
 package lazydemo
@@ -169,17 +170,18 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*lazydemoHelloHandler)(nil)
+var _ rotini.ErrorHandler = (*lazydemoHelloHandler)(nil)
 
 type lazydemoHelloHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*lazydemoHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*lazydemoHelloHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stdout, "hello")
+	return nil
 }
 -- cmd/lazydemo/.rotini.spec.yaml --
 version: 0.0.0
@@ -212,6 +214,7 @@ generate:
     - type: cmd
       file: internal/cmd/lazydemo/zz_lazydemo.go
       package: lazydemo
+      hook_returns: error
   features:
     - type: help
       enabled: true

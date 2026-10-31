@@ -1,6 +1,10 @@
 const CategoryInternal
 const CategoryNone Category
 const CategoryUsage
+const ClassError
+const ClassInfo ChannelClass
+const ClassSuccess
+const ClassWarning
 const FlagGroupAtLeastOne FlagGroupKind
 const FlagGroupMutuallyExclusive FlagGroupKind
 const FlagGroupOneOf FlagGroupKind
@@ -281,6 +285,10 @@ field NoHooks.NoCascadingPostRun
 field NoHooks.NoCascadingPreRun
 field NoHooks.NoPostRun
 field NoHooks.NoPreRun
+field NoHooksE.NoCascadingPostRunE
+field NoHooksE.NoCascadingPreRunE
+field NoHooksE.NoPostRunE
+field NoHooksE.NoPreRunE
 field Outcome.Errors []error
 field Outcome.Infos []string
 field Outcome.Panics []*PanicError
@@ -366,6 +374,7 @@ func Fallbacks() Feature
 func FileMode(perm fs.FileMode) OutputOption
 func FlagDependencies() Feature
 func FlagGroups() Feature
+func FromErrorHandler(h ErrorHandler) Handler
 func IPValues() Feature
 func InternalError(err error) error
 func IsTerminal(stream any) bool
@@ -375,6 +384,7 @@ func MACValues() Feature
 func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport)
 func MergeInputs[T any](layers ...InputLayer[T]) T
 func Multicall() Feature
+func NewChannel[T any](name string, class ChannelClass) Channel[T]
 func NewContextFor(def Definition, argv []string) *Context
 func NewDependency[T any](name string) Dependency[T]
 func NewInputReader(meta InputSettings) *InputReader
@@ -426,6 +436,10 @@ method ByteSize.MarshalText() ([]byte, error)
 method ByteSize.String() string
 method ByteSize.UnmarshalText(text []byte) error
 method Category.String() string
+method Channel.Class() ChannelClass
+method Channel.Name() string
+method Channel.String() string
+method ChannelClass.String() string
 method Command.DiscoveredPlugins() []DiscoveredPlugin
 method Command.PluginBinary(name string) (string, bool)
 method Command.PluginDiscoveryErrors() []error
@@ -465,6 +479,7 @@ method Context.RecordError(err error)
 method Context.RecordInfo(msg string)
 method Context.RecordSuccess(msg string)
 method Context.RecordWarning(warn error)
+method Context.Record[T any](ch Channel[T], v T)
 method Context.SetCompletionFallback(fallback Completion)
 method Context.SetCompletionOptions(opts CompletionOptions)
 method Context.SetContext(ctx context.Context)
@@ -495,6 +510,11 @@ method Dependency.String() string
 method DependencyError.Error() string
 method DependencyError.Unwrap() []error
 method Deprecation.Error() string
+method ErrorHandler.CascadingPostRun(ctx context.Context, rtx *Context) error
+method ErrorHandler.CascadingPreRun(ctx context.Context, rtx *Context) error
+method ErrorHandler.PostRun(ctx context.Context, rtx *Context) error
+method ErrorHandler.PreRun(ctx context.Context, rtx *Context) error
+method ErrorHandler.Run(ctx context.Context, rtx *Context) error
 method Feature.String() string
 method FlagValueCompleter.CompleteFlagValue(rtx *Context, flag, partial string) []string
 method Glob.MarshalText() ([]byte, error)
@@ -517,11 +537,16 @@ method InputReport.History(path FieldPath) []InputSource
 method InputReport.Validate() error
 method InputReport.Winner(path FieldPath) (InputSource, bool)
 method NoCascadingPostRun.CascadingPostRun(ctx context.Context, rtx *Context)
+method NoCascadingPostRunE.CascadingPostRun(ctx context.Context, rtx *Context) error
 method NoCascadingPreRun.CascadingPreRun(ctx context.Context, rtx *Context)
+method NoCascadingPreRunE.CascadingPreRun(ctx context.Context, rtx *Context) error
 method NoPostRun.PostRun(ctx context.Context, rtx *Context)
+method NoPostRunE.PostRun(ctx context.Context, rtx *Context) error
 method NoPreRun.PreRun(ctx context.Context, rtx *Context)
+method NoPreRunE.PreRun(ctx context.Context, rtx *Context) error
 method Outcome.Empty() bool
 method Outcome.Failed() bool
+method Outcome.Records[T any](ch Channel[T]) []T
 method OutputFile.Abort() error
 method OutputFile.Close() error
 method OutputFile.Name() string
@@ -590,6 +615,8 @@ type ArgvOption func(*argvConfig)
 type Base64Bytes []byte
 type ByteSize int64
 type Category int
+type ChannelClass uint8
+type Channel[T any] struct
 type Command struct
 type CommandDef struct
 type Completion struct
@@ -613,6 +640,7 @@ type DiscoverDef struct
 type DiscoveredPlugin struct
 type Effects struct
 type EnumValue struct
+type ErrorHandler interface
 type ExitStatusDef struct
 type Feature struct
 type FieldPath string
@@ -636,10 +664,15 @@ type Lifecycle func(chain []Command, handlers []Handler) []LifecycleStep
 type LifecycleStep struct
 type MulticallDef struct
 type NoCascadingPostRun struct
+type NoCascadingPostRunE struct
 type NoCascadingPreRun struct
+type NoCascadingPreRunE struct
 type NoHooks struct
+type NoHooksE struct
 type NoPostRun struct
+type NoPostRunE struct
 type NoPreRun struct
+type NoPreRunE struct
 type Option func(*Program)
 type Outcome struct
 type OutputDef struct

@@ -4,7 +4,7 @@
 
 gomodinit example.com/plug
 exec rotini init plug
-grep '^\tif rtx\.PluginHelp\(inputs\.PlugHelp\.Arguments\.Command\.\.\.\) \{\n\t\treturn\n\t\}$' internal/cmd/plug/plug_help.go
+grep '^\tif rtx\.PluginHelp\(inputs\.PlugHelp\.Arguments\.Command\.\.\.\) \{\n\t\treturn nil\n\t\}$' internal/cmd/plug/plug_help.go
 cp plug.spec.yaml cmd/plug/.rotini.spec.yaml
 exec rotini generate cmd/plug/.rotini.spec.yaml --config cmd/plug/.rotini.conf.yaml
 exec go mod tidy
@@ -51,7 +51,7 @@ stdout '^  plug version$'
 
 -- help-lines.go.txt --
 if rtx.PluginHelp(inputs.PlugHelp.Arguments.Command...) {
-	return
+	return nil
 }
 -- plug.spec.yaml --
 version: 0.0.0

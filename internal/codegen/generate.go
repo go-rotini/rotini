@@ -831,6 +831,7 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		Prefix:        c.prefix,
 		RuntimeImport: runtimeImport,
 		Header:        cmdHeader,
+		ErrorHooks:    gp.layout.cmdErrorHooks,
 	}
 	isRoot := c.prefix == gp.root.prefix
 	rootHooked := seedHelpAndVersion(gp, c, &d, isRoot, helpOn)
@@ -945,6 +946,7 @@ func seedGenerateArgs(ext string) string {
 // another package's handler.
 func rollupMethods(gp *program) []templateHandlersMethod {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
+	shapes := hookShapes(gp.layout.cmdDir)
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
 			// Own command (types generated locally) whose handler lives in another package.
@@ -956,7 +958,11 @@ func rollupMethods(gp *program) []templateHandlersMethod {
 			})
 			continue
 		}
-		methods = append(methods, templateHandlersMethod{Method: c.prefix, HandlerType: c.handler})
+		methods = append(methods, templateHandlersMethod{
+			Method:      c.prefix,
+			HandlerType: c.handler,
+			ErrorHooks:  errorHooks(shapes, c.handler, gp.layout.cmdErrorHooks),
+		})
 	}
 	for _, c := range gp.composed {
 		methods = append(methods, templateHandlersMethod{

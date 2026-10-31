@@ -18,6 +18,8 @@ type pinnedBlock struct{ title, script, file string }
 // guideBlocks pins each code block in the guide to the file an e2e script builds or compares, so
 // the guide shows code and output that are known to work.
 var guideBlocks = []pinnedBlock{
+	{"scan.go", "r16_hooks_channels.txtar", "scan.go.txt"},
+	{"scan/report.go", "r16_hooks_channels.txtar", "report.go.txt"},
 	{"store.go", "r12_recipe_lazy_dep.txtar", "store.go.txt"},
 	{"lazydemo_get.go", "r12_recipe_lazy_dep.txtar", "get.go.txt"},
 	{"mandemo_man.go", "r12_recipe_man_all.txtar", "man.go.txt"},

@@ -134,40 +134,38 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dpHandler)(nil)
+var _ rotini.ErrorHandler = (*dpHandler)(nil)
 
 type dpHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
+	rotini.NoPreRunE
+	rotini.NoPostRunE
 }
 
-func (*dpHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (*dpHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) error {
 	trace(rtx, "root CascadingPostRun")
+	return nil
 }
 
-func (*dpHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*dpHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
 	trace(rtx, "root CascadingPreRun")
 	argv, err := rtx.ArgvInputs[DpInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	inputs := argv.Values
 
 	if inputs.Dp.Flags.Help {
 		page, err := rtx.InvokedHelp()
 		if err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 
 		if _, err := fmt.Fprintln(rtx.Stdout, page); err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 
 		rtx.HaltWithCode(0)
-		return
+		return nil
 	}
 
 	if inputs.Dp.Flags.Version {
@@ -177,23 +175,24 @@ func (*dpHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 		}
 
 		if _, err := fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version); err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 
 		rtx.HaltWithCode(0)
-		return
+		return nil
 	}
+
+	return nil
 }
 
-func (*dpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*dpHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if _, err := rtx.Inputs[DpInputs](); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
 	rtx.HaltWithCode(1)
+	return nil
 }
 -- dp_convert.go.txt --
 package dp
@@ -206,42 +205,37 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dpConvertHandler)(nil)
+var _ rotini.ErrorHandler = (*dpConvertHandler)(nil)
 
 type dpConvertHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*dpConvertHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*dpConvertHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[DpConvertInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	in := inputs.DpConvert
 	src, err := rotini.OpenInput(rtx, in.Arguments.Input)
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	data, err := io.ReadAll(src)
 	src.Close()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	var doc any
 	if err := json.Unmarshal(data, &doc); err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return
+		return rotini.UsageError(err)
 	}
 	out, err := rotini.CreateOutput(rtx, in.Flags.Out, rotini.Overwrite(in.Flags.Force))
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	defer out.Abort()
 	enc := json.NewEncoder(out)
@@ -249,10 +243,9 @@ func (*dpConvertHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		enc.SetIndent("", "  ")
 	}
 	if err := enc.Encode(doc); err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
-	rtx.HaltWith(out.Close())
+	return out.Close()
 }
 -- dp_count.go.txt --
 package dp
@@ -265,23 +258,23 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dpCountHandler)(nil)
+var _ rotini.ErrorHandler = (*dpCountHandler)(nil)
 
 type dpCountHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*dpCountHandler) PreRun(ctx context.Context, rtx *rotini.Context) {
+func (*dpCountHandler) PreRun(ctx context.Context, rtx *rotini.Context) error {
 	trace(rtx, "count PreRun")
+	return nil
 }
 
-func (*dpCountHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*dpCountHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[DpCountInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	in := inputs.DpCount
 	var out DpCountOutput
@@ -306,8 +299,7 @@ func (*dpCountHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		if name != "-" {
 			f, err := rotini.OpenInput(rtx, name)
 			if err != nil {
-				rtx.HaltWith(err)
-				return
+				return err
 			}
 			defer f.Close()
 			sc := bufio.NewScanner(f)
@@ -326,11 +318,10 @@ func (*dpCountHandler) Run(ctx context.Context, rtx *rotini.Context) {
 			continue // stdin is a terminal
 		}
 		if err := count(lines); err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 	}
-	rtx.HaltWith(rtx.WriteOutput(out, "json", nil))
+	return rtx.WriteOutput(out, "json", nil)
 }
 -- dp_fail.go.txt --
 package dp
@@ -342,19 +333,18 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dpFailHandler)(nil)
+var _ rotini.ErrorHandler = (*dpFailHandler)(nil)
 
 type dpFailHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*dpFailHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*dpFailHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[DpFailInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	f := inputs.DpFail.Flags
 	switch {
@@ -366,12 +356,15 @@ func (*dpFailHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.RecordWarning(errors.New("failing on purpose"))
 		rtx.HaltWithCode(f.Code)
 	default:
-		rtx.HaltWith(errors.New("plain failure"))
+		return errors.New("plain failure")
 	}
+
+	return nil
 }
 
-func (*dpFailHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+func (*dpFailHandler) PostRun(ctx context.Context, rtx *rotini.Context) error {
 	trace(rtx, "fail PostRun")
+	return nil
 }
 -- dp_slow.go.txt --
 package dp
@@ -384,43 +377,42 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dpSlowHandler)(nil)
+var _ rotini.ErrorHandler = (*dpSlowHandler)(nil)
 
 type dpSlowHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*dpSlowHandler) PreRun(ctx context.Context, rtx *rotini.Context) {
+func (*dpSlowHandler) PreRun(ctx context.Context, rtx *rotini.Context) error {
 	trace(rtx, "slow PreRun")
+	return nil
 }
 
-func (*dpSlowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*dpSlowHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[DpSlowInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	in := inputs.DpSlow
 	out, err := rotini.CreateOutput(rtx, in.Arguments.Out, rotini.Overwrite(true))
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintln(out, "started")
 	fmt.Fprintln(rtx.Stderr, "writing", in.Arguments.Out)
 	select {
 	case <-ctx.Done():
-		rtx.HaltWith(ctx.Err())
-		return
+		return ctx.Err()
 	case <-time.After(in.Flags.For):
 	}
 	fmt.Fprintln(out, "finished")
-	rtx.HaltWith(out.Close())
+	return out.Close()
 }
 
-func (*dpSlowHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
+func (*dpSlowHandler) PostRun(ctx context.Context, rtx *rotini.Context) error {
 	fmt.Fprintln(rtx.Stderr, "slow PostRun: cleaned up")
+	return nil
 }
 -- dp_stats.go.txt --
 package dp
@@ -433,24 +425,22 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dpStatsHandler)(nil)
+var _ rotini.ErrorHandler = (*dpStatsHandler)(nil)
 
 type dpStatsHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*dpStatsHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*dpStatsHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[DpStatsInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if inputs.DpStats.Stdin == nil {
-		rtx.HaltWith(rotini.UsageError(errNoStdin))
-		return
+		return rotini.UsageError(errNoStdin)
 	}
 	xs := *inputs.DpStats.Stdin
 	sum := 0.0
@@ -458,6 +448,7 @@ func (*dpStatsHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		sum += x
 	}
 	fmt.Fprintf(rtx.Stdout, "n=%d min=%g max=%g mean=%g\n", len(xs), slices.Min(xs), slices.Max(xs), sum/float64(len(xs)))
+	return nil
 }
 -- dp_sum.go.txt --
 package dp
@@ -468,38 +459,36 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*dpSumHandler)(nil)
+var _ rotini.ErrorHandler = (*dpSumHandler)(nil)
 
 type dpSumHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*dpSumHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*dpSumHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[DpSumInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	if inputs.DpSum.Stdin == nil {
-		rtx.HaltWith(rotini.UsageError(errNoStdin))
-		return
+		return rotini.UsageError(errNoStdin)
 	}
 	var out DpSumOutput
 	for rec, err := range inputs.DpSum.Stdin {
 		if err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 		out.N++
 		out.Total += rec.Value
 		if err := rtx.WriteOutputItem(out, "json", nil); err != nil {
-			rtx.HaltWith(err)
-			return
+			return err
 		}
 	}
+
+	return nil
 }
 -- empty.txt --
 

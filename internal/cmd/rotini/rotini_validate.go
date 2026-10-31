@@ -7,37 +7,34 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handler = (*rotiniValidateHandler)(nil)
+var _ rotini.ErrorHandler = (*rotiniValidateHandler)(nil)
 
 type rotiniValidateHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*rotiniValidateHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniValidateHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[RotiniValidateInputs]()
 	if err != nil {
-		haltWithInputError(rtx, err)
-		return
+		return inputError(err)
 	}
 	args := inputs.RotiniValidate.Arguments
 	flags := inputs.RotiniValidate.Flags
 	if flags.Format == "json" {
-		validateJSON(rtx, args.SpecFilePath, flags)
-		return
+		return validateJSON(rtx, args.SpecFilePath, flags)
 	}
 
-	spec, conf, ok := resolveInputs(rtx, args.SpecFilePath, flags.ConfFilePath)
-	if !ok {
-		return
+	spec, conf, err := resolveInputs(rtx, args.SpecFilePath, flags.ConfFilePath)
+	if err != nil {
+		return err
 	}
 
 	release, err := releaseOf(rtx, spec, conf, flags.Release)
 	if err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
-		return
+		return rotini.UsageError(err)
 	}
 
 	version := rtx.Version()
@@ -46,11 +43,11 @@ func (*rotiniValidateHandler) Run(ctx context.Context, rtx *rotini.Context) {
 
 	// Warnings never fail the run.
 	if err := validate(spec, conf, flags.Watch, flags.Fail, release, printResult(rtx), printWarnings(rtx)); err != nil {
-		haltWithProblems(rtx, err)
-		return
+		return problems(rtx, err)
 	}
 
 	rtx.HaltWithCode(0)
+	return nil
 }
 
 // releaseOf is the release validate checks planned removals against: --release when given,

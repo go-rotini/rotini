@@ -195,23 +195,23 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoAddHandler)(nil)
+var _ rotini.ErrorHandler = (*todoAddHandler)(nil)
 
 type todoAddHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	inputs, err := rtx.Inputs[TodoAddInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	add := inputs.TodoAdd
 	fmt.Fprintf(rtx.Stdout, "added %q (priority %s)\n", add.Arguments.Title, add.Flags.Priority)
+	return nil
 }
 -- deploy.go.txt --
 package todo
@@ -223,22 +223,22 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoDeployHandler)(nil)
+var _ rotini.ErrorHandler = (*todoDeployHandler)(nil)
 
 type todoDeployHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoDeployInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	fmt.Fprintf(rtx.Stdout, "deploy %s to %s\n", in.TodoDeploy.Arguments.Service, in.TodoDeploy.Arguments.Env)
+	return nil
 }
 -- show.go.txt --
 package todo
@@ -250,21 +250,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handler = (*todoShowHandler)(nil)
+var _ rotini.ErrorHandler = (*todoShowHandler)(nil)
 
 type todoShowHandler struct {
-	rotini.NoCascadingPreRun
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
 }
 
-func (*todoShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoShowHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, err := rtx.Inputs[TodoShowInputs]()
 	if err != nil {
-		rtx.HaltWith(err)
-		return
+		return err
 	}
 	s := in.TodoShow
 	fmt.Fprintf(rtx.Stdout, "tags=%v\nlabels=%v\nhosts=%v\nkubeconfig=%v\n", s.Flags.Tags, s.Flags.Labels, s.Arguments.Hosts, s.Env.Kubeconfig)
+	return nil
 }

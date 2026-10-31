@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -93,6 +94,8 @@ type Context struct {
 	warnings      []error   // runtime, never recorded by a handler.
 	successes     []string
 	faults        []*PanicError
+	channels      []*channelRecords // author channels, in first-recorded order
+	lastErr       error             // the error RecordError last recorded, as given
 
 	// frame is the chain index of the command whose hook is running, or frameUnset outside a
 	// hook (resolving to the leaf). [AsCommand] sets it around every step; [Context.Command]
@@ -532,10 +535,39 @@ func (rtx *Context) RecordError(err error) {
 	if err == nil {
 		return
 	}
+	given := err
 	err = rtx.withPath(err)
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
 	rtx.errs = append(rtx.errs, err)
+	rtx.lastErr = given
+}
+
+// returned applies an [ErrorHandler] hook's result: it records err unless it is the error the
+// hook last recorded itself, and when halt is set it stops forward progress as HaltWith does.
+func (rtx *Context) returned(err error, halt bool) {
+	if err == nil {
+		return
+	}
+	rtx.mu.RLock()
+	last := rtx.lastErr
+	rtx.mu.RUnlock()
+	if !sameError(err, last) {
+		rtx.RecordError(err)
+	}
+	if halt {
+		rtx.Halt()
+	}
+}
+
+// sameError reports whether a and b are the same error value, without the panic == raises for
+// an uncomparable dynamic type.
+func sameError(a, b error) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
+	return ta == tb && ta.Comparable() && a == b //nolint:errorlint // identity, not a match: the same value the hook recorded
 }
 
 // copyErrors snapshots the recorded errors, in recording order.
@@ -612,7 +644,7 @@ func snapshot[T any](rtx *Context, channel func(*Context) []T) []T {
 func (rtx *Context) Failed() bool {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
-	return len(rtx.errs) > 0 || len(rtx.faults) > 0
+	return len(rtx.errs) > 0 || len(rtx.faults) > 0 || failedChannel(rtx.channels)
 }
 
 // recordFault appends a recovered panic or detected fault.
