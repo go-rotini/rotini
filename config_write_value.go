@@ -46,14 +46,14 @@ type checkedValue struct {
 func checkConfigKey(k ConfigKey, raw string, view *osView, parse func(string) error) (checkedValue, error) {
 	label := "config key " + k.Key
 	if k.Object {
-		return checkedValue{}, usageBind(channelConfig, k.Key, label+" holds an object; edit the configuration file by hand", nil)
+		return checkedValue{}, usageBind(InputErrorKindWriteRefused, channelConfig, k.Key, label+" holds an object; edit the configuration file by hand", nil)
 	}
 	fd := k.flagDef()
 	texts := []string{raw}
 	if isArrayType(k.Type) || isMapType(k.Type) {
 		var err error
 		if texts, err = splitValue(raw, k.separator()); err != nil {
-			return checkedValue{}, usageBind(channelConfig, k.Key, fmt.Sprintf("%s: %v", label, err), err)
+			return checkedValue{}, usageBind(InputErrorKindInvalidValue, channelConfig, k.Key, fmt.Sprintf("%s: %v", label, err), err)
 		}
 	}
 	texts = flagEnum(&fd).canonical(texts)
@@ -71,7 +71,7 @@ func checkConfigKey(k ConfigKey, raw string, view *osView, parse func(string) er
 	}
 	if parse != nil {
 		if err := parse(raw); err != nil {
-			return checkedValue{}, usageBind(channelConfig, k.Key, fmt.Sprintf("%s: %s", label, err), err)
+			return checkedValue{}, usageBind(InputErrorKindInvalidValue, channelConfig, k.Key, fmt.Sprintf("%s: %s", label, err), err)
 		}
 	}
 	return out, nil
@@ -86,12 +86,12 @@ func configValueError(key string, err error) error {
 	}
 	pe, ok := asError[*ParseError](err)
 	if !ok {
-		return usageBind(channelConfig, key, err.Error(), err)
+		return usageBind(InputErrorKindInvalidValue, channelConfig, key, err.Error(), err)
 	}
 	if pe.Kind == ParseKindInternal {
 		return internalBind(channelConfig, key, pe.Msg, err)
 	}
-	e := usageBind(channelConfig, key, pe.Msg, err)
+	e := usageBind(inputKindOf(pe.Kind), channelConfig, key, pe.Msg, err)
 	e.Token, e.Candidates = pe.Token, pe.Candidates
 	return e
 }

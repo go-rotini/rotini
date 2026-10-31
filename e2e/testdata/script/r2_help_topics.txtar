@@ -19,7 +19,7 @@ exec ./demo$exe help environment
 stdout '^  DEMO_LEVEL int +how loud \(used by: demo alpha\)'
 stdout '^  DEMO_TOKEN string +the API token \(used by: demo\)'
 ! exec ./demo$exe help nosuch
-stderr 'no help for command "nosuch"'
+stderr '^Error: demo: unknown command "nosuch"$'
 
 # A command's own page says what its stability promises; help shows the summary, not the
 # description.

@@ -90,6 +90,14 @@ type layerCore struct {
 	// shadowed is what a field's value overrode within the layer, low → high: the shared
 	// entries a profile's map replaced, which the report lists under the layer's own entry.
 	shadowed map[FieldPath][]InputSource
+	// reader and filePaths are what a merged report names inputs and files with, for
+	// [InputReport.Label], [InputReport.Sources] and [InputReport.Explain]: the reader the layer
+	// read with, and the file each configuration source was read from, by logical name.
+	reader    *InputReader
+	filePaths map[string]string
+	// configDocs is each configuration file the layer opened, for
+	// [InputReport.UnreadConfigKeys].
+	configDocs []openedDoc
 }
 
 // ── the one-liner ────────────────────────────────────────────────────────────.
@@ -327,6 +335,8 @@ type InputReport struct {
 	// stdinSchemas check a hand-built stdin document; nil when no rotini layer supplied them.
 	stdinSchemas map[string]string
 	view         *osView // the run's environment and directory, from a rotini layer
+	names        *inputNames
+	configDocs   []openedDoc // the configuration files the files layer opened
 }
 
 // Winner returns the provenance of the layer that supplied path's final value.
@@ -442,6 +452,12 @@ func (r *InputReport) absorb(core *layerCore) {
 	}
 	if core.stdinSchemas != nil {
 		r.stdinSchemas = core.stdinSchemas
+	}
+	if core.configDocs != nil {
+		r.configDocs = core.configDocs
+	}
+	if core.reader != nil {
+		r.names = r.names.merge(core.reader.namesFor(core.chain, core.filePaths, core.view))
 	}
 	if core.view != nil {
 		r.view = core.view
@@ -625,7 +641,8 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 		})
 		argPresence(set, "argv", topName, ci, frame, si.args)
 	})
-	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas, view: rtx.osView()}, nil
+	b := readerFor(rtx)
+	return set, &layerCore{chain: chain, store: store, anchor: anchor, anchored: true, stdinSchemas: b.stdinSchemas, view: rtx.osView(), reader: b}, nil
 }
 
 // defaultsLayer synthesizes declared defaults into v and records presence.
@@ -715,7 +732,8 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 			})
 		}
 	})
-	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults, anchor: anchor, anchored: true, stdinSchemas: readerFor(rtx).stdinSchemas, view: rtx.osView()}, nil
+	b := readerFor(rtx)
+	return set, &layerCore{chain: chain, store: store, argDefaults: argDefaults, anchor: anchor, anchored: true, stdinSchemas: b.stdinSchemas, view: rtx.osView(), reader: b}, nil
 }
 
 // envLayer acquires the env channel (Env structs + flag env-fallbacks) into v. A registry is
@@ -744,7 +762,11 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value, above layerShadow) 
 		return nil, nil, err
 	}
 	labels := channelLabels{env: envNames(v, "Env", b.envPrefix), view: view}
-	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), labels, above)
+	set, core, err := channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil, argvWaived(rtx, chain), labels, above)
+	if core != nil {
+		core.reader = b
+	}
+	return set, core, err
 }
 
 // envRegistries builds the environment channel's registries for the inputs v describes: the
@@ -825,7 +847,14 @@ func filesLayer(b *InputReader, rtx *Context, v reflect.Value, above layerShadow
 	}
 	labels := cfg.labels()
 	labels.view = view
-	return channelLayer(v, chain, anchor, "files", "Config", reg, reg, cfg, waived, labels, above)
+	set, core, err := channelLayer(v, chain, anchor, "files", "Config", reg, reg, cfg, waived, labels, above)
+	if core != nil {
+		core.reader, core.filePaths = b, labels.files
+		if view.files != nil {
+			core.configDocs = view.files.docs
+		}
+	}
+	return set, core, err
 }
 
 // filesBootstrap is what the files channel reads before any configuration file: the chain, the
@@ -964,6 +993,9 @@ func fillChannelStruct(set Presence, shadowed map[FieldPath][]InputSource, ci re
 	if !cs.IsValid() || cs.Kind() != reflect.Struct {
 		return nil
 	}
+	if err := checkTimeChannel(view.clockRef().features(), cs); err != nil {
+		return err
+	}
 	if cfg != nil {
 		// A pinned field reads only its own file, before it is expanded and checked.
 		if err := fillConfig(cs, cfg, waived); err != nil {
@@ -992,7 +1024,7 @@ func fillChannelStruct(set Presence, shadowed map[FieldPath][]InputSource, ci re
 	nested := map[string]bool{}
 	if structName == "Env" {
 		var err error
-		if nested, err = fillEnvNested(cs, view); err != nil {
+		if nested, err = fillEnvFamilies(cs, view); err != nil {
 			return err
 		}
 	}
@@ -1124,7 +1156,7 @@ func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 			}
 		}
 	}
-	return set, &layerCore{chain: chain, view: rtx.osView()}, nil
+	return set, &layerCore{chain: chain, view: rtx.osView(), reader: b}, nil
 }
 
 // stdinSet reports whether a Stdin field holds a payload: a non-nil pointer, or a non-nil

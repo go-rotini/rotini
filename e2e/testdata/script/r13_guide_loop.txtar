@@ -93,7 +93,7 @@ $ go tool rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.roti
 $ go tool rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
 spec: ./cmd/todo/.rotini.spec.yaml
 conf: ./cmd/todo/.rotini.conf.yaml
-Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sumary: unknown key "sumary" on a flag input
+Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sumary: unknown key "sumary" on a flag input; did you mean "summary"?
 -- typo.yaml --
 $schema: ./.rotini-schema.spec.json
 version: 0.0.0

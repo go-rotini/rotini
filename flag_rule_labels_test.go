@@ -33,7 +33,7 @@ func TestFlagRules_nameTypedSpellings(t *testing.T) {
 	}{
 		{[]string{"-46"}, "flags -4 and -6 are mutually exclusive"},
 		{[]string{"--ipv6", "-4"}, "flags -4 and --ipv6 are mutually exclusive"},
-		{[]string{"-u", "ada"}, "flags -u, --pass must be used together"},
+		{[]string{"-u", "ada"}, "flags -u, --pass must be used together; --pass is missing"},
 		{[]string{"-f", "csv"}, "flag --out is required when -f is set"},
 		{[]string{"-o", "x", "-q"}, "flag -q can't be used when -o is set"},
 	} {

@@ -62,7 +62,7 @@ func lintToolNames(spec *Spec, conf *Conf) []error {
 		}
 		name := strings.Join(names, "_")
 		for _, target := range targets {
-			if limit, ok := toolNameLimits[target]; ok && len(name) > limit {
+			if limit, ok := toolNameLimits()[target]; ok && len(name) > limit {
 				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + cmdPath,
 					msg: fmt.Sprintf("makes the tool name %q, %d characters, longer than %s allows (%d); shorten a name on its path, or keep it from agents with `agent: false`", name, len(name), target, limit)})
 				return

@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // lintFlagSets checks `flag_sets` and `use`: sets are declared on the root and used by name,
@@ -108,9 +107,13 @@ func flagSetClashes(c *Command, sets map[string]FlagSet) []string {
 }
 
 // setItemPointer matches the pointer of a command's flag, flag group or flag dependency.
-var setItemPointer = sync.OnceValue(func() *regexp.Regexp {
-	return regexp.MustCompile(`^(.*)/(flags|flag_groups|flag_dependencies)/(\d+)(/.*)?$`)
-})
+func setItemPointer() *regexp.Regexp {
+	return setItemPointerOnce.value(func() *regexp.Regexp {
+		return regexp.MustCompile(`^(.*)/(flags|flag_groups|flag_dependencies)/(\d+)(/.*)?$`)
+	})
+}
+
+var setItemPointerOnce lazy[*regexp.Regexp]
 
 // remapFlagSetProblems points each problem about a flag, flag group or flag dependency a
 // command got from a flag set at the set's declaration instead, where the source has it, and

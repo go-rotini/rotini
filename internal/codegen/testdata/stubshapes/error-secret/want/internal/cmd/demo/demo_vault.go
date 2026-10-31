@@ -22,6 +22,5 @@ func (*demoVaultHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	rtx.HaltWithCode(1)
-	return nil
+	return rotini.MissingCommand(rtx)
 }

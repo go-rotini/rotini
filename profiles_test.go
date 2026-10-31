@@ -272,7 +272,7 @@ func TestProfiles_schemaChecksTheEffectiveView(t *testing.T) {
 		t.Fatalf("default: %v", err)
 	}
 	_, err := pfRead(t, nil, pfSettings(f), "--profile", "bad")
-	if err == nil || !strings.Contains(err.Error(), "configuration file "+path+" (profile bad) is invalid") {
+	if err == nil || !strings.Contains(err.Error(), "configuration file "+path+":17:16 (profile bad) is invalid") {
 		t.Fatalf("bad: %v", err)
 	}
 }

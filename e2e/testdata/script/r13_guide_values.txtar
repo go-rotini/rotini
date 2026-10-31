@@ -40,9 +40,9 @@ stdout '^added "buy milk" \(priority high\)$'
 
 # Help lists the variable first, then the config key, under the flag.
 exec ./todo$exe add --help
-stdout '^Flags:\n  -p, --priority string    how urgent \(default normal\) \[low\|normal\|high\]\n                           also set by TODO_DEFAULTS_PRIORITY or config key defaults\.priority\n      --tag \[\]string       a label \(repeatable\)\n'
+stdout '^Flags:\n  -p, --priority string    how urgent \(default normal\) \[low\|normal\|high\]\n                           also set by TODO_DEFAULTS_PRIORITY or config key defaults\.priority\n      --tag string\.\.\.      a label \(repeatable\)\n'
 stdout '^                           also set by TODO_DEFAULTS_PRIORITY or config key defaults\.priority$'
-stdout '^      --tag \[\]string       a label \(repeatable\)$'
+stdout '^      --tag string\.\.\.      a label \(repeatable\)$'
 
 # A null key is not set: the default applies.
 cp config-null.yaml xdg/todo/config.yaml

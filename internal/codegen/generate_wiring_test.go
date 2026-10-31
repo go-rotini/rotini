@@ -69,6 +69,18 @@ func TestWiredFeatures_perDeclaration(t *testing.T) {
 `, []string{`rotini.Stdin("lines", "jsonl", "yaml")`, "rotini.Schemas()", "rotini.JSON()", "rotini.YAML()"}},
 		{"stdin default json", `  stdin: {schema: {type: string}}
 `, []string{`rotini.Stdin("json")`, "rotini.Schemas()", "rotini.JSON()"}},
+		{"formats of the program's own", `  config_files:
+    - {name: app, path: ./app.ini, format: ini}
+  config:
+    - {name: region, schema: {type: string}}
+  commands:
+    - name: a
+      summary: s
+      stdin: {format: hcl, schema: {type: object, properties: {x: {type: string}}}}
+    - name: b
+      summary: s
+      stdin: {format: yaml, schema: {type: object, properties: {x: {type: string}}}}
+`, []string{`rotini.Stdin("yaml", "hcl")`, "rotini.ConfigFiles()", "rotini.Schemas()", "rotini.YAML()"}},
 		{"env", `  env:
     - {name: home, schema: {type: string}}
 `, []string{"rotini.Env()"}},
@@ -167,6 +179,21 @@ func TestWiredFeatures_perDeclaration(t *testing.T) {
     - {name: h, identifiers: [--h], schema: {type: array, items: {type: hostport}}}
     - {name: r, identifiers: [--r], schema: {type: regexp}}
 `, []string{"rotini.URLValues()", "rotini.EmailValues()", "rotini.TimeZoneValues()", "rotini.MACValues()", "rotini.IPValues()", "rotini.RegexpValues()"}},
+		{"plain time", `  flags:
+    - {name: at, identifiers: [--at], schema: {type: time}}
+`, nil},
+		{"date", `  flags:
+    - {name: day, identifiers: [--day], schema: {type: date}}
+`, []string{"rotini.TimeValues()"}},
+		{"time layout", `  arguments:
+    - {name: at, schema: {type: "[]time", layout: unix}}
+`, []string{"rotini.TimeValues()"}},
+		{"relative time in a config input", `  config:
+    - {name: since, schema: {type: time, relative: past}}
+`, []string{"rotini.ConfigFiles()", "rotini.TimeValues()"}},
+		{"env family", `  env:
+    - {name: http, schema: {type: map, nesting: __}}
+`, []string{"rotini.Env()", "rotini.EnvFamilies()"}},
 		{"value type in an env input", `  env:
     - {name: net, schema: {type: cidr}}
 `, []string{"rotini.Env()", "rotini.IPValues()"}},

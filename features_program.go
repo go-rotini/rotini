@@ -90,5 +90,5 @@ func recordChdirError(rtx *Context, err error) {
 var (
 	wiredResponseFileHooks = responseFileHooks{expand: expandResponseFiles, completionWords: completionWords}
 	wiredChdirHooks        = chdirHooks{apply: (*Program).applyChdir, complete: (*Program).completionChdir}
-	wiredMulticallHooks    = multicallHooks{route: multicallArgv}
+	wiredMulticallHooks    = multicallHooks{route: multicallArgv, completion: PluginCompletion}
 )

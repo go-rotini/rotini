@@ -111,14 +111,14 @@ func TestOverride_layers(t *testing.T) {
 		t.Errorf("db: footer %q, effects %v; want root's", db.help.Footer, db.help.Effects)
 	}
 	status := nodeAt(t, gp, "db", "status")
-	if !slices.Equal(status.help.Examples, []string{"acme db status"}) || status.deprecated != "use migrate" {
+	if !slices.Equal(exampleRuns(status.help.Examples), []string{"acme db status"}) || status.deprecated != "use migrate" {
 		t.Errorf("db status: examples %q, deprecated %q; want root's examples, db's deprecation", status.help.Examples, status.deprecated)
 	}
 	if status.replacedBy.text != "acme db migrate" {
 		t.Errorf("db status replaced by %q; want root's, relative to root", status.replacedBy.text)
 	}
 	migrate := nodeAt(t, gp, "db", "migrate")
-	if !slices.Equal(migrate.help.Examples, []string{"acme db migrate --steps 2"}) {
+	if !slices.Equal(exampleRuns(migrate.help.Examples), []string{"acme db migrate --steps 2"}) {
 		t.Errorf("db migrate examples = %q; want root's", migrate.help.Examples)
 	}
 	if migrate.help.Summary != "db's migrate" || migrate.help.Footer != "mig's footer" || !slices.Equal(migrate.aliases, []string{"m"}) {
@@ -146,7 +146,7 @@ func TestOverride_twoLayers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := nodeAt(t, gp, "db", "status").help.Examples; !slices.Equal(got, []string{"acme db status"}) {
+	if got := exampleRuns(nodeAt(t, gp, "db", "status").help.Examples); !slices.Equal(got, []string{"acme db status"}) {
 		t.Errorf("db status examples = %q", got)
 	}
 	if got := nodeAt(t, gp, "db").help.Footer; got != "Run 'db help' for more." {
@@ -234,11 +234,11 @@ func TestOverride_validatePositions(t *testing.T) {
 	}
 }
 
-// TestStub_helpAnswersForPlugins pins that the seeded help command asks PluginHelp first, so
-// `help <plugin>` runs the plugin's own help, even for plugins declared after it is seeded.
+// TestStub_helpAnswersForPlugins pins that a seeded help command that can name a plugin asks
+// PluginHelp first, so `help <plugin>` runs the plugin's own help.
 func TestStub_helpAnswersForPlugins(t *testing.T) {
 	emitted := composeModuleStaged(t, map[string]string{
-		"cmd/root/.rotini.spec.yaml": "version: 0.0.0\ncommand:\n  name: root\n" +
+		"cmd/root/.rotini.spec.yaml": "version: 0.0.0\ncommand:\n  name: root\n  plugins:\n    - {name: lint}\n" +
 			"  commands:\n    - name: help\n      arguments:\n        - name: command\n          schema: { type: '[]string' }\n",
 		"cmd/root/.rotini.conf.yaml": "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/root/zz_root.go\n  features:\n    - type: help\n      enabled: true\n",
 	})

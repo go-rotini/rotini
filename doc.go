@@ -86,6 +86,12 @@
 // [Context.Halt], [Context.HaltWithCode] or [Context.Exit]; recorded errors, recovered panics
 // and detected faults are reported once, after teardown, by the outcome reporter.
 //
+// Code that belongs around every command rather than in one, such as tracing, timing or a
+// confirmation before a destructive run, is a [Middleware] the program installs with
+// [Program.WithMiddleware]. It wraps every hook invocation, sees the error a hook returns, and
+// may return its own or skip the hook. [Context.Command] carries the command's declared
+// effects, exit statuses and stability, and [RunEffects] adds what the given flags declare.
+//
 // The runtime resolves only which command was invoked. Flags and arguments are parsed and
 // validated when a handler calls [Context.Inputs] (or the per-channel [Context.ArgvInputs],
 // [Context.EnvInputs], [Context.FileInputs] and [Context.StdinInputs]), which the generated
@@ -216,13 +222,22 @@
 // A hook that records a failure without stopping lets the next hook run, often repeating the
 // same failure.
 //
-// The default reporter prints infos, warnings, errors, panics, then successes, each followed by
-// the records of the author channels of that class, all to stderr so
-// stdout carries only what handlers write, then applies the exit floor: a recorded error or
+// The default reporter, [DefaultReporter], prints infos, warnings, errors, panics, then
+// successes, each followed by the records of the author channels of that class, all to stderr
+// so stdout carries only what handlers write, then applies the exit floor: a recorded error or
 // fault exits 1 unless a handler already set a non-zero code. It leaves out an error the run's
-// own signal trap caused, since that run exits 128+n anyway. A custom reporter receives every
-// record and applies no floor: the run exits with the code a handler set, or with the one the
-// reporter sets with [Context.Exit], which replaces it.
+// own signal trap caused ([SignalCaused]), since that run exits 128+n anyway. A custom reporter
+// receives every record and applies no floor: the run exits with the code a handler set
+// ([Outcome.ExitCode]), or with the one the reporter sets with [Context.Exit], which replaces
+// it. [Outcome.Signal] is the trapped signal that stopped the run. A custom reporter that only
+// adds to the report calls DefaultReporter for the rest:
+//
+//	p.WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+//		rotini.DefaultReporter(ctx, rtx, out)
+//		if out.Failed() && out.Signal == nil {
+//			fmt.Fprintln(rtx.Stderr, "Run 'todo --help' for usage.")
+//		}
+//	})
 //
 // Every failure class is errors.Is-able against the [ErrUsage] or [ErrInternal] sentinel, so
 // [CategoryOf] classifies it, and errors.As-able to a typed value with structured fields. The
@@ -232,12 +247,14 @@
 // two are usage errors). Rotini's own messages expose no decoder or OS internals and no secret
 // values. A [*ParseError] or usage [*InputError] starts its message with the path of the
 // command the input belongs to, as typed (`todo add: missing required input: <title>`); its
-// Msg field is the message alone, for a reporter that words its own:
+// Msg field is the message alone, and Path returns the path, for a reporter that words its own:
 //
 //   - [*ParseError] — the argv channel. [ParseError.Kind] identifies the failure; Token and
 //     Candidates are the facts a "did you mean" needs.
 //   - [*InputError] — the env, config, stdin and flag-fallback channels, carrying the channel,
-//     the input and a message, with the recon cause reachable via errors.As. A word outside a
+//     the input and a message, with the recon cause reachable via errors.As.
+//     [InputError.Kind] identifies the failure, under the same name as a [ParseKind] where the
+//     command line can fail the same way. A word outside a
 //     known set (an env or config enum value, a configuration profile, a key given to a
 //     configuration write) also carries Token and Candidates.
 //   - [*PluginError] — a plugin dispatch, recorded as an error. A missing discovered plugin is
@@ -280,7 +297,29 @@
 //	s := rtx.MustGetDependency(tasks.Store)
 //
 // [Context.GetDependency] reports a miss instead of routing it to the reporter, and
-// [Context.SetDependency] sets one for the rest of this run only. [Context.Command] is the
+// [Context.SetDependency] sets one for the rest of this run only.
+//
+// A dependency that is costly to open, or built from the command line, is provided instead:
+// [Program.WithProvider] registers a function that builds it on the first request in a run,
+// once for that run, and closes it after teardown when it is an [io.Closer]. A command that
+// never asks, or a --help that halts first, never builds it. [Context.Dependency] returns the
+// provider's error as is, so a [UsageError] stays a usage error, and a value registered with
+// WithDependency or SetDependency, such as a test's double, wins over the provider:
+//
+//	func openStore(ctx context.Context, rtx *rotini.Context) (*store.Store, error) {
+//		in, err := rtx.Inputs[TasksInputs]()
+//		if err != nil {
+//			return nil, err
+//		}
+//		return store.Open(ctx, in.Tasks.Flags.Database)
+//	}
+//
+//	cmd.NewProgram().WithProvider(tasks.Store, openStore).Execute()
+//
+//	// any handler
+//	s, err := rtx.Dependency(tasks.Store)
+//
+// [Context.Command] is the
 // command whose hook is running, [Context.CommandPath] its canonical path ("tasks add"), and
 // [Context.CommandChain] the full chain with the tokens the user typed.
 //

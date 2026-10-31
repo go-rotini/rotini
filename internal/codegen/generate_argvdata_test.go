@@ -7,21 +7,25 @@ import (
 
 // TestCompose_recordsInputsTypes pins the Definition's Inputs fields across composition: the
 // root's own type, a composed child's type through the child's package, and a grandchild's
-// through the grandchild's own package.
+// through the grandchild's own package. They are set on first use, so the literal stays
+// static data.
 func TestCompose_recordsInputsTypes(t *testing.T) {
 	// gofmt aligns the literal's fields, so compare with runs of space collapsed.
 	root := strings.Join(strings.Fields(composeModuleStaged(t, transitiveTree())["internal/cmd/root/zz_root.go"]), " ")
 	for _, want := range []string{
-		"Inputs: rotiniTypeOf((*RootInputs)(nil)),",
-		"Inputs: rotiniTypeOf((*childcli.ChildInputs)(nil)),",
-		"Inputs: rotiniTypeOf((*grandcli.GrandInputs)(nil)),",
+		"definition.Inputs = rotiniTypeOf((*RootInputs)(nil))",
+		"definition.Commands[0].Inputs = rotiniTypeOf((*childcli.ChildInputs)(nil))",
+		"definition.Commands[0].Commands[0].Inputs = rotiniTypeOf((*grandcli.GrandInputs)(nil))",
 	} {
 		if !strings.Contains(root, want) {
 			t.Errorf("root Definition lacks %q:\n%s", want, root)
 		}
 	}
-	if n := strings.Count(root, "Inputs: rotiniTypeOf((*"); n != 3 {
+	if n := strings.Count(root, ".Inputs = rotiniTypeOf((*"); n != 3 {
 		t.Errorf("root Definition records %d inputs types, want 3:\n%s", n, root)
+	}
+	if strings.Contains(root, "Inputs: rotiniTypeOf(") {
+		t.Errorf("the definition literal calls rotiniTypeOf, so it is built at init:\n%s", root)
 	}
 	if !strings.Contains(root, `"reflect"`) {
 		t.Error("the root file doesn't import reflect")
@@ -80,9 +84,9 @@ command:
 `
 	root := strings.Join(strings.Fields(composeModuleStaged(t, files)["internal/cmd/root/zz_root.go"]), " ")
 	for _, want := range []string{
-		"Output: &rotini.OutputDef{Type: rotiniTypeOf((*childcli.ChildOutput)(nil))",
-		"Output: &rotini.OutputDef{Type: rotiniTypeOf((*childcli.ChildListOutput)(nil)), Schema: `",
-		"Output: &rotini.OutputDef{Type: rotiniTypeOf((*grandcli.GrandOutput)(nil))",
+		".Output.Type = rotiniTypeOf((*childcli.ChildOutput)(nil))",
+		".Output.Type = rotiniTypeOf((*childcli.ChildListOutput)(nil))",
+		".Output.Type = rotiniTypeOf((*grandcli.GrandOutput)(nil))",
 		`"id":{"type":"string"}`,
 		"Stream: true",
 	} {

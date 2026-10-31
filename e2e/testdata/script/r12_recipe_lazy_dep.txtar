@@ -1,6 +1,6 @@
-# R12 — the lazy dependency recipe: a store registered in the root's CascadingPreRun is opened
-# only by a command that asks for it, once, and a test's own registration wins. The handler
-# files are the ones the guide shows.
+# R12 — the lazy dependency recipe: a store provided with Program.WithProvider is opened only
+# by a command that asks for it, once, never by --help, and a test's own registration wins.
+# The files are the ones the guide shows.
 
 gomodinit example.com/lazydemo
 
@@ -8,12 +8,17 @@ exec rotini generate cmd/lazydemo/.rotini.spec.yaml --config cmd/lazydemo/.rotin
 cp store.go.txt internal/cmd/lazydemo/store.go
 cp get.go.txt internal/cmd/lazydemo/lazydemo_get.go
 cp root.go.txt internal/cmd/lazydemo/lazydemo.go
+cp main.go.txt cmd/lazydemo/main.go
 exec go mod tidy
 exec go build -o lazydemo$exe ./cmd/lazydemo
 
-# hello never asks for the store, so it runs without one.
+# hello never asks for the store, so it runs without one, and so does --help.
 exec ./lazydemo$exe hello
 stdout '^hello$'
+exec ./lazydemo$exe --help
+! stderr .
+exec ./lazydemo$exe get --help
+! stderr .
 
 # get opens it, and fails when it can't.
 wantexit 1 ./lazydemo$exe get region
@@ -23,8 +28,8 @@ cp data.txt store.txt
 exec ./lazydemo$exe get region
 stdout '^eu-1$'
 
-# A test's double, registered with Program.WithDependency, is kept: SetDependencyIfAbsent
-# leaves it in place, and the real store is never opened.
+# A test's double, registered with Program.WithDependency, wins over the provider, so the real
+# store is never opened.
 cp double_test.go.txt internal/cmd/lazydemo/double_test.go
 exec go test ./internal/cmd/lazydemo
 stdout '^ok'
@@ -38,18 +43,14 @@ import (
 )
 
 func TestGetUsesTheDouble(t *testing.T) {
-	opened := 0
-	double := func() (*Store, error) {
-		opened++
-		return &Store{values: map[string]string{"region": "test-1"}}, nil
-	}
+	double := &Store{values: map[string]string{"region": "test-1"}}
 	var out strings.Builder
-	p := NewProgram().WithDependency(storeDep, double).WithDir(t.TempDir()).WithStdout(&out)
+	p := NewProgram().With(WithStore).WithDependency(storeDep, double).WithDir(t.TempDir()).WithStdout(&out)
 	if code, err := p.Run([]string{"get", "region"}); code != 0 || err != nil {
 		t.Fatalf("get: exit %d, %v", code, err)
 	}
-	if out.String() != "test-1\n" || opened != 1 {
-		t.Fatalf("get printed %q and called the double %d times", out.String(), opened)
+	if out.String() != "test-1\n" {
+		t.Fatalf("get printed %q", out.String())
 	}
 }
 -- data.txt --
@@ -58,9 +59,10 @@ region=eu-1
 package lazydemo
 
 import (
+	"context"
 	"os"
+	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/go-rotini/rotini"
 )
@@ -68,18 +70,14 @@ import (
 // Store is costly to open, so only the commands that use it open it.
 type Store struct{ values map[string]string }
 
-// storeDep holds a function that opens the store on its first call and returns the same
-// store, or the same error, on every later call.
-var storeDep = rotini.NewDependency[func() (*Store, error)]("lazydemo.store")
+var storeDep = rotini.NewDependency[*Store]("lazydemo.store")
 
-// registerStore makes the store available without opening it. A test that registered its own
-// opener first keeps it.
-func registerStore(rtx *rotini.Context) {
-	rtx.SetDependencyIfAbsent(storeDep, sync.OnceValues(openStore))
-}
+// WithStore provides the store: a run opens it the first time a command asks for it, and a
+// run that never asks never opens it.
+var WithStore = rotini.WithProvider(storeDep, openStore)
 
-func openStore() (*Store, error) {
-	data, err := os.ReadFile("store.txt")
+func openStore(ctx context.Context, rtx *rotini.Context) (*Store, error) {
+	data, err := os.ReadFile(filepath.Join(rtx.Dir(), "store.txt"))
 	if err != nil {
 		return nil, err
 	}
@@ -115,12 +113,24 @@ func (*lazydemoGetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if err != nil {
 		return err
 	}
-	store, err := rtx.MustGetDependency(storeDep)()
+	store, err := rtx.Dependency(storeDep)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintln(rtx.Stdout, store.values[inputs.LazydemoGet.Arguments.Key])
 	return nil
+}
+-- main.go.txt --
+package main
+
+import (
+	cmd "example.com/lazydemo/internal/cmd/lazydemo"
+)
+
+func main() {
+	cmd.NewProgram().
+		With(cmd.WithStore).
+		Execute()
 }
 -- root.go.txt --
 package lazydemo
@@ -141,8 +151,6 @@ type lazydemoHandler struct {
 }
 
 func (*lazydemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
-	registerStore(rtx)
-
 	inputs, err := rtx.Inputs[LazydemoInputs]()
 	if err != nil {
 		return err

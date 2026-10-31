@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // This file drives the generate stage: resolveProgram turns a validated spec and conf
@@ -47,6 +46,10 @@ type program struct {
 	// spec, and back in the build now that it has returned. Reported as notices.
 	restored []string
 
+	// stubSeeds are the handler files this pass creates, with any test seeded beside each, set
+	// by renderStubs and written by emitStubs.
+	stubSeeds []stubSeed
+
 	// skipPrune deletes no orphaned file, and only disables orphaned stubs. `rotini init` sets
 	// it: init never deletes a file, but leaves a package that builds.
 	skipPrune bool
@@ -55,6 +58,19 @@ type program struct {
 	// resembles a lifecycle hook but is not one, or a call acquiring another command's
 	// inputs type. Reported as notices, never errors, since both are legal Go.
 	auditWarnings []error
+
+	// authorPackageDoc is whether a file of the author's in the cmd package already has a package
+	// doc comment, which the generated file then leaves to it. checkCmdPackage sets it.
+	authorPackageDoc bool
+
+	// authorNames maps each top-level name a file of the author's in the cmd package declares to
+	// that file, so a generated constant doesn't redeclare one. checkCmdPackage sets it.
+	authorNames map[string]string
+
+	// consts caches [program.constants].
+	consts     []constGroup
+	constsDone bool
+	constsErr  error
 
 	// handlerImports are the import paths named by the spec's `handler:` blocks. auditHooks
 	// reads the ones inside this module.
@@ -108,6 +124,10 @@ type program struct {
 	// contractGo is the contract document for the cmd file's Contract variable
 	// (generate.contract.go), set by emitContract; nil when that is off.
 	contractGo []byte
+
+	// generated holds what each conf generator returned, set by runGenerators before anything
+	// is written.
+	generated []generatorRun
 
 	// toolsGo is the MCP tools document for the cmd file's ToolsMCP variable (the tools
 	// feature's `go: true`), set by emitProgramFeatures; nil when that is off.
@@ -166,13 +186,16 @@ func (p *program) generate() error {
 	}{
 		{"check cmd package", p.checkCmdPackage},
 		{"read previous pages", p.readPriorPages},
+		{"run generators", p.runGenerators},
 		{"emit schemas", p.emitSchemas},
 		{"emit contract", p.emitContract},
 		{"emit program features", p.emitProgramFeatures},
+		{"render handler stubs", p.renderStubs},
 		{"emit models file", p.emitModelsFile},
 		{"emit cmd file", p.emitCmdFile},
 		{"emit feature outputs", p.emitFeatures},
 		{"emit install files", p.emitInstallFiles},
+		{"write generator files", p.writeGeneratorFiles},
 		{"emit handler stubs", p.emitStubs},
 		{"emit entrypoint", p.emitEntrypoint},
 		{"prune orphans", p.prune},
@@ -193,7 +216,8 @@ func (p *program) generate() error {
 // directory declares another package, as every handler does once the conf's `package:`
 // changes. Handlers belong to the author, so generate never rewrites them; the error names
 // each one. Files rotini rewrites itself, build-ignored files and generated files are
-// skipped, as is a file that doesn't parse (the compiler reports it).
+// skipped, as is a file that doesn't parse (the compiler reports it). It also notes whether an author
+// file carries the package doc comment.
 func (p *program) checkCmdPackage() error {
 	dir := p.layout.cmdDir
 	entries, err := os.ReadDir(dir)
@@ -221,11 +245,14 @@ func (p *program) checkCmdPackage() error {
 		if buildIgnored(src) {
 			continue
 		}
-		f, err := parser.ParseFile(token.NewFileSet(), name, src, parser.PackageClauseOnly|parser.ParseComments)
+		f, err := parser.ParseFile(token.NewFileSet(), name, src, parser.ParseComments|parser.SkipObjectResolution)
 		if err != nil || ast.IsGenerated(f) {
 			continue
 		}
 		got := f.Name.Name
+		if got == want {
+			p.recordAuthorFile(name, f)
+		}
 		if got == want || (strings.HasSuffix(name, "_test.go") && got == want+"_test") {
 			continue
 		}
@@ -258,6 +285,10 @@ func (p *program) emitModelsFile() error {
 	if err != nil {
 		return err
 	}
+	consts, err := p.constDecls(true, false, false, p.layout.modelsInCmd)
+	if err != nil {
+		return err
+	}
 	content, err := renderModelsFile(templateModelsData{
 		Package:     p.layout.modelsPkgName,
 		Imports:     renderImports(imports),
@@ -265,12 +296,13 @@ func (p *program) emitModelsFile() error {
 		FlagSets:    flagSetTemplates(p),
 		OutputTypes: outputTypes,
 		ExitCodes:   exitConstantsDecl(p.exitConstants(), false),
+		Constants:   consts,
 		Header:      p.layout.modelsHeader,
 	})
 	if err != nil {
 		return err
 	}
-	if err := duplicateDecls(p.layout.modelsFile, generatedNames(p.exitConstants(), false, false), content); err != nil {
+	if err := duplicateDecls(p.layout.modelsFile, p.generatedOrigins(false, false), content); err != nil {
 		return err
 	}
 	return p.plan.write(filepath.Join(p.layout.modelsDir, p.layout.modelsFile), content)
@@ -282,7 +314,7 @@ func (p *program) emitCmdFile() error {
 	if err != nil {
 		return err
 	}
-	if err := duplicateDecls(p.layout.cmdFile, generatedNames(p.exitConstants(), p.contractGo != nil, p.toolsGo != nil), content); err != nil {
+	if err := duplicateDecls(p.layout.cmdFile, p.generatedOrigins(p.contractGo != nil, p.toolsGo != nil), content); err != nil {
 		return err
 	}
 	return p.plan.write(filepath.Join(p.layout.cmdDir, p.layout.cmdFile), content)
@@ -302,8 +334,12 @@ func (p *program) emitFeatures() error {
 	return nil
 }
 
-// emitStubs creates each missing handler stub. Existing stubs are never overwritten.
-func (p *program) emitStubs() error { return writeHandlerStubs(p, p.layout) }
+// emitStubs creates each missing handler stub, rendered by renderStubs. Existing stubs are
+// never overwritten.
+func (p *program) emitStubs() error {
+	p.auditWarnings = append(p.auditWarnings, composedHelpMissesPlugins(p)...)
+	return writeHandlerStubs(p, p.layout)
+}
 
 // emitEntrypoint writes the binary's main.go, create-once, when the conf declares an
 // entrypoint, and notes an existing one that still uses the removed Program variable.
@@ -318,7 +354,11 @@ func (p *program) emitEntrypoint() error {
 }
 
 // programVarUse matches a package-qualified Program, as in cmd.Program.Execute().
-var programVarUse = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.Program\b`) })
+func programVarUse() *regexp.Regexp {
+	return programVarUseOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.Program\b`) })
+}
+
+var programVarUseOnce lazy[*regexp.Regexp]
 
 // staleProgramVar reports an existing main.go that uses the generated package's Program
 // variable, which generated code no longer declares, with the line that replaces it.
@@ -529,8 +569,38 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 	}
 	imports["reflect"] = true // the Definition records each command's inputs type
 
+	pointers := pointerVars{}
+	def, err := makeStatic(renderDefinition(gp), pointers, true)
+	if err != nil {
+		return nil, fmt.Errorf("rendering the definition: %w", err)
+	}
+	settings, err := makeStatic(renderInputSettings(gp), pointers, false)
+	if err != nil {
+		return nil, fmt.Errorf("rendering InputSettings: %w", err)
+	}
+	// Enum constants sit beside the types: here unless the models file declares them, then
+	// re-exported unless it is in this package. Name constants are always this file's.
+	enums := !lay.splitModels || !lay.modelsInCmd
+	consts, err := gp.constDecls(enums, lay.splitModels, true, true)
+	if err != nil {
+		return nil, err
+	}
+	contract := contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo) + examplesDecl(gp.examples)
+	if runs := gp.exampleRunsDecl(); runs != "" {
+		if contract != "" {
+			contract += "\n"
+		}
+		contract += runs
+	}
+	defRef := "definition"
+	if len(def.fills) > 0 {
+		defRef = "rotiniDefinition()"
+		imports["sync"] = true
+	}
+
 	return renderRotiniFile(templateRotiniData{
 		Package:            lay.cmdPkgName,
+		PackageDoc:         packageDoc(gp, lay.cmdPkgName),
 		PathResolvers:      hasPathResolver(features),
 		HelpResolver:       featureResolver(features, helpFeatureDesc.noun),
 		CompletionResolver: featureResolver(features, completionFeatureDesc.noun),
@@ -541,21 +611,43 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		ChildImports:       gp.childImports,
 		Methods:            gp.methods(),
 		RollupMethods:      rollupMethods(gp),
-		Definition:         renderDefinition(gp),
+		Definition:         def.decl + definitionFill(def.fills) + pointers.decl(),
+		DefinitionRef:      defRef,
 		ModelsImport:       modelsImport,
 		ModelAliases:       aliases,
 		Blocks:             blocks,
 		FlagSets:           flagSets,
 		OutputTypes:        outputTypes,
-		InputSettings:      renderInputSettings(gp),
+		InputSettings:      settings.decl,
 		Features:           features,
 		EmbedImport:        anyEmbed(features) || examplesEmbed(gp.examples),
-		NeedsFmt:           gp.examples.configOn,
+		NeedsFmt:           gp.examples.configOn || featureResolver(features, completionFeatureDesc.noun) != "",
 		ExitCodes:          exitCodes,
-		Contract:           contractDecl(gp.contractGo) + toolsDecl(gp.toolsGo) + examplesDecl(gp.examples),
-		UsageFunc:          usageFuncDecl(gp),
+		Constants:          consts,
+		Contract:           contract,
+		UsageFunc:          usageFuncDecl(gp, defRef),
 		CanonicalPath:      canonicalPathDecl(gp.tree),
 	})
+}
+
+// packageDoc is the cmd package's doc comment, from the root's summary, or "" when the root has
+// none or a file of the author's in the package already has one: go doc joins every file's
+// package comment, so the generated one steps aside rather than doubling the author's.
+func packageDoc(gp *program, pkg string) string {
+	summary := strings.TrimSpace(commentText(gp.spec.Command.Summary))
+	if summary == "" || gp.authorPackageDoc {
+		return ""
+	}
+	if !strings.ContainsAny(summary[len(summary)-1:], ".!?") {
+		summary += "."
+	}
+	text := fmt.Sprintf("Package %s implements the %s command: %s", pkg, gp.rootName, summary)
+	var b strings.Builder
+	for l := range strings.Lines(text) {
+		b.WriteString(strings.TrimRight("// "+strings.TrimRight(l, "\r\n"), " "))
+		b.WriteByte('\n')
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // inputBlocks assembles the per-command typed-struct blocks and the imports their field
@@ -650,12 +742,12 @@ func anyEmbed(features []templateFeature) bool {
 	return false
 }
 
-// writeHandlerStubs creates a handler stub for the root and every own sub-command whose
-// stub file does not exist yet; stubs are user-owned and never overwritten. Composed and
-// passthrough commands get no stub, since their handlers live in another package. The
-// body is seeded by stubBody.
+// writeHandlerStubs creates the handler stubs renderStubs rendered, for the root and every own
+// sub-command whose stub file did not exist, and the tests seeded beside them; stubs are
+// user-owned and never overwritten. Composed and passthrough commands get no stub, since their
+// handlers live in another package. A stub pruning disabled whose command is back is
+// re-enabled, with its seeded test.
 func writeHandlerStubs(gp *program, lay layout) error {
-	helpOn := featureEnabled(gp.conf, "help")
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
 			continue
@@ -665,22 +757,30 @@ func writeHandlerStubs(gp *program, lay layout) error {
 		if err != nil {
 			return err
 		}
-		if exists && stubDisabled(body) {
-			// Its command left the spec and has come back: re-enable it.
-			if err := gp.plan.write(path, enableStub(body)); err != nil {
-				return err
-			}
-			gp.restored = append(gp.restored, filepath.Base(path))
+		if !exists || !stubDisabled(body) {
 			continue
 		}
-		if exists {
-			continue
+		// Its command left the spec and has come back: re-enable it.
+		if err := gp.plan.write(path, enableStub(body)); err != nil {
+			return err
 		}
-		content, err := renderHandlerStubFile(stubBody(gp, c, lay.cmdPkgName, lay.cmdHeader, helpOn))
+		gp.restored = append(gp.restored, filepath.Base(path))
+		restored, err := restoreSeededTest(gp.plan, path)
 		if err != nil {
 			return err
 		}
-		if err := gp.plan.createOnce(path, content); err != nil {
+		if restored {
+			gp.restored = append(gp.restored, seededTestFile(filepath.Base(path)))
+		}
+	}
+	for _, s := range gp.stubSeeds {
+		if err := gp.plan.createOnce(s.path, s.content); err != nil {
+			return err
+		}
+		if s.testPath == "" {
+			continue
+		}
+		if err := gp.plan.createOnce(s.testPath, s.testContent); err != nil {
 			return err
 		}
 	}
@@ -839,6 +939,7 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 	switch name := commandName(c.invocation); {
 	case name == "help" && !isRoot && helpOn:
 		d.HelpPathArg = variadicStringArgField(c)
+		d.HelpPlugins = helpReachesPlugins(gp, c)
 	case name == "version" && !isRoot && len(c.args) == 0:
 		d.VersionOnly = true
 	case !isRoot && completionStub(gp, c):
@@ -850,6 +951,88 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 	d.Redact = d.HelpPathArg+d.CompletionArg == "" && !d.VersionOnly && !d.PrintHelpWhenBare && chainHasSecret(gp, c)
 	d.setInputsUse(rootHooked)
 	return d
+}
+
+// helpReachesPlugins reports whether the help command c can name a plugin: one declared, or
+// plugin discovery, on the command c sits under or anywhere below it, composed children
+// included, since a help path is read from there.
+func helpReachesPlugins(gp *program, c genCommand) bool {
+	under, ok := parentNodeOf(gp.tree, c.prefix)
+	if !ok {
+		return false
+	}
+	if under == nil { // c sits under the root
+		return len(gp.rootPlugins) > 0 || gp.rootDiscovery != nil || treeHasPlugins(gp.tree)
+	}
+	return nodeHasPlugins(under, false)
+}
+
+// parentNodeOf finds the node with the given prefix in nodes and returns its parent, nil for
+// a top-level node.
+func parentNodeOf(nodes []rnode, prefix string) (*rnode, bool) {
+	for i := range nodes {
+		if nodes[i].prefix == prefix {
+			return nil, true
+		}
+		if p, ok := parentNodeOf(nodes[i].children, prefix); ok {
+			if p == nil {
+				p = &nodes[i]
+			}
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+// treeHasPlugins reports whether any node in nodes or below declares a plugin or plugin
+// discovery.
+func treeHasPlugins(nodes []rnode) bool {
+	return slices.ContainsFunc(nodes, func(n rnode) bool { return nodeHasPlugins(&n, false) })
+}
+
+// nodeHasPlugins reports whether n or a node below it declares a plugin or plugin discovery.
+// With composedOnly, it walks only the nodes mounted from composed specs.
+func nodeHasPlugins(n *rnode, composedOnly bool) bool {
+	if composedOnly && !n.composed {
+		return false
+	}
+	if len(n.plugins) > 0 || n.discovery != nil {
+		return true
+	}
+	return slices.ContainsFunc(n.children, func(c rnode) bool { return nodeHasPlugins(&c, composedOnly) })
+}
+
+// addedHasPlugins reports whether a node this spec authors at or below n declares a plugin or
+// plugin discovery.
+func addedHasPlugins(n *rnode) bool {
+	if !n.composed && (len(n.plugins) > 0 || n.discovery != nil) {
+		return true
+	}
+	return slices.ContainsFunc(n.children, func(c rnode) bool { return addedHasPlugins(&c) })
+}
+
+// composedHelpMissesPlugins warns about a help command mounted from a composed spec when
+// commands this spec adds beside the `$ref` bring plugins under it but the composed spec's own
+// commands there declare none: the help handler, seeded from the composed spec alone, then
+// answers for those plugins only if it calls rtx.PluginHelp.
+func composedHelpMissesPlugins(gp *program) []error {
+	var warnings []error
+	var walk func(nodes []rnode, under *rnode, path []string)
+	walk = func(nodes []rnode, under *rnode, path []string) {
+		for i := range nodes {
+			n := &nodes[i]
+			at := append(slices.Clip(path), n.name)
+			if under != nil && n.composed && n.name == "help" &&
+				addedHasPlugins(under) && !nodeHasPlugins(under, true) {
+				warnings = append(warnings, fmt.Errorf(
+					"command %q comes from a composed spec, and the commands added beside its $ref bring plugins under it; it runs their help only if its handler calls rtx.PluginHelp before rtx.HelpFor",
+					strings.Join(at, " ")))
+			}
+			walk(n.children, n, at)
+		}
+	}
+	walk(gp.tree, nil, []string{gp.rootName})
+	return warnings
 }
 
 // setInputsUse decides how the stub's body reads its inputs. NeedsInputs: the body calls
@@ -947,6 +1130,13 @@ func seedGenerateArgs(ext string) string {
 func rollupMethods(gp *program) []templateHandlersMethod {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
 	shapes := hookShapes(gp.layout.cmdDir)
+	if shapes == nil {
+		shapes = map[string]bool{}
+	}
+	// A stub this pass creates declares its methods in what was rendered for it.
+	for _, seed := range gp.stubSeeds {
+		addHookShapes(shapes, token.NewFileSet(), filepath.Base(seed.path), seed.content)
+	}
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
 			// Own command (types generated locally) whose handler lives in another package.

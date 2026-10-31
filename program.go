@@ -58,16 +58,19 @@ const (
 //     relative times read, [Program.WithClock]; [Program.WithTerminationTimeout] bounds the
 //     wait after a signal, and [Program.WithArgv0] sets the name a multicall program dispatches
 //     on
-//   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
+//   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter];
+//     [Program.Reporter] returns the reporter a run uses
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
 //   - the program's dependencies — [Program.WithDependency], or [Program.With] with the
-//     [WithDependency] option to register several at once
+//     [WithDependency] option to register several at once; [Program.WithProvider] (or the
+//     [WithProvider] option) for one built per run on first use
 //   - rotini's own settings — [Program.WithVersion], [Program.WithParser], [Program.WithInputReader],
 //     and the ones the generated code sets, [Program.WithInputSettings], [Program.WithHelp] and
 //     [Program.WithCompletionScript];
 //     [Program.WithFeatures] adds runtime features to a program built with [NewWiredProgram]
 //   - phase replacement — [Program.WithResolver], [Program.WithLifecycle]
+//   - code around every hook — [Program.WithMiddleware]
 //
 // A setting that rotini reads (the runtime or generated code) is a typed option on the
 // Program; a setting only the program's own code reads is a dependency. Typed options cannot
@@ -90,9 +93,10 @@ type Program struct {
 	args       []string
 	def        Definition
 	deps       dependencyStore // seed dependencies: Program.WithDependency lands here; each run clones them
-	reporterFn Reporter        // nil → defaultReporter
+	reporterFn Reporter        // nil → DefaultReporter
 	resolver   Resolver        // nil → DefaultResolver
 	lifecycle  Lifecycle       // nil → DefaultLifecycle
+	middleware []Middleware    // WithMiddleware: wraps every hook, outermost first
 	stdin      io.Reader
 	stdout     io.Writer
 	stderr     io.Writer
@@ -135,8 +139,6 @@ type Program struct {
 	bufferedOutput bool        // WithBufferedOutput: buffer stdout and flush it when the run settles
 
 	feats *featureSet // the features each run has: every one, or NewWiredProgram's and WithFeatures'
-	// pluginHelpFn is pluginHelp, bound once so a run takes it without allocating.
-	pluginHelpFn func(rtx *Context, words []string) bool
 }
 
 // NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
@@ -157,13 +159,25 @@ func NewProgram(def Definition, handlers any) *Program {
 }
 
 // WithFeatures adds features to a program built with [NewWiredProgram], for code its spec does
-// not describe: a custom [InputSettings.Sources] entry needs [ConfigFiles], and an inputs
-// struct written by hand needs the features its fields use. It is a no-op on a program built
-// with [NewProgram] or [NewProgramFunc], which has every feature. Configure before the first
-// run.
+// not describe: a custom [InputSettings.Sources] entry needs [ConfigFiles], an inputs struct
+// written by hand needs the features its fields use, and a format the spec names that rotini
+// doesn't ship needs its [Codec]. A program built with [NewProgram] or [NewProgramFunc] has
+// every feature rotini ships, so on one only a [Codec] is added. Configure before the first run.
 func (p *Program) WithFeatures(features ...Feature) *Program {
 	if p.feats == nil {
 		p.feats = newFeatureSet(nil)
+	}
+	if p.feats.all {
+		var own []Feature
+		for _, f := range features {
+			if f.author {
+				own = append(own, f)
+			}
+		}
+		if len(own) > 0 {
+			p.feats = p.feats.withOwn(own)
+		}
+		return p
 	}
 	p.feats.add(features)
 	return p
@@ -184,7 +198,6 @@ func newProgram(def Definition, lookup HandlerLookup) *Program {
 		teardownOnPanic: true,
 		panicRecover:    true,
 	}
-	p.pluginHelpFn = p.pluginHelp
 	return p
 }
 
@@ -442,10 +455,12 @@ func (p *Program) newRunContext() *Context {
 	if svcs := p.deps.clone(); svcs != nil {
 		rtx.services = svcs
 	}
+	rtx.providers = &p.deps
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
 	rtx.meta, rtx.readerFn = p.meta, p.readerFn
 	rtx.version, rtx.parser, rtx.help, rtx.scripts = p.version, p.parser, p.help, p.scripts
-	rtx.pluginHelp = p.pluginHelpFn
+	rtx.program = p
+	rtx.middleware = p.middleware
 	rtx.outputChecks = p.outputChecks
 	rtx.clock.fn = p.clock
 	rtx.clock.feats = p.feats
@@ -564,7 +579,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 	if complete {
 		format := p.completion
 		if format == nil {
-			format = PluginCompletion
+			format = fs.multicall.completion // complete is reported only through the wired hook
 		}
 		return p.complete(runCtx, argv, format)
 	}
@@ -692,7 +707,7 @@ func (rtx *Context) bindChain(chain []Command) []Command {
 
 // adoptChain is bindChain for a chain the run owns, without the copy.
 func (rtx *Context) adoptChain(chain []Command) []Command {
-	markInvoked(chain)
+	finishChain(chain)
 	bindChainView(chain, rtx.view)
 	rtx.chain = chain
 	return chain
@@ -722,7 +737,7 @@ func (p *Program) installTrap(cancel context.CancelCauseFunc, rtx *Context) (cha
 		select {
 		case s := <-sigCh:
 			code = signalExitCode(s)
-			cancel(exitCodeError{code: code, signal: true})
+			cancel(exitCodeError{code: code, signal: s})
 		case <-done:
 			return
 		}

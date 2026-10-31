@@ -56,7 +56,7 @@ type boundSide struct {
 // integerValued reports whether a numeric type holds whole numbers only, so a range must
 // contain an integer to be satisfiable. Durations and sizes count in nanoseconds and bytes.
 func integerValued(elem string) bool {
-	return strings.HasPrefix(elem, "int") || strings.HasPrefix(elem, "uint") || measuredTypes[elem]
+	return strings.HasPrefix(elem, "int") || strings.HasPrefix(elem, "uint") || measuredTypes()[elem]
 }
 
 // rangeNoun names what a range of elem's values holds, for a message.
@@ -108,7 +108,7 @@ func numericBound(v any, elem string) (n *float64, ok bool) {
 // problem is keyed by the lower bound it names first.
 func boundsProblems(b *BaseSchema, elem string, lengths, items bool) []keyedMsg {
 	var out []keyedMsg
-	if constraintNumericFamily[elem] || measuredTypes[elem] {
+	if constraintNumericFamily()[elem] || measuredTypes()[elem] {
 		if km := rangeProblem(b, elem); km.msg != "" {
 			out = append(out, km)
 		}
@@ -296,7 +296,7 @@ func enumConstraintProblem(schema *InputSchema, typ string) keyedMsg {
 	constrained.Ref, constrained.Items, constrained.Type, constrained.Enum = "", nil, typ, nil
 	for i, m := range enumStrings(schema.Enum) {
 		msg := defaultViolation(&constrained, "`enum` value", m)
-		if msg == "" && measuredTypes[strings.TrimPrefix(typ, "[]")] {
+		if msg == "" && measuredTypes()[strings.TrimPrefix(typ, "[]")] {
 			if complaint := runtimeRejects(&constrained, []string{m}); complaint != "" {
 				msg = fmt.Sprintf("`enum` value %q breaks the declared bounds (%s)", m, complaint)
 			}
@@ -463,18 +463,24 @@ func lintSecretDefault(spec *Spec) []error {
 }
 
 // specSpellings maps the Go types rotini's own type names resolve to back to those names.
-var specSpellings = map[string]string{
-	"time.Duration": "duration", "time.Time": "time", "*url.URL": "url", "mail.Address": "email",
-	"*time.Location": "timezone", "net.HardwareAddr": "mac", "netip.Addr": "ip",
-	"netip.Prefix": "cidr", "netip.AddrPort": "hostport", rotiniPkgName + ".ByteSize": "bytesize",
-	rotiniPkgName + ".HexBytes": "hexbytes", rotiniPkgName + ".Base64Bytes": "base64bytes",
-	"*regexp.Regexp": "regexp", rotiniPkgName + ".Glob": "glob",
+func specSpellings() map[string]string {
+	return specSpellingsOnce.value(func() map[string]string {
+		return map[string]string{
+			"time.Duration": "duration", "time.Time": "time", "*url.URL": "url", "mail.Address": "email",
+			"*time.Location": "timezone", "net.HardwareAddr": "mac", "netip.Addr": "ip",
+			"netip.Prefix": "cidr", "netip.AddrPort": "hostport", rotiniPkgName + ".ByteSize": "bytesize",
+			rotiniPkgName + ".HexBytes": "hexbytes", rotiniPkgName + ".Base64Bytes": "base64bytes",
+			"*regexp.Regexp": "regexp", rotiniPkgName + ".Glob": "glob",
+		}
+	})
 }
+
+var specSpellingsOnce lazy[map[string]string]
 
 // typeSpelling renders a resolved Go type as the spec spells it, for a message: duration, not
 // time.Duration.
 func typeSpelling(goType string) string {
-	if s, ok := specSpellings[goType]; ok {
+	if s, ok := specSpellings()[goType]; ok {
 		return s
 	}
 	return goType

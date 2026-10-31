@@ -82,7 +82,7 @@ func TestIntBase_helpNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(help, "(accepts 0x, 0o and 0b prefixes)"); got != 4 {
+	if got := strings.Count(help, "accepts 0x, 0o and 0b prefixes)"); got != 4 {
 		t.Errorf("help notes the prefixes %d times, want 4 (two flags, the argument, the env input)\n%s", got, help)
 	}
 }

@@ -49,6 +49,24 @@ func (rtx *Context) SetContext(ctx context.Context) {
 	defer rtx.mu.Unlock()
 	if !rtx.ctxFrozen {
 		rtx.ctx = ctx
+		rtx.ctxGen++
+	}
+}
+
+// hookContext makes ctx the context the running hook received, for a middleware that hands
+// its hook a derived one, and returns the function that puts the previous one back unless the
+// hook passed a context on with SetContext.
+func (rtx *Context) hookContext(ctx context.Context) (restore func()) { //nolint:contextcheck // stores the hook's context; derives none
+	rtx.mu.Lock()
+	prev, gen := rtx.ctx, rtx.ctxGen
+	rtx.ctx = ctx
+	rtx.mu.Unlock()
+	return func() {
+		rtx.mu.Lock()
+		defer rtx.mu.Unlock()
+		if rtx.ctxGen == gen {
+			rtx.ctx = prev
+		}
 	}
 }
 

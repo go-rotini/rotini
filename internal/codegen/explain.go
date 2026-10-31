@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"sync"
 )
 
 // Key lookup for `rotini explain`: what a spec or conf key means, read from the embedded
@@ -71,7 +70,11 @@ func ExplainKey(path string) ([]KeyInfo, error) {
 }
 
 // listIndex matches a list position in a key path, such as the [0] of commands[0].
-var listIndex = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\[[^\]]*\]`) })
+func listIndex() *regexp.Regexp {
+	return listIndexOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`\[[^\]]*\]`) })
+}
+
+var listIndexOnce lazy[*regexp.Regexp]
 
 // explainMiss says which segment of a key path is unknown, with the nearest key there.
 func explainMiss(segs []string, at int, known []string) string {

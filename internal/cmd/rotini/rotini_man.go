@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/go-rotini/rotini"
 )
@@ -36,8 +35,7 @@ func (*rotiniManHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 
 	page, err := Man(in.Arguments.Command...)
 	if err != nil {
-		hits := suggestor.Suggest(strings.Join(in.Arguments.Command, " "), commandNames())
-		return withSuggestion(rotini.UsageError(err), hits)
+		return inputError(err)
 	}
 
 	if _, err := fmt.Fprint(rtx.Stdout, page); err != nil {

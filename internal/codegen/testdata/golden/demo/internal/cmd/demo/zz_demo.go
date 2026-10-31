@@ -3,9 +3,9 @@
 package demo
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/go-rotini/rotini"
 )
@@ -23,36 +23,57 @@ var definition = rotini.Definition{
 	Flags: []rotini.FlagDef{
 		{Name: "verbose", Identifiers: []string{"--verbose", "-v"}, Summary: "verbose output", Type: "bool", Local: true},
 	},
-	Inputs: rotiniTypeOf((*DemoInputs)(nil)),
-	Usage:  "demo [flags] <command>",
+	Usage: "demo [flags] <command>",
 	Commands: []rotini.CommandDef{
 		{Name: "build",
 			Handler: "DemoBuild",
 			Summary: "build the target",
 			Flags: []rotini.FlagDef{
-				{Name: "out", Identifiers: []string{"--out", "-o"}, Summary: "output path", Type: "string", Effects: &rotini.Effects{Kind: "destructive", OpenWorld: new(false)}},
+				{Name: "out", Identifiers: []string{"--out", "-o"}, Summary: "output path", Type: "string", Effects: &rotini.Effects{Kind: "destructive", OpenWorld: &rotiniFalse}},
 				{Name: "sort-by", Identifiers: []string{"--sort-by"}, Summary: "ordering", Type: "string"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "target", Type: "string"},
 			},
-			Inputs:  rotiniTypeOf((*DemoBuildInputs)(nil)),
 			Usage:   "demo build [flags] [target]",
-			Effects: &rotini.Effects{Kind: "write", Idempotent: new(true)},
+			Effects: &rotini.Effects{Kind: "write", Idempotent: &rotiniTrue},
 		},
 	},
 }
 
+var rotiniDefinitionOnce sync.Once
+
+// rotiniDefinition returns definition with its inputs and output types and its maps set,
+// which the first call does. Until then definition holds only static data, so a program
+// that composes this package and never builds it doesn't keep it.
+func rotiniDefinition() rotini.Definition {
+	rotiniDefinitionOnce.Do(func() {
+		definition.Inputs = rotiniTypeOf((*DemoInputs)(nil))
+		definition.Commands[0].Inputs = rotiniTypeOf((*DemoBuildInputs)(nil))
+	})
+	return definition
+}
+
+// The values the definition's and InputSettings' pointer fields point at.
+var (
+	rotiniFalse = false
+	rotiniTrue  = true
+)
+
 type DemoFlags struct {
+	// verbose output
 	Verbose bool `rotini:"verbose"`
 }
 
 type DemoArguments struct{}
 
 type DemoEnv struct {
-	Home    string `rotini:"home" recon:"home" env:"DEMO_HOME"`
+	// home dir
+	Home string `rotini:"home" recon:"home" env:"DEMO_HOME"`
+	// an env input whose name carries an underscore
 	BaseURL string `rotini:"base_url" recon:"base_url" env:"DEMO_BASE_URL"`
-	APIKey  string `rotini:"apiKey" recon:"apiKey" env:"DEMO_API_KEY"`
+	// a camelCase env input
+	APIKey string `rotini:"apiKey" recon:"apiKey" env:"DEMO_API_KEY"`
 }
 
 type DemoCommandInputs struct {
@@ -66,11 +87,14 @@ type DemoInputs struct {
 }
 
 type DemoBuildFlags struct {
-	Out    string `rotini:"out"`
+	// output path
+	Out string `rotini:"out"`
+	// ordering
 	SortBy string `rotini:"sort-by" recon:"build.sort_by" env:"DEMO_BUILD_SORT_BY"`
 }
 
 type DemoBuildArguments struct {
+	// what to build
 	Target string `rotini:"target"`
 }
 
@@ -84,9 +108,24 @@ type DemoBuildInputs struct {
 	DemoBuild DemoBuildCommandInputs
 }
 
+// The keys the configuration files hold, as rotini.SetConfigValue and
+// rotini.UnsetConfigValue take them.
+const (
+	DemoConfigKeyBuildSortBy = "build.sort_by"
+)
+
+// The environment variables the program reads, env_prefix applied.
+const (
+	DemoEnvHome        = "DEMO_HOME"
+	DemoEnvBaseURL     = "DEMO_BASE_URL"
+	DemoEnvAPIKey      = "DEMO_API_KEY"
+	DemoEnvBuildSortBy = "DEMO_BUILD_SORT_BY"
+)
+
 // Usage returns the usage line of the command identified by path (command names or
-// aliases; no arguments for the root), or an error when path names no command. A handler
-// uses rtx.Usage() instead, which is right for a composed command too.
+// aliases; no arguments for the root), or an unknown-command [*rotini.ParseError] when path
+// names no command. A handler uses rtx.Usage() instead, which is right for a composed
+// command too.
 func Usage(path ...string) (string, error) {
 	switch strings.Join(path, " ") {
 	case "":
@@ -94,7 +133,7 @@ func Usage(path ...string) (string, error) {
 	case "build":
 		return "demo build [flags] [target]", nil
 	default:
-		return "", fmt.Errorf("no usage for command %q", strings.Join(path, " "))
+		return "", rotini.UnknownCommandError(rotiniDefinition(), path...)
 	}
 }
 
@@ -115,7 +154,7 @@ func NewProgram() *rotini.Program {
 // a command's handler: embed the set [Handlers] returns in a struct and override the methods to
 // replace.
 func NewProgramWith(handlers ProgramHandlers) *rotini.Program {
-	return rotini.NewWiredProgram(definition, func(name string) (rotini.Handler, bool) {
+	return rotini.NewWiredProgram(rotiniDefinition(), func(name string) (rotini.Handler, bool) {
 		switch name {
 		case "Demo":
 			return handlers.Demo(), true

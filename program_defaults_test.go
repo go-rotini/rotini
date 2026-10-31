@@ -240,7 +240,7 @@ func TestContext_withStdinFeedsFlagStdin(t *testing.T) {
 // signalCtx is a run context canceled the way rotini's signal trap cancels one.
 func signalCtx(code int) context.Context {
 	ctx, cancel := context.WithCancelCause(context.Background())
-	cancel(exitCodeError{code: code, signal: true})
+	cancel(exitCodeError{code: code, signal: os.Interrupt})
 	return ctx
 }
 
@@ -250,7 +250,7 @@ func reportDefault(ctx context.Context, out Outcome, code int) (stdout, stderr s
 	rtx := p.newRunContext()
 	rtx.exitCode = code
 	rtx.setReporterStage(true)
-	defaultReporter(ctx, rtx, out)
+	DefaultReporter(ctx, rtx, out)
 	return o.String(), e.String(), rtx.code()
 }
 

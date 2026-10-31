@@ -12,7 +12,13 @@ import (
 // read them from the contract.
 
 // effectRank orders effect kinds from least to most impactful.
-var effectRank = map[string]int{"read": 0, "write": 1, "destructive": 2}
+func effectRank() map[string]int {
+	return effectRankOnce.value(func() map[string]int {
+		return map[string]int{"read": 0, "write": 1, "destructive": 2}
+	})
+}
+
+var effectRankOnce lazy[map[string]int]
 
 // effectsLiteral renders a spec `effects` as a rotini.Effects composite literal.
 func effectsLiteral(e *Effects) string {
@@ -75,7 +81,7 @@ func worstEffects(cmd *Effects, flags []*Effects) *Effects {
 		if f == nil {
 			continue
 		}
-		if effectRank[f.Kind] > effectRank[out.Kind] {
+		if effectRank()[f.Kind] > effectRank()[out.Kind] {
 			out.Kind = f.Kind
 		}
 		if f.Idempotent != nil && !*f.Idempotent {

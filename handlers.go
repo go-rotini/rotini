@@ -22,6 +22,7 @@ import "context"
 //	────────────                                  ───
 //	between one command's own hooks               a field on the handler
 //	between different commands in the chain       rtx.SetDependency(dep, v)
+//	built once per run, on first use              p.WithProvider(dep, fn)
 //	across every run of the program               p.WithDependency(dep, v)
 //
 // # Hand-written handler sets
@@ -104,7 +105,8 @@ type NoHooks struct {
 //	}
 //
 // Returning an error a hook has just recorded with HaltWith or RecordError does not record it
-// twice. Everything else is unchanged: [Context.RecordError] records and continues, and
+// twice. A [Middleware] sees the returned error before it is recorded. Everything else is
+// unchanged: [Context.RecordError] records and continues, and
 // [Context.HaltWithCode] sets a code before a `return nil`.
 //
 // A type is one shape or the other, since Go allows only one Run method per type. Wrap an

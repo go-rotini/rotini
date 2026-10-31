@@ -23,7 +23,7 @@ type ArgumentInput struct {
 	Description string `json:"description,omitempty"`
 	// When true, the argument is omitted from generated help (it still parses on the command line).
 	Hidden bool `json:"hidden,omitempty"`
-	// Your own labels for this argument, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the generated ArgDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
+	// Your own labels for this argument, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the generated ArgDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// Logical name for the argument
 	Name string `json:"name"`
@@ -61,6 +61,8 @@ type BaseSchema struct {
 	// The object form also takes `aliases` (other spellings accepted and bound as the value: `{value: yaml, aliases: [yml]}`), `hidden: true` (accepted, but left out of help's list, completion and error messages), and `deprecated` with a message, optionally `deprecated_since`, `removed_in` and `replaced_by` (another value). A deprecated value is still accepted and is left out of the same lists; `rotini.Deprecations` reports it when given on the command line, as it does `deprecated_aliases`, the aliases being retired. Help keeps its short list of the values to use; man and markdown pages list each value with its aliases and deprecation.
 	//
 	// On an argument, a value or alias starting with `-` reads as a flag unless typed after `--`, though completion offers it before; `rotini validate` warns about one.
+	//
+	// `rotini generate` writes a constant for each value of a string input (`TaskrListFormatJSON = "json"`, named for the command, the input and the value) and of a string schema under `schemas` (`StatusOpen Status = "open"`), with the value's summary as its doc comment and `Deprecated:` for a deprecated value.
 	Enum []any `json:"enum,omitempty"`
 	// Exclusive upper bound: the value must be strictly less. Same applicability rules as 'maximum'.
 	ExclusiveMaximum any `json:"exclusiveMaximum,omitempty"`
@@ -112,7 +114,7 @@ type BaseSchema struct {
 	// - 'inputfile' — a plain string field, checked like 'existingfile', except that '-' means stdin: rotini.OpenInput(rtx, path) opens either (`cat a.txt - b.txt`). Only one '-' may be given per run, across every inputfile value. Unlike `from: [stdin]`, where '-' replaces the value with stdin's text, the value stays '-' and the handler reads the stream. Help adds '(- for stdin)'
 	// - 'outputfile' — a plain string field: a file to write, where '-' means stdout. Checked at parse time to be no directory and to sit in an existing directory; rotini.CreateOutput(rtx, path) writes it atomically and refuses to replace an existing file unless given rotini.Overwrite(true). Help adds '(- for stdout)'
 	//
-	// A value type works inside Go spellings too ('[]bytesize', 'map[string]duration'), and help shows the name as written ('--limit bytesize'), not the Go type. The path types (existingfile, existingdir, inputfile, outputfile) show as `string`, the type of their field. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.
+	// A value type works inside Go spellings too ('[]bytesize', 'map[string]duration'). Help, man and markdown name every type in the user's words, never as a Go type: a value type as written ('--limit bytesize'), any integer as `int` (`uint` when unsigned), a float as `number`, the path types as `file` (existingfile, inputfile, outputfile) or `dir` (existingdir), a list as its item's label and `...` (`string...`), a map as `key=` and its value's label (`key=value`, `key=duration`), and a type of your own as `value`; a `placeholder` replaces the label. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.
 	//
 	// Shapes that change how a flag is written:
 	//
@@ -179,9 +181,9 @@ type Command struct {
 	//
 	// In a composed CLI, each spec's prefix names its own inputs: a `$ref`'d child's commands read the variables they read on their own, whatever the parent declares, and the parent's pages list those names. A parent that declares no env_prefix uses its child's for its own inputs; if its children declare different ones, it must declare its own.
 	EnvPrefix string `json:"env_prefix,omitempty"`
-	// Example command-line invocations, rendered one per line on the help page and in the man and markdown pages' EXAMPLES section. `rotini validate` parses each command in an example that runs this program against the spec, and rejects one that doesn't parse (an unknown command or flag, a bad value, a missing argument). A page given verbatim leaves them out.
-	Examples []string `json:"examples,omitempty"`
-	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The root's list is program-wide: a command without its own exit_status documents the root's, on its pages, on the agent skill page, in its tool definitions and in the exit-code check below, and a command's own list replaces the root's rather than adding to it. The contract records each command's own list. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. A page given verbatim ('man' or 'markdown') leaves the section out.
+	// Example command-line invocations, rendered one per line on the help page and in the man and markdown pages' EXAMPLES section. Each is a command line (`taskr list --status open`), or an object with the line as `run` and a one-line `summary`, which the pages show as a `# summary` line above it. `rotini validate` parses each command in an example that runs this program against the spec, and rejects one that doesn't parse (an unknown command or flag, a bad value, a missing argument); it warns about one that uses a deprecated command, flag, alias or value, a hidden alias or identifier, or a literal value for a secret input. The contract lists each example with the words it passes to the program, the MCP tool definitions carry them as input examples, and the generated cmd package lists them in `Examples` for a test to run. A page given verbatim leaves them out.
+	Examples []any `json:"examples,omitempty"`
+	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The root's list is program-wide: a command without its own exit_status documents the root's, on its pages, on the agent skill page, in its tool definitions and in the exit-code check below, and a command's own list replaces the root's rather than adding to it. The same list is what the contract records for the command (marked `exit_status_inherited` when it is the root's), what `rotini diff` compares, what the runtime Definition's ExitStatus holds and what rotinitest.ExitDocumented checks against. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. A page given verbatim ('man' or 'markdown') leaves the section out.
 	ExitStatus []ExitStatusEntry `json:"exit_status,omitempty"`
 	// Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
 	Filename string `json:"filename,omitempty"`
@@ -221,7 +223,7 @@ type Command struct {
 	Man string `json:"man,omitempty"`
 	// Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it as given — byte-for-byte except that ANSI styling is removed; when unset, the page is rendered from the structured doc-fields through the markdown template.
 	Markdown string `json:"markdown,omitempty"`
-	// Your own labels for this command, for your tools to read: string keys, each with a string value (`{owner: platform-team, tier: internal}`). Rotini never acts on them and shows them on no page (help, man, markdown, completion). It copies them as written into the generated Definition (CommandDef.Metadata, or Definition.Metadata on the root), where a handler reads them as rtx.Command().Metadata, and into the contract. `rotini diff` rates any change to them as safe. Sub-commands don't inherit them. Set next to a `$ref`, they replace the composed command's.
+	// Your own labels for this command, for your tools to read: string keys, each with a string value (`{owner: platform-team, tier: internal}`). Rotini never acts on them and shows them on no default page (help, man, markdown, completion); an editable page template reads them as `.Metadata`. It copies them as written into the generated Definition (CommandDef.Metadata, or Definition.Metadata on the root), where a handler reads them as rtx.Command().Metadata, and into the contract. `rotini diff` rates any change to them as safe. Sub-commands don't inherit them. Set next to a `$ref`, they replace the composed command's.
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// Root only: dispatch on the name the binary was invoked as, so one binary serves several names through links or copies. `true` is busybox style: a binary named after a top-level command, one of its aliases or hidden aliases, or a declared plugin (a symlink `ls` to the binary) runs it, as if the user had typed `<root> ls`. The object form sets a prefix to strip first, a prefix that answers shell completion, or both. The name is the base name the binary was run as, never a resolved symlink; on Windows a trailing .exe is dropped and names match without regard to case. A name that matches no command, the root's own included, runs the root as usual. Help pages still show the root's invocation (`busybox ls`).
 	Multicall any `json:"multicall,omitempty"`
@@ -288,7 +290,7 @@ type ConfigInput struct {
 	Description string `json:"description,omitempty"`
 	// When true, the input is omitted from generated help (it is still bound).
 	Hidden bool `json:"hidden,omitempty"`
-	// Your own labels for this config value, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+	// Your own labels for this config value, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// Logical name for this config value
 	Name string `json:"name"`
@@ -307,7 +309,9 @@ type ConfigurationFile struct {
 	As string `json:"as,omitempty"`
 	// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set.
 	Discover *ConfigurationFileDiscover `json:"discover,omitempty"`
-	// The file's format. When omitted, the format is inferred from the file extension; declare it when the extension is missing or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys are used as written: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
+	// The file's format. When omitted, the format is inferred from the file extension; declare it when the extension is missing or misleading. The built-in formats are json, yaml, toml, jsonc and dotenv. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys are used as written: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
+	//
+	// Any other name (`format: ini`) is a format of the program's own: the program adds its decoder with `WithFeatures(rotini.Codec("ini", decode))`, since `rotini generate` can't wire it, and a run that reads the file without it fails with a WiringError naming `rotini.Codec("ini", …)`. `rotini validate` warns about a name that isn't built in, so a typo doesn't go unnoticed. Such a file is read-only: SetConfigValue refuses to write it. A file with no declared format is read with a program's own format when its extension is one the codec lists (`rotini.CodecExtensions(".ini")`).
 	Format string `json:"format,omitempty"`
 	// Logical name for the config file (e.g. 'app-config'). It anchors per-input pins (schema 'file:') and config_source claims, so it must be unique within its chain (this command and its ancestors) — a name collision in scope is an error. `explicit` and `default` are reserved for the reader's own layers.
 	Name string `json:"name"`
@@ -368,7 +372,7 @@ type EnvInput struct {
 	Description string `json:"description,omitempty"`
 	// When true, the input is omitted from generated help (it is still bound).
 	Hidden bool `json:"hidden,omitempty"`
-	// Your own labels for this environment variable, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+	// Your own labels for this environment variable, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// Logical name for this env var input
 	Name string `json:"name"`
@@ -379,6 +383,13 @@ type EnvInput struct {
 	// How settled this environment variable is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it, and the contract carries it. An input is never more stable than its command. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time.
 	Stability string `json:"stability,omitempty"`
 	// Short one-liner shown next to this input in the generated Environment/Configuration help section.
+	Summary string `json:"summary,omitempty"`
+}
+
+type Example struct {
+	// The command line, written as a user types it (`taskr list --status open`).
+	Run string `json:"run"`
+	// What the example does, on one line. The help, man and markdown pages and the skill page show it as a `# summary` line above the command line.
 	Summary string `json:"summary,omitempty"`
 }
 
@@ -448,7 +459,7 @@ type FlagInput struct {
 	//
 	// A single dash and one digit (`-4`) declares a digit option, on a bool or count flag (`identifiers: ['-4', --ipv4]`; quoted, since a bare -4 is a number in YAML). A word starting with that dash and digit is then the flag, on this command and every command below it, while other negative numbers still parse as numbers. `rotini validate` rejects it when an argument of this command or one below it takes negative numbers.
 	Identifiers []string `json:"identifiers,omitempty"`
-	// Your own labels for this flag, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the generated FlagDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
+	// Your own labels for this flag, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the generated FlagDef.Metadata and the contract, and `rotini diff` rates any change to them as safe.
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// Logical name for the flag
 	Name string `json:"name"`
@@ -518,6 +529,8 @@ type HelpHeadings struct {
 	Environment string `json:"environment,omitempty"`
 	// Heading rendered above the examples section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Examples:".
 	Examples string `json:"examples,omitempty"`
+	// Heading rendered above the Files section, which lists the configuration files a command's inputs are read from, in the order they win. Rendered verbatim — include any trailing ':' you want. Default: "Files:".
+	Files string `json:"files,omitempty"`
 	// Heading rendered above the flags section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Flags:".
 	Flags string `json:"flags,omitempty"`
 	// Heading rendered above the Output section, which describes what the command writes when it declares `output:`. Rendered verbatim — include any trailing ':' you want. Default: "Output:".
@@ -659,6 +672,10 @@ type ResponseFiles struct {
 // JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.
 type Schema struct {
 	BaseSchema
+	// On an object schema with `properties`: `false` makes any other key an error, so a configuration file's typo (`replicaz: 3` beside `replicas`) is reported instead of ignored. `true`, like leaving it out, allows other keys. It applies to the object it is written on, not to the objects in its properties; write it on each one that should be closed.
+	//
+	// Checked wherever the shape is checked: configuration files, stdin payloads, object flags and output checks. In a configuration file the error names the file, line and column and the keys that are allowed, and is an InputError of kind unknown-key whose Token and Candidates are the key and the declared keys, for a reporter that suggests the nearest. Rejected beside `$ref` (write it on the named schema), on a schema that is not an object, and on one with no `properties`, which would allow no key at all. To warn about unread keys rather than refuse them, a handler reads InputReport.UnreadConfigKeys.
+	AdditionalProperties *bool `json:"additionalProperties,omitempty"`
 	// The one value this property may hold (standard JSON Schema semantics), checked wherever the shape is: output checks, stdin payloads, config files and object flags. Its Go field keeps the declared `type`. In a stream whose items come in several kinds (`oneOf` on `output`), each kind names itself with a required string property holding a `const`, such as `kind: {type: string, const: progress}`. On an output shape it must be a value of the declared `type` (`const: 3` on a string is rejected), or no output could pass.
 	Const any `json:"const,omitempty"`
 	// What this shape or property is, in a sentence. Rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema uses `summary:` on the input instead.
@@ -674,7 +691,7 @@ type Schema struct {
 type StdinSpec struct {
 	// How the piped stdin payload is read, and the Go type of the generated Stdin field.
 	//
-	// The four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin type (`*<Prefix>Stdin`), validated against the declared schema. The default is json.
+	// The four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin type (`*<Prefix>Stdin`), validated against the declared schema. The default is json. Any other name (`format: ini`) is a document format of the program's own, decoded the same way by the codec the program adds with `WithFeatures(rotini.Codec("ini", decode))`; `rotini validate` warns about a name that isn't built in, and a run that reads stdin without the codec fails with a WiringError naming `rotini.Codec("ini", …)`.
 	//
 	// 'jsonl' reads JSON Lines: one JSON record per line, blank lines skipped, each checked against the schema, which describes one record. The field is `*[]<Prefix>Stdin`, or with `stream: true` an iterator, `iter.Seq2[<Prefix>Stdin, error]`. An error names the line it was found on.
 	//
@@ -682,7 +699,7 @@ type StdinSpec struct {
 	//
 	// One leading UTF-8 byte-order mark is removed before the payload is read, in every format but 'bytes'. A declared stdin that is not streamed is held in memory for the run.
 	Format string `json:"format,omitempty"`
-	// Your own labels for this command's stdin, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no page. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
+	// Your own labels for this command's stdin, for your tools to read: string keys, each with a string value. Rotini never acts on them and shows them on no default page; an editable page template reads them as `.Metadata`. It copies them as written into the contract, and `rotini diff` rates any change to them as safe.
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// Type definition for stdin content. Set required: true in schema to error when stdin is empty. The document formats need a `type` or `$ref` here; the raw formats imply theirs, so `schema:` may be left out or hold only `required`.
 	Schema *InputSchema `json:"schema,omitempty"`
@@ -698,7 +715,7 @@ type StdinSpec struct {
 type Topic struct {
 	// The topic's text, paragraphs separated by blank lines. Set exactly one of `body` and `generate`.
 	Body string `json:"body,omitempty"`
-	// Build the topic's text from the spec. 'environment' lists every environment variable the program reads: env inputs, flag fallbacks, config_source and variable_file names, the completion switches the conf declares, and the XDG variables config discovery reads, each with the commands that read it. Set exactly one of `body` and `generate`.
+	// Build the topic's text from the spec. 'environment' lists every environment variable the program reads: env inputs, flag fallbacks, config_source and variable_file names, the completion switches the conf declares, and the XDG variables config discovery reads, each with the commands that read it. 'configuration' lists every configuration file the program reads, in the order they win, then every key its inputs read from them (configuration inputs and flag and argument fallbacks), each with the commands that read it. Set exactly one of `body` and `generate`.
 	Generate string `json:"generate,omitempty"`
 	// The word after `help` that shows the topic (`demo help filters`). Its man page is <program>-<name> in the man feature's section.
 	Name string `json:"name"`

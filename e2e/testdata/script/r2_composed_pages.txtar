@@ -27,7 +27,7 @@ markdown kid work: path=true footer="WORK FOOTER" globals=true
 man kid work: path=true globals=true
 help ghostkid work: found=true
 help kid sneaky: found=true
-help kidtopic: no help for command "kidtopic"
+help kidtopic: app: unknown command "kidtopic"
 -- cmd/kid/.rotini.spec.yaml --
 version: 0.0.0
 command:

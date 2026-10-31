@@ -61,6 +61,9 @@ type Definition struct {
 	Topics []TopicDef
 	// Effects is what running the root command does (spec effects:); nil when undeclared.
 	Effects *Effects
+	// Stability is the root command's declared stability (spec stability:): "experimental",
+	// "beta", or "" for stable. See [Command.Stability].
+	Stability string
 	// Metadata is the root command's own labels (spec metadata:), as written; rotini never
 	// reads them. nil when undeclared.
 	Metadata map[string]string
@@ -228,8 +231,9 @@ type CommandDef struct {
 	// Inputs is the command's generated inputs type, which [ArgvOf] finds the command by; nil
 	// when not recorded.
 	Inputs reflect.Type
-	// ExitStatus lists the exit codes the command documents (the spec's exit_status). Each
-	// command lists its own; a sub-command doesn't inherit its parent's.
+	// ExitStatus lists the exit codes the command documents: its own exit_status when it
+	// declares one, else the root's, which is program-wide. A command's own list replaces the
+	// root's; the lists are never merged. The generated Definition fills in the root's.
 	ExitStatus []ExitStatusDef
 
 	// Usage is the command's usage line, with its full invocation ("taskr add <title>
@@ -238,6 +242,10 @@ type CommandDef struct {
 	// Effects is what running the command does (spec effects:); nil when undeclared. Not
 	// inherited by sub-commands.
 	Effects *Effects
+	// Stability is the command's own declared stability (spec stability:): "experimental",
+	// "beta", or "" when it declares none. Sub-commands inherit it at run time; see
+	// [Command.Stability].
+	Stability string
 	// Metadata is the command's own labels (spec metadata:), as written; rotini never reads
 	// them. nil when undeclared. Not inherited by sub-commands.
 	Metadata map[string]string
@@ -380,7 +388,8 @@ type FlagDef struct {
 	// run resolves relative paths and config discovery against (see [Context.Dir]).
 	Role string
 	// Effects is what giving the flag adds to its command's effects (spec effects:); nil when
-	// undeclared. A run's effect is the highest of its command's and every given flag's.
+	// undeclared. A run's effect is the highest of its command's and every given flag's; see
+	// [RunEffects].
 	Effects *Effects
 	// Metadata is the flag's own labels (spec metadata:), as written; rotini never reads them.
 	// nil when undeclared.

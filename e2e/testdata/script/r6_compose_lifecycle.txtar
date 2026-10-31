@@ -70,7 +70,7 @@ stdout '^  acme kid work \[flags\]$'
 exec ./kid$exe help work
 stdout '^  kid work \[flags\]$'
 wantexit 1 ./acme$exe kid help nope
-stderr 'no help for command "kid nope"'
+stderr '^Error: acme kid: unknown command "nope"$'
 
 # ── usage errors ──
 # An unknown flag is reported by the first root that reads argv: the parent, through the

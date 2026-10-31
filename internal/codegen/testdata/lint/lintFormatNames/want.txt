@@ -1,0 +1,3 @@
+warning: spec: .rotini.spec.yaml:9:15: command demo: config_files "app": format "ini" is not built in; the program must add rotini.Codec("ini", …) with WithFeatures, since generate can't wire it
+warning: spec: .rotini.spec.yaml:15:15: command demo: config_files "typo": format "yml" is not built in; the program must add rotini.Codec("yml", …) with WithFeatures, since generate can't wire it
+warning: spec: .rotini.spec.yaml:22:17: command demo/apply: stdin: format "hcl" is not built in; the program must add rotini.Codec("hcl", …) with WithFeatures, since generate can't wire it

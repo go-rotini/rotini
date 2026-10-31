@@ -1,0 +1,2 @@
+warning: spec: .rotini.spec.yaml:17:7: command demo: `see_also` entry "demo-lst(8)" names the page demo-lst, which no command or help topic of demo has; did you mean "demo-list"?
+warning: spec: .rotini.spec.yaml:18:7: command demo: `see_also` entry "demo-list(1)" names section 1, but the man pages are written in section 8; write demo-list(8)

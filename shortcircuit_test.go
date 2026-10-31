@@ -1,9 +1,13 @@
 package rotini
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -396,4 +400,152 @@ func TestShortCircuit_completionReadsBundles(t *testing.T) {
 			t.Errorf("%q: candidates %q, stopped %v; want stopped %v", tt.words, got, stopped, tt.stop)
 		}
 	}
+}
+
+// scStrayDef is a root with short-circuit --help and --version, an author's own short-circuit
+// --explain, a group command, and a leaf that takes one argument.
+func scStrayDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", ShortCircuit: true},
+			{Name: "version", Identifiers: []string{"--version"}, Type: "bool", ShortCircuit: true},
+			{Name: "explain", Identifiers: []string{"--explain"}, Type: "bool", ShortCircuit: true},
+		},
+		Commands: []CommandDef{
+			{Name: "add", Handler: "AppAdd", Arguments: []ArgDef{{Name: "title", Type: "string", Required: true}}},
+			{Name: "config", Handler: "AppConfig", Commands: []CommandDef{
+				{Name: "set", Handler: "AppConfigSet", Arguments: []ArgDef{{Name: "key", Type: "string", Required: true}}},
+			}},
+		},
+	}
+}
+
+// TestContext_UnknownCommand pins the word a short-circuit flag let pass: the same
+// path-prefixed unknown-command error the run reports without the flag, for --help, --version
+// and an author's own flag, on the root and on a group; nil when everything resolved, when a
+// leaf merely has too many arguments, and without a short-circuit flag.
+func TestContext_UnknownCommand(t *testing.T) {
+	tests := []struct {
+		argv  []string
+		token string // "" = nil expected
+		msg   string
+		cands []string
+	}{
+		{[]string{"nope", "--help"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"--help", "nope"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"nope", "-h"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"nope", "--version"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"nope", "--explain"}, "nope", `app: unknown command "nope"`, []string{"add", "config"}},
+		{[]string{"config", "sett", "--help"}, "sett", `app config: unknown command "sett"`, []string{"set"}},
+		{argv: []string{"--help"}},
+		{argv: []string{"config", "--help"}},
+		{argv: []string{"add", "a", "b", "--help"}},
+		{argv: []string{"nope"}},
+		{argv: []string{"nope", "--help=false"}},
+		{argv: []string{"config", "sett"}},
+	}
+	for _, tt := range tests {
+		err := NewContextFor(scStrayDef(), tt.argv).UnknownCommand()
+		if tt.token == "" {
+			if err != nil {
+				t.Errorf("%q: UnknownCommand() = %v, want nil", tt.argv, err)
+			}
+			continue
+		}
+		pe, ok := errors.AsType[*ParseError](err)
+		if !ok || pe.Kind != ParseKindUnknownCommand || pe.Token != tt.token || pe.Error() != tt.msg || !slices.Equal(pe.Candidates, tt.cands) {
+			t.Errorf("%q: UnknownCommand() = %#v, want an unknown-command *ParseError %q for %q with candidates %q", tt.argv, err, tt.msg, tt.token, tt.cands)
+		}
+	}
+}
+
+type scStrayInputs struct {
+	App struct {
+		Flags struct {
+			Help    bool `rotini:"help"`
+			Version bool `rotini:"version"`
+		}
+		Arguments struct{}
+	}
+}
+
+type scStrayHandlers struct{ optOut bool }
+
+func (h scStrayHandlers) App() Handler        { return FromErrorHandler(&scStrayRoot{optOut: h.optOut}) }
+func (scStrayHandlers) AppAdd() Handler       { return ocNoop{} }
+func (scStrayHandlers) AppConfig() Handler    { return ocNoop{} }
+func (scStrayHandlers) AppConfigSet() Handler { return ocNoop{} }
+
+// scStrayRoot answers --help and --version the way the seeded root hook does; optOut is the
+// same hook with the UnknownCommand check deleted.
+type scStrayRoot struct {
+	NoPreRunE
+	NoPostRunE
+	NoCascadingPostRunE
+	optOut bool
+}
+
+func (h *scStrayRoot) CascadingPreRun(_ context.Context, rtx *Context) error {
+	argv, err := rtx.ArgvInputs[scStrayInputs]()
+	if err != nil {
+		return err
+	}
+	if !h.optOut {
+		if err := rtx.UnknownCommand(); err != nil {
+			return err
+		}
+	}
+	switch {
+	case argv.Values.App.Flags.Help:
+		page, err := rtx.InvokedHelp()
+		if err != nil {
+			return err
+		}
+		_, _ = io.WriteString(rtx.Stdout, page)
+		rtx.HaltWithCode(0)
+	case argv.Values.App.Flags.Version:
+		_, _ = io.WriteString(rtx.Stdout, "app 1.0.0")
+		rtx.HaltWithCode(0)
+	}
+	return nil
+}
+
+func (*scStrayRoot) Run(context.Context, *Context) error { return nil }
+
+// TestShortCircuit_hookReportsUnknownCommand pins the seeded hook's shape: with the
+// UnknownCommand check, `app nope --help` fails with exit 1 and the unknown-command error;
+// without it, the hook answers for the root, as ArgvInputs and InvokedHelp report no error.
+func TestShortCircuit_hookReportsUnknownCommand(t *testing.T) {
+	run := func(optOut bool, argv ...string) (int, error, string) {
+		var out bytes.Buffer
+		p := NewProgram(scStrayDef(), scStrayHandlers{optOut: optOut}).
+			WithHelp(func(path ...string) (string, error) { return "page:" + strings.Join(path, " "), nil }).
+			WithStdout(&out).WithStderr(io.Discard).WithoutSignalHandling()
+		code, err := p.Run(argv)
+		return code, err, out.String()
+	}
+	for _, argv := range [][]string{{"nope", "--help"}, {"nope", "--version"}, {"config", "sett", "--help"}} {
+		code, err, out := run(false, argv...)
+		if code != 1 || !isUnknownCommand(err) || out != "" {
+			t.Errorf("%q: exit %d, %v, printed %q; want 1 and the unknown-command error", argv, code, err, out)
+		}
+	}
+	for argv, page := range map[string]string{"nope --help": "page:", "config sett --help": "page:config", "nope --version": "app 1.0.0"} {
+		code, err, out := run(true, strings.Fields(argv)...)
+		if code != 0 || err != nil || out != page {
+			t.Errorf("opted out, %q: exit %d, %v, printed %q; want 0 and %q", argv, code, err, out, page)
+		}
+	}
+	for argv, page := range map[string]string{"--help": "page:", "config --help": "page:config", "add a b --help": "page:add"} {
+		code, err, out := run(false, strings.Fields(argv)...)
+		if code != 0 || err != nil || out != page {
+			t.Errorf("%q: exit %d, %v, printed %q; want 0 and %q", argv, code, err, out, page)
+		}
+	}
+}
+
+func isUnknownCommand(err error) bool {
+	pe, ok := errors.AsType[*ParseError](err)
+	return ok && pe.Kind == ParseKindUnknownCommand
 }

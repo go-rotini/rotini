@@ -1,0 +1,39 @@
+# A preview, a confirmation or an overwrite switch on a command that only reads tells a program
+# driving the CLI something its effects contradict.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    # Correct: the command writes, so each role has something to act on. No problem.
+    - name: sync
+      effects: { kind: write }
+      flags:
+        - name: dry-run
+          role: dry-run
+          schema: { type: bool }
+        - name: yes
+          role: confirm
+          schema: { type: bool }
+    # Correct: a flag's effects raise the read command's, so its run can write. No problem.
+    - name: report
+      effects: { kind: read }
+      flags:
+        - name: out
+          effects: { kind: write }
+          schema: { type: string }
+        - name: force
+          role: force
+          schema: { type: bool }
+    # Wrong: nothing to preview, confirm or overwrite.
+    - name: list
+      effects: { kind: read }
+      flags:
+        - name: dry-run
+          role: dry-run
+          schema: { type: bool }
+        - name: yes
+          role: confirm
+          schema: { type: bool }
+        - name: force
+          role: force
+          schema: { type: bool }

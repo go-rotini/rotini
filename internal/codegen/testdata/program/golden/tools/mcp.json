@@ -43,6 +43,14 @@
       "description": "add a task\n\nEffects: write.\n\nExit codes: 3 (duplicate): a task with this title exists.",
       "inputSchema": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "tag": [
+              "home"
+            ],
+            "title": "buy milk"
+          }
+        ],
         "properties": {
           "due": {
             "description": "when it is due",

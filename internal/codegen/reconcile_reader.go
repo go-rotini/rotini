@@ -404,7 +404,7 @@ func findModuleFile() (root, name, file string, err error) {
 		}
 		parent := filepath.Dir(d)
 		if goMod == "" && parent == d {
-			return "", "", "", errors.New("go.mod not found in any parent of working directory")
+			return "", "", "", errors.New("go.mod not found in any parent of working directory; run `go mod init <module>` first")
 		}
 		d = parent
 	}

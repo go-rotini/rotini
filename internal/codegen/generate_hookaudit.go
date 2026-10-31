@@ -24,7 +24,8 @@ import (
 // The same pass also reports a handler that acquires a different command's generated inputs
 // type (see wrongInputsTypes), which compiles but reads the wrong shape at run time, exit codes
 // the command's exit_status doesn't list (undocumentedExitCodes), stream writes on a command
-// whose output isn't marked output_stream (unmarkedStreams), and a root handler without the
+// whose output isn't marked output_stream (unmarkedStreams), config files, keys and profiles a
+// config call names that the spec doesn't declare (undeclaredConfigNames), and a root handler without the
 // CascadingPreRun a short-circuit --help needs (missingRootHook).
 
 // auditedHooks are the hook names a near-miss is measured against. Run is excluded: it has no
@@ -33,7 +34,8 @@ import (
 var auditedHooks = []string{"CascadingPreRun", "PreRun", "PostRun", "CascadingPostRun"}
 
 // auditHooks records the warnings described above (near-miss hook names, another command's
-// inputs type, undocumented exit codes, unmarked streams, a missing root hook). It runs last in a generate pass, so it sees the final
+// inputs type, undocumented exit codes, unmarked streams, a missing root hook, a help handler
+// that skips plugins). It runs last in a generate pass, so it sees the final
 // set of stubs.
 //
 // It covers the cmd package and every in-module package named by a spec's `handler:` block;
@@ -87,11 +89,67 @@ func (p *program) auditHooks() error {
 	}
 	p.auditWarnings = append(p.auditWarnings, undocumentedExitCodes(fset, files, p.exitContracts(), named, p.module.root)...)
 	p.auditWarnings = append(p.auditWarnings, p.unmarkedStreams(fset, files)...)
+	p.auditWarnings = append(p.auditWarnings, undeclaredConfigNames(fset, files, p.configNames(), p.module.root)...)
 
 	if featureEnabled(p.conf, "help") && rootShortCircuitFlag(p, "help", true) != "" {
 		p.auditWarnings = append(p.auditWarnings, missingRootHook(fset, files, p.root.handler, p.module.root)...)
 	}
+	if featureEnabled(p.conf, "help") {
+		p.auditWarnings = append(p.auditWarnings, missingPluginHelp(fset, files, p.pluginHelpHandlers(), p.module.root)...)
+	}
 	return nil
+}
+
+// pluginHelpHandlers maps the handler type of each own help command that can name a plugin to
+// how it is invoked; see helpReachesPlugins.
+func (p *program) pluginHelpHandlers() map[string]string {
+	out := map[string]string{}
+	for _, c := range p.own {
+		if !c.passthrough && commandName(c.invocation) == "help" && variadicStringArgField(c) != "" && helpReachesPlugins(p, c) {
+			out[c.handler] = c.invocation
+		}
+	}
+	return out
+}
+
+// missingPluginHelp warns when a help handler that can name a plugin calls rtx.HelpFor but not
+// rtx.PluginHelp, as a stub seeded before its subtree had plugins does: `help <plugin>` then
+// never runs the plugin's help.
+func missingPluginHelp(fset *token.FileSet, files map[string]*ast.File, handlers map[string]string, moduleRoot string) []error {
+	if len(handlers) == 0 {
+		return nil
+	}
+	var found []auditFinding
+	for _, f := range files {
+		for _, d := range f.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || len(fn.Recv.List) == 0 || fn.Name.Name != "Run" || fn.Body == nil {
+				continue
+			}
+			invocation, ok := handlers[receiverTypeName(fn.Recv.List[0].Type)]
+			if !ok {
+				continue
+			}
+			helpFor, pluginHelp := false, false
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if sel, ok := n.(*ast.SelectorExpr); ok {
+					helpFor = helpFor || sel.Sel.Name == "HelpFor"
+					pluginHelp = pluginHelp || sel.Sel.Name == "PluginHelp"
+				}
+				return true
+			})
+			if !helpFor || pluginHelp {
+				continue
+			}
+			at := findingAt(fset, fn.Name.Pos(), moduleRoot)
+			at.msg = fmt.Sprintf(
+				"%s:%d: %#q can name a plugin, but its Run calls rtx.HelpFor without rtx.PluginHelp, so `%s <plugin>` never runs the plugin's help; ask rtx.PluginHelp first, as a newly seeded help stub does",
+				at.file, at.line, invocation, invocation,
+			)
+			found = append(found, at)
+		}
+	}
+	return sortedWarnings(found)
 }
 
 // missingRootHook warns when the root's --help is short_circuit and cascading but the root
@@ -374,10 +432,16 @@ func receiverTypeName(t ast.Expr) string {
 
 // inputsMethods are the generic Context methods that acquire a command's own declared inputs.
 // Each takes the inputs type as its type argument, which is what the audit reads.
-var inputsMethods = map[string]bool{
-	"Inputs": true, "InputsWithReport": true,
-	"DefaultInputs": true, "ArgvInputs": true, "EnvInputs": true, "FileInputs": true, "StdinInputs": true,
+func inputsMethods() map[string]bool {
+	return inputsMethodsOnce.value(func() map[string]bool {
+		return map[string]bool{
+			"Inputs": true, "InputsWithReport": true,
+			"DefaultInputs": true, "ArgvInputs": true, "EnvInputs": true, "FileInputs": true, "StdinInputs": true,
+		}
+	})
 }
+
+var inputsMethodsOnce lazy[map[string]bool]
 
 // inputsTypeExpectations maps each generated handler type to its command's inputs type, and
 // returns the set of every generated inputs type.
@@ -426,7 +490,7 @@ func wrongInputsTypes(fset *token.FileSet, files map[string]*ast.File, expected 
 					return true
 				}
 				fn, arg, ok := genericCallTypeArg(call)
-				if !ok || !inputsMethods[fn] || arg == want || !known[arg] {
+				if !ok || !inputsMethods()[fn] || arg == want || !known[arg] {
 					return true
 				}
 				at := findingAt(fset, call.Pos(), moduleRoot)
@@ -535,7 +599,13 @@ func (p *program) exitContracts() map[string]exitContract {
 }
 
 // exitMethods are the Context methods that set the exit code from their argument.
-var exitMethods = map[string]bool{"HaltWithCode": true, "Exit": true}
+func exitMethods() map[string]bool {
+	return exitMethodsOnce.value(func() map[string]bool {
+		return map[string]bool{"HaltWithCode": true, "Exit": true}
+	})
+}
+
+var exitMethodsOnce lazy[map[string]bool]
 
 // namedExitCodes are the constants generated for named exit codes, which the audit reads from
 // the spec rather than from the generated files, so it works in a dry run and through the
@@ -618,7 +688,7 @@ func undocumentedExitCodes(fset *token.FileSet, files map[string]*ast.File, cont
 					return true
 				}
 				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || !exitMethods[sel.Sel.Name] {
+				if !ok || !exitMethods()[sel.Sel.Name] {
 					return true
 				}
 				if x, ok := sel.X.(*ast.Ident); !ok || !params[x.Name] {

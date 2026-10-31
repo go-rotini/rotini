@@ -262,7 +262,7 @@ func expandChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, wai
 			if waived && cfg != nil {
 				continue
 			}
-			return nil, usageBind(channel, key, xerr.Error(), nil)
+			return nil, usageBind(InputErrorKindInvalidValue, channel, key, xerr.Error(), nil)
 		}
 		if r.relConfig && cfg != nil {
 			out = relativeToFile(out, configSourceFile(cfg, val.Source()))

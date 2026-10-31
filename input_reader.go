@@ -459,7 +459,7 @@ func bindFlagFallback(reg fallbackLookup, field reflect.Value, tag reflect.Struc
 		if waivable {
 			return nil, "", nil
 		}
-		return nil, "", usageBind(channelFlag, name, err.Error()+fromSource(origin), err)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelFlag, name, err.Error()+fromSource(origin), err)
 	}
 	vals = fallbackTimes(field.Type(), def, vals)
 	var prev reflect.Value
@@ -490,7 +490,7 @@ func bindFlagFallback(reg fallbackLookup, field reflect.Value, tag reflect.Struc
 // origin, where it came from.
 func flagFallbackValues(val recon.Value, t reflect.Type, name string, def FlagDef, chain []Command, idx int, origin string) ([]string, error) {
 	if problem := flagShapeProblem(val, t, isObjectFlag(&def)); problem != "" {
-		return nil, usageBind(channelFlag, name, fallbackLabel(chain, idx, name)+" "+problem+fromSource(origin), nil)
+		return nil, usageBind(InputErrorKindInvalidValue, channelFlag, name, fallbackLabel(chain, idx, name)+" "+problem+fromSource(origin), nil)
 	}
 	vals, err := fallbackValues(val, def.Separator)
 	if err != nil {
@@ -637,7 +637,7 @@ func checkConfigShapes(s reflect.Value, cfg *cfgRegs) error {
 		}
 		l := cfg.labels()
 		if problem := configShapeProblem(val, f.Type); problem != "" {
-			return usageBind(channelConfig, key, l.name(channelConfig, key)+" "+problem+l.origin(val.Source()), nil)
+			return usageBind(InputErrorKindInvalidValue, channelConfig, key, l.name(channelConfig, key)+" "+problem+l.origin(val.Source()), nil)
 		}
 		if derefType(f.Type).Kind() != reflect.Slice || val.Kind() != recon.SliceKind {
 			continue
@@ -645,7 +645,7 @@ func checkConfigShapes(s reflect.Value, cfg *cfgRegs) error {
 		items, _ := val.AsSlice()
 		for i, it := range items {
 			if it.Kind() == recon.NullKind {
-				return usageBind(channelConfig, key, l.name(channelConfig, key)+": "+nullItem(i).Error()+l.origin(val.Source()), nil)
+				return usageBind(InputErrorKindInvalidValue, channelConfig, key, l.name(channelConfig, key)+": "+nullItem(i).Error()+l.origin(val.Source()), nil)
 			}
 		}
 	}
@@ -726,7 +726,7 @@ func fallbackCoerceError(chain []Command, idx int, name, source string, err erro
 		return internalBind(channelFlag, name, fmt.Sprintf("%s: %s", label, mistake), err)
 	}
 	msg := fmt.Sprintf("%s: %s", label, coerceMessage(err, secret)) + fromSource(source)
-	return usageBind(channelFlag, name, msg, err)
+	return usageBind(InputErrorKindInvalidValue, channelFlag, name, msg, err)
 }
 
 // recordOrigin notes where a reconciled fallback value came from (see scopeInputs.origin), so a
@@ -1499,7 +1499,7 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 	switch {
 	case overridden:
 		if override.emptyFlag != "" {
-			return nil, "", usageBind(channelConfig, f.Name, override.emptyFlag+" was given an empty path; name a configuration file", nil)
+			return nil, "", usageBind(InputErrorKindFileAccess, channelConfig, f.Name, override.emptyFlag+" was given an empty path; name a configuration file", nil)
 		}
 		path = override.path
 		opts = append(opts, recon.WithOptional(false))
@@ -1535,7 +1535,7 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 		if isWiringError(err) {
 			return nil, "", err
 		}
-		return nil, "", usageBind(channelConfig, f.Name, fmt.Sprintf("could not resolve configuration file path %s: %v", path, err), err)
+		return nil, "", usageBind(InputErrorKindFileAccess, channelConfig, f.Name, fmt.Sprintf("could not resolve configuration file path %s: %v", path, err), err)
 	}
 	if dirs != nil {
 		resolved = searchFile(dirs, filepath.Base(resolved))
@@ -1552,11 +1552,14 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 	src, err := newFileSource(fs, resolved, c, opts...)
 	if err != nil {
 		// The file's content or path is the user's to fix.
-		err = usageBind(channelConfig, f.Name, configFileProblem(resolved, err), err)
+		err = usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(resolved, err), err)
 		view.files.keep(key, openedFile{err: err})
 		return nil, "", err
 	}
 	view.files.keep(key, openedFile{src: src})
+	if fsrc, ok := src.(*recon.FileSource); ok && view.files != nil && f.As != "env" {
+		view.files.docs = append(view.files.docs, openedDoc{file: f, src: fsrc, codec: c})
+	}
 	return src, resolved, nil
 }
 
@@ -1567,6 +1570,16 @@ func (b *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 type fileCache struct {
 	files   map[openedKey]openedFile
 	checked map[checkedKey]error
+	// docs is each configuration file (not an `as: env` file) opened, in opening order, for
+	// [InputReport.UnreadConfigKeys].
+	docs []openedDoc
+}
+
+// openedDoc is one configuration file opened, and the entry it was opened for.
+type openedDoc struct {
+	file  ConfigFile
+	src   *recon.FileSource
+	codec *codecEntry // what it was decoded with; nil when recon chose by its extension
 }
 
 // openedKey identifies one opening of a configuration file: the entry, the file it resolved to,
@@ -1686,6 +1699,18 @@ func configFileProblem(path string, err error) string {
 	return fmt.Sprintf("could not open configuration file %s: %s", path, reason)
 }
 
+// configFileKind classifies an error [configFileProblem] words: a file that could not be
+// parsed, else one that could not be opened or read.
+func configFileKind(err error) InputErrorKind {
+	if _, ok := asError[*toml.DuplicateKeyError](err); ok {
+		return InputErrorKindMalformedDocument
+	}
+	if _, ok := asError[*recon.ParseError](err); ok {
+		return InputErrorKindMalformedDocument
+	}
+	return InputErrorKindFileAccess
+}
+
 // innermostCause returns the error at the end of err's chain, which names the cause without
 // the paths and prefixes the layers above it add.
 func innermostCause(err error) error {
@@ -1746,7 +1771,7 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 				return nil // absent: vacuous
 			}
 			// A present-but-unreadable file the user controls.
-			return usageBind(channelConfig, f.Name, configFileProblem(path, err), err)
+			return usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(path, err), err)
 		}
 	}
 	if fs.schemas == nil {
@@ -1770,7 +1795,7 @@ func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m
 	if !decoded {
 		if m, err = c.codec().Decode(stripBOM(data)); err != nil {
 			pe := fileParseError(path, err)
-			return usageBind(channelConfig, f.Name, configFileProblem(path, pe), pe)
+			return usageBind(configFileKind(pe), channelConfig, f.Name, configFileProblem(path, pe), pe)
 		}
 	}
 	if f.Profiles != nil {
@@ -1782,14 +1807,95 @@ func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m
 	}
 	if err := validator.Validate(m); err != nil {
 		fs.schemas.patternMessages(f.Schema, err)
-		where := path
+		where, got := path, ""
+		ve, isVE := asError[*recon.ValidationError](err)
+		if isVE {
+			if at := violationAt(c, data, decoded, path, ve.Path, f, profile); at != "" {
+				where += ":" + at
+			}
+			got = violationValue(m, ve, f)
+		}
 		if f.Profiles != nil && profile != "" {
 			where += " (profile " + profile + ")"
 		}
-		return usageBind(channelConfig, f.Name,
-			fmt.Sprintf("configuration file %s %s", where, schemaVerdict(err, "is invalid")), err)
+		if isVE && forbiddenKey(ve) {
+			return unknownFileKey(f, where, ve, err)
+		}
+		return usageBind(InputErrorKindSchemaViolation, channelConfig, f.Name,
+			fmt.Sprintf("configuration file %s %s%s", where, schemaVerdict(err, "is invalid"), got), err)
 	}
 	return nil
+}
+
+// violationAt is the "line:col" of the value at at, which a schema check of configuration file
+// f (read from path) rejected, or "" when its codec gives no positions or the value isn't
+// found. data is the file as read, unless the document was decoded when it was opened. The
+// selected profile's section is looked in first, then the shared keys.
+func violationAt(c *codecEntry, data []byte, decoded bool, path string, at recon.Path, f ConfigFile, profile string) string {
+	if c.locate == nil || len(at) == 0 {
+		return ""
+	}
+	if decoded {
+		var err error
+		if data, err = os.ReadFile(path); err != nil {
+			return ""
+		}
+	}
+	data = stripBOM(data)
+	tries := [][]string{at}
+	if f.Profiles != nil && profile != "" {
+		tries = [][]string{append([]string{f.Profiles.Under, profile}, at...), at}
+	}
+	for _, p := range tries {
+		if line, col, ok := c.locate(data, p); ok {
+			return strconv.Itoa(line) + ":" + strconv.Itoa(col)
+		}
+	}
+	return ""
+}
+
+// violationValue is the " (got <value>)" suffix naming the scalar value a schema check
+// rejected at ve's path in document m, or "" for a list, a map, a missing value, or a secret
+// key's value.
+func violationValue(m map[string]any, ve *recon.ValidationError, f ConfigFile) string {
+	if ve.Secret || len(ve.Path) == 0 {
+		return ""
+	}
+	key := strings.Join(ve.Path, ".")
+	for _, k := range f.Keys {
+		if k.Key == key && k.Secret {
+			return ""
+		}
+	}
+	var v any = m
+	for _, seg := range ve.Path {
+		switch node := v.(type) {
+		case map[string]any:
+			next, ok := node[seg]
+			if !ok {
+				return ""
+			}
+			v = next
+		case []any:
+			i, err := strconv.Atoi(seg)
+			if err != nil || i < 0 || i >= len(node) {
+				return ""
+			}
+			v = node[i]
+		default:
+			return ""
+		}
+	}
+	switch v := v.(type) {
+	case string:
+		return fmt.Sprintf(" (got %q)", v)
+	case map[string]any, []any:
+		return ""
+	case nil:
+		return " (got null)"
+	default:
+		return fmt.Sprintf(" (got %v)", v)
+	}
 }
 
 // pathOverrides resolves each ConfigFile's config_source inputs to the path they supply: the
@@ -2109,7 +2215,7 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 		// An unparseable value passes through as text so recon reports it as a usage error
 		// naming the input; an error returned from Get would be swallowed.
 		ts.clock = s.clock
-		if t, perr := parseTimeValue(v.String(), ts); perr == nil {
+		if t, perr := parseTime(v.String(), ts); perr == nil {
 			return recon.NewValue(t), true, nil
 		}
 	}
@@ -2199,11 +2305,11 @@ func fillEnvNested(env reflect.Value, view *osView) (map[string]bool, error) {
 		name := et.Field(j).Tag.Get("rotini")
 		fam, err := envFamily(view, base, sep)
 		if err != nil {
-			return filled, usageBind(channelEnv, name, err.Error(), nil)
+			return filled, usageBind(InputErrorKindInvalidValue, channelEnv, name, err.Error(), nil)
 		}
 		if len(fam) == 0 {
 			if opt == "required" {
-				return filled, usageBind(channelEnv, name,
+				return filled, usageBind(InputErrorKindMissingRequired, channelEnv, name,
 					fmt.Sprintf("environment variables %s%s* are required for %s", base, sep, name), nil)
 			}
 			continue
@@ -2279,6 +2385,7 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
+	fs := labels.view.clockRef().features()
 	for _, ci := range v.Fields() {
 		if ci.Kind() != reflect.Struct {
 			continue
@@ -2290,18 +2397,15 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 				if envReg == nil {
 					continue
 				}
-				if err := checkEnvMaps(ci.Field(j), envReg, labels); err != nil {
-					return err
-				}
-				if err := bindReconWaived(envReg, ci.Field(j).Addr().Interface(), waived); err != nil {
-					return labels.bindStruct(channelEnv, err, envReg, ci.Field(j))
-				}
-				if _, err := fillEnvNested(ci.Field(j), labels.view); err != nil {
+				if err := fillEnv(ci.Field(j), envReg, waived, labels); err != nil {
 					return err
 				}
 			case "Config":
 				if cfg == nil {
 					continue
+				}
+				if err := checkTimeChannel(fs, ci.Field(j)); err != nil {
+					return err
 				}
 				if err := fillConfig(ci.Field(j), cfg, waived); err != nil {
 					return err
@@ -2310,6 +2414,22 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs, waived 
 		}
 	}
 	return nil
+}
+
+// fillEnv recon-binds one Env struct from envReg and fills its nested env inputs (see
+// fillChannels).
+func fillEnv(s reflect.Value, envReg *recon.Registry, waived bool, labels channelLabels) error {
+	if err := checkTimeChannel(labels.view.clockRef().features(), s); err != nil {
+		return err
+	}
+	if err := checkEnvMaps(s, envReg, labels); err != nil {
+		return err
+	}
+	if err := bindReconWaived(envReg, s.Addr().Interface(), waived); err != nil {
+		return labels.bindStruct(channelEnv, err, envReg, s)
+	}
+	_, err := fillEnvFamilies(s, labels.view)
+	return err
 }
 
 // fillConfig recon-binds one Config struct from cfg (see fillChannels).
@@ -2581,27 +2701,93 @@ const (
 	channelFlag   = "flag"
 )
 
+// InputErrorKind classifies an [*InputError] so a reporter can branch on the failure without
+// matching the message. A kind the command line also has shares its [ParseKind]'s name
+// (invalid-value, enum-violation, constraint-violation, missing-required, internal); the others
+// are failures only a file, the environment or stdin can have.
+type InputErrorKind int
+
+// The input failure kinds.
+const (
+	// InputErrorKindUnspecified is the zero value: an [*InputError] whose construction site did
+	// not classify it (a hand-built error that sets no Kind).
+	InputErrorKindUnspecified         InputErrorKind = iota
+	InputErrorKindInvalidValue                       // a value its input's type or shape can't hold: a wrong type, a list for one value, a null list item, a malformed map entry, an empty value
+	InputErrorKindEnumViolation                      // a value was not one of a declared enum's members
+	InputErrorKindConstraintViolation                // a rule across inputs was broken: a variable and its _FILE twin both set
+	InputErrorKindMissingRequired                    // a required environment variable, config key or stdin payload was absent
+	InputErrorKindSchemaViolation                    // a configuration file, stdin document or record does not match its JSON Schema, or could not be fully checked against it
+	InputErrorKindMalformedDocument                  // a configuration file or stdin could not be parsed: a syntax error, a duplicate key, text that is not UTF-8
+	InputErrorKindFileAccess                         // a configuration file, or a file an environment variable names, could not be found, resolved, opened, read or written
+	InputErrorKindUnknownProfile                     // a profile was chosen that the configuration file does not define
+	InputErrorKindUnknownKey                         // a configuration write named a key the command does not read, or a configuration file holds a key its schema forbids (additionalProperties: false)
+	InputErrorKindWriteRefused                       // a configuration write rotini won't make: a secret key, an object value, a file others can read
+	InputErrorKindInterrupted                        // the run's signal interrupted reading stdin
+	InputErrorKindInternal                           // the program's mistake: a registry that could not be built, a schema that does not compile, a payload type that does not fit
+)
+
+// String renders the kind as a short, stable label (for logs, tests and structured output).
+func (k InputErrorKind) String() string {
+	switch k {
+	case InputErrorKindInvalidValue:
+		return "invalid-value"
+	case InputErrorKindEnumViolation:
+		return "enum-violation"
+	case InputErrorKindConstraintViolation:
+		return "constraint-violation"
+	case InputErrorKindMissingRequired:
+		return "missing-required"
+	case InputErrorKindSchemaViolation:
+		return "schema-violation"
+	case InputErrorKindMalformedDocument:
+		return "malformed-document"
+	case InputErrorKindFileAccess:
+		return "file-access"
+	case InputErrorKindUnknownProfile:
+		return "unknown-profile"
+	case InputErrorKindUnknownKey:
+		return "unknown-key"
+	case InputErrorKindWriteRefused:
+		return "write-refused"
+	case InputErrorKindInterrupted:
+		return "interrupted"
+	case InputErrorKindInternal:
+		return "internal"
+	default:
+		return "unspecified"
+	}
+}
+
 // InputError reports a failure acquiring or decoding one of a command's non-argv input
 // channels: environment variables, configuration files, a typed stdin payload, or a flag's or
 // argument's env/config fallback. It is the counterpart of the argv channel's [*ParseError].
 //
 // Error names the channel, the input, and what went wrong. The underlying recon, decode or OS
 // Cause is reachable via errors.As but kept out of the message, and the value of an input
-// marked secret is redacted.
+// marked secret is redacted. Kind says what went wrong without the message, and Command and
+// [InputError.Path] say whose input it was, so a reporter can word the failure its own way.
 //
 // A bad value, a missing required input, or a malformed document the user supplied is
 // [CategoryUsage]; a registry build, schema compile, IO read, or codegen mismatch is
-// [CategoryInternal].
+// [CategoryInternal] ([InputErrorKindInternal]).
 //
-//	var be *rotini.InputError
-//	if errors.As(err, &be) {
-//	    fmt.Fprintf(os.Stderr, "bad %s input %q: %s\n", be.Channel, be.Input, be.Error())
+//	var ie *rotini.InputError
+//	if errors.As(err, &ie) {
+//	    switch ie.Kind {
+//	    case rotini.InputErrorKindMalformedDocument, rotini.InputErrorKindSchemaViolation:
+//	        fmt.Fprintf(os.Stderr, "%s: check your configuration file: %s\n", ie.Path(), ie.Msg)
+//	    }
 //	}
 type InputError struct {
-	Channel string // one of "env", "config", "stdin", "flag", "argument"
-	Input   string // the offending input key/path, when a single one is known (else "")
-	Msg     string // the message Error returns; it never includes Cause's text
-	Cause   error  // the underlying recon/decode/OS error, reachable via errors.As (may be nil)
+	Kind    InputErrorKind // what went wrong, for branching without matching Msg (zero = InputErrorKindUnspecified)
+	Channel string         // one of "env", "config", "stdin", "flag", "argument"
+	Input   string         // the offending input key/path, when a single one is known (else "")
+	Msg     string         // the message Error returns; it never includes Cause's text
+	Cause   error          // the underlying recon/decode/OS error, reachable via errors.As (may be nil)
+
+	// Command is the name of the command whose inputs were read ("" until the error leaves
+	// the read that made it).
+	Command string
 
 	// Token and Candidates are set when a value is not one of an env or config input's enum:
 	// the rejected value ("[redacted]" for a secret input) and the allowed values. They are
@@ -2622,6 +2808,11 @@ func (e *InputError) Error() string {
 	return e.path + ": " + e.Msg
 }
 
+// Path returns the path of the command the error is reported against, as Error prints it
+// first ("taskr add"), or "" when Error prints none: an internal error, or one that has not
+// left the read that made it.
+func (e *InputError) Path() string { return e.path }
+
 // Unwrap returns Cause, when set, and the category sentinel, [ErrUsage] or [ErrInternal].
 func (e *InputError) Unwrap() []error {
 	sentinel := ErrInternal
@@ -2634,14 +2825,32 @@ func (e *InputError) Unwrap() []error {
 	return []error{e.Cause, sentinel}
 }
 
-// usageBind builds a [CategoryUsage] *InputError: bad input the end user can fix.
-func usageBind(channel, input, msg string, cause error) *InputError {
-	return &InputError{Channel: channel, Input: input, Msg: msg, Cause: cause, usage: true}
+// usageBind builds a [CategoryUsage] *InputError of kind: bad input the end user can fix.
+func usageBind(kind InputErrorKind, channel, input, msg string, cause error) *InputError {
+	return &InputError{Kind: kind, Channel: channel, Input: input, Msg: msg, Cause: cause, usage: true}
 }
 
-// internalBind builds a [CategoryInternal] *InputError: a failure the author must fix.
+// internalBind builds a [CategoryInternal] *InputError, of [InputErrorKindInternal]: a failure
+// the author must fix.
 func internalBind(channel, input, msg string, cause error) *InputError {
-	return &InputError{Channel: channel, Input: input, Msg: msg, Cause: cause}
+	return &InputError{Kind: InputErrorKindInternal, Channel: channel, Input: input, Msg: msg, Cause: cause}
+}
+
+// inputKindOf is the [InputErrorKind] for a value check's [ParseKind], when a channel reports
+// the check's failure as an [*InputError].
+func inputKindOf(k ParseKind) InputErrorKind {
+	switch k {
+	case ParseKindEnumViolation:
+		return InputErrorKindEnumViolation
+	case ParseKindConstraintViolation:
+		return InputErrorKindConstraintViolation
+	case ParseKindMissingRequired:
+		return InputErrorKindMissingRequired
+	case ParseKindInternal:
+		return InputErrorKindInternal
+	default:
+		return InputErrorKindInvalidValue
+	}
 }
 
 // reconBind converts a recon error for one channel into a clean, categorized [*InputError]. It

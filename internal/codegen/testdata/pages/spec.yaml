@@ -4,7 +4,10 @@
 # argument, long input descriptions, stability markers, exit-code links, help topics and
 # response files, and a header and footer on each page kind; a deprecated command's own page,
 # the root's exit_status inherited by commands without their own, secrets that refuse a typed
-# value, list defaults (JSON in man and markdown), and code spans in man rules and enum values.
+# value, list defaults (JSON in man and markdown), and code spans in man rules and enum values;
+# the configuration files a command reads (fixed, discovered, named by a flag), config keys in
+# the user's words, the rules between flags, value labels in the user's words (lists, maps,
+# numbers, a type of the author's own), exact lengths, and a generated configuration topic.
 version: 0.0.0
 command:
   name: ops
@@ -14,6 +17,8 @@ command:
   config_files:
     - name: user
       path: ~/.ops.yaml
+    - name: project
+      discover: {strategy: walk-up, file: .ops.yaml}
   groups:
     - name: Data
       description: Commands that read a document from standard input.
@@ -77,6 +82,9 @@ command:
     - name: environment
       summary: the environment variables ops reads
       generate: environment
+    - name: configuration
+      summary: the configuration files and keys ops reads
+      generate: configuration
   schemas:
     Task:
       type: object
@@ -99,6 +107,24 @@ command:
       footer: Report problems at https://example.com/ops/issues.
       group: Deploying
       stability: beta
+      metadata: {owner: platform}
+      config_files:
+        - name: secrets
+          path: ./secrets.json
+          profiles: {under: stages, select: stage, default: dev}
+      config:
+        - name: registry
+          summary: the registry to push to
+          schema: {type: string, key: deploy.registry, file: project}
+        - name: retries
+          summary: how many times to retry
+          schema: {type: int, key: deploy.retries, default: 1, minimum: 0, maximum: 9}
+      flag_groups:
+        - {kind: mutually_exclusive, flags: [token, key]}
+        - {kind: required_together, flags: [ratio, step]}
+      flag_dependencies:
+        - {when: zone, equals: [eu], requires: [port], forbids: [quote]}
+        - {unless: [key], requires: [token]}
       exit_status:
         - { code: 0, summary: shipped }
         - { code: 4, name: rejected, summary: the cluster refused it, docs_url: "https://example.com/ops/rejected" }
@@ -160,6 +186,39 @@ command:
           summary: the quoting style
           identifiers: [--quote]
           schema: {type: string, pattern: '^[a-z`"]+$', enum: ['a`b', plain]}
+        - name: secrets
+          summary: read secrets from this file
+          identifiers: [--secrets]
+          schema: {type: string, config_source: secrets}
+        - name: stage
+          summary: the stage to deploy to
+          identifiers: [--stage]
+          schema: {type: string}
+        - name: sep
+          summary: the field separator
+          identifiers: [--sep]
+          metadata: {tier: internal}
+          schema: {type: string, minLength: 1, maxLength: 1}
+        - name: points
+          summary: story points
+          identifiers: [--points]
+          schema: {type: int64, minimum: 1, maximum: 21, multipleOf: 1}
+        - name: weights
+          summary: a weight per zone
+          identifiers: [--weights]
+          schema: {type: 'map[string]float64'}
+        - name: link
+          summary: a link to follow
+          identifiers: [--link]
+          schema: {type: model.Link, import: example.com/model}
+        - name: pair
+          summary: exactly two hosts
+          identifiers: [--pair]
+          schema: {type: '[]string', minItems: 2, maxItems: 2}
+        - name: replicas
+          summary: how many to run
+          identifiers: [--replicas]
+          schema: {type: int, key: deploy.replicas, default: 1, minimum: 1, maximum: 100}
     - name: import
       summary: import tasks
       group: Data

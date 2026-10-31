@@ -70,6 +70,21 @@ func TestStructuredReporter_machine(t *testing.T) {
 	}
 }
 
+// An input error's line carries its kind, as a parse error's does.
+func TestStructuredReporter_inputErrorKind(t *testing.T) {
+	t.Parallel()
+	ie := usageBind(InputErrorKindSchemaViolation, channelConfig, "app", "configuration file app.yaml:2:11 is invalid", nil)
+	_, stderr, _ := runReporter(wantsJSON, []string{"list", "--json"}, Outcome{Errors: []error{ie}}, 0)
+	want := `{"schema_version":1,"error":{"category":"usage","command":"taskr list","exit_code":1,"kind":"schema-violation","message":"configuration file app.yaml:2:11 is invalid"}}` + "\n"
+	if stderr != want {
+		t.Errorf("stderr = %s, want %s", stderr, want)
+	}
+	unkinded := &InputError{Channel: channelConfig, Msg: "hand-built"}
+	if _, stderr, _ := runReporter(wantsJSON, []string{"list", "--json"}, Outcome{Errors: []error{unkinded}}, 0); strings.Contains(stderr, `"kind"`) {
+		t.Errorf("stderr = %s, want no kind for an unspecified one", stderr)
+	}
+}
+
 func TestStructuredReporter_keepsADeliberateCode(t *testing.T) {
 	t.Parallel()
 	_, stderr, code := runReporter(wantsJSON, []string{"list", "--json"}, Outcome{Errors: []error{errors.New("partial")}}, 3)

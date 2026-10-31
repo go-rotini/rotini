@@ -12,8 +12,8 @@ import (
 // timeout, environment and signal handling, and the program refuses to run itself as one. Its
 // output passes through, and the run halts with its exit code, or with a [*PluginError] when the
 // plugin can't be run. A discovered plugin counts only when its binary is found, so a mistyped
-// word still gets the help command's own answer. It reports false, doing nothing, when path
-// names no plugin.
+// word still gets the help command's own answer, the unknown-command error from HelpFor. It
+// reports false, doing nothing, when path names no plugin.
 //
 //	if rtx.PluginHelp(topic...) {
 //		return
@@ -21,13 +21,13 @@ import (
 //	page, err := rtx.HelpFor(topic...)
 func (rtx *Context) PluginHelp(path ...string) bool {
 	rtx.mu.RLock()
-	run := rtx.pluginHelp
+	p := rtx.program
 	frame := rtx.frameIndexLocked()
 	rtx.mu.RUnlock()
-	if run == nil || len(path) == 0 {
+	if p == nil || len(path) == 0 {
 		return false
 	}
-	return run(rtx, append(helpPath(rtx.chainRef(), 1, frame), path...))
+	return p.pluginHelp(rtx, append(helpPath(rtx.chainRef(), 1, frame), path...))
 }
 
 // pluginHelp is [Context.PluginHelp] for words, a command path below the root.

@@ -30,7 +30,7 @@ func TestPlacementHint_schemaKeys(t *testing.T) {
 				KeywordLocation: "#/definitions/" + def + "/additionalProperties",
 			}
 			want := fmt.Sprintf("unknown key %q on %s; ", key, definitionNoun(ve.KeywordLocation))
-			if chans, limited := schemaKeyChannels[key]; !limited || slices.Contains(chans, channel) {
+			if chans, limited := schemaKeyChannels()[key]; !limited || slices.Contains(chans, channel) {
 				want += fmt.Sprintf("%q belongs under schema: (schema: {%s: …})", key, key)
 			} else {
 				want += fmt.Sprintf("%q is a schema key of ", key)

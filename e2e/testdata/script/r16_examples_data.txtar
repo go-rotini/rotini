@@ -1,0 +1,215 @@
+# R16 — examples as data: the object form's summary on the help page, the parsed words in the
+# contract and the generated Examples variable, and a test that runs every example with
+# rotinitest.RunArgv.
+
+gomodinit example.com/taskr
+
+exec rotini generate cmd/taskr/.rotini.spec.yaml --config cmd/taskr/.rotini.conf.yaml
+grep '\{Command: "taskr list", Run: "taskr list --status open", Summary: "List the open tasks", Argv: \[\]string\{"list", "--status", "open"\}\},' internal/cmd/taskr/zz_taskr.go
+! grep 'Run: "taskr add <title>"' internal/cmd/taskr/zz_taskr.go
+grep '"argv": \[' contract.json
+
+exec go mod tidy
+exec go vet ./...
+exec go test -count=1 ./internal/cmd/taskr
+! stderr .
+
+exec go run ./cmd/taskr list --help
+cmp stdout list-help.txt
+
+# A deprecated spelling in an example is a warning, not an error.
+cp deprecated.yaml cmd/taskr/.rotini.spec.yaml
+exec rotini validate cmd/taskr/.rotini.spec.yaml --config cmd/taskr/.rotini.conf.yaml
+stderr 'example "taskr ls --open" uses a deprecated spelling \(flag "--open" is deprecated: use --status open\); show what to type now instead'
+
+-- cmd/taskr/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: taskr
+  summary: track tasks
+  examples:
+    - taskr add "buy milk"
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      summary: show help
+      schema: {type: bool}
+  commands:
+    - name: list
+      aliases: [ls]
+      summary: list tasks
+      examples:
+        - taskr list
+        - run: taskr list --status open
+          summary: List the open tasks
+      flags:
+        - name: status
+          identifiers: [--status]
+          summary: only tasks with this status
+          schema: {type: string, enum: [open, done]}
+    - name: add
+      summary: add a task
+      examples:
+        - taskr add <title>
+      arguments:
+        - name: title
+          summary: what to do
+          schema: {type: string, required: true}
+-- deprecated.yaml --
+version: 0.0.0
+command:
+  name: taskr
+  summary: track tasks
+  commands:
+    - name: list
+      aliases: [ls]
+      summary: list tasks
+      examples:
+        - taskr ls --open
+      flags:
+        - name: open
+          identifiers: [--open]
+          summary: only open tasks
+          deprecated: use --status open
+          schema: {type: bool}
+        - name: status
+          identifiers: [--status]
+          summary: only tasks with this status
+          schema: {type: string, enum: [open, done]}
+-- cmd/taskr/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+    - type: cmd
+      file: internal/cmd/taskr/zz_taskr.go
+      package: taskr
+  contract:
+    file: contract.json
+  features:
+    - type: help
+      enabled: true
+-- cmd/taskr/main.go --
+package main
+
+import taskr "example.com/taskr/internal/cmd/taskr"
+
+func main() {
+	taskr.NewProgram().Execute()
+}
+-- internal/cmd/taskr/taskr.go --
+package taskr
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrHandler struct {
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*taskrHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.Inputs[TaskrInputs]()
+	if err != nil || !in.Taskr.Flags.Help {
+		return err
+	}
+	page, err := rtx.InvokedHelp()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(rtx.Stdout, page)
+	rtx.HaltWithCode(0)
+	return nil
+}
+
+func (*taskrHandler) Run(ctx context.Context, rtx *rotini.Context) error { return nil }
+-- internal/cmd/taskr/taskr_list.go --
+package taskr
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrListHandler struct{ rotini.NoHooksE }
+
+func (*taskrListHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.Inputs[TaskrListInputs]()
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(rtx.Stdout, "listing", in.TaskrList.Flags.Status)
+	return err
+}
+-- internal/cmd/taskr/taskr_add.go --
+package taskr
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrAddHandler struct{ rotini.NoHooksE }
+
+func (*taskrAddHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.Inputs[TaskrAddInputs]()
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(rtx.Stdout, "added", in.TaskrAdd.Arguments.Title)
+	return err
+}
+-- internal/cmd/taskr/examples_test.go --
+package taskr_test
+
+import (
+	"testing"
+
+	"github.com/go-rotini/rotini/rotinitest"
+
+	"example.com/taskr/internal/cmd/taskr"
+)
+
+func TestExamples(t *testing.T) {
+	t.Parallel()
+	if len(taskr.Examples) != 3 {
+		t.Fatalf("Examples = %+v, want the three runnable examples", taskr.Examples)
+	}
+	for _, ex := range taskr.Examples {
+		t.Run(ex.Run, func(t *testing.T) {
+			t.Parallel()
+			res := rotinitest.RunArgv(t, taskr.NewProgram(), ex.Argv)
+			if res.Code != 0 || len(res.Stdout) == 0 {
+				t.Errorf("%s: code %d, stdout %q, err %v", ex.Run, res.Code, res.Stdout, res.Err)
+			}
+		})
+	}
+}
+-- list-help.txt --
+list tasks
+
+Usage:
+  taskr list [flags]
+
+Flags:
+      --status string    only tasks with this status [open|done]
+
+Global Flags:
+  -h, --help    show help
+
+Examples:
+  taskr list
+  # List the open tasks
+  taskr list --status open

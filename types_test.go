@@ -379,20 +379,21 @@ func TestCoerceWithLayout(t *testing.T) {
 		At    time.Time
 	}
 	v := reflect.ValueOf(&f).Elem()
+	all := featureClock(allFeatures())
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	must(coerceTime(v.FieldByName("Day"), []string{"2026-09-29"}, timeSpec{layout: "2006-01-02"}))
-	must(coerceTime(v.FieldByName("Maybe"), []string{"2026-09-30"}, timeSpec{layout: "2006-01-02"}))
-	must(coerceTime(v.FieldByName("Days"), []string{"2026-01-01", "2026-12-25"}, timeSpec{layout: "2006-01-02"}))
+	must(coerceTime(v.FieldByName("Day"), []string{"2026-09-29"}, timeSpec{layout: "2006-01-02", clock: all}))
+	must(coerceTime(v.FieldByName("Maybe"), []string{"2026-09-30"}, timeSpec{layout: "2006-01-02", clock: all}))
+	must(coerceTime(v.FieldByName("Days"), []string{"2026-01-01", "2026-12-25"}, timeSpec{layout: "2006-01-02", clock: all}))
 	must(coerceTime(v.FieldByName("At"), []string{"2026-09-29T14:00:00Z"}, timeSpec{}))
 	if f.Day.Day() != 29 || f.Maybe == nil || f.Maybe.Day() != 30 || len(f.Days) != 2 || f.Days[1].Month() != 12 || f.At.Hour() != 14 {
 		t.Errorf("%+v", f)
 	}
-	err := coerceTime(v.FieldByName("Day"), []string{"29-09-2026"}, timeSpec{layout: "2006-01-02"})
+	err := coerceTime(v.FieldByName("Day"), []string{"29-09-2026"}, timeSpec{layout: "2006-01-02", clock: all})
 	if err == nil || !strings.Contains(err.Error(), `"29-09-2026" is not a valid date (write it as 2006-01-02)`) {
 		t.Errorf("err = %v", err)
 	}

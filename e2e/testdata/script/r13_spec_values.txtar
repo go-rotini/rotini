@@ -238,7 +238,7 @@ env VALS_DB=
 exec ./vals$exe show --id id-1
 stdout '^ID=\{V:id-1\}$'
 ! exec ./vals$exe show --id nope
-stderr '"nope" is not a valid thing.Thing \(must start with id-\)'
+stderr '"nope" is not a valid value \(must start with id-\)'
 ! exec ./vals$exe show --plain v
 stderr 'the type must implement encoding.TextUnmarshaler'
 
@@ -333,10 +333,10 @@ stdout '--file PATH +where to read'
 stdout '--token string +api token \(@file\)$'
 ! stdout s3cr3t
 stdout '--limit bytesize'
-stdout '--sizes \[\]bytesize'
+stdout '--sizes bytesize\.\.\.'
 stdout '--n int +a number \(accepts 0x, 0o and 0b prefixes\)'
-stdout '--in string +input \(- for stdin\)'
-stdout '--out string +output \(- for stdout\)'
+stdout '--in file +input \(- for stdin\)'
+stdout '--out file +output \(- for stdout\)'
 stdout '--color\[=string\] +when to color \(implicit: always\)'
 stdout 'vals pages \[flags\] \[<TARGET>\]'
 stdout '^  \[<TARGET>\] +what to act on$'

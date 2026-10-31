@@ -1,14 +1,15 @@
-# R12 — the OpenTelemetry recipe: the root handler starts one span per run and hands its context
-# on with SetContext, so a command's own spans are its children, and the root's teardown ends
-# it, marked failed when the command failed. The handler files are the ones the guide
-# shows; printer.go stands in for an exporter and is not on the page.
+# R12 — the OpenTelemetry recipe: a middleware around each command's Run starts one span per run
+# and passes its context to Run, so a command's own spans are its children, and marks it
+# failed when the command failed. The middleware, main.go and the work handler are the ones
+# the guide shows; printer.go stands in for an exporter and is not on the page.
 # It needs the network on a cold module cache: `go get` fetches third-party modules, so it
 # opts in to the module proxy.
 
 gomodinit example.com/tracedemo
 
 exec rotini generate cmd/tracedemo/.rotini.spec.yaml --config cmd/tracedemo/.rotini.conf.yaml
-cp root.go.txt internal/cmd/tracedemo/tracedemo.go
+cp trace.go.txt internal/cmd/tracedemo/trace.go
+cp main.go.txt cmd/tracedemo/main.go
 cp work.go.txt internal/cmd/tracedemo/tracedemo_work.go
 env GOPROXY=$ROTINI_NETWORK_GOPROXY
 exec go get go.opentelemetry.io/otel@v1.44.0 go.opentelemetry.io/otel/trace@v1.44.0 go.opentelemetry.io/otel/sdk@v1.44.0
@@ -28,57 +29,48 @@ stderr 'no luck'
 -- want-work.txt --
 span "load" in "tracedemo work"
 span "tracedemo work"
--- root.go.txt --
+-- trace.go.txt --
 package tracedemo
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/go-rotini/rotini"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 )
-
-var _ rotini.ErrorHandler = (*tracedemoHandler)(nil)
 
 var tracer = otel.Tracer("example.com/tracedemo")
 
-type tracedemoHandler struct {
-	rotini.NoPreRunE
-	rotini.NoPostRunE
-
-	// span is the run's span. CascadingPostRun receives the context this handler's
-	// CascadingPreRun received, not the one it set, so the span is kept here to end it.
-	span trace.Span
-}
-
-// CascadingPreRun starts the run's span, named after the invoked command, and hands its
-// context to every later hook.
-func (h *tracedemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
-	var names []string
-	for _, c := range rtx.CommandChain() {
-		names = append(names, c.Name)
+// Trace runs each command's Run in a span named after the command, and marks the span failed
+// when the command fails.
+func Trace(h rotini.Hook, next rotini.HookFunc) rotini.HookFunc {
+	if h.Kind != rotini.HookRun {
+		return next
 	}
-	ctx, h.span = tracer.Start(ctx, strings.Join(names, " "))
-	rtx.SetContext(ctx)
-	return nil
-}
-
-func (h *tracedemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) error {
-	if rtx.Failed() {
-		h.span.SetStatus(codes.Error, "the command failed")
+	return func(ctx context.Context, rtx *rotini.Context) error {
+		ctx, span := tracer.Start(ctx, rtx.CommandPath())
+		defer span.End()
+		err := next(ctx, rtx)
+		// err is what Run returned; Failed also covers an error it recorded.
+		if err != nil || rtx.Failed() {
+			span.SetStatus(codes.Error, "the command failed")
+		}
+		return err
 	}
-	h.span.End()
-	return nil
 }
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
 
-func (*tracedemoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
-	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	rtx.HaltWithCode(1)
-	return nil
+import (
+	cmd "example.com/tracedemo/internal/cmd/tracedemo"
+)
+
+func main() {
+	cmd.NewProgram().
+		WithMiddleware(cmd.Trace).
+		Execute()
 }
 -- work.go.txt --
 package tracedemo

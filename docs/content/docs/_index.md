@@ -68,7 +68,7 @@ reports each problem with its `file:line:col`:
 $ go tool rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
 spec: ./cmd/todo/.rotini.spec.yaml
 conf: ./cmd/todo/.rotini.conf.yaml
-Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sumary: unknown key "sumary" on a flag input
+Error: spec: ./cmd/todo/.rotini.spec.yaml:31:19: /command/commands/0/flags/0/sumary: unknown key "sumary" on a flag input; did you mean "summary"?
 {{< /code >}}
 
 Beyond the schemas, `validate` catches specs that can never work: bounds or lengths that leave no
@@ -83,9 +83,15 @@ identifiers, flags with no long form, a literal default on a secret input, an en
 variable two inputs read differently, a summary of more than one line, a required flag that
 isn't cascading on a command with sub-commands, a completion value the carapace spec leaves out,
 and a `--help` or other short-circuit flag that isn't cascading on a command whose sub-commands
-don't declare their own. Two opt-in conf keys add warnings:
-`validate.flags_first` for env and config inputs no flag or argument can set, and
-`validate.posix_names` for a program name that isn't a POSIX utility name.
+don't declare their own, a `role: dry-run`, `confirm` or `force` flag on a command whose effects
+are `read`, one exit code named differently on two commands, and a `see_also` entry naming one
+of the program's own pages that doesn't exist or is in another man section. An unknown key
+suggests the nearest one, and with `fail: collect` (the default) a document whose only schema
+problems are unknown keys is still checked against the rules. Four opt-in conf keys add
+warnings: `validate.flags_first` for env and config inputs no flag or argument can set,
+`validate.posix_names` for a program name that isn't a POSIX utility name,
+`validate.input_summaries` for a flag or argument with no summary, and `validate.help_width: N`
+for a line of help text you wrote that is longer than N characters.
 
 `generate` runs the same checks first, so `validate` is mostly for CI. To also check in CI that
 the committed code matches the spec, run `go tool rotini generate --dry-run`: it writes nothing,
@@ -134,6 +140,25 @@ stands for any value. Words after a composed command or a plugin aren't checked.
 {{< code title="a stale example" language="text" open="true" collapsible="false" copy="false" >}}
 Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst" does not parse: todo: unknown command "lst"
 {{< /code >}}
+
+An example that parses is still a warning when it shows something a user shouldn't type: a
+deprecated command, flag, alias or value, a hidden alias, identifier or value, or a literal value
+for a secret input (write a `<placeholder>` instead).
+
+An example is a command line, or an object with the line as `run` and a one-line `summary`,
+which the help, man, markdown and skill pages show as a `# summary` line above it:
+
+{{< code title=".rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+examples:
+  - todo list
+  - run: todo list --status open
+    summary: List the open tasks
+{{< /code >}}
+
+The contract lists each example with the words it passes the program (`argv`), the MCP tool
+definitions carry each one as an input example (the parameters a call passes to run it), and the
+generated cmd package lists the examples that run the program with literal words in `Examples`,
+[for a test to run](#testing-with-typed-inputs).
 
 ### Importing a Cobra CLI
 
@@ -635,7 +660,9 @@ commands:
 
 `metadata` on a command, flag, argument, env or config input, or `stdin` holds labels of your
 own, string keys with string values, for tools you write: an owner to page, a team, an audit
-tag. Rotini never acts on them and shows them on no page. They are copied as written into the
+tag. Rotini never acts on them, and the default page templates don't show them; an editable
+help, man or markdown template (`template: true`) reads them as `.Metadata` on the page and on
+each command and input row, to print an owner or tier line. They are copied as written into the
 generated definition (`CommandDef.Metadata`, `FlagDef.Metadata`, `ArgDef.Metadata`, and
 `rtx.Command().Metadata` in a handler) and into the contract, and `rotini diff` rates any change
 to them as safe:
@@ -691,7 +718,7 @@ $ ./todo add --help
 Flags:
   -p, --priority string    how urgent (default normal) [low|normal|high]
                            also set by TODO_DEFAULTS_PRIORITY or config key defaults.priority
-      --tag []string       a label (repeatable)
+      --tag string...      a label (repeatable)
 {{< /code >}}
 
 A key set to null in a config file (`priority:` or `priority: null`) counts as not set, so the
@@ -1068,25 +1095,39 @@ completers see `rtx.Dir()`.
 
 ### Explaining where values came from
 
-`rtx.InputsWithReport` returns the inputs with an `InputReport`, and `report.Format(w)` writes one
-line per field a layer set: the value, where it came from, and what it overrode, nearest first.
-A secret prints `[redacted]`, whatever layer supplied it:
+`rtx.InputsWithReport` returns the inputs with an `InputReport`, and `report.Explain(w)` writes one
+line per field a layer set, in your users' words: the input as they write it, its value, where
+it came from, and what it overrode, nearest first. A secret prints `[redacted]`, whatever layer
+supplied it:
 
 ```console
 $ todo deploy prod --token s3cr3t --explain-inputs
-TodoDeploy.Arguments.Target = "prod" from argv:<target>
-TodoDeploy.Flags.ExplainInputs = "true" from argv:--explain-inputs
-TodoDeploy.Flags.Port = "9000" from env:TODO_PORT; overrides config:user#deploy.port "8000", default "8080"
-TodoDeploy.Flags.Token = [redacted] from argv:--token
+<target> = "prod" from the command line
+--explain-inputs = "true" from the command line
+--port = "9000" from TODO_PORT (overrides "8000" from deploy.port in todo.yaml, "8080" from default)
+--token = [redacted] from the command line
 ```
 
+A source reads as `the command line`, a variable (`TODO_HTTP__*` for a nested family), `the file
+TODO_TOKEN_FILE names` for a `variable_file` value, `<key> in <file>` for a config file (with
+`(profile prod)` for a key of the selected [profile](#profiles), and the `.env` file for a
+variable one set), `default` or `stdin`. A file inside the run's directory is named relative to
+it. A hand-built layer's value is named by its layer, and a streamed stdin prints `(stream)` and
+is never read.
+
+`report.Label(path)` is the user's name for one input (`--port`, `TODO_REGION`, `deploy.timeout`,
+`<target>`), and `report.Sources(path)` lists every place the spec lets its value come from,
+highest precedence first, such as `--port`, `TODO_PORT`, `deploy.port` and `default`. Use them to
+word your own messages.
+
+`report.Format(w)` writes the same lines by field path and origin, for you rather than your users.
 Each `InputSource` names its origin: `argv:<identifier as typed>`, `argv:<argument>`,
 `env:<VARIABLE>` (`env:TODO_HTTP__*` for a nested family; the `variable_file` variable, such as
 `env:TODO_TOKEN_FILE`, for a value read from its file), `config:<file name>#<key>`,
-`config:<.env file name>#<VARIABLE>` for a variable a `.env` file set, `default` or `stdin`. A hand-built layer's origin is empty, and the line names its layer. A streamed stdin
-prints `(stream)` and is never read. A map merged from a [profile](#profiles) and the file's
-shared keys, or from several config files, names each entry's own file and key, and lists the
-entries a higher source replaced:
+`config:<.env file name>#<VARIABLE>` for a variable a `.env` file set, `default` or `stdin`. A
+hand-built layer's origin is empty, and the line names its layer. A map merged from a profile and
+the file's shared keys, or from several config files, names each entry's own file and key, and
+lists the entries a higher source replaced:
 
 ```console
 App.Flags.Labels = "team=core, tier=api" from config:user#labels.team, config:user#profiles.prod.labels.tier; overrides config:user#labels.tier "web"
@@ -1099,7 +1140,7 @@ in its handler, before checking the error, since the run may be the one being ex
 func (*todoDeployHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	in, report, err := rtx.InputsWithReport[TodoDeployInputs]()
 	if in.TodoDeploy.Flags.ExplainInputs {
-		_ = report.Format(rtx.Stdout)
+		_ = report.Explain(rtx.Stdout)
 		return nil
 	}
 	if err != nil {
@@ -1118,6 +1159,79 @@ To list each field with only the value that won, as a `config list --show-origin
 walk `report.Fields()` and read `report.Winner(path)`; `report.History(path)` returns every
 layer that set it, the winner last. See [the recipe](#showing-where-settings-came-from).
 
+### Typos in config files
+
+A config file can hold keys no input reads, so `replicaz: 4` beside `replicas: 3` is ignored
+and the run goes on with 3. You decide whether that matters, in one of two ways.
+
+A schema can forbid the keys it doesn't list. `additionalProperties: false` on a config file's
+`schema:`, or on any object in it, makes another key a usage error naming the file, the line and
+the keys allowed. It closes only the object it is written on:
+
+{{< code title=".rotini.spec.yaml (closed keys)" language="yaml" open="true" collapsible="false" copy="true" >}}
+config_files:
+  - name: strict
+    path: strict.yaml
+    schema:
+      type: object
+      properties:
+        deploy:
+          type: object
+          properties:
+            replicas: { type: integer }
+            timeout: { type: string }
+          additionalProperties: false
+      additionalProperties: false
+{{< /code >}}
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ ./inidemo check
+Error: inidemo check: configuration file /home/ada/strict.yaml:3:13 has unknown key deploy.replicaz (keys: replicas, timeout)
+{{< /code >}}
+
+The error is an `*rotini.InputError` of kind `InputErrorKindUnknownKey`, and
+`rotini.SuggestionFacts` returns the key and the keys allowed, for a reporter that suggests the
+nearest.
+
+Or warn and carry on. `report.UnreadConfigKeys()` lists each key of the files the command read
+that no input of the program reads, with its file and line:
+
+{{< code title="inidemo_greet.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package inidemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.ErrorHandler = (*inidemoGreetHandler)(nil)
+
+type inidemoGreetHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*inidemoGreetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, report, err := rtx.InputsWithReport[InidemoGreetInputs]()
+	if err != nil {
+		return err
+	}
+	for _, k := range report.UnreadConfigKeys() {
+		fmt.Fprintf(rtx.Stderr, "warning: %s:%d: %s is not a setting\n", k.Path, k.Line, k.Key)
+	}
+	fmt.Fprintln(rtx.Stdout, in.InidemoGreet.Config.Greeting)
+	return nil
+}
+{{< /code >}}
+
+A key under one an input reads whole, such as a map's entries, counts as read, and a profile's
+keys are listed under the profile (`profiles.prod.deploy.timeout`). `.env` files read as the
+environment (`as: env`) are left out, since other programs share their variables.
+
 ### Editor support for your users' config
 
 With `generate.schemas.config.dir` in the conf, `rotini generate` writes a JSON Schema for each
@@ -1125,7 +1239,8 @@ config file the spec declares: `todo.user.config.json` for a file named `user` o
 `todo-deploy.team.config.json` for one declared on `deploy`. It lists every key a command that
 reads the file binds, nested by dot, with its type, enum values and their summaries, default
 (never a secret's), bounds, description and deprecation. Other keys are allowed, since rotini
-ignores them. A file's own `schema:` is included, and dotenv files get none.
+ignores them, unless the file's own `schema:` closes them; it is included, and dotenv files get
+none.
 
 {{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 generate:
@@ -1244,8 +1359,9 @@ cmd.NewProgram().WithDependency(cmd.Store, openStore()) // in main.go
 s := rtx.MustGetDependency(Store)                            // in a handler
 {{< /code >}}
 
-A dependency built from the command line, such as a client for the server a flag names, is set
-per run instead; see [per-run dependencies](#per-run-dependencies).
+A dependency that is costly to open, or built from the command line, such as a client for the
+server a flag names, is provided per run instead: `WithProvider` builds it the first time a hook
+asks, and closes it after the run. See [per-run dependencies](#per-run-dependencies).
 
 ### Two hook shapes
 
@@ -1272,8 +1388,8 @@ Some flags replace a command's run instead of changing it: `--help`, `--version`
 your own such as `--print-plan`. Mark one `short_circuit: true` in the spec. When it is set on
 the command line, Rotini waives every requirement the spec declares for the command chain
 (required inputs, enums, bounds, patterns, flag groups and flag dependencies), so `rtx.Inputs`
-succeeds and your handler can act on the flag. Input that can't be read is still an error: an
-unknown flag or command, a value of the wrong type, or too many arguments. A configuration file
+succeeds and your handler can act on the flag. Input that can't be read is still an error for
+`rtx.Inputs`: an unknown flag or command, a value of the wrong type, or too many arguments. A configuration file
 that can't be parsed, or holds a value of the wrong type, is skipped for that run, so `--help`
 works in a broken directory; a normal run still reports it. Each hook reads only the channels its
 inputs type describes: a hook whose inputs have no configuration values or fallbacks opens no
@@ -1292,6 +1408,18 @@ answer even when an environment variable or a configuration file can't be read, 
 doesn't check what only a sub-command reads: `todo add one two --help` prints the page, though
 `add` takes one argument. Without the flag, the command's own handler reads and validates every
 source.
+
+A short-circuit flag also lets a mistyped command pass: in `todo ad --help`, `rtx.ArgvInputs` and
+`rtx.InvokedHelp` answer for `todo`, the command the line resolved to. `rtx.UnknownCommand()`
+returns the error `todo ad` reports (`todo: unknown command "ad"`), or nil, and the seeded hook
+returns it first, so `todo ad --help` fails with exit 1. To print the nearest command's page
+instead, delete these lines from the hook:
+
+{{< code title="unknown command check" language="golang" open="true" collapsible="false" copy="true" >}}
+if err := rtx.UnknownCommand(); err != nil {
+	return err
+}
+{{< /code >}}
 
 A short-circuit flag can belong to one command, too:
 
@@ -1383,7 +1511,9 @@ or a denied permission, which are usage errors.
 To give each kind of failure its own exit code, write a reporter. A reporter replaces the default
 entirely: it prints only what it prints, and it sets the exit code with `rtx.Exit`. If it
 doesn't, the run keeps any code a handler set, and otherwise exits 0, so give it a fallback
-code for errors with no category. The codes below are common conventions, not Rotini defaults:
+code for errors with no category. To keep the default report and add to it, call
+`rotini.DefaultReporter` from yours. The codes below are common conventions, not Rotini
+defaults:
 
 {{< code title="todo/report.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
@@ -1406,28 +1536,19 @@ const (
 	exitNotFound      = 127
 )
 
-// Report prints warnings and errors to stderr, points at help after a usage error, and sets the
-// exit code from the first error.
+// Report prints the default report, points at help after a usage error, and sets the exit
+// code from the first error, unless the run already set one.
 func Report(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
-	if ctx.Err() != nil {
+	rotini.DefaultReporter(ctx, rtx, out)
+	if !out.Failed() || out.Signal != nil {
 		return // stopped by a signal: keep the 128+n exit code the run already set
-	}
-	for _, w := range out.Warnings {
-		fmt.Fprintln(rtx.Stderr, "Warning:", w)
-	}
-	for _, err := range out.Errors {
-		fmt.Fprintln(rtx.Stderr, "Error:", err)
-	}
-	for _, p := range out.Panics {
-		fmt.Fprintln(rtx.Stderr, "Error:", p)
-	}
-	if !out.Failed() {
-		return
 	}
 	if len(out.Errors) > 0 && rotini.CategoryOf(out.Errors[0]) == rotini.CategoryUsage {
 		fmt.Fprintf(rtx.Stderr, "Run '%s --help' for usage.\n", rtx.CommandPath())
 	}
-	rtx.Exit(exitCode(out))
+	if out.ExitCode == 0 {
+		rtx.Exit(exitCode(out))
+	}
 }
 
 func exitCode(out rotini.Outcome) int {
@@ -1454,13 +1575,13 @@ func exitCode(out rotini.Outcome) int {
 }
 {{< /code >}}
 
-- **Check `ctx.Err()` first.** After Ctrl-C or SIGTERM the run has already set 128+n (130 or
-  143), and `out.Errors` holds the cancellation's error when a handler stopped with it; without
-  the check, the reporter would replace that code. The same goes for a cancellation with
-  [`ExitCause`](#signals-and-cancellation).
-- **A reporter can't read the code a handler set.** `rtx.Exit` replaces any code from
-  `rtx.HaltWithCode`, so map only the errors you mean to, or carry a handler's code in an error
-  type of your own, as in [linking exit codes to docs](#linking-exit-codes-to-docs).
+- **`out.ExitCode`** is the code the run set before the reporter: a handler's
+  `rtx.HaltWithCode` or `rtx.Exit`, an [`ExitCause`](#signals-and-cancellation), or 128+n after
+  Ctrl-C or SIGTERM (130 or 143). It's 0 when none was set. `rtx.Exit` in the reporter replaces
+  it, so the reporter above sets a code only when there's none.
+- **`out.Signal`** is the trapped signal that stopped the run, or nil. `out.Errors` then holds
+  the cancellation's error when a handler stopped with it. `rotini.DefaultReporter` leaves that
+  error out; a reporter that prints errors itself skips it with `rotini.SignalCaused(ctx, err)`.
 - **A plugin's own exit code** passes through unchanged and never reaches the reporter. A file
   found next to the binary or in `plugin_path` that can't be run is `PluginStartFailed`; one on
   `PATH` without the execute bit isn't found at all, so it exits 127. A plugin that runs past its
@@ -1476,15 +1597,18 @@ The `Outcome` also carries `Infos` and `Successes`, from `rtx.RecordInfo` and
 For errors that scripts parse, `rotini.StructuredReporter` writes them as JSON lines; see
 [errors scripts can read](#errors-scripts-can-read). Declare `exit_status:` in the spec to
 document a command's codes in its man and markdown pages. The root's list is program-wide: a
-command without its own documents the root's, on its pages, the skill page and its tool
-definitions, and a command's own list replaces it.
+command without its own documents the root's, on its pages, the skill page, its tool
+definitions, the contract (marked `exit_status_inherited`), `rotini diff`,
+`rotinitest.ExitDocumented` and `rtx.Command().ExitStatus`, and a command's own list replaces it.
 
 Once a command declares `exit_status:`, or inherits the root's, `rotini generate` checks its
 handler against it: a code the handler passes to `rtx.HaltWithCode` or `rtx.Exit` as a number or
 a constant, but that the list leaves out, is reported as a warning with its file and line.
 Code 0 needs no entry. A command that prints its help when called without a sub-command exits
-1, so list 1 for it. (The stub `rotini generate` writes for a root or a group command does this,
-printing the help on stderr.) The check reads only the methods of the command's handler type, so
+1, so list 1 for it. (The stub `rotini generate` writes for a root or a group command does this:
+it prints the help on stderr and returns `rotini.MissingCommand(rtx)`, a usage error of kind
+`ParseKindMissingCommand` whose `Candidates` are the sub-commands, which the reporter prints as
+`Error: todo config: a command is required (one of: get, set)` and exits 1 for.) The check reads only the methods of the command's handler type, so
 it can't see a code computed at run time, set in another function or package, or set by a
 reporter, and it skips a command whose handler lives in another package (`handler:`). `rotini
 validate` also reports a code listed twice, and warns about a code above 128, which a process
@@ -1615,56 +1739,31 @@ Definition carries each code's link as `ExitStatusDef.DocsURL`.
     - { code: 3, name: not_found, summary: no such task, docs_url: "https://todo.example/errors/not-found" }
 {{< /code >}}
 
-A reporter can't read the code a handler set, so the handler records it with the error:
+The handler stops with the documented code, and the reporter reads it from `out.ExitCode`:
 
 {{< code title="report_links.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/go-rotini/rotini"
 )
 
-// ExitError ends a command with one of its documented exit codes, returned from a hook:
-// return &ExitError{Code: TodoGetExitNotFound, Err: err}.
-type ExitError struct {
-	Code int
-	Err  error
-}
-
-func (e *ExitError) Error() string { return e.Err.Error() }
-func (e *ExitError) Unwrap() error { return e.Err }
-
-// ReportWithLinks prints warnings and errors to stderr, and after an ExitError the link its
-// code declares, then exits with that code (1 for any other failure).
+// ReportWithLinks prints the default report, then the docs_url the invoked command declares
+// for the code the run exits with. A handler sets the code:
+//
+//	rtx.HaltWithCode(TodoGetExitNotFound)
+//	return err
 func ReportWithLinks(def rotini.Definition) rotini.Reporter {
 	return func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
-		for _, w := range out.Warnings {
-			fmt.Fprintln(rtx.Stderr, "Warning:", w)
+		rotini.DefaultReporter(ctx, rtx, out)
+		if out.ExitCode == 0 {
+			return
 		}
-		code := 0
-		for _, err := range out.Errors {
-			fmt.Fprintln(rtx.Stderr, "Error:", err)
-			var exit *ExitError
-			if errors.As(err, &exit) && code == 0 {
-				code = exit.Code
-				if url := docsURL(def, rtx.CommandChain(), code); url != "" {
-					fmt.Fprintln(rtx.Stderr, "See", url)
-				}
-			}
-		}
-		for _, p := range out.Panics {
-			fmt.Fprintln(rtx.Stderr, "Error:", p)
-		}
-		switch {
-		case !out.Failed() || ctx.Err() != nil:
-		case code != 0:
-			rtx.Exit(code)
-		default:
-			rtx.Exit(1)
+		if url := docsURL(def, rtx.CommandChain(), out.ExitCode); url != "" {
+			fmt.Fprintln(rtx.Stderr, "See", url)
 		}
 	}
 }
@@ -1700,7 +1799,10 @@ An error about the user's input, from `rtx.Inputs`, the per-source methods, `rtx
 - **`*rotini.ParseError`**: the command line, and validation of any value. Its `Kind` says what
   went wrong, `Token` holds the value at fault and `Candidates` what it could have been.
 - **`*rotini.InputError`**: reading an environment variable, a config file or stdin. `Channel`
-  and `Input` say which.
+  and `Input` say which, and its `Kind` says what went wrong.
+
+Both carry `Command`, the name of the command whose input it was, and `Path()`, the command path
+the message starts with, so a reporter that rewords a message can still say whose input it was.
 
 (`rtx.Inputs` can also return a `*rotini.WiringError`, for a fault in the program's own setup
 rather than the input.) Wrapping an error with `rotini.UsageError` or `rotini.InternalError`
@@ -1730,12 +1832,23 @@ if err != nil {
 The kinds are `ParseKindUnknownFlag`, `ParseKindUnknownCommand`, `ParseKindNeedsValue`,
 `ParseKindInvalidValue`, `ParseKindEnumViolation`, `ParseKindConstraintViolation`,
 `ParseKindMissingRequired`, `ParseKindNoArguments`, `ParseKindTooManyArguments`,
-`ParseKindMisplacedFlag` and `ParseKindInternal`. `ParseKindMisplacedFlag` is a flag typed
+`ParseKindMisplacedFlag`, `ParseKindMissingCommand` and `ParseKindInternal`. `ParseKindMisplacedFlag` is a flag typed
 where it can't apply: a `local` flag given to a command below its own, or a flag before a
 plugin's name, where the plugin would never see it (`todo --verbose sync` is refused;
 `todo sync --verbose` passes `--verbose` to the plugin). Before a plugin's name, a short-circuit
 flag such as `--help` and a [directory flag](#a-directory-flag) are the exceptions: the program
 answers or applies them itself, and the error reaches the reporter, not a handler.
+
+An `InputError`'s kinds share a name with the command line's where the failure is the same:
+`InputErrorKindInvalidValue`, `InputErrorKindEnumViolation`,
+`InputErrorKindConstraintViolation`, `InputErrorKindMissingRequired` and
+`InputErrorKindInternal`. The rest are failures only a file, the environment or stdin can have:
+`InputErrorKindSchemaViolation` (a config file, stdin document or record that doesn't match its
+schema), `InputErrorKindMalformedDocument` (one that doesn't parse), `InputErrorKindFileAccess`
+(a config file, or a file an environment variable names, that can't be found, opened, read or
+written), `InputErrorKindUnknownProfile`, `InputErrorKindUnknownKey` and
+`InputErrorKindWriteRefused` (from a [config write](#writing-config-values)), and
+`InputErrorKindInterrupted` (a signal stopped the read of stdin).
 
 Each response is one call:
 
@@ -1846,8 +1959,9 @@ the generated function, and `rotini validate` reports it.
 
 ## Runtime control
 
-How a run stops: on a signal, on a canceled context or a deadline, and after a panic, and how
-to give one run its own dependencies. What a run used is covered elsewhere:
+How a run stops: on a signal, on a canceled context or a deadline, and after a panic; how to
+give one run its own dependencies; and how to wrap every hook in middleware. What a run used is
+covered elsewhere:
 [where each value came from](#explaining-where-values-came-from) and
 [which deprecated spellings it used](#deprecating-a-command-or-flag).
 
@@ -1908,7 +2022,8 @@ func main() {
 
 A cancellation without an `ExitCause` stops the run the same way, and the exit code is decided
 as usual. The default reporter leaves out the error a signal's cancellation caused; a
-[custom reporter](#errors-and-exit-codes) checks `ctx.Err()` to keep the code the run set.
+[custom reporter](#errors-and-exit-codes) reads the signal from `out.Signal` and the code the run
+set from `out.ExitCode`, and skips that error with `rotini.SignalCaused(ctx, err)`.
 
 ### Passing a context on
 
@@ -2020,12 +2135,143 @@ dependencies, so `rtx.SetDependency` and `rtx.SetDependencyIfAbsent` never reach
 the value and whether it is set; `rtx.MustGetDependency` treats a missing one as a fault, which
 reaches the reporter as a panic.
 
+A provider does the same without a hook: `Program.WithProvider` registers a function that builds
+the run's value the first time a hook asks for it.
+
+{{< code title="a provider" language="golang" open="true" collapsible="false" copy="true" >}}
+func dial(ctx context.Context, rtx *rotini.Context) (*Client, error) {
+	inputs, err := rtx.Inputs[TodoInputs]()
+	if err != nil {
+		return nil, err
+	}
+	if inputs.Todo.Flags.Endpoint == "" {
+		return nil, rotini.UsageError(errors.New("--endpoint is empty"))
+	}
+	return &Client{Endpoint: inputs.Todo.Flags.Endpoint}, nil
+}
+
+cmd.NewProgram().WithProvider(clientDep, dial) // in main.go
+client, err := rtx.Dependency(clientDep)       // in a handler
+{{< /code >}}
+
+- **Lazy, once per run:** the provider runs on the first request in a run and every later
+  request in that run, from any goroutine, gets the same value or error. A run that never asks,
+  such as `--help`, never builds it.
+- **A registered value wins:** a value set with `WithDependency`, `SetDependency` or
+  `SetDependencyIfAbsent` is returned instead, so a test's double needs nothing more.
+- **Closed after teardown:** a value the provider built that has a `Close() error` method is
+  closed after every hook has finished, before the reporter, newest first. A `Close` error is
+  recorded as an error.
+- **Errors stay as they are:** `rtx.Dependency` returns the provider's error unchanged, so a
+  `rotini.UsageError` is still a usage error. `rtx.GetDependency` reports a failed provider as
+  not set, without recording the error; `rtx.MustGetDependency` panics with a
+  `*rotini.DependencyError` that wraps it.
+
+### Middleware
+
+Code that belongs around every command rather than in one, such as tracing, timing, or a
+confirmation before a destructive run, is middleware: a function the program installs in
+`main.go` that wraps every hook. It receives a `rotini.Hook`, which says which hook is about to
+run (`h.Kind`, such as `rotini.HookRun`) and the command it belongs to (`h.Command`, with its
+declared effects, exit statuses, stability and metadata), and the `next` function that runs the
+hook. It returns the function to run in its place:
+
+{{< code title="middleware.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package todo
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+// Confirm asks before a destructive run, and refuses one when there is no terminal to ask on.
+func Confirm(h rotini.Hook, next rotini.HookFunc) rotini.HookFunc {
+	if h.Kind != rotini.HookRun {
+		return next
+	}
+	return func(ctx context.Context, rtx *rotini.Context) error {
+		if rotini.RunEffects(rtx).Kind != "destructive" {
+			return next(ctx, rtx)
+		}
+		if !rotini.IsTerminal(rtx.Stdin) {
+			return errors.New("refusing a destructive run without a terminal to confirm it")
+		}
+		fmt.Fprintf(rtx.Stderr, "%s can't be undone. Continue? [y/N] ", rtx.CommandPath())
+		answer, _ := bufio.NewReader(rtx.Stdin).ReadString('\n')
+		if strings.TrimSpace(answer) != "y" {
+			return errors.New("not confirmed")
+		}
+		return next(ctx, rtx)
+	}
+}
+
+// Timing prints how long each command's Run took when TODO_TIMING is set.
+func Timing(h rotini.Hook, next rotini.HookFunc) rotini.HookFunc {
+	if h.Kind != rotini.HookRun {
+		return next
+	}
+	return func(ctx context.Context, rtx *rotini.Context) error {
+		start := time.Now()
+		err := next(ctx, rtx)
+		if _, ok := rtx.LookupEnv("TODO_TIMING"); ok {
+			fmt.Fprintf(rtx.Stderr, "%s took %s\n", rtx.CommandPath(), time.Since(start).Round(time.Millisecond))
+		}
+		return err
+	}
+}
+{{< /code >}}
+
+{{< code title="main.go (middleware)" language="golang" open="true" collapsible="false" copy="true" >}}
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	cmd "example.com/todo/internal/cmd/todo"
+)
+
+var version = "1.0.0"
+
+func main() {
+	cmd.NewProgram().
+		WithVersion(version).
+		WithMiddleware(cmd.Confirm, cmd.Timing).
+		Execute()
+}
+{{< /code >}}
+
+- **Order.** The first middleware is the outermost, so here a refused run is never timed. A
+  second `WithMiddleware` call adds more inside the first.
+- **Every hook, every command.** Setup and teardown hooks of every command in the chain,
+  composed commands included, run through it. A middleware with nothing to do for a hook
+  returns `next` itself.
+- **It sees the error.** `next` returns what an `ErrorHandler` hook returned, before it is
+  recorded, or nil for a hook that returns nothing. Return an error to fail the hook: it is
+  recorded, and from `CascadingPreRun`, `PreRun` or `Run` the run stops, as for a returned
+  error. Teardown still runs.
+- **It may skip the hook** by not calling `next`, as `Confirm` does when it refuses.
+- **It may pass a context.** A context given to `next` reaches that hook only; call
+  `rtx.SetContext` too to [hand it on](#passing-a-context-on).
+- **A panic** in middleware is handled as one in the hook it wraps.
+
+`rotini.RunEffects(rtx)` is what this run does: the command's `effects` raised by those of the
+flags given on the command line, by the rule [under Effects](#effects). A custom
+`WithLifecycle` plan gets middleware around the hooks it takes from `rotini.DefaultLifecycle`;
+a step function it writes itself runs as it is.
+
 ### What a program links
 
 The generated `NewProgram` passes `rotini.NewWiredProgram` the runtime features its spec uses:
-`rotini.Env()` for env inputs, `rotini.ConfigFiles()` and `rotini.YAML()` for a YAML
-configuration file, `rotini.URLValues()` for a `url` flag, and so on. The program links only
-those, so a CLI that uses few of them builds a smaller binary that starts faster. `go generate`
+`rotini.Env()` for env inputs, `rotini.EnvFamilies()` for one with `nesting:`,
+`rotini.ConfigFiles()` and `rotini.YAML()` for a YAML configuration file,
+`rotini.TimeValues()` for a `date` input or one with `layout:` or `relative:`,
+`rotini.URLValues()` for a `url` flag, and so on. The program links only those, so a CLI that
+uses few of them builds a smaller binary that starts faster. `go generate`
 keeps the list in step with the spec. A `config_files` entry that a `config_source` input names
 links every config format, since the user may name any kind of file, unless the entry declares
 `format:`; `rotini validate` warns about it.
@@ -2456,6 +2702,10 @@ $ todo list --bogus --json id
 {"schema_version":1,"error":{"candidates":["--json","--sort-by","--reverse","-h","--help","--version","-o","--output","--format"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"todo list: unknown flag \"--bogus\"","token":"--bogus"}}
 ```
 
+`kind` is the typed error's kind, for a config file, the environment or stdin as for the command
+line: a config file that doesn't match its schema is `"kind":"schema-violation"`, one that doesn't
+parse `"kind":"malformed-document"`.
+
 Exit codes are decided exactly as the default reporter decides them. Each line's shape is
 described by
 [schema-error.json](https://github.com/go-rotini/rotini/blob/main/schema-error.json).
@@ -2811,6 +3061,10 @@ don't inherit effects. Where the actual command line isn't known (tool annotatio
 rules, the skill page), the worst case over the command and its flags is used. A command without
 `effects` says nothing, and agents assume the worst.
 
+At run time `rtx.Command().Effects` is the command's own, and `rotini.RunEffects(rtx)` applies
+the rule to the flags given on the command line, for [middleware](#middleware) that asks before
+a destructive run.
+
 ### Roles agents read
 
 `role` on a flag tells a program driving the CLI what the flag is for. Beside `force`, `fields`,
@@ -2964,6 +3218,10 @@ To expose one, add a command for it to the spec and call the function from its h
 `completion` command's handler prints `rtx.CompletionScript(shell)`, the script of the program
 that is running, which the generated `NewProgram` sets to `Completion`.
 
+For a path that names no command, `Help`, `Man`, `Markdown` and `Usage` return the error typing
+the word as a command gives, `rotini.UnknownCommandError`: `todo help ad` fails with
+`todo: unknown command "ad"`, a usage error with the commands accepted there as `Candidates`.
+
 Generate removes the help, completion, man and markdown files it no longer writes: a removed
 command's pages, the old root's after a rename, and every file of a feature turned off
 (`enabled: false`), installed files included. Files it didn't write and editable templates stay.
@@ -2972,9 +3230,21 @@ Pages show what the spec declares, so they stay accurate without editing:
 
 - **Usage lines** put flags first: `todo add [flags] <title>`. A passthrough argument gets a
   `[--]` before it: `app exec [flags] [--] <command...>`.
-- **Constraints** follow each row's summary: bounds (`1..65535`, `>= 1`), lengths, item counts
-  and `repeatable` (or `once` for `repeatable: false`, and `unique` for `uniqueItems`) in help,
-  and as sentences in man and markdown, which also give patterns and separators.
+- **Value labels** name each value in the user's words, never a Go type: `string`, `int`
+  (`uint` when unsigned), `number` for a float, a value type as written (`duration`, `url`),
+  `file` and `dir` for the path types, `string...` for a list, `key=value` (or `key=duration`) for
+  a map, and `value` for a type of your own. A `placeholder` replaces the label.
+- **Notes** follow each row's summary in one parenthetical: `(default 1, 1..100)`. Constraints
+  are bounds (`1..65535`, `>= 1`), lengths (`exactly 1 character`), item counts and
+  `repeatable` (or `once` for `repeatable: false`, and `unique` for `uniqueItems`) in help, and
+  sentences in man and markdown, which also give patterns and separators.
+- **Flag rules** from `flag_groups` and `flag_dependencies` are short lines under the flags:
+  `--json and --yaml can't be used together`, `with --tls, --cert is required`.
+- **Configuration** rows name the key a user writes (`deploy.timeout`), with `in .todo.yaml`
+  when the value is read from one file only. A command whose inputs read a configuration file
+  lists the files under `Files:` (`.SH FILES` in man), in the order they win: the path, or the
+  name discovery looks for and where, the flag that names another path (`config_source`), and
+  how a profile is chosen. `headings.files` renames the heading.
 - **Groups**: commands and flags that share a `group` appear under its heading. List the groups
   in the command's `groups` to give each a description, shown under its heading, and to set
   their order (the example below).
@@ -3036,8 +3306,8 @@ A command's inputs and sub-commands are never more stable than it is, so a marke
 everything under an experimental command is experimental, and `rotini validate` warns about an
 item marked more stable than its command. It also warns about a required experimental input on a
 command that isn't experimental, since the command would depend on something that may go away.
-Nothing changes at run time; to keep an experimental command behind a switch, check for it in the
-handler.
+Nothing changes at run time. `rtx.Command().Stability` holds the inherited marker, so one
+[middleware](#middleware) can keep every experimental command behind a switch.
 
 ### Help topics
 
@@ -3057,6 +3327,9 @@ command:
     - name: environment
       summary: the environment variables todo reads
       generate: environment
+    - name: configuration
+      summary: the configuration files and keys todo reads
+      generate: configuration
 {{< /code >}}
 
 The root's help lists them under `Help Topics:` (`headings.topics` renames it), and the generated
@@ -3068,6 +3341,9 @@ feature's section (`todo-filters.1`), listed after the commands in `ManPages()` 
 `generate: environment` builds the page from the spec: every environment variable the program
 reads (env inputs, flag and argument fallbacks, `variable_file` names, the completion switches the
 conf declares, and the XDG variables config discovery uses), each with the commands that read it.
+`generate: configuration` lists every configuration file the program reads and every key its
+inputs read from them (config inputs and flag and argument fallbacks), each key with the commands
+that read it.
 
 A topic name can't also be a root command's name or alias, or a declared plugin's. With plugin
 discovery on, don't install an executable named after a topic (`todo-filters`): it would run as
@@ -3078,8 +3354,9 @@ warns about topics in a spec mounted with `$ref`, which `help <topic>` can't rea
 
 ### Files ready to package
 
-Set `install_dir` on the completion or man feature, and `rotini generate` also writes the scripts
-and pages as files named the way packages install them, whether or not the feature embeds them:
+Set `install_dir` on the completion, man or markdown feature, and `rotini generate` also writes the
+scripts and pages as files named the way packages and docs sites use them, whether or not the
+feature embeds them:
 
 {{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
 generate:
@@ -3102,7 +3379,13 @@ share/man/man1/todo.1
 share/man/man1/todo-add.1
 ```
 
-Each file holds exactly what `Completion(shell)` or `Man(path...)` returns. A man page whose
+The markdown feature writes `<page>.md` straight into its `install_dir` (`docs/cli/todo.md`,
+`docs/cli/todo-add.md`), the names the `llms` feature links under `base_url`. The default
+markdown template links each page to its parent, its sub-commands and the root's topics by those
+names, so the directory publishes as a docs site as it is. Your own pages can share the directory:
+generate removes only the pages it listed before.
+
+Each file holds exactly what `Completion(shell)`, `Man(path...)` or `Markdown(path...)` returns. A man page whose
 command or topic is gone, or that carries the root's old name, is removed on the next generate,
 as is every file of a feature turned off; hidden commands get none. Don't use
 GoReleaser's `dist/` directory, which it empties. Commit the files and let `rotini generate
@@ -3590,11 +3873,12 @@ command:
   separator, or one that is `.` or `..`, is never a discovered plugin.
 
 `plug help sync` runs `plug-sync --help`, and `plug help sync push` runs `plug-sync push --help`:
-the help command `rotini init` writes calls `rtx.PluginHelp` before `rtx.HelpFor`, and the plugin
-runs as `plug sync` would run it, with the same search, timeout, environment and signal handling,
-its output and exit code passing through. A discovered plugin answers only when its binary is
-found, so `plug help typo` still says there is no such command. A help handler without the call
-answers for plugins with these lines before its `rtx.HelpFor`:
+a help command seeded where a plugin or plugin discovery is in reach calls `rtx.PluginHelp` before
+`rtx.HelpFor`, and the plugin runs as `plug sync` would run it, with the same search, timeout,
+environment and signal handling, its output and exit code passing through. A discovered plugin
+answers only when its binary is found, so `plug help typo` still says there is no such command.
+A help handler without the call, such as one seeded before the spec declared plugins, makes
+`rotini generate` warn; it answers for plugins with these lines before its `rtx.HelpFor`:
 
 {{< code title="plug_help.go" language="golang" open="true" collapsible="false" copy="true" >}}
 if rtx.PluginHelp(inputs.PlugHelp.Arguments.Command...) {
@@ -3897,8 +4181,15 @@ func TestAddHigh(t *testing.T) {
   [`output:`](#structured-output), checking it against the output schema:
   `rotinitest.Output[TodoListOutput](t, res)`. `OutputAs` reads yaml or toml. Output checks are
   on for the run, so a handler that writes a value off its schema fails it.
+- **`res.Outcome`** is what the run recorded, as the program's reporter received it. A test
+  reads a [channel](#your-own-outcome-channels)'s records with
+  `res.Outcome.Records(SkippedFiles)` instead of parsing stderr, and `res.Outcome.ExitCode` is
+  the code the run set before the reporter. The program's own reporter still runs and writes
+  stderr. A run that recorded nothing has an empty `Outcome`; `res.Code` is the exit code
+  either way.
 - **`ExitDocumented`** fails the test when the exit code isn't one the command lists in its
-  `exit_status`. 0 always passes; a command that lists none passes only 0.
+  `exit_status`, or the root's when it lists none. 0 always passes; a command that documents no
+  codes passes only 0.
 - **`Clock(now)`** fixes the run's clock at `now`, so relative times such as `2h` and `today` read the same
   instant on every run.
 - **`Argv0(name)`** runs a `multicall` program as if invoked as `name`; pass the inputs of the
@@ -3906,7 +4197,20 @@ func TestAddHigh(t *testing.T) {
 
 Pass a fresh `NewProgram()` to every `Run`, with the dependencies `main.go` adds:
 `Run` sets the program's streams and environment. A command line that typed inputs can't express,
-such as a typo or an unknown flag, is still tested with `Program.Run`.
+such as a typo or an unknown flag, runs with `rotinitest.RunArgv(t, NewProgram(), argv)`, in the
+same isolated environment. The generated `Examples` variable lists the spec's examples with
+their words, so one test can run them all:
+
+{{< code language="golang" open="true" collapsible="false" copy="true" >}}
+func TestExamples(t *testing.T) {
+	for _, ex := range todo.Examples {
+		t.Run(ex.Run, func(t *testing.T) {
+			res := rotinitest.RunArgv(t, todo.NewProgram(), ex.Argv)
+			rotinitest.ExitDocumented(t, res)
+		})
+	}
+}
+{{< /code >}}
 
 ### Turning inputs back into a command line
 
@@ -4095,7 +4399,7 @@ or on what the old contract planned.
 | `STDIN_STREAM_CHANGED` | stdin read one item at a time (`stream`), or no longer | possibly breaking |
 | `OUTPUT_NO_DELETE`, `OUTPUT_STREAM_CHANGED` | an output removed, or a stream turned on or off | breaking |
 | `OUTPUT_ADDED` | an output declared | safe |
-| `EXIT_STATUS_NO_DELETE`, `EXIT_SUMMARY_CHANGED`, `EXIT_NAME_CHANGED`, `EXIT_RETRYABLE_REMOVED` | an exit status removed, reworded, renamed, or no longer retryable | possibly breaking |
+| `EXIT_STATUS_NO_DELETE`, `EXIT_SUMMARY_CHANGED`, `EXIT_NAME_CHANGED`, `EXIT_RETRYABLE_REMOVED` | an exit status removed, reworded, renamed, or no longer retryable; a command without its own list is compared by the root's, so a root code it loses to a list of its own counts as removed | possibly breaking |
 | `EXIT_STATUS_ADDED`, `EXIT_NAME_ADDED`, `EXIT_RETRYABLE_ADDED` | an exit status added, named, or now retryable | safe |
 | `DEPRECATION_ADDED`, `DEPRECATION_CHANGED`, `DEPRECATION_REMOVED`, `LIFECYCLE_CHANGED`, `REPLACED_BY_CHANGED` | deprecation, planned removal and replacement | safe |
 | `STABILITY_PROMOTED`, `STABILITY_DEMOTED` | stability | safe, possibly breaking |
@@ -4238,19 +4542,231 @@ the build as it was, and once deleted, a committed file is still in Git's histor
 command is the same: the old name's file is disabled and a new stub is written for the new name,
 so move the code across before the second run.
 
+#### Your own handler stub
+
+When every handler starts with the same boilerplate, such as a logger, a tracing span or an
+error-wrapping convention, write it once as a template. On the `cmd` package,
+[`stub_template:`](/configuration#stub_template) names a Go `text/template` that `go generate`
+renders for each new handler file in place of the built-in stub, and
+[`stub_test_template:`](/configuration#stub_test_template) one it renders into a test beside it.
+Paths are relative to the module root:
+
+{{< code title="cmd/tmpldemo/.rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/tmpldemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/tmpldemo/zz_tmpldemo.go
+      hook_returns: error
+      stub_template: templates/handler.go.tmpl
+      stub_test_template: templates/handler_test.go.tmpl
+{{< /code >}}
+
+The template gets the data the built-in stub is rendered from: `.HandlerType` is the type the
+generated wiring returns, `.InputsType` the command's inputs type, `.Invocation` how a user types
+the command, and [the reference](/configuration#stub_template) lists the rest. Keep the
+`var _ rotini.ErrorHandler` line, which marks the file as one generate may retire when its
+command leaves the spec:
+
+{{< code title="templates/handler.go.tmpl" language="golang" open="true" collapsible="false" copy="true" >}}
+package {{.Package}}
+
+import (
+	"cmp"
+	"context"
+	"log/slog"
+
+	{{.RuntimeImport}}
+)
+
+var _ rotini.ErrorHandler = (*{{.HandlerType}})(nil)
+
+// {{.HandlerType}} runs `{{.Invocation}}`.
+type {{.HandlerType}} struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+
+	log *slog.Logger
+}
+
+func (h *{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) error {
+	if _, err := rtx.Inputs[{{.InputsType}}](); err != nil {
+		return err
+	}
+	log := cmp.Or(h.log, slog.New(slog.NewTextHandler(rtx.Stderr, nil)))
+	log.Info("run", "command", "{{.Invocation}}")
+	return nil
+}
+{{< /code >}}
+
+The test template seeds a test per command, here one that runs it:
+
+{{< code title="templates/handler_test.go.tmpl" language="golang" open="true" collapsible="false" copy="true" >}}
+package {{.Package}}
+
+import (
+	"io"
+	"strings"
+	"testing"
+)
+
+func Test{{title .HandlerType}}(t *testing.T) {
+	var stderr strings.Builder
+	p := NewProgram().WithStdout(io.Discard).WithStderr(&stderr)
+	args := strings.Fields("{{.Invocation}}")[1:]
+	if code, err := p.Run(args); code != 0 || err != nil {
+		t.Fatalf("{{.Invocation}}: exit %d, %v", code, err)
+	}
+	if !strings.Contains(stderr.String(), "{{.Invocation}}") {
+		t.Errorf("{{.Invocation}} logged %q", stderr.String())
+	}
+}
+{{< /code >}}
+
+Both shape only the files generate creates: a handler file or test you already have is never
+rewritten. The template replaces the whole stub, so the root's `--help` and `--version`
+handling is the template's to write too; the `.RootHook` and `.HelpFlag` fields say where the
+built-in stub would put it, and its own template,
+[handler_error.go.tmpl](https://github.com/go-rotini/rotini/blob/main/internal/codegen/templates/handler_error.go.tmpl),
+is a starting point. A seeded test starts with a `// rotini: seeded beside its handler file`
+line: while it is there, the test is disabled and deleted with its handler file when the
+command leaves the spec. Delete the line to keep the test regardless.
+
+#### Naming spec values in Go
+
+`go generate` writes a constant for each enum value of a string input, each value of a string
+schema under `schemas:` (typed by the schema), and each configuration file, config key, profile
+and environment variable the spec declares. Use them where a handler would repeat a spelling:
+
+{{< code title="todo_config.go" language="golang" open="true" collapsible="false" copy="false" >}}
+if in.TodoList.Flags.Format == TodoListFormatJSON {
+	// ...
+}
+err := rotini.SetConfigValue(rtx, TodoConfigFileUser, TodoConfigKeyServerPort, raw,
+	rotini.ToProfile(TodoProfileProd))
+fmt.Fprintf(rtx.Stderr, "set %s to sign in\n", TodoEnvToken)
+{{< /code >}}
+
+A value renamed in the spec then fails to compile instead of never matching, and the env
+constant follows `env_prefix`. Each constant's doc comment is the value's `summary`, with
+`Deprecated:` for a deprecated value; each input field's is the input's. See
+[the generated file](/generated) for the names.
+
+#### Generators of your own
+
+To write a file Rotini doesn't, such as a page for your docs site, a catalog entry or a test
+scaffold per command, list a generator in the conf: a program that reads the contract and
+returns files. `rotini generate` runs it every time and writes what it returns, so its files
+follow the same rules as Rotini's own: a regenerate with no change writes nothing, `--dry-run`
+lists what would change and exits 2, and a file it stops returning is removed.
+
+{{< code title=".rotini.conf.yaml (generators)" language="yaml" open="true" collapsible="false" copy="true" >}}
+generate:
+  generators:
+    - name: docs
+      run: [go, run, ./tools/mdgen]
+      dir: docs/commands
+{{< /code >}}
+
+`run` is the program and its arguments, run as written in the module root with your
+environment; there is no shell. Pin a generator you depend on as a tool (`go get -tool`) and run
+`[go, tool, <name>]`. Only the programs the conf lists ever run, as with a `//go:generate` line,
+so list only programs you trust.
+
+The generator reads the contract document on stdin, the same JSON `generate.contract.file`
+writes, and writes one JSON document to stdout listing its files, each `path` relative to
+`dir`:
+
+```json
+{"rotini_generator": 1, "files": [{"path": "todo-add.md", "content": "# todo add\n"}]}
+```
+
+This one writes a page per visible command:
+
+{{< code title="tools/mdgen/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
+// Command mdgen is a rotini generator: it reads the contract document on stdin and returns one
+// markdown page per visible command.
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+)
+
+type contract struct {
+	Commands []struct {
+		Name    string `json:"name"`
+		Summary string `json:"summary"`
+		Hidden  bool   `json:"hidden"`
+	} `json:"commands"`
+}
+
+type file struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+func main() {
+	var c contract
+	if err := json.NewDecoder(os.Stdin).Decode(&c); err != nil {
+		fmt.Fprintln(os.Stderr, "mdgen:", err)
+		os.Exit(1)
+	}
+	files := []file{}
+	for _, cmd := range c.Commands {
+		if cmd.Hidden {
+			continue
+		}
+		if cmd.Summary == "" {
+			fmt.Fprintf(os.Stderr, "mdgen: %s has no summary\n", cmd.Name)
+			os.Exit(1)
+		}
+		files = append(files, file{
+			Path:    strings.ReplaceAll(cmd.Name, " ", "-") + ".md",
+			Content: "# " + cmd.Name + "\n\n" + cmd.Summary + "\n",
+		})
+	}
+	json.NewEncoder(os.Stdout).Encode(map[string]any{"rotini_generator": 1, "files": files})
+}
+{{< /code >}}
+
+- **Same contract, same files.** A generator must be deterministic and write no files itself;
+  it runs in a dry run too.
+- **What it owns.** Rotini lists the files a generator returned in `<dir>/.rotini-generated`, and
+  removes only files on that list. Other files in `dir` stay unless the generator returns their
+  path, and a path in the generator's `keep:` is never removed.
+- **Paths are checked.** A path that is absolute, holds `.` or `..`, or names one file twice in
+  any case fails generate, as does output that isn't the document above.
+- **Errors.** Generators run before anything is written. One that exits non-zero fails generate,
+  showing its stderr, and no file changes; on success, its stderr is shown as a warning.
+- **Its directory is its own.** `rotini validate` rejects a `dir` that is the module root,
+  overlaps another generator's, or overlaps anything Rotini writes.
+
+The contract's `format` names its version. See [the conf reference](/configuration) for every
+key.
+
 #### A dependency opened only when needed
 
 A dependency that is costly to set up, such as a database or an API client, shouldn't slow down
-`--help` or the commands that never use it. Register a function that opens it on first use:
-`sync.OnceValues` runs the opener once and hands every later caller the same result.
+`--help` or the commands that never use it. Provide it with `rotini.WithProvider`: a run calls
+the provider the first time a command asks for the dependency, once, and a run that never asks
+never calls it.
 
 {{< code title="store.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package lazydemo
 
 import (
+	"context"
 	"os"
+	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/go-rotini/rotini"
 )
@@ -4258,18 +4774,14 @@ import (
 // Store is costly to open, so only the commands that use it open it.
 type Store struct{ values map[string]string }
 
-// storeDep holds a function that opens the store on its first call and returns the same
-// store, or the same error, on every later call.
-var storeDep = rotini.NewDependency[func() (*Store, error)]("lazydemo.store")
+var storeDep = rotini.NewDependency[*Store]("lazydemo.store")
 
-// registerStore makes the store available without opening it. A test that registered its own
-// opener first keeps it.
-func registerStore(rtx *rotini.Context) {
-	rtx.SetDependencyIfAbsent(storeDep, sync.OnceValues(openStore))
-}
+// WithStore provides the store: a run opens it the first time a command asks for it, and a
+// run that never asks never opens it.
+var WithStore = rotini.WithProvider(storeDep, openStore)
 
-func openStore() (*Store, error) {
-	data, err := os.ReadFile("store.txt")
+func openStore(ctx context.Context, rtx *rotini.Context) (*Store, error) {
+	data, err := os.ReadFile(filepath.Join(rtx.Dir(), "store.txt"))
 	if err != nil {
 		return nil, err
 	}
@@ -4283,8 +4795,24 @@ func openStore() (*Store, error) {
 }
 {{< /code >}}
 
-Call `registerStore(rtx)` first in the root handler's `CascadingPreRun`, which runs before every
-command. A command that needs the store calls the function; one that doesn't never opens it:
+`main.go` adds the provider to the program:
+
+{{< code title="cmd/lazydemo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package main
+
+import (
+	cmd "example.com/lazydemo/internal/cmd/lazydemo"
+)
+
+func main() {
+	cmd.NewProgram().
+		With(cmd.WithStore).
+		Execute()
+}
+{{< /code >}}
+
+A command that needs the store asks for it with `rtx.Dependency`, which returns the provider's
+error as it is; one that doesn't never opens it:
 
 {{< code title="lazydemo_get.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package lazydemo
@@ -4310,7 +4838,7 @@ func (*lazydemoGetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	if err != nil {
 		return err
 	}
-	store, err := rtx.MustGetDependency(storeDep)()
+	store, err := rtx.Dependency(storeDep)
 	if err != nil {
 		return err
 	}
@@ -4319,8 +4847,9 @@ func (*lazydemoGetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 }
 {{< /code >}}
 
-A test registers a double under `storeDep` with `Program.WithDependency`, and
-`SetDependencyIfAbsent` leaves it in place.
+If `*Store` had a `Close() error` method, Rotini would close it after the run's last hook. A test
+builds `NewProgram().With(WithStore).WithDependency(storeDep, double)`: a registered value wins
+over the provider, so the test gets the double and the real store is never opened.
 
 ### Shipping
 
@@ -4689,68 +5218,58 @@ writes files or calls the network needs a double for the fuzz test, registered w
 
 #### Tracing with OpenTelemetry
 
-One span per run, named after the invoked command, with every span a command starts nested
-under it. The root handler's `CascadingPreRun`, which runs first in every run, starts the span
-and passes its context on with [`rtx.SetContext`](#passing-a-context-on), so `Run` and
-every later hook receive it:
+A span around the invoked command's work, named after the command, with every span the command
+starts nested under it. A [middleware](#middleware) around `Run` starts the span, passes its
+context to `Run`, and marks the span failed when the command fails:
 
-{{< code title="tracedemo.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="tracedemo_trace.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package tracedemo
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/go-rotini/rotini"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 )
-
-var _ rotini.ErrorHandler = (*tracedemoHandler)(nil)
 
 var tracer = otel.Tracer("example.com/tracedemo")
 
-type tracedemoHandler struct {
-	rotini.NoPreRunE
-	rotini.NoPostRunE
-
-	// span is the run's span. CascadingPostRun receives the context this handler's
-	// CascadingPreRun received, not the one it set, so the span is kept here to end it.
-	span trace.Span
-}
-
-// CascadingPreRun starts the run's span, named after the invoked command, and hands its
-// context to every later hook.
-func (h *tracedemoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) error {
-	var names []string
-	for _, c := range rtx.CommandChain() {
-		names = append(names, c.Name)
+// Trace runs each command's Run in a span named after the command, and marks the span failed
+// when the command fails.
+func Trace(h rotini.Hook, next rotini.HookFunc) rotini.HookFunc {
+	if h.Kind != rotini.HookRun {
+		return next
 	}
-	ctx, h.span = tracer.Start(ctx, strings.Join(names, " "))
-	rtx.SetContext(ctx)
-	return nil
-}
-
-func (h *tracedemoHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) error {
-	if rtx.Failed() {
-		h.span.SetStatus(codes.Error, "the command failed")
+	return func(ctx context.Context, rtx *rotini.Context) error {
+		ctx, span := tracer.Start(ctx, rtx.CommandPath())
+		defer span.End()
+		err := next(ctx, rtx)
+		// err is what Run returned; Failed also covers an error it recorded.
+		if err != nil || rtx.Failed() {
+			span.SetStatus(codes.Error, "the command failed")
+		}
+		return err
 	}
-	h.span.End()
-	return nil
-}
-
-func (*tracedemoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
-	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	rtx.HaltWithCode(1)
-	return nil
 }
 {{< /code >}}
 
-The root's `CascadingPostRun` receives the context its `CascadingPreRun` received, not the one
-it set, so the span is kept in a handler field to end there. A command starts its own spans
-from the context it is given:
+{{< code title="main.go (tracing)" language="golang" open="true" collapsible="false" copy="true" >}}
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	cmd "example.com/tracedemo/internal/cmd/tracedemo"
+)
+
+func main() {
+	cmd.NewProgram().
+		WithMiddleware(cmd.Trace).
+		Execute()
+}
+{{< /code >}}
+
+A command starts its own spans from the context it is given:
 
 {{< code title="tracedemo_work.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package tracedemo
@@ -4781,7 +5300,8 @@ func (*tracedemoWorkHandler) Run(ctx context.Context, rtx *rotini.Context) error
 
 Set up the tracer provider and its exporter in `main.go` as for any Go program. `Execute` exits
 the process, so call `Run` instead, shut the provider down to send the last spans, then exit
-with the code `Run` returned.
+with the code `Run` returned. To trace setup and teardown hooks too, drop the `h.Kind` check
+and add `h.Kind` to the span's name.
 
 #### -v and -vv as log levels
 
@@ -5568,6 +6088,129 @@ kill -TERM $!    # stopped; exits 143
 Without the `signal.Notify`, SIGHUP ends the process with 129 and no teardown. To reload when
 the file changes instead, `NewWatcher` from `github.com/go-rotini/fs` reports changes to a path,
 saves by rename included. SIGHUP doesn't exist on Windows.
+
+#### Your own config format
+
+Rotini reads JSON, YAML, TOML, JSON with comments and `.env` files. For any other format, such
+as an older tool's INI files, name it in the spec and give the program a decoder:
+
+{{< code title=".rotini.spec.yaml (own format)" language="yaml" open="true" collapsible="false" copy="true" >}}
+config_files:
+  - name: legacy
+    path: legacy.ini
+    format: ini
+{{< /code >}}
+
+`rotini validate` warns that `ini` isn't built in, so a mistyped `yml` doesn't go unnoticed,
+and `rotini generate` leaves it out of the program's features. The decoder turns a whole
+document into the maps, lists and scalars the built-in formats produce; `rotini.Codec` wires it:
+
+{{< code title="ini.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package inidemo
+
+import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+// INI reads the spec's `format: ini` files, and any .ini file without one.
+var INI = rotini.Codec("ini", decodeINI, rotini.CodecExtensions(".ini"))
+
+// decodeINI reads `[section]` headers, `key = value` lines and `;` or `#` comments. Each
+// section is a mapping, and a section or key given twice is an error.
+func decodeINI(data []byte) (any, error) {
+	doc := map[string]any{}
+	section := doc
+	lines := bufio.NewScanner(bytes.NewReader(data))
+	for n := 1; lines.Scan(); n++ {
+		line := strings.TrimSpace(lines.Text())
+		switch {
+		case line == "" || line[0] == ';' || line[0] == '#':
+		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
+			name := strings.TrimSpace(line[1 : len(line)-1])
+			if _, dup := doc[name]; dup {
+				return nil, iniError{n, fmt.Sprintf("section [%s] given twice", name)}
+			}
+			section = map[string]any{}
+			doc[name] = section
+		default:
+			key, value, ok := strings.Cut(line, "=")
+			if !ok {
+				return nil, iniError{n, "want key = value"}
+			}
+			key = strings.TrimSpace(key)
+			if _, dup := section[key]; dup {
+				return nil, iniError{n, fmt.Sprintf("key %s given twice", key)}
+			}
+			section[key] = strings.TrimSpace(value)
+		}
+	}
+	return doc, lines.Err()
+}
+
+// iniError is a failure on a line; its Position and Message methods let the error name the
+// file and line.
+type iniError struct {
+	line int
+	msg  string
+}
+
+func (e iniError) Error() string             { return fmt.Sprintf("line %d: %s", e.line, e.msg) }
+func (e iniError) Position() (line, col int) { return e.line, 1 }
+func (e iniError) Message() string           { return e.msg }
+{{< /code >}}
+
+`main.go` adds it to the program:
+
+{{< code title="main.go (own format)" language="golang" open="true" collapsible="false" copy="true" >}}
+package main
+
+import (
+	cmd "example.com/inidemo/internal/cmd/inidemo"
+)
+
+func main() {
+	cmd.NewProgram().
+		WithFeatures(cmd.INI).
+		Execute()
+}
+{{< /code >}}
+
+The file then reads like any other: precedence, profiles, its `schema:`, `--explain-inputs` and
+`report.UnreadConfigKeys()` all work, and a decode error names the file and line
+(`legacy.ini:3:1: want key = value`). A `stdin:` with `format: ini` decodes the same way. A
+program that runs without the codec fails with a `*rotini.WiringError` naming
+`rotini.Codec("ini", …)`. The format is read-only: `rotini.SetConfigValue` refuses to write
+the file. `rotini.CodecLocate` adds a function that finds a key's line, so a schema error or an
+unread key names it too. Given a built-in format's name, `rotini.Codec` replaces that format's
+decoder, object flags included.
+
+To read as strictly as the built-in formats, a decoder fails on a key given twice and on more
+than one document, decodes the format's null as `nil`, which Rotini treats as unset, and keeps
+nothing of its input. `rotinitest.CheckCodec` checks those rules, given documents in the format;
+leave out the ones it can't write:
+
+{{< code title="ini_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package inidemo
+
+import (
+	"testing"
+
+	"github.com/go-rotini/rotini/rotinitest"
+)
+
+// INI has no null and one document per file, so those checks are left out.
+func TestDecodeINI(t *testing.T) {
+	rotinitest.CheckCodec(t, decodeINI, rotinitest.CodecDocuments{
+		Valid:        [][]byte{[]byte("; settings\n[deploy]\nregion = eu-west\n")},
+		DuplicateKey: []byte("[deploy]\nregion = a\nregion = b\n"),
+	})
+}
+{{< /code >}}
 
 #### The version from the build
 

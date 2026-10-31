@@ -41,6 +41,9 @@ type LifecycleStep struct {
 // A plan built from scratch should wrap each hook in [AsCommand] so [Context.Command] and
 // [Context.Inputs] anchor on the hook's own command; an unwrapped hook reports the invoked
 // command, which is wrong for a cascading hook.
+//
+// [Program.WithMiddleware] wraps the hooks a plan takes from DefaultLifecycle's steps; a step
+// function the plan writes itself runs without middleware.
 type Lifecycle func(chain []Command, handlers []Handler) []LifecycleStep
 
 // DefaultLifecycle is rotini's run-phase plan, exported for a custom [Lifecycle] to wrap: one
@@ -52,66 +55,60 @@ func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep {
 	for i, h := range handlers {
 		steps = append(steps, LifecycleStep{
 			Name: "cascading:" + chain[i].Name,
-			Do:   hookOf(i, h, hookCascadingPreRun),
-			Undo: hookOf(i, h, hookCascadingPostRun),
+			Do:   hookOf(i, h, HookCascadingPreRun),
+			Undo: hookOf(i, h, HookCascadingPostRun),
 		})
 	}
 	leafIdx := len(handlers) - 1
 	leaf := handlers[leafIdx]
 	leafName := chain[len(chain)-1].Name
 	steps = append(steps,
-		LifecycleStep{Name: "prerun:" + leafName, Do: hookOf(leafIdx, leaf, hookPreRun), Undo: hookOf(leafIdx, leaf, hookPostRun)},
-		LifecycleStep{Name: "run:" + leafName, Do: hookOf(leafIdx, leaf, hookRun)},
+		LifecycleStep{Name: "prerun:" + leafName, Do: hookOf(leafIdx, leaf, HookPreRun), Undo: hookOf(leafIdx, leaf, HookPostRun)},
+		LifecycleStep{Name: "run:" + leafName, Do: hookOf(leafIdx, leaf, HookRun)},
 	)
 	return steps
 }
 
-// handlerHook names one of a [Handler]'s hooks.
-type handlerHook uint8
-
-const (
-	hookCascadingPreRun handlerHook = iota
-	hookPreRun
-	hookRun
-	hookPostRun
-	hookCascadingPostRun
-)
-
-// hookOf is AsCommand(i, h.<which>) as one closure: the method value AsCommand would wrap is
+// hookOf is AsCommand(i, h.<kind>) as one closure: the method value AsCommand would wrap is
 // a second allocation per hook.
-func hookOf(i int, h Handler, which handlerHook) func(context.Context, *Context) {
-	return func(ctx context.Context, rtx *Context) { callHook(ctx, rtx, i, h, which) }
+func hookOf(i int, h Handler, kind HookKind) func(context.Context, *Context) {
+	return func(ctx context.Context, rtx *Context) { callHook(ctx, rtx, i, h, kind) }
 }
 
-// callHook runs hook which of h as the hook of chain frame i, as [AsCommand] labels it.
-func callHook(ctx context.Context, rtx *Context, i int, h Handler, which handlerHook) {
+// callHook runs hook kind of h as the hook of chain frame i, as [AsCommand] labels it, inside
+// the program's middleware when it has any.
+func callHook(ctx context.Context, rtx *Context, i int, h Handler, kind HookKind) {
 	prev := rtx.setFrame(i)
 	defer rtx.setFrame(prev)
-	switch which {
-	case hookCascadingPreRun:
+	if len(rtx.middleware) > 0 {
+		callWrapped(ctx, rtx, h, kind)
+		return
+	}
+	switch kind {
+	case HookCascadingPreRun:
 		h.CascadingPreRun(ctx, rtx)
-	case hookPreRun:
+	case HookPreRun:
 		h.PreRun(ctx, rtx)
-	case hookRun:
+	case HookRun:
 		h.Run(ctx, rtx)
-	case hookPostRun:
+	case HookPostRun:
 		h.PostRun(ctx, rtx)
-	case hookCascadingPostRun:
+	case HookCascadingPostRun:
 		h.CascadingPostRun(ctx, rtx)
 	}
 }
 
 // defaultStep is step k of [DefaultLifecycle]'s plan for handlers, without building the plan:
 // the frame and handler its hooks belong to, its forward hook, and its teardown, if any.
-func defaultStep(handlers []Handler, k int) (frame int, h Handler, do, undo handlerHook, hasUndo bool) {
+func defaultStep(handlers []Handler, k int) (frame int, h Handler, do, undo HookKind, hasUndo bool) {
 	leaf := len(handlers) - 1
 	switch {
 	case k <= leaf:
-		return k, handlers[k], hookCascadingPreRun, hookCascadingPostRun, true
+		return k, handlers[k], HookCascadingPreRun, HookCascadingPostRun, true
 	case k == leaf+1:
-		return leaf, handlers[leaf], hookPreRun, hookPostRun, true
+		return leaf, handlers[leaf], HookPreRun, HookPostRun, true
 	default:
-		return leaf, handlers[leaf], hookRun, 0, false
+		return leaf, handlers[leaf], HookRun, 0, false
 	}
 }
 

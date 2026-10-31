@@ -20,7 +20,7 @@ func (p *Processor) Tree(specPath string) (string, error) {
 	if err != nil {
 		return "", p.explainDecodeFailure("spec", err)
 	}
-	if errs, _ := splitProblems(p.validateAndLintSpec(rs)); len(errs) > 0 {
+	if errs, _ := splitProblems(p.validateAndLintSpec(rs, false)); len(errs) > 0 {
 		return "", errors.Join(errs...)
 	}
 	// Without a go.mod, local refs still resolve; a mod:// ref fails with its own error.

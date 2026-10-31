@@ -22,6 +22,10 @@ func (*demoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) er
 	}
 	inputs := argv.Values
 
+	if err := rtx.UnknownCommand(); err != nil {
+		return err
+	}
+
 	if inputs.Demo.Flags.Help {
 		page, err := rtx.InvokedHelp()
 		if err != nil {
@@ -59,6 +63,5 @@ func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	rtx.HaltWithCode(1)
-	return nil
+	return rotini.MissingCommand(rtx)
 }

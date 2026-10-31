@@ -319,6 +319,7 @@ type templateHandlerData struct {
 	VersionFlag       string // Go field of this command's bool `version` flag; "" when there is none
 	Header            string // the target's conf `header:`; "" for none
 	HelpPathArg       string // Go field of the variadic path argument on a command named `help`; "" otherwise
+	HelpPlugins       bool   // that help command can name a plugin, so it asks rtx.PluginHelp first
 	VersionOnly       bool   // a command named `version` whose whole job is to print it
 	CompletionArg     string // Go field of a `completion` command's shell argument; "" otherwise
 	PrintHelpWhenBare bool   // a dispatcher root or group: sub-commands, no own arguments, help feature on
@@ -367,7 +368,8 @@ type templateInputField struct {
 	Field   string
 	GoType  string
 	Tag     string
-	Comment string // optional trailing line-comment ("" for none)
+	Comment string   // optional trailing line-comment ("" for none)
+	Doc     []string // the doc comment's lines, each starting "//"; nil for none
 }
 
 // inputFieldTag assembles a generated input field's complete struct-tag literal: the rotini
@@ -455,12 +457,14 @@ type templateFeature struct {
 // templateRotiniData is the data for the generated cmd file.
 type templateRotiniData struct {
 	Package       string
+	PackageDoc    string                   // the package doc comment; "" when an author file has one, or the root has no summary
 	RuntimeImport string                   // the rotini runtime's import line (identifier `rotini`)
 	Imports       []string                 // pre-rendered import lines (aliased form "alias \"path\"")
 	ChildImports  []templateHandlersImport // composed children's cmd packages
 	Methods       []string                 // ProgramHandlers method names, e.g. "RotiniGenerate"
 	RollupMethods []templateHandlersMethod // the generated handlers struct's command→handler methods
-	Definition    string                   // pre-rendered definition var declaration
+	Definition    string                   // pre-rendered definition var declaration, its fill and pointer vars
+	DefinitionRef string                   // the expression NewProgramWith and the resolvers read the definition by
 	ModelsImport  string                   // models package import line; "" unless the types were split out
 	ModelAliases  []string                 // model type names re-exported here as aliases; empty unless split
 	Blocks        []templateInputBlock
@@ -468,7 +472,7 @@ type templateRotiniData struct {
 	InputSettings string // pre-rendered InputSettings declaration; "" when none
 	Features      []templateFeature
 	EmbedImport   bool // emit `import _ "embed"`: some feature uses //go:embed
-	NeedsFmt      bool // emit `import "fmt"` for ConfigExample, even without a doc feature
+	NeedsFmt      bool // emit `import "fmt"`: for ConfigExample or the per-shell Completion resolver
 	// PathResolvers is true when some feature emits a path-keyed resolver (help, man,
 	// markdown), which imports "strings". The shell-keyed completion resolver does not.
 	PathResolvers bool
@@ -484,6 +488,7 @@ type templateRotiniData struct {
 	WiredFeatures []string
 	Header        string // the target's conf `header:`; "" for none
 	ExitCodes     string // pre-rendered named exit-code constants (or their re-exports); "" when none
+	Constants     string // pre-rendered enum value (or their re-exports) and name constants; "" when none
 	Contract      string // pre-rendered Contract variable (generate.contract.go); "" when off
 	UsageFunc     string // pre-rendered Usage function, always emitted; it imports "fmt" and "strings"
 	CanonicalPath string // pre-rendered alias-to-name path mapping the resolvers use; "" without aliases
@@ -506,6 +511,7 @@ type templateModelsData struct {
 	FlagSets    []templateFlagSet
 	OutputTypes string // pre-rendered output type declarations; "" when none
 	ExitCodes   string // pre-rendered named exit-code constants; "" when none
+	Constants   string // pre-rendered enum value constants; "" when none
 	Header      string // the target's conf `header:`; "" for none
 }
 
@@ -516,13 +522,57 @@ func renderModelsFile(data templateModelsData) ([]byte, error) {
 // templateDocHeadings holds the resolved section headings, each rendered verbatim (the trailing
 // ":" is part of the value).
 type templateDocHeadings struct {
-	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples, Output, Stdin, Topics string
+	Usage, Commands, Arguments, Flags, Environment, Configuration, Files, Cascading, Examples, Output, Stdin, Topics string
 }
 
 // templateDocTopicRow is one help topic in the root page's list of topics.
 type templateDocTopicRow struct {
 	Name    string
 	Summary string
+	Page    string // the topic's page name (taskr-filters), which names its man and markdown pages
+}
+
+// templateDocFileRow is one configuration file a command's inputs are read from, in the order
+// the files win: the first one listed that sets a key supplies it.
+type templateDocFileRow struct {
+	Name   string // the file's logical name, as config_files declares it (an author's word, not shown by default)
+	File   string // the file as a user names it: the declared path (./taskr.yaml), or the name discovery looks for (.taskr.yaml, taskr/config.yaml)
+	Format string // the declared format; "" when the file's extension says it
+	// Found says where discovery looks, in the user's words ("in the working directory or the
+	// nearest parent holding one"); "" for a fixed path.
+	Found string
+	// PathFrom are the flags and variables that name another path for the file (config_source),
+	// flags first; nil for none.
+	PathFrom []string
+	AsEnv    bool // the file's KEY=value lines are read as environment variables (as: env)
+	// Profiles describes the file's named profiles; nil when it has none.
+	Profiles *templateDocProfiles
+	// Note is the rest in one line: the format, discovery, the other paths, as: env and the
+	// profiles (`profiles under "profiles", chosen by --profile (default dev)`); "" for none.
+	Note string
+}
+
+// templateDocProfiles is how a configuration file's named profiles are chosen.
+type templateDocProfiles struct {
+	Under   string   // the top-level key holding the profiles
+	Select  []string // what chooses one: the selector flag's identifier, then its variables
+	Default string   // the profile used when nothing chooses one; "" for the shared keys only
+}
+
+// templateDocFlagRule is one rule between a command's flags, from its flag_groups and
+// flag_dependencies.
+type templateDocFlagRule struct {
+	// Kind is the group's kind (mutually_exclusive, required_together, one_of, at_least_one), or
+	// "dependency" for a flag_dependencies entry.
+	Kind string
+	// Flags are the flags the rule covers, by their long identifier (--json): a group's members,
+	// or a dependency's requires then forbids.
+	Flags []string
+	// Condition is when a dependency applies ("with --format csv or tsv", "unless --config is
+	// given"); "" for a group.
+	Condition string
+	// Text is the rule as a short sentence: "--json and --yaml can't be used together".
+	Text string
 }
 
 // templateDocCommandGroup is one bucket of sub-commands in the Commands section. Title is the
@@ -539,7 +589,10 @@ type templateDocCommandRow struct {
 	Summary    string
 	Aliases    []string
 	Group      string // the child command's `group` (buckets it in the Commands section)
+	Page       string // the command's page name (taskr-add), which names its man and markdown pages; "" for a plugin
 	Deprecated string
+	// Metadata is the command's own `metadata` labels, as written; nil when it declares none.
+	Metadata map[string]string
 	// Stability is the declared stability of a command or input: "experimental", "beta", or
 	// "" for stable.
 	Stability string
@@ -568,6 +621,8 @@ type templateDocArgumentRow struct {
 	Env         []string // the env fallback variables, in lookup order; nil for an argument with no fallback
 	ConfigKey   string   // the config fallback key; "" for none, or when the page's command reads no config files
 
+	Metadata map[string]string // the input's own `metadata` labels, as written; nil for none
+
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 
 	defaultJSON string // a list or map default as JSON, which man and markdown show in place of Default; "" otherwise
@@ -595,6 +650,8 @@ type templateDocFlagRow struct {
 	Accepts     string   // what the input accepts beyond its type's default, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
 	Effects     string   // what giving the flag adds to its command's effects ("destructive"); "" for none
+
+	Metadata map[string]string // the input's own `metadata` labels, as written; nil for none
 
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 
@@ -632,14 +689,22 @@ type templateDocEnvRow struct {
 	Accepts     string   // what the input accepts beyond its type's default, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
 
+	Metadata map[string]string // the input's own `metadata` labels, as written; nil for none
+
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 
 	defaultJSON string // see templateDocArgumentRow
 }
 
 type templateDocConfigRow struct {
-	Name        string
-	Location    string // where the value is read from: "<file>.<key>", "<key>" or ""
+	Name string // the input's logical name
+	// Key is the key a user writes in the file (deploy.timeout): the declared key, else the name.
+	Key string
+	// File is the one file the value is read from (`file:`), as a user names it (see
+	// templateDocFileRow.File); "" when any configuration file in scope may set it.
+	File        string
+	Location    string   // the key with the pinned file's logical name before it: "<file>.<key>", "<key>" or ""
+	Commands    []string // on the generated configuration topic: the commands that read the key; nil elsewhere
 	Summary     string
 	Description string // see templateDocArgumentRow
 	Stability   string // see templateDocCommandRow
@@ -653,9 +718,12 @@ type templateDocConfigRow struct {
 	Accepts     string   // what the input accepts beyond its type's default, as a short note; "" for none
 	Rules       []string // the declared constraints as sentences, for man and markdown
 
+	Metadata map[string]string // the input's own `metadata` labels, as written; nil for none
+
 	DeprecatedSince, RemovedIn string // see templateDocCommandRow
 
 	defaultJSON string // see templateDocArgumentRow
+	pinned      string // the logical name of the file the value is read from; "" for any
 }
 
 type templateDocExitRow struct {
@@ -665,6 +733,24 @@ type templateDocExitRow struct {
 	Retryable bool   // running the command again may succeed
 	Output    string // the shape stdout carries with this code, as a type name; "" for none
 	DocsURL   string // a link to more about the code; "" for none
+}
+
+// templateDocExample is one example: its command line, and its one-line summary ("" for none).
+type templateDocExample struct {
+	Run     string
+	Summary string
+}
+
+// exampleRows returns examples as template rows.
+func exampleRows(examples []Example) []templateDocExample {
+	if len(examples) == 0 {
+		return nil
+	}
+	out := make([]templateDocExample, len(examples))
+	for i, e := range examples {
+		out[i] = templateDocExample(e)
+	}
+	return out
 }
 
 // templateHelpData is the per-command data shared by the help, man and markdown templates.
@@ -684,7 +770,8 @@ type templateHelpData struct {
 	Environment   []templateDocEnvRow
 	Configuration []templateDocConfigRow
 	Cascading     []templateDocFlagRow
-	Examples      []string
+	Examples      []string             // each example's command line
+	ExampleRows   []templateDocExample // each example's command line and summary
 	ExitStatus    []templateDocExitRow
 	SeeAlso       []string
 
@@ -710,6 +797,17 @@ type templateHelpData struct {
 	Topic bool
 	// Topics lists the help topics on the root's page; nil on every other page.
 	Topics []templateDocTopicRow
+	// Files lists the configuration files the command's inputs are read from, in the order they
+	// win; nil when none of its inputs reads one.
+	Files []templateDocFileRow
+	// FlagRules lists the rules between the command's flags; nil for none.
+	FlagRules []templateDocFlagRule
+	// ParentPage is the page name of the command's parent (taskr for taskr-add), and the root's
+	// page on a topic; "" on the root's page.
+	ParentPage string
+	// Metadata is the command's own `metadata` labels, as written (a topic has none); nil when
+	// it declares none.
+	Metadata map[string]string
 	// ResponseFiles is the response-file prefix on the root's page when response files are
 	// on; "" otherwise.
 	ResponseFiles string
@@ -931,6 +1029,10 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 		d.SeeAlso[i] = clean(d.SeeAlso[i])
 	}
 	d.Topics = sanitizeTopics(d.Topics, clean)
+	d.Files = append([]templateDocFileRow(nil), d.Files...)
+	for i := range d.Files {
+		d.Files[i].File, d.Files[i].Found, d.Files[i].Note = clean(d.Files[i].File), clean(d.Files[i].Found), clean(d.Files[i].Note)
+	}
 	return d
 }
 
@@ -1010,6 +1112,8 @@ func templateFuncMap() template.FuncMap {
 			return elems[len(elems)-1]
 		},
 		"alsoSetBy": alsoSetBy,
+		// " (a, b)": the non-empty notes in one parenthetical, "" when there are none.
+		"notes": notesText,
 		// A Markdown code span that holds any text, backticks included.
 		"code": markdownCode,
 		// "deprecated since 1.4.0, removed in 2.0.0: <message>", for a deprecated item's note.
@@ -1128,6 +1232,30 @@ func alsoSetBy(env []string, configKey, before, after string) string {
 		return "also set by " + names[0]
 	}
 	return "also set by " + strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
+}
+
+// notesText joins the notes beside a row into one parenthetical, " (default 1, 1..100)", skipping
+// the empty ones: "" and false, as `and .Required "required"` gives for an optional input. It
+// returns "" when every note is empty.
+func notesText(notes ...any) string {
+	var parts []string
+	for _, n := range notes {
+		switch v := n.(type) {
+		case string:
+			if v != "" {
+				parts = append(parts, v)
+			}
+		case bool, nil:
+		default:
+			if s := fmt.Sprint(v); s != "" {
+				parts = append(parts, s)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 // deprecationNote phrases a deprecation for the note beside an item in help, man and

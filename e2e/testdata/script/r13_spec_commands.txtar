@@ -17,7 +17,7 @@ stdout '^  lab +experiments \(experimental\)$'
 ! stdout 'zap'
 ! stdout 'hush'
 grep 'remove things \(deprecated since 1\.2\.0, removed in 3\.0\.0: use purge; use cmds$' internal/cmd/cmds/renders/cmds.1
-grep '^- `remove` \(alias rm, del\) — remove things \*\(deprecated since 1\.2\.0, removed in 3\.0\.0: use purge; use cmds purge instead\)\*$' internal/cmd/cmds/renders/markdown_cmds.md
+grep '^- \[`remove`\]\(cmds-remove\.md\) \(alias rm, del\) — remove things \*\(deprecated since 1\.2\.0, removed in 3\.0\.0: use purge; use cmds purge instead\)\*$' internal/cmd/cmds/renders/markdown_cmds.md
 ! grep 'zap|hush' internal/cmd/cmds/renders/cmds.1
 ! grep 'zap|hush' internal/cmd/cmds/renders/markdown_cmds.md
 
@@ -65,7 +65,7 @@ stdout '^Effects: write, not idempotent, open world$'
 stdout '^      --wipe +wipe more \(destructive\)$'
 stdout '^  \[target\] +what to purge \(experimental\) \(deprecated since 1\.1\.0, removed in 2\.0\.0: give no target\)$'
 stdout '^  CMDS_LEVEL int +how loud \(beta\) \(deprecated since 1\.0\.0, removed in 2\.5\.0: no longer read\)$'
-stdout '^  color \(color\) string +color mode \(experimental\) \(deprecated, removed in 2\.6\.0: ignored\)$'
+stdout '^  color string +color mode \(experimental\) \(deprecated, removed in 2\.6\.0: ignored\)$'
 ! stdout 'dir|secretarg|QUIET|secretcfg'
 grep '^This command is in beta: it may change in a minor release\.$' internal/cmd/cmds/renders/cmds-purge.1
 grep '^Effects: write, not idempotent, open world$' internal/cmd/cmds/renders/markdown_cmds_purge.md

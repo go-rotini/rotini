@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -221,7 +222,7 @@ func parseTimeValue(s string, ts timeSpec) (time.Time, error) {
 	}
 	switch {
 	case len(list) == 0:
-		return time.Time{}, &coerceError{Value: s, TypeName: "time", Cause: errors.New("write it as RFC 3339, e.g. 2026-09-29T14:00:00Z; or declare `type: date` or a `layout:`")}
+		return time.Time{}, &coerceError{Value: s, TypeName: "time", Cause: errors.New(plainTimeHint)}
 	case len(list) == 1:
 		return time.Time{}, &coerceError{Value: s, TypeName: layoutLabel(list[0]), Cause: firstErr}
 	}
@@ -358,14 +359,76 @@ func orList(items []string) string {
 
 // coerceTime is [coerce] for an input that declares how its text reads: a time.Time field (or
 // a pointer to one, or a list of them) reads each value under ts's layouts and relative forms,
-// and an integer field under its base. Any other field, or a plain spec, is plain coerce.
+// through [TimeValues], and an integer field under its base. Any other field, or a plain spec,
+// is plain coerce.
 func coerceTime(f reflect.Value, raw []string, ts timeSpec) error {
+	fs := ts.clock.features()
 	if ts.base == basePrefixed && len(raw) > 0 && (isPlainInteger(f.Type()) || isPlainFloat(f.Type())) {
-		return coercePrefixed(f, raw, ts.clock.features())
+		return coercePrefixed(f, raw, fs)
 	}
 	if ts.plain() || len(raw) == 0 {
-		return coerce(f, raw, ts.clock.features())
+		return coerce(f, raw, fs)
 	}
+	if fs.times != nil {
+		// A copy: raw itself passed to the hook would move every caller's slice to the heap,
+		// plain inputs' included.
+		return fs.times.coerce(f, slices.Clone(raw), ts)
+	}
+	if isTimeField(f.Type()) {
+		return missingTimes("input is a date or time with a layout or relative form")
+	}
+	return coerce(f, raw, fs)
+}
+
+// isTimeField reports whether a field of type t holds times: a time.Time, a pointer to one, or
+// a list or string-keyed map of them.
+func isTimeField(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Slice:
+		return derefType(t.Elem()) == timeType
+	case reflect.Map:
+		return t.Key().Kind() == reflect.String && derefType(t.Elem()) == timeType
+	}
+	return derefType(t) == timeType
+}
+
+// missingTimes is the error for a time input with a layout or relative form, which the
+// program does not wire: subject says which input.
+func missingTimes(subject string) *WiringError {
+	return missingFeature("values:time", "TimeValues()", subject)
+}
+
+// parseTime reads s under ts, a spec with layouts or a relative form, through [TimeValues].
+func parseTime(s string, ts timeSpec) (time.Time, error) {
+	if h := ts.clock.features().times; h != nil {
+		return h.parse(s, ts)
+	}
+	return time.Time{}, missingTimes("input is a date or time with a layout or relative form")
+}
+
+// plainTimeHint says how a time input with no layout or relative form is written.
+const plainTimeHint = "write it as RFC 3339, e.g. 2026-09-29T14:00:00Z; or declare `type: date` or a `layout:`"
+
+// checkTimeChannel reports a time input with a layout or relative form in one Env or Config
+// struct s when the program does not wire [TimeValues]: its values would otherwise read as RFC
+// 3339 text and fail as the user's mistake.
+func checkTimeChannel(fs *featureSet, s reflect.Value) error {
+	if fs.times != nil || !s.IsValid() || s.Kind() != reflect.Struct {
+		return nil
+	}
+	st := s.Type()
+	for j := range s.NumField() {
+		f := st.Field(j)
+		if reconKey(f.Tag.Get("recon")) != "" && isTimeField(f.Type) && !tagTimeSpec(f.Tag).plain() {
+			return missingTimes("input " + f.Tag.Get("rotini") + " is a date or time with a layout or relative form")
+		}
+	}
+	return nil
+}
+
+// coerceDeclaredTime is [coerceTime] for a time field under a spec with layouts or relative
+// forms; [TimeValues] wires it.
+func coerceDeclaredTime(f reflect.Value, raw []string, ts timeSpec) error {
 	switch {
 	case f.Type() == timeType:
 		t, err := parseTimeValue(raw[len(raw)-1], ts)
@@ -376,7 +439,7 @@ func coerceTime(f reflect.Value, raw []string, ts timeSpec) error {
 		return nil
 	case f.Kind() == reflect.Pointer && f.Type().Elem() == timeType:
 		v := reflect.New(timeType)
-		if err := coerceTime(v.Elem(), raw, ts); err != nil {
+		if err := coerceDeclaredTime(v.Elem(), raw, ts); err != nil {
 			return err
 		}
 		f.Set(v)
@@ -384,7 +447,7 @@ func coerceTime(f reflect.Value, raw []string, ts timeSpec) error {
 	case f.Kind() == reflect.Slice && derefType(f.Type().Elem()) == timeType:
 		out := reflect.MakeSlice(f.Type(), len(raw), len(raw))
 		for i, r := range raw {
-			if err := coerceTime(out.Index(i), []string{r}, ts); err != nil {
+			if err := coerceDeclaredTime(out.Index(i), []string{r}, ts); err != nil {
 				return err
 			}
 		}
@@ -399,7 +462,7 @@ func coerceTime(f reflect.Value, raw []string, ts timeSpec) error {
 				continue
 			}
 			ev := reflect.New(f.Type().Elem()).Elem()
-			if err := coerceTime(ev, []string{v}, ts); err != nil {
+			if err := coerceDeclaredTime(ev, []string{v}, ts); err != nil {
 				return fmt.Errorf("value for key %q: %w", k, err)
 			}
 			out.SetMapIndex(reflect.ValueOf(k).Convert(f.Type().Key()), ev)

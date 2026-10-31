@@ -221,7 +221,7 @@ func readTypeName(t string) string {
 	if t == "count" {
 		return "int" // a count's fallback reads a number
 	}
-	if _, ok := valueTypeGo[t]; ok || parserSignificantType(t) {
+	if _, ok := valueTypeGo()[t]; ok || parserSignificantType(t) {
 		return t
 	}
 	return jsonSchemaTypeToGo(t)

@@ -110,6 +110,7 @@ var specLints = []func(*Spec) []error{
 	lintObjectFlags,
 	lintLayout,
 	lintExitStatus,
+	lintExitNames,
 	lintStdinSchema,
 	lintGroups,
 	lintRepeatable,
@@ -130,6 +131,8 @@ var specLints = []func(*Spec) []error{
 	lintConfigFilesAsEnv,
 	lintDiscoverApp,
 	lintConfigSourceFormat,
+	lintFormatNames,
+	lintAdditionalProperties,
 	lintStreamPaths,
 	lintRoles,
 	lintGlob,
@@ -151,6 +154,7 @@ var specLints = []func(*Spec) []error{
 	lintProfiles,
 	lintEffects,
 	lintFlagRoles,
+	lintReadOnlyRoles,
 	lintAgent,
 	lintExamplesParse,
 	lintConfigFileSchemaRefs,
@@ -734,12 +738,18 @@ func lintConfigSource(spec *Spec) []error {
 
 // constraintNumericFamily mirrors the runtime's numericFamily in parser.go: the
 // range-checkable int, uint and float types plus the JSON Schema aliases.
-var constraintNumericFamily = map[string]bool{
-	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
-	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
-	"float32": true, "float64": true,
-	"integer": true, "number": true,
+func constraintNumericFamily() map[string]bool {
+	return constraintNumericFamilyOnce.value(func() map[string]bool {
+		return map[string]bool{
+			"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+			"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+			"float32": true, "float64": true,
+			"integer": true, "number": true,
+		}
+	})
 }
+
+var constraintNumericFamilyOnce lazy[map[string]bool]
 
 // inputProblem builds a spec problem about one input, labeled `command <path>: <channel>
 // "<name>": …` and positioned at ptr: the key at fault below the input's pointer from
@@ -854,9 +864,9 @@ func boundApplicability(schema *InputSchema, typ, elem string) []keyedMsg {
 	switch {
 	case first == "":
 		return nil
-	case measuredTypes[elem]:
+	case measuredTypes()[elem]:
 		return measuredBoundProblems(schema, elem)
-	case !constraintNumericFamily[elem]:
+	case !constraintNumericFamily()[elem]:
 		return []keyedMsg{{first, fmt.Sprintf("`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf` apply to numeric types, durations and sizes only, not %s; the bound would be silently ignored", typ)}}
 	}
 	var out []keyedMsg
@@ -1208,7 +1218,7 @@ func lintComplete(spec *Spec) []error {
 				}
 			case "executable", "user", "group", "host":
 				if t != "string" && t != "[]string" {
-					p := schemaKeyProblem(ptr, "complete/kind", path, channel, name, fmt.Sprintf("sets `complete.kind: %s` but its type is %s, which can't hold the %s names the shell offers", kind, t, nativeKindNouns[kind]))
+					p := schemaKeyProblem(ptr, "complete/kind", path, channel, name, fmt.Sprintf("sets `complete.kind: %s` but its type is %s, which can't hold the %s names the shell offers", kind, t, nativeKindNouns()[kind]))
 					p.sev = severityWarning
 					problems = append(problems, p)
 				}
@@ -1219,7 +1229,13 @@ func lintComplete(spec *Spec) []error {
 }
 
 // nativeKindNouns names what each shell-completed `complete.kind` offers.
-var nativeKindNouns = map[string]string{"executable": "program", "user": "user", "group": "group", "host": "host"}
+func nativeKindNouns() map[string]string {
+	return nativeKindNounsOnce.value(func() map[string]string {
+		return map[string]string{"executable": "program", "user": "user", "group": "group", "host": "host"}
+	})
+}
+
+var nativeKindNounsOnce lazy[map[string]string]
 
 // lintDefaultScalar requires a `default:` to be a scalar, or, on a repeatable (list or map)
 // input, a list or map of scalars, each seeded as one occurrence.

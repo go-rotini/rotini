@@ -27,6 +27,7 @@ func main() {
 |---|---|
 | `WithVersion(v)` | set the version `rtx.Version()` returns, which the `--version` flag and `version` command that `rotini init` declares print |
 | `WithDependency(dep, v)` | give handlers a dependency, such as a store or an API client |
+| `WithProvider(dep, fn)` | give handlers a dependency built per run the first time one asks, and closed after the run; see [per-run dependencies](/docs#per-run-dependencies) |
 | `WithStdin` / `WithStdout` / `WithStderr` | replace the program's streams |
 | `WithReporter(fn)` | replace how recorded outcomes are printed and which exit code is used |
 | `WithoutSignalHandling()` | turn off the default Ctrl+C and SIGTERM handling |
@@ -37,6 +38,7 @@ func main() {
 | `WithContext(ctx)` / `RunContext(ctx, argv)` | run under your own context, which leaves signals to you; see [signals and cancellation](/docs#signals-and-cancellation) |
 | `WithSignals(sigs...)` | choose which signals stop the run, also with your own context |
 | `WithPanicRecover(b)` / `WithTeardownOnPanic(b)` | re-raise panics, or skip teardown after one; see [panics](/docs#panics) |
+| `WithMiddleware(mw...)` | wrap every hook, to trace or time it or to refuse a run; see [middleware](/docs#middleware) |
 | `WithClock(now)` | set the clock relative times such as `2h` and `today` are read against, for tests |
 | `WithOutputChecks(true)` | check every structured output against its declared shape before writing it; see [check it](/docs#check-it) |
 | `WithCompletion(format)` / `Complete(words, format)` | answer completion requests in another program's format; see [tab completion](/docs#tab-completion) |
@@ -79,13 +81,14 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.Argv` | the raw arguments, for a handler that parses its own |
 | `rtx.LookupEnv(name)` / `rtx.Environ()` / `rtx.Dir()` | the run's environment and working directory; pass `rtx.Environ()` to a child process's `Env`, and open a relative path with `filepath.Join(rtx.Dir(), path)` |
 | `rtx.MustGetDependency(dep)` | a dependency registered in `main.go` |
+| `rtx.Dependency(dep)` | a dependency, building a provided one on first use, with the provider's error |
 | `rtx.RecordSuccess` / `rtx.RecordWarning` / `rtx.RecordInfo` | record an outcome; the reporter prints it once, after the teardown hooks |
 | `rtx.HaltWith(err)` | fail: record the error and stop |
 | `rtx.Failed()` | whether anything has failed so far, for a teardown hook deciding to commit or roll back |
 | `rtx.Help()` / `rtx.Version()` | the command's help page and the program's version |
 | `rtx.CompletionScript(shell)` | the running program's completion script for a shell, which a generated `completion` handler prints |
 | `rtx.Usage()` | the command's usage line, for a reporter to print after a usage error; see [printing the usage line](/docs#printing-the-usage-line) |
-| `rtx.InputsWithReport[T]()` | the inputs plus where each value came from; `report.Format(w)` prints it; see [explaining where values came from](/docs#explaining-where-values-came-from) |
+| `rtx.InputsWithReport[T]()` | the inputs plus where each value came from; `report.Explain(w)` prints it for users, `report.Format(w)` by field path; see [explaining where values came from](/docs#explaining-where-values-came-from). `report.UnreadConfigKeys()` lists the config file keys no input reads; see [typos in config files](/docs#typos-in-config-files) |
 | `rtx.WriteOutput(v, format, render)` | write a command's [structured output](/docs#structured-output) |
 | `shape.Render(t)` | a renderer for `WriteOutput` that runs a `--format '{{…}}'` template, from the opt-in package `github.com/go-rotini/rotini/shape`; see [templates](/docs#templates) |
 | `rotini.OpenInput(rtx, path)` / `rotini.CreateOutput(rtx, path)` | open an `inputfile` or `outputfile` value, where `-` is stdin or stdout, with `rotini.Overwrite(true)` and `rotini.FileMode(0o600)` as `CreateOutput`'s options; see [files and the standard streams](/docs#files-and-the-standard-streams) |
@@ -101,6 +104,7 @@ Every hook receives a `*rotini.Context`, conventionally named `rtx`:
 | `rtx.DashIndex()` | how many arguments came before a `--` the user typed |
 | `rtx.Now()` | the run's one clock reading, the one relative times are measured from |
 | `rotini.Deprecations(rtx)` | the deprecated spellings this run used; see [deprecating a command or flag](/docs#deprecating-a-command-or-flag) |
+| `rotini.RunEffects(rtx)` | what this run does: the command's `effects` raised by the flags given; see [effects](/docs#effects) |
 | `rotini.AppDirs(rtx, app, strategy)` | the config, data, cache and state directories; see [files your program keeps](/docs#files-your-program-keeps) |
 | `rotini.ConfigProfiles(rtx, file)` | the profiles a config file defines, for a completer; see [profiles](/docs#profiles) |
 | `rotini.SortBy(items, field, desc)` / `rotini.SelectFields(v, at, fields)` | sort a command's output by a field and keep the fields the user chose; see [choosing fields and order](/docs#choosing-fields-and-order) |
@@ -147,7 +151,9 @@ with `rotini.InternalError(err)`. An unknown flag or a bad value is already a us
 A custom reporter is a `rotini.Reporter`, `func(ctx context.Context, rtx *rotini.Context, out
 rotini.Outcome)`, installed with `Program.WithReporter`. It replaces the default entirely: it
 prints only what it prints, and sets the exit code with `rtx.Exit`, so a failed run exits 0
-unless it does. The [guide](/docs#errors-and-exit-codes) has a complete one. For scripts,
+unless it does. To keep the default report and add to it, call `rotini.DefaultReporter` from
+it; `out.ExitCode` is the code the run set and `out.Signal` the signal that stopped it. The
+[guide](/docs#errors-and-exit-codes) has a complete one. For scripts,
 `rotini.StructuredReporter` writes each outcome to stderr as one JSON object per line.
 
 `errors.Is(err, rotini.ErrUsage)` and `errors.Is(err, rotini.ErrInternal)` test the same categories,
@@ -202,7 +208,7 @@ checking it against the declared shape.
 | Package | What it is |
 |---|---|
 | `github.com/go-rotini/rotini/shape` | `shape.Template`, a flag type for a `--format '{{…}}'` Go template, and `shape.Render`, the renderer that runs it; see [templates](/docs#templates) |
-| `github.com/go-rotini/rotini/rotinitest` | `Run`, `Output`, `OutputAs` and `ExitDocumented` for tests with typed inputs, with the options `Env`, `Dir`, `Stdin`, `Context`, `Presence`, `Secrets`, `Clock`, `Argv0` and `Path`; see [testing with typed inputs](/docs#testing-with-typed-inputs) |
+| `github.com/go-rotini/rotini/rotinitest` | `Run`, `Output`, `OutputAs` and `ExitDocumented` for tests with typed inputs, with the options `Env`, `Dir`, `Stdin`, `Context`, `Presence`, `Secrets`, `Clock`, `Argv0` and `Path`; see [testing with typed inputs](/docs#testing-with-typed-inputs). `CheckCodec` checks a decoder given to `rotini.Codec`; see [your own config format](/docs#your-own-config-format) |
 
 Both are opt-in: a program that doesn't import them links none of their code.
 
@@ -216,10 +222,11 @@ Generated code and most programs never need these, but they are supported:
 | `rotini.NewWiredProgram(def, lookup, features...)` | the same with only the listed features linked; the generated `NewProgram` uses it. See [what a program links](/docs#what-a-program-links) |
 | `Program.WithFeatures(features...)` | add features to a wired program, for code its spec does not describe |
 | `rotini.Plugins`, `rotini.ResponseFiles`, `rotini.Chdir`, `rotini.Multicall` | program features: plugins, response files, `role: chdir`, `multicall` |
-| `rotini.Stdin(formats...)`, `rotini.Env`, `rotini.ConfigFiles`, `rotini.Profiles`, `rotini.EnvFiles`, `rotini.Fallbacks`, `rotini.PathExpansion`, `rotini.UserHomes`, `rotini.ObjectFlags`, `rotini.Schemas` | input features: stdin formats, env inputs, configuration files and their profiles, `.env` files and `variable_file`, flag fallbacks, `expand` and `~user` paths, `~user` paths alone, object flags, schema checks |
+| `rotini.Stdin(formats...)`, `rotini.Env`, `rotini.EnvFamilies`, `rotini.ConfigFiles`, `rotini.Profiles`, `rotini.EnvFiles`, `rotini.Fallbacks`, `rotini.PathExpansion`, `rotini.UserHomes`, `rotini.ObjectFlags`, `rotini.Schemas` | input features: stdin formats, env inputs, `nesting:` env families, configuration files and their profiles, `.env` files and `variable_file`, flag fallbacks, `expand` and `~user` paths, `~user` paths alone, object flags, schema checks |
 | `rotini.JSON`, `rotini.YAML`, `rotini.TOML`, `rotini.JSONC`, `rotini.Dotenv` | document formats, each linking only its own decoder |
+| `rotini.Codec(name, decode, opts...)` with `rotini.CodecExtensions`, `rotini.CodecLocate` | a read-only document format of your own, for config files and stdin; see [your own config format](/docs#your-own-config-format) |
 | `rotini.Bounds`, `rotini.UniqueItems`, `rotini.Patterns`, `rotini.FlagGroups`, `rotini.FlagDependencies`, `rotini.StreamPaths` | validation: bounds, `uniqueItems`, `pattern`, flag groups, flag dependencies, `inputfile`/`outputfile` |
-| `rotini.URLValues`, `rotini.EmailValues`, `rotini.TimeZoneValues`, `rotini.MACValues`, `rotini.IPValues`, `rotini.RegexpValues` | the value types `url`, `email`, `timezone`, `mac`, `ip`/`cidr`/`hostport`, `regexp` |
+| `rotini.TimeValues`, `rotini.URLValues`, `rotini.EmailValues`, `rotini.TimeZoneValues`, `rotini.MACValues`, `rotini.IPValues`, `rotini.RegexpValues` | the value types `date` and times with `layout:` or `relative:`, `url`, `email`, `timezone`, `mac`, `ip`/`cidr`/`hostport`, `regexp` |
 | `WiringError.Feature` | the feature a run needed but its program does not wire |
 | `Program.WithResolver` / `rotini.DefaultResolver` | replace how the command line is resolved to a command or a plugin |
 | `Program.WithLifecycle` / `rotini.DefaultLifecycle` / `rotini.AsCommand` | replace which hooks run and in what order |

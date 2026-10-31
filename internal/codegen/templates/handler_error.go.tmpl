@@ -25,6 +25,12 @@ func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Contex
 		return err
 	}
 	inputs := argv.Values
+{{- if or .RootHelpFlag .RootVersionFlag}}
+
+	if err := rtx.UnknownCommand(); err != nil {
+		return err
+	}
+{{- end}}
 {{- if .RootHelpFlag}}
 
 	if inputs.{{.Prefix}}.Flags.{{.RootHelpFlag}} {
@@ -133,11 +139,11 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) error {
 	}
 {{end}}
 {{- end}}
-{{- if .HelpPathArg}}
+{{- if .HelpPathArg}}{{if .HelpPlugins}}
 	if rtx.PluginHelp(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...) {
 		return nil
 	}
-
+{{end}}
 	page, err := rtx.HelpFor(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...)
 	if err != nil {
 		return err
@@ -166,8 +172,7 @@ func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) error {
 	return err
 {{- else if and .PrintHelpWhenBare .NewShape}}
 	fmt.Fprintln(rtx.Stderr, rtx.Help())
-	rtx.HaltWithCode(1)
-	return nil
+	return rotini.MissingCommand(rtx)
 {{- else if .PrintHelpWhenBare}}
 	if _, err := fmt.Fprintln(rtx.Stdout, rtx.Help()); err != nil {
 		return err

@@ -9,6 +9,8 @@ command:
   usage: deploy [flags] <command>
   examples:
     - deploy ship api --env prod
+    - run: deploy ship web --env staging
+      summary: Ship the web app to staging
   groups:
     - name: Deploying
       description: Commands that change what runs where.
@@ -23,6 +25,7 @@ command:
     cascading: "Global Flags:"
     environment: "Environment:"
     configuration: "Configuration:"
+    files: "Files:"
     stdin: "Stdin:"
     output: "Output:"
     examples: "Examples:"
@@ -31,6 +34,9 @@ command:
     - name: environment
       summary: the environment variables deploy reads
       generate: environment
+    - name: configuration
+      summary: the configuration files and keys deploy reads
+      generate: configuration
     - name: targets
       summary: how targets are written
       body: A target is a host and an optional port.
@@ -141,6 +147,7 @@ command:
         type: object
         properties:
           digest: { type: string }
+        additionalProperties: false
   response_files: { prefix: "+" }
   commands:
     - name: ship

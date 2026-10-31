@@ -1,0 +1,1 @@
+warning: spec: .rotini.spec.yaml:17:28: command demo/remove: exit_status names code 3 "missing", but command demo names it "not_found"; give a code one name across the program, so a script reading it sees one meaning

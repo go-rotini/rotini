@@ -1,0 +1,57 @@
+# One command of each kind the stub data describes: the root answering the short-circuit
+# --help and --version for the tree, a help command, a version command, a completion command,
+# a command holding a secret, a bare group, and commands answering a help or version flag of
+# their own.
+version: 0.0.0
+command:
+  name: demo
+  summary: a demo
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+    - name: version
+      identifiers: [-v, --version]
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          schema: { type: '[]string' }
+    - name: version
+      summary: print the version
+    - name: completion
+      summary: print a completion script
+      arguments:
+        - name: shell
+          schema: { type: string, required: true, enum: [bash, fish, powershell, zsh] }
+    - name: deploy
+      summary: deploy it
+      flags:
+        - name: token
+          identifiers: [--token]
+          schema: { type: string, secret: true }
+    - name: vault
+      summary: use the vault
+      commands:
+        - name: read
+          summary: read a value
+          arguments:
+            - name: key
+              schema: { type: string, required: true }
+    - name: legacy
+      summary: answers its own help flag
+      flags:
+        - name: help
+          identifiers: [--usage]
+          schema: { type: bool }
+    - name: tool
+      summary: answers its own version flag
+      flags:
+        - name: version
+          identifiers: [--tool-version]
+          schema: { type: bool }

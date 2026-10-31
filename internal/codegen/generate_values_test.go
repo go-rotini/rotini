@@ -156,7 +156,7 @@ func TestPages_valueKeys(t *testing.T) {
 		"(accepts 2006-01-02 15:04 or a time ago: 2h, 3d, yesterday)",
 		"(accepts 2006-01-02)",
 		"--re regexp",
-		"--glob []glob",
+		"--glob glob...",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("help is missing %q\n%s", want, help)

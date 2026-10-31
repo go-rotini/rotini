@@ -38,6 +38,33 @@ func Env() Feature {
 	}}
 }
 
+// EnvFamilies wires nested env inputs (`nesting:`), each collecting a family of environment
+// variables (APP_HTTP__TIMEOUT, APP_HTTP__RETRY__MAX) into one map. It also needs [Env].
+func EnvFamilies() Feature {
+	return Feature{name: "env-families", apply: func(s *featureSet) {
+		s.families = &envFamilyHooks{fill: fillEnvNested}
+	}}
+}
+
+// fillEnvFamilies fills the nested env inputs of one Env struct through [EnvFamilies],
+// returning the recon keys it filled. A struct with none needs no feature.
+func fillEnvFamilies(env reflect.Value, view *osView) (map[string]bool, error) {
+	if h := view.clockRef().features().families; h != nil {
+		return h.fill(env, view)
+	}
+	if env.Kind() == reflect.Struct {
+		et := env.Type()
+		for j := range env.NumField() {
+			f := et.Field(j)
+			if f.Tag.Get("envnest") != "" {
+				return nil, missingFeature("env-families", "EnvFamilies()",
+					"env input "+f.Tag.Get("rotini")+" collects a family of variables (nesting)")
+			}
+		}
+	}
+	return nil, nil //nolint:nilnil // no nested inputs: nothing filled
+}
+
 // ConfigFiles wires configuration files: config inputs (the Config sub-structs), per-input
 // file pins, discovery, custom [InputSettings.Sources], [ConfigFilePath] and writing values
 // back. Each file's format also needs its codec.

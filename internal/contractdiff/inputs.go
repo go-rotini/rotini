@@ -34,7 +34,11 @@ func accepted(f *input) []string { return slices.Concat(f.Identifiers, f.HiddenI
 
 // digitIdentifier matches a flag identifier that is a dash and digits, such as -4, which an
 // argument starting with a digit can no longer be.
-var digitIdentifier = regexp.MustCompile(`^-\d+$`)
+func digitIdentifier() *regexp.Regexp {
+	return digitIdentifierOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^-\d+$`) })
+}
+
+var digitIdentifierOnce lazy[*regexp.Regexp]
 
 // flags compares the flags a command accepts: a flag of the same name that still takes one of
 // its identifiers first, else the flag that takes one of its identifiers now. An inherited
@@ -145,7 +149,7 @@ func (d *differ) addedFlags(st stability, oc, nc *command, matched map[*input]bo
 		nf := &nc.Flags[i]
 		if hasArgs {
 			for _, id := range accepted(nf) {
-				if digitIdentifier.MatchString(id) && !oldAccepts[id] {
+				if digitIdentifier().MatchString(id) && !oldAccepts[id] {
 					d.add(st, PossiblyBreaking, RuleDigitFlagAdded, oc.Name+" "+id,
 						"flag "+id+" added to a command with arguments", "an argument such as "+id+" now reads as the flag")
 				}
@@ -226,7 +230,7 @@ func (d *differ) flagIdentifiers(st stability, oc *command, of, nf *input, newAc
 			}
 		}
 		for _, id := range l.new {
-			if !oldAccepts[id] && (!digitIdentifier.MatchString(id) || len(oc.Arguments) == 0) {
+			if !oldAccepts[id] && (!digitIdentifier().MatchString(id) || len(oc.Arguments) == 0) {
 				d.add(st, Safe, l.added, oc.Name+" "+id, l.what+" "+id+" added", "")
 			}
 		}
@@ -619,7 +623,7 @@ func (d *differ) inputType(st stability, w string, o, n *input) {
 		if o.Kind == "" || n.Kind == "" || o.Kind == n.Kind {
 			d.add(st, Safe, RuleInputTypeWidened, w, msg, "")
 		} // else the kind change is reported, and breaks
-	case n.Type == "float64" && (intBits[o.Type] == 64 || uintBits[o.Type] == 64):
+	case n.Type == "float64" && (intBits()[o.Type] == 64 || uintBits()[o.Type] == 64):
 		d.add(st, PossiblyBreaking, RuleInputTypeChanged, w, msg, "an integer beyond 2^53 is rounded")
 	default:
 		d.add(st, Breaking, RuleInputTypeChanged, w, msg, "")
@@ -627,8 +631,21 @@ func (d *differ) inputType(st stability, w string, o, n *input) {
 }
 
 // intBits is the width of each integer type; int is taken as 64 bits.
-var intBits = map[string]int{"int8": 8, "int16": 16, "int32": 32, "int64": 64, "int": 64}
-var uintBits = map[string]int{"uint8": 8, "uint16": 16, "uint32": 32, "uint64": 64, "uint": 64}
+func intBits() map[string]int {
+	return intBitsOnce.value(func() map[string]int {
+		return map[string]int{"int8": 8, "int16": 16, "int32": 32, "int64": 64, "int": 64}
+	})
+}
+
+var intBitsOnce lazy[map[string]int]
+
+func uintBits() map[string]int {
+	return uintBitsOnce.value(func() map[string]int {
+		return map[string]int{"uint8": 8, "uint16": 16, "uint32": 32, "uint64": 64, "uint": 64}
+	})
+}
+
+var uintBitsOnce lazy[map[string]int]
 
 // typeWidened reports whether type n accepts every value type o does.
 func typeWidened(o, n string) bool {
@@ -641,13 +658,13 @@ func typeWidened(o, n string) bool {
 		return typeWidened(oe, ne)
 	}
 	switch {
-	case intBits[o] > 0 && intBits[n] > 0:
-		return intBits[n] >= intBits[o]
-	case uintBits[o] > 0 && uintBits[n] > 0:
-		return uintBits[n] >= uintBits[o]
-	case uintBits[o] > 0 && intBits[n] > 0:
-		return intBits[n] > uintBits[o]
-	case (intBits[o] > 0 && intBits[o] <= 32 || uintBits[o] > 0 && uintBits[o] <= 32 || o == "float32") && n == "float64":
+	case intBits()[o] > 0 && intBits()[n] > 0:
+		return intBits()[n] >= intBits()[o]
+	case uintBits()[o] > 0 && uintBits()[n] > 0:
+		return uintBits()[n] >= uintBits()[o]
+	case uintBits()[o] > 0 && intBits()[n] > 0:
+		return intBits()[n] > uintBits()[o]
+	case (intBits()[o] > 0 && intBits()[o] <= 32 || uintBits()[o] > 0 && uintBits()[o] <= 32 || o == "float32") && n == "float64":
 		return true // float64 holds every such value exactly
 	case o == "existingfile" && n == "inputfile":
 		return true

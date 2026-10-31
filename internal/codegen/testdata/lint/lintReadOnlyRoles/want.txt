@@ -1,0 +1,3 @@
+warning: spec: .rotini.spec.yaml:32:17: command demo/list: flag "dry-run": has role dry-run, but its command's effects are read, so there is nothing to preview; remove the role, or declare the command's (or the flag's) effects as write or destructive
+warning: spec: .rotini.spec.yaml:35:17: command demo/list: flag "yes": has role confirm, but its command's effects are read, so there is nothing to confirm; remove the role, or declare the command's (or the flag's) effects as write or destructive
+warning: spec: .rotini.spec.yaml:38:17: command demo/list: flag "force": has role force, but its command's effects are read, so there is nothing to overwrite; remove the role, or declare the command's (or the flag's) effects as write or destructive

@@ -221,12 +221,13 @@ func lintMountedExamples(spec *Spec, specPath string) []error {
 		if c.Ref != "" && c.Name == "" {
 			cmdPath, subject = strings.TrimSuffix(cmdPath, "/"+c.Ref), fmt.Sprintf("$ref %q: ", c.Ref)
 		}
-		for i, line := range c.Examples {
+		for i, ex := range examplesOf(c.Examples) {
+			line := ex.Run
 			if msg, unclosed := plain.complaint(line); msg != "" || unclosed {
 				continue
 			}
 			if msg, _ := full.complaint(line); msg != "" {
-				problems = append(problems, &problem{kind: "spec", ptr: fmt.Sprintf("%s/examples/%d", ptr, i), loc: "command " + cmdPath,
+				problems = append(problems, &problem{kind: "spec", ptr: examplePointer(c, ptr, i), loc: "command " + cmdPath,
 					msg: fmt.Sprintf("%sexample %q does not parse: %s", subject, line, msg)})
 			}
 		}

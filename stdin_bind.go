@@ -68,7 +68,7 @@ func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, ar
 	}
 	if text == "" {
 		if tag.required {
-			return usageBind(channelStdin, "", tag.emptyMessage(), nil)
+			return usageBind(InputErrorKindMissingRequired, channelStdin, "", tag.emptyMessage(), nil)
 		}
 		return nil // nothing piped → leave Stdin nil
 	}
@@ -76,7 +76,7 @@ func (b *InputReader) bindStdin(rtx *Context, sf reflect.Value, tag stdinTag, ar
 		return bindRawStdin(sf, tag, text)
 	}
 	if strings.HasPrefix(text, "\xff\xfe") || strings.HasPrefix(text, "\xfe\xff") {
-		return usageBind(channelStdin, "", "stdin is UTF-16 encoded; pipe UTF-8 instead", nil)
+		return usageBind(InputErrorKindMalformedDocument, channelStdin, "", "stdin is UTF-16 encoded; pipe UTF-8 instead", nil)
 	}
 
 	// A raw format binds the payload itself rather than decoding a document.
@@ -96,7 +96,7 @@ func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, 
 	data := stripBOM([]byte(text))
 	js := b.stdinSchemas[sf.Type().Elem().Name()]
 	c := fs.codec(format)
-	if c == nil && codecCtor(format) != "" {
+	if c == nil {
 		return missingCodec(format, stdinSubject(rtx)+" is "+format)
 	}
 	if js != "" && fs.schemas == nil {
@@ -106,9 +106,6 @@ func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, 
 		return bindStdinValue(fs, sf, format, c, data, js)
 	}
 
-	if c == nil {
-		return internalBind(channelStdin, "", fmt.Sprintf("unsupported stdin format %q", format), nil)
-	}
 	m, err := c.codec().Decode(data)
 	if err != nil {
 		return stdinDecodeError(format, err)
@@ -121,7 +118,7 @@ func (b *InputReader) bindStdinDocument(rtx *Context, sf reflect.Value, format, 
 		}
 		if err := validator.Validate(m); err != nil {
 			if errors.Is(err, errSchemaUnfinished) {
-				return usageBind(channelStdin, "", stdinUnfinished, err)
+				return usageBind(InputErrorKindSchemaViolation, channelStdin, "", stdinUnfinished, err)
 			}
 			fs.schemas.patternMessages(js, err)
 			return reconBind(channelStdin, err)
@@ -151,7 +148,7 @@ func (b *InputReader) bindStdinStream(rtx *Context, sf reflect.Value, tag stdinT
 	}
 	if !rtx.stdinState().piped() {
 		if tag.required {
-			return usageBind(channelStdin, "", tag.emptyMessage(), nil)
+			return usageBind(InputErrorKindMissingRequired, channelStdin, "", tag.emptyMessage(), nil)
 		}
 		return nil
 	}
@@ -193,7 +190,7 @@ func bindStdinValue(fs *featureSet, sf reflect.Value, format string, c *codecEnt
 	}
 	ptr := reflect.New(sf.Type().Elem())
 	if err := json.Unmarshal(raw, ptr.Interface()); err != nil {
-		return usageBind(channelStdin, "", fmt.Sprintf("could not bind stdin: %s", jsonDecodeMessage(err)), err)
+		return usageBind(InputErrorKindInvalidValue, channelStdin, "", fmt.Sprintf("could not bind stdin: %s", jsonDecodeMessage(err)), err)
 	}
 	sf.Set(ptr)
 	return nil
@@ -206,7 +203,7 @@ func stdinDecodeError(format string, err error) error {
 	if line, col, ok := parsePosition(err); ok {
 		msg += fmt.Sprintf(" at line %d, column %d", line, col)
 	}
-	return usageBind(channelStdin, "", msg+": "+decodeMessage(err), err)
+	return usageBind(InputErrorKindMalformedDocument, channelStdin, "", msg+": "+decodeMessage(err), err)
 }
 
 // isRawStdinFormat reports whether format binds stdin directly instead of decoding it.

@@ -61,6 +61,19 @@ type Command struct {
 	// Metadata is the command's own labels; see [CommandDef.Metadata].
 	Metadata map[string]string
 
+	// Effects is what running the command does; nil when undeclared. See [CommandDef.Effects],
+	// and [RunEffects] for what this run's flags add.
+	Effects *Effects
+
+	// ExitStatus lists the exit codes the command documents: its own, else the root's. See
+	// [CommandDef.ExitStatus].
+	ExitStatus []ExitStatusDef
+
+	// Stability is "experimental", "beta", or "" for stable: the least stable of the command's
+	// and its ancestors' declared [CommandDef.Stability], so a command under an experimental
+	// one is experimental too.
+	Stability string
+
 	// pluginPathRaw is PluginPath as declared, for re-expanding it against a run's injected
 	// environment; view is that run's environment, used by [Command.PluginBinary] and
 	// [Command.DiscoveredPlugins]. Both are set by the runtime; nil reads the process.
@@ -85,6 +98,7 @@ func rootFrame(def Definition) Command {
 		Commands: def.Commands, Plugins: def.Plugins, PluginDiscovery: def.PluginDiscovery,
 		PluginPath: expandPluginPath(def.PluginPath), pluginPathRaw: def.PluginPath, Passthrough: def.Passthrough, OptionsFirst: def.OptionsFirst,
 		Output: def.Output, Usage: def.Usage, Metadata: def.Metadata,
+		Effects: def.Effects, ExitStatus: def.ExitStatus, Stability: def.Stability,
 	}
 }
 
@@ -98,6 +112,7 @@ func cmdFrame(c CommandDef) Command {
 		Commands: c.Commands, Plugins: c.Plugins, PluginDiscovery: c.PluginDiscovery,
 		PluginPath: expandPluginPath(c.PluginPath), pluginPathRaw: c.PluginPath, Passthrough: c.Passthrough, OptionsFirst: c.OptionsFirst,
 		Output: c.Output, Usage: c.Usage, Metadata: c.Metadata,
+		Effects: c.Effects, ExitStatus: c.ExitStatus, Stability: c.Stability,
 	}
 }
 

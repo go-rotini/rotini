@@ -23,10 +23,6 @@ func (*demoHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	if rtx.PluginHelp(inputs.DemoHelp.Arguments.Command...) {
-		return
-	}
-
 	page, err := rtx.HelpFor(inputs.DemoHelp.Arguments.Command...)
 	if err != nil {
 		rtx.HaltWith(err)

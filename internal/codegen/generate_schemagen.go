@@ -25,9 +25,16 @@ const outputRootSentinel = "rotiniGeneratedOutputsRoot"
 // when there are none. It uses gogen.Generate, the engine behind the spec and conf
 // types.
 func buildOutputTypes(gp *program, pkg string) (string, error) {
+	types, _, err := buildOutputTypesConsts(gp, pkg)
+	return types, err
+}
+
+// buildOutputTypesConsts is [buildOutputTypes], also returning the enum value constants of the
+// generated types' string fields (see outputEnumGroups), which the caller declares.
+func buildOutputTypesConsts(gp *program, pkg string) (string, []constGroup, error) {
 	defs := collectOutputDefs(gp)
 	if len(defs) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 	unions := collectOutputUnions(gp)
 	doc, err := json.Marshal(map[string]any{
@@ -36,13 +43,13 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 		"definitions": defs,
 	})
 	if err != nil {
-		return "", fmt.Errorf("marshal output schema document: %w", err)
+		return "", nil, fmt.Errorf("marshal output schema document: %w", err)
 	}
 	src, err := gogen.Generate(doc,
 		gogen.WithPackage(pkg),
 		gogen.WithRootType(outputRootSentinel))
 	if err != nil {
-		return "", fmt.Errorf("generate output types: %w", err)
+		return "", nil, fmt.Errorf("generate output types: %w", err)
 	}
 	fixed := map[string]bool{}
 	for name := range defs {
@@ -50,11 +57,11 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 	}
 	sized, err := sizedNumberTypes(stripGenerated(string(src), outputRootSentinel), defs)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	types, err := initialismIdents(sized, fixed)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var b strings.Builder
 	b.WriteString(types)
@@ -62,7 +69,11 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 		b.WriteString("\n\n")
 		b.WriteString(u.decl())
 	}
-	return b.String(), nil
+	groups, err := outputEnumGroups(types, defs)
+	if err != nil {
+		return "", nil, err
+	}
+	return b.String(), groups, nil
 }
 
 // outputUnion is the <Prefix>Output interface of a stream whose items come in several kinds,

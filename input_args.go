@@ -112,13 +112,13 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 		if waivable {
 			return nil, "", nil
 		}
-		return nil, "", usageBind(channelArgument, ad.Name, label+" "+problem+fromSource(origin), nil)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelArgument, ad.Name, label+" "+problem+fromSource(origin), nil)
 	}
 	if vals, err = fallbackValues(val, ad.Separator); err != nil {
 		if waivable {
 			return nil, "", nil
 		}
-		return nil, "", usageBind(channelArgument, ad.Name, fmt.Sprintf("%s: %v", label, err)+fromSource(origin), err)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelArgument, ad.Name, fmt.Sprintf("%s: %v", label, err)+fromSource(origin), err)
 	}
 	vals = argEnum(&ad).canonical(vals)
 	if vals, err = expandFallbackWired(vals, sf.Tag, source, label, rd); err != nil {
@@ -128,7 +128,7 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 		if waivable {
 			return nil, "", nil
 		}
-		return nil, "", usageBind(channelArgument, ad.Name, err.Error()+fromSource(origin), err)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelArgument, ad.Name, err.Error()+fromSource(origin), err)
 	}
 	probe := reflect.New(field.Type()).Elem()
 	if err := coerceTime(probe, vals, argTimeSpec(&ad, rd.view.clockRef())); err != nil {
@@ -141,7 +141,7 @@ func argFallback(reg fallbackLookup, field reflect.Value, sf reflect.StructField
 		if mistake, ok := asError[authorMistake](err); ok {
 			return nil, "", internalBind(channelArgument, ad.Name, fmt.Sprintf("%s: %s", label, mistake), err)
 		}
-		return nil, "", usageBind(channelArgument, ad.Name, fmt.Sprintf("%s: %s", label, coerceMessage(err, ad.Secret))+fromSource(origin), err)
+		return nil, "", usageBind(InputErrorKindInvalidValue, channelArgument, ad.Name, fmt.Sprintf("%s: %s", label, coerceMessage(err, ad.Secret))+fromSource(origin), err)
 	}
 	if vals == nil {
 		vals = []string{} // supplied, and empty: still present

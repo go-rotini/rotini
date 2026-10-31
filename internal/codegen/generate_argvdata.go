@@ -48,6 +48,15 @@ func exitStatusLiteral(entries []ExitStatusEntry) string {
 	return "ExitStatus: " + l + ",\n"
 }
 
+// effectiveExitStatus is the exit_status a command documents: its own when it declares one,
+// else the root's, which is program-wide. An own list replaces the root's.
+func effectiveExitStatus(own, root []ExitStatusEntry) []ExitStatusEntry {
+	if len(own) > 0 {
+		return own
+	}
+	return root
+}
+
 // composedTypeName names a generated type (suffix "Inputs" or "Output") of the command at path
 // in a composed subtree, qualified by the package of the spec that declares the command, or ""
 // when the subtree's types live in no package the parent imports (a hand-written handler
@@ -72,4 +81,50 @@ func (gp *program) nestedTypeAlias(rr resolvedRef, c Command, ctx composeCtx, mo
 		return ""
 	}
 	return gp.addImport(identAlias(rr.spec.Command.Name), imp)
+}
+
+// exampleRunsDecl renders the cmd file's Examples variable: each example of the program's
+// commands whose first command running the program has literal words, with those words, for a
+// test to run. "" when there are none, or when a file of the author's in the package already
+// declares Examples (generate then leaves it out, with a notice).
+func (gp *program) exampleRunsDecl() string {
+	program := gp.exampleProgram()
+	var rows []string
+	for _, n := range gp.contractNodes() {
+		command := strings.Join(append([]string{gp.rootName}, n.path...), " ")
+		for _, e := range n.help.Examples {
+			argv, ok := exampleRunArgv(e.Run, program)
+			if !ok {
+				continue
+			}
+			row := fmt.Sprintf("{Command: %q, Run: %q", command, e.Run)
+			if e.Summary != "" {
+				row += fmt.Sprintf(", Summary: %q", e.Summary)
+			}
+			rows = append(rows, row+", Argv: "+goStringSlice(argv)+"}")
+		}
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	if file, ok := gp.authorNames["Examples"]; ok {
+		gp.auditWarnings = append(gp.auditWarnings, fmt.Errorf("%s declares Examples, the name of the generated variable listing the spec's examples; generate leaves the variable out", file))
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("// Examples are the spec's examples that run the program with literal words (no expansion,\n")
+	b.WriteString("// glob or <placeholder>), in the spec's order, each with the words after the program's name\n")
+	b.WriteString("// that a test can run:\n//\n")
+	b.WriteString("//\tfor _, ex := range Examples {\n//\t\tres := rotinitest.RunArgv(t, NewProgram(), ex.Argv)\n//\t\t// check res\n//\t}\n")
+	b.WriteString("var Examples = []struct {\n")
+	b.WriteString("\tCommand string   // the command whose examples list it, by its path\n")
+	b.WriteString("\tRun     string   // the line as the spec writes it\n")
+	b.WriteString("\tSummary string   // what it does; \"\" for none\n")
+	b.WriteString("\tArgv    []string // the words after the program's name\n")
+	b.WriteString("}{\n")
+	for _, r := range rows {
+		fmt.Fprintf(&b, "\t%s,\n", r)
+	}
+	b.WriteString("}\n")
+	return b.String()
 }

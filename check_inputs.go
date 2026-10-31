@@ -458,10 +458,10 @@ func checkTypedChannelPresence(v reflect.Value, chain []Command, anchor int, set
 					if tag.Get("env") != "" {
 						names = strings.Split(tag.Get("env"), ",")
 					}
-					err = usageBind(channelEnv, key, envUnsetLabel(names, key)+" is required", nil)
+					err = usageBind(InputErrorKindMissingRequired, channelEnv, key, envUnsetLabel(names, key)+" is required", nil)
 					return
 				}
-				err = usageBind(channelConfig, key, "config key "+key+" is required", nil)
+				err = usageBind(InputErrorKindMissingRequired, channelConfig, key, "config key "+key+" is required", nil)
 			})
 		}
 		if err != nil || scope != len(chain)-1 {
@@ -476,7 +476,7 @@ func checkTypedChannelPresence(v reflect.Value, chain []Command, anchor int, set
 			return // not required, or the file argument is the input
 		}
 		if _, given := set[fieldPath(top, "Stdin")]; !given {
-			err = usageBind(channelStdin, "", "required stdin payload is missing", nil)
+			err = usageBind(InputErrorKindMissingRequired, channelStdin, "", "required stdin payload is missing", nil)
 		}
 	})
 	return err
@@ -527,7 +527,7 @@ func checkTypedStdin(fs *featureSet, ci reflect.Value, schemas map[string]string
 	}
 	if err := validator.Validate(doc); err != nil {
 		if errors.Is(err, errSchemaUnfinished) {
-			return usageBind(channelStdin, "", stdinUnfinished, err)
+			return usageBind(InputErrorKindSchemaViolation, channelStdin, "", stdinUnfinished, err)
 		}
 		fs.schemas.patternMessages(js, err)
 		return reconBind(channelStdin, err)
@@ -763,7 +763,7 @@ func checkTypedRecords(fs *featureSet, records reflect.Value, schemas map[string
 		}
 		if err := fs.schemas.document(js, raw); err != nil {
 			if ie, ok := asError[*InputError](err); ok {
-				return &InputError{Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin record %d: %s", i+1, ie.Msg), Cause: ie.Cause, usage: ie.usage}
+				return &InputError{Kind: ie.Kind, Channel: channelStdin, Input: ie.Input, Msg: fmt.Sprintf("stdin record %d: %s", i+1, ie.Msg), Cause: ie.Cause, usage: ie.usage}
 			}
 			return err
 		}

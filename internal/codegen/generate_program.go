@@ -229,7 +229,6 @@ func (p *program) agentProgram() (*agentProgram, error) {
 	groups := map[string]bool{}
 	off := map[string]bool{}        // command paths with `agent: false`
 	declared := map[string]string{} // command path → its declared stability
-	var rootExits []contractExit
 	for _, c := range a.doc.Commands {
 		if len(c.Path) > 0 {
 			groups[strings.Join(c.Path[:len(c.Path)-1], " ")] = true
@@ -238,17 +237,11 @@ func (p *program) agentProgram() (*agentProgram, error) {
 			off[strings.Join(c.Path, " ")] = true
 		}
 		declared[strings.Join(c.Path, " ")] = c.Stability
-		if len(c.Path) == 0 && !c.Plugin {
-			rootExits = c.ExitStatus
-		}
 	}
 	displayWords := strings.Fields(p.rootDisplay)
 	for _, c := range a.doc.Commands {
 		if c.Plugin {
 			continue
-		}
-		if len(c.ExitStatus) == 0 {
-			c.ExitStatus = rootExits // the root's exit_status is program-wide
 		}
 		key := strings.Join(c.Path, " ")
 		ac := agentCommand{

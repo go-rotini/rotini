@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 )
 
@@ -25,12 +26,22 @@ type Outcome struct {
 	// is no record call for them.
 	Panics []*PanicError
 
+	// ExitCode is the exit code the lifecycle set before the reporter ran: by
+	// [Context.HaltWithCode], [Context.Exit], an [ExitCause], or 128+n after a trapped signal.
+	// It is 0 when none was set. It is information only: the reporter sets the final code with
+	// [Context.Exit].
+	ExitCode int
+	// Signal is the signal rotini's trap caught that stopped the run, or nil. See [SignalCaused]
+	// for the errors it caused.
+	Signal os.Signal
+
 	// channels are the author's [Channel] records, read with [Outcome.Records].
 	channels []*channelRecords
 }
 
-// Empty reports whether the run recorded nothing, in the built-in fields or any [Channel]. The
-// runtime does not call the reporter for an empty Outcome.
+// Empty reports whether the run recorded nothing, in the built-in record fields or any
+// [Channel]; ExitCode and Signal are not records. The runtime does not call the reporter for an
+// empty Outcome.
 func (o Outcome) Empty() bool {
 	return len(o.Infos)+len(o.Successes)+len(o.Warnings)+len(o.Errors)+len(o.Panics)+len(o.channels) == 0
 }
@@ -55,21 +66,36 @@ func (o Outcome) Failed() bool {
 // failure, for example by writing to rtx.Stderr and setting a code with [Context.Exit].
 type Reporter func(ctx context.Context, rtx *Context, out Outcome)
 
-// WithReporter sets the program's outcome reporter. See [Reporter].
+// WithReporter sets the program's outcome reporter. See [Reporter]. The default is
+// [DefaultReporter]; a custom reporter receives every recorded error and owns the exit code
+// entirely, and can call DefaultReporter for the rest of the report:
 //
-// The default prints infos, warnings, errors, panics, then successes, each followed by the
-// records of the [Channel]s of that [ChannelClass], all to the run's stderr ([Context.Stderr], so
-// a handler that replaces it redirects the report too), so stdout carries only what handlers
-// write. It applies an exit floor: a recorded error or panic exits 1
-// unless a handler already set a non-zero code. It leaves out an error caused by the run's own
-// signal trap (the trap's cancellation, or context.Canceled after it), since a signal is a
-// graceful stop and the exit code, 128+n, already says why the run ended. A custom reporter
-// receives every recorded error and owns the exit code entirely.
+//	p.WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+//		rotini.DefaultReporter(ctx, rtx, out)
+//		if out.Failed() {
+//			fmt.Fprintln(rtx.Stderr, "Run 'taskr --help' for usage.")
+//		}
+//	})
 //
 // A nil fn restores the default reporter.
 func (p *Program) WithReporter(fn Reporter) *Program {
 	p.reporterFn = fn
 	return p
+}
+
+// Reporter returns the program's outcome reporter: the one [Program.WithReporter] set, or
+// [DefaultReporter]. Wrapping it keeps the program's report while adding to it:
+//
+//	report := p.Reporter()
+//	p.WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+//		audit(out)
+//		report(ctx, rtx, out)
+//	})
+func (p *Program) Reporter() Reporter {
+	if p.reporterFn == nil {
+		return DefaultReporter
+	}
+	return p.reporterFn
 }
 
 // settle is the single run tail every run path ends in: it discards output files left open,
@@ -78,13 +104,17 @@ func (p *Program) WithReporter(fn Reporter) *Program {
 //
 // A handler's exit code is already in rtx.exitCode when the reporter runs; the reporter is
 // the final authority, since rtx.Exit overrides it during the reporter stage. The exit floor
-// lives in defaultReporter, so a custom reporter does not inherit it.
+// lives in DefaultReporter, so a custom reporter does not inherit it.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	// A signal that arrived after the last forward step (during teardown, say) still ends
 	// the run with its code, however forward progress stopped, unless a hook exited.
 	if _, exitNow := rtx.stopState(); !exitNow && signalCanceled(ctx) {
 		rtx.HaltWithCode(canceledExitCode(ctx))
 	}
+	// Every hook has finished: close what the run's providers built, so a Close error reaches
+	// the reporter.
+	rtx.closeProvided()
+
 	rtx.endStdin()
 	rtx.abortOutputs()
 	rtx.settleOutput()
@@ -94,6 +124,8 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 		Warnings:  rtx.copyWarnings(),
 		Errors:    rtx.copyErrors(),
 		Panics:    rtx.copyFaults(),
+		ExitCode:  rtx.code(),
+		Signal:    runSignal(ctx),
 		channels:  rtx.copyChannels(),
 	}
 
@@ -103,10 +135,7 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	err := joinOutcome(append(slices.Clip(out.Errors), out.channelErrors()...), out.Panics)
 
 	if !out.Empty() {
-		fn := p.reporterFn
-		if fn == nil {
-			fn = defaultReporter
-		}
+		fn := p.Reporter()
 		rtx.setReporterStage(true) // rtx.Exit now overrides; rtx.HaltWithCode is a no-op
 		fn(ctx, rtx, out)
 		rtx.setReporterStage(false)
@@ -128,9 +157,21 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 	return errors.Join(all...)
 }
 
-// defaultReporter prints infos, warnings, errors, panics, then successes to the run's stderr,
-// [Context.Stderr], then applies the exit floor. Panic stacks are not printed.
-func defaultReporter(ctx context.Context, rtx *Context, out Outcome) {
+// DefaultReporter is the [Reporter] a program uses unless [Program.WithReporter] sets another.
+// It prints infos, warnings, errors, panics, then successes, each followed by the records of the
+// [Channel]s of that [ChannelClass], all to the run's stderr ([Context.Stderr], so a handler
+// that replaces it redirects the report too), so stdout carries only what handlers write. Panic
+// stacks are not printed. Each line is the record's text; a warning starts "Warning: ", an error
+// "Error: " and a panic "Fatal Error: ".
+//
+// It applies an exit floor: a recorded error or panic exits 1 unless a non-zero code was
+// already set ([Outcome.ExitCode]). It leaves out an error the run's own signal caused
+// ([SignalCaused]), since a signal is a graceful stop and the exit code, 128+n, already says why
+// the run ended.
+//
+// A custom reporter calls it to keep the default report and add to it; see
+// [Program.WithReporter].
+func DefaultReporter(ctx context.Context, rtx *Context, out Outcome) {
 	writeText(ctx, rtx, rtx.Stderr, out)
 }
 
@@ -172,7 +213,7 @@ func writeText(ctx context.Context, rtx *Context, w io.Writer, out Outcome) {
 func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, int) {
 	errs := out.Errors
 	if signalCanceled(ctx) {
-		errs = slices.DeleteFunc(slices.Clone(errs), func(err error) bool { return fromRunSignal(ctx, err) })
+		errs = slices.DeleteFunc(slices.Clone(errs), func(err error) bool { return SignalCaused(ctx, err) })
 	}
 	kept := len(errs)
 	if custom := out.channelErrors(); len(custom) > 0 {
@@ -206,9 +247,9 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 // shape is described by schema-error.json in the rotini repository, and the contract document
 // includes it.
 //
-// When structured reports false, or is nil, it reports as the default reporter does. Either way
-// the exit code follows the default reporter's rule, and an error the run's own signal caused
-// is left out, as the default reporter leaves it out.
+// When structured reports false, or is nil, it reports with [DefaultReporter]. Either way the
+// exit code follows DefaultReporter's rule, and an error the run's own signal caused is left
+// out, as DefaultReporter leaves it out.
 //
 // structured is the program's own rule, typically whether its format flag asks for json. The
 // run may have failed in parsing, so the rule should read [Context.Argv], not validated inputs:
@@ -219,7 +260,7 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 func StructuredReporter(structured func(rtx *Context) bool) Reporter {
 	return func(ctx context.Context, rtx *Context, out Outcome) {
 		if structured == nil || !structured(rtx) {
-			defaultReporter(ctx, rtx, out)
+			DefaultReporter(ctx, rtx, out)
 			return
 		}
 		reportStructured(ctx, rtx, out)
@@ -257,6 +298,10 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 			}
 			if pe.Token != "" {
 				body["token"] = pe.Token
+			}
+		} else if ie, ok := asError[*InputError](err); ok {
+			if ie.Kind != InputErrorKindUnspecified {
+				body["kind"] = ie.Kind.String()
 			}
 		} else if pe, ok := asError[*PluginError](err); ok {
 			body["kind"] = pe.Kind.String()

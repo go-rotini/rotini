@@ -64,10 +64,10 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) er
 		return writeError(err)
 	}
 
-	// init does not edit go.mod, so it warns when the module does not yet require the runtime
-	// the scaffold imports.
-	if !requiresRuntime(".") {
-		rtx.RecordWarning(missingRuntime(".", "building ./cmd/"+args.Name))
+	// init does not edit go.mod, so it warns when the module is not yet set up to build the
+	// scaffold and run its go:generate line.
+	if err := moduleSetup(".", "building ./cmd/"+args.Name); err != nil {
+		rtx.RecordWarning(err)
 	}
 	return nil
 }
@@ -91,6 +91,10 @@ func seedLines(in codegen.Initialized) string {
 // runtimeModule is the module the generated code imports.
 const runtimeModule = "github.com/go-rotini/rotini"
 
+// companionTool is the companion's package, which the seeded //go:generate line runs as
+// `go tool rotini`. It is in runtimeModule, so `go get -tool` adds the runtime as well.
+const companionTool = runtimeModule + "/cmd/rotini"
+
 // modRequires reports whether go.mod text requires module or declares it as its own module. It
 // scans lines rather than using golang.org/x/mod, to avoid the dependency: a matching line
 // starts with the module path, inside a require block or after `require` or `module`.
@@ -110,6 +114,36 @@ func modRequires(gomod, module string) bool {
 	return false
 }
 
+// modTool reports whether go.mod text declares pkg as a tool, on a `tool` line or in a tool
+// block.
+func modTool(gomod, pkg string) bool {
+	inBlock := false
+	for line := range strings.SplitSeq(gomod, "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		fields := strings.Fields(line)
+		switch {
+		case len(fields) == 0:
+			continue
+		case inBlock && fields[0] == ")":
+			inBlock = false
+			continue
+		case len(fields) == 2 && fields[0] == "tool" && fields[1] == "(":
+			inBlock = true
+			continue
+		case fields[0] == "tool":
+			fields = fields[1:]
+		case !inBlock:
+			continue
+		}
+		if len(fields) > 0 && fields[0] == pkg {
+			return true
+		}
+	}
+	return false
+}
+
 // requiresRuntime reports whether the module file nearest dir (see moduleFile) requires the
 // rotini runtime or is the runtime's own. With no readable module file it reports false, so
 // the warning is shown.
@@ -120,6 +154,17 @@ func requiresRuntime(dir string) bool {
 	}
 	data, err := os.ReadFile(file)
 	return err == nil && modRequires(string(data), runtimeModule)
+}
+
+// hasCompanionTool reports whether the module file nearest dir declares the companion as a
+// tool, so `go tool rotini` runs it.
+func hasCompanionTool(dir string) bool {
+	file := moduleFile(dir)
+	if file == "" {
+		return false
+	}
+	data, err := os.ReadFile(file)
+	return err == nil && modTool(string(data), companionTool)
 }
 
 // moduleFile returns the module file of the module dir is in: the nearest directory at or above
@@ -143,18 +188,45 @@ func moduleFile(dir string) string {
 	}
 }
 
-// missingRuntime is the warning for a module that doesn't require the runtime yet, naming the
-// go get that adds it before the step that needs it. A module kept in vendor.mod names that
-// file to go get.
-func missingRuntime(dir, before string) error {
-	name, modfile := "go.mod", ""
-	if file := moduleFile(dir); filepath.Base(file) == "vendor.mod" {
-		name, modfile = "vendor.mod", " -modfile="+filepath.ToSlash(file)
+// moduleSetup is the warning for a module not yet set up for the scaffold, naming the commands
+// that set it up before the step that needs them, or nil when it is. Building needs the runtime,
+// and the seeded //go:generate line needs the companion as a tool: `go get -tool` adds both. A
+// module kept in vendor.mod names that file to go get; with no module file, `go mod init` comes
+// first. The runtime's own module needs neither.
+func moduleSetup(dir, before string) error {
+	file := moduleFile(dir)
+	if file == "" {
+		return fmt.Errorf("no go.mod found; run `go mod init <module>`, then `go get -tool %s`, before %s", companionTool, before)
+	}
+	if hasCompanionTool(dir) || ownModule(file) {
+		return nil
+	}
+	name, modfile := filepath.Base(file), ""
+	if name == "vendor.mod" {
+		modfile = " -modfile=" + filepath.ToSlash(file)
 		if abs, err := filepath.Abs(dir); err == nil {
 			if rel, err := filepath.Rel(abs, file); err == nil {
 				modfile = " -modfile=" + filepath.ToSlash(rel)
 			}
 		}
 	}
-	return fmt.Errorf("%s does not require %s yet; run `go get%s %s` before %s", name, runtimeModule, modfile, runtimeModule, before)
+	get := fmt.Sprintf("go get%s -tool %s", modfile, companionTool)
+	if !requiresRuntime(dir) {
+		return fmt.Errorf("%s does not require %s yet; run `%s` before %s (it adds the package and the tool the go:generate line runs)", name, runtimeModule, get, before)
+	}
+	return fmt.Errorf("%s has no tool line for %s, which the go:generate line runs as `go tool rotini`; run `%s` before go generate", name, companionTool, get)
+}
+
+// ownModule reports whether the module file declares the runtime's own module.
+func ownModule(file string) bool {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return false
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if fields := strings.Fields(line); len(fields) == 2 && fields[0] == "module" && fields[1] == runtimeModule {
+			return true
+		}
+	}
+	return false
 }

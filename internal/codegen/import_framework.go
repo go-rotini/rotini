@@ -36,37 +36,43 @@ type importFramework struct {
 }
 
 // importFrameworks are the frameworks by name.
-var importFrameworks = map[string]importFramework{
-	FrameworkCobra: {
-		pkg: "cobra", label: "cobra", module: "github.com/spf13/cobra",
-		findRoot: findImportRoot,
-		call: func(root string, opts ImportOptions, _ string) string {
-			return fmt.Sprintf("rotiniimportcobra.FromCobra((%s).Root(), rotiniimportcobra.Options{Strict: %t})", root, opts.Strict)
-		},
-	},
-	FrameworkKong: {
-		pkg: "kong", label: "kong", module: "github.com/alecthomas/kong",
-		findRoot: findKongRoot,
-		call: func(root string, opts ImportOptions, name string) string {
-			var vars string
-			if len(opts.Vars) > 0 {
-				pairs := make([]string, 0, len(opts.Vars))
-				for _, k := range slices.Sorted(maps.Keys(opts.Vars)) {
-					pairs = append(pairs, strconv.Quote(k)+": "+strconv.Quote(opts.Vars[k]))
-				}
-				vars = ", Vars: map[string]string{" + strings.Join(pairs, ", ") + "}"
-			}
-			return fmt.Sprintf("rotiniimportkong.FromKong(%s, rotiniimportkong.Options{Name: %s%s})", root, strconv.Quote(rootName(opts, name)), vars)
-		},
-	},
-	FrameworkURFave: {
-		pkg: "urfave", label: "urfave/cli", module: "github.com/urfave/cli/v3",
-		findRoot: findURFaveRoot,
-		call: func(root string, opts ImportOptions, name string) string {
-			return fmt.Sprintf("rotiniimporturfave.FromURFave(%s, rotiniimporturfave.Options{Name: %s, Strict: %t})", root, strconv.Quote(rootName(opts, name)), opts.Strict)
-		},
-	},
+func importFrameworks() map[string]importFramework {
+	return importFrameworksOnce.value(func() map[string]importFramework {
+		return map[string]importFramework{
+			FrameworkCobra: {
+				pkg: "cobra", label: "cobra", module: "github.com/spf13/cobra",
+				findRoot: findImportRoot,
+				call: func(root string, opts ImportOptions, _ string) string {
+					return fmt.Sprintf("rotiniimportcobra.FromCobra((%s).Root(), rotiniimportcobra.Options{Strict: %t})", root, opts.Strict)
+				},
+			},
+			FrameworkKong: {
+				pkg: "kong", label: "kong", module: "github.com/alecthomas/kong",
+				findRoot: findKongRoot,
+				call: func(root string, opts ImportOptions, name string) string {
+					var vars string
+					if len(opts.Vars) > 0 {
+						pairs := make([]string, 0, len(opts.Vars))
+						for _, k := range slices.Sorted(maps.Keys(opts.Vars)) {
+							pairs = append(pairs, strconv.Quote(k)+": "+strconv.Quote(opts.Vars[k]))
+						}
+						vars = ", Vars: map[string]string{" + strings.Join(pairs, ", ") + "}"
+					}
+					return fmt.Sprintf("rotiniimportkong.FromKong(%s, rotiniimportkong.Options{Name: %s%s})", root, strconv.Quote(rootName(opts, name)), vars)
+				},
+			},
+			FrameworkURFave: {
+				pkg: "urfave", label: "urfave/cli", module: "github.com/urfave/cli/v3",
+				findRoot: findURFaveRoot,
+				call: func(root string, opts ImportOptions, name string) string {
+					return fmt.Sprintf("rotiniimporturfave.FromURFave(%s, rotiniimporturfave.Options{Name: %s, Strict: %t})", root, strconv.Quote(rootName(opts, name)), opts.Strict)
+				},
+			},
+		}
+	})
 }
+
+var importFrameworksOnce lazy[map[string]importFramework]
 
 // frameworkFor returns the framework opts names; "" is Cobra.
 func frameworkFor(opts ImportOptions) (importFramework, error) {
@@ -74,7 +80,7 @@ func frameworkFor(opts ImportOptions) (importFramework, error) {
 	if name == "" {
 		name = FrameworkCobra
 	}
-	fw, ok := importFrameworks[name]
+	fw, ok := importFrameworks()[name]
 	if !ok {
 		return importFramework{}, fmt.Errorf("unknown framework %q: want cobra, kong or urfave", name)
 	}
@@ -241,7 +247,13 @@ const urfaveImportPath = "github.com/urfave/cli/v3"
 
 // urfaveConstructors are the parameterless functions findURFaveRoot recognizes as returning
 // the root command, in the order it prefers them.
-var urfaveConstructors = append(slices.Clone(rootConstructors), "NewApp", "newApp", "App", "app")
+func urfaveConstructors() []string {
+	return urfaveConstructorsOnce.value(func() []string {
+		return append(slices.Clone(rootConstructors), "NewApp", "newApp", "App", "app")
+	})
+}
+
+var urfaveConstructorsOnce lazy[[]string]
 
 // findURFaveRoot picks the Go expression that yields the root *cli.Command of the package in
 // pkgDir, from its non-test files, without type-checking. A command another command lists
@@ -294,7 +306,7 @@ func findURFaveRoot(pkgDir string) (expr, how string, err error) {
 		}
 		return vars[0], "a package-level command variable", nil
 	}
-	for _, name := range urfaveConstructors {
+	for _, name := range urfaveConstructors() {
 		if slices.Contains(funcs, name) {
 			return name + "()", "a root constructor", nil
 		}
@@ -304,7 +316,7 @@ func findURFaveRoot(pkgDir string) (expr, how string, err error) {
 	}
 	var b strings.Builder
 	b.WriteString("no root command found: the package declares no package-level *cli.Command variable and no root constructor (")
-	b.WriteString(strings.Join(urfaveConstructors[:6], ", "))
+	b.WriteString(strings.Join(urfaveConstructors()[:6], ", "))
 	b.WriteString(", newApp)")
 	if found := slices.Concat(funcs, others); len(found) > 0 {
 		b.WriteString("; functions returning *cli.Command: ")

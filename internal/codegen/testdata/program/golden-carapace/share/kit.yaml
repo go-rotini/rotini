@@ -39,7 +39,7 @@ commands:
         workdir:
           - $directories
         define:
-          - "$message(--define map[string]string: build variables)"
+          - "$message(--define key=value: build variables)"
         owner:
           - $carapace.os.Users
         shell:

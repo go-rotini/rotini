@@ -98,13 +98,15 @@
         },
         "output": { "$ref": "#/definitions/JSONSchema", "description": "The shape of what the command writes to stdout when it succeeds, when it declares one. A command that writes a stream of items declares one item; when the items come in several kinds, it is `oneOf` one object schema per kind, each naming its kind in the same required string property, which holds a `const`. Self-contained." },
         "stream": { "type": "boolean", "description": "true when the command writes a stream of `output` items rather than one value: in JSON, one compact value per line; in YAML, one document per item, each starting `---`." },
-        "exit_status": { "type": "array", "items": { "$ref": "#/definitions/ExitStatus" } },
+        "exit_status": { "type": "array", "items": { "$ref": "#/definitions/ExitStatus" }, "description": "The exit codes the command documents: its own exit_status, else the root's, which is program-wide. A command's own list replaces the root's." },
+        "exit_status_inherited": { "type": "boolean", "description": "true when `exit_status` is the root's: the command declares none of its own." },
         "hidden_aliases": { "type": "array", "items": { "type": "string" }, "description": "More names that run the command but that help, completion and suggestions never list." },
         "replaced_by": { "type": "string", "description": "With `deprecated`: the command to use instead, as its command names below the root joined by spaces (\"purge\", \"remote add\")." },
         "stability": { "$ref": "#/definitions/Stability", "description": "How settled the command is, as declared. Its inputs, sub-commands, output and exit codes are at most as stable as it is." },
         "effects": { "$ref": "#/definitions/Effects", "description": "What running the command does, as declared. Absent says nothing: assume the worst (destructive, reaching outside the machine). Sub-commands don't inherit it; a flag's `effects` can raise it for a run that gives the flag." },
         "agent": { "$ref": "#/definitions/Agent" },
-        "metadata": { "$ref": "#/definitions/Metadata" }
+        "metadata": { "$ref": "#/definitions/Metadata" },
+        "examples": { "type": "array", "items": { "$ref": "#/definitions/Example" }, "description": "The command's examples, in the spec's order." }
       }
     },
     "Argument": {
@@ -437,7 +439,7 @@
         "name": { "type": "string", "description": "The word after `help` that shows the topic." },
         "summary": { "type": "string" },
         "body": { "type": "string", "description": "The topic's text, when it is written in the spec." },
-        "generate": { "enum": ["environment"], "description": "What the topic's text is built from, when it is generated. environment: every environment variable the program reads." }
+        "generate": { "enum": ["environment", "configuration"], "description": "What the topic's text is built from, when it is generated. environment: every environment variable the program reads. configuration: every configuration file and key it reads." }
       }
     },
     "Effects": {
@@ -458,6 +460,16 @@
       "type": "object",
       "additionalProperties": { "type": "string" },
       "description": "The item's own labels, as the spec declares them: string keys, each with a string value. Rotini never acts on them; they are for the program's own tools."
+    },
+    "Example": {
+      "type": "object",
+      "required": ["run"],
+      "additionalProperties": false,
+      "properties": {
+        "run": { "type": "string", "description": "The command line, as the spec writes it." },
+        "summary": { "type": "string", "description": "What the example does, on one line." },
+        "argv": { "type": "array", "items": { "type": "string" }, "description": "The words the first command in the line that runs the program passes it, after the program's name, as the shell would split them. Absent when no command in the line runs the program, or when one of its words is a shell expansion, a glob or a <placeholder>." }
+      }
     }
   }
 }

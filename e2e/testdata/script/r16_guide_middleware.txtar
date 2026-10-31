@@ -1,0 +1,175 @@
+# R16 — the guide's "Middleware": main.go installs two middleware, one that refuses a
+# destructive run with no terminal to confirm it on and one that times each Run. The
+# middleware and main.go are the ones the guide shows.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+cp middleware.go.txt internal/cmd/todo/middleware.go
+cp main.go.txt cmd/todo/main.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+# A read runs, and is timed when asked.
+exec ./todo$exe list
+stdout '^3 tasks$'
+! stderr .
+env TODO_TIMING=1
+exec ./todo$exe list
+stderr '^todo list took \d'
+
+# A destructive run is refused before its Run starts: it isn't timed, and nothing is purged.
+wantexit 1 ./todo$exe purge
+! stdout .
+stderr 'refusing a destructive run without a terminal to confirm it'
+! stderr 'took'
+
+# A flag that raises a read to destructive is refused the same way.
+wantexit 1 ./todo$exe list --prune
+! stdout .
+stderr 'refusing a destructive run'
+env TODO_TIMING=
+
+-- internal/cmd/todo/todo_list.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.ErrorHandler = (*todoListHandler)(nil)
+
+type todoListHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*todoListHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	fmt.Fprintln(rtx.Stdout, "3 tasks")
+	return nil
+}
+-- internal/cmd/todo/todo_purge.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.ErrorHandler = (*todoPurgeHandler)(nil)
+
+type todoPurgeHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*todoPurgeHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	fmt.Fprintln(rtx.Stdout, "purged")
+	return nil
+}
+-- middleware.go.txt --
+package todo
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+// Confirm asks before a destructive run, and refuses one when there is no terminal to ask on.
+func Confirm(h rotini.Hook, next rotini.HookFunc) rotini.HookFunc {
+	if h.Kind != rotini.HookRun {
+		return next
+	}
+	return func(ctx context.Context, rtx *rotini.Context) error {
+		if rotini.RunEffects(rtx).Kind != "destructive" {
+			return next(ctx, rtx)
+		}
+		if !rotini.IsTerminal(rtx.Stdin) {
+			return errors.New("refusing a destructive run without a terminal to confirm it")
+		}
+		fmt.Fprintf(rtx.Stderr, "%s can't be undone. Continue? [y/N] ", rtx.CommandPath())
+		answer, _ := bufio.NewReader(rtx.Stdin).ReadString('\n')
+		if strings.TrimSpace(answer) != "y" {
+			return errors.New("not confirmed")
+		}
+		return next(ctx, rtx)
+	}
+}
+
+// Timing prints how long each command's Run took when TODO_TIMING is set.
+func Timing(h rotini.Hook, next rotini.HookFunc) rotini.HookFunc {
+	if h.Kind != rotini.HookRun {
+		return next
+	}
+	return func(ctx context.Context, rtx *rotini.Context) error {
+		start := time.Now()
+		err := next(ctx, rtx)
+		if _, ok := rtx.LookupEnv("TODO_TIMING"); ok {
+			fmt.Fprintf(rtx.Stderr, "%s took %s\n", rtx.CommandPath(), time.Since(start).Round(time.Millisecond))
+		}
+		return err
+	}
+}
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	cmd "example.com/todo/internal/cmd/todo"
+)
+
+var version = "1.0.0"
+
+func main() {
+	cmd.NewProgram().
+		WithVersion(version).
+		WithMiddleware(cmd.Confirm, cmd.Timing).
+		Execute()
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: track tasks
+  commands:
+    - name: list
+      summary: list the tasks
+      effects: { kind: read }
+      flags:
+        - name: prune
+          summary: also delete finished tasks
+          identifiers: [--prune]
+          effects: { kind: destructive }
+          schema: { type: bool }
+    - name: purge
+      summary: delete every task
+      effects: { kind: destructive }
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+      hook_returns: error
+  features:
+    - type: help
+      enabled: true

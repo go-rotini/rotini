@@ -16,7 +16,7 @@ import (
 // raisesEffects reports whether a flag's effects add anything to its command's: a higher
 // kind, "not idempotent" where the command doesn't say so, or "open world" where it doesn't.
 func raisesEffects(cmd, flag *Effects) bool {
-	if effectRank[flag.Kind] > effectRank[cmd.Kind] {
+	if effectRank()[flag.Kind] > effectRank()[cmd.Kind] {
 		return true
 	}
 	if flag.Idempotent != nil && !*flag.Idempotent && (cmd.Idempotent == nil || *cmd.Idempotent) {
@@ -351,8 +351,8 @@ func programFeatureProblems(conf *Conf, i int, f Feature, pf programFeature) []e
 		add("go", severityError, "puts mcp.json in the generated code, but `targets` doesn't include mcp; add mcp or remove `go`")
 	case f.Type == "skill" && !mdOn:
 		add("type", severityWarning, "the skill's references/ folder holds the markdown pages, but the markdown feature is off, so the skill has none; turn markdown on (it needn't embed)")
-	case f.Type == "llms" && f.BaseUrl == "" && (!mdOn || !md.Embed):
-		add("base_url", severityWarning, "llms.txt links each command to its markdown page, but without `base_url` the links are relative and the markdown feature doesn't write its pages (it needs `enabled: true` and `embed: true`); set `base_url` to where the pages are published")
+	case f.Type == "llms" && f.BaseUrl == "" && (!mdOn || (!md.Embed && md.InstallDir == "")):
+		add("base_url", severityWarning, "llms.txt links each command to its markdown page, but without `base_url` the links are relative and the markdown feature doesn't write its pages (it needs `enabled: true` and `embed: true` or an `install_dir`); set `base_url` to where the pages are published")
 	}
 	return problems
 }

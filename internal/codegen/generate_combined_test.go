@@ -63,7 +63,7 @@ command:
       aliases: [rm]
       hidden_aliases: [del]
 `)
-	src := usageFuncDecl(gp)
+	src := usageFuncDecl(gp, "definition")
 	if want := "case \"remove\":\n\t\treturn \"acme remove\", nil"; !strings.Contains(src, want) {
 		t.Errorf("Usage function lacks %q\n%s", want, src)
 	}

@@ -30,16 +30,31 @@ ops deploy [flags] <service> [COUNT]
 
   The port the service listens on.
 
-- `--ratio` `float64` — traffic share (experimental); greater than 0 and at most 1
+- `--ratio` `number` — traffic share (experimental); greater than 0 and at most 1
 - `--step` `int` — rollout step; a multiple of 5
-- `--tag` `[]string` — a label; 1 to 5 values; each value at most 10 characters; several values per occurrence, separated by ","; repeatable
+- `--tag` `string...` — a label; 1 to 5 values; each value at most 10 characters; several values per occurrence, separated by ","; repeatable
 - `--timeout` `duration` — how long to wait; at least 1s and less than 1h
-- `-e, --env` `map[string]string` — extra environment; at most 8 values; repeatable
+- `-e, --env` `key=value` — extra environment; at most 8 values; repeatable
 - `--token` `string` — the deploy token (@file or - for stdin)
 - `--key` `string` — the signing key (@file)
-- `--label` `[]string` — a label to apply (default `["a,b", "c\"d"]`); several values per occurrence, separated by ","; repeatable
-- `--zone` `[]string` — the zones to use (default `["eu", "us"]`); repeatable
+- `--label` `string...` — a label to apply (default `["a,b", "c\"d"]`); several values per occurrence, separated by ","; repeatable
+- `--zone` `string...` — the zones to use (default `["eu", "us"]`); repeatable
 - `--quote` `string` — the quoting style (one of ``a`b``, `plain`); matches ``^[a-z`"]+$``
+- `--secrets` `string` — read secrets from this file
+- `--stage` `string` — the stage to deploy to
+- `--sep` `string` — the field separator; exactly 1 character
+- `--points` `int` — story points; between 1 and 21
+- `--weights` `key=number` — a weight per zone; repeatable
+- `--link` `value` — a link to follow
+- `--pair` `string...` — exactly two hosts; exactly 2 values; repeatable
+- `--replicas` `int` — how many to run (default `1`); between 1 and 100; also set by `OPS_DEPLOY_REPLICAS` or config key `deploy.replicas`
+
+Rules:
+
+- --token and --key can't be used together
+- --ratio and --step must be used together
+- with --zone eu, --port is required and --quote can't be used
+- unless --key is given, --token is required
 
 ## Global Flags
 
@@ -47,9 +62,26 @@ ops deploy [flags] <service> [COUNT]
 - `-v, --verbose` — say more; repeat to count: -vvv
 - `--color` `string` — when to color (default `auto`) (one of `auto`, `always`, `never`)
 
+## Configuration
+
+- `deploy.registry` `string` — the registry to push to (in `.ops.yaml`)
+- `deploy.retries` `int` — how many times to retry (default `1`); between 0 and 9
+
+## Files
+
+The first file listed that sets a key supplies it.
+
+- `./secrets.json` — or the file --secrets names; profiles under "stages", chosen by --stage (default dev)
+- `~/.ops.yaml`
+- `.ops.yaml` — in the working directory or the nearest parent holding one
+
 ## Exit Status
 
 - `0` — shipped
 - `4` (`rejected`) — the cluster refused it ([docs](https://example.com/ops/rejected))
+
+## See Also
+
+- [ops](ops.md)
 
 Report problems at https://example.com/ops/issues.

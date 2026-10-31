@@ -287,12 +287,12 @@ func resolveFileVars(v reflect.Value, view *osView, waived bool) (map[string]env
 		path := layer(file)
 		switch {
 		case plain >= 0 && path != "":
-			firstErr = usageBind(channel, f.Tag.Get("rotini"), fmt.Sprintf("set %s or %s, not both", names[plain], file), nil)
+			firstErr = usageBind(InputErrorKindConstraintViolation, channel, f.Tag.Get("rotini"), fmt.Sprintf("set %s or %s, not both", names[plain], file), nil)
 		case path != "":
 			val, err := readEnvFile(view, file, path)
 			if err != nil {
 				if !waived {
-					firstErr = usageBind(channel, f.Tag.Get("rotini"), err.Error(), err)
+					firstErr = usageBind(InputErrorKindFileAccess, channel, f.Tag.Get("rotini"), err.Error(), err)
 				}
 				return
 			}

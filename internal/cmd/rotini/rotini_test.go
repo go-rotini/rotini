@@ -276,16 +276,16 @@ func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	if gotName != "mycli" || gotFormat != "json" || !gotForce {
 		t.Errorf("initialize got (%q, %q, force=%v), want the parsed argv", gotName, gotFormat, gotForce)
 	}
-	if want := "run `go get github.com/go-rotini/rotini` before building ./cmd/mycli"; !strings.Contains(errb.String(), want) {
+	if want := "run `go mod init <module>`, then `go get -tool github.com/go-rotini/rotini/cmd/rotini`, before building ./cmd/mycli"; !strings.Contains(errb.String(), want) {
 		t.Errorf("stderr = %q, want the runtime warning", errb.String())
 	}
 }
 
 // TestCLI_initializeReportsWhatItWrote pins init's report (spec, conf, timing line) and the
-// absence of a warning when go.mod already requires the runtime.
+// absence of a warning when go.mod already declares the companion as a tool.
 func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n\ntool github.com/go-rotini/rotini/cmd/rotini\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -610,15 +610,49 @@ func TestMissingRuntime_vendorMod(t *testing.T) {
 		t.Errorf("moduleFile = %s, want the vendor.mod", got)
 	}
 	for dir, want := range map[string]string{
-		vm:  "vendor.mod does not require github.com/go-rotini/rotini yet; run `go get -modfile=vendor.mod github.com/go-rotini/rotini` before building",
-		sub: "run `go get -modfile=../../vendor.mod github.com/go-rotini/rotini`",
+		vm:  "vendor.mod does not require github.com/go-rotini/rotini yet; run `go get -modfile=vendor.mod -tool github.com/go-rotini/rotini/cmd/rotini` before building",
+		sub: "run `go get -modfile=../../vendor.mod -tool github.com/go-rotini/rotini/cmd/rotini`",
 	} {
-		if got := missingRuntime(dir, "building").Error(); !strings.Contains(got, want) {
-			t.Errorf("missingRuntime(%s) = %q, want it to hold %q", dir, got, want)
+		if err := moduleSetup(dir, "building"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("moduleSetup(%s) = %v, want it to hold %q", dir, err, want)
 		}
 	}
-	if got := missingRuntime(t.TempDir(), "building").Error(); !strings.HasPrefix(got, "go.mod does not require") || !strings.Contains(got, "run `go get github.com/go-rotini/rotini`") {
-		t.Errorf("with no module file: %q", got)
+}
+
+// TestModuleSetup pins the warning for each way a module can be short of what the scaffold
+// needs: no module file, neither the runtime nor the tool, the runtime without the tool; and
+// none once the tool is declared, on a line or in a block, or in the runtime's own module.
+func TestModuleSetup(t *testing.T) {
+	const get = "run `go get -tool github.com/go-rotini/rotini/cmd/rotini`"
+	write := func(gomod string) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	cases := []struct {
+		name string
+		dir  string
+		want string // "" means no warning
+	}{
+		{"no go.mod", t.TempDir(), "no go.mod found; run `go mod init <module>`, then `go get -tool github.com/go-rotini/rotini/cmd/rotini`, before building ./cmd/mycli"},
+		{"neither", write("module example.com/a\n\ngo 1.26\n"), "go.mod does not require github.com/go-rotini/rotini yet; " + get + " before building ./cmd/mycli (it adds the package and the tool the go:generate line runs)"},
+		{"runtime only", write("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n"), "go.mod has no tool line for github.com/go-rotini/rotini/cmd/rotini, which the go:generate line runs as `go tool rotini`; " + get + " before go generate"},
+		{"tool line", write("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n\ntool github.com/go-rotini/rotini/cmd/rotini\n"), ""},
+		{"tool block", write("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n\ntool (\n\texample.com/other\n\tgithub.com/go-rotini/rotini/cmd/rotini // the companion\n)\n"), ""},
+		{"another tool", write("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n\ntool example.com/other\n"), "go.mod has no tool line"},
+		{"own module", write("module github.com/go-rotini/rotini\n\ngo 1.26\n"), ""},
+	}
+	for _, tc := range cases {
+		err := moduleSetup(tc.dir, "building ./cmd/mycli")
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%s: moduleSetup = %q, want no warning", tc.name, err)
+		case tc.want != "" && (err == nil || !strings.HasPrefix(err.Error(), tc.want)):
+			t.Errorf("%s: moduleSetup = %v, want %q", tc.name, err, tc.want)
+		}
 	}
 }
 
@@ -683,8 +717,9 @@ func TestCLI_suggestsNearestSpelling(t *testing.T) {
 		{argv: []string{"hlep"}, want: `did you mean "help"?`},
 		{argv: []string{"validate", "--fial", "fast"}, want: `Error: rotini validate: unknown flag "--fial"; did you mean "--fail"?`},
 		{argv: []string{"init", "x", "--format", "jsn"}, want: `did you mean "json"?`},
-		{argv: []string{"help", "genrate"}, want: `no help for command "genrate"; did you mean "generate"?`},
-		{argv: []string{"man", "genrate"}, want: `no man page for command "genrate"; did you mean "generate"?`},
+		{argv: []string{"help", "genrate"}, want: `Error: rotini: unknown command "genrate"; did you mean "generate"?`},
+		{argv: []string{"man", "genrate"}, want: `Error: rotini: unknown command "genrate"; did you mean "generate"?`},
+		{argv: []string{"help", "import", "cobrx"}, want: `Error: rotini import: unknown command "cobrx"; did you mean "cobra"?`},
 		{argv: []string{"kubernetes"}},
 		{argv: []string{"init", "x", "--bogus"}},
 	}

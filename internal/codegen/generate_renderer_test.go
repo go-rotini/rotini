@@ -116,7 +116,7 @@ func TestStubBody_newShapeForms(t *testing.T) {
 	}
 	for _, want := range []string{
 		"fmt.Fprintln(rtx.Stdout, rtx.CommandChain()[0].Name, version)",
-		"fmt.Fprintln(rtx.Stderr, rtx.Help())\n\trtx.HaltWithCode(1)",
+		"fmt.Fprintln(rtx.Stderr, rtx.Help())\n\trtx.HaltWith(rotini.MissingCommand(rtx))",
 	} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("stub missing %q:\n%s", want, out)
@@ -156,7 +156,8 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 			{Method: "App", HandlerType: "appHandler"},
 			{Method: "AppChild", Composed: true, DelegateAlias: "childcli", DelegateMethod: "Child"},
 		},
-		Definition: "var definition = rotini.Definition{}",
+		Definition:    "var definition = rotini.Definition{}",
+		DefinitionRef: "definition",
 		Blocks: []templateInputBlock{
 			{
 				Prefix: "App",
@@ -245,9 +246,10 @@ func smokeDocData() templateHelpData {
 		Cascading: []templateDocFlagRow{
 			{Identifiers: []string{"--verbose"}, Summary: "noisy output"},
 		},
-		Examples:   []string{"app generate ./src"},
-		ExitStatus: []templateDocExitRow{{Code: 0, Summary: "success"}, {Code: 1, Summary: "failure"}},
-		SeeAlso:    []string{"app(1)", "app-sub(1)"},
+		Examples:    []string{"app generate ./src"},
+		ExampleRows: []templateDocExample{{Run: "app generate ./src"}},
+		ExitStatus:  []templateDocExitRow{{Code: 0, Summary: "success"}, {Code: 1, Summary: "failure"}},
+		SeeAlso:     []string{"app(1)", "app-sub(1)"},
 	}
 }
 

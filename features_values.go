@@ -98,6 +98,15 @@ func StreamPaths() Feature {
 	}}
 }
 
+// TimeValues wires time inputs read with a layout or a relative form: `type: date`, `layout:`
+// (Unix timestamps included) and `relative:`. A time input with neither reads RFC 3339 and
+// needs no feature.
+func TimeValues() Feature {
+	return Feature{name: "values:time", apply: func(s *featureSet) {
+		s.times = &timeHooks{coerce: coerceDeclaredTime, parse: parseTimeValue}
+	}}
+}
+
 // URLValues wires *url.URL inputs (type url).
 func URLValues() Feature {
 	return Feature{name: "values:url", apply: func(s *featureSet) {

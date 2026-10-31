@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/go-rotini/yaml"
 )
@@ -176,17 +175,21 @@ func plainReadsBack(s string) bool {
 // yaml11Typed matches the plain scalars YAML 1.1 readers resolve to an int (including
 // base 2, 8 and 60 and `_` separators), a float (including base 60, .inf and .nan) or a
 // timestamp, which YAML 1.2 reads as strings.
-var yaml11Typed = sync.OnceValue(func() *regexp.Regexp {
-	return regexp.MustCompile(`^(?:` +
-		`[-+]?0b[01_]+` +
-		`|[-+]?0x[0-9a-fA-F_]+` +
-		`|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])*` +
-		`|[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*(?:[eE][-+]?[0-9]+)?` +
-		`|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*` +
-		`|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN)` +
-		`|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)?` +
-		`)$`)
-})
+func yaml11Typed() *regexp.Regexp {
+	return yaml11TypedOnce.value(func() *regexp.Regexp {
+		return regexp.MustCompile(`^(?:` +
+			`[-+]?0b[01_]+` +
+			`|[-+]?0x[0-9a-fA-F_]+` +
+			`|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])*` +
+			`|[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*(?:[eE][-+]?[0-9]+)?` +
+			`|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*` +
+			`|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN)` +
+			`|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)?` +
+			`)$`)
+	})
+}
+
+var yaml11TypedOnce lazy[*regexp.Regexp]
 
 // literalBlock renders multi-line s as a "|-" block at indent, or "" when a block can't
 // carry it exactly.

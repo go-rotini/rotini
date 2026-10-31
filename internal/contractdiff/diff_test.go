@@ -832,3 +832,44 @@ func TestDiff_wrongShapeIsNotCalledNotJSON(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// A command without its own exit_status is compared by the root's: a contract that lists only
+// own codes reads the same as one that writes the root's out, and replacing the root's codes
+// with an own list reports the ones lost.
+func TestDiff_inheritedExitStatus(t *testing.T) {
+	root := `{"name": "app", "path": [], "exit_status": [{"code": 1}, {"code": 2}, {"code": 3}]}`
+	ownOnly := contract(root + `, {"name": "app run", "path": ["run"]}`)
+	written := contract(root + `, {"name": "app run", "path": ["run"], "exit_status_inherited": true,
+	  "exit_status": [{"code": 1}, {"code": 2}, {"code": 3}]}`)
+	replaced := contract(root + `, {"name": "app run", "path": ["run"], "exit_status": [{"code": 4}]}`)
+
+	for _, pair := range [][2][]byte{{ownOnly, written}, {written, ownOnly}} {
+		r, err := Diff(pair[0], pair[1], Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := lines(r); len(got) != 0 {
+			t.Errorf("an inherited list written out or not: findings %v, want none", got)
+		}
+	}
+	for _, old := range [][]byte{ownOnly, written} {
+		r, err := Diff(old, replaced, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{
+			"possibly_breaking EXIT_STATUS_NO_DELETE app run exit 1",
+			"possibly_breaking EXIT_STATUS_NO_DELETE app run exit 2",
+			"possibly_breaking EXIT_STATUS_NO_DELETE app run exit 3",
+			"safe EXIT_STATUS_ADDED app run exit 4",
+		}
+		if got := lines(r); !slices.Equal(got, want) {
+			t.Errorf("findings:\n  got  %v\n  want %v", got, want)
+		}
+		for _, f := range r.Findings {
+			if f.Rule == RuleExitStatusNoDelete && !strings.Contains(f.Note, "replaces the root's") {
+				t.Errorf("%s at %s: note %q, want it to say the own list replaces the root's", f.Rule, f.Where, f.Note)
+			}
+		}
+	}
+}

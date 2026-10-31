@@ -128,23 +128,27 @@ func (l channelLabels) bind(channel string, err error) error {
 	switch {
 	case errors.As(err, &ce):
 		path, typ := ce.Path.String(), cleanType(ce.Target)
-		return usageBind(channel, path,
+		return usageBind(InputErrorKindInvalidValue, channel, path,
 			fmt.Sprintf("%s: expected %s%s", label(path), typ, l.origin(ce.Source)), err)
 	case errors.As(err, &mre):
 		in := ""
 		if l.pinned != "" {
 			in = " in configuration file " + l.pinned
 		}
-		return usageBind(channel, mre.Path.String(),
+		return usageBind(InputErrorKindMissingRequired, channel, mre.Path.String(),
 			fmt.Sprintf("%s is required%s", label(mre.Path.String()), in), err)
 	case errors.As(err, &ve):
-		return usageBind(channel, ve.Path.String(),
+		return usageBind(InputErrorKindSchemaViolation, channel, ve.Path.String(),
 			fmt.Sprintf("%s: %s", label(ve.Path.String()), ve.Msg), err)
 	case errors.As(err, &eve):
-		return usageBind(channel, eve.Path.String(),
+		return usageBind(InputErrorKindInvalidValue, channel, eve.Path.String(),
 			fmt.Sprintf("%s must not be empty%s", label(eve.Path.String()), l.origin(eve.Source)), err)
 	default:
-		return usageBind(channel, "", fmt.Sprintf("could not read %s input", channelDesc(channel)), err)
+		kind := InputErrorKindInvalidValue
+		if errors.As(err, new(*recon.ParseError)) {
+			kind = InputErrorKindMalformedDocument
+		}
+		return usageBind(kind, channel, "", fmt.Sprintf("could not read %s input", channelDesc(channel)), err)
 	}
 }
 
@@ -155,7 +159,7 @@ func (l channelLabels) bindStruct(channel string, err error, reg *recon.Registry
 	if ce, ok := asError[*recon.CoercionError](err); ok && reg != nil && l.view != nil {
 		path := ce.Path.String()
 		if msg, ok := l.valueProblem(reg, s, path, ce.Secret); ok {
-			return usageBind(channel, path, l.name(channel, path)+": "+msg+l.origin(ce.Source), err)
+			return usageBind(InputErrorKindInvalidValue, channel, path, l.name(channel, path)+": "+msg+l.origin(ce.Source), err)
 		}
 	}
 	return l.bind(channel, err)
@@ -252,7 +256,7 @@ func checkEnvMaps(s reflect.Value, reg *recon.Registry, l channelLabels) error {
 				continue
 			}
 			if msg := mapPairProblem(label, entry, secret); msg != "" {
-				return usageBind(channelEnv, key, msg, nil)
+				return usageBind(InputErrorKindInvalidValue, channelEnv, key, msg, nil)
 			}
 		}
 	}

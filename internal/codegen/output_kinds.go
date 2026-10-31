@@ -306,7 +306,7 @@ func constTypeProblem(s Schema) string {
 	if text, ok := s.Const.(string); ok {
 		shown = strconv.Quote(text)
 	}
-	return fmt.Sprintf("`const` %s is %s, but the type is %s, so no output can pass; make the `const` a value of the type, or change the type", shown, jsonKindNames[got], displayType(s.Type))
+	return fmt.Sprintf("`const` %s is %s, but the type is %s, so no output can pass; make the `const` a value of the type, or change the type", shown, jsonKindNames()[got], displayType(s.Type))
 }
 
 // jsonKind is the JSON Schema type of a decoded value: "integer" for a whole number, "number"
@@ -338,10 +338,16 @@ func jsonKind(v any) string {
 }
 
 // jsonKindNames describes each JSON Schema type for a message.
-var jsonKindNames = map[string]string{
-	"string": "a string", "boolean": "a boolean", "integer": "a whole number", "number": "a number",
-	"array": "a list", "object": "an object",
+func jsonKindNames() map[string]string {
+	return jsonKindNamesOnce.value(func() map[string]string {
+		return map[string]string{
+			"string": "a string", "boolean": "a boolean", "integer": "a whole number", "number": "a number",
+			"array": "a list", "object": "an object",
+		}
+	})
 }
+
+var jsonKindNamesOnce lazy[map[string]string]
 
 // keysBesideOneOf lists the keys an output declares beside its oneOf, other than description.
 func keysBesideOneOf(s Schema) []string {

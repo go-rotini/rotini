@@ -70,7 +70,7 @@ stdout 'mode=always'
 stdout 'args=\[never\]'
 exec ./fl$exe show --help
 stdout '--mode\[=<?string>?\]'
-stdout '\(implicit: always\)'
+stdout '[(, ]implicit: always\)'
 
 # repeatable: false refuses a second value, naming the first and last; the default lets the last win.
 ! exec ./fl$exe show --level a --level b --level c

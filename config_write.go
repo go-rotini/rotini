@@ -169,7 +169,7 @@ func writeConfigValue(rtx *Context, file, key string, raw *string, opts []Config
 	} else {
 		secret := slices.ContainsFunc(keys, func(k ConfigKey) bool { return k.Secret })
 		if secret && !w.allowSecret {
-			return usageBind(channelConfig, key, fmt.Sprintf("config key %s is secret and isn't written to a file", key), nil)
+			return usageBind(InputErrorKindWriteRefused, channelConfig, key, fmt.Sprintf("config key %s is secret and isn't written to a file", key), nil)
 		}
 		value, verr := configValue(rtx, keys, *raw, format, w.parse)
 		if verr != nil {
@@ -237,7 +237,7 @@ func unknownConfigKey(f ConfigFile, key string) *InputError {
 	if len(names) > 0 {
 		msg += " (keys: " + strings.Join(names, ", ") + ")"
 	}
-	e := usageBind(channelConfig, key, msg, nil)
+	e := usageBind(InputErrorKindUnknownKey, channelConfig, key, msg, nil)
 	e.Token, e.Candidates = key, names
 	return e
 }
@@ -260,11 +260,11 @@ func configKeyPath(format cfgedit.Format, f ConfigFile, profile, key string) []s
 func (t configFileTarget) editError(key string, err error) error {
 	switch {
 	case errors.Is(err, cfgedit.ErrRefused), errors.Is(err, cfgedit.ErrValue):
-		return usageBind(channelConfig, key, fmt.Sprintf("configuration file %s: %v", t.path, err), err)
+		return usageBind(InputErrorKindWriteRefused, channelConfig, key, fmt.Sprintf("configuration file %s: %v", t.path, err), err)
 	case errors.Is(err, cfgedit.ErrVerify), errors.Is(err, cfgedit.ErrUnsupported):
 		return internalBind(channelConfig, key, fmt.Sprintf("could not write config key %s to configuration file %s: %v", key, t.path, err), err)
 	}
-	return usageBind(channelConfig, key, configFileProblem(t.path, err), err)
+	return usageBind(configFileKind(err), channelConfig, key, configFileProblem(t.path, err), err)
 }
 
 // shadowed is the warning for a value written to a profiled file's shared keys that the

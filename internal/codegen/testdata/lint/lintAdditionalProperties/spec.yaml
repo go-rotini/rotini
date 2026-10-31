@@ -1,0 +1,30 @@
+# additionalProperties: false closes an object to the keys under its properties. It is
+# rejected where it would not do that: beside $ref, on a schema that isn't an object, and on an
+# object with no properties. On a closed object, and on its own objects, it passes.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    DB:
+      type: object
+      additionalProperties: false
+      properties:
+        host: {type: string}
+  config_files:
+    - name: app
+      path: app.yaml
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          db: {$ref: DB, additionalProperties: false}
+          name: {type: string, additionalProperties: false}
+          extra: {type: object, additionalProperties: false}
+          deploy:
+            type: object
+            additionalProperties: true
+            properties:
+              replicas: {type: integer}
+  config:
+    - name: name
+      schema: {type: string}

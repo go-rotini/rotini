@@ -33,13 +33,23 @@
     "ValidateConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. The rules are fixed, apart from the opt-in `flags_first` and `posix_names` warnings. `rotini validate --fail` overrides `fail`.",
+      "description": "Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. The rules are fixed, apart from the opt-in `flags_first`, `posix_names`, `input_summaries` and `help_width` warnings. `rotini validate --fail` overrides `fail`.",
       "properties": {
         "fail": {
           "type": "string",
           "enum": ["fast", "collect"],
           "default": "collect",
-          "description": "fast = stop at and report the first problem; collect = run to completion and report every problem at once (default)."
+          "description": "fast = stop at and report the first problem; collect = run to completion and report every problem at once (default). With collect, a document whose only schema problems are unknown keys is still linted, so a typo in one key doesn't hide the problems elsewhere."
+        },
+        "input_summaries": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in: warn about each visible flag and argument with no `summary`, which help shows as a row with nothing beside it. Warnings never fail validation."
+        },
+        "help_width": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Opt-in: warn about each line of help text you wrote that is longer than this many characters: a command's summary, description, usage, header, footer, examples and verbatim `help` page, each input's summary, and each help topic's summary and text. Nothing is rewrapped; the warning only points at the line. Unset, lines aren't measured. Warnings never fail validation."
         },
         "flags_first": {
           "type": "boolean",
@@ -80,6 +90,11 @@
         "contract": {
           "$ref": "#/definitions/ContractConfig",
           "description": "Optional: where to write the contract document, a JSON description of every command's inputs, output and exit statuses."
+        },
+        "generators": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/GeneratorConfig" },
+          "description": "Programs of your own that `rotini generate` runs to write more files from the contract document, such as a docs-site format, a catalog entry or per-command test scaffolds. Each runs on every generate, in the order listed, and rotini writes the files it returns, so they are dry-run, unchanged-file and pruning aware like rotini's own outputs. Only the programs listed here run, as with a `//go:generate` line, so list only generators you trust."
         },
         "dry_run_env": {
           "type": "string",
@@ -142,6 +157,36 @@
         }
       }
     },
+    "GeneratorConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "run", "dir"],
+      "description": "One generator: a program that reads the contract document and returns files for rotini to write under `dir`. It runs with the module root as its working directory, with exactly the arguments in `run` (no shell) and the environment `rotini generate` has. It reads the contract on stdin, the document `generate.contract.file` writes, whose `format` names its version. It writes one JSON document to stdout, `{\"rotini_generator\": 1, \"files\": [{\"path\": \"todo-add.md\", \"content\": \"...\"}]}`, where each `path` is slash-separated and relative to `dir`, and `content` is the file's text. A path that is absolute, has a `.` or `..` element, or names one file twice (in any case) fails generate, as does output that isn't such a document. Rotini then writes each file: a file with the same content is left alone, `--dry-run` lists what would change and exits 2, and a file the generator returned last time but not this time is removed. It records the files in `<dir>/.rotini-generated`; any other file in `dir` is left alone unless the generator returns that path. A generator must return the same files for the same contract, write no files itself, and print diagnostics on stderr, which generate shows as warnings. It runs in a dry run too. Generators run before generate writes anything: when one exits with a non-zero status, generate fails, showing its stderr, and no file is changed.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$", "examples": ["docs-site", "catalog"],
+          "description": "The generator's name in rotini's messages: lowercase letters, digits, '-' and '_'. Unique among the generators."
+        },
+        "run": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "examples": [["go", "tool", "docsgen"], ["go", "run", "./tools/docsgen"]],
+          "description": "The program and its arguments, run as written: there is no shell, so no quoting, variables or pipes. A first item without a slash is looked up on PATH; one with a slash is relative to the module root. Pin a Go generator as a tool (`go get -tool`) and run `[go, tool, <name>]`, or run one kept in this module with `[go, run, ./tools/<name>]`."
+        },
+        "dir": {
+          "type": "string",
+          "pattern": "^[^/\\\\].*$", "examples": ["docs/site/commands"],
+          "description": "Module-root-relative directory (no leading slash) the generator's files are written under. It belongs to this generator: it can't be the module root, and can't contain, or sit inside, another generator's `dir` or anything rotini writes (the packages, the features' directories and files, the schemas and the contract). Removing the generator from the conf leaves its files in place."
+        },
+        "keep": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Paths relative to `dir` that rotini never removes, even once the generator stops returning them; from then on the file is yours."
+        }
+      }
+    },
     "SchemaConfig": {
       "type": "object",
       "additionalProperties": false,
@@ -194,18 +239,28 @@
               "default": "none",
               "description": "Only for type 'cmd': whether the handler stubs `generate` seeds have hooks that return an error. 'none' (the default) seeds rotini.Handler stubs, whose hooks return nothing and fail with rtx.HaltWith(err). 'error' seeds rotini.ErrorHandler stubs, whose hooks fail with `return err`. It decides only the shape of a stub when it is first written: a handler file you already have keeps its shape, and the generated wiring follows each handler type's own methods, so one package may mix both. `rotini init` writes 'error'."
             },
+            "stub_template": {
+              "type": "string",
+              "pattern": "^[^/\\\\].*$", "examples": ["internal/cmd/app/templates/stub.go.tmpl"],
+              "description": "Only for type 'cmd': a Go text/template file (relative to the module root) that `generate` renders for each new handler file, in place of the built-in stub. Use it to give every new handler your team's boilerplate: a logger field, a tracing span, an error-wrapping convention. It shapes only files written from now on: a handler file you already have is never rewritten. The output must be Go source: it is formatted with gofmt, and a template that fails to parse or run, or renders something that isn't Go, stops generate with the template's name and line. 'header' is written above it, as for the built-in stub, so the template doesn't print it. The template declares the handler type, and the generated wiring follows the methods it declares, as for any handler file. Keep a `var _ rotini.ErrorHandler = (*{{.HandlerType}})(nil)` line (or `rotini.Handler`): it marks the file as one rotini seeded, so a handler whose command leaves the spec is retired (see 'keep'); without it the file is yours and is never removed, and generate warns.\n\nThe template's data, the same the built-in stub gets:\n\n- .Package: the cmd package's Go name.\n- .HandlerType: the handler type the wiring returns for this command, e.g. appDeployHandler; the template must declare it.\n- .InputsType: the command's generated inputs type, e.g. AppDeployInputs, for rtx.Inputs.\n- .Prefix: the command's frame in that type, as in inputs.<Prefix>.Flags.\n- .Invocation: how a user types the command, e.g. \"app deploy\".\n- .RuntimeImport: the rotini import path, quoted, ready for an import block.\n- .Header: the conf 'header', already written above the file.\n- .ErrorHooks: 'hook_returns' is 'error', so the hooks should return an error.\n- .NewShape: the root's --help is short_circuit and cascading; the built-in stub then prints \"<program> <version>\" and sends bare help to stderr.\n- .HelpFlag, .HelpFrame: the Go field of the --help flag this command answers itself, and the frame holding it (this command's prefix, or an ancestor's); \"\" when the root's hook answers it, the command has none, or the help feature is off.\n- .VersionFlag: the Go field of this command's --version flag it answers itself; \"\" when none.\n- .RootHook: set on the root only, when its CascadingPreRun answers the short-circuit --help and --version for every command; .RootHelpFlag and .RootVersionFlag are those flags' Go fields (\"\" when absent).\n- .HelpPathArg: on a command named help, the Go field of its variadic path argument; .HelpPlugins: that help can name a plugin, so it asks rtx.PluginHelp first.\n- .VersionOnly: a command named version whose job is to print it.\n- .CompletionArg: on a completion command, the Go field of its shell argument.\n- .PrintHelpWhenBare: a root or group with sub-commands and no arguments, which shows its help when run bare.\n- .NeedsInputs: the built-in body calls rtx.Inputs; .UsesInputs: it reads the result.\n- .Redact: the command's inputs hold a secret, so the built-in body prints only the command path.\n\nThe template functions are the page templates' (join, upper, lower, title, trim, replace, indent, default, contains and the rest)."
+            },
+            "stub_test_template": {
+              "type": "string",
+              "pattern": "^[^/\\\\].*$", "examples": ["internal/cmd/app/templates/stub_test.go.tmpl"],
+              "description": "Only for type 'cmd': a Go text/template file (relative to the module root) that `generate` renders into '<handler>_test.go' beside each new handler file, with the same data as 'stub_template', so every command starts with a test. It is written only together with a new handler file, and never when that test file exists. The output must be Go source, formatted with gofmt, and fails generate as 'stub_template' does. Rotini writes a `// rotini: seeded beside its handler file` line at the top, which ties the test to its handler: when the handler's command leaves the spec, the test is disabled and deleted together with the handler file, and restored with it. Delete that line to keep the test whatever happens to the handler."
+            },
             "keep": {
               "type": "array",
               "items": {
                 "type": "string",
                 "pattern": "^[^/\\\\].*$", "examples": ["extra.go"]
               },
-              "description": "Package-relative paths (e.g. 'helpers.go') that rotini must never remove.\n\nYou rarely need it: rotini only ever removes files it wrote that no longer match the spec, such as a handler file whose command has left the spec (identified by the generated marker it carries), and it reports each one. A handler file goes in two steps: the next generate disables it with `//go:build ignore`, and the one after deletes it. A file you wrote is never removed, whatever it is named, and neither are test files or the editable feature templates. Use 'keep' when you have kept a handler file whose command is gone and left its marker in place, or to protect a rendered output file under an embed_dir."
+              "description": "Package-relative paths (e.g. 'helpers.go') that rotini must never remove.\n\nYou rarely need it: rotini only ever removes files it wrote that no longer match the spec, such as a handler file whose command has left the spec (identified by the generated marker it carries), and it reports each one. A handler file goes in two steps: the next generate disables it with `//go:build ignore`, and the one after deletes it. A file you wrote is never removed, whatever it is named, and neither are test files (except one seeded from stub_test_template, which goes with its handler file) or the editable feature templates. Use 'keep' when you have kept a handler file whose command is gone and left its marker in place, or to protect a rendered output file under an embed_dir."
             }
           }
         },
         {
-          "$comment": "hook_returns shapes handler stubs, which only the cmd target has.",
+          "$comment": "hook_returns, stub_template and stub_test_template shape handler stubs, which only the cmd target has.",
           "if": {
             "required": [
               "type"
@@ -221,8 +276,10 @@
           },
           "then": {
             "not": {
-              "required": [
-                "hook_returns"
+              "anyOf": [
+                { "required": ["hook_returns"] },
+                { "required": ["stub_template"] },
+                { "required": ["stub_test_template"] }
               ]
             }
           }
@@ -243,7 +300,7 @@
         "type": {
           "type": "string",
           "enum": ["help", "completion", "man", "markdown", "tools", "skill", "llms", "permissions", "carapace", "config_example", "env_example"],
-          "description": "Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell, nushell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion<Shell>' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.\n\ntools, skill, llms and permissions are files for AI agents and their tools, one set for the whole program, written under 'file' (relative to the module root) and never removed, except the skill's reference pages: generate removes a page it wrote under references/ once its command leaves the spec or is no longer offered to agents, and keeps every file it didn't write. tools writes tool definitions for each of 'targets' (tools/mcp.json, tools/openai.json, tools/gemini.json), skill an Agent Skills page (skills/<name>/SKILL.md), llms an llms.txt, and permissions permission rules for each of 'harnesses'. They add no Go code, except `go: true` on tools. skill and llms render from an editable template, as help does; tools and permissions are built from the contract and have none. 'embed' and 'embed_dir' don't apply to them.\n\ncarapace, config_example and env_example are files for the program's users, also written under 'file' and never removed. carapace writes a carapace-spec completion file (completions/carapace/<name>.yaml) from the spec's static facts: commands, flags, enum values and completion hints. config_example writes an example of each configuration file the spec declares (examples/config/<name>.example.<ext>), in the file's format, with every key commented out above its summary, type and default; env_example writes .env.example, every environment variable the program reads, commented out. config_example and env_example also generate 'ConfigExample(name string) (string, error)' and 'EnvExample() string', so a command can print them; 'embed' and 'embed_dir' choose how that text is stored, as for help, and don't apply to carapace. All three are built in Go, with no editable template."
+          "description": "Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell, nushell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion<Shell>' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.\n\ntools, skill, llms and permissions are files for AI agents and their tools, one set for the whole program, written under 'file' (relative to the module root) and never removed, except the skill's reference pages: generate removes a page it wrote under references/ once its command leaves the spec or is no longer offered to agents, and keeps every file it didn't write. tools writes tool definitions for each of 'targets' (tools/mcp.json, tools/openai.json, tools/gemini.json), skill an Agent Skills page (skills/<name>/SKILL.md), llms an llms.txt, and permissions permission rules for each of 'harnesses'. They add no Go code, except `go: true` on tools. skill and llms render from an editable template, as help does; tools and permissions are built from the contract and have none. 'embed' and 'embed_dir' don't apply to them.\n\ncarapace, config_example and env_example are files for the program's users, also written under 'file' and never removed. carapace writes a carapace-spec completion file (completions/carapace/<name>.yaml) from the spec's static facts: commands, flags, enum values and completion hints. config_example writes an example of each configuration file the spec declares (examples/config/<name>.example.<ext>), in the file's format (a file in a format of the program's own gets none), with every key commented out above its summary, type and default; env_example writes .env.example, every environment variable the program reads, commented out. config_example and env_example also generate 'ConfigExample(name string) (string, error)' and 'EnvExample() string', so a command can print them; 'embed' and 'embed_dir' choose how that text is stored, as for help, and don't apply to carapace. All three are built in Go, with no editable template."
         },
         "enabled": {
           "type": "boolean",
@@ -295,7 +352,7 @@
         "install_dir": {
           "type": "string",
           "pattern": "^(\\.|[a-zA-Z0-9_][a-zA-Z0-9_./-]*)$", "examples": ["share", "."],
-          "description": "completion and man only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package, named the way packages install them: completions/<name>.bash, completions/_<name> (zsh), completions/<name>.fish, completions/<name>.ps1 and completions/<name>.nu, and man/man<section>/<page>.<section>, where <name> is the root command's name. Each file holds what Completion(shell) or Man(path...) returns. Rewritten on every generate; a man page whose command or topic is gone, or whose name is the old root's after a rename, is removed, and turning the feature off removes its files. Hidden commands get no man page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error."
+          "description": "completion, man and markdown only: a directory (relative to the module root) where `rotini generate` also writes the pages as files ready to package or publish, named the way packages and docs sites use them: completions/<name>.bash, completions/_<name> (zsh), completions/<name>.fish, completions/<name>.ps1 and completions/<name>.nu, man/man<section>/<page>.<section>, and <page>.md for markdown, where <name> is the root command's name and <page> a page's name (taskr-add), the name llms.txt links under `base_url` and the default markdown template links between pages. Each file holds what Completion(shell), Man(path...) or Markdown(path...) returns. Rewritten on every generate; a man or markdown page whose command or topic is gone, or whose name is the old root's after a rename, is removed (for markdown, only the pages the previous generate listed, so your own pages in the directory are kept), and turning the feature off removes its files. Hidden commands get no man or markdown page. Works with embed on or off. Don't use GoReleaser's dist/ directory, which it deletes. Setting it on any other feature is an error."
         },
         "file": {
           "type": "string",

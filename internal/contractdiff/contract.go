@@ -70,6 +70,7 @@ type command struct {
 	Output                any               `json:"output"`
 	Stream                bool              `json:"stream"`
 	ExitStatus            []exitStatus      `json:"exit_status"`
+	ExitStatusInherited   bool              `json:"exit_status_inherited"` // exit_status is the root's
 	HiddenAliases         []string          `json:"hidden_aliases"`
 	ReplacedBy            string            `json:"replaced_by"`
 	Stability             string            `json:"stability"`
@@ -230,11 +231,33 @@ func decode(which string, raw []byte) (*document, error) {
 		return nil, fmt.Errorf("the %s contract: %w: format %q; this rotini reads %q", which, errNotContract, d.Format, format)
 	}
 	d.legacy = isLegacy(&d)
+	inheritExitStatus(&d)
 	d.byPath = map[string]*command{}
 	for i := range d.Commands {
 		d.byPath[pathKey(d.Commands[i].Path)] = &d.Commands[i]
 	}
 	return &d, nil
+}
+
+// inheritExitStatus gives each command without its own exit_status the root's, which is
+// program-wide, so commands are compared by the codes they document. A contract written
+// before rotini 1.11 lists only a command's own codes.
+func inheritExitStatus(d *document) {
+	var root []exitStatus
+	for _, c := range d.Commands {
+		if len(c.Path) == 0 && !c.Plugin {
+			root = c.ExitStatus
+		}
+	}
+	if len(root) == 0 {
+		return
+	}
+	for i := range d.Commands {
+		c := &d.Commands[i]
+		if len(c.Path) > 0 && !c.Plugin && len(c.ExitStatus) == 0 {
+			c.ExitStatus, c.ExitStatusInherited = root, true
+		}
+	}
 }
 
 // isLegacy reports whether a contract was written before rotini 1.4, which added most of the
@@ -271,7 +294,7 @@ func projectLegacy(d *document) *document {
 	for _, c := range d.Commands {
 		p := command{
 			Name: c.Name, Path: c.Path, Aliases: c.Aliases, Hidden: c.Hidden, Deprecated: c.Deprecated,
-			Plugin: c.Plugin, Output: c.Output,
+			Plugin: c.Plugin, Output: c.Output, ExitStatusInherited: c.ExitStatusInherited,
 		}
 		for _, list := range []struct {
 			from []input

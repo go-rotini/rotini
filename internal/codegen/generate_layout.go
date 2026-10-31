@@ -22,12 +22,14 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 	}
 
 	lay := layout{
-		cmdDir:        filepath.Join(moduleRoot, filepath.FromSlash(cmdPkgDir)),
-		cmdPkgName:    cmdPkgName,
-		cmdFile:       path.Base(cmdFile),
-		cmdImport:     moduleName + "/" + cmdPkgDir,
-		cmdHeader:     cmd.Header,
-		cmdErrorHooks: cmd.HookReturns == "error",
+		cmdDir:           filepath.Join(moduleRoot, filepath.FromSlash(cmdPkgDir)),
+		cmdPkgName:       cmdPkgName,
+		cmdFile:          path.Base(cmdFile),
+		cmdImport:        moduleName + "/" + cmdPkgDir,
+		cmdHeader:        cmd.Header,
+		cmdErrorHooks:    cmd.HookReturns == "error",
+		stubTemplate:     cmd.StubTemplate,
+		stubTestTemplate: cmd.StubTestTemplate,
 	}
 
 	if ep := conf.Generate.mainPkg(); ep != nil && ep.File != "" {
@@ -128,6 +130,12 @@ type layout struct {
 
 	// cmdErrorHooks is the cmd target's `hook_returns: error`: new stubs are ErrorHandlers.
 	cmdErrorHooks bool
+
+	// stubTemplate and stubTestTemplate are the cmd target's module-root-relative
+	// `stub_template` and `stub_test_template`: the author's templates for new handler files
+	// and for the tests seeded beside them. "" for the built-in stub, and no test.
+	stubTemplate     string
+	stubTestTemplate string
 
 	// cmdHeader, mainHeader and modelsHeader are each target's conf `header:` (a license
 	// block, a //go:build constraint), written verbatim above the generated-code line.

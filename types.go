@@ -271,7 +271,7 @@ func (g Glob) Match(name string) bool {
 func parseRFC3339Value(s string) (reflect.Value, error) {
 	t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
 	if err != nil {
-		return reflect.Value{}, errors.New("write it as RFC 3339, e.g. 2026-09-29T14:00:00Z; or declare `type: date` or a `layout:`")
+		return reflect.Value{}, errors.New(plainTimeHint)
 	}
 	return reflect.ValueOf(t), nil
 }
@@ -295,6 +295,32 @@ func typeLabel(t reflect.Type, fs *featureSet) string {
 		return "glob pattern"
 	}
 	return t.String()
+}
+
+// valueLabel is [typeLabel] for a message the user reads: a type the program declares itself
+// (an author's [encoding.TextUnmarshaler], say) is a "value", since its Go name means nothing to
+// the person typing it.
+func valueLabel(t reflect.Type, fs *featureSet) string {
+	label := typeLabel(t, fs)
+	if label != t.String() {
+		return label
+	}
+	if derefType(t).PkgPath() != "" {
+		return "value"
+	}
+	return label
+}
+
+// numberLabel names a number's kind for an out-of-range message: "integer", "non-negative
+// integer" or "number", not the field's Go type.
+func numberLabel(t reflect.Type) string {
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return "integer"
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "non-negative integer"
+	}
+	return "number"
 }
 
 // parseBool reads true/false, t/f, 1/0, yes/no, y/n and on/off, case-insensitively: a wider

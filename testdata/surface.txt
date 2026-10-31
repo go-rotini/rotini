@@ -9,11 +9,30 @@ const FlagGroupAtLeastOne FlagGroupKind
 const FlagGroupMutuallyExclusive FlagGroupKind
 const FlagGroupOneOf FlagGroupKind
 const FlagGroupRequiredTogether FlagGroupKind
+const HookCascadingPostRun
+const HookCascadingPreRun HookKind
+const HookPostRun
+const HookPreRun
+const HookRun
+const InputErrorKindConstraintViolation
+const InputErrorKindEnumViolation
+const InputErrorKindFileAccess
+const InputErrorKindInternal
+const InputErrorKindInterrupted
+const InputErrorKindInvalidValue
+const InputErrorKindMalformedDocument
+const InputErrorKindMissingRequired
+const InputErrorKindSchemaViolation
+const InputErrorKindUnknownKey
+const InputErrorKindUnknownProfile
+const InputErrorKindUnspecified InputErrorKind
+const InputErrorKindWriteRefused
 const ParseKindConstraintViolation
 const ParseKindEnumViolation
 const ParseKindInternal
 const ParseKindInvalidValue
 const ParseKindMisplacedFlag
+const ParseKindMissingCommand
 const ParseKindMissingRequired
 const ParseKindNeedsValue
 const ParseKindNoArguments
@@ -61,6 +80,8 @@ field Command.Deprecated string
 field Command.DeprecatedIdentifiers []string
 field Command.DeprecatedIdentifiersRemovedIn map[string]string
 field Command.DeprecatedSince string
+field Command.Effects *Effects
+field Command.ExitStatus []ExitStatusDef
 field Command.FlagDependencies []FlagDependency
 field Command.FlagGroups []FlagGroup
 field Command.Flags []FlagDef
@@ -77,6 +98,7 @@ field Command.PluginPath string
 field Command.Plugins []PluginDef
 field Command.RemovedIn string
 field Command.ReplacedBy string
+field Command.Stability string
 field Command.Usage string
 field CommandDef.Aliases []string
 field CommandDef.Arguments []ArgDef
@@ -104,6 +126,7 @@ field CommandDef.PluginPath string
 field CommandDef.Plugins []PluginDef
 field CommandDef.RemovedIn string
 field CommandDef.ReplacedBy string
+field CommandDef.Stability string
 field CommandDef.Summary string
 field CommandDef.Usage string
 field Completion.Extensions []string
@@ -180,6 +203,7 @@ field Definition.PluginDiscovery *PluginDiscoveryDef
 field Definition.PluginPath string
 field Definition.Plugins []PluginDef
 field Definition.ResponseFiles *ResponseFilesDef
+field Definition.Stability string
 field Definition.Topics []TopicDef
 field Definition.Usage string
 field DependencyError.Name string
@@ -260,10 +284,14 @@ field FlagDependency.Unless []string
 field FlagDependency.When string
 field FlagGroup.Flags []string
 field FlagGroup.Kind FlagGroupKind
+field Hook.Command Command
+field Hook.Kind HookKind
 field InputError.Candidates []string
 field InputError.Cause error
 field InputError.Channel string
+field InputError.Command string
 field InputError.Input string
+field InputError.Kind InputErrorKind
 field InputError.Msg string
 field InputError.Token string
 field InputLayer.Name string
@@ -290,8 +318,10 @@ field NoHooksE.NoCascadingPreRunE
 field NoHooksE.NoPostRunE
 field NoHooksE.NoPreRunE
 field Outcome.Errors []error
+field Outcome.ExitCode int
 field Outcome.Infos []string
 field Outcome.Panics []*PanicError
+field Outcome.Signal os.Signal
 field Outcome.Successes []string
 field Outcome.Warnings []error
 field OutputDef.Kinds []OutputKind
@@ -344,6 +374,11 @@ field Resolution.Plugin *PluginDispatch
 field ResponseFilesDef.Prefix string
 field TopicDef.Name string
 field TopicDef.Summary string
+field UnreadConfigKey.Column int
+field UnreadConfigKey.File string
+field UnreadConfigKey.Key string
+field UnreadConfigKey.Line int
+field UnreadConfigKey.Path string
 field WiringError.Command string
 field WiringError.Feature string
 field WiringError.Handler string
@@ -357,17 +392,22 @@ func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context
 func Bounds() Feature
 func CategoryOf(err error) Category
 func Chdir() Feature
+func Codec(name string, decode func(data []byte) (any, error), opts ...CodecOption) Feature
+func CodecExtensions(exts ...string) CodecOption
+func CodecLocate(locate func(data []byte, path []string) (line, col int, ok bool)) CodecOption
 func ConfigFilePath(rtx *Context, file string) (path string, exists bool, err error)
 func ConfigFiles() Feature
 func ConfigProfiles(rtx *Context, file string) ([]string, error)
 func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile, error)
 func DecodeOutput[T any](p *Program, data []byte, format string) (T, error)
 func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep
+func DefaultReporter(ctx context.Context, rtx *Context, out Outcome)
 func DefaultResolver(def Definition, argv []string) (Resolution, error)
 func Deprecations(rtx *Context) []Deprecation
 func Dotenv() Feature
 func EmailValues() Feature
 func Env() Feature
+func EnvFamilies() Feature
 func EnvFiles() Feature
 func ExitCause(code int) error
 func Fallbacks() Feature
@@ -383,6 +423,7 @@ func JSONC() Feature
 func MACValues() Feature
 func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport)
 func MergeInputs[T any](layers ...InputLayer[T]) T
+func MissingCommand(rtx *Context) *ParseError
 func Multicall() Feature
 func NewChannel[T any](name string, class ChannelClass) Channel[T]
 func NewContextFor(def Definition, argv []string) *Context
@@ -406,9 +447,11 @@ func Profiles() Feature
 func Ptr[T any](v T) *T
 func RegexpValues() Feature
 func ResponseFiles() Feature
+func RunEffects(rtx *Context) Effects
 func Schemas() Feature
 func SelectFields(v any, at string, fields []string) (Selection, error)
 func SetConfigValue(rtx *Context, file, key, raw string, opts ...ConfigWriteOption) error
+func SignalCaused(ctx context.Context, err error) bool
 func SortBy[E any](items []E, field string, desc bool) error
 func Stdin(formats ...string) Feature
 func StreamPaths() Feature
@@ -416,15 +459,18 @@ func StripANSI(text string) string
 func StructuredReporter(structured func(rtx *Context) bool) Reporter
 func SuggestionFacts(err error) (token string, candidates []string, ok bool)
 func TOML() Feature
+func TimeValues() Feature
 func TimeZoneValues() Feature
 func ToProfile(name string) ConfigWriteOption
 func ToSharedKeys() ConfigWriteOption
 func URLValues() Feature
 func UniqueItems() Feature
+func UnknownCommandError(def Definition, path ...string) *ParseError
 func UnsetConfigValue(rtx *Context, file, key string, opts ...ConfigWriteOption) error
 func UsageError(err error) error
 func UserHomes() Feature
 func WithDependency[T any](dep Dependency[T], value T) Option
+func WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Context) (T, error)) Option
 func YAML() Feature
 method ArgValueCompleter.CompleteArgValue(rtx *Context, arg, partial string) []string
 method ArgvError.Error() string
@@ -454,6 +500,7 @@ method Context.CompletionScript(shell string) (string, error)
 method Context.Context() context.Context
 method Context.DashIndex() (int, bool)
 method Context.DefaultInputs[T any]() (InputLayer[T], error)
+method Context.Dependency[T any](dep Dependency[T]) (T, error)
 method Context.Dir() string
 method Context.EnvInputs[T any]() (InputLayer[T], error)
 method Context.Environ() []string
@@ -486,6 +533,7 @@ method Context.SetContext(ctx context.Context)
 method Context.SetDependencyIfAbsent[T any](dep Dependency[T], value T)
 method Context.SetDependency[T any](dep Dependency[T], value T)
 method Context.StdinInputs[T any]() (InputLayer[T], error)
+method Context.UnknownCommand() error
 method Context.Usage() string
 method Context.Version() string
 method Context.WithClock(now func() time.Time) *Context
@@ -528,12 +576,19 @@ method Handler.Run(ctx context.Context, rtx *Context)
 method HexBytes.MarshalText() ([]byte, error)
 method HexBytes.String() string
 method HexBytes.UnmarshalText(text []byte) error
+method HookKind.String() string
 method InputError.Error() string
+method InputError.Path() string
 method InputError.Unwrap() []error
+method InputErrorKind.String() string
 method InputReader.Read(rtx *Context, out any) error
+method InputReport.Explain(w io.Writer) error
 method InputReport.Fields() []FieldPath
 method InputReport.Format(w io.Writer) error
 method InputReport.History(path FieldPath) []InputSource
+method InputReport.Label(path FieldPath) string
+method InputReport.Sources(path FieldPath) []string
+method InputReport.UnreadConfigKeys() []UnreadConfigKey
 method InputReport.Validate() error
 method InputReport.Winner(path FieldPath) (InputSource, bool)
 method NoCascadingPostRun.CascadingPostRun(ctx context.Context, rtx *Context)
@@ -554,6 +609,7 @@ method OutputFile.Write(p []byte) (int, error)
 method PanicError.Error() string
 method PanicError.Unwrap() []error
 method ParseError.Error() string
+method ParseError.Path() string
 method ParseError.Unwrap() error
 method ParseKind.String() string
 method Parser.Parse(rtx *Context, out any) error
@@ -563,6 +619,7 @@ method PluginErrorKind.String() string
 method Program.Complete(words []string, format CompletionFormat) (int, error)
 method Program.Definition() Definition
 method Program.Execute() error
+method Program.Reporter() Reporter
 method Program.Run(argv []string) (int, error)
 method Program.RunContext(ctx context.Context, argv []string) (int, error)
 method Program.With(opts ...Option) *Program
@@ -584,9 +641,11 @@ method Program.WithHelp(help HelpFunc) *Program
 method Program.WithInputReader(fn func(InputSettings) *InputReader) *Program
 method Program.WithInputSettings(meta InputSettings) *Program
 method Program.WithLifecycle(fn Lifecycle) *Program
+method Program.WithMiddleware(mw ...Middleware) *Program
 method Program.WithOutputChecks(enabled bool) *Program
 method Program.WithPanicRecover(enabled bool) *Program
 method Program.WithParser(parser *Parser) *Program
+method Program.WithProvider[T any](dep Dependency[T], fn func(ctx context.Context, rtx *Context) (T, error)) *Program
 method Program.WithReporter(fn Reporter) *Program
 method Program.WithResolver(fn Resolver) *Program
 method Program.WithSignals(sigs ...os.Signal) *Program
@@ -617,6 +676,7 @@ type ByteSize int64
 type Category int
 type ChannelClass uint8
 type Channel[T any] struct
+type CodecOption func(*codecEntry)
 type Command struct
 type CommandDef struct
 type Completion struct
@@ -654,7 +714,11 @@ type Handler interface
 type HandlerLookup func(name string) (Handler, bool)
 type HelpFunc func(path ...string) (string, error)
 type HexBytes []byte
+type Hook struct
+type HookFunc func(ctx context.Context, rtx *Context) error
+type HookKind uint8
 type InputError struct
+type InputErrorKind int
 type InputLayer[T any] struct
 type InputReader struct
 type InputReport struct
@@ -662,6 +726,7 @@ type InputSettings struct
 type InputSource struct
 type Lifecycle func(chain []Command, handlers []Handler) []LifecycleStep
 type LifecycleStep struct
+type Middleware func(h Hook, next HookFunc) HookFunc
 type MulticallDef struct
 type NoCascadingPostRun struct
 type NoCascadingPostRunE struct
@@ -700,6 +765,7 @@ type ResponseFilesDef struct
 type Selection struct
 type Suggestor struct
 type TopicDef struct
+type UnreadConfigKey struct
 type WiringError struct
 var ErrDependencyNotFound
 var ErrInternal

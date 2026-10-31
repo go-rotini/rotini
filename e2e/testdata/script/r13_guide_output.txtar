@@ -74,7 +74,7 @@ exec go build -o todo$exe ./cmd/todo
 exec ./todo$exe list --json id,title --sort-by title
 cmp stdout select.json
 exec ./todo$exe list --help
-stdout '--json \[\]string .*\[id\|status\|title\]'
+stdout '--json string\.\.\. .*\[id\|status\|title\]'
 
 -- list.table --
 ID  STATUS  TITLE

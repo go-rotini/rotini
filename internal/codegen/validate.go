@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"unicode"
 
 	"github.com/go-rotini/jsonschema"
@@ -143,9 +142,38 @@ func validateInstance(kind string, instance []byte, schema *jsonschema.Schema) [
 		if loc == "" {
 			loc = "/"
 		}
-		problems = append(problems, &problem{kind: kind, loc: loc, msg: humanizeSchemaError(ve)})
+		p := &problem{kind: kind, loc: loc, msg: humanizeSchemaError(ve)}
+		if key := pointerLeaf(ve.InstanceLocation); ve.Keyword == "false" && key != "" {
+			p.unknownKey = true
+			if !strings.Contains(p.msg, "; ") {
+				p.msg = didYouMean(p.msg, key, schemaKeysAt(kind, strings.TrimSuffix(staticLocation(ve.KeywordLocation), "/additionalProperties")))
+			}
+		}
+		problems = append(problems, p)
 	}
 	return problems
+}
+
+// schemaKeysAt returns the property names the object schema at location declares in the kind
+// ("spec" or "conf") document's schema, sorted.
+func schemaKeysAt(kind, location string) []string {
+	docs := schemaDocuments()
+	i := 0
+	if kind == "conf" {
+		i = 1
+	}
+	if i >= len(docs) {
+		return nil
+	}
+	node := docs[i]
+	for seg := range strings.SplitSeq(strings.TrimPrefix(location, "#"), "/") {
+		if seg != "" {
+			node = childNode(node, unescapePointer(seg))
+		}
+	}
+	m, _ := node.(map[string]any)
+	props, _ := m["properties"].(map[string]any)
+	return slices.Sorted(maps.Keys(props))
 }
 
 // humanizeSchemaError rewrites a schema violation in rotini's vocabulary for the keywords
@@ -234,16 +262,20 @@ func patternSubject(instanceLocation string) string {
 
 // schemaDocuments are rotini's two embedded schemas, parsed once, for reading keywords the
 // validator does not report, such as `examples` and `x-hint`.
-var schemaDocuments = sync.OnceValue(func() []any {
-	var docs []any
-	for _, raw := range [][]byte{schemaSpecFileBytes, schemaConfFileBytes} {
-		var doc any
-		if err := json.Unmarshal(raw, &doc); err == nil {
-			docs = append(docs, doc)
+func schemaDocuments() []any {
+	return schemaDocumentsOnce.value(func() []any {
+		var docs []any
+		for _, raw := range [][]byte{schemaSpecFileBytes, schemaConfFileBytes} {
+			var doc any
+			if err := json.Unmarshal(raw, &doc); err == nil {
+				docs = append(docs, doc)
+			}
 		}
-	}
-	return docs
-})
+		return docs
+	})
+}
+
+var schemaDocumentsOnce lazy[[]any]
 
 // schemaHint returns the rotini-specific `x-hint` of the schema node at a keyword location,
 // or "".
@@ -450,50 +482,60 @@ type schemaBlockKeySets struct {
 	object map[string]bool // Schema: output, schemas, config_files, properties, items
 }
 
-var loadSchemaBlockKeys = sync.OnceValues(func() (schemaBlockKeySets, error) {
-	var doc struct {
-		Definitions map[string]struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-			AllOf      []struct {
+func loadSchemaBlockKeys() (schemaBlockKeySets, error) {
+	return loadSchemaBlockKeysOnce.value(func() (schemaBlockKeySets, error) {
+		var doc struct {
+			Definitions map[string]struct {
 				Properties map[string]json.RawMessage `json:"properties"`
-			} `json:"allOf"`
-		} `json:"definitions"`
-	}
-	if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
-		return schemaBlockKeySets{}, fmt.Errorf("read embedded spec schema: %w", err)
-	}
-	keysOf := func(def string) map[string]bool {
-		out := map[string]bool{}
-		for k := range doc.Definitions["BaseSchema"].Properties {
-			out[k] = true
+				AllOf      []struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				} `json:"allOf"`
+			} `json:"definitions"`
 		}
-		for _, branch := range doc.Definitions[def].AllOf {
-			for k := range branch.Properties {
+		if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
+			return schemaBlockKeySets{}, fmt.Errorf("read embedded spec schema: %w", err)
+		}
+		keysOf := func(def string) map[string]bool {
+			out := map[string]bool{}
+			for k := range doc.Definitions["BaseSchema"].Properties {
 				out[k] = true
 			}
+			for _, branch := range doc.Definitions[def].AllOf {
+				for k := range branch.Properties {
+					out[k] = true
+				}
+			}
+			return out
 		}
-		return out
-	}
-	sets := schemaBlockKeySets{input: keysOf("InputSchema"), object: keysOf("Schema")}
-	if len(sets.input) == 0 || len(sets.object) == 0 {
-		return schemaBlockKeySets{}, errors.New("embedded spec schema has no BaseSchema/Schema/InputSchema properties")
-	}
-	return sets, nil
-})
+		sets := schemaBlockKeySets{input: keysOf("InputSchema"), object: keysOf("Schema")}
+		if len(sets.input) == 0 || len(sets.object) == 0 {
+			return schemaBlockKeySets{}, errors.New("embedded spec schema has no BaseSchema/Schema/InputSchema properties")
+		}
+		return sets, nil
+	})
+}
+
+var loadSchemaBlockKeysOnce lazyErr[schemaBlockKeySets]
 
 // jsonSchemaOnlyKeywords are JSON Schema keywords rotini's schema blocks do not implement.
 // An unknown key in this set gets a message saying so rather than a plain typo message.
-var jsonSchemaOnlyKeywords = map[string]bool{
-	"const": true, "format": true, "contains": true, "minContains": true,
-	"maxContains": true, "additionalProperties": true, "patternProperties": true,
-	"propertyNames": true, "minProperties": true, "maxProperties": true, "dependencies": true,
-	"dependentRequired": true, "dependentSchemas": true, "if": true, "then": true, "else": true,
-	"allOf": true, "anyOf": true, "oneOf": true, "not": true, "additionalItems": true,
-	"unevaluatedItems": true, "unevaluatedProperties": true, "$id": true, "$defs": true,
-	"definitions": true, "title": true, "description": true, "examples": true, "$comment": true,
-	"readOnly": true, "writeOnly": true, "deprecated": true, "contentMediaType": true,
-	"contentEncoding": true, "default": true,
+func jsonSchemaOnlyKeywords() map[string]bool {
+	return jsonSchemaOnlyKeywordsOnce.value(func() map[string]bool {
+		return map[string]bool{
+			"const": true, "format": true, "contains": true, "minContains": true,
+			"maxContains": true, "patternProperties": true,
+			"propertyNames": true, "minProperties": true, "maxProperties": true, "dependencies": true,
+			"dependentRequired": true, "dependentSchemas": true, "if": true, "then": true, "else": true,
+			"allOf": true, "anyOf": true, "oneOf": true, "not": true, "additionalItems": true,
+			"unevaluatedItems": true, "unevaluatedProperties": true, "$id": true, "$defs": true,
+			"definitions": true, "title": true, "description": true, "examples": true, "$comment": true,
+			"readOnly": true, "writeOnly": true, "deprecated": true, "contentMediaType": true,
+			"contentEncoding": true, "default": true,
+		}
+	})
 }
+
+var jsonSchemaOnlyKeywordsOnce lazy[map[string]bool]
 
 // schemaBlockProblems reports every key in a spec's schema blocks that the block's kind does
 // not define, positioned by JSON pointer. It visits input schemas on each channel, output and
@@ -599,7 +641,11 @@ func (w *schemaBlockWalker) block(node any, input bool, ptr, noun, channel strin
 	for _, k := range slices.Sorted(maps.Keys(m)) {
 		switch {
 		case !allowed[k]:
-			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + escapePointer(k), msg: unknownSchemaKey(k, noun, channel)})
+			msg := unknownSchemaKey(k, noun, channel)
+			if !strings.Contains(msg, "; ") {
+				msg = didYouMean(msg, k, slices.Sorted(maps.Keys(allowed)))
+			}
+			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + escapePointer(k), msg: msg, unknownKey: true})
 		case k == "oneOf" && noun != outputBlockNoun:
 			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + k,
 				msg: fmt.Sprintf("`oneOf` in %s; it is accepted only on a command's `output`, listing the kinds of a stream's items", noun)})
@@ -623,7 +669,10 @@ func unknownSchemaKey(key, noun, channel string) string {
 	if hint := entryPlacementHint(channel, key); hint != "" {
 		return msg + "; " + hint
 	}
-	if jsonSchemaOnlyKeywords[key] {
+	if key == "additionalProperties" {
+		return msg + "; `additionalProperties: false` belongs on an object schema: a config_files entry's schema, a named schema, or a property"
+	}
+	if jsonSchemaOnlyKeywords()[key] {
 		msg += fmt.Sprintf("; %q is a JSON Schema keyword rotini's schema blocks do not implement, so it would have done nothing", key)
 	}
 	return msg

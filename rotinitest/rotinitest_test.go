@@ -3,6 +3,7 @@ package rotinitest_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -458,5 +459,86 @@ func TestRunDir(t *testing.T) {
 	res := rotinitest.Run(t, newTool[loadJSON](), toolInputs{}, rotinitest.Dir(dir))
 	if res.Dir != dir {
 		t.Errorf("dir = %q, want %q", res.Dir, dir)
+	}
+}
+
+// skipped is a test channel: files a run left alone.
+var skipped = rotini.NewChannel[string]("skipped", rotini.ClassWarning)
+
+// outcomeTool records an info, a channel record and an error, then halts with code 3.
+func outcomeTool() *rotini.Program {
+	return rotini.NewProgramFunc(toolDef(), func(name string) (rotini.Handler, bool) {
+		return &handler{run: func(rtx *rotini.Context) {
+			if name != "ToolList" {
+				return
+			}
+			rtx.RecordInfo("scanning")
+			rtx.Record(skipped, "a.txt")
+			rtx.RecordError(errors.New("b.txt: unreadable"))
+			rtx.HaltWithCode(3)
+		}}, true
+	})
+}
+
+func TestRunOutcome(t *testing.T) {
+	t.Parallel()
+	t.Run("the default reporter", func(t *testing.T) {
+		t.Parallel()
+		res := rotinitest.Run(t, outcomeTool(), listInputs{})
+		out := res.Outcome
+		if got := out.Records(skipped); !slices.Equal(got, []string{"a.txt"}) {
+			t.Errorf("Records(skipped) = %q, want [a.txt]", got)
+		}
+		if !slices.Equal(out.Infos, []string{"scanning"}) || len(out.Errors) != 1 || out.ExitCode != 3 || out.Signal != nil {
+			t.Errorf("Outcome = %+v, want the info, the error and exit code 3", out)
+		}
+		if want := "scanning\nWarning: a.txt\nError: b.txt: unreadable\n"; string(res.Stderr) != want || res.Code != 3 {
+			t.Errorf("exit %d, stderr %q; want the default report %q and 3", res.Code, res.Stderr, want)
+		}
+	})
+	t.Run("the program's own reporter", func(t *testing.T) {
+		t.Parallel()
+		p := outcomeTool().WithReporter(func(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
+			fmt.Fprintf(rtx.Stderr, "%d problems\n", len(out.Errors))
+			out.Errors[0] = errors.New("rewritten")
+			rtx.Exit(4)
+		})
+		res := rotinitest.Run(t, p, listInputs{})
+		if string(res.Stderr) != "1 problems\n" || res.Code != 4 {
+			t.Errorf("exit %d, stderr %q; want the program's reporter to run and set 4", res.Code, res.Stderr)
+		}
+		if got := res.Outcome.Errors[0].Error(); got != "b.txt: unreadable" || res.Outcome.ExitCode != 3 {
+			t.Errorf("Outcome error %q, ExitCode %d; want what the run recorded, before the reporter", got, res.Outcome.ExitCode)
+		}
+	})
+	t.Run("a run that recorded nothing", func(t *testing.T) {
+		t.Parallel()
+		res := rotinitest.Run(t, newTool[loadJSON](), listInputs{})
+		if !res.Outcome.Empty() || res.Outcome.ExitCode != 0 || res.Code != 0 {
+			t.Errorf("Outcome %+v, exit %d; want an empty Outcome and 0", res.Outcome, res.Code)
+		}
+	})
+}
+
+// TestRunArgv pins that a command line runs as given, in a run's isolated environment, with
+// the invoked command found from its words for ExitDocumented, and a typo failing as it would for a user.
+func TestRunArgv(t *testing.T) {
+	t.Parallel()
+	res := rotinitest.RunArgv(t, newTool[loadJSON](), []string{"--verbose", "add", "--count", "3", "buy milk"})
+	if res.Code != 0 || string(res.Stdout) != "count=3 title=buy milk token= key= home=true" {
+		t.Errorf("code %d, stdout %q, err %v", res.Code, res.Stdout, res.Err)
+	}
+	listed := rotinitest.RunArgv(t, newTool[loadJSON](), []string{"list", "--code", "4"})
+	if msg := failure(t, func(tb testing.TB) { rotinitest.ExitDocumented(tb, listed) }); !strings.Contains(msg, "tool list exited 4") {
+		t.Errorf("ExitDocumented = %q, want it to name tool list", msg)
+	}
+	typo := rotinitest.RunArgv(t, newTool[loadJSON](), []string{"add", "--colour", "x"})
+	var pe *rotini.ParseError
+	if typo.Code != 2 || !errors.As(typo.Err, &pe) || pe.Kind != rotini.ParseKindUnknownFlag {
+		t.Errorf("typo: code %d, err %v; want an unknown-flag ParseError", typo.Code, typo.Err)
+	}
+	piped := rotinitest.RunArgv(t, newTool[loadText](), []string{"load"}, rotinitest.Stdin(strings.NewReader("hi")))
+	if string(piped.Stdout) != `"hi"` {
+		t.Errorf("stdin: stdout %q, err %v", piped.Stdout, piped.Err)
 	}
 }

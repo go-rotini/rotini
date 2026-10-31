@@ -15,9 +15,8 @@ var hookNames = []string{"CascadingPreRun", "PreRun", "Run", "PostRun", "Cascadi
 
 // hookShapes reports, for each type in dir that declares a lifecycle hook, whether its hooks
 // return a result: an ErrorHandler, which the generated wiring wraps with
-// rotini.FromErrorHandler. A type that declares no hook is absent, so a stub not written yet
-// takes the conf's hook_returns. Unreadable files, files that don't parse, test files and
-// files out of the build (a disabled stub) are skipped.
+// rotini.FromErrorHandler. A type that declares no hook is absent. Unreadable files, files that
+// don't parse, test files and files out of the build (a disabled stub) are skipped.
 func hookShapes(dir string) map[string]bool {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -34,28 +33,34 @@ func hookShapes(dir string) map[string]bool {
 		if err != nil || buildIgnored(src) {
 			continue
 		}
-		f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution)
-		if err != nil {
-			continue
-		}
-		for _, d := range f.Decls {
-			fd, ok := d.(*ast.FuncDecl)
-			if !ok || fd.Recv == nil || len(fd.Recv.List) != 1 || !slices.Contains(hookNames, fd.Name.Name) {
-				continue
-			}
-			typ := receiverTypeName(fd.Recv.List[0].Type)
-			if typ == "" {
-				continue
-			}
-			returns := fd.Type.Results != nil && len(fd.Type.Results.List) > 0
-			shapes[typ] = shapes[typ] || returns
-		}
+		addHookShapes(shapes, fset, name, src)
 	}
 	return shapes
 }
 
+// addHookShapes records in shapes, for each type the Go source src declares a lifecycle hook on,
+// whether its hooks return a result. A file that doesn't parse adds nothing.
+func addHookShapes(shapes map[string]bool, fset *token.FileSet, name string, src []byte) {
+	f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution)
+	if err != nil {
+		return
+	}
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Recv == nil || len(fd.Recv.List) != 1 || !slices.Contains(hookNames, fd.Name.Name) {
+			continue
+		}
+		typ := receiverTypeName(fd.Recv.List[0].Type)
+		if typ == "" {
+			continue
+		}
+		returns := fd.Type.Results != nil && len(fd.Type.Results.List) > 0
+		shapes[typ] = shapes[typ] || returns
+	}
+}
+
 // errorHooks reports whether handler type typ is an ErrorHandler: by its own methods when
-// shapes knows it, else by the conf, which decides the stub generate is about to seed.
+// shapes knows it, else by the conf's hook_returns.
 func errorHooks(shapes map[string]bool, typ string, confError bool) bool {
 	if returns, known := shapes[typ]; known {
 		return returns

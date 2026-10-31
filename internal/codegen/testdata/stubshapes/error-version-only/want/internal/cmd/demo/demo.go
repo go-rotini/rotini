@@ -22,6 +22,10 @@ func (*demoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) er
 	}
 	inputs := argv.Values
 
+	if err := rtx.UnknownCommand(); err != nil {
+		return err
+	}
+
 	if inputs.Demo.Flags.Version {
 		version := rtx.Version()
 		if version == "" {

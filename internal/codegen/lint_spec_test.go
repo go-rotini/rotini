@@ -16,14 +16,14 @@ import (
 // TestLintRegistryCompleteness pins the number of registered spec, conf and cross rules so a
 // dropped rule is noticed.
 func TestLintRegistryCompleteness(t *testing.T) {
-	if got := len(specLints); got != 113 {
-		t.Errorf("len(specLints) = %d, want 113 (a rule was dropped or added — update intentionally)", got)
+	if got := len(specLints); got != 117 {
+		t.Errorf("len(specLints) = %d, want 117 (a rule was dropped or added — update intentionally)", got)
 	}
 	if got := len(confLints); got != 16 {
 		t.Errorf("len(confLints) = %d, want 16", got)
 	}
-	if got := len(crossLints); got != 12 {
-		t.Errorf("len(crossLints) = %d, want 12", got)
+	if got := len(crossLints); got != 16 {
+		t.Errorf("len(crossLints) = %d, want 16", got)
 	}
 }
 
@@ -47,8 +47,8 @@ func TestConstraintNumericFamilyMatchesRuntime(t *testing.T) {
 	if len(runtimeSet) == 0 {
 		t.Fatal("extracted no types from runtime isNumericType")
 	}
-	if !maps.Equal(runtimeSet, constraintNumericFamily) {
-		t.Errorf("constraintNumericFamily drifted from runtime isNumericType:\n runtime=%v\n codegen=%v", runtimeSet, constraintNumericFamily)
+	if !maps.Equal(runtimeSet, constraintNumericFamily()) {
+		t.Errorf("constraintNumericFamily drifted from runtime isNumericType:\n runtime=%v\n codegen=%v", runtimeSet, constraintNumericFamily())
 	}
 }
 

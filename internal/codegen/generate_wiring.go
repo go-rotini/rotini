@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -14,14 +15,15 @@ import (
 
 // wiring records the features a program needs, one flag per feature.
 type wiring struct {
-	plugins, respFiles, chdir, multicall                bool
-	stdin                                               map[string]bool
-	env, config, profiles, envFiles, fallbacks, expand  bool
-	homes                                               bool // a path may name another user's home ("~bob")
-	objects, schemas                                    bool
-	json, yaml, toml, jsonc, dotenv                     bool
-	bounds, unique, patterns, groups, deps, streamPaths bool
-	url, email, timezone, mac, ip, regexp               bool
+	plugins, respFiles, chdir, multicall                 bool
+	stdin                                                map[string]bool
+	env, families, config, profiles, envFiles, fallbacks bool
+	expand                                               bool
+	homes                                                bool // a path may name another user's home ("~bob")
+	objects, schemas                                     bool
+	json, yaml, toml, jsonc, dotenv                      bool
+	bounds, unique, patterns, groups, deps, streamPaths  bool
+	times, url, email, timezone, mac, ip, regexp         bool
 }
 
 // stdinFormatOrder is the order stdin formats are passed to rotini.Stdin.
@@ -115,7 +117,8 @@ func (w *wiring) command(gp *program, in *Inputs, plugins []PluginSpec, discover
 }
 
 // input records what one input's schema needs: its bounds, unique items, pattern, expansion,
-// variable file, and the value types of the input and of everything its schema names.
+// variable file, env family, time layouts or relative form, and the value types of the input
+// and of everything its schema names.
 func (w *wiring) input(schema *InputSchema, schemas map[string]Schema) {
 	if schema == nil {
 		return
@@ -135,6 +138,12 @@ func (w *wiring) input(schema *InputSchema, schemas map[string]Schema) {
 	}
 	if schema.VariableFile != "" {
 		w.envFiles = true
+	}
+	if schema.Nesting != "" {
+		w.families = true
+	}
+	if len(layoutsFor(schema)) > 0 || relative(schema) != "" {
+		w.times = true
 	}
 	w.typeName(definitionType(schema, schemas))
 	w.typeName(goFieldType(schema))
@@ -293,16 +302,16 @@ func (w *wiring) expressions() []string {
 				formats = append(formats, strconv.Quote(f))
 			}
 		}
-		for f := range w.stdin {
+		for _, f := range slices.Sorted(maps.Keys(w.stdin)) {
 			if !slices.Contains(stdinFormatOrder, f) {
-				// An unknown format: wire every format, as a program with every feature reads.
-				formats = nil
-				break
+				// A format of the program's own, whose rotini.Codec the program adds.
+				formats = append(formats, strconv.Quote(f))
 			}
 		}
 		out = append(out, rotiniPkgName+".Stdin("+strings.Join(formats, ", ")+")")
 	}
 	add(w.env, "Env")
+	add(w.families, "EnvFamilies")
 	add(w.config, "ConfigFiles")
 	add(w.profiles, "Profiles")
 	add(w.envFiles, "EnvFiles")
@@ -322,6 +331,7 @@ func (w *wiring) expressions() []string {
 	add(w.groups, "FlagGroups")
 	add(w.deps, "FlagDependencies")
 	add(w.streamPaths, "StreamPaths")
+	add(w.times, "TimeValues")
 	add(w.url, "URLValues")
 	add(w.email, "EmailValues")
 	add(w.timezone, "TimeZoneValues")

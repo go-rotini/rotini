@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 )
 
@@ -34,7 +33,11 @@ var (
 const skillLineLimit = 500
 
 // skillName is the Agent Skills rule for a skill's name.
-var skillName = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`) })
+func skillName() *regexp.Regexp {
+	return skillNameOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`) })
+}
+
+var skillNameOnce lazy[*regexp.Regexp]
 
 // templateProgramData is what the whole-program page templates render.
 type templateProgramData struct {
@@ -59,18 +62,19 @@ type templateProgramData struct {
 
 // templateProgramCommand is one command on a whole-program page.
 type templateProgramCommand struct {
-	Invocation  string   // "taskr remote add"
-	Summary     string   //
-	Description string   //
-	Aliases     []string // its other names
-	Effects     string   // the worst case over the command and its flags, as words; "" when undeclared
-	Kind        string   // that worst case's kind: read, write, destructive, or ""
-	Stability   string   // experimental, beta or "", inherited from its ancestors
-	Deprecated  string   // its deprecation message, "" for none
-	JSON        string   // what to add to the command line for JSON output, "" for none
-	DryRun      string   // its dry-run flag, "" for none
-	Confirm     string   // its confirm flag, "" for none
-	Examples    []string
+	Invocation  string               // "taskr remote add"
+	Summary     string               //
+	Description string               //
+	Aliases     []string             // its other names
+	Effects     string               // the worst case over the command and its flags, as words; "" when undeclared
+	Kind        string               // that worst case's kind: read, write, destructive, or ""
+	Stability   string               // experimental, beta or "", inherited from its ancestors
+	Deprecated  string               // its deprecation message, "" for none
+	JSON        string               // what to add to the command line for JSON output, "" for none
+	DryRun      string               // its dry-run flag, "" for none
+	Confirm     string               // its confirm flag, "" for none
+	Examples    []string             // each example's command line
+	ExampleRows []templateDocExample // each example's command line and summary
 	ExitStatus  []templateDocExitRow
 	Link        string // skill: its reference page (references/<page>.md); llms: its markdown page; "" for none
 }
@@ -97,7 +101,7 @@ func programData(p *program, a *agentProgram, link func(page string) string) tem
 		row := templateProgramCommand{
 			Invocation: c.invocation, Summary: cmd.Summary, Description: cmd.Description, Aliases: cmd.Aliases,
 			Effects: effectsText(c.effects), Stability: c.stability, Deprecated: cmd.Deprecated,
-			JSON: strings.Join(c.machine, " "), DryRun: c.dryRun, Confirm: c.confirm, Examples: h.Examples,
+			JSON: strings.Join(c.machine, " "), DryRun: c.dryRun, Confirm: c.confirm, Examples: exampleRuns(h.Examples), ExampleRows: exampleRows(h.Examples),
 			Link: link(manPageName(a.doc.Name, cmd.Path)),
 		}
 		if c.effects != nil {
@@ -235,9 +239,13 @@ func renderSkill(p *program, f *Feature, a *agentProgram, tmpl *template.Templat
 }
 
 // skillReferenceLink matches a link SKILL.md makes to one of its reference pages.
-var skillReferenceLink = sync.OnceValue(func() *regexp.Regexp {
-	return regexp.MustCompile(`\(references/([^()/\\\s]+\.md)\)`)
-})
+func skillReferenceLink() *regexp.Regexp {
+	return skillReferenceLinkOnce.value(func() *regexp.Regexp {
+		return regexp.MustCompile(`\(references/([^()/\\\s]+\.md)\)`)
+	})
+}
+
+var skillReferenceLinkOnce lazy[*regexp.Regexp]
 
 // pruneSkillReferences removes each reference page the previous SKILL.md linked that this run
 // doesn't write, as a renamed or removed command leaves behind. SKILL.md is rotini's, so its
@@ -326,18 +334,26 @@ func commandSpellings(a *agentProgram, c agentCommand) []string {
 }
 
 // renderLLMS writes llms.txt, linking each command to its markdown page: under base_url when
-// set, else relative to llms.txt, at the markdown feature's files.
+// set, else relative to llms.txt, at the markdown feature's installed pages when it sets
+// install_dir, else at its embedded files.
 func renderLLMS(p *program, f *Feature, a *agentProgram, tmpl *template.Template) (map[string][]byte, []error, error) {
 	link := func(page string) string { return "" }
 	if f.BaseUrl != "" {
 		link = func(page string) string { return f.BaseUrl + page + ".md" }
-	} else if md := p.conf.Generate.featureOf("markdown"); md != nil && md.Enabled && md.Embed {
+	} else if md := p.conf.Generate.featureOf("markdown"); md != nil && md.Enabled && (md.Embed || md.InstallDir != "") {
 		files := map[string]string{}
 		for _, o := range p.featureOutputs {
-			if o.desc.name == "markdown" {
-				for _, n := range o.nodes {
-					files[n.data.PageName] = filepath.Join(o.absEmbedDir, n.file)
+			if o.desc.name != "markdown" {
+				continue
+			}
+			for _, n := range o.nodes {
+				if md.InstallDir != "" { // the installed <page>.md, named as base_url names it
+					if n.listed {
+						files[n.data.PageName] = filepath.Join(p.module.root, md.InstallDir, n.data.PageName+".md")
+					}
+					continue
 				}
+				files[n.data.PageName] = filepath.Join(o.absEmbedDir, n.file)
 			}
 		}
 		at, err := underModule(p.module.root, "generate.features.llms.file", cmp.Or(f.File, "llms.txt"))

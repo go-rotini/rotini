@@ -11,9 +11,12 @@ import (
 // Each topic is one more node in the help, man and markdown features, so `Help("<topic>")`,
 // ManPages and MarkdownPages serve it like a command's page.
 
-// topicGenerateEnvironment is the `generate:` value that builds a topic listing every
-// environment variable the program reads.
-const topicGenerateEnvironment = "environment"
+// The `generate:` values: a topic listing every environment variable the program reads, and
+// one listing every configuration file and key.
+const (
+	topicGenerateEnvironment   = "environment"
+	topicGenerateConfiguration = "configuration"
+)
 
 // topicNodes returns one node per declared topic for a doc feature, after the commands' nodes.
 // Pages show the root's display name; files use its real name (help_demo.topic.filters.txt,
@@ -41,9 +44,13 @@ func topicNodes(gp *program, feat docFeature, section, date string) []helpNode {
 			Source:       gp.rootDisplay,
 			Date:         date,
 			RelatedPages: []string{manPageName(gp.rootName, nil)},
+			ParentPage:   manPageName(gp.rootName, nil),
 		}
-		if t.Generate == topicGenerateEnvironment {
+		switch t.Generate {
+		case topicGenerateEnvironment:
 			data.Environment = environmentTopicRows(gp)
+		case topicGenerateConfiguration:
+			data.Files, data.Configuration = configurationTopicRows(gp)
 		}
 		out = append(out, helpNode{
 			prefix: "Topic" + gp.rootPascal + toPascalCase(t.Name),
@@ -60,10 +67,10 @@ func topicNodes(gp *program, feat docFeature, section, date string) []helpNode {
 }
 
 // topicRows returns the root page's list of topics, in declared order.
-func topicRows(topics []Topic) []templateDocTopicRow {
-	rows := make([]templateDocTopicRow, 0, len(topics))
-	for _, t := range topics {
-		rows = append(rows, templateDocTopicRow{Name: t.Name, Summary: t.Summary})
+func topicRows(gp *program) []templateDocTopicRow {
+	rows := make([]templateDocTopicRow, 0, len(gp.rootHelp.Topics))
+	for _, t := range gp.rootHelp.Topics {
+		rows = append(rows, templateDocTopicRow{Name: t.Name, Summary: t.Summary, Page: manPageName(gp.rootName, []string{t.Name})})
 	}
 	return rows
 }
@@ -123,6 +130,86 @@ func environmentTopicRows(gp *program) []templateDocEnvRow {
 	}
 	slices.SortFunc(out, func(a, b templateDocEnvRow) int { return cmp.Compare(a.Var, b.Var) })
 	return out
+}
+
+// configurationTopicRows lists every configuration file the program reads, in declared order
+// (the root's first), and every key its visible inputs read from them, one row per key (and
+// pinned file) sorted by key: configuration inputs, and the config fallbacks of flags and
+// arguments on commands that read a file. A row names the commands that declare it.
+func configurationTopicRows(gp *program) ([]templateDocFileRow, []templateDocConfigRow) {
+	files := make([]templateDocFileRow, 0, len(gp.configFiles))
+	for _, cf := range gp.configFiles {
+		files = append(files, gp.fileRow(cf, gp.scopeChain(cmp.Or(cf.Scope, gp.rootName))))
+	}
+	rows := map[string]*templateDocConfigRow{}
+	add := func(r templateDocConfigRow, command string) {
+		id := r.Key + "\x00" + r.pinned
+		got, ok := rows[id]
+		if !ok {
+			got = &r
+			rows[id] = got
+		}
+		if !slices.Contains(got.Commands, command) {
+			got.Commands = append(got.Commands, command)
+		}
+	}
+	visit := func(names []string, in *Inputs) {
+		if in == nil {
+			return
+		}
+		command := strings.Join(append([]string{gp.rootDisplay}, names...), " ")
+		for _, c := range in.Config {
+			if c.Hidden {
+				continue
+			}
+			r := configRow(c)
+			r.File = gp.pinnedFileName(names, r.pinned)
+			add(r, command)
+		}
+		if !gp.readsConfig(names) {
+			return
+		}
+		for _, f := range in.Flags {
+			if key := flagConfigKey(f.Name, f.Schema); !f.Hidden && key != "" && !slices.Contains(gp.configReadsOf(names).selectors, f.Name) {
+				add(fallbackConfigRow(key, f.Summary, f.Schema), command)
+			}
+		}
+		for _, a := range in.Arguments {
+			if _, key := argumentFallback(a, gp.envPrefix, true); !a.Hidden && key != "" {
+				add(fallbackConfigRow(key, a.Summary, a.Schema), command)
+			}
+		}
+	}
+	visit(nil, gp.rootInputs)
+	var walk func(nodes []rnode, names []string)
+	walk = func(nodes []rnode, names []string) {
+		for _, n := range nodes {
+			if n.hidden {
+				continue
+			}
+			path := append(slices.Clone(names), n.name)
+			visit(path, n.inputs)
+			walk(n.children, path)
+		}
+	}
+	walk(gp.tree, nil)
+	out := make([]templateDocConfigRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, *r)
+	}
+	slices.SortFunc(out, func(a, b templateDocConfigRow) int {
+		return cmp.Or(cmp.Compare(a.Key, b.Key), cmp.Compare(a.File, b.File))
+	})
+	return files, out
+}
+
+// fallbackConfigRow is the configuration topic's row for a flag's or argument's config key.
+func fallbackConfigRow(key, summary string, schema *InputSchema) templateDocConfigRow {
+	return templateDocConfigRow{
+		Key: key, Location: key, Summary: summary, Type: flagDisplayType(schema),
+		Default: schemaDefaultString(schema), defaultJSON: structuredDefault(schema),
+		Enum: enumOf(schema),
+	}
 }
 
 // envTopic collects the environment topic's rows, one per variable.

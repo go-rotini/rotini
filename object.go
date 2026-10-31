@@ -407,7 +407,7 @@ func collectValidation(err error, out *[]string) {
 	}
 	if ve, ok := asError[*recon.ValidationError](err); ok {
 		msg := ve.Msg
-		if strings.Contains(msg, "schema is false") {
+		if msg == unknownKeyMsg || strings.Contains(msg, "schema is false") {
 			*out = append(*out, fmt.Sprintf("unknown key %q", ve.Path.String()))
 			return
 		}

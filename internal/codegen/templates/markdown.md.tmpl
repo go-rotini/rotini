@@ -6,9 +6,24 @@
 
        DATA: .Header .Summary .Description .Footer .Invocation
          .Usage/.UsageDerived .Passthrough .CommandGroups[] .Arguments[] .FlagGroups[]
-         .Environment[] .Configuration[] .Cascading[] .Examples[] .Stdin .Output
-         .ExitStatus[] .SeeAlso[]   (.Stdin and .Output are nil when the command declares
-         none). .Passthrough is the command's name when every word after it is passed
+         .Environment[] .Configuration[] .Cascading[] .Examples[] .ExampleRows[] .Stdin .Output
+         .ExitStatus[] .SeeAlso[] .Files[] .FlagRules[] .Metadata .PageName .ParentPage
+         (.Stdin and .Output are nil when the command declares none). .PageName is the page's
+         name (taskr-add), the file a markdown install_dir writes as <PageName>.md, and
+         .ParentPage the parent command's ("" on the root's page); command and topic rows carry
+         .Page, their own, which the default template links as <Page>.md. .Files lists the
+         configuration files the command's inputs are read from, in the order they win, as
+         {.File .Format .Found .PathFrom .AsEnv .Profiles .Note .Name} (nil when none of its
+         inputs reads one): .File is the path, or the name discovery looks for, .Note the rest
+         in one line (see help.txt.tmpl). .FlagRules are the rules between the command's flags,
+         {.Kind .Flags .Condition .Text}, .Text a sentence such as "--json and --yaml can't be
+         used together". A config row carries .Key (what a user writes in the file) and .File
+         (the one file it is read from, "" for any), beside the spec's .Name and .Location.
+         .Metadata, on the page and on command, argument, flag, env and config rows, is the
+         item's own `metadata` labels as written; the default template doesn't show it. A flag,
+         env or config row's .Type is the value's label in the user's words (string, int,
+         number, duration, file, string... for a list, key=value for a map, value for a type of
+         the author's own; see help.txt.tmpl). .Passthrough is the command's name when every word after it is passed
          through unparsed, else "". A command or flag group carries .Description, the
          paragraph the command's `groups` gives it.
          A flag or argument row also carries .Env (its environment variables, in lookup order) and
@@ -44,11 +59,12 @@
          The root's page carries .Topics[] {.Name .Summary}, its help topics, and .ResponseFiles,
          the response-file prefix ("" when response files are off). On a topic's page
          .Topic is true: .Summary and .Description are the topic's, .Environment holds a
-         generated environment topic's rows, each with .Commands (the commands that read it),
-         and the rest is empty.
+         generated environment topic's rows, .Files and .Configuration a generated configuration
+         topic's, each row with .Commands (the commands that read it), and the rest is empty.
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last,
-                alsoSetBy, deprecation, stabilityNote, listed, described. */ -}}
+                alsoSetBy, deprecation, stabilityNote, listed, described, code, notes (the
+                non-empty notes in one parenthetical: " (a, b)"). */ -}}
 # {{.Invocation}}
 
 {{with .Header}}{{.}}
@@ -87,17 +103,17 @@
 
 {{with .Description}}{{.}}
 
-{{end}}{{range .Commands}}- `{{.Name}}`{{with .Aliases}} (alias {{join . ", "}}){{end}} — {{.Summary}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}
+{{end}}{{range .Commands}}- {{if .Page}}[{{code .Name}}]({{.Page}}.md){{else}}{{code .Name}}{{end}}{{with .Aliases}} (alias {{join . ", "}}){{end}} — {{.Summary}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}
 {{end}}
 {{end -}}
 {{- with .Topics}}## Help Topics
 
-{{range .}}- `{{.Name}}` — {{.Summary}}
+{{range .}}- {{if .Page}}[{{code .Name}}]({{.Page}}.md){{else}}{{code .Name}}{{end}} — {{.Summary}}
 {{end}}
 {{end -}}
 {{- with .Arguments}}## Arguments
 
-{{range .}}{{$v := ""}}{{if .Variadic}}{{$v = "..."}}{{end}}- {{if .Required}}{{code (printf "<%s%s>" (or .Placeholder .Name) $v)}}{{else}}{{code (printf "[%s%s]" (or .Placeholder .Name) $v)}}{{end}}{{with .Summary}} — {{.}}{{end}}{{if .Passthrough}} (passed through as typed){{end}}{{with .Default}} (default {{code .}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{range .}}{{$v := ""}}{{if .Variadic}}{{$v = "..."}}{{end}}- {{if .Required}}{{code (printf "<%s%s>" (or .Placeholder .Name) $v)}}{{else}}{{code (printf "[%s%s]" (or .Placeholder .Name) $v)}}{{end}}{{with .Summary}} — {{.}}{{end}}{{notes (and .Passthrough "passed through as typed") (and .Default (printf "default %s" (code .Default))) .Accepts .Stability}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 
@@ -108,16 +124,21 @@
 
 {{with .Description}}{{.}}
 
-{{end}}{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{with .Effects}} ({{.}}){{end}}{{if .Required}} (required){{end}}{{with .Default}} (default {{code .}}){{end}}{{with .Implicit}} (implicit {{code .}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{end}}{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{notes .Effects (and .Required "required") (and .Default (printf "default %s" (code .Default))) (and .Implicit (printf "implicit %s" (code .Implicit))) .Accepts .Stability}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 
 {{end}}{{range .EnumValues}}  - {{code .Value}}{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
 {{end}}{{end}}
 {{end -}}
+{{- if .FlagGroups}}{{with .FlagRules}}Rules:
+
+{{range .}}- {{.Text}}
+{{end}}
+{{end}}{{end -}}
 {{- with .Cascading}}## Global Flags
 
-{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{with .Effects}} ({{.}}){{end}}{{if .Required}} (required){{end}}{{with .Default}} (default {{code .}}){{end}}{{with .Implicit}} (implicit {{code .}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
+{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{notes .Effects (and .Required "required") (and .Default (printf "default %s" (code .Default))) (and .Implicit (printf "implicit %s" (code .Implicit))) .Accepts .Stability}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}{{if or .Env .ConfigKey}}; {{alsoSetBy .Env .ConfigKey "`" "`"}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 
@@ -126,7 +147,7 @@
 {{end -}}
 {{- with .Environment}}## Environment
 
-{{range .}}- `{{.Var}}`{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{if .Required}} (required){{end}}{{with .Default}} (default {{code .}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{with .Commands}} (used by: {{join . ", "}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
+{{range .}}- `{{.Var}}`{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{notes (and .Required "required") (and .Default (printf "default %s" (code .Default))) .Accepts .Stability}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{with .Commands}} (used by: {{join . ", "}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 
@@ -135,17 +156,25 @@
 {{end -}}
 {{- with .Configuration}}## Configuration
 
-{{range .}}- `{{.Name}}`{{with .Location}} ({{.}}){{end}}{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{if .Required}} (required){{end}}{{with .Default}} (default {{code .}}){{end}}{{with .Accepts}} ({{.}}){{end}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{with .Stability}} ({{.}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
+{{range .}}- {{code .Key}}{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{notes (and .File (printf "in %s" (code .File))) (and .Required "required") (and .Default (printf "default %s" (code .Default))) .Accepts .Stability}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{with .Commands}} (used by: {{join . ", "}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 
 {{end}}{{range .EnumValues}}  - {{code .Value}}{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
 {{end}}{{end}}
 {{end -}}
-{{- with .Examples}}## Examples
+{{- with .Files}}## Files
+
+The first file listed that sets a key supplies it.
+
+{{range .}}- {{code .File}}{{with .Note}} — {{.}}{{end}}
+{{end}}
+{{end -}}
+{{- with .ExampleRows}}## Examples
 
 ```
-{{range .}}{{.}}
+{{range .}}{{with .Summary}}# {{.}}
+{{end}}{{.Run}}
 {{end}}```
 
 {{end -}}
@@ -181,9 +210,10 @@ Reads {{if eq .Format "text"}}text{{else if eq .Format "lines"}}lines of text{{i
 {{range .}}- `{{.Code}}`{{with .Name}} (`{{.}}`){{end}} — {{.Summary}}{{if .Retryable}} (retryable){{end}}{{with .Output}} (writes `{{.}}` to stdout){{end}}{{with .DocsURL}} ([docs]({{.}})){{end}}
 {{end}}
 {{end -}}
-{{- with .SeeAlso}}## See Also
+{{- if or .ParentPage .SeeAlso}}## See Also
 
-{{range .}}- {{.}}
+{{with .ParentPage}}- [{{.}}]({{.}}.md)
+{{end}}{{range .SeeAlso}}- {{.}}
 {{end}}
 {{end -}}
 {{- with .Footer}}{{.}}

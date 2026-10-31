@@ -48,7 +48,7 @@ exec ./fr$exe need --c x --d y
 exec ./fr$exe login
 env FR_PASS=secret
 ! exec ./fr$exe login --user u
-stderr 'flags --user, --pass must be used together'
+stderr 'flags --user, --pass must be used together; --pass is missing'
 env FR_PASS=
 exec ./fr$exe login --user u --pass p
 

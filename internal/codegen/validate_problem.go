@@ -44,6 +44,9 @@ type problem struct {
 	msg   string
 	sev   severity
 	cause error // optional typed cause, reachable via errors.As
+	// unknownKey marks a schema problem that is only an unknown key: the document still
+	// decodes, so with fail: collect it is linted too.
+	unknownKey bool
 }
 
 // splitProblems partitions problems into errors and warnings by severity. A non-*problem

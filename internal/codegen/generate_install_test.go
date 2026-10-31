@@ -100,6 +100,66 @@ func TestInstallFiles_prune(t *testing.T) {
 	}
 }
 
+// TestInstallFiles_markdown checks that a markdown install_dir gets <page>.md for every visible
+// command and topic, each holding the generated page and linking its neighbours by the same
+// names, and that regenerating removes only the pages the previous run listed.
+func TestInstallFiles_markdown(t *testing.T) {
+	const conf = `version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    - type: markdown
+      enabled: true
+      install_dir: docs/cli
+`
+	dir := generateInModule(t, installSpec, conf)
+	pages := filepath.Join(dir, "docs", "cli")
+	gp := resolveInModule(t, dir)
+	nodes := flattenFeature(gp, markdownFeatureDesc)
+	contents, err := docFeatureContents(gp.plan, "", nodes, markdownFeatureDesc, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range nodes {
+		path := filepath.Join(pages, n.data.PageName+".md")
+		if !n.listed {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Errorf("%s: a hidden command got an installed page", n.data.PageName)
+			}
+			continue
+		}
+		if got := readTestFile(t, path); got != contents[i] {
+			t.Errorf("%s.md differs from the page", n.data.PageName)
+		}
+	}
+	root := readTestFile(t, filepath.Join(pages, "demo.md"))
+	for _, link := range []string{"[`add`](demo-add.md)", "[`filters`](demo-filters.md)"} {
+		if !strings.Contains(root, link) {
+			t.Errorf("demo.md lacks the link %s:\n%s", link, root)
+		}
+	}
+	if add := readTestFile(t, filepath.Join(pages, "demo-add.md")); !strings.Contains(add, "- [demo](demo.md)") {
+		t.Errorf("demo-add.md doesn't link its parent:\n%s", add)
+	}
+
+	writeTestFile(t, dir, "docs/cli/guide.md", "the author's own page")
+	writeTestFile(t, dir, ".rotini.spec.yaml", "version: 0.0.0\ncommand:\n  name: demo\n")
+	runGenerate(t, dir)
+	for _, gone := range []string{"demo-add.md", "demo-filters.md"} {
+		if _, err := os.Stat(filepath.Join(pages, gone)); !os.IsNotExist(err) {
+			t.Errorf("%s survived; want it pruned", gone)
+		}
+	}
+	for _, kept := range []string{"demo.md", "guide.md"} {
+		if _, err := os.Stat(filepath.Join(pages, kept)); err != nil {
+			t.Errorf("%s: %v; want it kept", kept, err)
+		}
+	}
+}
+
 // TestInstallFiles_dryRun checks that a dry run lists the install files and writes none.
 func TestInstallFiles_dryRun(t *testing.T) {
 	dir := t.TempDir()

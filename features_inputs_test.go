@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-rotini/recon"
 )
@@ -31,6 +32,36 @@ type wrEnvOnly struct {
 		Arguments struct{}
 		Env       struct {
 			Region string `rotini:"region" recon:"region"`
+		}
+	}
+}
+
+type wrEnvFamily struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Env       struct {
+			Labels map[string]any `rotini:"labels" recon:"labels" envnest:"WR_LABELS,__"`
+		}
+	}
+}
+
+type wrEnvTime struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Env       struct {
+			Since time.Time `rotini:"since" recon:"since" env:"WR_SINCE" layout:"2006-01-02"`
+		}
+	}
+}
+
+type wrConfigTime struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Config    struct {
+			Until time.Time `rotini:"until" recon:"until" relative:"future"`
 		}
 	}
 }
@@ -111,7 +142,10 @@ func wrFile(t *testing.T, name, body string) string {
 func TestWiring_inputs(t *testing.T) {
 	yamlFile := wrFile(t, "app.yaml", "api:\n  endpoint: e\ndir: sub\nprofiles:\n  dev:\n    api:\n      endpoint: d\n")
 	envFile := wrFile(t, "local.env", "REGION=west\n")
+	timeFile := wrFile(t, "time.yaml", "until: 2d\n")
 	t.Setenv("WR_ROOT", "/r")
+	t.Setenv("WR_LABELS__TEAM", "core")
+	t.Setenv("WR_SINCE", "2026-01-02")
 	for _, tc := range []struct {
 		name     string
 		out      func() any
@@ -122,6 +156,10 @@ func TestWiring_inputs(t *testing.T) {
 		drop     string
 	}{
 		{"env", func() any { return &wrEnvOnly{} }, InputSettings{}, nil, "", []Feature{Env()}, "env"},
+		{"env families", func() any { return &wrEnvFamily{} }, InputSettings{}, nil, "", []Feature{Env(), EnvFamilies()}, "env-families"},
+		{"env time", func() any { return &wrEnvTime{} }, InputSettings{}, nil, "", []Feature{Env(), TimeValues()}, "values:time"},
+		{"config time", func() any { return &wrConfigTime{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: timeFile}}}, nil, "",
+			[]Feature{ConfigFiles(), YAML(), TimeValues()}, "values:time"},
 		{"config files", func() any { return &wrConfigOnly{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: yamlFile}}}, nil, "",
 			[]Feature{ConfigFiles(), YAML()}, "config-files"},
 		{"config codec", func() any { return &wrConfigOnly{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: yamlFile}}}, nil, "",

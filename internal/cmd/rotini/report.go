@@ -38,20 +38,6 @@ type suggestedError struct {
 func (e *suggestedError) Error() string { return fmt.Sprintf("%s; did you mean %q?", e.err, e.hint) }
 func (e *suggestedError) Unwrap() error { return e.err }
 
-// commandNames lists every name and alias of the visible sub-commands, for suggesting a match
-// when `rotini help <topic>` names no command.
-func commandNames() []string {
-	var names []string
-	for _, c := range definition.Commands {
-		if c.Hidden {
-			continue
-		}
-		names = append(names, c.Name)
-		names = append(names, c.Aliases...)
-	}
-	return names
-}
-
 // resolveInputs resolves and prints the spec and conf paths a generate or validate reads. When
 // no conf is found it prints "conf: none (defaults)". A resolution failure is a usage error.
 func resolveInputs(rtx *rotini.Context, specPath, confPath string) (spec, conf string, err error) {

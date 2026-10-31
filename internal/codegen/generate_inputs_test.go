@@ -47,7 +47,7 @@ func TestRotiniTypeAliasesMatchTheResolver(t *testing.T) {
 	if len(cases) == 0 {
 		t.Fatal("found no cases in jsonSchemaTypeToGo — did it move or change shape?")
 	}
-	for name := range valueTypeGo {
+	for name := range valueTypeGo() {
 		cases = append(cases, name)
 	}
 	for _, c := range cases {
@@ -95,8 +95,9 @@ func TestJSONSchemaTypeToGo_listAndMapSpellings(t *testing.T) {
 	}
 }
 
-// TestFlagDisplayType_valueAliases pins that help shows a value type as the spec wrote it,
-// not as its Go type.
+// TestFlagDisplayType_valueAliases pins that help shows a value type in the user's words: a
+// value type as the spec wrote it, never a Go type, lists as `<label>...` and maps as
+// `key=<label>`.
 func TestFlagDisplayType_valueAliases(t *testing.T) {
 	for _, tc := range []struct {
 		schema *InputSchema
@@ -104,11 +105,19 @@ func TestFlagDisplayType_valueAliases(t *testing.T) {
 	}{
 		{&InputSchema{Type: "duration"}, "duration"},
 		{&InputSchema{Type: "bytesize"}, "bytesize"},
-		{&InputSchema{Type: "[]url"}, "[]url"},
-		{&InputSchema{Type: "map[string]duration"}, "map[string]duration"},
-		{&InputSchema{Type: "array", Items: &Schema{Type: "ip"}}, "[]ip"},
-		{&InputSchema{Type: "integer"}, "int"}, // a shape alias still reads as its Go type
-		{&InputSchema{Type: "array"}, "[]string"},
+		{&InputSchema{Type: "[]url"}, "url..."},
+		{&InputSchema{Type: "map[string]duration"}, "key=duration"},
+		{&InputSchema{Type: "map[string]string"}, "key=value"},
+		{&InputSchema{Type: "array", Items: &Schema{Type: "ip"}}, "ip..."},
+		{&InputSchema{Type: "integer"}, "int"},
+		{&InputSchema{Type: "int64"}, "int"},
+		{&InputSchema{Type: "uint16"}, "uint"},
+		{&InputSchema{Type: "float64"}, "number"},
+		{&InputSchema{Type: "existingdir"}, "dir"},
+		{&InputSchema{Type: "inputfile"}, "file"},
+		{&InputSchema{Type: "model.Link", Import: "example.com/model"}, "value"}, // a type of the author's own
+		{&InputSchema{Type: "[]model.Link", Import: "example.com/model"}, "value..."},
+		{&InputSchema{Type: "array"}, "string..."},
 		{&InputSchema{Type: "bytesize", Placeholder: "SIZE"}, "SIZE"}, // the author's word wins
 		{&InputSchema{Type: "bool"}, ""},
 	} {

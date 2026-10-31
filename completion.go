@@ -737,7 +737,7 @@ func seedCompletionContext(rtx *Context, chain []Command, words []string, idx in
 	if rtx == nil {
 		return func() {}
 	}
-	markInvoked(chain)
+	finishChain(chain)
 	rtx.mu.Lock()
 	rtx.chain = chain
 	rtx.Argv = words
@@ -1265,6 +1265,7 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 		words = []string{""}
 	}
 	rtx := p.newRunContext()
+	defer rtx.closeProvided() // a completer may ask for a provided dependency
 	rtx.ctx = ctx
 	// The answer owns stdout: a completer's own writes go to stderr, which the scripts discard.
 	rtx.Stdout, rtx.bufOut = rtx.Stderr, nil

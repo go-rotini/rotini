@@ -1,12 +1,24 @@
-# R15 — `help <plugin>` runs the plugin with --help, through the help command `rotini init`
-# writes: a declared plugin by name or alias, a discovered one whose binary is found, with the
-# plugin's output, exit code and timeout passing through, and the program refusing to run itself.
+# R15 — `help <plugin>` runs the plugin with --help, through the help command rotini seeds where
+# plugins can be named: a declared plugin by name or alias, a discovered one whose binary is
+# found, with the plugin's output, exit code and timeout passing through, and the program
+# refusing to run itself.
 
 gomodinit example.com/plug
 exec rotini init plug
-grep '^\tif rtx\.PluginHelp\(inputs\.PlugHelp\.Arguments\.Command\.\.\.\) \{\n\t\treturn nil\n\t\}$' internal/cmd/plug/plug_help.go
+! grep 'PluginHelp' internal/cmd/plug/plug_help.go
+grep '^\tpage, err := rtx\.HelpFor\(inputs\.PlugHelp\.Arguments\.Command\.\.\.\)$' internal/cmd/plug/plug_help.go
+
+# Declaring plugins leaves the help stub as it was, and generate says it skips them.
 cp plug.spec.yaml cmd/plug/.rotini.spec.yaml
 exec rotini generate cmd/plug/.rotini.spec.yaml --config cmd/plug/.rotini.conf.yaml
+stderr 'internal/cmd/plug/plug_help.go:\d+: `plug help` can name a plugin, but its Run calls rtx\.HelpFor without rtx\.PluginHelp'
+! grep 'PluginHelp' internal/cmd/plug/plug_help.go
+
+# A help stub seeded with plugins in reach asks PluginHelp first, and draws no warning.
+rm internal/cmd/plug/plug_help.go
+exec rotini generate cmd/plug/.rotini.spec.yaml --config cmd/plug/.rotini.conf.yaml
+! stderr 'PluginHelp'
+grep '^\tif rtx\.PluginHelp\(inputs\.PlugHelp\.Arguments\.Command\.\.\.\) \{\n\t\treturn nil\n\t\}$' internal/cmd/plug/plug_help.go
 exec go mod tidy
 exec go build -o plug$exe ./cmd/plug
 mkdir plugins
@@ -35,7 +47,7 @@ env ECHO_SLEEP=
 exec ./plug$exe help lint
 stdout '^plug-lint(\.exe)? got \["--help"\]$'
 wantexit 1 ./plug$exe help nope
-stderr '^Error: no help for command "nope"$'
+stderr '^Error: plug: unknown command "nope"$'
 
 # A declared plugin with no binary, or whose binary is the program itself, fails as running it
 # does.

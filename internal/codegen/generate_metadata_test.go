@@ -123,3 +123,33 @@ func TestValidate_metadataValues(t *testing.T) {
 		t.Errorf("validate rejected string metadata: %v %v", err, warnings)
 	}
 }
+
+// TestDefinitionLiteral_stability pins that a declared `stability:` reaches the root and
+// command literals as declared (the runtime inherits it down the chain), and that a command
+// without one gets no field.
+func TestDefinitionLiteral_stability(t *testing.T) {
+	const spec = `version: 0.0.0
+command:
+  name: app
+  stability: beta
+  commands:
+    - name: db
+      commands:
+        - name: drop
+          stability: experimental
+        - name: ls
+`
+	gp, err := resolveTree(decodeSpecYAML(t, spec), filepath.Join(t.TempDir(), ".rotini.spec.yaml"), "example.com/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := renderDefinition(gp)
+	for _, want := range []string{`Stability: "beta",` + "\n", `Stability: "experimental",` + "\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("definition lacks %q:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, "Stability:"); n != 2 {
+		t.Errorf("Stability appears %d times, want 2:\n%s", n, got)
+	}
+}

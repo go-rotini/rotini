@@ -74,7 +74,8 @@ func eachOwnPrefix(spec *Spec, visit func(c *Command, path, ptr, prefix, prev st
 // lintGeneratedNames rejects two spec entries whose generated top-level Go names coincide,
 // where neither is a clash of command prefixes (commandPrefixClashes reports those): a
 // command's suffixed types (<Prefix>Inputs, <Prefix>CommandInputs, ...) against another's, a
-// named schema against them, an exit constant against them, and any of these against the
+// named schema against them, an exit constant, an enum value constant or a name constant
+// (config file, key, profile, env variable) against them, and any of these against the
 // fixed names the cmd file declares, including the enabled doc features' resolvers and
 // variables. Generate would refuse the same code without a position.
 func lintGeneratedNames(spec *Spec, conf *Conf) []error {
@@ -82,17 +83,32 @@ func lintGeneratedNames(spec *Spec, conf *Conf) []error {
 		return nil
 	}
 	var problems []error
+	taken := generatedGoNames(spec, conf, func(p *problem) { problems = append(problems, p) })
+	groups := mergeConstGroups(append(inputEnumGroups(spec), nameGroups(spec, spec.Command.EnvPrefix)...))
+	_, clashes := withoutClashes(groups, taken)
+	for _, c := range clashes {
+		problems = append(problems, &problem{kind: "spec", ptr: c.ptr, loc: c.loc, sev: severityWarning, msg: c.msg})
+	}
+	return problems
+}
+
+// generatedGoNames maps each top-level Go name the cmd file declares for spec, other than the
+// enum and name constants, to what declares it, reporting each name two entries make.
+func generatedGoNames(spec *Spec, conf *Conf, report func(*problem)) map[string]string {
 	taken := map[string]string{} // name -> what declares it
 	// claim records name for owner; own is how the subject's message names it.
 	claim := func(name, own, owner, ptr, loc string) {
 		if prev, dup := taken[name]; dup {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: loc, msg: fmt.Sprintf(
+			report(&problem{kind: "spec", ptr: ptr, loc: loc, msg: fmt.Sprintf(
 				"generates the Go name %s (%s), which %s also declares; rename one", name, own, prev)})
 			return
 		}
 		taken[name] = owner
 	}
 	features := fixedGoNames(conf, taken)
+	if specHasExamples(spec) {
+		taken["Examples"] = "the generated Examples variable, which lists the spec's examples"
+	}
 	schemas := spec.Command.Schemas
 	for _, name := range slices.Sorted(maps.Keys(schemas)) {
 		if name == "Usage" {
@@ -120,7 +136,22 @@ func lintGeneratedNames(spec *Spec, conf *Conf) []error {
 			}
 		}
 	})
-	return problems
+	return taken
+}
+
+// specHasExamples reports whether a command of spec declares an example the cmd file lists in
+// its Examples variable: one that runs the program with literal words.
+func specHasExamples(spec *Spec) bool {
+	program := exampleProgramWords(spec)
+	found := false
+	walkCommandsAt(spec, func(c *Command, _, _ string) {
+		for _, ex := range examplesOf(c.Examples) {
+			if _, ok := exampleRunArgv(ex.Run, program); ok {
+				found = true
+			}
+		}
+	})
+	return found
 }
 
 // commandTypeSuffixes lists the suffixes of the types generated under c's prefix.

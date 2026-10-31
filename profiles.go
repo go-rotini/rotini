@@ -356,12 +356,12 @@ func profileNames(f ConfigFile, src recon.Source, path string) ([]string, error)
 	under := f.Profiles.Under
 	v, found, err := src.Get(recon.Path{under})
 	if err != nil {
-		return nil, usageBind(channelConfig, f.Name, configFileProblem(path, err), err)
+		return nil, usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(path, err), err)
 	}
 	if !found || v.Kind() == recon.NullKind {
 		return nil, nil
 	}
-	bad := usageBind(channelConfig, f.Name, fmt.Sprintf("configuration file %s: %q must map profile names to sections", path, under), nil)
+	bad := usageBind(InputErrorKindMalformedDocument, channelConfig, f.Name, fmt.Sprintf("configuration file %s: %q must map profile names to sections", path, under), nil)
 	m, err := v.AsMap()
 	if err != nil {
 		return nil, bad
@@ -498,7 +498,7 @@ func unknownProfile(choice profileChoice, paths, names []string) *InputError {
 			msg += " (profiles: " + strings.Join(names, ", ") + ")"
 		}
 	}
-	e := usageBind(channelConfig, choice.input, msg, nil)
+	e := usageBind(InputErrorKindUnknownProfile, channelConfig, choice.input, msg, nil)
 	e.Token, e.Candidates = choice.name, names
 	return e
 }

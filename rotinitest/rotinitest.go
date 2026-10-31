@@ -20,6 +20,9 @@
 // directory. A developer's own variables and configuration files never leak in, and tests can
 // call t.Parallel.
 //
+// [Result.Outcome] is what the run recorded, so a test reads a [rotini.Channel]'s records with
+// res.Outcome.Records(ch) instead of parsing stderr.
+//
 // Limits:
 //   - Pass a fresh program to every call, built as main builds it (with the dependencies main
 //     adds). Run sets its streams and environment, so a program shared between tests, such as
@@ -27,8 +30,8 @@
 //   - Config inputs come from configuration files the test writes first, into the directory it
 //     passes as the run's ([Dir]) or as XDG_CONFIG_HOME ([Env]); putting one in the inputs
 //     value fails the test.
-//   - Command lines that typed inputs can't express (a typo, an unknown flag) are tested with
-//     [rotini.Program.Run] directly.
+//   - Command lines that typed inputs can't express (a typo, an unknown flag) are run with
+//     [RunArgv].
 //   - Handlers still run in the test process's working directory; see [rotini.Program.WithDir].
 package rotinitest
 
@@ -57,16 +60,22 @@ type Result struct {
 	Code           int      // the exit code
 	Err            error    // the error the run reported, nil on success
 	Stdout, Stderr []byte   // what the program wrote
-	Argv           []string // the command line Run wrote
+	Argv           []string // the command line the run was given
 	Env            []string // the run's whole environment
 	Dir            string   // the run's working directory
+
+	// Outcome is what the run recorded, as the program's reporter received it, captured before
+	// the reporter ran; read a [rotini.Channel]'s records with Outcome.Records(ch). The program's
+	// own reporter still runs and writes Stderr. It is the zero Outcome when the run recorded
+	// nothing, since the reporter isn't called then; Code holds the exit code either way.
+	Outcome rotini.Outcome
 
 	program *rotini.Program
 	command string                 // the invoked command's path, for messages
 	exits   []rotini.ExitStatusDef // the invoked command's documented exit codes
 }
 
-// Option configures [Run].
+// Option configures [Run] and [RunArgv].
 type Option func(*config)
 
 type config struct {
@@ -139,7 +148,8 @@ func Path(names ...string) Option {
 // Run runs p with the command line and environment that supply in, the generated inputs type of
 // the command to run, with output checks on ([rotini.Program.WithOutputChecks]). Only in's set
 // fields are written ([Presence] to choose). A value no command line can express fails the
-// test. p must be a fresh program: Run sets its streams, environment and directory.
+// test. p must be a fresh program: Run sets its streams, environment and directory, and wraps
+// its reporter to capture [Result.Outcome].
 func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result {
 	tb.Helper()
 	var cfg config
@@ -180,6 +190,79 @@ func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result {
 		}
 	}
 
+	stdin := cfg.stdin
+	if stdin == nil {
+		payload, err := stdinPayload(in)
+		if err != nil {
+			tb.Fatalf("rotinitest: %v", err)
+		}
+		stdin = bytes.NewReader(payload)
+	}
+	return execute(tb, p, &cfg, argv, inputEnv, stdin, path)
+}
+
+// RunArgv runs p with argv, the words after the program's name, in the environment [Run]
+// gives a run, with output checks on: for a command line typed inputs can't express, or an
+// entry of a generated package's Examples:
+//
+//	for _, ex := range cmd.Examples {
+//		t.Run(ex.Run, func(t *testing.T) {
+//			res := rotinitest.RunArgv(t, cmd.NewProgram(), ex.Argv)
+//			rotinitest.ExitDocumented(t, res)
+//		})
+//	}
+//
+// Stdin is empty unless [Stdin] gives it; [Presence] and [Secrets] do nothing here. [Path]
+// names the command the run invokes, for [ExitDocumented] and messages, when the words that
+// name it are spelled in a way the Definition can't tell from argv.
+func RunArgv(tb testing.TB, p *rotini.Program, argv []string, opts ...Option) Result {
+	tb.Helper()
+	var cfg config
+	for _, o := range opts {
+		if o != nil {
+			o(&cfg)
+		}
+	}
+	path := cfg.path
+	if !cfg.hasPath {
+		path = argvCommand(p.Definition(), argv)
+	}
+	stdin := cfg.stdin
+	if stdin == nil {
+		stdin = bytes.NewReader(nil)
+	}
+	return execute(tb, p, &cfg, slices.Clone(argv), nil, stdin, path)
+}
+
+// argvCommand is the path of the command argv runs, read from its words that name commands
+// before the first argument.
+func argvCommand(def rotini.Definition, argv []string) []string {
+	var path []string
+	cmds := def.Commands
+	for _, w := range argv {
+		if w == "--" {
+			break
+		}
+		if strings.HasPrefix(w, "-") {
+			continue
+		}
+		i := slices.IndexFunc(cmds, func(c rotini.CommandDef) bool {
+			return c.Name == w || slices.Contains(c.Aliases, w) || slices.Contains(c.HiddenAliases, w)
+		})
+		if i < 0 {
+			break
+		}
+		path = append(path, cmds[i].Name)
+		cmds = cmds[i].Commands
+	}
+	return path
+}
+
+// execute runs p with argv in a fresh home and working directory, with inputEnv added to the
+// run's environment, and returns what it did. path is the invoked command's.
+func execute(tb testing.TB, p *rotini.Program, cfg *config, argv, inputEnv []string, stdin io.Reader, path []string) Result {
+	tb.Helper()
+	def := p.Definition()
 	base := tb.TempDir()
 	home := filepath.Join(base, "home")
 	dir := cfg.dir
@@ -196,14 +279,6 @@ func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result {
 	env = append(env, cfg.env...)
 	env = append(env, inputEnv...)
 
-	stdin := cfg.stdin
-	if stdin == nil {
-		payload, err := stdinPayload(in)
-		if err != nil {
-			tb.Fatalf("rotinitest: %v", err)
-		}
-		stdin = bytes.NewReader(payload)
-	}
 	ctx := cfg.ctx
 	if ctx == nil {
 		ctx = tb.Context()
@@ -218,9 +293,19 @@ func Run[T any](tb testing.TB, p *rotini.Program, in T, opts ...Option) Result {
 	if cfg.argv0 != "" {
 		p.WithArgv0(cfg.argv0)
 	}
+	var outcome rotini.Outcome
+	report := p.Reporter()
+	p.WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+		outcome = out
+		// The reporter may change the slices it receives; the test sees what the run recorded.
+		outcome.Infos, outcome.Successes = slices.Clone(out.Infos), slices.Clone(out.Successes)
+		outcome.Warnings, outcome.Errors = slices.Clone(out.Warnings), slices.Clone(out.Errors)
+		outcome.Panics = slices.Clone(out.Panics)
+		report(ctx, rtx, out)
+	})
 	code, runErr := p.RunContext(ctx, argv)
 	return Result{
-		Code: code, Err: runErr,
+		Code: code, Err: runErr, Outcome: outcome,
 		Stdout: stdout.Bytes(), Stderr: stderr.Bytes(),
 		Argv: argv, Env: env, Dir: dir,
 		program: p,
@@ -248,8 +333,9 @@ func OutputAs[T any](tb testing.TB, res Result, format string) T {
 }
 
 // ExitDocumented fails the test unless the run's exit code is one its command documents in its
-// spec's exit_status. 0 always passes. A command that documents no exit codes fails on any
-// other: there is nothing to check the code against. Only the invoked command's own list counts.
+// spec's exit_status: the invoked command's own list, else the root's, which is program-wide.
+// 0 always passes. A command that documents no exit codes fails on any other: there is nothing
+// to check the code against.
 func ExitDocumented(tb testing.TB, res Result) {
 	tb.Helper()
 	if res.Code == 0 {
@@ -294,7 +380,7 @@ func commandPath(def rotini.Definition, t reflect.Type) ([]string, bool) {
 	return find(def.Commands, nil)
 }
 
-// exitStatus is the exit codes the command at path documents.
+// exitStatus is the exit codes the command at path documents: its own, else the root's.
 func exitStatus(def rotini.Definition, path []string) []rotini.ExitStatusDef {
 	exits, cmds := def.ExitStatus, def.Commands
 	for _, name := range path {
@@ -305,6 +391,9 @@ func exitStatus(def rotini.Definition, path []string) []rotini.ExitStatusDef {
 			return nil
 		}
 		exits, cmds = cmds[i].ExitStatus, cmds[i].Commands
+	}
+	if len(exits) == 0 {
+		return def.ExitStatus
 	}
 	return exits
 }

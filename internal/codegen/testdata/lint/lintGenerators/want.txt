@@ -1,0 +1,8 @@
+conf: .rotini.conf.yaml:21:13: generate.generators.site.name: generator "site" is declared more than once; each generator needs a name of its own
+conf: .rotini.conf.yaml:27:12: generate.generators.nested.dir: "docs/site/nested" overlaps generator "site"'s dir "docs/site"; each generator needs a directory of its own
+conf: .rotini.conf.yaml:31:12: generate.generators.docs.dir: "docs" overlaps generator "site"'s dir "docs/site"; each generator needs a directory of its own
+conf: .rotini.conf.yaml:31:12: generate.generators.docs.dir: "docs" overlaps "docs/cli", which rotini writes (generate.features.markdown.install_dir); give the generator a directory of its own
+conf: .rotini.conf.yaml:35:12: generate.generators.incmd.dir: "internal/cmd/demo/extra" overlaps "internal/cmd/demo", which rotini writes (generate.packages.cmd); give the generator a directory of its own
+conf: .rotini.conf.yaml:39:12: generate.generators.root.dir: "." is the module root; give the generator a directory of its own, such as "docs/root"
+conf: .rotini.conf.yaml:43:12: generate.generators.outside.dir: "../elsewhere" must resolve under the module root
+conf: .rotini.conf.yaml:48:14: generate.generators.keeper.keep.0: "../secret.txt" must stay inside the generator's dir

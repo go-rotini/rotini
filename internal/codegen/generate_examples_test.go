@@ -234,3 +234,19 @@ func TestExamples_roundTrip(t *testing.T) {
 		})
 	}
 }
+
+// A file in a format of the program's own gets no example: rotini can't write the format.
+func TestExampleFiles_skipsOwnFormats(t *testing.T) {
+	p := &program{configFiles: []scopedConfigFile{
+		{Name: "app", Path: "app.yaml"},
+		{Name: "legacy", Path: "legacy.ini", Format: "ini"},
+		{Name: "tuning", Path: "tuning.conf", Format: "toml"},
+	}}
+	var names []string
+	for _, cf := range p.exampleFiles() {
+		names = append(names, cf.Name)
+	}
+	if strings.Join(names, ",") != "app,tuning" {
+		t.Errorf("exampleFiles = %v, want app and tuning", names)
+	}
+}

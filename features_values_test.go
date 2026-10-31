@@ -345,3 +345,82 @@ func TestMeasuredFor(t *testing.T) {
 		}
 	}
 }
+
+// TestTimeValues_ownFeature pins that a time input with a layout or relative form reads only
+// with TimeValues wired, and that a plain RFC 3339 time needs no feature.
+func TestTimeValues_ownFeature(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "day", Identifiers: []string{"--day"}, Type: "time.Time", Layout: layoutDate},
+		{Name: "since", Identifiers: []string{"--since"}, Type: "time.Time", Relative: relativePast},
+		{Name: "at", Identifiers: []string{"--at"}, Type: "time.Time"},
+	}}
+	type in struct {
+		App struct {
+			Flags struct {
+				Day   time.Time `rotini:"day"`
+				Since time.Time `rotini:"since"`
+				At    time.Time `rotini:"at"`
+			}
+			Arguments struct{}
+		}
+	}
+	parse := func(argv []string, fs ...Feature) (in, error) {
+		var out in
+		err := NewParser().Parse(wired(NewContextFor(def, argv), fs...), &out)
+		return out, err
+	}
+	if got, err := parse([]string{"--at", "2026-09-29T14:00:00Z"}); err != nil || got.App.Flags.At.Hour() != 14 {
+		t.Errorf("plain time with no features: %v, %v", got.App.Flags.At, err)
+	}
+	for _, argv := range [][]string{{"--day", "2026-09-29"}, {"--since", "2h"}} {
+		_, err := parse(argv)
+		wantMissing(t, err, "values:time", "TimeValues()")
+		if want := "input " + argv[0] + " is a date or time with a layout or relative form, but the program does not wire values:time"; !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("message %q, want prefix %q", err, want)
+		}
+	}
+	got, err := parse([]string{"--day", "2026-09-29", "--since", "2h"}, TimeValues())
+	if err != nil || got.App.Flags.Day.Day() != 29 || got.App.Flags.Since.IsZero() {
+		t.Errorf("wired TimeValues: %+v, %v", got.App.Flags, err)
+	}
+	if !isTimeField(reflect.TypeFor[map[string]*time.Time]()) || !isTimeField(reflect.TypeFor[[]time.Time]()) || isTimeField(reflect.TypeFor[int]()) {
+		t.Error("isTimeField misjudges a field type")
+	}
+	if _, err := parseTime("2026-09-29", timeSpec{layout: layoutDate}); !errors.As(err, new(*WiringError)) {
+		t.Errorf("parseTime unwired: %v, want a *WiringError", err)
+	}
+	if d, err := parseTime("2026-09-29", timeSpec{layout: layoutDate, clock: featureClock(newFeatureSet([]Feature{TimeValues()}))}); err != nil || d.Day() != 29 {
+		t.Errorf("parseTime wired: %v, %v", d, err)
+	}
+	// A plain time compares as the instant it names, with no feature wired.
+	key := uniqueKeyFor("[]time.Time", timeSpec{}, enumSet{})
+	if a, b := key("2026-09-29T14:00:00+02:00"), key("2026-09-29T12:00:00Z"); a != b {
+		t.Errorf("plain time keys %q and %q differ", a, b)
+	}
+}
+
+// TestEnvFamilies_values pins what a wired EnvFamilies reads and that time channel inputs read
+// their layouts with TimeValues.
+func TestEnvFamilies_values(t *testing.T) {
+	t.Setenv("WR_LABELS__TEAM", "core")
+	t.Setenv("WR_LABELS__ON__CALL", "ada")
+	t.Setenv("WR_SINCE", "2026-01-02")
+	var fam wrEnvFamily
+	if err := NewInputReader(InputSettings{}).Read(wired(NewContextFor(wrDef(), nil), Env(), EnvFamilies()), &fam); err != nil {
+		t.Fatal(err)
+	}
+	if l := fam.App.Env.Labels; l["team"] != "core" || l["on"].(map[string]any)["call"] != "ada" {
+		t.Errorf("labels = %v", l)
+	}
+	var tm wrEnvTime
+	if err := NewInputReader(InputSettings{}).Read(wired(NewContextFor(wrDef(), nil), Env(), TimeValues()), &tm); err != nil {
+		t.Fatal(err)
+	}
+	if s := tm.App.Env.Since; s.Year() != 2026 || s.Day() != 2 {
+		t.Errorf("since = %v", s)
+	}
+	var none wrEnvOnly
+	if err := NewInputReader(InputSettings{}).Read(wired(NewContextFor(wrDef(), nil), Env()), &none); err != nil {
+		t.Errorf("env without families or times needs neither: %v", err)
+	}
+}

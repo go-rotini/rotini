@@ -870,13 +870,14 @@ type fieldDef struct {
 	Field   string
 	GoType  string
 	Tag     string
-	Import  string // Go import path backing GoType ("" for builtins); aliased form "alias path"
-	Recon   string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
-	EnvVar  string // environment variable an env field reads, explicit (schema.variable) or derived (envVarFor); "" otherwise
-	EnvNest string // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
-	EnvFile string // the variable naming a file to read the value from (schema.variable_file); "" otherwise
-	CfgFile string // config input's pinned source file (schema.file); the value is read from that file only
-	Comment string // trailing line comment on the generated field, e.g. the TextUnmarshaler note; "" for none
+	Import  string   // Go import path backing GoType ("" for builtins); aliased form "alias path"
+	Recon   string   // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
+	EnvVar  string   // environment variable an env field reads, explicit (schema.variable) or derived (envVarFor); "" otherwise
+	EnvNest string   // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
+	EnvFile string   // the variable naming a file to read the value from (schema.variable_file); "" otherwise
+	CfgFile string   // config input's pinned source file (schema.file); the value is read from that file only
+	Comment string   // trailing line comment on the generated field, e.g. the TextUnmarshaler note; "" for none
+	Doc     []string // the field's doc comment lines, from the input's summary and deprecation; nil for none
 	// Constraint is the space-separated validation struct tags for an env/config field
 	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), enforced by the input reader on the
 	// reconciled value; "" when the input declares no constraints.

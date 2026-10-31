@@ -40,7 +40,7 @@ var wiringFixtures = map[string]wiringFixture{
 		},
 		inputs: typesOf(argFileInputs{}, bdCpInputs{}, bdExecInputs{}, bdSSHInputs{}, depInputs{}, exInputs{},
 			idEnvInputs{}, idListInputs{}, idSecretInputs{}, outFieldsInputs{}, pfInputs{}, ssBytesInputs{},
-			ssCatInputs{}, ssJSONLInputs{}, ssLinesInputs{}, ssNulSliceInputs{}),
+			ssCatInputs{}, ssJSONLInputs{}, ssLinesInputs{}, ssNulSliceInputs{}, kdInputs{}, kdRequiredInputs{}, kdStdinInputs{}),
 	},
 	"calc":  {meta: InputSettings{ConfigFiles: []ConfigFile{{Name: "main", Format: "yaml"}}}, inputs: typesOf(acCalcInputs{})},
 	"cat":   {},

@@ -36,11 +36,13 @@ stdin empty.yaml
 ! exec ./ks$exe doc
 stderr 'name'
 
-# The environment, a variable_file and a .env file.
+# The environment, a variable_file, a .env file and a family of variables.
 env KS_TOKEN_FILE=token.txt
+env KS_LABELS__TEAM=core
 exec ./ks$exe env
 stdout 'Token:from-file'
 stdout 'Dotenv:from-dotenv'
+stdout 'Labels:map\[team:core\]'
 env KS_TOKEN_FILE=
 
 # Configuration files: YAML with a profile and an enum alias, a second layout, JSONC.
@@ -101,6 +103,15 @@ stderr 'does not wire plugins'
 stderr 'rotini.Plugins\(\)'
 exec ./ks-unwired$exe bounds --port 3
 stdout 'Port:3'
+exec go run ./tools/drop internal/cmd/ks/zz_ks.go 'rotini.TimeValues(),'
+exec go run ./tools/drop internal/cmd/ks/zz_ks.go 'rotini.EnvFamilies(),'
+exec go build -o ks-unwired$exe ./cmd/ks
+! exec ./ks-unwired$exe config
+stderr 'input since is a date or time with a layout or relative form, but the program does not wire values:time'
+stderr 'rotini.TimeValues\(\)'
+! exec ./ks-unwired$exe env
+stderr 'env input labels collects a family of variables \(nesting\), but the program does not wire env-families'
+stderr 'rotini.EnvFamilies\(\)'
 
 -- cmd/ks/.rotini.conf.yaml --
 version: 0.0.0
@@ -341,6 +352,8 @@ command:
           schema: {type: string, variable: KS_TOKEN, variable_file: KS_TOKEN_FILE}
         - name: dotenv
           schema: {type: string, variable: KS_DOTENV}
+        - name: labels
+          schema: {type: map, variable: KS_LABELS, nesting: __}
     - name: config
       summary: read the configuration file
       config:

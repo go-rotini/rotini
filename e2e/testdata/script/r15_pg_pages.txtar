@@ -30,10 +30,10 @@ grep '^- `--key` `string` — the signing key \(@file\)$' internal/cmd/app/rende
 grep '^- `--pin` `string` — a pin \(- for stdin\)$' internal/cmd/app/renders/markdown_app_status.md
 
 # A list default: terse in help, JSON in man and markdown.
-stdout '^      --label \[\]string +a label \(default \[a,b c"d\]\) \(repeatable\)$'
+stdout '^      --label string\.\.\. +a label \(default \[a,b c"d\], repeatable\)$'
 grep '^a label \(default \["a,b", "c\\e"d"\]\)$' internal/cmd/app/renders/app-deploy.1
-grep '^- `--label` `\[\]string` — a label \(default `\["a,b", "c\\"d"\]`\)' internal/cmd/app/renders/markdown_app_deploy.md
-grep '^- `--zone` `\[\]string` — zones \(default `\["eu", "us"\]`\)' internal/cmd/app/renders/markdown_app_deploy.md
+grep '^- `--label` `string\.\.\.` — a label \(default `\["a,b", "c\\"d"\]`\)' internal/cmd/app/renders/markdown_app_deploy.md
+grep '^- `--zone` `string\.\.\.` — zones \(default `\["eu", "us"\]`\)' internal/cmd/app/renders/markdown_app_deploy.md
 
 # Code in a rule is bold in man, without its backticks; enum values are code in markdown.
 grep '^matches \\fB\^\[a\\-z\\\(ga"\]\+\$\\fR$' internal/cmd/app/renders/app-deploy.1
@@ -44,15 +44,19 @@ grep '\(one of ``a`b``, `plain`\); matches ``\^\[a-z`"\]\+\$``$' internal/cmd/ap
 # deploy's own list replaces it.
 grep '^\.SH "EXIT STATUS"\n\.TP\n\\fB0\\fR\ndone\n\.TP\n\\fB3\\fR \(busy\)\nthe fleet is busy \(retryable\)$' internal/cmd/app/renders/app-status.1
 grep '^## Exit Status\n\n- `0` — done\n- `3` \(`busy`\) — the fleet is busy \(retryable\)' internal/cmd/app/renders/markdown_app_status.md
-grep '^## Exit Status\n\n- `0` — shipped\n- `4` \(`rejected`\) — refused\z' internal/cmd/app/renders/markdown_app_deploy.md
+grep '^## Exit Status\n\n- `0` — shipped\n- `4` \(`rejected`\) — refused\n\n## See Also\n' internal/cmd/app/renders/markdown_app_deploy.md
 grep '(?s)## `app status`.*- Exit 3 \(busy\): the fleet is busy \(running it again may succeed\)' skills/app/SKILL.md
 grep '(?s)## `app deploy`\n.*- Exit 4 \(rejected\): refused\n' skills/app/SKILL.md
 ! grep '(?s)## `app deploy`\n[^#]*Exit 3' skills/app/SKILL.md
 grep 'Exit codes: 0: done; 3 \(busy, retryable\): the fleet is busy\.' tools/mcp.json
 grep 'Exit codes: 0: shipped; 4 \(rejected\): refused\.' tools/mcp.json
-# The contract records each command's own list.
+# The contract records the list each command documents, and marks the root's where a command
+# inherits it: the root, legacy and status carry the busy code, and only the last two inherit it.
 grep '"exit_status": \[' cli-contract.json
-! grep '"summary": "the fleet is busy"(?s).*"summary": "the fleet is busy"' cli-contract.json
+grep '(?s)"summary": "the fleet is busy".*"summary": "the fleet is busy".*"summary": "the fleet is busy"' cli-contract.json
+! grep '(?s)"summary": "the fleet is busy".*"summary": "the fleet is busy".*"summary": "the fleet is busy".*"summary": "the fleet is busy"' cli-contract.json
+grep '(?s)"exit_status_inherited": true.*"exit_status_inherited": true' cli-contract.json
+! grep '(?s)"exit_status_inherited": true.*"exit_status_inherited": true.*"exit_status_inherited": true' cli-contract.json
 
 # Duration and bytesize bounds are nanoseconds and bytes in the contract, which keeps them, and
 # left out of every tool schema, where the value is a string.

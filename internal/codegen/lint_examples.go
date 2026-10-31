@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/go-rotini/rotini"
 )
@@ -23,24 +22,42 @@ import (
 // with a shell expansion or a glob, or a <placeholder>, is opaque: a complaint about it is
 // dropped, and an opaque word where a flag is expected skips the segment. A command composed
 // from another spec, or a plugin, accepts whatever follows it.
+//
+// An example that parses is still a warning when it teaches something a user shouldn't type: a
+// deprecated command, flag, alias or value, a hidden alias, identifier or value, or a literal
+// value for a secret input.
 func lintExamplesParse(spec *Spec) []error {
 	var problems []error
 	check := newExampleChecker(spec)
 	walkCommandsAt(spec, func(c *Command, cmdPath, ptr string) {
-		for i, line := range c.Examples {
-			at := fmt.Sprintf("%s/examples/%d", ptr, i)
-			msg, unclosed := check.complaint(line)
+		for i, ex := range examplesOf(c.Examples) {
+			at := examplePointer(c, ptr, i)
+			res := check.check(ex.Run)
 			switch {
-			case unclosed:
+			case res.unclosed:
 				problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + cmdPath, sev: severityWarning,
-					msg: fmt.Sprintf("example %q has an unclosed quote", line)})
-			case msg != "":
+					msg: fmt.Sprintf("example %q has an unclosed quote", ex.Run)})
+			case res.msg != "":
 				problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + cmdPath,
-					msg: fmt.Sprintf("example %q does not parse: %s", line, msg)})
+					msg: fmt.Sprintf("example %q does not parse: %s", ex.Run, res.msg)})
+			}
+			for _, note := range res.notes {
+				problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + cmdPath, sev: severityWarning,
+					msg: fmt.Sprintf("example %q %s", ex.Run, note)})
 			}
 		}
 	})
 	return problems
+}
+
+// examplePointer is the JSON pointer of c's i'th example: the entry, or its `run` in the object
+// form.
+func examplePointer(c *Command, ptr string, i int) string {
+	at := fmt.Sprintf("%s/examples/%d", ptr, i)
+	if _, ok := c.Examples[i].(string); !ok {
+		at += "/run"
+	}
+	return at
 }
 
 // exampleChecker parses examples against one spec. Its Definition is built on first use.
@@ -55,28 +72,93 @@ func newExampleChecker(spec *Spec) *exampleChecker {
 	return &exampleChecker{spec: spec, program: exampleProgramWords(spec)}
 }
 
+// exampleResult is what checking one example found.
+type exampleResult struct {
+	msg      string   // the runtime's complaint about the first command that doesn't parse; "" when all parse
+	unclosed bool     // a quote is left open, so the line is unchecked
+	notes    []string // what a parsed command teaches that a user shouldn't type, each finishing "example %q ..."
+	// use is what the words of the first command in the line that runs the program set, when
+	// each word is literal (no expansion, glob or placeholder), the line parses and the words
+	// could be read; nil otherwise.
+	use *exampleUse
+}
+
 // complaint returns the runtime's complaint about the first command in line that runs the
 // program and doesn't parse, or "" when every such command parses (or none runs the program).
 // unclosed reports a quote left open, which leaves the line unchecked.
 func (ec *exampleChecker) complaint(line string) (msg string, unclosed bool) {
+	res := ec.check(line)
+	return res.msg, res.unclosed
+}
+
+// check parses each command in line that runs the program, stopping at the first that
+// doesn't parse.
+func (ec *exampleChecker) check(line string) exampleResult {
+	var res exampleResult
 	segments, unclosed := exampleSegments(line)
 	if unclosed {
-		return "", true
+		res.unclosed = true
+		return res
 	}
+	first := true
 	for _, words := range segments {
 		argv, ok := exampleArgv(words, ec.program)
-		if !ok || reachesUnnamedRef(&ec.spec.Command, argv) {
+		if !ok {
+			continue
+		}
+		literal := first && !slices.ContainsFunc(argv, func(w exampleWord) bool { return w.opaque })
+		if reachesUnnamedRef(&ec.spec.Command, argv) {
+			first = false
 			continue
 		}
 		if ec.def == nil {
 			d := specDefinition(ec.spec)
 			ec.def = &d
 		}
-		if msg := exampleComplaint(*ec.def, argv); msg != "" {
-			return msg, false
+		msg, ctx := exampleComplaint(*ec.def, argv)
+		if msg != "" {
+			res.msg = msg
+			return res
 		}
+		if ctx != nil {
+			for _, d := range rotini.Deprecations(ctx) {
+				res.notes = append(res.notes, fmt.Sprintf("uses a deprecated spelling (%s); show what to type now instead", d.Error()))
+			}
+		}
+		if use, ok := readExample(&ec.spec.Command, argv); ok {
+			res.notes = append(res.notes, use.notes()...)
+			if literal {
+				res.use = &use
+			}
+		}
+		first = false
 	}
-	return "", false
+	return res
+}
+
+// exampleRunArgv returns the words after the program's name of the first command in line that
+// runs the program, when each word is literal (no expansion, glob or placeholder); ok is false
+// otherwise. program lists the spellings that start the program (see exampleProgramWords).
+func exampleRunArgv(line string, program [][]string) (argv []string, ok bool) {
+	segments, unclosed := exampleSegments(line)
+	if unclosed {
+		return nil, false
+	}
+	for _, words := range segments {
+		args, runs := exampleArgv(words, program)
+		if !runs {
+			continue
+		}
+		argv = make([]string, 0, len(args))
+		for _, w := range args {
+			if w.opaque {
+				return nil, false
+			}
+			argv = append(argv, w.text)
+		}
+		return argv, true
+	}
+	return nil, false
 }
 
 // exampleProgramWords are the spellings that start an example of the program: its name, and
@@ -114,31 +196,32 @@ func exampleArgv(words []exampleWord, program [][]string) ([]exampleWord, bool) 
 }
 
 // exampleComplaint parses argv against def and returns the runtime's complaint, or "" when it
-// parses (or the complaint is about an opaque word).
-func exampleComplaint(def rotini.Definition, words []exampleWord) string {
+// parses (or the complaint is about an opaque word). ctx is the parsed run's context when argv
+// parsed with nothing opaque in a flag's place; nil otherwise.
+func exampleComplaint(def rotini.Definition, words []exampleWord) (string, *rotini.Context) {
 	argv := make([]string, len(words))
 	for i, w := range words {
 		if w.opaque && strings.HasPrefix(w.text, "-") {
-			return "" // an expansion where a flag may be expected: nothing to check
+			return "", nil // an expansion where a flag may be expected: nothing to check
 		}
 		argv[i] = w.text
 	}
 	ctx := lintContext(def, argv).WithStdin(strings.NewReader(""))
 	err := rotini.NewParser().Parse(ctx, &struct{}{})
 	if err == nil {
-		return ""
+		return "", ctx
 	}
 	msg := err.Error()
 	for _, w := range words {
 		if w.opaque && strings.Contains(msg, strconv.Quote(w.text)) {
-			return ""
+			return "", nil
 		}
 	}
 	var pe *rotini.ParseError
 	if errors.As(err, &pe) && pe.Kind == rotini.ParseKindUnknownCommand && specDiscoversPlugins(def) {
-		return "" // the word may name a discovered plugin
+		return "", nil // the word may name a discovered plugin
 	}
-	return msg
+	return msg, nil
 }
 
 // specDiscoversPlugins reports whether any command in def discovers plugins, which accept any
@@ -323,13 +406,25 @@ type exampleWord struct {
 }
 
 // examplePrompt is a leading shell prompt to strip.
-var examplePrompt = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^\s*[$%]\s+`) })
+func examplePrompt() *regexp.Regexp {
+	return examplePromptOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^\s*[$%]\s+`) })
+}
+
+var examplePromptOnce lazy[*regexp.Regexp]
 
 // exampleAssignment is a leading VAR=value word, which sets the environment for the command.
-var exampleAssignment = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`) })
+func exampleAssignment() *regexp.Regexp {
+	return exampleAssignmentOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`) })
+}
+
+var exampleAssignmentOnce lazy[*regexp.Regexp]
 
 // examplePlaceholder is a <placeholder> word, which isn't a redirect.
-var examplePlaceholder = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`^<[^<>\s]+>`) })
+func examplePlaceholder() *regexp.Regexp {
+	return examplePlaceholderOnce.value(func() *regexp.Regexp { return regexp.MustCompile(`^<[^<>\s]+>`) })
+}
+
+var examplePlaceholderOnce lazy[*regexp.Regexp]
 
 // exampleSegments splits an example into the words of each command in it, POSIX style: single
 // quotes are literal, double quotes take \" \\ \$ and \`, a backslash outside quotes escapes the

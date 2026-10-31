@@ -106,7 +106,7 @@ func TestSetConfigValue_refusesInvalidValues(t *testing.T) {
 		{"level", "loud", `invalid value "loud" for config key level (one of: debug, info)`, "loud"},
 		{"deploy.replicas", "ten", `config key deploy.replicas: "ten" is not a valid integer`, ""},
 		{"deploy.replicas", "10", "config key deploy.replicas must be <= 9 (got 10)", ""},
-		{"deploy.timeout", "soon", `config key deploy.timeout: "soon" is not a valid duration`, ""},
+		{"deploy.timeout", "soon", `config key deploy.timeout: "soon" is not a valid duration (write it as 90s, 5m, 1h30m or 7d)`, ""},
 		{"name", "Bob", `config key name must match ^[a-z]+$ (got "Bob")`, ""},
 		{"tags", "a,b,c,d", "config key tags accepts at most 3 values (got 4)", ""},
 		{"verbose", "maybe", `config key verbose: "maybe" is not a valid boolean`, ""},
@@ -166,7 +166,7 @@ func TestSetConfigValue_checksAsTheCommandLine(t *testing.T) {
 			}
 			if t, ok := typeForName(fd.Type); perr == nil && ok {
 				// A value the type can't hold is reported when the flag is bound.
-				if err := coerceFlagValues(reflect.New(t).Elem(), fd, []string{tt.raw}, nil); err != nil {
+				if err := coerceFlagValues(reflect.New(t).Elem(), fd, []string{tt.raw}, featureClock(allFeatures())); err != nil {
 					perr = coerceFailure("--n", "--n", err, false)
 				}
 			}

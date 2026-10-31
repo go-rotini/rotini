@@ -46,7 +46,7 @@ func TestSuggestionFacts_inputError(t *testing.T) {
 		check(t, bind(t, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}), "gold1", []string{"gold", "silver"})
 	})
 	t.Run("other failures carry none", func(t *testing.T) {
-		err := usageBind(channelEnv, "PORT", "PORT is required", nil)
+		err := usageBind(InputErrorKindMissingRequired, channelEnv, "PORT", "PORT is required", nil)
 		if err.Token != "" || err.Candidates != nil {
 			t.Fatalf("a non-enum *InputError carries facts: %#v", err)
 		}

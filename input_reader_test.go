@@ -1308,7 +1308,7 @@ func TestInputError_secretNeverLeaks(t *testing.T) {
 func TestInputError_typeContract(t *testing.T) {
 	boom := errors.New("low-level cause")
 
-	usage := usageBind(channelConfig, "api.token", "config key \"api.token\" is required", boom)
+	usage := usageBind(InputErrorKindMissingRequired, channelConfig, "api.token", "config key \"api.token\" is required", boom)
 	if usage.Error() != `config key "api.token" is required` {
 		t.Errorf("Error() = %q, want the clean message", usage.Error())
 	}
@@ -1322,7 +1322,7 @@ func TestInputError_typeContract(t *testing.T) {
 	}
 
 	// A nil cause is fine — the sentinel is still reachable.
-	noCause := usageBind(channelStdin, "", "required stdin payload is empty", nil)
+	noCause := usageBind(InputErrorKindMissingRequired, channelStdin, "", "required stdin payload is empty", nil)
 	if !errors.Is(noCause, ErrUsage) {
 		t.Error("a nil-cause usage InputError must still match ErrUsage")
 	}
@@ -2234,12 +2234,12 @@ func TestInputReader_envIntegerWording(t *testing.T) {
 	for env, want := range map[string]string{
 		"APP_N=0x10":                 `app: environment variable APP_N: "0x10" is not a valid integer`,
 		"APP_N= 5":                   `app: environment variable APP_N: " 5" is not a valid integer`,
-		"APP_N=99999999999999999999": fmt.Sprintf(`app: environment variable APP_N: "99999999999999999999" is not a valid int (out of range: %d to %d)`, math.MinInt, math.MaxInt),
-		"APP_U8=256":                 `app: environment variable APP_U8: "256" is not a valid uint8 (out of range: 0 to 255)`,
-		"APP_U8=-1":                  `app: environment variable APP_U8: "-1" is not a valid uint8 (out of range: 0 to 255)`,
+		"APP_N=99999999999999999999": fmt.Sprintf(`app: environment variable APP_N: "99999999999999999999" is not a valid integer (out of range: %d to %d)`, math.MinInt, math.MaxInt),
+		"APP_U8=256":                 `app: environment variable APP_U8: "256" is not a valid non-negative integer (out of range: 0 to 255)`,
+		"APP_U8=-1":                  `app: environment variable APP_U8: "-1" is not a valid non-negative integer (out of range: 0 to 255)`,
 		"APP_PIN=12x4":               `app: environment variable APP_PIN: "[redacted]" is not a valid integer`,
 		"APP_PORTS=1,x":              `app: environment variable APP_PORTS: "x" is not a valid integer`,
-		"APP_PINS=1,300":             `app: environment variable APP_PINS: "300" is not a valid uint8 (out of range: 0 to 255)`,
+		"APP_PINS=1,300":             `app: environment variable APP_PINS: "300" is not a valid non-negative integer (out of range: 0 to 255)`,
 	} {
 		for reader, err := range readerErrors[in](NewContextFor(tbAppDef(), nil).WithEnviron([]string{env}), "env") {
 			if err == nil || err.Error() != want {
@@ -2282,11 +2282,11 @@ func TestInputReader_configValueWording(t *testing.T) {
 		"b: 0\n":            "",
 		"pins: \"1,2\"\n":   "",
 		"b: 2\n":            `app: config key b: "2" is not a valid boolean`,
-		"i8: 200\n":         `app: config key i8: "200" is not a valid int8 (out of range: -128 to 127)`,
+		"i8: 200\n":         `app: config key i8: "200" is not a valid integer (out of range: -128 to 127)`,
 		"i8: 1.5\n":         `app: config key i8: "1.5" is not a valid integer`,
-		"l8: [1, 200]\n":    `app: config key l8: "200" is not a valid int8 (out of range: -128 to 127)`,
-		"pins: [1, 300]\n":  `app: config key pins: "300" is not a valid uint8 (out of range: 0 to 255)`,
-		"pins: \"1,300\"\n": `app: config key pins: "300" is not a valid uint8 (out of range: 0 to 255)`,
+		"l8: [1, 200]\n":    `app: config key l8: "200" is not a valid integer (out of range: -128 to 127)`,
+		"pins: [1, 300]\n":  `app: config key pins: "300" is not a valid non-negative integer (out of range: 0 to 255)`,
+		"pins: \"1,300\"\n": `app: config key pins: "300" is not a valid non-negative integer (out of range: 0 to 255)`,
 	} {
 		cfg := writeConfig(t, body)
 		if want != "" {
@@ -2334,8 +2334,8 @@ func TestCheckDecimal_fieldType(t *testing.T) {
 	}{
 		{"U64", []string{"18446744073709551615"}, ""},
 		{"L64", []string{"1,18446744073709551615"}, ""},
-		{"U64", []string{"18446744073709551616"}, `u: "18446744073709551616" is not a valid uint64 (out of range: 0 to 18446744073709551615)`},
-		{"I8", []string{"200"}, `u: "200" is not a valid int8 (out of range: -128 to 127)`},
+		{"U64", []string{"18446744073709551616"}, `u: "18446744073709551616" is not a valid non-negative integer (out of range: 0 to 18446744073709551615)`},
+		{"I8", []string{"200"}, `u: "200" is not a valid integer (out of range: -128 to 127)`},
 		{"I8", []string{"0x10"}, `u: "0x10" is not a valid integer`},
 	} {
 		f, _ := st.FieldByName(tc.field)

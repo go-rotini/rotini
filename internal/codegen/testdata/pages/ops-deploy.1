@@ -33,7 +33,7 @@ The port the service listens on.
 .br
 between 1 and 65535
 .TP
-\fB\-\-ratio\fR \fIfloat64\fR
+\fB\-\-ratio\fR \fInumber\fR
 traffic share (experimental)
 .br
 greater than 0 and at most 1
@@ -43,7 +43,7 @@ rollout step
 .br
 a multiple of 5
 .TP
-\fB\-\-tag\fR \fI[]string\fR
+\fB\-\-tag\fR \fIstring...\fR
 a label
 .br
 1 to 5 values; each value at most 10 characters; several values per occurrence,
@@ -54,7 +54,7 @@ how long to wait
 .br
 at least 1s and less than 1h
 .TP
-\fB\-e\fR, \fB\-\-env\fR \fImap[string]string\fR
+\fB\-e\fR, \fB\-\-env\fR \fIkey=value\fR
 extra environment
 .br
 at most 8 values; repeatable
@@ -65,12 +65,12 @@ the deploy token (@file or \- for stdin)
 \fB\-\-key\fR \fIstring\fR
 the signing key (@file)
 .TP
-\fB\-\-label\fR \fI[]string\fR
+\fB\-\-label\fR \fIstring...\fR
 a label to apply (default ["a,b", "c\e"d"])
 .br
 several values per occurrence, separated by ","; repeatable
 .TP
-\fB\-\-zone\fR \fI[]string\fR
+\fB\-\-zone\fR \fIstring...\fR
 the zones to use (default ["eu", "us"])
 .br
 repeatable
@@ -79,6 +79,50 @@ repeatable
 the quoting style [a\(gab|plain]
 .br
 matches \fB^[a\-z\(ga"]+$\fR
+.TP
+\fB\-\-secrets\fR \fIstring\fR
+read secrets from this file
+.TP
+\fB\-\-stage\fR \fIstring\fR
+the stage to deploy to
+.TP
+\fB\-\-sep\fR \fIstring\fR
+the field separator
+.br
+exactly 1 character
+.TP
+\fB\-\-points\fR \fIint\fR
+story points
+.br
+between 1 and 21
+.TP
+\fB\-\-weights\fR \fIkey=number\fR
+a weight per zone
+.br
+repeatable
+.TP
+\fB\-\-link\fR \fIvalue\fR
+a link to follow
+.TP
+\fB\-\-pair\fR \fIstring...\fR
+exactly two hosts
+.br
+exactly 2 values; repeatable
+.TP
+\fB\-\-replicas\fR \fIint\fR
+how many to run (default 1)
+.br
+between 1 and 100
+.br
+also set by \fBOPS_DEPLOY_REPLICAS\fR or config key \fBdeploy.replicas\fR
+.PP
+\-\-token and \-\-key can\(aqt be used together.
+.br
+\-\-ratio and \-\-step must be used together.
+.br
+with \-\-zone eu, \-\-port is required and \-\-quote can\(aqt be used.
+.br
+unless \-\-key is given, \-\-token is required.
 .SH "GLOBAL OPTIONS"
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -91,6 +135,27 @@ repeat to count: \-vvv
 .TP
 \fB\-\-color\fR \fIstring\fR
 when to color (default auto) [auto|always|never]
+.SH CONFIGURATION
+.TP
+\fBdeploy.registry\fR \fIstring\fR
+the registry to push to (in \&.ops.yaml)
+.TP
+\fBdeploy.retries\fR \fIint\fR
+how many times to retry (default 1)
+.br
+between 0 and 9
+.SH FILES
+The first file listed that sets a key supplies it.
+.TP
+\fI\&./secrets.json\fR
+or the file \-\-secrets names; profiles under "stages", chosen by \-\-stage
+(default dev)
+.TP
+\fI~/.ops.yaml\fR
+A configuration file.
+.TP
+\fI\&.ops.yaml\fR
+in the working directory or the nearest parent holding one
 .SH "EXIT STATUS"
 .TP
 \fB0\fR

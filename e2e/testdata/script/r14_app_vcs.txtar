@@ -99,7 +99,7 @@ stdout '^  vcs remote remove <name>$'
 exec ./vcs$exe help revisions
 stdout '^A revision is a commit number'
 wantexit 1 ./vcs$exe help nope
-stderr '^Error: no help for command "nope"$'
+stderr '^Error: vcs: unknown command "nope"$'
 exec ./vcs$exe gc --help
 stdout '^This command is experimental: it may change or be removed in any release\.$'
 stdout '\(deprecated since 0\.2\.0, removed in 1\.0\.0: it is always aggressive now\)$'
@@ -111,7 +111,7 @@ stdout '^\.SH "EXIT STATUS"$'
 exec ./vcs$exe man commit
 stdout '^\.SH "GLOBAL OPTIONS"$'
 wantexit 1 ./vcs$exe man nope
-stderr '^Error: no man page for command "nope"$'
+stderr '^Error: vcs: unknown command "nope"$'
 
 # Completion: hidden and deprecated names are left out, a set digit option takes its group
 # with it, and the flag a dependency requires comes first.

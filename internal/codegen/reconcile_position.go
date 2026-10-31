@@ -96,14 +96,20 @@ func tomlLocator(data []byte) sourceLocator {
 }
 
 // pointerUnescaper decodes an RFC 6901 token.
-var pointerUnescaper = strings.NewReplacer("~1", "/", "~0", "~")
+func pointerUnescaper() *strings.Replacer {
+	return pointerUnescaperOnce.value(func() *strings.Replacer {
+		return strings.NewReplacer("~1", "/", "~0", "~")
+	})
+}
+
+var pointerUnescaperOnce lazy[*strings.Replacer]
 
 // tomlResolve follows RFC 6901 tokens from a table to the node they name: a key's value, a
 // table, an array element or one [[name]] entry. It returns nil when a token doesn't resolve.
 func tomlResolve(n *toml.Node, tokens []string) *toml.Node {
 	var run []*toml.Node // the entries of an array of tables awaiting an index
 	for _, tok := range tokens {
-		tok = pointerUnescaper.Replace(tok)
+		tok = pointerUnescaper().Replace(tok)
 		if run != nil || n.Kind == toml.ArrayNode {
 			items := run
 			if items == nil {

@@ -54,9 +54,12 @@ func renderDefinition(gp *program) string {
 	b.WriteString(exitStatusLiteral(gp.rootHelp.ExitStatus))
 	fmt.Fprintf(&b, "Usage: %q,\n", rootUsage(gp))
 	b.WriteString(effectsField(gp.rootHelp.Effects))
+	if gp.rootHelp.Stability != "" {
+		fmt.Fprintf(&b, "Stability: %q,\n", gp.rootHelp.Stability)
+	}
 	writeMetadataField(&b, "%s: %s,\n", gp.rootHelp.Metadata)
 	b.WriteString(multicallLiteral(gp))
-	if cl := rnodesLiteral(gp.rootName, gp.rootDisplay, gp.tree, gp.schemas); cl != "" {
+	if cl := rnodesLiteral(gp.rootName, gp.rootDisplay, gp.tree, gp.schemas, gp.rootHelp.ExitStatus); cl != "" {
 		fmt.Fprintf(&b, "Commands: %s,\n", cl)
 	}
 	if rl := pluginDefsLiteral(gp.rootName, gp.rootPlugins); rl != "" {
@@ -438,9 +441,15 @@ func withObjectDefault(schema *InputSchema) *InputSchema {
 }
 
 // pathCompleteKinds are the completion kinds the path types imply.
-var pathCompleteKinds = map[string]string{
-	"existingfile": "file", "inputfile": "file", "outputfile": "file", "existingdir": "directory",
+func pathCompleteKinds() map[string]string {
+	return pathCompleteKindsOnce.value(func() map[string]string {
+		return map[string]string{
+			"existingfile": "file", "inputfile": "file", "outputfile": "file", "existingdir": "directory",
+		}
+	})
 }
+
+var pathCompleteKindsOnce lazy[map[string]string]
 
 // completionHint is the completion hint an input completes with: its `complete:` hint when that
 // declares a kind, else the kind its path type implies (an existingfile, inputfile or
@@ -453,7 +462,7 @@ func completionHint(schema *InputSchema) *CompletionHint {
 	if schema.Complete != nil && schema.Complete.Kind != "" {
 		return schema.Complete
 	}
-	kind := pathCompleteKinds[strings.TrimPrefix(definitionType(schema, nil), "[]")]
+	kind := pathCompleteKinds()[strings.TrimPrefix(definitionType(schema, nil), "[]")]
 	if kind == "" || len(enumOrItems(schema)) > 0 || schema.ValuesFrom != "" {
 		return schema.Complete
 	}
@@ -582,7 +591,8 @@ func flagDependenciesLiteral(in *Inputs) string {
 // rnodesLiteral renders the []rotini.CommandDef literal for a resolved command tree,
 // recursively, or "" when nodes is empty. host prefixes plugin binary names unless a node
 // carries its own pluginHost; invocation is the parent's, which each usage line starts with.
-func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Schema) string {
+// rootExits is the root's exit_status, which a command without its own documents.
+func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Schema, rootExits []ExitStatusEntry) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
 		fmt.Fprintf(b, "Name: %q,\n", n.name)
 		fmt.Fprintf(b, "Handler: %q,\n", n.prefix)
@@ -622,11 +632,14 @@ func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Sc
 			b.WriteString(outputDefLiteral(n.outputType, n.output, scoped, n.stream))
 		}
 		b.WriteString(inputsTypeLiteral(n.inputsType))
-		b.WriteString(exitStatusLiteral(n.help.ExitStatus))
+		b.WriteString(exitStatusLiteral(effectiveExitStatus(n.help.ExitStatus, rootExits)))
 		fmt.Fprintf(b, "Usage: %q,\n", nodeUsage(invocation, n))
 		b.WriteString(effectsField(n.help.Effects))
+		if n.help.Stability != "" {
+			fmt.Fprintf(b, "Stability: %q,\n", n.help.Stability)
+		}
 		writeMetadataField(b, "%s: %s,\n", n.help.Metadata)
-		if cl := rnodesLiteral(host, usageInvocation(invocation, n), n.children, schemas); cl != "" {
+		if cl := rnodesLiteral(host, usageInvocation(invocation, n), n.children, schemas, rootExits); cl != "" {
 			fmt.Fprintf(b, "Commands: %s,\n", cl)
 		}
 		pluginHost := host

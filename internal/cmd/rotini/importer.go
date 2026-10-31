@@ -48,8 +48,8 @@ func runImport(ctx context.Context, rtx *rotini.Context, opts codegen.ImportOpti
 	if _, err := fmt.Fprintln(rtx.Stdout, imported.Result); err != nil {
 		return writeError(err)
 	}
-	if !requiresRuntime(".") {
-		rtx.RecordWarning(missingRuntime(".", "building the imported CLI"))
+	if err := moduleSetup(".", "building the imported CLI"); err != nil {
+		rtx.RecordWarning(err)
 	}
 	return nil
 }

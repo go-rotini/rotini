@@ -301,6 +301,7 @@ const (
 	ParseKindTooManyArguments              // more positionals than the command's declared (non-variadic) arity
 	ParseKindInternal                      // a parser API misuse: nil parser/context, a bad out argument, or an inputs type that does not describe the running command
 	ParseKindMisplacedFlag                 // a flag was typed where it can't apply: before a plugin's name, or a local flag while running a command below its own
+	ParseKindMissingCommand                // a command that only groups others was run without one of them (see [MissingCommand])
 )
 
 // String renders the kind as a short, stable label (for logs and tests).
@@ -328,6 +329,8 @@ func (k ParseKind) String() string {
 		return "internal"
 	case ParseKindMisplacedFlag:
 		return "misplaced-flag"
+	case ParseKindMissingCommand:
+		return "missing-command"
 	default:
 		return "unspecified"
 	}
@@ -369,6 +372,10 @@ func (e *ParseError) Error() string {
 	return e.path + ": " + e.Msg
 }
 
+// Path returns the path of the command the error is reported against, as Error prints it
+// first ("taskr add"), or "" when Error prints none.
+func (e *ParseError) Path() string { return e.path }
+
 // atCommand reports each [*ParseError] and usage [*InputError] in err's tree against chain's
 // command path, unless it already names one. An internal error is the program's mistake, not
 // the user's input, so it is left as it is.
@@ -387,6 +394,9 @@ func atPath(err error, path string) {
 			e.path = path
 		}
 	case *InputError:
+		if e.Command == "" {
+			e.Command = path[strings.LastIndexByte(path, ' ')+1:]
+		}
 		if e.path == "" && e.usage {
 			e.path = path // Error never prints Cause, so the cause needs no path of its own
 		}
@@ -1075,6 +1085,85 @@ func strayCommand(leaf *Command, si *scopeInputs, store *parsedInputs) error {
 	}
 }
 
+// UnknownCommandError is the error for a command path that names no command of def: path is
+// the command words below the root, as a generated Help, Man, Markdown or Usage function takes
+// them. It is the [ParseKindUnknownCommand] error the command line gives for the same word,
+// reported against the deepest command path reaches, with that command's sub-commands and
+// plugins (and, at the root, its help topics) as Candidates. Every generated resolver returns
+// it for a path it has no page for:
+//
+//	_, err := Help("deplyo") // mycli: unknown command "deplyo"
+//
+// When every word of path names a command, the last one is reported.
+func UnknownCommandError(def Definition, path ...string) *ParseError {
+	chain := []Command{{Name: def.Name, Commands: def.Commands, Plugins: def.Plugins, Passthrough: def.Passthrough}}
+	i := 0
+	for ; i < len(path); i++ {
+		cur := &chain[len(chain)-1]
+		if cur.Passthrough {
+			break
+		}
+		c, ok := findChild(cur, path[i])
+		if !ok {
+			break
+		}
+		chain = append(chain, Command{Name: c.Name, Commands: c.Commands, Plugins: c.Plugins, Passthrough: c.Passthrough})
+	}
+	if i == len(path) && i > 0 {
+		chain, i = chain[:len(chain)-1], i-1
+	}
+	var tok string
+	if i < len(path) {
+		tok = path[i]
+	}
+	leaf := &chain[len(chain)-1]
+	candidates := childCommandNames(leaf)
+	if len(chain) == 1 {
+		for _, t := range def.Topics {
+			candidates = append(candidates, t.Name)
+		}
+	}
+	return &ParseError{
+		Kind:       ParseKindUnknownCommand,
+		Msg:        "unknown command " + strconv.Quote(tok),
+		Command:    leaf.Name,
+		Token:      tok,
+		Candidates: candidates,
+		path:       pathOf(chain),
+	}
+}
+
+// MissingCommand is the error for running a command that groups others without naming one of
+// them: a [ParseKindMissingCommand] error reported against the running command's path, with its
+// visible sub-commands and declared plugins (and their aliases) as Candidates. A seeded group
+// stub prints the command's help and returns it:
+//
+//	fmt.Fprintln(rtx.Stderr, rtx.Help())
+//	return rotini.MissingCommand(rtx) // cfgctl config: a command is required (one of: get, set, unset)
+func MissingCommand(rtx *Context) *ParseError {
+	cmd := rtx.Command()
+	var names []string
+	for _, c := range cmd.Commands {
+		if !c.Hidden {
+			names = append(names, c.Name)
+		}
+	}
+	for _, r := range cmd.Plugins {
+		names = append(names, r.Name)
+	}
+	msg := "a command is required"
+	if len(names) > 0 {
+		msg += " (one of: " + strings.Join(names, ", ") + ")"
+	}
+	return &ParseError{
+		Kind:       ParseKindMissingCommand,
+		Msg:        msg,
+		Command:    cmd.Name,
+		Candidates: childCommandNames(&cmd),
+		path:       rtx.CommandPath(),
+	}
+}
+
 // extraPositionals reports positionals the leaf has no argument for, unless a variadic argument
 // absorbs them.
 func extraPositionals(chain []Command, si *scopeInputs, store *parsedInputs) error {
@@ -1605,7 +1694,17 @@ func checkFlagGroup(kind FlagGroupKind, set, all []string) error {
 		}
 	case FlagGroupRequiredTogether:
 		if n := len(set); n > 0 && n < len(all) {
-			return constraintViolation("flags %s must be used together", strings.Join(all, ", "))
+			missing := all[:0:0]
+			for _, l := range all {
+				if !slices.Contains(set, l) {
+					missing = append(missing, l)
+				}
+			}
+			verb := "is"
+			if len(missing) > 1 {
+				verb = "are"
+			}
+			return constraintViolation("flags %s must be used together; %s %s missing", strings.Join(all, ", "), joinAnd(missing), verb)
 		}
 	case FlagGroupOneOf:
 		switch {
@@ -2622,7 +2721,7 @@ func coerce(f reflect.Value, raw []string, fs *featureSet) error {
 		last := raw[len(raw)-1]
 		v, err := parse(last)
 		if err != nil {
-			return &coerceError{Value: last, TypeName: typeLabel(f.Type(), fs), Cause: err}
+			return &coerceError{Value: last, TypeName: valueLabel(f.Type(), fs), Cause: err}
 		}
 		f.Set(v)
 		return nil
@@ -2643,14 +2742,14 @@ func coerce(f reflect.Value, raw []string, fs *featureSet) error {
 	if f.Type() == durationType {
 		d, err := parseDuration(last)
 		if err != nil {
-			return notValid(last, "duration")
+			return &coerceError{Value: last, TypeName: "duration", Cause: errDurationForm}
 		}
 		f.SetInt(int64(d))
 		return nil
 	}
 	if f.CanAddr() && f.Addr().Type().Implements(textUnmarshalerType) {
 		if err := f.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(last)); err != nil {
-			return &coerceError{Value: last, TypeName: typeLabel(f.Type(), fs), Cause: err}
+			return &coerceError{Value: last, TypeName: valueLabel(f.Type(), fs), Cause: err}
 		}
 		return nil
 	}
@@ -2774,6 +2873,9 @@ func coerceMessage(err error, secret bool) string {
 	return err.Error()
 }
 
+// errDurationForm says how a duration is written, for a value that isn't one.
+var errDurationForm = errors.New("write it as 90s, 5m, 1h30m or 7d")
+
 // notValid is the standard "value isn't a <type>" coercion error.
 func notValid(value, typeName string) error {
 	return &coerceError{Value: value, TypeName: typeName}
@@ -2827,7 +2929,7 @@ func coerceNumber(f reflect.Value, last string) error {
 }
 
 // outOfRange is the error for a number that parsed but does not fit its field's type, naming
-// the range: `"300" is not a valid int8 (out of range: -128 to 127)`.
+// the range: `"300" is not a valid integer (out of range: -128 to 127)`.
 func outOfRange(value string, t reflect.Type) error {
 	var bounds string
 	switch t.Kind() {
@@ -2839,7 +2941,7 @@ func outOfRange(value string, t reflect.Type) error {
 	default: // float32: a float64 field cannot overflow a value ParseFloat(…, 64) accepted
 		bounds = fmt.Sprintf("±%g", math.MaxFloat32)
 	}
-	return &coerceError{Value: value, TypeName: typeLabel(t, noFeatures), Cause: fmt.Errorf("out of range: %s", bounds)}
+	return &coerceError{Value: value, TypeName: numberLabel(t), Cause: fmt.Errorf("out of range: %s", bounds)}
 }
 
 // coerceMapDotted fills a map[string]any flag from "key=value" pairs whose keys are dotted

@@ -20,8 +20,9 @@ Deploying:
   deploy    ship a service (beta)
 
 Help Topics:
-  filters        how filters work
-  environment    the environment variables ops reads
+  filters          how filters work
+  environment      the environment variables ops reads
+  configuration    the configuration files and keys ops reads
 
 Flags:
   -h, --help    print help
@@ -39,7 +40,11 @@ Environment:
                         error    failures only
 
 Configuration:
-  region (region) string      the default region (beta)
-  profile (profile) string    the output profile [short|long]
-                                short    one line each
-                                long     every field
+  region string     the default region (beta)
+  profile string    the output profile [short|long]
+                      short    one line each
+                      long     every field
+
+Files:
+  ~/.ops.yaml
+  .ops.yaml      in the working directory or the nearest parent holding one

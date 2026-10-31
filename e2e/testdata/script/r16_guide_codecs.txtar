@@ -1,0 +1,365 @@
+# R16 — the guide's config strictness and "Your own config format": a schema with
+# additionalProperties: false makes a config file's typo an error naming where it is, a handler
+# warns about keys no input reads, and a program reads an INI file through its own rotini.Codec.
+# ini.go, main.go and the greet handler are the ones the guide shows.
+
+gomodinit example.com/inidemo
+
+# validate warns about a format rotini doesn't ship, and generate doesn't wire it.
+exec rotini validate cmd/inidemo/.rotini.spec.yaml --config cmd/inidemo/.rotini.conf.yaml
+stderr 'Warning: .*config_files "legacy": format "ini" is not built in; the program must add rotini.Codec\("ini", …\) with WithFeatures'
+stderr 'Warning: .*command inidemo/load: stdin: format "ini" is not built in'
+exec rotini generate cmd/inidemo/.rotini.spec.yaml --config cmd/inidemo/.rotini.conf.yaml
+! grep 'Codec\(' internal/cmd/inidemo/zz_inidemo.go
+cp greet.go.txt internal/cmd/inidemo/inidemo_greet.go
+cp show.go.txt internal/cmd/inidemo/inidemo_show.go
+cp check.go.txt internal/cmd/inidemo/inidemo_check.go
+cp ini.go.txt internal/cmd/inidemo/ini.go
+cp load.go.txt internal/cmd/inidemo/inidemo_load.go
+cp ini_test.go.txt internal/cmd/inidemo/ini_test.go
+exec go mod tidy
+
+# Without the codec, a run that reads the file fails naming what to add.
+exec go build -o inidemo$exe ./cmd/inidemo
+wantexit 1 ./inidemo$exe show
+stderr 'configuration file .*legacy.ini is ini, but the program does not wire codec:ini; ini is not a format rotini ships, so add rotini.Codec\("ini", …\) to the program''s features'
+
+# With it, the file reads like any other.
+cp main.go.txt cmd/inidemo/main.go
+exec go build -o inidemo$exe ./cmd/inidemo
+exec ./inidemo$exe show
+stdout '^region: eu-west$'
+! stderr .
+
+# A decode error in the program's format names the line.
+cp broken.ini legacy.ini
+wantexit 1 ./inidemo$exe show
+stderr 'could not parse configuration file .*legacy.ini:3:1: want key = value'
+
+# Unread keys are data: greet warns about them, and still runs.
+exec ./inidemo$exe greet
+stdout '^hi$'
+stderr '^warning: .*inidemo.yaml:3: greting is not a setting$'
+stderr '^warning: .*inidemo.yaml:4: colour is not a setting$'
+! stderr 'greeting is not'
+
+# additionalProperties: false makes a typo an error, with where it is and the keys allowed.
+wantexit 1 ./inidemo$exe check
+stderr '^Error: inidemo check: configuration file .*strict.yaml:3:13 has unknown key deploy.replicaz \(keys: replicas, timeout\)$'
+cp strict-ok.yaml strict.yaml
+exec ./inidemo$exe check
+stdout '^replicas: 3$'
+
+# A stdin document in the program's format decodes the same way, checked against its schema.
+stdin piped.ini
+exec ./inidemo$exe load
+stdout '^region: eu-west$'
+stdin piped-typo.ini
+wantexit 1 ./inidemo$exe load
+stderr 'Error: inidemo load: stdin field "deploy.regoin": unknown key$'
+
+# The decoder meets the rules rotinitest.CheckCodec checks.
+exec go test ./internal/cmd/inidemo
+stdout '^ok'
+
+-- piped.ini --
+[deploy]
+region = eu-west
+-- piped-typo.ini --
+[deploy]
+regoin = eu-west
+-- ini_test.go.txt --
+package inidemo
+
+import (
+	"testing"
+
+	"github.com/go-rotini/rotini/rotinitest"
+)
+
+// INI has no null and one document per file, so those checks are left out.
+func TestDecodeINI(t *testing.T) {
+	rotinitest.CheckCodec(t, decodeINI, rotinitest.CodecDocuments{
+		Valid:        [][]byte{[]byte("; settings\n[deploy]\nregion = eu-west\n")},
+		DuplicateKey: []byte("[deploy]\nregion = a\nregion = b\n"),
+	})
+}
+-- load.go.txt --
+package inidemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.ErrorHandler = (*inidemoLoadHandler)(nil)
+
+type inidemoLoadHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*inidemoLoadHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.Inputs[InidemoLoadInputs]()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(rtx.Stdout, "region:", in.InidemoLoad.Stdin.Deploy.Region)
+	return nil
+}
+-- legacy.ini --
+; settings from the old tool
+[deploy]
+region = eu-west
+-- broken.ini --
+[deploy]
+region = eu-west
+zone
+-- inidemo.yaml --
+greeting: hi
+# typos and leftovers
+greting: hello
+colour: blue
+-- strict.yaml --
+deploy:
+  replicas: 3
+  replicaz: 4
+-- strict-ok.yaml --
+deploy:
+  replicas: 3
+-- ini.go.txt --
+package inidemo
+
+import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+// INI reads the spec's `format: ini` files, and any .ini file without one.
+var INI = rotini.Codec("ini", decodeINI, rotini.CodecExtensions(".ini"))
+
+// decodeINI reads `[section]` headers, `key = value` lines and `;` or `#` comments. Each
+// section is a mapping, and a section or key given twice is an error.
+func decodeINI(data []byte) (any, error) {
+	doc := map[string]any{}
+	section := doc
+	lines := bufio.NewScanner(bytes.NewReader(data))
+	for n := 1; lines.Scan(); n++ {
+		line := strings.TrimSpace(lines.Text())
+		switch {
+		case line == "" || line[0] == ';' || line[0] == '#':
+		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
+			name := strings.TrimSpace(line[1 : len(line)-1])
+			if _, dup := doc[name]; dup {
+				return nil, iniError{n, fmt.Sprintf("section [%s] given twice", name)}
+			}
+			section = map[string]any{}
+			doc[name] = section
+		default:
+			key, value, ok := strings.Cut(line, "=")
+			if !ok {
+				return nil, iniError{n, "want key = value"}
+			}
+			key = strings.TrimSpace(key)
+			if _, dup := section[key]; dup {
+				return nil, iniError{n, fmt.Sprintf("key %s given twice", key)}
+			}
+			section[key] = strings.TrimSpace(value)
+		}
+	}
+	return doc, lines.Err()
+}
+
+// iniError is a failure on a line; its Position and Message methods let the error name the
+// file and line.
+type iniError struct {
+	line int
+	msg  string
+}
+
+func (e iniError) Error() string             { return fmt.Sprintf("line %d: %s", e.line, e.msg) }
+func (e iniError) Position() (line, col int) { return e.line, 1 }
+func (e iniError) Message() string           { return e.msg }
+-- main.go.txt --
+package main
+
+import (
+	cmd "example.com/inidemo/internal/cmd/inidemo"
+)
+
+func main() {
+	cmd.NewProgram().
+		WithFeatures(cmd.INI).
+		Execute()
+}
+-- greet.go.txt --
+package inidemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.ErrorHandler = (*inidemoGreetHandler)(nil)
+
+type inidemoGreetHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*inidemoGreetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, report, err := rtx.InputsWithReport[InidemoGreetInputs]()
+	if err != nil {
+		return err
+	}
+	for _, k := range report.UnreadConfigKeys() {
+		fmt.Fprintf(rtx.Stderr, "warning: %s:%d: %s is not a setting\n", k.Path, k.Line, k.Key)
+	}
+	fmt.Fprintln(rtx.Stdout, in.InidemoGreet.Config.Greeting)
+	return nil
+}
+-- show.go.txt --
+package inidemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.ErrorHandler = (*inidemoShowHandler)(nil)
+
+type inidemoShowHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*inidemoShowHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.Inputs[InidemoShowInputs]()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(rtx.Stdout, "region:", in.InidemoShow.Config.Region)
+	return nil
+}
+-- check.go.txt --
+package inidemo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.ErrorHandler = (*inidemoCheckHandler)(nil)
+
+type inidemoCheckHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*inidemoCheckHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.Inputs[InidemoCheckInputs]()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(rtx.Stdout, "replicas:", in.InidemoCheck.Config.Replicas)
+	return nil
+}
+-- cmd/inidemo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: inidemo
+  summary: reads its settings from YAML and from an old tool's INI file
+  schemas:
+    Settings:
+      type: object
+      properties:
+        deploy:
+          type: object
+          properties:
+            region: { type: string }
+          additionalProperties: false
+  config_files:
+    - name: main
+      path: inidemo.yaml
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      cascading: true
+      short_circuit: true
+      schema: { type: bool }
+  commands:
+    - name: greet
+      summary: print the greeting
+      config:
+        - name: greeting
+          summary: what to greet with
+          schema: { type: string, default: hello, key: greeting, file: main }
+    - name: show
+      summary: print the region from the INI file
+      config_files:
+        - name: legacy
+          path: legacy.ini
+          format: ini
+      config:
+        - name: region
+          summary: the region to deploy to
+          schema: { type: string, key: deploy.region, file: legacy }
+    - name: check
+      summary: read a file whose schema allows only the keys it lists
+      config_files:
+        - name: strict
+          path: strict.yaml
+          schema:
+            type: object
+            properties:
+              deploy:
+                type: object
+                properties:
+                  replicas: { type: integer }
+                  timeout: { type: string }
+                additionalProperties: false
+            additionalProperties: false
+      config:
+        - name: replicas
+          summary: how many to run
+          schema: { type: int, key: deploy.replicas, file: strict }
+    - name: load
+      summary: read settings piped on stdin
+      stdin:
+        format: ini
+        schema: { $ref: Settings, required: true }
+-- cmd/inidemo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/inidemo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/inidemo/zz_inidemo.go
+      package: inidemo
+      hook_returns: error
+  features:
+    - type: help
+      enabled: true

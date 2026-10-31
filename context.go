@@ -25,8 +25,9 @@ import (
 //     derived one to the hooks after it
 //   - command — [Context.Command] is the command whose hook is running (its Invoked field
 //     reports whether the user ran it), [Context.CommandPath] names it, and
-//     [Context.CommandChain] lists every command from the root to the invoked one, and
-//     [Context.Usage] is its usage line
+//     [Context.CommandChain] lists every command from the root to the invoked one,
+//     [Context.Usage] is its usage line, and [Context.UnknownCommand] is a mistyped
+//     sub-command a short-circuit flag let pass
 //   - inputs — [Context.Inputs] returns the command's validated inputs,
 //     [Context.InputsWithReport] adds where each value came from, and the per-channel
 //     [Context.ArgvInputs], [Context.EnvInputs], [Context.FileInputs],
@@ -36,7 +37,8 @@ import (
 //     [Context.WriteOutputItem] one item of a stream, [Context.WriteOutputTo] and
 //     [Context.WriteOutputItemTo] write them to another writer, and [Context.CheckOutput] checks
 //     a value against the declared shape without writing it
-//   - dependencies — [Context.GetDependency] and [Context.MustGetDependency] read one;
+//   - dependencies — [Context.Dependency], [Context.GetDependency] and
+//     [Context.MustGetDependency] read one, building a provided one on first request;
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] set one for this run
 //   - records — [Context.RecordInfo], [Context.RecordSuccess], [Context.RecordWarning],
 //     [Context.RecordError], and [Context.Failed]; during completion, a completer adds to
@@ -83,6 +85,13 @@ type Context struct {
 	// of its generated inputs.
 	Argv []string
 
+	// providers are the program's dependency providers (nil on a standalone Context);
+	// provided holds their results in this run, by name, and closers the io.Closers they
+	// built, in construction order.
+	providers *dependencyStore
+	provided  map[string]*providedValue
+	closers   []providedCloser
+
 	services      map[string]any
 	chain         []Command // resolved command path, root → leaf
 	exitCode      int       // first non-zero wins; the reporter overrides
@@ -103,9 +112,14 @@ type Context struct {
 	frame int
 
 	// ctx is the context the running hook received; see [Context.SetContext]. ctxFrozen makes
-	// SetContext a no-op during teardown and the reporter.
+	// SetContext a no-op during teardown and the reporter. ctxGen counts the contexts
+	// SetContext has handed on.
 	ctx       context.Context
 	ctxFrozen bool
+	ctxGen    uint32
+
+	// middleware wraps every hook; see [Program.WithMiddleware].
+	middleware []Middleware
 
 	// rotini's own settings, seeded from the Program each run and kept out of services so a
 	// dependency can never shadow them.
@@ -113,10 +127,10 @@ type Context struct {
 	readerFn func(InputSettings) *InputReader
 	version  string
 	help     HelpFunc
-	// pluginHelp runs a plugin with --help for [Context.PluginHelp]; nil outside a run.
-	pluginHelp func(rtx *Context, words []string) bool
-	scripts    CompletionScriptFunc
-	parser     *Parser
+	// program is the running program, read only by [Context.PluginHelp]; nil outside a run.
+	program *Program
+	scripts CompletionScriptFunc
+	parser  *Parser
 
 	// view is the environment and directory this run reads; see [Program.WithEnviron] and
 	// [Program.WithDir]. nil reads the process's.
@@ -217,7 +231,7 @@ func newContext() *Context {
 func NewContextFor(def Definition, argv []string) *Context {
 	rtx := newContext()
 	chain, _ := resolveChain(def, argv)
-	markInvoked(chain)
+	finishChain(chain)
 	rtx.Argv = argv
 	rtx.chain = chain
 	rtx.clock.feats = legacyFeatures(def)
@@ -273,12 +287,34 @@ func (rtx *Context) withPath(err error) error {
 	return err
 }
 
-// markInvoked sets Invoked on the last command of chain and clears it on the others, whoever
-// built the chain.
-func markInvoked(chain []Command) {
+// finishChain sets Invoked on the last command of chain and clears it on the others, and
+// carries each command's ancestors' stability down to it, whoever built the chain. Applying it
+// again changes nothing.
+func finishChain(chain []Command) {
 	for i := range chain {
 		chain[i].Invoked = i == len(chain)-1
+		if i > 0 {
+			chain[i].Stability = leastStable(chain[i-1].Stability, chain[i].Stability)
+		}
 	}
+}
+
+// leastStable returns the less stable of two stability markers: "experimental", then "beta",
+// then "" (stable). A marker rotini doesn't know counts as experimental.
+func leastStable(a, b string) string {
+	rank := func(s string) int {
+		switch s {
+		case "":
+			return 2
+		case "beta":
+			return 1
+		}
+		return 0
+	}
+	if rank(b) < rank(a) {
+		return b
+	}
+	return a
 }
 
 // frameUnset marks a Context that is not inside a lifecycle step. It resolves to the invoked
@@ -829,11 +865,41 @@ func (rtx *Context) InvokedHelp() (string, error) {
 	return help(helpPath(chain, 1, len(chain))...)
 }
 
+// UnknownCommand returns the unknown-command error a short-circuit flag
+// ([FlagDef.ShortCircuit]) let pass, or nil. In `mycli nope --help` the command line resolves
+// to the root, which takes no arguments, and "nope" is read as a mistyped sub-command; the
+// flag waives that check, so [Context.ArgvInputs] and [Context.InvokedHelp] answer for the
+// root. UnknownCommand returns the [*ParseError] (Kind [ParseKindUnknownCommand], with Token
+// and Candidates) that `mycli nope` reports, so a hook answering the flag can report the word
+// instead:
+//
+//	if err := rtx.UnknownCommand(); err != nil {
+//		return err
+//	}
+//
+// It is nil when every word resolved, when no short-circuit flag is set (the run then reports
+// the word itself), and when the command line can't be parsed, which [Context.ArgvInputs]
+// reports.
+func (rtx *Context) UnknownCommand() error {
+	chain := rtx.chainRef()
+	if len(chain) == 0 {
+		return nil
+	}
+	store, err := parseArgvTokens(chain, rtx.Argv, rtx.argvAcq())
+	if err != nil || !shortCircuited(chain, store) {
+		return nil //nolint:nilerr // a command line that can't be parsed is ArgvInputs's to report
+	}
+	leaf := len(chain) - 1
+	return rtx.withPath(strayCommand(&chain[leaf], &store.scopes[leaf], store))
+}
+
 // HelpFor returns the help page of the command at path, read the way a help command's arguments
 // are: from the command [Context.Command] sits under. In `acme db help migrate`, run in the hook
 // of db's help command, HelpFor("migrate") is the page of `acme db migrate`, and HelpFor() is
-// db's. The page is the running program's, as with [Context.Help]. It returns an error when
-// path names no command, and "" and no error when [Program.WithHelp] set no pages.
+// db's. The page is the running program's, as with [Context.Help]. When path names no command,
+// the generated Help function returns [UnknownCommandError], the error `acme db migrat` gives:
+// `acme db: unknown command "migrat"`. It returns "" and no error when [Program.WithHelp] set
+// no pages.
 func (rtx *Context) HelpFor(path ...string) (string, error) {
 	rtx.mu.RLock()
 	help := rtx.help
