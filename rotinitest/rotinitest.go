@@ -27,7 +27,10 @@
 // Limits:
 //   - Pass a fresh program to every call, built as main builds it (with the dependencies main
 //     adds). Run sets its streams and environment, so a program shared between tests, such as
-//     one held in a package-level variable, leaks state between them.
+//     one held in a package-level variable, leaks state between them. A shared provider
+//     ([rotini.Program.WithSharedProvider]) builds once per program, so a program reused across
+//     calls reuses its value, and a fresh one builds its own. Run never releases it: a test
+//     whose shared value holds a resource calls p.Close, in t.Cleanup for instance.
 //   - Config inputs come from configuration files the test writes first, into the directory it
 //     passes as the run's ([Dir]) or as XDG_CONFIG_HOME ([Env]); putting one in the inputs
 //     value fails the test.
@@ -334,9 +337,9 @@ func OutputAs[T any](tb testing.TB, res Result, format string) T {
 }
 
 // ExitDocumented fails the test unless the run's exit code is one its command documents in its
-// spec's exit_status: the invoked command's own list, else the root's, which is program-wide.
-// 0 always passes. A command that documents no exit codes fails on any other: there is nothing
-// to check the code against.
+// spec's exit_status: the invoked command's own list (the root's added to it by `inherit: true`),
+// else the root's, which is program-wide. 0 always passes. A command that documents no exit
+// codes fails on any other: there is nothing to check the code against.
 func ExitDocumented(tb testing.TB, res Result) {
 	tb.Helper()
 	if res.Code == 0 {

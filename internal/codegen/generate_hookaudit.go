@@ -564,32 +564,32 @@ func genericCallTypeArg(call *ast.CallExpr) (fn, arg string, ok bool) {
 
 // ─── the exit-code audit ────────────────────────────────────────────────────.
 
-// exitCodesOf returns the codes an exit_status list documents.
-func exitCodesOf(entries []ExitStatusEntry) []int {
-	codes := make([]int, 0, len(entries))
-	for _, e := range entries {
-		codes = append(codes, e.Code)
-	}
-	return codes
-}
-
 // exitContract is what a handler type's command documents: how it is typed, its codes, and the
-// command whose exit_status lists them (the root's when the command inherits it).
+// command whose exit_status lists them (the root's when the command inherits it). A command
+// that adds to the root's list with `inherit: true` owns its list, and inherited holds the
+// root's codes in it, whose root constants it may use.
 type exitContract struct {
 	invocation string
 	codes      []int
 	owner      string
+	root       string
+	inherited  []int
 }
 
-// exitContracts maps each generated handler type to the exit_status its command documents: its
-// own, else the root's, which is program-wide. A command with neither documents nothing, so
-// it is not audited.
+// exitContracts maps each generated handler type to the exit_status its command documents (see
+// documentedExits). A command that documents nothing is not audited.
 func (p *program) exitContracts() map[string]exitContract {
 	out := map[string]exitContract{}
 	for _, c := range p.ownCommands() {
-		contract := exitContract{invocation: c.invocation, codes: c.exitCodes, owner: c.invocation}
-		if len(c.exitCodes) == 0 {
-			contract.codes, contract.owner = p.root.exitCodes, p.root.invocation
+		contract := exitContract{invocation: c.invocation, owner: c.invocation, root: p.root.invocation}
+		for _, e := range documentedExits(c.exitStatus, p.root.exitStatus) {
+			contract.codes = append(contract.codes, e.Code)
+			if e.inherited {
+				contract.inherited = append(contract.inherited, e.Code)
+			}
+		}
+		if len(c.exitStatus) == 0 {
+			contract.owner = p.root.invocation
 		}
 		if c.handler != "" && len(contract.codes) > 0 {
 			out[c.handler] = contract
@@ -712,7 +712,7 @@ func undocumentedExitCodes(fset *token.FileSet, files map[string]*ast.File, cont
 func exitCodeProblem(arg ast.Expr, f *ast.File, contract exitContract, named namedExitCodes, consts map[string]int) string {
 	code, known := intValue(arg, consts)
 	if c, ok := named.lookup(arg, f); ok {
-		if c.owner != contract.owner {
+		if c.owner != contract.owner && (c.owner != contract.root || !slices.Contains(contract.inherited, c.code)) {
 			return fmt.Sprintf("%s, which belongs to %q; declare the code on this command and use its own constant", c.name, c.owner)
 		}
 		code, known = c.code, true

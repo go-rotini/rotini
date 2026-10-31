@@ -100,7 +100,7 @@ func TestChdir_pathRules(t *testing.T) {
 			}
 		}}
 		var errb bytes.Buffer
-		meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "project", Format: "yaml", Discover: &DiscoverDef{Strategy: "walk-up", File: ".proj.yaml"}}}}
+		meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "project", Format: "yaml", Discover: &DiscoverDef{Strategy: "walk-up", File: ".proj.yaml"}}}}
 		code, _ := NewProgramFunc(def, fnLookup(fns)).WithInputSettings(meta).
 			WithEnviron(env).WithDir(base).WithoutSignalHandling().
 			WithStdout(&bytes.Buffer{}).WithStderr(&errb).Run(argv)

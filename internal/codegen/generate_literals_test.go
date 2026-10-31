@@ -227,19 +227,19 @@ func TestInputSettings_configSourceVariables(t *testing.T) {
 		{"the flag's variable", `
   flags:
     - {name: config, identifiers: [--config], schema: {type: string, variable: ACME_CONFIG, config_source: user}}`,
-			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: "ACME_CONFIG"}`},
+			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: []string{"ACME_CONFIG"}}`},
 		{"the flag's variables, then the env input's", `
   flags:
     - {name: config, identifiers: [--config], schema: {type: string, variable: [ACME_CONFIG, ACME_CFG], config_source: user}}
   env:
     - {name: config_path, schema: {type: string, config_source: user}}`,
-			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: "ACME_CONFIG,ACME_CFG,ACME_CONFIG_PATH"}`},
+			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: []string{"ACME_CONFIG", "ACME_CFG", "ACME_CONFIG_PATH"}}`},
 		{"a variable both name is listed once", `
   flags:
     - {name: config, identifiers: [--config], schema: {type: string, variable: ACME_CONFIG, config_source: user}}
   env:
     - {name: config, schema: {type: string, variable: ACME_CONFIG, config_source: user}}`,
-			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: "ACME_CONFIG"}`},
+			`PathFrom: &rotini.PathFromDef{Flag: "config", Env: []string{"ACME_CONFIG"}}`},
 		{"a flag with no variable", `
   flags:
     - {name: config, identifiers: [--config], schema: {type: string, config_source: user}}`,

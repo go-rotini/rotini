@@ -47,12 +47,12 @@ func TestUsageError_cleanMessageAndMatches(t *testing.T) {
 		t.Error("a usage error must not match ErrInternal")
 	}
 
-	typed := &ArgvError{Field: "x", Reason: "y"}
+	typed := &ArgvOfError{Field: "x", Reason: "y"}
 	for name, tagged := range map[string]error{"UsageError": UsageError(typed), "InternalError": InternalError(typed)} {
 		if tagged.Error() != typed.Error() {
 			t.Errorf("%s altered the message: %q", name, tagged.Error())
 		}
-		if got, ok := errors.AsType[*ArgvError](tagged); !ok || got != typed {
+		if got, ok := errors.AsType[*ArgvOfError](tagged); !ok || got != typed {
 			t.Errorf("%s: errors.As does not reach the tagged error", name)
 		}
 	}

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "rotini structured report line",
-  "description": "One line rotini.StructuredReporter writes to stderr when the program's own rule says the run is structured: a JSON object holding one error, warning, info or success, in the order the default reporter prints them (info, warning, error, success). A field is present only when rotini knows it. Secrets never appear.",
+  "description": "One line rotini.StructuredReporter writes to stderr when the program's own rule says the run is structured: a JSON object holding one error, warning, info or success, or one record of a channel the program's spec declares, in the order the default reporter prints them (info, warning, error, success, each with the records of the channels of that class). A field is present only when rotini knows it. Secrets never appear.",
   "type": "object",
   "oneOf": [
     {
@@ -77,6 +77,18 @@
           }
         }
       }
+    },
+    {
+      "description": "A record of a channel the program's spec declares, under the channel's name: {\"schema_version\":1,\"skipped\":{\"path\":\"a.bin\"}}. The record's shape is the channel's schema, in the contract document's `channels`. A record of an error-class channel is also written as an error line.",
+      "required": ["schema_version"],
+      "minProperties": 2,
+      "maxProperties": 2,
+      "not": { "anyOf": [{ "required": ["error"] }, { "required": ["warning"] }, { "required": ["info"] }, { "required": ["success"] }] },
+      "properties": {
+        "schema_version": { "const": 1, "description": "The version of this line's format. It changes only when a line's shape changes in a way that breaks a reader; a new optional field doesn't change it." }
+      },
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "type": "object", "description": "The record, as the channel's schema describes it." }
     }
   ]
 }

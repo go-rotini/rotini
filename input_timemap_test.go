@@ -25,7 +25,7 @@ func timeMapBind(t *testing.T, conf string, env ...string) (timeMapInputs, error
 	t.Helper()
 	dir := t.TempDir()
 	idWrite(t, dir, "c.yaml", conf)
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "c", Scope: "app", Path: filepath.Join(dir, "c.yaml"), Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "c", Scope: "app", Path: filepath.Join(dir, "c.yaml"), Format: "yaml"}}}
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithEnviron(env)
 	var in timeMapInputs
 	err := NewInputReader(meta).Read(rtx, &in)

@@ -20,7 +20,7 @@ import (
 // The constructors group into:
 //
 //   - program — [Plugins], [ResponseFiles], [Chdir], [Multicall]
-//   - input channels — [Stdin], [Env], [EnvFamilies], [ConfigFiles], [Profiles], [EnvFiles],
+//   - input channels — [Stdin], [Env], [NestedEnv], [ConfigFiles], [Profiles], [EnvFiles],
 //     [Fallbacks], [PathExpansion], [UserHomes], [ObjectFlags], [Schemas]
 //   - document formats — [JSON], [YAML], [TOML], [JSONC], [Dotenv], and an author's own [Codec]
 //   - validation — [Bounds], [UniqueItems], [Patterns], [FlagGroups], [FlagDependencies]
@@ -120,9 +120,11 @@ type stdinHooks struct {
 type codecEntry struct {
 	name  string             // "json", "yaml", "toml", "jsonc", "dotenv", or a [Codec] format's
 	codec func() recon.Codec // the format's recon codec
-	// author marks a [Codec] format: read-only, with exts the file extensions it claims.
+	// author marks a [Codec] format, with exts the file extensions it claims and encode, when
+	// [CodecEncode] gives one, the encoder its files are rewritten with; nil is read-only.
 	author bool
 	exts   []string
+	encode func(doc any) ([]byte, error)
 	// decodeAny decodes a document of any shape, for a stdin payload that is not an object;
 	// nil for toml and dotenv, whose documents are always tables.
 	decodeAny func(data []byte) (any, error)
@@ -142,15 +144,15 @@ type envFamilyHooks struct {
 
 type configHooks struct {
 	regs        func(b *InputReader, chain []Command, boot fileBootstrap, v reflect.Value, waived bool, view *osView) (*cfgRegs, error)
-	fileSources func(b *InputReader, files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error)
+	fileSources func(b *InputReader, files []ConfigFileDef, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error)
 	locate      func(rtx *Context, name string) (locatedConfigFile, error)
 }
 
 type profileHooks struct {
 	choices func(b *InputReader, chain []Command, store *parsedInputs, view *osView) map[string]profileChoice
 	check   func(b *InputReader, v reflect.Value, chain []Command, boot fileBootstrap, waived bool, view *osView) error
-	names   func(f ConfigFile, src recon.Source, path string) ([]string, error)
-	sources func(f ConfigFile, src recon.Source, path string, names []string, choice profileChoice) []recon.Source
+	names   func(f ConfigFileDef, src recon.Source, path string) ([]string, error)
+	sources func(f ConfigFileDef, src recon.Source, path string, names []string, choice profileChoice) []recon.Source
 }
 
 type envFileHooks struct {
@@ -185,7 +187,7 @@ type schemaHooks struct {
 	document        func(schema string, raw []byte) error
 	record          func(schema string, v any) error
 	patternMessages func(schema string, err error)
-	configFile      func(fs *featureSet, f ConfigFile, src *recon.FileSource, doc map[string]any, decoded bool, data []byte, profile string) error
+	configFile      func(fs *featureSet, f ConfigFileDef, src fileDoc, doc map[string]any, decoded bool, data []byte, profile string) error
 }
 
 type boundHooks struct {
@@ -213,7 +215,7 @@ type dependencyHooks struct {
 }
 
 type streamPathHooks struct {
-	check    func(label, typ, value, dir string) error
+	check    func(label, typ, value string, view *osView) error
 	dashOnce func(chain []Command, store *parsedInputs) error
 }
 
@@ -273,7 +275,7 @@ func allFeatures() *featureSet {
 func everyFeature() []Feature {
 	return []Feature{
 		Plugins(), ResponseFiles(), Chdir(), Multicall(),
-		Stdin(), Env(), EnvFamilies(), ConfigFiles(), Profiles(), EnvFiles(), Fallbacks(),
+		Stdin(), Env(), NestedEnv(), ConfigFiles(), Profiles(), EnvFiles(), Fallbacks(),
 		PathExpansion(), UserHomes(), ObjectFlags(), Schemas(),
 		YAML(), TOML(), JSONC(), JSON(), Dotenv(),
 		Bounds(), UniqueItems(), Patterns(), FlagGroups(), FlagDependencies(), StreamPaths(),

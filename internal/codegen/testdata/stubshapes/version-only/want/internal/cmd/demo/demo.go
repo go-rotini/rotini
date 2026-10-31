@@ -55,5 +55,5 @@ func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	rtx.HaltWithCode(1)
+	rtx.HaltWith(rotini.MissingCommandError(rtx))
 }

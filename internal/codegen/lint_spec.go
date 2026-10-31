@@ -64,6 +64,7 @@ var specLints = []func(*Spec) []error{
 	lintSiblingCollisions,
 	lintDuplicateInputNames,
 	lintGoNames,
+	lintChannels,
 	lintVariadicArguments,
 	lintDeprecatedIdentifiers,
 	lintPluginTimeouts,
@@ -110,6 +111,7 @@ var specLints = []func(*Spec) []error{
 	lintObjectFlags,
 	lintLayout,
 	lintExitStatus,
+	lintExitStatusRefs,
 	lintExitNames,
 	lintStdinSchema,
 	lintGroups,
@@ -183,8 +185,9 @@ func rootLabel(spec *Spec) string {
 	return "command " + spec.Command.Name
 }
 
-// lintDocLevelKeys rejects env_prefix, schemas and display_name on a non-root command:
-// codegen reads them only on the root, so elsewhere they would be silently ignored.
+// lintDocLevelKeys rejects env_prefix, schemas, exit_statuses, display_name, response_files and
+// channels on a non-root command: codegen reads them only on the root, so elsewhere they would be
+// silently ignored.
 func lintDocLevelKeys(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -203,11 +206,17 @@ func lintDocLevelKeys(spec *Spec) []error {
 		if c.Schemas != nil {
 			add("schemas")
 		}
+		if c.ExitStatuses != nil {
+			add("exit_statuses")
+		}
 		if c.DisplayName != "" {
 			add("display_name")
 		}
 		if c.ResponseFiles != nil {
 			add("response_files")
+		}
+		if c.Channels != nil {
+			add("channels")
 		}
 	})
 	return problems
@@ -1597,6 +1606,9 @@ func lintSchemaRefs(spec *Spec) []error {
 	for _, name := range names {
 		walkSchemaTree(spec.Command.Schemas[name].BaseSchema, checkAt(rootLabel(spec), fmt.Sprintf("schema %q", name), rootPointer+"/schemas/"+name))
 	}
+	for i, c := range spec.Command.Channels {
+		walkSchemaTree(c.Schema.BaseSchema, checkAt(rootLabel(spec), fmt.Sprintf("channel %q", c.Name), fmt.Sprintf("%s/channels/%d/schema", rootPointer, i)))
+	}
 	return append(problems, schemaRefCycles(spec, names)...)
 }
 
@@ -2115,6 +2127,9 @@ func lintExitStatus(spec *Spec) []error {
 		seen := map[int]bool{}
 		names := map[string]string{} // generated constant suffix → the name that claimed it
 		for i, e := range c.ExitStatus {
+			if e.Inherit || e.Ref != "" {
+				continue // lintExitStatusRefs
+			}
 			at := &problem{kind: "spec", ptr: fmt.Sprintf("%s/exit_status/%d", ptr, i), loc: "command " + path}
 			switch {
 			case seen[e.Code]:

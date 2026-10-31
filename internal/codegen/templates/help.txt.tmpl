@@ -15,7 +15,7 @@
          .Invocation     full command path, e.g. "rotini generate"
          .Usage          spec declarative (may be empty)
          .UsageDerived   spec computed (always set)
-         .Headings.{Usage,Commands,Arguments,Flags,Environment,Configuration,Files,Cascading,Stdin,Output,Examples}
+         .Headings.{Usage,Commands,Arguments,Flags,Environment,Configuration,Files,Cascading,Stdin,Output,Examples,SeeAlso}
                        resolved heading text, colon included (override is verbatim)
          .Passthrough    the command's name when every word after it is passed through
                          unparsed (flags go before it); "" otherwise
@@ -85,6 +85,11 @@
          .Examples[]      strings: each example's command line
          .ExampleRows[]   {.Run .Summary}: each example's command line and its one-line summary
                           ("" for none)
+         .SeeAlso[]       strings: each see_also entry as help shows it: text as written, a
+                          command's command line (taskr remote add), a topic's (taskr help
+                          filters), or a URL
+         .SeeAlsoRows[]   {.Text .Page .URL}: the same entries, .Text as in .SeeAlso, with a
+                          command's or topic's page name (taskr-remote-add) and a url entry's link
          .Description     on argument, flag, env and config rows too: the input's longer text,
                           paragraphs separated by blank lines ("" for none). Help shows .Summary
                           only; man and markdown show both
@@ -203,6 +208,10 @@
 {{- with .ExampleRows}}{{$.Headings.Examples}}
 {{range .}}{{with .Summary}}{{indent 2 (printf "# %s" .)}}
 {{end}}{{indent 2 .Run}}
+{{end}}
+{{end -}}
+{{- with .SeeAlso}}{{$.Headings.SeeAlso}}
+{{range .}}  {{.}}
 {{end}}
 {{end -}}
 {{- with .Footer}}{{.}}

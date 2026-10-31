@@ -489,6 +489,7 @@ type templateRotiniData struct {
 	Header        string // the target's conf `header:`; "" for none
 	ExitCodes     string // pre-rendered named exit-code constants (or their re-exports); "" when none
 	Constants     string // pre-rendered enum value (or their re-exports) and name constants; "" when none
+	Channels      string // pre-rendered handles of the spec's declared channels; "" when none
 	Contract      string // pre-rendered Contract variable (generate.contract.go); "" when off
 	UsageFunc     string // pre-rendered Usage function, always emitted; it imports "fmt" and "strings"
 	CanonicalPath string // pre-rendered alias-to-name path mapping the resolvers use; "" without aliases
@@ -522,7 +523,7 @@ func renderModelsFile(data templateModelsData) ([]byte, error) {
 // templateDocHeadings holds the resolved section headings, each rendered verbatim (the trailing
 // ":" is part of the value).
 type templateDocHeadings struct {
-	Usage, Commands, Arguments, Flags, Environment, Configuration, Files, Cascading, Examples, Output, Stdin, Topics string
+	Usage, Commands, Arguments, Flags, Environment, Configuration, Files, Cascading, Examples, Output, Stdin, Topics, SeeAlso string
 }
 
 // templateDocTopicRow is one help topic in the root page's list of topics.
@@ -773,7 +774,9 @@ type templateHelpData struct {
 	Examples      []string             // each example's command line
 	ExampleRows   []templateDocExample // each example's command line and summary
 	ExitStatus    []templateDocExitRow
-	SeeAlso       []string
+	SeeAlso       []string             // each see_also entry as help shows it
+	SeeAlsoRows   []templateDocSeeAlso // each see_also entry with its page or URL
+	seeAlso       []seeAlsoEntry       // the entries as declared, which the page fields render
 
 	// Man page fields, set for every feature.
 	PageName     string   // the page's name: the command path joined with "-", lowercased (taskr-add)
@@ -1024,10 +1027,7 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 		}
 		d.Stdin = &in
 	}
-	d.SeeAlso = append([]string(nil), d.SeeAlso...)
-	for i := range d.SeeAlso {
-		d.SeeAlso[i] = clean(d.SeeAlso[i])
-	}
+	d.SeeAlso, d.SeeAlsoRows = sanitizeSeeAlso(d.SeeAlso, d.SeeAlsoRows, clean)
 	d.Topics = sanitizeTopics(d.Topics, clean)
 	d.Files = append([]templateDocFileRow(nil), d.Files...)
 	for i := range d.Files {

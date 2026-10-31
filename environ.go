@@ -3,6 +3,7 @@ package rotini
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,7 @@ type osView struct {
 	clock    *runClock         // the run's clock (see Program.WithClock); nil reads time.Now
 	input    *inputEnv         // what inputs read beyond env: .env files and variable_file values
 	files    *fileCache        // the configuration files one read of the inputs has opened; nil opens each time
+	fsys     fs.FS             // the run's file system (see Program.WithFS); nil is the operating system's
 }
 
 // newOSView indexes env (exec.Cmd.Env's KEY=value form; later duplicates win). A nil env reads
@@ -59,11 +61,12 @@ func newOSView(env []string, dir, goos string) *osView {
 func (v *osView) withEnviron(env []string) *osView {
 	dir, goos := "", runtime.GOOS
 	var clock *runClock
+	var fsys fs.FS
 	if v != nil {
-		dir, clock = v.dir, v.clock
+		dir, clock, fsys = v.dir, v.clock, v.fsys
 	}
 	out := newOSView(env, dir, goos)
-	out.clock = clock
+	out.clock, out.fsys = clock, fsys
 	return out
 }
 
@@ -438,7 +441,7 @@ func runnableAt(dir, name string, exts []string) (string, bool) {
 }
 
 // bindChainView gives each frame of a run's chain the run's view, which
-// [Command.PluginBinary] and [Command.DiscoveredPlugins] read through. An injected environment
+// [Command.LookPlugin] and [Command.DiscoveredPlugins] read through. An injected environment
 // re-expands each declared plugin path; a frame a custom resolver built without one keeps its
 // own.
 func bindChainView(chain []Command, view *osView) {
@@ -460,6 +463,6 @@ func pluginDispatchFor(chain []Command, pd *PluginDispatch, view *osView) *Plugi
 		return pd
 	}
 	out := *pd
-	out.Dir = view.expandPluginPath(chain[len(chain)-1].pluginPathRaw)
+	out.PluginPath, out.Dir = view.expandPluginPath(chain[len(chain)-1].pluginPathRaw), ""
 	return &out
 }

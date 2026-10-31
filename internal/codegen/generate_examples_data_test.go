@@ -95,7 +95,7 @@ command:
         - acme add "buy milk" --tag home,work -vv --no-color --prio 0x1f --state finished --label team=core
         - acme add x --token hunter2
         - acme add x --debug
-        - acme add x --tag a --tag b
+        - { run: acme add x --tag a --tag b, summary: two tags }
       flags:
         - name: tag
           schema: { type: "[]string", separator: "," }
@@ -142,10 +142,17 @@ func TestExamples_toolInputExamples(t *testing.T) {
 	}
 	uses := gp.exampleUses()
 	var got []any
+	var shown []Example
 	for _, tl := range tools {
 		if strings.Join(tl.invoke.Path, " ") == "add" {
-			got = tl.inputExamples(uses["add"])
+			got, shown = tl.inputExamples(uses["add"])
 		}
+	}
+	wantText := "Add a task.\n\nExamples:\n" +
+		"  acme add \"buy milk\" --tag home,work -vv --no-color --prio 0x1f --state finished --label team=core\n" +
+		"  acme add x --tag a --tag b  # two tags"
+	if text := describedExamples("Add a task.", shown); text != wantText {
+		t.Errorf("described examples =\n%s\nwant\n%s", text, wantText)
 	}
 	raw, _ := json.Marshal(got)
 	var decoded any

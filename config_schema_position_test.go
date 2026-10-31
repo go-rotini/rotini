@@ -25,7 +25,7 @@ func TestConfigSchema_positionAndValue(t *testing.T) {
 		`"replicas":{"type":"integer"},"hosts":{"type":"array","items":{"type":"string"}},"token":{"type":"string"}}}}}`
 	tests := []struct {
 		name, format, body, want string
-		keys                     []ConfigKey
+		keys                     []ConfigKeyDef
 	}{
 		{"yaml", "yaml", "deploy:\n  replicas: three\n", `.yaml:2:13 is invalid: deploy.replicas: value is not of type integer (got "three")`, nil},
 		{"json", "json", "{\n  \"deploy\": {\"replicas\": true}\n}\n", `.json:2:26 is invalid: deploy.replicas: value is not of type integer (got true)`, nil},
@@ -33,7 +33,7 @@ func TestConfigSchema_positionAndValue(t *testing.T) {
 		{"toml", "toml", "[deploy]\nreplicas = \"three\"\n", `.toml:2:12 is invalid: deploy.replicas: value is not of type integer (got "three")`, nil},
 		{"list item", "yaml", "deploy:\n  hosts:\n    - a\n    - 7\n", `.yaml:4:7 is invalid: deploy.hosts.1: value is not of type string (got 7)`, nil},
 		{"secret", "yaml", "deploy:\n  token: 42\n", `.yaml:2:10 is invalid: deploy.token: value is not of type string`,
-			[]ConfigKey{{Key: "deploy.token", Secret: true}}},
+			[]ConfigKeyDef{{Key: "deploy.token", Secret: true}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,7 +42,7 @@ func TestConfigSchema_positionAndValue(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Format: tt.format, Schema: schema, Keys: tt.keys}}}
+			meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path, Format: tt.format, Schema: schema, Keys: tt.keys}}}
 			var in cspInputs
 			err := NewInputReader(meta).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithDir(dir), &in)
 			want := "app: configuration file " + filepath.Join(dir, "app") + tt.want
@@ -67,7 +67,7 @@ func TestConfigSchema_positionInProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	schema := `{"type":"object","properties":{"deploy":{"type":"object","properties":{"replicas":{"type":"integer"}}}}}`
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Format: "yaml", Schema: schema,
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path, Format: "yaml", Schema: schema,
 		Profiles: &ProfilesDef{Under: "profiles", Flag: "profile"}}}}
 	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "profile", Identifiers: []string{"--profile"}, Type: "string"}}}
 	var in struct {

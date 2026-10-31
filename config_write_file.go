@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 
 	"github.com/go-rotini/recon"
 	"github.com/go-rotini/rotini/internal/cfgedit"
@@ -16,7 +17,7 @@ import (
 // configFileTarget is the file a config write edits: where it is, what it holds now, and the
 // profile the run selects.
 type configFileTarget struct {
-	file    ConfigFile
+	file    ConfigFileDef
 	profile profileChoice
 	path    string      // the file as resolved; a symbolic link is followed only when writing
 	target  string      // the file written: path with symbolic links resolved
@@ -24,6 +25,7 @@ type configFileTarget struct {
 	mode    fs.FileMode // an existing file's permissions
 	src     []byte      // its content; nil when it doesn't exist
 	feats   *featureSet // the run's features, whose codecs read and check the file
+	view    *osView     // the run's view, whose file system holds the file
 }
 
 // configTarget resolves the named configuration file for writing and reads it.
@@ -44,7 +46,7 @@ func configTarget(rtx *Context, name string) (configFileTarget, error) {
 	if path == "" {
 		return configFileTarget{}, usageBind(InputErrorKindWriteRefused, channelConfig, f.Name, fmt.Sprintf("configuration file %q has no location to write to", f.Name), nil)
 	}
-	t := configFileTarget{file: f, profile: lf.profile, path: path, target: path, feats: lf.view.clockRef().features()}
+	t := configFileTarget{file: f, profile: lf.profile, path: path, target: path, feats: lf.view.clockRef().features(), view: lf.view}
 	if err := t.read(); err != nil {
 		return configFileTarget{}, err
 	}
@@ -78,72 +80,85 @@ func (lf locatedConfigFile) writePath() (string, error) {
 
 // read loads the target's current content, following a symbolic link to the file it names.
 func (t *configFileTarget) read() error {
-	info, err := os.Lstat(t.path)
+	info, err := t.view.lstat(t.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err == nil && info.Mode()&fs.ModeSymlink != 0 {
-		if t.target, err = filepath.EvalSymlinks(t.path); err == nil {
-			info, err = os.Stat(t.target)
+		if t.target, err = t.view.evalSymlinks(t.path); err == nil {
+			info, err = t.view.stat(t.target)
 		}
 		if errors.Is(err, fs.ErrNotExist) {
 			return usageBind(InputErrorKindFileAccess, channelConfig, t.file.Name, fmt.Sprintf("configuration file %s is a symbolic link to a file that doesn't exist", t.path), err)
 		}
 	}
 	if err != nil {
-		return usageBind(configFileKind(err), channelConfig, t.file.Name, configFileProblem(t.path, err), err)
+		return usageBind(configFileKind(err), channelConfig, t.file.Name, configFileProblem(t.view, t.path, err), err)
 	}
 	if !info.Mode().IsRegular() {
 		return usageBind(InputErrorKindFileAccess, channelConfig, t.file.Name, fmt.Sprintf("configuration file %s is not a regular file", t.path), nil)
 	}
-	if t.src, err = os.ReadFile(t.target); err != nil {
-		return usageBind(configFileKind(err), channelConfig, t.file.Name, configFileProblem(t.path, err), err)
+	if t.src, err = t.view.readFile(t.target); err != nil {
+		return usageBind(configFileKind(err), channelConfig, t.file.Name, configFileProblem(t.view, t.path, err), err)
 	}
 	t.exists, t.mode = true, info.Mode().Perm()
 	return nil
 }
 
 // format is the file's format as cfgedit names it: its declared format, else its extension's.
-func (t configFileTarget) format() (cfgedit.Format, error) {
+// For a [Codec] format with an encoder, it is the format's name and enc is its codec, whose
+// files are rewritten whole rather than edited in place.
+func (t configFileTarget) format() (format cfgedit.Format, enc *codecEntry, err error) {
 	if t.file.As == "env" {
-		return cfgedit.Dotenv, nil
+		return cfgedit.Dotenv, nil, nil
 	}
 	c, err := t.feats.codecFor(t.file.Format, t.path)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if c == nil {
-		return "", internalBind(channelConfig, t.file.Name, fmt.Sprintf("configuration file %s has no format rotini can write; declare its format", t.path), nil)
+		return "", nil, internalBind(channelConfig, t.file.Name, fmt.Sprintf("configuration file %s has no format rotini can write; declare its format", t.path), nil)
 	}
 	if c.author {
-		return "", usageBind(InputErrorKindWriteRefused, channelConfig, t.file.Name,
-			fmt.Sprintf("configuration file %s is %s, which this program reads but doesn't write; edit it by hand", t.path, c.name), nil)
+		if c.encode == nil {
+			return "", nil, usageBind(InputErrorKindWriteRefused, channelConfig, t.file.Name,
+				fmt.Sprintf("configuration file %s is %s, which this program reads but doesn't write; edit it by hand", t.path, c.name), nil)
+		}
+		return cfgedit.Format(c.name), c, nil
 	}
-	return cfgedit.Format(c.name), nil
+	return cfgedit.Format(c.name), nil, nil
+}
+
+// codec is the wired codec the file reads with.
+func (t configFileTarget) codec() (*codecEntry, error) {
+	if t.file.As == "env" {
+		if c := t.feats.codec("dotenv"); c != nil {
+			return c, nil
+		}
+		return nil, missingCodec("dotenv", fmt.Sprintf(".env file %q is written", t.file.Name))
+	}
+	c, err := t.feats.codecFor(t.file.Format, t.path)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, recon.ErrUnsupportedFormat
+	}
+	return c, nil
 }
 
 // decode reads data in the file's format.
 func (t configFileTarget) decode(data []byte) (map[string]any, error) {
-	var c *codecEntry
-	if t.file.As == "env" {
-		if c = t.feats.codec("dotenv"); c == nil {
-			return nil, missingCodec("dotenv", fmt.Sprintf(".env file %q is written", t.file.Name))
-		}
-	} else {
-		var err error
-		if c, err = t.feats.codecFor(t.file.Format, t.path); err != nil {
-			return nil, err
-		}
-		if c == nil {
-			return nil, recon.ErrUnsupportedFormat
-		}
+	c, err := t.codec()
+	if err != nil {
+		return nil, err
 	}
 	return c.codec().Decode(stripBOM(data)) //nolint:wrapcheck // reported by the caller
 }
 
 // holdsSecrets reports whether any key the file may hold is secret.
 func (t configFileTarget) holdsSecrets() bool {
-	return slices.ContainsFunc(t.file.Keys, func(k ConfigKey) bool { return k.Secret })
+	return slices.ContainsFunc(t.file.Keys, func(k ConfigKeyDef) bool { return k.Secret })
 }
 
 // checkPrivate refuses to write a secret into an existing file other users can read.
@@ -156,25 +171,26 @@ func (t configFileTarget) checkPrivate(key string) error {
 
 // checkSchema checks the edited file against the file's declared schema, as the input reader
 // will read it: for a file with profiles, its shared keys merged with profile (the one
-// written, else the one the run selects).
+// written, else the one the run selects). A violation is reported as a read reports it, with
+// where the rejected value would be in the edited file and, unless it is secret, the value.
 func (t configFileTarget) checkSchema(key string, edited []byte, profile string) error {
 	f := t.file
 	if f.Schema == "" {
 		return nil
 	}
-	m, err := t.decode(edited)
+	c, err := t.codec()
+	if err != nil {
+		return err
+	}
+	m, err := c.codec().Decode(stripBOM(edited))
 	if err != nil {
 		return internalBind(channelConfig, key, fmt.Sprintf("could not read back configuration file %s after the edit", t.path), err)
 	}
-	where := t.path
+	if f.Profiles != nil && profile == "" {
+		profile = t.profile.name
+	}
 	if f.Profiles != nil {
-		if profile == "" {
-			profile = t.profile.name
-		}
 		m = effectiveDocument(m, f.Profiles.Under, profile)
-		if profile != "" {
-			where += " (profile " + profile + ")"
-		}
 	}
 	if t.feats.schemas == nil {
 		return missingFeature("schemas", "Schemas()", fmt.Sprintf("configuration file %q has a schema", f.Name))
@@ -185,7 +201,30 @@ func (t configFileTarget) checkSchema(key string, edited []byte, profile string)
 	}
 	if err := validator.Validate(m); err != nil {
 		t.feats.schemas.patternMessages(f.Schema, err)
-		return usageBind(InputErrorKindSchemaViolation, channelConfig, key, fmt.Sprintf("config key %s: configuration file %s %s", key, where, schemaVerdict(err, "would be invalid")), err)
+		where, got := t.path, ""
+		ve, isVE := asError[*recon.ValidationError](err)
+		if isVE {
+			if at := violationAt(t.view, c, edited, false, t.path, ve.Path, f, profile); at != "" {
+				where += ":" + at
+			}
+			got = violationValue(m, ve, f)
+		}
+		if f.Profiles != nil && profile != "" {
+			where += " (profile " + profile + ")"
+		}
+		if isVE && forbiddenKey(ve) {
+			// As a read reports a key the schema forbids, in the future tense.
+			known := schemaKeysAt(f.Schema, ve.Path[:len(ve.Path)-1])
+			msg := fmt.Sprintf("config key %s: configuration file %s would have unknown key %s", key, where, ve.Path.String())
+			if len(known) > 0 {
+				msg += " (keys: " + strings.Join(known, ", ") + ")"
+			}
+			e := usageBind(InputErrorKindUnknownKey, channelConfig, key, msg, err)
+			e.Token, e.Candidates = ve.Path[len(ve.Path)-1], known
+			return e
+		}
+		return usageBind(InputErrorKindSchemaViolation, channelConfig, key,
+			fmt.Sprintf("config key %s: configuration file %s %s%s", key, where, schemaVerdict(err, "would be invalid"), got), err)
 	}
 	return nil
 }
@@ -205,35 +244,38 @@ func (t configFileTarget) write(key string, data []byte) error {
 		pe := &pathError{msg: fmt.Sprintf("could not %s configuration file %s", what, t.path), err: err, detail: true}
 		return usageBind(InputErrorKindFileAccess, channelConfig, key, pe.Error(), err)
 	}
-	if err := os.MkdirAll(filepath.Dir(t.target), dirPerm); err != nil {
+	if !t.view.writable() {
+		return usageBind(InputErrorKindWriteRefused, channelConfig, key, fmt.Sprintf("configuration file %s can't be written: %v", t.path, readOnlyError{}), nil)
+	}
+	if err := t.view.mkdirAll(filepath.Dir(t.target), dirPerm); err != nil {
 		return fail("create the directory of", err)
 	}
-	f, tmp, err := createTemp(t.target, perm)
+	f, tmp, err := createTemp(t.view, t.target, perm)
 	if err != nil {
 		return fail("write", err)
 	}
 	if t.exists {
 		// The temporary file was created through the umask; give it the replaced file's mode.
-		err = f.Chmod(perm)
+		err = chmodFile(f, perm)
 	}
 	if err == nil {
 		_, err = f.Write(data)
 	}
 	if err == nil {
 		// On disk before the rename, so a crash can't leave an empty file in the config's place.
-		err = syncFile(f)
+		err = syncWritten(f)
 	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err == nil {
-		err = renameOutput(tmp, t.target)
+		err = renameOutput(t.view, tmp, t.target)
 	}
 	if err != nil {
-		_ = os.Remove(tmp)
+		_ = t.view.remove(tmp)
 		return fail("write", err)
 	}
-	syncDir(filepath.Dir(t.target))
+	t.view.syncDir(filepath.Dir(t.target))
 	return nil
 }
 
@@ -241,13 +283,14 @@ func (t configFileTarget) write(key string, data []byte) error {
 var syncFile = (*os.File).Sync
 
 // syncDir flushes a directory's entries, so a rename into it survives a crash. It is best
-// effort: some file systems can't sync a directory, and Windows can't open one for it.
-func syncDir(dir string) {
+// effort: some file systems can't sync a directory, Windows can't open one for it, and a
+// directory a [Program.WithFS] file system opens is synced only when it has a Sync method.
+func (v *osView) syncDir(dir string) {
 	if runtime.GOOS == "windows" {
 		return
 	}
-	if d, err := os.Open(dir); err == nil {
-		_ = syncFile(d) //nolint:errcheck // best effort, as the doc says
+	if d, err := v.open(dir); err == nil {
+		_ = syncWritten(d) //nolint:errcheck // best effort, as the doc says
 		_ = d.Close()
 	}
 }

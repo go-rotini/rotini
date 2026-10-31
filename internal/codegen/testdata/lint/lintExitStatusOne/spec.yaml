@@ -1,0 +1,25 @@
+# With validate.exit_status_one, a command's own exit_status should list 1, the code every
+# recorded error exits with unless a handler sets another.
+version: 0.0.0
+command:
+  name: demo
+  # The root's own list leaves out 1.
+  exit_status:
+    - { code: 3, summary: partial }
+  commands:
+    # Correct: it lists 1. No problem.
+    - name: get
+      exit_status:
+        - { code: 1, summary: an error }
+        - { code: 4, summary: no such task }
+    # Correct: no list of its own; the root's is checked where it is declared. No problem.
+    - name: list
+    # Adds the root's, which leaves out 1 too.
+    - name: put
+      exit_status:
+        - inherit: true
+        - { code: 5, summary: conflict }
+    # Leaves out 1.
+    - name: run
+      exit_status:
+        - { code: 2, summary: bad input }

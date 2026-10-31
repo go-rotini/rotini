@@ -1,0 +1,179 @@
+# R16 — channels declared in the spec: codegen writes a record type and handle for each, the
+# structured reporter writes their records as lines of their own kind, the contract lists them,
+# rotini diff compares them, and validate rejects a bad declaration. spec.yaml.txt, scan.go.txt
+# and lines.txt are the guide's blocks.
+
+gomodinit example.com/scan
+cp spec.yaml.txt cmd/scan/.rotini.spec.yaml
+exec rotini generate cmd/scan/.rotini.spec.yaml --config cmd/scan/.rotini.conf.yaml
+grep '^var SkippedChannel = rotini.NewChannel\[SkippedRecord\]\("skipped", rotini.ChannelClassInfo\)$' internal/cmd/scan/zz_rotini.go
+grep '^func \(r ConflictRecord\) Error\(\) string \{ return r.Message \}$' internal/cmd/scan/zz_rotini.go
+cp scan.go.txt internal/cmd/scan/scan.go
+cp main.go.txt cmd/scan/main.go
+exec go mod tidy
+exec go build -o scan$exe ./cmd/scan
+
+# The default reporter prints the records by their text, with their class.
+wantexit 1 ./scan$exe a.txt a.bin a.md
+stdout '^scanned a.txt$'
+stderr '^\{a.bin binary\}$'
+stderr '^Error: a.txt and a.md claim a$'
+
+# Structured: a declared channel's records are lines of their own kind; an error channel's
+# record is also an error line.
+wantexit 1 ./scan$exe a.txt a.bin a.md --json
+stdout '^scanned a.txt$'
+cmp stderr lines.txt
+
+# Nothing recorded, nothing written.
+exec ./scan$exe a.txt --json
+! stderr .
+
+# The contract lists the channels with their schemas.
+grep '"channels": \[' cli-contract.json
+grep '"name": "conflict"' cli-contract.json
+cp cli-contract.json v1.json
+
+# rotini diff: a record losing a field is breaking, as an output's is; a removed channel too.
+cp v2.spec.yaml cmd/scan/.rotini.spec.yaml
+wantexit 2 rotini diff v1.json --spec cmd/scan/.rotini.spec.yaml
+stdout 'OUTPUT_PROPERTY_NO_DELETE +channel skipped.reason'
+stdout 'CHANNEL_NO_DELETE +channel conflict +channel removed'
+
+# validate rejects a reserved name and an error channel without a message.
+! exec rotini validate bad.yaml
+stderr 'channel "warning": "warning" is reserved'
+stderr 'channel "clash": an error channel''s record needs a required, non-nullable string property `message`'
+
+-- cmd/scan/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/scan/main.go
+    - type: cmd
+      file: internal/cmd/scan/zz_rotini.go
+      hook_returns: error
+-- spec.yaml.txt --
+version: 0.0.0
+command:
+  name: scan
+  summary: scan files
+  flags:
+    - name: json
+      summary: report as JSON lines
+      schema: { type: bool }
+  arguments:
+    - name: paths
+      summary: the files to scan
+      schema: { type: '[]string' }
+  channels:
+    - name: skipped
+      class: info
+      summary: a file the scan didn't read
+      schema:
+        type: object
+        required: [path]
+        properties:
+          path: { type: string }
+          reason: { type: string, enum: [binary, too_large] }
+    - name: conflict
+      class: error
+      summary: two files claim one key
+      schema:
+        type: object
+        required: [message, key]
+        properties:
+          message: { type: string }
+          key: { type: string }
+-- scan.go.txt --
+package scan
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*scanHandler)(nil)
+
+type scanHandler struct{ rotini.NoHooksE }
+
+func (*scanHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	inputs, err := rtx.Inputs[ScanInputs]()
+	if err != nil {
+		return err
+	}
+
+	seen := map[string]string{}
+	for _, path := range inputs.Scan.Arguments.Paths {
+		if strings.HasSuffix(path, ".bin") {
+			rtx.Record(SkippedChannel, SkippedRecord{Path: path, Reason: SkippedRecordReasonBinary})
+			continue
+		}
+		key := strings.TrimSuffix(path, filepath.Ext(path))
+		if prev, ok := seen[key]; ok {
+			rtx.Record(ConflictChannel, ConflictRecord{Key: key, Message: prev + " and " + path + " claim " + key})
+			continue
+		}
+		seen[key] = path
+		if _, err := fmt.Fprintln(rtx.Stdout, "scanned", path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+-- main.go.txt --
+package main
+
+import (
+	"slices"
+
+	"github.com/go-rotini/rotini"
+
+	cmd "example.com/scan/internal/cmd/scan"
+)
+
+func main() {
+	cmd.NewProgram().WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
+		return slices.Contains(rtx.Argv, "--json")
+	})).Execute()
+}
+-- lines.txt --
+{"schema_version":1,"skipped":{"path":"a.bin","reason":"binary"}}
+{"schema_version":1,"error":{"category":"none","command":"scan","exit_code":1,"message":"a.txt and a.md claim a"}}
+{"schema_version":1,"conflict":{"key":"a","message":"a.txt and a.md claim a"}}
+-- v2.spec.yaml --
+version: 0.0.0
+command:
+  name: scan
+  flags:
+    - name: json
+      schema: { type: bool }
+  arguments:
+    - name: paths
+      schema: { type: '[]string' }
+  channels:
+    - name: skipped
+      class: info
+      schema:
+        type: object
+        required: [path]
+        properties:
+          path: { type: string }
+-- bad.yaml --
+version: 0.0.0
+command:
+  name: scan
+  channels:
+    - name: warning
+      class: warning
+      schema: { type: object, properties: { text: { type: string } } }
+    - name: clash
+      class: error
+      schema: { type: object, properties: { message: { type: string } } }

@@ -182,7 +182,7 @@ func TestAllocs_registryPath(t *testing.T) {
 	def := allocDef()
 	def.Commands[0].Flags = append(def.Commands[0].Flags, FlagDef{Name: "level", Identifiers: []string{"--level"}, Type: "int"})
 	p := NewProgram(def, allocRegistryHandlers{}).
-		WithInputSettings(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg}}}).
+		WithInputSettings(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg}}}).
 		WithStdin(&emptyReader{}).WithStdout(io.Discard).WithStderr(io.Discard).
 		WithoutSignalHandling()
 	t.Setenv("ALLOC_REGION", "eu")

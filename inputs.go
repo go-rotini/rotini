@@ -468,7 +468,7 @@ func (r *InputReport) absorb(core *layerCore) {
 	}
 	if core.view != nil {
 		r.view = core.view
-		r.store.dir = core.view.base()
+		r.store.view = core.view
 		r.store.clock = featureClock(core.view.clockRef().features())
 	}
 	if core.store == nil || len(core.store.scopes) != len(r.store.scopes) {
@@ -897,7 +897,7 @@ func filesBootstrap(b *InputReader, rtx *Context, v reflect.Value) (chain []Comm
 // does before it reads any value.
 func checkProfileLayer(b *InputReader, rtx *Context, v reflect.Value) error {
 	fs := rtx.features()
-	if fs.profiles == nil || !slices.ContainsFunc(b.configFiles, func(f ConfigFile) bool { return f.Profiles != nil }) {
+	if fs.profiles == nil || !slices.ContainsFunc(b.configFiles, func(f ConfigFileDef) bool { return f.Profiles != nil }) {
 		return nil
 	}
 	chain, view, boot, waived, err := filesBootstrap(b, rtx, v)
@@ -1031,7 +1031,7 @@ func fillChannelStruct(set Presence, shadowed map[FieldPath][]InputSource, ci re
 	nested := map[string]bool{}
 	if structName == "Env" {
 		var err error
-		if nested, err = fillEnvFamilies(cs, view); err != nil {
+		if nested, err = fillNestedEnv(cs, view); err != nil {
 			return err
 		}
 	}

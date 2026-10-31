@@ -257,7 +257,7 @@ type idEnvCmd struct {
 type idEnvInputs struct{ App idEnvCmd }
 
 func idEnvMeta(dir string) InputSettings {
-	return InputSettings{ConfigFiles: []ConfigFile{
+	return InputSettings{ConfigFiles: []ConfigFileDef{
 		{Name: "dotenv", Scope: "app", Path: filepath.Join(dir, ".env"), Format: "dotenv", As: "env"},
 		{Name: "base", Scope: "app", Path: filepath.Join(dir, "base.env"), As: "env"},
 		{Name: "conf", Scope: "app", Path: filepath.Join(dir, "conf.yaml"), Format: "yaml"},
@@ -422,7 +422,7 @@ func TestDiscover_nativeOverSystem(t *testing.T) {
 		}
 	}
 	type inputs struct{ App cmd }
-	meta := InputSettings{ConfigFiles: []ConfigFile{
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{
 		{Name: "user", Scope: "app", Format: "yaml", Discover: &DiscoverDef{Strategy: "native", App: "demo", File: "config.yaml"}},
 		{Name: "system", Scope: "app", Format: "yaml", Discover: &DiscoverDef{Strategy: "xdg-system", App: "demo", File: "config.yaml"}},
 	}}
@@ -445,7 +445,7 @@ func TestDiscover_systemNone(t *testing.T) {
 		t.Errorf("dirs = %q, %v; want none", dirs, err)
 	}
 	b := NewInputReader(InputSettings{})
-	src, _, err := b.openFileSource(ConfigFile{Name: "s", Format: "yaml", Discover: &DiscoverDef{Strategy: "xdg-system", App: "demo", File: "c.yaml"}}, nil, newOSView([]string{"XDG_CONFIG_DIRS=rel"}, t.TempDir(), runtime.GOOS))
+	src, _, err := b.openFileSource(ConfigFileDef{Name: "s", Format: "yaml", Discover: &DiscoverDef{Strategy: "xdg-system", App: "demo", File: "c.yaml"}}, nil, newOSView([]string{"XDG_CONFIG_DIRS=rel"}, t.TempDir(), runtime.GOOS))
 	if err != nil || len(src.Keys()) != 0 {
 		t.Errorf("source = %v, %v; want an empty one", src, err)
 	}

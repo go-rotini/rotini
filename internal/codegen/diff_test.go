@@ -1033,6 +1033,26 @@ func TestDiff_stdinOutputExitRules(t *testing.T) {
 			},
 		},
 		{
+			// `inherit: true` keeps the root's codes beside the command's own.
+			name: "inherited exit statuses added to",
+			old:  rootExits + sub(""),
+			new:  rootExits + sub("      exit_status:\n        - inherit: true\n        - {code: 4, summary: busy}\n"),
+			want: []string{"safe EXIT_STATUS_ADDED app run exit 4"},
+		},
+		{
+			// A root code the command lists itself is its own entry.
+			name: "inherited exit status overridden",
+			old:  rootExits + sub("      exit_status:\n        - inherit: true\n"),
+			new:  rootExits + sub("      exit_status:\n        - inherit: true\n        - {code: 3, summary: no such task}\n"),
+			want: []string{"possibly_breaking EXIT_SUMMARY_CHANGED app run exit 3"},
+		},
+		{
+			// A named exit status is the entry written out.
+			name: "exit status moved to a named one",
+			old:  sub("      exit_status:\n        - {code: 3, name: not_found, summary: not found}\n"),
+			new:  "  exit_statuses:\n    not_found: {code: 3, summary: not found}\n" + sub("      exit_status:\n        - $ref: not_found\n"),
+		},
+		{
 			name: "inherited exit statuses written out as its own",
 			old:  rootExits + sub(""),
 			new:  rootExits + sub("      exit_status:\n        - {code: 1, summary: failed}\n        - {code: 2, summary: usage}\n        - {code: 3, summary: not found}\n"),

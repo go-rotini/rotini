@@ -7,7 +7,7 @@
        DATA: .Header .Summary .Description .Footer .Invocation
          .Usage/.UsageDerived .Passthrough .CommandGroups[] .Arguments[] .FlagGroups[]
          .Environment[] .Configuration[] .Cascading[] .Examples[] .ExampleRows[] .Stdin .Output
-         .ExitStatus[] .SeeAlso[] .Files[] .FlagRules[] .Metadata .PageName .ParentPage
+         .ExitStatus[] .SeeAlso[] .SeeAlsoRows[] .Files[] .FlagRules[] .Metadata .PageName .ParentPage
          (.Stdin and .Output are nil when the command declares none). .PageName is the page's
          name (taskr-add), the file a markdown install_dir writes as <PageName>.md, and
          .ParentPage the parent command's ("" on the root's page); command and topic rows carry
@@ -210,10 +210,10 @@ Reads {{if eq .Format "text"}}text{{else if eq .Format "lines"}}lines of text{{i
 {{range .}}- `{{.Code}}`{{with .Name}} (`{{.}}`){{end}} — {{.Summary}}{{if .Retryable}} (retryable){{end}}{{with .Output}} (writes `{{.}}` to stdout){{end}}{{with .DocsURL}} ([docs]({{.}})){{end}}
 {{end}}
 {{end -}}
-{{- if or .ParentPage .SeeAlso}}## See Also
+{{- if or .ParentPage .SeeAlsoRows}}## See Also
 
 {{with .ParentPage}}- [{{.}}]({{.}}.md)
-{{end}}{{range .SeeAlso}}- {{.}}
+{{end}}{{range .SeeAlsoRows}}- {{if .Page}}[{{.Text}}]({{.Page}}.md){{else if .URL}}<{{.URL}}>{{else}}{{.Text}}{{end}}
 {{end}}
 {{end -}}
 {{- with .Footer}}{{.}}

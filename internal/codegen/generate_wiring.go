@@ -311,7 +311,7 @@ func (w *wiring) expressions() []string {
 		out = append(out, rotiniPkgName+".Stdin("+strings.Join(formats, ", ")+")")
 	}
 	add(w.env, "Env")
-	add(w.families, "EnvFamilies")
+	add(w.families, "NestedEnv")
 	add(w.config, "ConfigFiles")
 	add(w.profiles, "Profiles")
 	add(w.envFiles, "EnvFiles")

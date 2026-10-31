@@ -69,6 +69,7 @@ func buildOutputTypesConsts(gp *program, pkg string) (string, []constGroup, erro
 		b.WriteString("\n\n")
 		b.WriteString(u.decl())
 	}
+	b.WriteString(channelErrorMethods(gp.channels))
 	groups, err := outputEnumGroups(types, defs)
 	if err != nil {
 		return "", nil, err
@@ -231,9 +232,9 @@ func eachOwnNode(nodes []rnode, visit func(n *rnode)) {
 }
 
 // collectOutputDefs assembles the JSON Schema `definitions` for buildOutputTypes: each named
-// schema, plus "<Prefix>Output" for each own command declaring an output and "<Prefix>Stdin"
-// for each declaring a decoded (non-raw) stdin payload. "#/schemas/" refs become
-// "#/definitions/".
+// schema, plus "<Prefix>Output" for each own command declaring an output, "<Prefix>Stdin"
+// for each declaring a decoded (non-raw) stdin payload, and "<Name>Record" for each channel
+// the spec declares. "#/schemas/" refs become "#/definitions/".
 func collectOutputDefs(gp *program) map[string]any {
 	defs := map[string]any{}
 	for name, sch := range gp.schemas {
@@ -264,6 +265,9 @@ func collectOutputDefs(gp *program) map[string]any {
 	}
 	add(gp.rootPascal, gp.rootOutput)
 	addStdin(gp.rootPascal, gp.rootInputs)
+	for _, c := range gp.channels {
+		defs[channelRecordType(c.Name)] = typeDoc(channelRecordDoc(c))
+	}
 	eachOwnNode(gp.tree, func(n *rnode) {
 		add(n.prefix, n.output)
 		addStdin(n.prefix, n.inputs)
@@ -279,9 +283,9 @@ type pathFromClaim struct {
 	env     string
 }
 
-// variables are the claim's environment variables, comma-separated, first preferred: the
-// flag's own, then the env input's.
-func (c pathFromClaim) variables() string {
+// variables are the claim's environment variables, first preferred: the flag's own, then the
+// env input's.
+func (c pathFromClaim) variables() []string {
 	var out []string
 	for _, names := range []string{c.flagEnv, c.env} {
 		for v := range strings.SplitSeq(names, ",") {
@@ -290,7 +294,7 @@ func (c pathFromClaim) variables() string {
 			}
 		}
 	}
-	return strings.Join(out, ",")
+	return out
 }
 
 // collectStdinSchemas maps each own command's "<Prefix>Stdin" name to the self-contained JSON

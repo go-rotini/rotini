@@ -40,7 +40,7 @@ func argvGlobRoundTrip(t *testing.T, goos, dir string, files []string, dest stri
 		t.Fatalf("ArgvOf: %v", err)
 	}
 	chain := NewContextFor(argvGlobDef(), nil).CommandChain()
-	store, err := parseArgvTokens(chain, argv, argvAcq{dir: dir, goos: goos})
+	store, err := parseArgvTokens(chain, argv, argvAcq{view: dirView(dir), goos: goos})
 	if err != nil {
 		t.Fatalf("parse %q: %v", argv, err)
 	}
@@ -101,7 +101,7 @@ func TestExpandGlob_escapes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := expandGlob(dir, tt.word); !slices.Equal(got, tt.want) {
+			if got := expandGlob(dirView(dir), tt.word); !slices.Equal(got, tt.want) {
 				t.Errorf("expandGlob(%q) = %q, want %q", tt.word, got, tt.want)
 			}
 		})
@@ -112,7 +112,7 @@ func TestExpandGlobs_escapesOnlyOnWindows(t *testing.T) {
 	t.Parallel()
 	def := Definition{Name: "app", Handler: "App", Arguments: []ArgDef{{Name: "files", Type: "[]string", Variadic: true, Glob: true}}}
 	chain := NewContextFor(def, nil).CommandChain()
-	store, err := parseArgvTokens(chain, []string{"a[*]"}, argvAcq{dir: t.TempDir(), goos: "linux"})
+	store, err := parseArgvTokens(chain, []string{"a[*]"}, argvAcq{view: dirView(t.TempDir()), goos: "linux"})
 	if err != nil {
 		t.Fatal(err)
 	}

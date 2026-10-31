@@ -56,7 +56,7 @@ func (p *Program) runPluginHelp(rtx *Context, chain []Command, d *PluginDispatch
 		if len(chain) > 0 && foldsToDeclared(&chain[len(chain)-1], d.Def.Name) {
 			return false
 		}
-		if _, err := resolvePluginBinary(d.Def.Binary, d.Dir, rtx.osView()); err != nil {
+		if _, err := resolvePluginBinary(d.Def.Binary, d.searchPath(), rtx.osView()); err != nil {
 			return false
 		}
 	}

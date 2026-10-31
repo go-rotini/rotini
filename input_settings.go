@@ -7,7 +7,7 @@ import (
 // InputSettings is the generated descriptor the [InputReader] consumes to fill the non-argv input
 // channels. It carries the document-level concerns the dispatch-time [Definition] omits.
 type InputSettings struct {
-	ConfigFiles []ConfigFile // per-command config_files sources, each tagged with its Scope; the input reader scopes them to the invoked chain (cascade, nearest-wins)
+	ConfigFiles []ConfigFileDef // per-command config_files sources, each tagged with its Scope; the input reader scopes them to the invoked chain (cascade, nearest-wins)
 	// EnvPrefix scopes every derived env-var name under "<EnvPrefix>_". Explicit variable
 	// names are exempt, and with a prefix set the unprefixed names don't bind.
 	EnvPrefix string
@@ -24,9 +24,12 @@ type InputSettings struct {
 	StdinSchemas map[string]string
 }
 
-// ConfigFile is one configuration-file source the input reader reads (reconciled by recon).
+// Deprecated: use [ConfigFileDef].
+type ConfigFile = ConfigFileDef
+
+// ConfigFileDef is one configuration-file source the input reader reads (reconciled by recon).
 // Exactly one of Path and Discover locates the file (the spec enforces this).
-type ConfigFile struct {
+type ConfigFileDef struct {
 	Name string // logical name
 	// Scope is the command path this source is declared on. Sources cascade: one is in
 	// scope for the invoked chain when its Scope is one of the chain's commands. "" is
@@ -49,21 +52,21 @@ type ConfigFile struct {
 	Profiles *ProfilesDef
 	// Keys is every key an input reads from this file, sorted by key, one entry per declaring
 	// input: what [SetConfigValue] checks a value against, and what a key completer offers.
-	Keys []ConfigKey
+	Keys []ConfigKeyDef
 }
 
-// ProfilesDef selects one named section of a [ConfigFile] per run. The section's keys are read
+// ProfilesDef selects one named section of a [ConfigFileDef] per run. The section's keys are read
 // as if they sat at the top of the file, winning over the file's other top-level keys, which
 // every profile shares. The selection is the flag set on argv, then the first variable of Env
 // that is set, then Default.
 type ProfilesDef struct {
-	Under   string // the top-level key holding the named sections
-	Flag    string // logical name of the selector flag, searched across the chain; "" when none
-	Env     string // variables read directly, comma-separated, the first one set winning
-	Default string // the profile used when argv and the environment select none; "" means the shared keys only
+	Under   string   // the top-level key holding the named sections
+	Flag    string   // logical name of the selector flag, searched across the chain; "" when none
+	Env     []string // variables read directly, the first one set winning
+	Default string   // the profile used when argv and the environment select none; "" means the shared keys only
 }
 
-// PathFromDef names the runtime inputs that supply a [ConfigFile]'s path — the declarative
+// PathFromDef names the runtime inputs that supply a [ConfigFileDef]'s path — the declarative
 // two-phase parse, where argv and env are read first and the config channel then opens
 // whatever they pointed at. Precedence: the flag set on argv, then the first variable of Env that is set,
 // then the flag's default, then the entry's own path or discover. A path supplied this way must
@@ -73,9 +76,9 @@ type ProfilesDef struct {
 // variable set to "" counts as unset.
 type PathFromDef struct {
 	Flag string // logical flag name searched across the resolved chain
-	// Env is the variables read directly, comma-separated, the first one set winning. Generated
-	// code lists the flag's own variables, then the env input's.
-	Env string
+	// Env is the variables read directly, the first one set winning. Generated code lists the
+	// flag's own variables, then the env input's.
+	Env []string
 }
 
 // DiscoverDef locates a configuration file at run time. The strategy orders the directories

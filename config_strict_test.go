@@ -41,7 +41,7 @@ func TestConfigSchema_unknownKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := pfWrite(t, dir, tt.file, tt.body)
-			files := []ConfigFile{{Name: "app", Path: path, Schema: csSchema}}
+			files := []ConfigFileDef{{Name: "app", Path: path, Schema: csSchema}}
 			rtx := wired(NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithDir(dir).WithInputSettings(InputSettings{ConfigFiles: files}),
 				ConfigFiles(), Schemas(), YAML(), JSON(), TOML(), iniCodec())
 			var in csInputs
@@ -64,7 +64,7 @@ func TestConfigSchema_unknownKeyAllowedByDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.yaml", "deploy:\n  replicas: 2\n  replicaz: 3\n")
 	schema := `{"type":"object","properties":{"deploy":{"type":"object","properties":{"replicas":{"type":"integer"}}}}}`
-	files := []ConfigFile{{Name: "app", Path: path, Schema: schema}}
+	files := []ConfigFileDef{{Name: "app", Path: path, Schema: schema}}
 	var in csInputs
 	if err := NewInputReader(InputSettings{ConfigFiles: files}).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithDir(dir), &in); err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestConfigSchema_unknownKeyAllowedByDefault(t *testing.T) {
 func TestConfigSchema_unknownKeyInProfile(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.yaml", "deploy:\n  replicas: 2\nprofiles:\n  prod:\n    deploy:\n      replicaz: 9\n")
-	files := []ConfigFile{{Name: "app", Path: path, Schema: csSchema, Profiles: &ProfilesDef{Under: "profiles", Flag: "profile"}}}
+	files := []ConfigFileDef{{Name: "app", Path: path, Schema: csSchema, Profiles: &ProfilesDef{Under: "profiles", Flag: "profile"}}}
 	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "profile", Identifiers: []string{"--profile"}, Type: "string"}}}
 	var in struct {
 		App struct {
@@ -143,8 +143,8 @@ func TestInputReport_UnreadConfigKeys(t *testing.T) {
 		"profiles:\n  prod:\n    deploy:\n      timeout: 5s\n")
 	iniPath := pfWrite(t, dir, "more.ini", "[deploy]\nreplicas = 4\nzone = b\n")
 	envPath := pfWrite(t, dir, ".env", "OTHER_TOOL=1\n")
-	keys := []ConfigKey{{Key: "deploy.replicas", Type: "int"}, {Key: "labels", Type: "map[string]string"}}
-	files := []ConfigFile{
+	keys := []ConfigKeyDef{{Key: "deploy.replicas", Type: "int"}, {Key: "labels", Type: "map[string]string"}}
+	files := []ConfigFileDef{
 		{Name: "app", Path: yamlPath, Keys: keys, Profiles: &ProfilesDef{Under: "profiles", Flag: "profile"}},
 		{Name: "more", Path: iniPath, Keys: keys},
 		{Name: "dotenv", Path: envPath, Format: "dotenv", As: "env"},
@@ -175,7 +175,7 @@ func TestInputReport_UnreadConfigKeys(t *testing.T) {
 func TestInputReport_UnreadConfigKeysNoPositions(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.cfg", "[deploy]\nzone = b\n")
-	files := []ConfigFile{{Name: "app", Path: path, Format: "plain-ini", Keys: []ConfigKey{{Key: "deploy.replicas"}}}}
+	files := []ConfigFileDef{{Name: "app", Path: path, Format: "plain-ini", Keys: []ConfigKeyDef{{Key: "deploy.replicas"}}}}
 	rtx := wired(NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithDir(dir).WithInputSettings(InputSettings{ConfigFiles: files}),
 		ConfigFiles(), Codec("plain-ini", decodeINI))
 	_, report, err := rtx.InputsWithReport[csInputs]()

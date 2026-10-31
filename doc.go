@@ -104,10 +104,13 @@
 // command with sub-commands is accepted only when that command is the one run, unless the
 // spec marks it cascading ([FlagDef.Local]).
 //
-// A run reads the process environment and working directory unless the program gives it its
-// own with [Program.WithEnviron] and [Program.WithDir]. Env inputs and fallbacks, config file
-// paths and discovery, `@file` and existingfile paths, and plugins all read through them, and a
-// handler reads them with [Context.LookupEnv], [Context.Environ] and [Context.Dir].
+// A run reads the process environment, working directory and file system unless the program
+// gives it its own with [Program.WithEnviron], [Program.WithDir] and [Program.WithFS]. Env inputs
+// and fallbacks, config file paths and discovery, `@file` and existingfile paths, and plugins
+// all read through the first two, and a handler reads them with [Context.LookupEnv],
+// [Context.Environ] and [Context.Dir]. Every file rotini reads or writes for the program goes
+// through the file system; plugins, which are programs, are found and run on the operating
+// system's.
 //
 // The runtime's only built-in behaviors are a default SIGINT/SIGTERM trap (see
 // [Program.WithoutSignalHandling] and [Program.WithSignals]), the hidden __complete entry the
@@ -207,8 +210,13 @@
 //	rtx.Record(Skipped, SkippedFile{Path: path, Reason: "binary"}) // in a hook
 //	for _, s := range out.Records(Skipped) { … }                   // in the reporter
 //
+// A channel can also be declared in the spec's `channels:`, with a schema for its records;
+// codegen then writes its record type and handle, and the channel is part of the program's
+// contract ([ChannelDef]).
+//
 // Recording does not stop the run. The reporter is called only when some channel is non-empty,
-// so a run that records nothing exits silently with code 0 unless a handler set one.
+// so a run that records nothing exits silently with code 0 unless a handler set one;
+// [Program.WithReporterOnEmpty] calls it on every run.
 //
 // A handler stops in one of these ways:
 //
@@ -263,7 +271,7 @@
 //     a usage error; a missing declared plugin, or a plugin that cannot start, is internal; a
 //     timeout is neither. A missing discovered plugin carries Candidates: the names the
 //     command knows, to rank its Name against.
-//   - [*ArgvError] and every other [ArgvOf] error, and an [AppDirs] error, are internal: the
+//   - [*ArgvOfError] and every other [ArgvOf] error, and an [AppDirs] error, are internal: the
 //     program asked for something its own definition rules out.
 //   - [*DependencyError] and [*PanicError] arrive as panics, as does a [*WiringError] from the
 //     program's wiring. [Context.Inputs] returns a [*WiringError] as an error instead: config
@@ -286,12 +294,10 @@
 //	// main.go — the value's type is checked where it is supplied
 //	cmd.NewProgram().WithDependency(tasks.Store, store.New()).Execute()
 //
-//	// or several at once ([WithDependency] and [Program.With])
+//	// or several, chained
 //	cmd.NewProgram().
-//		With(
-//			rotini.WithDependency(tasks.Store, store.New()),
-//			rotini.WithDependency(tasks.Client, client.New()),
-//		).
+//		WithDependency(tasks.Store, store.New()).
+//		WithDependency(tasks.Client, client.New()).
 //		WithVersion(version).
 //		Execute()
 //
@@ -325,6 +331,11 @@
 //
 //	// any handler
 //	s, err := rtx.Dependency(tasks.Store)
+//
+// [Program.WithSharedProvider] builds one value for the whole program instead, on the first
+// request in any run, and every later run reuses it. [Program.Close] calls its cleanup;
+// [Program.Execute] calls Close for its run, and a host that calls [Program.Run] repeatedly
+// calls Close itself when it is done.
 //
 // [Context.Command] is the
 // command whose hook is running, [Context.CommandPath] its canonical path ("tasks add"), and

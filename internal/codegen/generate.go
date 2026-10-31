@@ -99,6 +99,7 @@ type program struct {
 	rootPluginPath  string             // root command's extra plugin directory (both kinds of plugin)
 	rootPassthrough bool               // root command's passthrough (raw positionals)
 	schemas         map[string]Schema  // document-level named schemas (for output codegen)
+	channels        []Channel          // the root spec's declared outcome channels
 	configFiles     []scopedConfigFile // per-command config-file sources, tagged with their command path (for the input reader's cascade)
 	envPrefix       string             // document-level env_prefix for DERIVED env-var names
 	adoptedPrefixes map[string]string  // env_prefix → child root name, from composed children (see resolveEnvPrefix)
@@ -624,6 +625,7 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		NeedsFmt:           gp.examples.configOn || featureResolver(features, completionFeatureDesc.noun) != "",
 		ExitCodes:          exitCodes,
 		Constants:          consts,
+		Channels:           channelHandlesDecl(gp.channels),
 		Contract:           contract,
 		UsageFunc:          usageFuncDecl(gp, defRef),
 		CanonicalPath:      canonicalPathDecl(gp.tree),

@@ -149,7 +149,7 @@ func customArgvStore(rtx *Context, p ArgvParser, chain []Command, acq argvAcq) (
 // recordArgvValues records an [ArgvParser]'s values for chain into a store.
 func recordArgvValues(chain []Command, vals ArgvValues, acq argvAcq) (*parsedInputs, error) {
 	store := newParsedInputs(len(chain))
-	store.dir, store.clock = acq.dir, acq.clock
+	store.view, store.clock = acq.view, acq.clock
 	store.poolHint = len(vals.Flags) + len(vals.Args)
 	leaf := len(chain) - 1
 	for _, f := range vals.Flags {

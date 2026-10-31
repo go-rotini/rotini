@@ -23,6 +23,7 @@ import "context"
 //	between one command's own hooks               a field on the handler
 //	between different commands in the chain       rtx.SetDependency(dep, v)
 //	built once per run, on first use              p.WithProvider(dep, fn)
+//	built once for the program, on first use      p.WithSharedProvider(dep, fn)
 //	across every run of the program               p.WithDependency(dep, v)
 //
 // # Hand-written handler sets

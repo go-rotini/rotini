@@ -252,10 +252,12 @@ var schemaBlockLocations = map[string]string{
 	"StdinSpec.schema":         "  stdin:\n    format: json\n    schema: { type: object, bogus: 1 }\n",
 	"Command.output":           "  output: { type: object, bogus: 1 }\n",
 	"Command.schemas":          "  schemas:\n    X: { type: object, bogus: 1 }\n",
+	"Channel.schema":           "  channels:\n    - name: c\n      class: info\n      schema: { type: object, bogus: 1 }\n",
 	"ConfigurationFile.schema": "  config_files:\n    - name: main\n      path: c.yaml\n      schema: { type: object, bogus: 1 }\n",
 	"BaseSchema.properties":    "  output: { type: object, properties: { p: { type: string, bogus: 1 } } }\n",
 	"BaseSchema.items":         "  output: { type: array, items: { type: string, bogus: 1 } }\n",
 	"ExitStatusEntry.output":   "  exit_status:\n    - code: 3\n      output: { type: object, bogus: 1 }\n",
+	"NamedExitStatus.output":   "  exit_statuses:\n    partial:\n      code: 3\n      output: { type: object, bogus: 1 }\n",
 	"Schema.oneOf":             "  output_stream: true\n  output:\n    oneOf:\n      - { type: object, bogus: 1 }\n",
 }
 

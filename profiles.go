@@ -3,7 +3,6 @@ package rotini
 import (
 	"fmt"
 	"maps"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -35,7 +34,7 @@ type fileBootstrap struct {
 // selectProfiles is [InputReader.profileChoices] through the profiles hook: none when no
 // configuration file has profiles.
 func (r *InputReader) selectProfiles(fs *featureSet, chain []Command, store *parsedInputs, view *osView) (map[string]profileChoice, error) {
-	i := slices.IndexFunc(r.configFiles, func(f ConfigFile) bool { return f.Profiles != nil })
+	i := slices.IndexFunc(r.configFiles, func(f ConfigFileDef) bool { return f.Profiles != nil })
 	if i < 0 {
 		return nil, nil //nolint:nilnil // no file has profiles: nothing to select
 	}
@@ -49,7 +48,7 @@ func (r *InputReader) selectProfiles(fs *featureSet, chain []Command, store *par
 
 // profileChoices selects a profile for each profiled configuration file in scope for chain.
 func (r *InputReader) profileChoices(chain []Command, store *parsedInputs, view *osView) map[string]profileChoice {
-	if !slices.ContainsFunc(r.configFiles, func(f ConfigFile) bool { return f.Profiles != nil }) {
+	if !slices.ContainsFunc(r.configFiles, func(f ConfigFileDef) bool { return f.Profiles != nil }) {
 		return nil
 	}
 	var out map[string]profileChoice
@@ -72,7 +71,7 @@ func selectProfile(p *ProfilesDef, chain []Command, store *parsedInputs, view *o
 	if explicit, _ := storeFlagValue(store, p.Flag); explicit != "" {
 		return profileChoice{name: explicit, input: p.Flag, label: typedFlagLabel(chain, store, p.Flag), explicit: true}
 	}
-	if name := firstSetEnv(view, p.Env); name != "" {
+	if name := firstSetVar(view, p.Env); name != "" {
 		return profileChoice{name: view.inputGetenv(name), input: name, label: name + view.inputOrigin(name), variable: name, explicit: true}
 	}
 	return profileChoice{name: p.Default}
@@ -95,7 +94,7 @@ func typedFlagLabel(chain []Command, store *parsedInputs, name string) string {
 }
 
 // selectorFlags maps each selector flag in scope to the profile it selected.
-func (boot fileBootstrap) selectorFlags(files []ConfigFile) map[string]profileChoice {
+func (boot fileBootstrap) selectorFlags(files []ConfigFileDef) map[string]profileChoice {
 	var out map[string]profileChoice
 	for _, f := range files {
 		if f.Profiles == nil || f.Profiles.Flag == "" {
@@ -337,7 +336,7 @@ func (s sharedSource) Keys() []recon.Path {
 
 // profiledSources is the sources a profiled file contributes, highest first: the selected
 // profile's keys when the file defines it, then the shared keys.
-func profiledSources(f ConfigFile, src recon.Source, path string, names []string, choice profileChoice) []recon.Source {
+func profiledSources(f ConfigFileDef, src recon.Source, path string, names []string, choice profileChoice) []recon.Source {
 	under := f.Profiles.Under
 	shared := namedSource{Source: sharedSource{Source: src, under: under}, name: f.Name, path: path}
 	if choice.name == "" || !slices.Contains(names, choice.name) {
@@ -352,11 +351,11 @@ func profiledSources(f ConfigFile, src recon.Source, path string, names []string
 
 // profileNames lists the profiles a file defines under under, sorted. A file without the key
 // defines none; a key that does not map names to sections is a usage error.
-func profileNames(f ConfigFile, src recon.Source, path string) ([]string, error) {
+func profileNames(f ConfigFileDef, src recon.Source, path string) ([]string, error) {
 	under := f.Profiles.Under
 	v, found, err := src.Get(recon.Path{under})
 	if err != nil {
-		return nil, usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(path, err), err)
+		return nil, usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(sourceView(src), path, err), err)
 	}
 	if !found || v.Kind() == recon.NullKind {
 		return nil, nil
@@ -431,7 +430,7 @@ func (r *InputReader) checkProfiles(v reflect.Value, chain []Command, boot fileB
 		if f.Profiles == nil || !choice.explicit {
 			continue
 		}
-		key := f.Profiles.Flag + "\x00" + f.Profiles.Env
+		key := f.Profiles.Flag + "\x00" + strings.Join(f.Profiles.Env, ",")
 		sel := bySelector[key]
 		if sel == nil {
 			sel = &selection{choice: choice}
@@ -463,7 +462,7 @@ func (r *InputReader) checkProfiles(v reflect.Value, chain []Command, boot fileB
 
 // definedProfiles opens one profiled file and lists the profiles it defines, reporting whether
 // the file exists at all.
-func (r *InputReader) definedProfiles(f ConfigFile, paths map[string]pathOverride, view *osView) (path string, present bool, names []string, err error) {
+func (r *InputReader) definedProfiles(f ConfigFileDef, paths map[string]pathOverride, view *osView) (path string, present bool, names []string, err error) {
 	src, path, err := r.openFileSource(f, paths, view)
 	if err != nil {
 		return "", false, nil, err
@@ -472,7 +471,7 @@ func (r *InputReader) definedProfiles(f ConfigFile, paths map[string]pathOverrid
 	if path == "" {
 		return "", false, nil, nil
 	}
-	if _, err := os.Stat(path); err != nil {
+	if _, err := view.stat(path); err != nil {
 		return path, false, nil, nil // an absent optional file defines no profiles
 	}
 	names, err = profileNames(f, src, path)
@@ -508,7 +507,7 @@ func unknownProfile(choice profileChoice, paths, names []string) *InputError {
 // resolvedConfigFile is one config_files entry as the running command reads it: the file it
 // resolves to, opened, and the profile the run selects.
 type resolvedConfigFile struct {
-	file    ConfigFile
+	file    ConfigFileDef
 	path    string // the file read; it may not exist. "" when a discover search has nowhere to look
 	src     recon.Source
 	profile profileChoice
@@ -533,7 +532,7 @@ func resolveConfigFile(rtx *Context, name string) (resolvedConfigFile, error) {
 // locatedConfigFile is a config_files entry in scope for the running command, with what
 // locating it needs, before the file is opened.
 type locatedConfigFile struct {
-	file    ConfigFile
+	file    ConfigFileDef
 	profile profileChoice
 	reader  *InputReader
 	paths   map[string]pathOverride // the config_source paths, by logical name
@@ -566,7 +565,7 @@ func locateConfigFile(rtx *Context, name string) (locatedConfigFile, error) {
 	}
 	b := readerFor(rtx)
 	files := b.chainConfigFiles(chain)
-	i := slices.IndexFunc(files, func(f ConfigFile) bool { return f.Name == name })
+	i := slices.IndexFunc(files, func(f ConfigFileDef) bool { return f.Name == name })
 	if i < 0 {
 		return locatedConfigFile{}, internalBind(channelConfig, name, fmt.Sprintf("no configuration file %q is in scope for this command", name), nil)
 	}

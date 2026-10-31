@@ -100,7 +100,7 @@ func TestArgvParser_readsTheAuthorsSyntax(t *testing.T) {
 func TestArgvParser_keepsPrecedence(t *testing.T) {
 	t.Parallel()
 	cfg := writeConfig(t, "deploy:\n  region: eu\n")
-	files := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	files := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	cases := []struct {
 		name   string
 		argv   []string
@@ -330,7 +330,7 @@ func TestArgvParser_readsOnlyTheCommandLineFacts(t *testing.T) {
 func TestFileInputs_forwardsToConfigInputs(t *testing.T) {
 	t.Parallel()
 	cfg := writeConfig(t, "deploy:\n  region: eu\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	config, err := kvContext().WithInputSettings(meta).ConfigInputs[kvInputs]()
 	if err != nil {
 		t.Fatal(err)

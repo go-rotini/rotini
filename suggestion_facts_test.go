@@ -43,7 +43,7 @@ func TestSuggestionFacts_inputError(t *testing.T) {
 	})
 	t.Run("config", func(t *testing.T) {
 		cfg := writeConfig(t, "tier: gold1\n")
-		check(t, bind(t, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}), "gold1", []string{"gold", "silver"})
+		check(t, bind(t, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}), "gold1", []string{"gold", "silver"})
 	})
 	t.Run("other failures carry none", func(t *testing.T) {
 		err := usageBind(InputErrorKindMissingRequired, channelEnv, "PORT", "PORT is required", nil)

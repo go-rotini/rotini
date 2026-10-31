@@ -16,14 +16,14 @@ import (
 // TestLintRegistryCompleteness pins the number of registered spec, conf and cross rules so a
 // dropped rule is noticed.
 func TestLintRegistryCompleteness(t *testing.T) {
-	if got := len(specLints); got != 117 {
-		t.Errorf("len(specLints) = %d, want 117 (a rule was dropped or added — update intentionally)", got)
+	if got := len(specLints); got != 119 {
+		t.Errorf("len(specLints) = %d, want 119 (a rule was dropped or added — update intentionally)", got)
 	}
 	if got := len(confLints); got != 16 {
 		t.Errorf("len(confLints) = %d, want 16", got)
 	}
-	if got := len(crossLints); got != 16 {
-		t.Errorf("len(crossLints) = %d, want 16", got)
+	if got := len(crossLints); got != 18 {
+		t.Errorf("len(crossLints) = %d, want 18", got)
 	}
 }
 

@@ -136,7 +136,7 @@ func renderConfigKeys(b *strings.Builder, gp *program, f scopedConfigFile) {
 	if len(keys) == 0 {
 		return
 	}
-	fmt.Fprintf(b, ", Keys: []%s.ConfigKey{", rotiniPkgName)
+	fmt.Fprintf(b, ", Keys: []%s.ConfigKeyDef{", rotiniPkgName)
 	var items []string
 	for _, k := range keys {
 		if item := configKeyLiteral(gp, k); !slices.Contains(items, item) { // inputs declaring a key alike
@@ -147,7 +147,7 @@ func renderConfigKeys(b *strings.Builder, gp *program, f scopedConfigFile) {
 	b.WriteString("}")
 }
 
-// configKeyLiteral renders one ConfigKey literal.
+// configKeyLiteral renders one ConfigKeyDef literal.
 func configKeyLiteral(gp *program, k keyDef) string {
 	var b strings.Builder
 	schemas := gp.schemasOf(k.scope)
@@ -165,7 +165,7 @@ func configKeyLiteral(gp *program, k keyDef) string {
 	return b.String()
 }
 
-// writeKeyRules appends a ConfigKey's enum, layouts, base, separator and secrecy, omitting zero values.
+// writeKeyRules appends a ConfigKeyDef's enum, layouts, base, separator and secrecy, omitting zero values.
 func writeKeyRules(b *strings.Builder, schema *InputSchema) {
 	if schema == nil {
 		return

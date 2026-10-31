@@ -359,7 +359,7 @@ func TestConfigFile_BOM(t *testing.T) {
 	}
 	for _, schema := range []string{"", `{"type":"object"}`} {
 		var in tbInputs
-		meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Schema: schema}}}
+		meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path, Schema: schema}}}
 		if err := NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in); err != nil {
 			t.Fatalf("schema %q: %v", schema, err)
 		}
@@ -460,7 +460,7 @@ func TestInputErrorTexts_configParse(t *testing.T) {
 				t.Fatal(err)
 			}
 			var in tbInputs
-			err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path}}}).
+			err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path}}}).
 				Read(NewContextFor(tbDef(), nil), &in)
 			want := "app: could not parse configuration file " + path + tc.want
 			if err == nil || !strings.HasPrefix(err.Error(), want) {
@@ -475,7 +475,7 @@ func TestInputErrorTexts_configParse(t *testing.T) {
 
 func TestInputErrorTexts_configMissingOverride(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "none.yaml")
-	src, _, err := (&InputReader{}).openFileSource(ConfigFile{Name: "app"}, map[string]pathOverride{"app": {path: missing}}, everyFeatureView())
+	src, _, err := (&InputReader{}).openFileSource(ConfigFileDef{Name: "app"}, map[string]pathOverride{"app": {path: missing}}, everyFeatureView())
 	if err == nil || src != nil || err.Error() != "could not open configuration file "+missing+": no such file" {
 		t.Errorf("err = %v, want the path and the reason", err)
 	}
@@ -494,7 +494,7 @@ type stCfgInputs struct {
 func TestInputErrorTexts_configValue(t *testing.T) {
 	path := writeConfig(t, "api:\n  port: abc\n")
 	var in stCfgInputs
-	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path}}}).
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path}}}).
 		Read(stRTX(nil), &in)
 	want := `app: config key api.port: "abc" is not a valid integer (from configuration file ` + path + ")"
 	if err == nil || err.Error() != want {

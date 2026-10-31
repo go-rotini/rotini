@@ -113,7 +113,7 @@ type cmdHelp struct {
 	Headings    *HelpHeadings
 	Examples    []Example         // command.examples, either form read as {run, summary}
 	ExitStatus  []ExitStatusEntry // command.exit_status (man EXIT STATUS section)
-	SeeAlso     []string          // command.see_also (man SEE ALSO section)
+	SeeAlso     []seeAlsoEntry    // command.see_also
 	Groups      []HelpGroup       // command.groups: descriptions and order of its pages' group headings
 	Help        string            // verbatim help page (command.help)
 	Man         string            // verbatim man page (command.man)
@@ -130,7 +130,7 @@ func commandHelp(c Command) cmdHelp {
 	return cmdHelp{
 		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
 		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
-		Examples: examplesOf(c.Examples), ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso, Groups: c.Groups,
+		Examples: examplesOf(c.Examples), ExitStatus: c.ExitStatus, SeeAlso: seeAlsoOf(c.SeeAlso), Groups: c.Groups,
 		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
 		Stability: c.Stability, Topics: c.Topics,
 		Effects: c.Effects, Agent: c.Agent, Metadata: c.Metadata,
@@ -160,6 +160,8 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			d.Stdin = stdinDocFor(inputs, gp.schemas)
 		}
 		d.PageName = manPageName(gp.rootName, names)
+		d.SeeAlsoRows = seeAlsoRows(d.seeAlso, gp.rootName, gp.rootDisplay)
+		d.SeeAlso = seeAlsoTexts(d.SeeAlsoRows)
 		d.Section = section
 		d.Source = gp.rootDisplay
 		d.Date = date
@@ -227,9 +229,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 				data.Deprecated = withReplacement(n.deprecated, n.replacedBy.text)
 				data.DeprecatedSince, data.RemovedIn = n.lifecycle.since, n.lifecycle.removedIn
 			}
-			if len(data.ExitStatus) == 0 {
-				data.ExitStatus = out[0].data.ExitStatus // the root's exit_status is program-wide
-			}
+			data.ExitStatus = exitRows(effectiveExitStatus(n.help.ExitStatus, gp.rootHelp.ExitStatus)) // the root's exit_status is program-wide
 			data.Stability = leastStable(stability, n.help.Stability)
 			markStream(data.Output, n.stream)
 			out = append(out, helpNode{
@@ -337,7 +337,7 @@ func completionNodes() []helpNode {
 // resolveHeadings returns the default section headings, overridden by any set in the spec.
 func resolveHeadings(h cmdHelp) templateDocHeadings {
 	// Defaults carry the trailing ":" so an override renders verbatim, colon or not.
-	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Files: "Files:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:", Stdin: "Stdin:", Topics: "Help Topics:"}
+	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Files: "Files:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:", Stdin: "Stdin:", Topics: "Help Topics:", SeeAlso: "See Also:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -359,6 +359,7 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 	override(&hd.Output, o.Output)
 	override(&hd.Stdin, o.Stdin)
 	override(&hd.Topics, o.Topics)
+	override(&hd.SeeAlso, o.SeeAlso)
 	return hd
 }
 
@@ -377,13 +378,11 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Cascading:   withConfigKeys(unshadowed(ancestorCascading, ownFlags(inputs, false)), reads),
 		Examples:    exampleRuns(h.Examples),
 		ExampleRows: exampleRows(h.Examples),
-		SeeAlso:     h.SeeAlso,
+		seeAlso:     h.SeeAlso,
 		Effects:     effectsText(h.Effects),
 		Metadata:    h.Metadata,
 		FlagRules:   flagRules(inputs),
-	}
-	for _, e := range h.ExitStatus {
-		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, Output: shapeTypeName(e.Output), DocsURL: e.DocsUrl})
+		ExitStatus:  exitRows(effectiveExitStatus(h.ExitStatus, nil)),
 	}
 	var cmds []templateDocCommandRow
 	for _, c := range children {
@@ -464,6 +463,18 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 	d.FlagGroups = groupFlags(d.Flags, h.Groups)
 	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(plugins) > 0)
 	return d
+}
+
+// exitRows is an exit_status list as the EXIT STATUS section's rows.
+func exitRows(entries []ExitStatusEntry) []templateDocExitRow {
+	if len(entries) == 0 {
+		return nil
+	}
+	rows := make([]templateDocExitRow, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, templateDocExitRow{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, Output: shapeTypeName(e.Output), DocsURL: e.DocsUrl})
+	}
+	return rows
 }
 
 // configRow is a configuration input's row on the help, man and markdown pages.

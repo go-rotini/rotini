@@ -3,7 +3,6 @@ package rotini
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -222,13 +221,13 @@ func readsEnv(v reflect.Value) bool {
 // environment variable (config_source on an env input), or its profile (a profile selector's
 // variables).
 func (r *InputReader) envPathSource(chain []Command) bool {
-	return slices.ContainsFunc(r.chainConfigFiles(chain), func(f ConfigFile) bool {
-		return (f.PathFrom != nil && f.PathFrom.Env != "") || (f.Profiles != nil && f.Profiles.Env != "")
+	return slices.ContainsFunc(r.chainConfigFiles(chain), func(f ConfigFileDef) bool {
+		return (f.PathFrom != nil && len(f.PathFrom.Env) > 0) || (f.Profiles != nil && len(f.Profiles.Env) > 0)
 	})
 }
 
 // readDotenv reads one .env file into a layer, or nil when the file is absent.
-func (r *InputReader) readDotenv(f ConfigFile, overrides map[string]pathOverride, waived bool, view *osView) (*dotenvLayer, error) {
+func (r *InputReader) readDotenv(f ConfigFileDef, overrides map[string]pathOverride, waived bool, view *osView) (*dotenvLayer, error) {
 	src, path, err := r.openFileSource(f, overrides, view)
 	if err != nil {
 		if waived && !isWiringError(err) {
@@ -384,14 +383,14 @@ func pairLayer(view *osView, names []string, file string) func(string) string {
 // readEnvFile reads the file a variable_file variable names, relative to the run's directory,
 // with one trailing line ending removed.
 func readEnvFile(view *osView, variable, path string) (string, error) {
-	f, err := os.Open(view.abs(path))
+	f, err := view.open(view.abs(path))
 	if err != nil {
-		return "", fmt.Errorf("%s: %s", variable, unreadableFile(path, view.abs(path), err))
+		return "", fmt.Errorf("%s: %s", variable, unreadableFile(view, path, view.abs(path), err))
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, envFileCap+1))
 	if err != nil {
-		return "", fmt.Errorf("%s: %s", variable, unreadableFile(path, view.abs(path), err))
+		return "", fmt.Errorf("%s: %s", variable, unreadableFile(view, path, view.abs(path), err))
 	}
 	if len(data) > envFileCap {
 		return "", fmt.Errorf("%s: %s is larger than 1 MiB", variable, quotePath(path))
@@ -401,7 +400,7 @@ func readEnvFile(view *osView, variable, path string) (string, error) {
 
 // chainFiles is [InputReader.chainConfigFiles] narrowed to the files read as environment
 // (asEnv) or to the configuration files.
-func (r *InputReader) chainFiles(chain []Command, asEnv bool) []ConfigFile {
+func (r *InputReader) chainFiles(chain []Command, asEnv bool) []ConfigFileDef {
 	all := r.chainConfigFiles(chain)
 	out := all[:0:0]
 	for _, f := range all {

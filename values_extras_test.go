@@ -225,7 +225,7 @@ func TestInputReader_argumentFallback(t *testing.T) {
 		var in inputs
 		meta := InputSettings{}
 		if config {
-			meta.ConfigFiles = []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}
+			meta.ConfigFiles = []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}
 		}
 		rtx := NewContextFor(def, argv).WithEnviron(env).WithClock(func() time.Time { return at })
 		return in, NewInputReader(meta).Read(rtx, &in)

@@ -21,6 +21,5 @@ func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 		return err
 	}
 
-	rtx.HaltWithCode(1)
-	return nil
+	return rotini.MissingCommandError(rtx)
 }

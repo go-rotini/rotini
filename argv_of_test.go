@@ -274,7 +274,7 @@ func TestArgvOfRules(t *testing.T) {
 		opts  []ArgvOption
 		argv  []string
 		env   []string
-		err   string // the *ArgvError's Field, when it can't be expressed
+		err   string // the *ArgvOfError's Field, when it can't be expressed
 	}{
 		{name: "nothing set", fill: func(*argvRunCI) {}, argv: []string{"run"}},
 		{name: "same flag on root and leaf", fill: func(c *argvRunCI) { c.Flags.Help = true },
@@ -448,9 +448,9 @@ func TestArgvOfRules(t *testing.T) {
 			in, set := argvRun(tc.fill, tc.paths...)
 			argv, env, err := ArgvOf(argvDef(), in, set, tc.opts...)
 			if tc.err != "" {
-				var ae *ArgvError
+				var ae *ArgvOfError
 				if !errors.As(err, &ae) || ae.Field != FieldPath(tc.err) {
-					t.Fatalf("err = %v, want an *ArgvError on %s", err, tc.err)
+					t.Fatalf("err = %v, want an *ArgvOfError on %s", err, tc.err)
 				}
 				return
 			}
@@ -682,7 +682,7 @@ func TestArgvOfFindsTheCommand(t *testing.T) {
 			t.Fatalf("argv = %q, want %q", argv, want)
 		}
 	})
-	t.Run("wiring mistakes are not ArgvErrors", func(t *testing.T) {
+	t.Run("wiring mistakes are not ArgvOfErrors", func(t *testing.T) {
 		in, set := argvRun(func(*argvRunCI) {})
 		for _, tc := range []struct {
 			name string
@@ -694,7 +694,7 @@ func TestArgvOfFindsTheCommand(t *testing.T) {
 			{"not a struct", second(ArgvOf(argvDef(), 3, nil, ArgvPath()))},
 			{"a path in set naming no field", second(ArgvOf(argvDef(), in, Presence{"Run.Flags.Nope": {}}))},
 		} {
-			var ae *ArgvError
+			var ae *ArgvOfError
 			if tc.err == nil || errors.As(tc.err, &ae) {
 				t.Errorf("%s: err = %v, want a wiring error", tc.name, tc.err)
 			}
@@ -704,7 +704,7 @@ func TestArgvOfFindsTheCommand(t *testing.T) {
 
 func second(_, _ []string, err error) error { return err }
 
-func TestArgvError_Error(t *testing.T) {
+func TestArgvOfError_Error(t *testing.T) {
 	in, set := argvRun(func(c *argvRunCI) { c.Config.Region = "eu" }, "Run.Config.Region")
 	_, _, err := ArgvOf(argvDef(), in, set)
 	want := "rotini: Run.Config.Region: a config input comes only from a configuration file; write one"
@@ -740,7 +740,7 @@ var argvFuzzPaths = []string{
 var argvFuzzZones = []string{"UTC", "Europe/Berlin", "America/New_York", "Asia/Kolkata"}
 
 // FuzzArgvOf checks that ArgvOf's output parses back to the value it was given: either ArgvOf
-// reports an *ArgvError, or argv and env read back every field in set, and only those.
+// reports an *ArgvOfError, or argv and env read back every field in set, and only those.
 func FuzzArgvOf(f *testing.F) {
 	f.Add("hello", "key", int64(3), uint64(7), 1.5, true, int64(1759104000), ^uint64(0))
 	f.Add("a,b", "", int64(-1), uint64(0), math.Inf(1), false, int64(0), uint64(0b1010101010101))
@@ -804,7 +804,7 @@ func FuzzArgvOf(f *testing.F) {
 		argvFuzzPassthrough(t, filepath.Dir(inPath), s, k)
 		argv, env, err := ArgvOf(argvDef(), in, set, ArgvSecrets())
 		if err != nil {
-			if _, ok := errors.AsType[*ArgvError](err); !ok {
+			if _, ok := errors.AsType[*ArgvOfError](err); !ok {
 				t.Fatalf("ArgvOf: %v", err)
 			}
 			return

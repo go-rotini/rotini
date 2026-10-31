@@ -88,7 +88,7 @@ type acInputs struct {
 	}
 }
 
-func acContext(dir string, files ...ConfigFile) *Context {
+func acContext(dir string, files ...ConfigFileDef) *Context {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithDir(dir).WithInputSettings(InputSettings{ConfigFiles: files})
 	return wired(rtx, ConfigFiles(), Schemas(), YAML(), iniCodec())
 }
@@ -103,7 +103,7 @@ func TestCodec_readsConfigFiles(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := pfWrite(t, dir, tt.file, acINI)
-			files := []ConfigFile{{Name: "app", Path: path, Format: tt.format}}
+			files := []ConfigFileDef{{Name: "app", Path: path, Format: tt.format}}
 			var in acInputs
 			if err := NewInputReader(InputSettings{ConfigFiles: files}).Read(acContext(dir, files...), &in); err != nil {
 				t.Fatal(err)
@@ -131,7 +131,7 @@ func TestCodec_errors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := pfWrite(t, dir, "app.ini", tt.body)
-			files := []ConfigFile{{Name: "app", Path: path, Schema: tt.schema}}
+			files := []ConfigFileDef{{Name: "app", Path: path, Schema: tt.schema}}
 			var in struct {
 				App struct {
 					Flags     struct{}
@@ -153,7 +153,7 @@ func TestCodec_errors(t *testing.T) {
 func TestCodec_missing(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.conf", acINI)
-	files := []ConfigFile{{Name: "app", Path: path, Format: "ini"}}
+	files := []ConfigFileDef{{Name: "app", Path: path, Format: "ini"}}
 	rtx := wired(NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithDir(dir), ConfigFiles(), YAML())
 	var in acInputs
 	err := NewInputReader(InputSettings{ConfigFiles: files}).Read(rtx, &in)
@@ -182,7 +182,7 @@ func TestCodec_topLevelMustBeAMapping(t *testing.T) {
 func TestCodec_writeRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.ini", acINI)
-	f := ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{{Key: "deploy.region", Type: "string"}}}
+	f := ConfigFileDef{Name: "app", Path: path, Keys: []ConfigKeyDef{{Key: "deploy.region", Type: "string"}}}
 	rtx := wired(cwContext(dir, nil, f), ConfigFiles(), iniCodec())
 	err := SetConfigValue(rtx, "app", "deploy.region", "us")
 	want := "configuration file " + path + " is ini, which this program reads but doesn't write; edit it by hand"
@@ -285,7 +285,7 @@ func TestCodec_extensionsWithOrWithoutDot(t *testing.T) {
 		t.Run(ext, func(t *testing.T) {
 			dir := t.TempDir()
 			path := pfWrite(t, dir, "app.INI", acINI)
-			files := []ConfigFile{{Name: "app", Path: path}}
+			files := []ConfigFileDef{{Name: "app", Path: path}}
 			rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithDir(dir).WithInputSettings(InputSettings{ConfigFiles: files})
 			rtx = wired(rtx, ConfigFiles(), Schemas(), Codec("ini", decodeINI, CodecExtensions(ext)))
 			var in acInputs
@@ -322,7 +322,7 @@ func TestCodec_panics(t *testing.T) {
 func TestCodec_profilesAndProvenance(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.conf", `{"deploy":{"region":"eu"},"profiles":{"prod":{"deploy":{"region":"us"}}}}`)
-	files := []ConfigFile{{Name: "app", Path: path, Format: "own-json", Profiles: &ProfilesDef{Under: "profiles", Flag: "profile"}}}
+	files := []ConfigFileDef{{Name: "app", Path: path, Format: "own-json", Profiles: &ProfilesDef{Under: "profiles", Flag: "profile"}}}
 	own := Codec("own-json", func(data []byte) (any, error) {
 		var v any
 		err := json.Unmarshal(data, &v)

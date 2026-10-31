@@ -193,7 +193,7 @@ func TestWiredFeatures_perDeclaration(t *testing.T) {
 `, []string{"rotini.ConfigFiles()", "rotini.TimeValues()"}},
 		{"env family", `  env:
     - {name: http, schema: {type: map, nesting: __}}
-`, []string{"rotini.Env()", "rotini.EnvFamilies()"}},
+`, []string{"rotini.Env()", "rotini.NestedEnv()"}},
 		{"value type in an env input", `  env:
     - {name: net, schema: {type: cidr}}
 `, []string{"rotini.Env()", "rotini.IPValues()"}},

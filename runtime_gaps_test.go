@@ -104,7 +104,7 @@ func TestInputs_configErrorTiming(t *testing.T) {
 			return &timingLeaf{err: &leafErr}, true
 		}
 		return nil, false
-	}).WithInputSettings(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Format: "yaml"}}}).
+	}).WithInputSettings(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path, Format: "yaml"}}}).
 		WithoutSignalHandling().WithStdout(io.Discard).WithStderr(io.Discard)
 
 	if code, _ := p.Run([]string{"build"}); code != 1 {

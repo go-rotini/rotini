@@ -146,9 +146,9 @@ func TestLocalFlag_argvOf(t *testing.T) {
 
 	v.AppDb.Flags.Dsn = "x"
 	_, _, err = ArgvOf(localDef(), v, PresenceOf(v), ArgvPath("db", "migrate"))
-	var ae *ArgvError
+	var ae *ArgvOfError
 	if !errors.As(err, &ae) || ae.Field != "AppDb.Flags.Dsn" || !strings.Contains(ae.Reason, `"db" is the command run`) {
-		t.Fatalf("err = %v, want an ArgvError for AppDb.Flags.Dsn", err)
+		t.Fatalf("err = %v, want an ArgvOfError for AppDb.Flags.Dsn", err)
 	}
 }
 

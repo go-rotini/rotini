@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"math"
-	"os"
 	"reflect"
 	"slices"
 	"strconv"
@@ -58,9 +57,9 @@ type parsedInputs struct {
 	// "ame", so an error that follows from that says so. nil when none.
 	spelled *spelling
 
-	// dir is the run's injected working directory, which relative existingfile and existingdir
-	// values are checked against; "" is the process's.
-	dir string
+	// view is the run's view: its injected working directory, which relative existingfile and
+	// existingdir values are checked against ("" is the process's), and its file system.
+	view *osView
 
 	// clock is what relative time values are measured from; nil reads time.Now.
 	clock *runClock
@@ -89,14 +88,14 @@ func (p *parsedInputs) one(s string) []string {
 }
 
 // argvAcq is what reading argv values may consult: stdin for a `from: [stdin]` flag's "-",
-// and the run's injected directory for a relative `@file` ("" is the process working
+// and the run's injected directory and file system for a relative `@file` ("" is the process working
 // directory).
 type argvAcq struct {
 	stdin io.Reader
 	// rtx, when stdin is nil, supplies the run's stdin replay on the first "-" value, so a parse
 	// with none builds no reader.
 	rtx   *Context
-	dir   string
+	view  *osView   // the run's directory and file system; nil is the process's
 	clock *runClock // what relative time values are measured from; nil reads time.Now
 	// goos is the operating system whose rules glob arguments follow; "" is the running one.
 	goos string
@@ -710,10 +709,10 @@ func acquiringArg(args []ArgDef, pos int) (ArgDef, bool) {
 // parseArgvTokens is parseInto without defaults: exactly what argv supplied. It records each
 // explicitly set flag in the store's argvSet, the single source of truth for "set on the
 // command line". acq.stdin backs the from:stdin sentinel and is read only when a "-" value
-// appears on an opted-in flag; acq.dir is where relative `@file` and existingfile paths resolve.
+// appears on an opted-in flag; acq.view is where relative `@file` and existingfile paths resolve.
 func parseArgvTokens(chain []Command, argv []string, acq argvAcq) (*parsedInputs, error) {
 	store := newParsedInputs(len(chain))
-	store.dir, store.clock = acq.dir, acq.clock
+	store.view, store.clock = acq.view, acq.clock
 	store.poolHint = len(argv)
 	leaf := len(chain) - 1 // chain index of the leaf command
 	depth := 1             // index of the next chain frame we might descend into
@@ -1029,7 +1028,7 @@ func winningValues(fd *FlagDef, vals []string) []string {
 
 // checkFlagValues checks one flag's argv values against its enum, its key=value shape when it
 // is a map, and its constraints. label is the flag as the user typed it.
-func checkFlagValues(fd *FlagDef, label string, vals []string, dir string, clock *runClock) error {
+func checkFlagValues(fd *FlagDef, label string, vals []string, view *osView, clock *runClock) error {
 	enum := flagEnum(fd)
 	for _, v := range vals {
 		if enum.declared() && !enum.has(v) {
@@ -1042,7 +1041,7 @@ func checkFlagValues(fd *FlagDef, label string, vals []string, dir string, clock
 		}
 	}
 	fs := clock.features()
-	if err := checkConstraints(fs, label, fd.Type, fd.Base, fd.Constraints, vals, fd.Secret, dir); err != nil {
+	if err := checkConstraints(fs, label, fd.Type, fd.Base, fd.Constraints, vals, fd.Secret, view); err != nil {
 		return err
 	}
 	if fd.UniqueItems && !isObjectFlag(fd) {
@@ -1243,7 +1242,7 @@ func validate(chain []Command, store *parsedInputs) error {
 			if waived {
 				err = checkFlagShape(fd, fsi.label(fd), vals)
 			} else if err = checkRepeat(fd, fsi.label(fd), fsi.flags[fd.Name], store.setOnArgv(i, fd.Name)); err == nil {
-				err = checkFlagValues(fd, fsi.label(fd), vals, store.dir, store.clock)
+				err = checkFlagValues(fd, fsi.label(fd), vals, store.view, store.clock)
 			}
 			if err != nil {
 				return withSource(withWritten(scoped(err, f.Name, fsi.label(fd)), fsi.flags[fd.Name], fsi.written), fsi.origin[fd.Name])
@@ -1257,12 +1256,12 @@ func validate(chain []Command, store *parsedInputs) error {
 	if err := extraPositionals(chain, si, store); err != nil {
 		return err
 	}
-	return validateArgs(leaf, si, waived, store.dir, store.clock)
+	return validateArgs(leaf, si, waived, store.view, store.clock)
 }
 
 // validateArgs checks the leaf's positional values: every rule normally, and only whether each
 // value can be read at all under a short circuit.
-func validateArgs(leaf *Command, si *scopeInputs, waived bool, dir string, clock *runClock) error {
+func validateArgs(leaf *Command, si *scopeInputs, waived bool, view *osView, clock *runClock) error {
 	args := si.args[:len(si.args)-si.placeholderArgs] // only values this store actually read
 	spans := argSpans(leaf.Arguments, len(si.args))
 	for i := range leaf.Arguments {
@@ -1287,7 +1286,7 @@ func validateArgs(leaf *Command, si *scopeInputs, waived bool, dir string, clock
 		if len(vals) == 0 && !ad.Variadic {
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		} // an absent variadic still gets a MinItems check
-		if err := checkArgValues(ad, vals, dir, clock); err != nil {
+		if err := checkArgValues(ad, vals, view, clock); err != nil {
 			return withSource(withWritten(scoped(err, leaf.Name, ""), vals, si.written), si.argOrigin[i])
 		}
 	}
@@ -1296,7 +1295,7 @@ func validateArgs(leaf *Command, si *scopeInputs, waived bool, dir string, clock
 
 // checkArgValues checks one argument's values against its enum and its constraints; the
 // positional counterpart of [checkFlagValues].
-func checkArgValues(ad *ArgDef, vals []string, dir string, clock *runClock) error {
+func checkArgValues(ad *ArgDef, vals []string, view *osView, clock *runClock) error {
 	enum := argEnum(ad)
 	for _, v := range vals {
 		if enum.declared() && !enum.has(v) {
@@ -1305,7 +1304,7 @@ func checkArgValues(ad *ArgDef, vals []string, dir string, clock *runClock) erro
 	}
 	label := "<" + ad.Name + ">"
 	fs := clock.features()
-	if err := checkConstraints(fs, label, ad.Type, ad.Base, ad.Constraints, vals, ad.Secret, dir); err != nil {
+	if err := checkConstraints(fs, label, ad.Type, ad.Base, ad.Constraints, vals, ad.Secret, view); err != nil {
 		return err
 	}
 	if ad.UniqueItems {
@@ -1331,7 +1330,7 @@ func hasVariadicArg(args []ArgDef) bool {
 // type, which a valid spec cannot produce, is skipped. base is an integer input's base rule,
 // which numeric bounds read values under. A secret input's value and length are redacted. A
 // check the run's features do not wire is a [*WiringError].
-func checkConstraints(fs *featureSet, label, typ, base string, c Constraints, values []string, secret bool, dir string) error {
+func checkConstraints(fs *featureSet, label, typ, base string, c Constraints, values []string, secret bool, view *osView) error {
 	if (isArrayType(typ) || isMapType(typ)) && (c.MinItems > 0 || c.MaxItems != nil) {
 		if fs.bounds == nil {
 			return missingBounds(label)
@@ -1359,7 +1358,7 @@ func checkConstraints(fs *featureSet, label, typ, base string, c Constraints, va
 			}
 		}
 		if isPathType(elem) {
-			if err := checkPathKind(fs, label, elem, v, dir); err != nil {
+			if err := checkPathKind(fs, label, elem, v, view); err != nil {
 				return err
 			}
 		}
@@ -1381,14 +1380,14 @@ func checkPattern(fs *featureSet, label string, c Constraints, v string, secret 
 
 // checkPathKind enforces a path type on one value: existence for existingfile and existingdir,
 // the run's stream-path check for inputfile and outputfile.
-func checkPathKind(fs *featureSet, label, typ, value, dir string) error {
+func checkPathKind(fs *featureSet, label, typ, value string, view *osView) error {
 	if !isStreamPathType(typ) {
-		return checkExistingPath(label, typ, value, dir)
+		return checkExistingPath(label, typ, value, view)
 	}
 	if fs.streamPaths == nil {
 		return missingFeature("stream-paths", "StreamPaths()", "input "+label+" is an "+typ)
 	}
-	return fs.streamPaths.check(label, typ, value, dir)
+	return fs.streamPaths.check(label, typ, value, view)
 }
 
 // hasLengthBounds reports whether c declares a length bound.
@@ -1404,18 +1403,18 @@ func isPathType(typ string) bool {
 // checkPathExists enforces an existingfile/existingdir type at parse time, so the error names
 // the flag the user typed. It checks only existence and kind; cleaning, resolving symlinks and
 // creating missing files are left to the handler, and "~" and "$VAR" are expanded beforehand
-// only for inputs that declare `expand`. A relative value is checked against dir, the run's
-// injected directory ("" is the process working directory).
-func checkPathExists(label, typ, value, dir string) error {
+// only for inputs that declare `expand`. A relative value is checked against the run's
+// injected directory ("" is the process working directory), in the run's file system.
+func checkPathExists(label, typ, value string, view *osView) error {
 	if isStreamPathType(typ) {
-		return checkStreamPath(label, typ, value, dir)
+		return checkStreamPath(label, typ, value, view)
 	}
-	return checkExistingPath(label, typ, value, dir)
+	return checkExistingPath(label, typ, value, view)
 }
 
 // checkExistingPath is [checkPathExists] for existingfile and existingdir.
-func checkExistingPath(label, typ, value, dir string) error {
-	info, err := os.Stat(joinDir(dir, value))
+func checkExistingPath(label, typ, value string, view *osView) error {
+	info, err := view.stat(joinDir(view.base(), value))
 	switch {
 	case pathMissing(err):
 		noun := "file"
@@ -1974,7 +1973,7 @@ func plural(word string, n int) string {
 // trailing line ending removed (trimAcquiredPayload, as the stdin channel does) and is then
 // coerced and validated like a literal value. Without the matching mode, '@' and '-' are
 // ordinary characters. Sentinels are argv grammar only: defaults and fallbacks never resolve.
-// A relative `@file` path resolves against acq.dir; the error names it as typed. A file larger
+// A relative `@file` path resolves against acq.view's directory; the error names it as typed. A file larger
 // than 64 MiB is an error rather than a value.
 func resolveFlagValue(fd FlagDef, label, value string, acq argvAcq) (string, error) {
 	return resolveAcquired(fd.From, label, label, value, acq)
@@ -1993,12 +1992,12 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 			Flag: flag, Token: value,
 		}
 	case strings.HasPrefix(value, "@") && slices.Contains(from, "file"):
-		path := joinDir(acq.dir, value[1:])
-		data, err := readValueFile(path)
+		path := joinDir(acq.view.base(), value[1:])
+		data, err := readValueFile(acq.view, path)
 		if err != nil {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
-				Msg:  label + ": " + unreadableFile(value[1:], path, err),
+				Msg:  label + ": " + unreadableFile(acq.view, value[1:], path, err),
 				Flag: flag, Token: value,
 			}
 		}
@@ -2031,7 +2030,7 @@ func resolveAcquired(from []string, label, flag, value string, acq argvAcq) (str
 // unreadableFile says why an `@file` value could not be read in rotini's words rather than the
 // platform-specific OS error text, as checkPathExists does. typed is the path as the user wrote
 // it, path where it resolved.
-func unreadableFile(typed, path string, err error) string {
+func unreadableFile(view *osView, typed, path string, err error) string {
 	switch {
 	case errors.Is(err, errValueFileTooLarge):
 		return fmt.Sprintf("%s is larger than 64 MiB", quotePath(typed))
@@ -2040,7 +2039,7 @@ func unreadableFile(typed, path string, err error) string {
 	case errors.Is(err, fs.ErrPermission):
 		return fmt.Sprintf("permission denied reading %s", quotePath(typed))
 	}
-	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+	if info, statErr := view.stat(path); statErr == nil && info.IsDir() {
 		return fmt.Sprintf("%s is a directory, not a file", quotePath(typed))
 	}
 	return fmt.Sprintf("cannot read %s", quotePath(typed))
@@ -2053,10 +2052,10 @@ const valueFileCap = 64 << 20
 var errValueFileTooLarge = errors.New("value file too large")
 
 // readValueFile reads an `@file` value's file, up to valueFileCap bytes.
-func readValueFile(path string) ([]byte, error) {
-	f, err := os.Open(path)
+func readValueFile(view *osView, path string) ([]byte, error) {
+	f, err := view.open(path)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // unreadableFile words it
+		return nil, err
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, valueFileCap+1))

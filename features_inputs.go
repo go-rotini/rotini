@@ -38,17 +38,17 @@ func Env() Feature {
 	}}
 }
 
-// EnvFamilies wires nested env inputs (`nesting:`), each collecting a family of environment
+// NestedEnv wires nested env inputs (`nesting:`), each collecting a family of environment
 // variables (APP_HTTP__TIMEOUT, APP_HTTP__RETRY__MAX) into one map. It also needs [Env].
-func EnvFamilies() Feature {
-	return Feature{name: "env-families", apply: func(s *featureSet) {
+func NestedEnv() Feature {
+	return Feature{name: "nested-env", apply: func(s *featureSet) {
 		s.families = &envFamilyHooks{fill: fillEnvNested}
 	}}
 }
 
-// fillEnvFamilies fills the nested env inputs of one Env struct through [EnvFamilies],
+// fillNestedEnv fills the nested env inputs of one Env struct through [NestedEnv],
 // returning the recon keys it filled. A struct with none needs no feature.
-func fillEnvFamilies(env reflect.Value, view *osView) (map[string]bool, error) {
+func fillNestedEnv(env reflect.Value, view *osView) (map[string]bool, error) {
 	if h := view.clockRef().features().families; h != nil {
 		return h.fill(env, view)
 	}
@@ -57,7 +57,7 @@ func fillEnvFamilies(env reflect.Value, view *osView) (map[string]bool, error) {
 		for j := range env.NumField() {
 			f := et.Field(j)
 			if f.Tag.Get("envnest") != "" {
-				return nil, missingFeature("env-families", "EnvFamilies()",
+				return nil, missingFeature("nested-env", "NestedEnv()",
 					"env input "+f.Tag.Get("rotini")+" collects a family of variables (nesting)")
 			}
 		}
@@ -83,7 +83,7 @@ func (s *featureSet) wireChannels() {
 	}
 }
 
-// Profiles wires configuration file profiles ([ConfigFile.Profiles]): selecting one named
+// Profiles wires configuration file profiles ([ConfigFileDef.Profiles]): selecting one named
 // section of a file per run.
 func Profiles() Feature {
 	return Feature{name: "config-profiles", apply: func(s *featureSet) {

@@ -78,7 +78,7 @@ func TestOutputKinds_goTypes(t *testing.T) {
 		"func (Result) isAcmeWatchOutput() {}",
 		"// How far the run has got.\ntype AcmeWatchOutputProgress struct {",
 		"Kind string `json:\"kind\"`",
-		"Tag: \"kind\", Kinds: []rotini.OutputKind{{Value: \"progress\", Schema: `",
+		"Tag: \"kind\", Kinds: []rotini.OutputKindDef{{Value: \"progress\", Schema: `",
 		"{Value: \"result\", Schema: `",
 		".Output.Kinds[0].Type = rotiniTypeOf((*AcmeWatchOutputProgress)(nil))",
 		".Output.Kinds[1].Type = rotiniTypeOf((*Result)(nil))",

@@ -26,13 +26,13 @@ func featureNames(fs []Feature) []string {
 
 func TestFeature_String(t *testing.T) {
 	got := featureNames([]Feature{
-		Plugins(), ResponseFiles(), Chdir(), Multicall(), Stdin("json", "yaml"), Env(), EnvFamilies(), ConfigFiles(), Profiles(),
+		Plugins(), ResponseFiles(), Chdir(), Multicall(), Stdin("json", "yaml"), Env(), NestedEnv(), ConfigFiles(), Profiles(),
 		EnvFiles(), Fallbacks(), PathExpansion(), ObjectFlags(), Schemas(), JSON(), YAML(), TOML(), JSONC(), Dotenv(),
 		Bounds(), UniqueItems(), Patterns(), FlagGroups(), FlagDependencies(), StreamPaths(), TimeValues(), URLValues(), EmailValues(),
 		TimeZoneValues(), MACValues(), IPValues(), RegexpValues(),
 	})
 	want := []string{
-		"plugins", "response-files", "chdir", "multicall", "stdin(json,yaml)", "env", "env-families", "config-files", "config-profiles",
+		"plugins", "response-files", "chdir", "multicall", "stdin(json,yaml)", "env", "nested-env", "config-files", "config-profiles",
 		"env-files", "fallbacks", "path-expansion", "object-flags", "schemas", "codec:json", "codec:yaml", "codec:toml",
 		"codec:jsonc", "codec:dotenv", "bounds", "unique-items", "patterns", "flag-groups", "flag-dependencies", "stream-paths",
 		"values:time", "values:url", "values:email", "values:timezone", "values:mac", "values:ip", "values:regexp",

@@ -25,6 +25,7 @@ func (d *differ) document() {
 	d.topics()
 	d.completion()
 	d.responseFiles()
+	d.channels()
 	d.definitions()
 	d.commands()
 }

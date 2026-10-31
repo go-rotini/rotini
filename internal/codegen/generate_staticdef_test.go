@@ -69,7 +69,7 @@ Effects: &rotini.Effects{Kind: "write", Idempotent: new(true), OpenWorld: new(fa
 // TestMakeStatic_keepsWithoutMove pins InputSettings' form: pointers move to variables, but a
 // map stays in the exported literal, which handler code may read before NewProgram.
 func TestMakeStatic_keepsWithoutMove(t *testing.T) {
-	src := "// InputSettings is the descriptor.\nvar InputSettings = rotini.InputSettings{\nStdinSchemas: map[string]string{\"a\": `{}`},\nConfigFiles: []rotini.ConfigFile{{Name: \"user\", Keys: []rotini.ConfigKey{{Key: \"n\", Minimum: new(float64(0))}}}},\n}"
+	src := "// InputSettings is the descriptor.\nvar InputSettings = rotini.InputSettings{\nStdinSchemas: map[string]string{\"a\": `{}`},\nConfigFiles: []rotini.ConfigFileDef{{Name: \"user\", Keys: []rotini.ConfigKeyDef{{Key: \"n\", Minimum: new(float64(0))}}}},\n}"
 	pv := pointerVars{}
 	got, err := makeStatic(src, pv, false)
 	if err != nil {

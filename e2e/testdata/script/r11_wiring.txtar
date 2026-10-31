@@ -104,14 +104,14 @@ stderr 'rotini.Plugins\(\)'
 exec ./ks-unwired$exe bounds --port 3
 stdout 'Port:3'
 exec go run ./tools/drop internal/cmd/ks/zz_ks.go 'rotini.TimeValues(),'
-exec go run ./tools/drop internal/cmd/ks/zz_ks.go 'rotini.EnvFamilies(),'
+exec go run ./tools/drop internal/cmd/ks/zz_ks.go 'rotini.NestedEnv(),'
 exec go build -o ks-unwired$exe ./cmd/ks
 ! exec ./ks-unwired$exe config
 stderr 'input since is a date or time with a layout or relative form, but the program does not wire values:time'
 stderr 'rotini.TimeValues\(\)'
 ! exec ./ks-unwired$exe env
-stderr 'env input labels collects a family of variables \(nesting\), but the program does not wire env-families'
-stderr 'rotini.EnvFamilies\(\)'
+stderr 'env input labels collects a family of variables \(nesting\), but the program does not wire nested-env'
+stderr 'rotini.NestedEnv\(\)'
 
 -- cmd/ks/.rotini.conf.yaml --
 version: 0.0.0

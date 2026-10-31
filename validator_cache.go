@@ -218,7 +218,7 @@ func forbiddenKey(ve *recon.ValidationError) bool {
 // unknownFileKey is the usage error for a key in configuration file f, found at where, that
 // the file's schema forbids. Its Token and Candidates are the key and the keys its object's
 // schema declares, which [SuggestionFacts] reads.
-func unknownFileKey(f ConfigFile, where string, ve *recon.ValidationError, err error) *InputError {
+func unknownFileKey(f ConfigFileDef, where string, ve *recon.ValidationError, err error) *InputError {
 	key := ve.Path[len(ve.Path)-1]
 	known := schemaKeysAt(f.Schema, ve.Path[:len(ve.Path)-1])
 	msg := fmt.Sprintf("configuration file %s has unknown key %s", where, ve.Path.String())

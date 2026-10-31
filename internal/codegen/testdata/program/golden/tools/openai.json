@@ -1,6 +1,6 @@
 [
   {
-    "description": "add a task\n\nEffects: write.\n\nExit codes: 3 (duplicate): a task with this title exists.",
+    "description": "add a task\n\nEffects: write.\n\nExit codes: 3 (duplicate): a task with this title exists.\n\nExamples:\n  taskr add \"buy milk\" --tag home",
     "name": "taskr_add",
     "parameters": {
       "additionalProperties": false,

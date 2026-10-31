@@ -164,23 +164,23 @@ func TestCheckConstraints_wiring(t *testing.T) {
 	c := Constraints{MaxLength: new(3), Pattern: "^a", MaxItems: new(5)}
 	vals := []string{"abc", "bcd", "abcdef"}
 	full := newFeatureSet([]Feature{Bounds(), Patterns()})
-	want := checkConstraints(allFeatures(), "--s", "[]string", "", c, vals, false, "")
+	want := checkConstraints(allFeatures(), "--s", "[]string", "", c, vals, false, nil)
 	if want == nil || !strings.Contains(want.Error(), "must match ^a") {
 		t.Fatalf("legacy = %v, want the pattern error on the second value", want)
 	}
-	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, ""); errText(got) != errText(want) {
+	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, nil); errText(got) != errText(want) {
 		t.Errorf("wired = %v, want %v", got, want)
 	}
 	vals = []string{"abcdef", "bcd"}
-	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, ""); got == nil || !strings.Contains(got.Error(), "at most 3") {
+	if got := checkConstraints(full, "--s", "[]string", "", c, vals, false, nil); got == nil || !strings.Contains(got.Error(), "at most 3") {
 		t.Errorf("length before pattern: got %v", got)
 	}
 
-	wantMissing(t, checkConstraints(noFeatures, "--s", "[]string", "", Constraints{MinItems: 1}, nil, false, ""), "bounds", "Bounds()")
-	wantMissing(t, checkConstraints(noFeatures, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, ""), "bounds", "Bounds()")
-	wantMissing(t, checkConstraints(noFeatures, "--d", "time.Duration", "", Constraints{Maximum: new(1.0)}, []string{"1s"}, false, ""), "bounds", "Bounds()")
-	wantMissing(t, checkConstraints(noFeatures, "--s", "string", "", Constraints{Pattern: "x"}, []string{"x"}, false, ""), "patterns", "Patterns()")
-	wantMissing(t, checkConstraints(noFeatures, "<in>", "inputfile", "", Constraints{}, []string{"-"}, false, ""), "stream-paths", "StreamPaths()")
+	wantMissing(t, checkConstraints(noFeatures, "--s", "[]string", "", Constraints{MinItems: 1}, nil, false, nil), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(noFeatures, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, nil), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(noFeatures, "--d", "time.Duration", "", Constraints{Maximum: new(1.0)}, []string{"1s"}, false, nil), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(noFeatures, "--s", "string", "", Constraints{Pattern: "x"}, []string{"x"}, false, nil), "patterns", "Patterns()")
+	wantMissing(t, checkConstraints(noFeatures, "<in>", "inputfile", "", Constraints{}, []string{"-"}, false, nil), "stream-paths", "StreamPaths()")
 
 	// A constraint that checks nothing for its type, or no value to check, needs no feature.
 	for _, tt := range []struct {
@@ -195,7 +195,7 @@ func TestCheckConstraints_wiring(t *testing.T) {
 		{"string", Constraints{MinItems: 1}, []string{"x"}},
 		{"[]string", Constraints{UniqueItems: true}, []string{"x", "x"}},
 	} {
-		if err := checkConstraints(noFeatures, "--x", tt.typ, "", tt.c, tt.vals, false, ""); err != nil {
+		if err := checkConstraints(noFeatures, "--x", tt.typ, "", tt.c, tt.vals, false, nil); err != nil {
 			t.Errorf("%s %+v: %v, want nothing to check", tt.typ, tt.c, err)
 		}
 	}
@@ -204,7 +204,7 @@ func TestCheckConstraints_wiring(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "f"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkConstraints(noFeatures, "--f", "existingfile", "", Constraints{}, []string{"f", "missing"}, false, dir); err == nil || !strings.Contains(err.Error(), "no such file") {
+	if err := checkConstraints(noFeatures, "--f", "existingfile", "", Constraints{}, []string{"f", "missing"}, false, dirView(dir)); err == nil || !strings.Contains(err.Error(), "no such file") {
 		t.Errorf("existingfile stays core: %v", err)
 	}
 }
@@ -283,7 +283,7 @@ func TestUniqueItems_ownFeature(t *testing.T) {
 	if err := checkUnique(unique, "--tags", []string{"1", "01"}, "[]int", timeSpec{}, enumSet{}, false); err == nil || !strings.Contains(err.Error(), "must not repeat") {
 		t.Errorf("wired unique: %v", err)
 	}
-	wantMissing(t, checkConstraints(unique, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, ""), "bounds", "Bounds()")
+	wantMissing(t, checkConstraints(unique, "--n", "int", "", Constraints{Minimum: new(1.0)}, []string{"5"}, false, nil), "bounds", "Bounds()")
 
 	def := objDef()
 	def.Flags[1].UniqueItems = true
@@ -399,14 +399,14 @@ func TestTimeValues_ownFeature(t *testing.T) {
 	}
 }
 
-// TestEnvFamilies_values pins what a wired EnvFamilies reads and that time channel inputs read
+// TestNestedEnv_values pins what a wired NestedEnv reads and that time channel inputs read
 // their layouts with TimeValues.
-func TestEnvFamilies_values(t *testing.T) {
+func TestNestedEnv_values(t *testing.T) {
 	t.Setenv("WR_LABELS__TEAM", "core")
 	t.Setenv("WR_LABELS__ON__CALL", "ada")
 	t.Setenv("WR_SINCE", "2026-01-02")
 	var fam wrEnvFamily
-	if err := NewInputReader(InputSettings{}).Read(wired(NewContextFor(wrDef(), nil), Env(), EnvFamilies()), &fam); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(wired(NewContextFor(wrDef(), nil), Env(), NestedEnv()), &fam); err != nil {
 		t.Fatal(err)
 	}
 	if l := fam.App.Env.Labels; l["team"] != "core" || l["on"].(map[string]any)["call"] != "ada" {

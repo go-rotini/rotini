@@ -133,6 +133,41 @@ func goInitialisms() map[string]bool {
 
 var goInitialismsOnce lazy[map[string]bool]
 
+// constCase respells the words of a PascalCase constant-name part that name formats and shells
+// as Go writes them: "FormatYaml" -> "FormatYAML", "ShellPowershell" -> "ShellPowerShell",
+// "Ok" -> "OK". It applies to generated enum, name and exit constants only; struct fields and
+// types keep [toPascalCase]'s spelling.
+func constCase(name string) string {
+	r := []rune(name)
+	var b strings.Builder
+	start := 0
+	for i := 1; i <= len(r); i++ {
+		if i < len(r) && (!unicode.IsUpper(r[i]) || unicode.IsUpper(r[i-1])) {
+			continue
+		}
+		word := string(r[start:i])
+		if spelled, ok := constWords()[word]; ok {
+			word = spelled
+		}
+		b.WriteString(word)
+		start = i
+	}
+	return b.String()
+}
+
+// constWords maps a PascalCased word to its spelling in a constant name.
+func constWords() map[string]string {
+	return constWordsOnce.value(func() map[string]string {
+		return map[string]string{
+			"Csv": "CSV", "Hcl": "HCL", "Ini": "INI", "Jsonc": "JSONC", "Jsonl": "JSONL",
+			"Ndjson": "NDJSON", "Ok": "OK", "Powershell": "PowerShell", "Toml": "TOML",
+			"Tsv": "TSV", "Yaml": "YAML",
+		}
+	})
+}
+
+var constWordsOnce lazy[map[string]string]
+
 // lowerFirst returns s as an unexported identifier, lower-casing its first rune or its whole
 // leading capital run: "APIResources" -> "apiResources", "URL" -> "url".
 func lowerFirst(s string) string {

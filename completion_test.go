@@ -94,8 +94,8 @@ func TestDiscoveredPlugins(t *testing.T) {
 	if got := cmd.DiscoveredPlugins(); len(got) == 0 || got[0].Path != filepath.Join(dir, progFile("acme-foo")) {
 		t.Errorf("foo = %v, want the plugin-path copy (searched before PATH)", got)
 	}
-	if path, ok := cmd.PluginBinary("foo"); !ok || path != filepath.Join(dir, progFile("acme-foo")) {
-		t.Errorf("PluginBinary(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
+	if path, ok := cmd.LookPlugin("foo"); !ok || path != filepath.Join(dir, progFile("acme-foo")) {
+		t.Errorf("LookPlugin(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
 	}
 
 	// Hidden discovery → nil.

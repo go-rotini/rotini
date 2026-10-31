@@ -38,7 +38,9 @@ func (gp *program) applyOverrides(c Command, ctx composeCtx) (Command, map[strin
 	replacedBy := gp.commandReplacement(c.ReplacedBy, ctx.specRoot)
 	var below map[string][]override
 	for _, o := range ctx.overrides[c.Name] {
-		c = overlayCommand(c, o.cmd)
+		oc := o.cmd
+		oc.SeeAlso = gp.rebaseSeeAlso(oc.SeeAlso, o.specRoot)
+		c = overlayCommand(c, oc)
 		if o.cmd.ReplacedBy != "" {
 			replacedBy = gp.commandReplacement(o.cmd.ReplacedBy, o.specRoot)
 		}

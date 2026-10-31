@@ -136,6 +136,9 @@ type {{.Prefix}}Inputs struct {
 {{- with .Constants}}
 {{.}}
 {{end}}
+{{- with .Channels}}
+{{.}}
+{{end}}
 {{- with .Contract}}
 {{.}}
 {{end}}

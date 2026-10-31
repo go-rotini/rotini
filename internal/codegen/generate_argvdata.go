@@ -48,15 +48,6 @@ func exitStatusLiteral(entries []ExitStatusEntry) string {
 	return "ExitStatus: " + l + ",\n"
 }
 
-// effectiveExitStatus is the exit_status a command documents: its own when it declares one,
-// else the root's, which is program-wide. An own list replaces the root's.
-func effectiveExitStatus(own, root []ExitStatusEntry) []ExitStatusEntry {
-	if len(own) > 0 {
-		return own
-	}
-	return root
-}
-
 // composedTypeName names a generated type (suffix "Inputs" or "Output") of the command at path
 // in a composed subtree, qualified by the package of the spec that declares the command, or ""
 // when the subtree's types live in no package the parent imports (a hand-written handler

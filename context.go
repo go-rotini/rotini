@@ -54,7 +54,7 @@ import (
 //     [Context.PluginHelp] runs a plugin's help;
 //     [Context.WithVersion], [Context.WithHelp], [Context.WithCompletionScript], [Context.WithParser],
 //     [Context.WithInputSettings], [Context.WithInputReader] (deprecated), [Context.WithEnviron],
-//     [Context.WithDir], [Context.WithClock], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
+//     [Context.WithDir], [Context.WithFS], [Context.WithClock], [Context.WithStdin], [Context.WithStdout], [Context.WithStderr] and
 //     [Context.WithOutputChecks] set them on a standalone Context
 //
 // Nothing is parsed or validated until a handler calls an inputs method. A program with its own
@@ -97,6 +97,9 @@ type Context struct {
 	providers *dependencyStore
 	provided  map[string]*providedValue
 	cleanups  []providedCleanup
+	// closesShared reports that the run is [Program.Execute]'s, which releases the program's
+	// shared values as it settles.
+	closesShared bool
 
 	services      map[string]any
 	chain         []Command // resolved command path, root → leaf
@@ -110,6 +113,7 @@ type Context struct {
 	successes     []string
 	faults        []*PanicError
 	channels      []*channelRecords // author channels, in first-recorded order
+	declared      []ChannelDef      // the channels the Definition declares (read-only)
 	lastErr       error             // the error RecordError last recorded, as given
 
 	// frame is the chain index of the command whose hook is running, or frameUnset outside a
@@ -199,7 +203,7 @@ func (rtx *Context) AddCompletionMessage(msg string) {
 // argvAcq is what parsing this run's argv reads values from: the replayed stdin and the
 // injected directory.
 func (rtx *Context) argvAcq() argvAcq {
-	return argvAcq{rtx: rtx, dir: rtx.osView().base(), clock: &rtx.clock}
+	return argvAcq{rtx: rtx, view: rtx.osView(), clock: &rtx.clock}
 }
 
 // newContext returns an empty [Context] with the os streams and no resolved command.
@@ -239,6 +243,7 @@ func NewContextFor(def Definition, argv []string) *Context {
 	finishChain(chain)
 	rtx.Argv = argv
 	rtx.chain = chain
+	rtx.declared = def.Channels
 	rtx.clock.feats = legacyFeatures(def)
 	rtx.view = rtx.view.withClock(&rtx.clock)
 	return rtx

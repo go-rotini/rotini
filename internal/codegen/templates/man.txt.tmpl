@@ -18,8 +18,11 @@
        DATA: .PageName .ParentPage .Section .Source .Date .RelatedPages .Header .Summary
          .Description .Footer .Invocation .Usage/.UsageDerived .Passthrough .CommandGroups[]
          .Arguments[] .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Stdin
-         .Output .ExitStatus[] .Examples[] .ExampleRows[] .SeeAlso[] .Files[] .FlagRules[] .Metadata   (.Stdin
-         and .Output are nil when the command declares none). .ParentPage is the parent
+         .Output .ExitStatus[] .Examples[] .ExampleRows[] .SeeAlso[] .SeeAlsoRows[] .Files[]
+         .FlagRules[] .Metadata   (.Stdin and .Output are nil when the command declares none).
+         .SeeAlsoRows are the command's see_also entries as {.Text .Page .URL}: .Page is the page
+         name of a command or topic entry, .URL a url entry's link, and .Text what help shows
+         (.SeeAlso holds the .Text of each). .ParentPage is the parent
          command's page name ("" on the root's page); command and topic rows carry .Page, their
          own. .Files lists the configuration files the command's inputs are read from, in the
          order they win, as {.File .Format .Found .PathFrom .AsEnv .Profiles .Note .Name} (nil
@@ -203,6 +206,6 @@ See \fI{{roff .}}\fR.
 {{end}}.fi
 .RE
 {{end}}
-{{if or .RelatedPages .SeeAlso}}.SH "SEE ALSO"
-{{$first := true}}{{range .RelatedPages}}{{if not $first}}, {{end}}{{$first = false}}\fB{{roff .}}\fR({{$.Section}}){{end}}{{range .SeeAlso}}{{if not $first}}, {{end}}{{$first = false}}{{roff .}}{{end}}
+{{if or .RelatedPages .SeeAlsoRows}}.SH "SEE ALSO"
+{{$first := true}}{{range .RelatedPages}}{{if not $first}}, {{end}}{{$first = false}}\fB{{roff .}}\fR({{$.Section}}){{end}}{{range .SeeAlsoRows}}{{if not $first}}, {{end}}{{$first = false}}{{if .Page}}\fB{{roff .Page}}\fR({{$.Section}}){{else}}{{roff .Text}}{{end}}{{end}}
 {{end}}

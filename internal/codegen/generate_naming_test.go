@@ -41,6 +41,22 @@ func TestGeneratedNamesKeepGoInitialisms(t *testing.T) {
 			t.Errorf("initialismCase(%q) = %q, want %q", in, got, want)
 		}
 	}
+	// Constant names spell format and shell words as Go does; other identifiers don't.
+	for in, want := range map[string]string{
+		"FormatYaml":      "FormatYAML",
+		"FormatJsonc":     "FormatJSONC",
+		"ShellPowershell": "ShellPowerShell",
+		"ExitOk":          "ExitOK",
+		"Yamlish":         "Yamlish",
+		"Okay":            "Okay",
+	} {
+		if got := constCase(in); got != want {
+			t.Errorf("constCase(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := toPascalCase("yaml"); got != "Yaml" {
+		t.Errorf("toPascalCase(yaml) = %q, want Yaml: struct fields keep their spelling", got)
+	}
 	// Unexported names — handler types — lower the whole leading initialism.
 	for in, want := range map[string]string{
 		"APIResources":        "apiResources",

@@ -200,6 +200,93 @@ func TestChannels_structuredReporter(t *testing.T) {
 	}
 }
 
+type declaredSkip struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type declaredConflict struct {
+	Key     string `json:"key"`
+	Message string `json:"message"`
+}
+
+func (c declaredConflict) Error() string { return c.Message }
+
+// TestChannels_structuredReporterDeclared pins the declared-channel line kind: a channel the
+// Definition declares (name and class) is written as its own line, the record as JSON; a
+// declared error channel's record is also an error line; an undeclared channel, or one whose
+// class differs from the declaration, keeps the message lines.
+func TestChannels_structuredReporterDeclared(t *testing.T) {
+	t.Parallel()
+	skip := NewChannel[declaredSkip]("skip", ChannelClassInfo)
+	conflict := NewChannel[declaredConflict]("clash", ChannelClassError)
+	stale := NewChannel[string]("stale_note", ChannelClassWarning) // declared as info below: not a match
+	def := Definition{Name: "app", Handler: "App", Channels: []ChannelDef{
+		{Name: "skip", Class: ChannelClassInfo},
+		{Name: "clash", Class: ChannelClassError},
+		{Name: "stale_note", Class: ChannelClassInfo},
+	}}
+	p := NewProgramFunc(def, func(string) (Handler, bool) {
+		return &funcRun{run: func(rtx *Context) {
+			rtx.Record(skip, declaredSkip{Path: "a.bin", Reason: "binary"})
+			rtx.Record(skip, declaredSkip{Path: "b.bin"})
+			rtx.Record(stale, "old cache")
+			rtx.Record(chSkipped, skippedFile{Path: "c", Reason: "undeclared"})
+			rtx.Record(conflict, declaredConflict{Key: "k", Message: "conflict on k"})
+		}}, true
+	}).WithReporter(StructuredReporter(func(*Context) bool { return true }))
+	var o, e bytes.Buffer
+	p.stdout, p.stderr = &o, &e
+	code, err := p.Run(nil)
+	if code != 1 || err == nil || err.Error() != "conflict on k" {
+		t.Fatalf("code, err = %d, %v; want 1, conflict on k", code, err)
+	}
+	want := []string{
+		`{"schema_version":1,"skip":{"path":"a.bin","reason":"binary"}}`,
+		`{"schema_version":1,"skip":{"path":"b.bin"}}`,
+		`{"schema_version":1,"info":{"command":"app","message":"skipped c: undeclared"}}`,
+		`{"schema_version":1,"warning":{"command":"app","message":"old cache"}}`,
+		`{"schema_version":1,"error":{"category":"none","command":"app","exit_code":1,"message":"conflict on k"}}`,
+		`{"schema_version":1,"clash":{"key":"k","message":"conflict on k"}}`,
+	}
+	if got := strings.Split(strings.TrimSuffix(e.String(), "\n"), "\n"); !slices.Equal(got, want) {
+		t.Errorf("stderr =\n%s\nwant\n%s", e.String(), strings.Join(want, "\n"))
+	}
+}
+
+// TestChannels_declaredDefaultReporter checks the default reporter is unchanged by a
+// declaration: records print with their class, by their text.
+func TestChannels_declaredDefaultReporter(t *testing.T) {
+	t.Parallel()
+	conflict := NewChannel[declaredConflict]("clash", ChannelClassError)
+	def := Definition{Name: "app", Handler: "App", Channels: []ChannelDef{{Name: "clash", Class: ChannelClassError}}}
+	p := NewProgramFunc(def, func(string) (Handler, bool) {
+		return &funcRun{run: func(rtx *Context) {
+			rtx.Record(conflict, declaredConflict{Key: "k", Message: "conflict on k"})
+		}}, true
+	})
+	var o, e bytes.Buffer
+	p.stdout, p.stderr = &o, &e
+	if code, _ := p.Run(nil); code != 1 || e.String() != "Error: conflict on k\n" {
+		t.Errorf("code, stderr = %d, %q; want 1, Error: conflict on k", code, e.String())
+	}
+}
+
+// TestChannels_declaredNotAnObject falls back to the class's message line when a declared
+// channel's record doesn't marshal to a JSON object.
+func TestChannels_declaredNotAnObject(t *testing.T) {
+	t.Parallel()
+	note := NewChannel[string]("note", ChannelClassSuccess)
+	rtx := NewContextFor(Definition{Name: "app", Channels: []ChannelDef{{Name: "note", Class: ChannelClassSuccess}}}, nil)
+	var e bytes.Buffer
+	rtx.WithStderr(&e)
+	rtx.Record(note, "done")
+	StructuredReporter(func(*Context) bool { return true })(context.Background(), rtx, Outcome{channels: rtx.copyChannels()})
+	if want := `{"schema_version":1,"success":{"command":"app","message":"done"}}` + "\n"; e.String() != want {
+		t.Errorf("stderr = %q, want %q", e.String(), want)
+	}
+}
+
 func TestNewChannel_panics(t *testing.T) {
 	t.Parallel()
 	for name, fn := range map[string]func(){

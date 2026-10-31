@@ -144,7 +144,7 @@ func scChannelDef() Definition {
 func TestShortCircuit_readerWaivesChannelRequirements(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  other: x\n")
 	reader := func() *InputReader {
-		return NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{
+		return NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{
 			Name: "app", Path: cfg, Format: "yaml",
 			Schema: `{"type":"object","required":["must"]}`,
 		}}})
@@ -189,7 +189,7 @@ func TestShortCircuit_readerSkipsUnparseableConfig(t *testing.T) {
 		rtx := NewContextFor(scChannelDef(), []string{"--help"})
 		rtx.Stdin = strings.NewReader("")
 		var in scChannelInputs
-		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
 		if err != nil {
 			t.Fatalf("Read = %v, want the unparseable config file skipped", err)
 		}
@@ -211,7 +211,7 @@ func TestShortCircuit_readerSkipsUnparseableConfig(t *testing.T) {
 				}
 			}
 		}
-		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path, Format: "yaml"}}}).Read(rtx, &in)
 		if err != nil {
 			t.Fatalf("Read = %v, want the config value skipped", err)
 		}
@@ -221,8 +221,8 @@ func TestShortCircuit_readerSkipsUnparseableConfig(t *testing.T) {
 		rtx := NewContextFor(scChannelDef(), []string{"--help"})
 		rtx.Stdin = strings.NewReader("")
 		var in scChannelInputs
-		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{
-			Name: "app", Path: "app.yaml", PathFrom: &PathFromDef{Env: "APP_CONFIG"},
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{
+			Name: "app", Path: "app.yaml", PathFrom: &PathFromDef{Env: []string{"APP_CONFIG"}},
 		}}}).Read(rtx, &in)
 		if err != nil {
 			t.Fatalf("Read = %v, want the missing config file skipped", err)
@@ -262,7 +262,7 @@ func TestShortCircuit_brokenConfigFallbackFlag(t *testing.T) {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "project", Path: path}}})
+		reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "project", Path: path}}})
 		for _, argv := range [][]string{{"--help"}, {"sub", "--help"}} {
 			rtx := NewContextFor(brokenConfigDef(), argv)
 			rtx.frame = 0
@@ -283,7 +283,7 @@ func TestShortCircuit_brokenConfigWithoutWaiver(t *testing.T) {
 	if err := os.WriteFile(path, []byte("defaults: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "project", Path: path}}})
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "project", Path: path}}})
 	rtx := NewContextFor(brokenConfigDef(), []string{"sub"})
 	rtx.frame = 0
 	var in brokenConfigInputs
@@ -312,7 +312,7 @@ func TestShortCircuit_brokenConfigKeepsOtherFiles(t *testing.T) {
 	if err := os.WriteFile(good, []byte("list:\n  limit: 9\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{
 		{Name: "broken", Path: broken},
 		{Name: "good", Path: good},
 	}})

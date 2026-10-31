@@ -67,6 +67,19 @@ type Definition struct {
 	// Metadata is the root command's own labels (spec metadata:), as written; rotini never
 	// reads them. nil when undeclared.
 	Metadata map[string]string
+	// Channels lists the outcome channels the spec declares (its root `channels:`), and those
+	// of the specs it composes. [StructuredReporter] writes a declared channel's records as
+	// lines of their own kind; see [ChannelDef].
+	Channels []ChannelDef
+}
+
+// ChannelDef is an outcome channel the spec declares: the spec's `channels:` entry. A
+// [Channel] with the same name and class is declared; its records are part of the program's
+// contract, and [StructuredReporter] writes each one as its own line,
+// {"schema_version":1,"<name>":<the record as JSON>}.
+type ChannelDef struct {
+	Name  string       // the channel's name
+	Class ChannelClass // the channel's class
 }
 
 // ExitStatusDef is one exit code a command documents: the spec's `exit_status` entry.
@@ -167,7 +180,7 @@ type FlagDependency struct {
 
 // PluginDef describes a co-located sub-command, kubectl/git plugin style: invoking it execs
 // Binary with the remaining arguments passed through. Binary is looked up next to the host
-// binary, then in the command's PluginPath, then on PATH ([Command.PluginBinary]).
+// binary, then in the command's PluginPath, then on PATH ([Command.LookPlugin]).
 type PluginDef struct {
 	Name    string        // the sub-command name that dispatches to the plugin
 	Aliases []string      // other names that dispatch to it
@@ -235,7 +248,8 @@ type CommandDef struct {
 	Inputs reflect.Type
 	// ExitStatus lists the exit codes the command documents: its own exit_status when it
 	// declares one, else the root's, which is program-wide. A command's own list replaces the
-	// root's; the lists are never merged. The generated Definition fills in the root's.
+	// root's, unless it holds `inherit: true`, which adds the root's codes it doesn't list
+	// itself. The generated Definition holds the resulting list.
 	ExitStatus []ExitStatusDef
 
 	// Usage is the command's usage line, with its full invocation ("taskr add <title>

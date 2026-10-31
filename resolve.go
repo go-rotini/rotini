@@ -75,7 +75,7 @@ type Command struct {
 	Stability string
 
 	// pluginPathRaw is PluginPath as declared, for re-expanding it against a run's injected
-	// environment; view is that run's environment, used by [Command.PluginBinary] and
+	// environment; view is that run's environment, used by [Command.LookPlugin] and
 	// [Command.DiscoveredPlugins]. Both are set by the runtime; nil reads the process.
 	pluginPathRaw string
 	view          *osView
@@ -159,13 +159,13 @@ func descend(chain []Command, def Definition, argv []string) ([]Command, *Plugin
 			continue
 		}
 		if rd, ok := findPlugin(cur, tok); ok {
-			return chain, &PluginDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: cur.PluginPath}
+			return chain, &PluginDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), PluginPath: cur.PluginPath}
 		}
 		// At a discovery-enabled command, an unmatched token dispatches to the executable
 		// <prefix><token>; the binary is located (and any error reported) at exec time.
 		if d := cur.PluginDiscovery; d != nil && pluginToken(tok) {
 			rd := PluginDef{Name: tok, Binary: d.Prefix + tok}
-			return chain, &PluginDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: cur.PluginPath, Discovered: true}
+			return chain, &PluginDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), PluginPath: cur.PluginPath, Discovered: true}
 		}
 		break // first positional argument; stop descending
 	}

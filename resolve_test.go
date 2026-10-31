@@ -134,8 +134,8 @@ func TestResolveChain_discoversPlugin(t *testing.T) {
 	if plugin.Def.Name != "foo" || plugin.Def.Binary != "acme-foo" {
 		t.Errorf("discovery dispatch = {Name:%q Binary:%q}, want {foo acme-foo}", plugin.Def.Name, plugin.Def.Binary)
 	}
-	if plugin.Dir != "/opt/acme/plugins" {
-		t.Errorf("dispatch dir = %q, want /opt/acme/plugins", plugin.Dir)
+	if plugin.PluginPath != "/opt/acme/plugins" || plugin.Dir != "" {
+		t.Errorf("dispatch plugin path = %q (Dir %q), want /opt/acme/plugins", plugin.PluginPath, plugin.Dir)
 	}
 	if len(plugin.Args) != 2 || plugin.Args[0] != "x" || plugin.Args[1] != "y" {
 		t.Errorf("discovery args = %v, want [x y]", plugin.Args)

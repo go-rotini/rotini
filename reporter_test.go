@@ -85,6 +85,27 @@ func TestStructuredReporter_inputErrorKind(t *testing.T) {
 	}
 }
 
+// A plugin error's line carries its released label as kind, and none when it is unspecified.
+func TestStructuredReporter_pluginErrorKind(t *testing.T) {
+	t.Parallel()
+	for kind, label := range map[PluginErrorKind]string{
+		PluginNotFound: "binary-not-found", PluginTimeout: "timeout", PluginStartFailed: "spawn-failed",
+	} {
+		pe := &PluginError{Name: "sync", Kind: kind, Msg: "plugin failed", cat: CategoryInternal}
+		_, stderr, _ := runReporter(wantsJSON, []string{"list", "--json"}, Outcome{Errors: []error{pe}}, 0)
+		if !strings.Contains(stderr, `"kind":"`+label+`"`) {
+			t.Errorf("%v: stderr = %s, want kind %q", kind, stderr, label)
+		}
+	}
+	unkinded := &PluginError{Name: "sync", Msg: "hand-built"}
+	if _, stderr, _ := runReporter(wantsJSON, []string{"list", "--json"}, Outcome{Errors: []error{unkinded}}, 0); strings.Contains(stderr, `"kind"`) {
+		t.Errorf("stderr = %s, want no kind for an unspecified one", stderr)
+	}
+	if got := PluginErrorKindUnspecified.String(); got != "unspecified" {
+		t.Errorf("PluginErrorKindUnspecified = %q, want unspecified", got)
+	}
+}
+
 func TestStructuredReporter_keepsADeliberateCode(t *testing.T) {
 	t.Parallel()
 	_, stderr, code := runReporter(wantsJSON, []string{"list", "--json"}, Outcome{Errors: []error{errors.New("partial")}}, 3)

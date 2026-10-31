@@ -41,7 +41,7 @@ func evDef() Definition {
 			Schema: `{"oneOf":[` + evProgressSchema + `,` + evResultSchema + `]}`,
 			Stream: true,
 			Tag:    "kind",
-			Kinds: []OutputKind{
+			Kinds: []OutputKindDef{
 				{Value: "progress", Type: reflect.TypeFor[evProgress](), Schema: evProgressSchema},
 				{Value: "result", Type: reflect.TypeFor[evResult](), Schema: evResultSchema},
 			},

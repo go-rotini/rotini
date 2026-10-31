@@ -311,13 +311,19 @@ Example command-line invocations, rendered one per line on the help page and in 
 
 array of [`ExitStatusEntry`](#exitstatusentry)
 
-Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The root's list is program-wide: a command without its own exit_status documents the root's, on its pages, on the agent skill page, in its tool definitions and in the exit-code check below, and a command's own list replaces the root's rather than adding to it. The same list is what the contract records for the command (marked `exit_status_inherited` when it is the root's), what `rotini diff` compares, what the runtime Definition's ExitStatus holds and what rotinitest.ExitDocumented checks against. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. A page given verbatim ('man' or 'markdown') leaves the section out.
+Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. An entry is a code written out (`{code: 3, name: not_found, summary: no such task}`), a `$ref` to one of the root command's named `exit_statuses` (`{$ref: not_found}`), or `{inherit: true}`. The root's list is program-wide: a command without its own exit_status documents the root's, on its pages, on the agent skill page, in its tool definitions and in the exit-code check below. A command's own list replaces the root's, unless it holds `{inherit: true}`: the root's entries then stand in that item's place, less any code the command lists itself, so a command that needs one more code writes `[{inherit: true}, {code: 4, summary: conflict}]` rather than copying the root's list. The same list is what the contract records for the command (marked `exit_status_inherited` when it holds the root's entries), what `rotini diff` compares, what the runtime Definition's ExitStatus holds and what rotinitest.ExitDocumented checks against. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses; with the conf's `validate.exit_status_one`, it also warns about a command's own list that leaves out 1, the code every recorded error exits with, and with `validate.exit_status_drops_root`, about a command's own list, without `inherit: true`, that leaves out a code the root lists. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. A page given verbatim ('man' or 'markdown') leaves the section out.
+
+#### `exit_statuses`
+
+`object`
+
+Document-level (root only): reusable exit statuses, keyed by snake_case name, which a command's `exit_status` lists by reference (`- $ref: not_found`, or `- $ref: '#/exit_statuses/not_found'`) instead of writing the entry out again. Each takes the keys of an `exit_status` entry except `name`: its key is its name. A named exit status documents nothing until a command lists it, the root included, and a command that lists one documents it as if written out there, its constant included. A composed spec's references name its own `exit_statuses`.
 
 #### `see_also`
 
-array of `string`
+array of `string` or [`SeeAlso`](#seealso)
 
-Cross-references rendered as a SEE ALSO section in the man and markdown pages (e.g. related commands or man pages like 'rotini-generate(1)', or URLs); the man page also links the parent and sub-commands. A page given verbatim ('man' or 'markdown') leaves it out.
+Cross-references rendered as a See Also section in the help, man and markdown pages; the man page also links the parent and sub-commands, and the markdown page the parent. Each is text written as it is shown (another program's man page like 'git(1)', or a note), or one of the program's own pages or a URL as an object: `{command: remote add}` names a command by its path below the root, `{topic: filters}` a help topic, and `{url: https://example.com/docs}` a link. Each page shows a reference in its own form: help the command line (`taskr remote add`, `taskr help filters`) or the URL, man the page name and section (`taskr-remote-add(1)`), markdown a link to the page (`[taskr remote add](taskr-remote-add.md)`) or the URL. In a spec composed with `$ref`, a command path is below that spec's own root. `rotini validate` warns about a command or topic the program doesn't have. A page given verbatim ('help', 'man' or 'markdown') leaves it out.
 
 #### `group`
 
@@ -392,6 +398,12 @@ When true, the command writes a stream of items rather than one value, and `outp
 `object`
 
 Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
+
+#### `channels`
+
+array of [`Channel`](#channel)
+
+Document-level (root only): the program's own outcome channels, each a kind of record a handler hands the reporter with `rtx.Record`, beside the built-in infos, successes, warnings and errors. Each becomes a generated record type `<Name>Record` and a channel handle `<Name>Channel` (the name PascalCased) in the cmd package, the type in the models package when the conf declares one. rotini.StructuredReporter writes each record as its own line, `{"schema_version":1,"<name>":{...}}`, and the contract lists the channels, so a record's shape is part of the contract `rotini diff` compares.
 
 ### Generated code
 
@@ -845,7 +857,7 @@ Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or
 
 The file's format. When omitted, the format is inferred from the file extension; declare it when the extension is missing or misleading. The built-in formats are json, yaml, toml, jsonc and dotenv. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys are used as written: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
 
-Any other name (`format: ini`) is a format of the program's own: the program adds its decoder with `WithFeatures(rotini.Codec("ini", decode))`, since `rotini generate` can't wire it, and a run that reads the file without it fails with a WiringError naming `rotini.Codec("ini", …)`. `rotini validate` warns about a name that isn't built in, so a typo doesn't go unnoticed. Such a file is read-only: SetConfigValue refuses to write it. A file with no declared format is read with a program's own format when its extension is one the codec lists (`rotini.CodecExtensions(".ini")`).
+Any other name (`format: ini`) is a format of the program's own: the program adds its decoder with `WithFeatures(rotini.Codec("ini", decode))`, since `rotini generate` can't wire it, and a run that reads the file without it fails with a WiringError naming `rotini.Codec("ini", …)`. `rotini validate` warns about a name that isn't built in, so a typo doesn't go unnoticed. SetConfigValue writes such a file only when the codec has an encoder (`rotini.CodecEncode`), which rewrites the whole file. A file with no declared format is read with a program's own format when its extension is one the codec lists (`rotini.CodecExtensions(".ini")`).
 
 ### `path`
 
@@ -992,9 +1004,17 @@ Executable-name prefix to discover: a file name, so it holds no '/' or '\'. Defa
 
 ## ExitStatusEntry
 
+One entry of a command's `exit_status`: a code written out (with `code`), a named exit status (`$ref`), or the root's list (`inherit: true`).
+
+### `$ref`
+
+`string`
+
+A named exit status under the root command's `exit_statuses`, by its name (`$ref: not_found`) or as a pointer (`$ref: '#/exit_statuses/not_found'`). The two mean the same. The entry is the named one, with its key as its `name`, so nothing else may sit beside `$ref`; to change a summary for one command, write its entry out. Resolved when you generate, against the spec file the reference is written in.
+
 ### `code`
 
-`integer` · **required**
+`integer`
 
 The exit status code being documented (0-255 — the range a process can actually return).
 
@@ -1003,6 +1023,12 @@ The exit status code being documented (0-255 — the range a process can actuall
 `string`
 
 An absolute http or https link to more about this exit code, shown in the man and markdown EXIT STATUS sections and carried into the contract. Help and the default reporter don't show it; a reporter of your own can print it, from the generated Definition's ExitStatusDef.DocsURL.
+
+### `inherit`
+
+`boolean`
+
+`inherit: true`, alone in its item, puts the root command's exit_status in this list at this point, less any code the list gives itself, so the command documents the root's codes and its own. Not valid on the root command, and at most once per list.
 
 ### `name`
 
@@ -1104,6 +1130,12 @@ Heading rendered above the flags section of the generated help page. Rendered ve
 
 Heading rendered above the Output section, which describes what the command writes when it declares `output:`. Rendered verbatim — include any trailing ':' you want. Default: "Output:".
 
+### `see_also`
+
+`string`
+
+Heading rendered above the See Also section (`see_also:`) of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "See Also:".
+
 ### `stdin`
 
 `string`
@@ -1187,6 +1219,35 @@ The generated &lt;Prefix&gt;Output is then an interface that only the kinds' typ
 array of `string`
 
 Required property names for object schemas (standard JSON Schema semantics). On an output shape, each must be one of its `properties`, or no output could pass.
+
+
+## Channel
+
+One outcome channel: a name, a class and the shape of its records.
+
+### `name`
+
+`string` · **required**
+
+The channel's name, unique among the program's channels and not a built-in outcome (info, success, warning, error, panic) or `schema_version`. It names the structured line (`{"skipped":{...}}`) and, PascalCased, the generated SkippedRecord type and SkippedChannel handle.
+
+### `class`
+
+`string` · **required** · one of `info`, `success`, `warning`, `error`
+
+How rotini treats the records when the program's reporter doesn't: info, success and warning records print where infos, successes and warnings print; error records are failures, which print with the errors and count toward the exit code, `rtx.Failed()` and the error Run returns. An error channel's schema must declare a required string property `message`: the generated type's Error method returns it.
+
+### `schema`
+
+[`Schema`](#schema) · **required**
+
+The shape of one record: an object schema, written here or a `$ref` to a named one (`type SkippedRecord File`). The generated record type is built from it, the structured line carries the record as this JSON object, and the contract carries the schema.
+
+### `summary`
+
+`string`
+
+What one record means, one line. It becomes the doc comment of the generated type and handle, and the contract carries it.
 
 
 ## Effects
@@ -1772,4 +1833,62 @@ An invoked name starting with this answers shell completion for the root instead
 `string`
 
 Stripped from the invoked name before it is matched against the root's commands: with 'acme-', a binary run as acme-ls runs `ls`. A name without the prefix runs the root.
+
+
+## NamedExitStatus
+
+A reusable exit status under the root's `exit_statuses`: an `exit_status` entry without `name`, since its key names it.
+
+### `code`
+
+`integer` · **required**
+
+The exit status code being documented (0-255 — the range a process can actually return).
+
+### `docs_url`
+
+`string`
+
+An absolute http or https link to more about this exit code, shown in the man and markdown EXIT STATUS sections and carried into the contract. Help and the default reporter don't show it; a reporter of your own can print it, from the generated Definition's ExitStatusDef.DocsURL.
+
+### `output`
+
+[`Schema`](#schema)
+
+The shape stdout still carries when the command exits with this code, for an outcome that is not plain success but prints data anyway (`3: some tasks failed; stdout lists what succeeded`). Documented in the EXIT STATUS section and described in the output schema files and the contract document.
+
+### `retryable`
+
+`boolean` · default `false`
+
+When true, running the same command again may succeed (a timeout, a busy lock). Carried into the contract for agents and other callers that decide whether to retry; rotini itself never retries.
+
+### `summary`
+
+`string`
+
+What this exit code means.
+
+
+## SeeAlso
+
+A cross-reference to one of the program's own commands or help topics, or to a URL. Exactly one key is set.
+
+### `command`
+
+`string`
+
+A command, by the names on its path below the root, separated by spaces.
+
+### `topic`
+
+`string`
+
+A help topic the root declares in `topics:`, by name.
+
+### `url`
+
+`string`
+
+An absolute http or https link.
 

@@ -194,8 +194,12 @@ type SchemasConfig struct {
 	Spec *SchemaConfig `json:"spec,omitempty"`
 }
 
-// Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. The rules are fixed, apart from the opt-in `flags_first`, `posix_names`, `input_summaries` and `help_width` warnings. `rotini validate --fail` overrides `fail`.
+// Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. The rules are fixed, apart from the opt-in `flags_first`, `posix_names`, `exit_status_one`, `exit_status_drops_root`, `input_summaries` and `help_width` warnings. `rotini validate --fail` overrides `fail`.
 type ValidateConfig struct {
+	// Opt-in: warn about each command whose own `exit_status`, without `inherit: true`, leaves out a code the root command's lists. Such a list replaces the root's, so the command's pages, tool definitions and contract stop documenting the codes it doesn't repeat. Warnings never fail validation.
+	ExitStatusDropsRoot bool `json:"exit_status_drops_root,omitempty"`
+	// Opt-in: warn about each command whose own `exit_status` leaves out 1, the code every recorded error, and a recovered panic, exits with when no handler sets another. A command without its own list, which documents the root's, isn't checked, and a list with `inherit: true` is checked with the root's codes in it. Warnings never fail validation.
+	ExitStatusOne bool `json:"exit_status_one,omitempty"`
 	// fast = stop at and report the first problem; collect = run to completion and report every problem at once (default). With collect, a document whose only schema problems are unknown keys is still linted, so a typo in one key doesn't hide the problems elsewhere.
 	Fail string `json:"fail,omitempty"`
 	// Opt-in: warn about each env or config input that no flag, or argument of its command, can also set (through its `variable:` or `key:`), so `--help` shows the whole configuration surface. Secret inputs are exempt, since a secret belongs in a file or the environment, not on the command line, and so are nested env inputs (`nesting:`), since no single flag can mirror a family of variables. Warnings never fail validation.

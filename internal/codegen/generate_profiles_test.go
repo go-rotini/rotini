@@ -50,8 +50,8 @@ func profilesProgram(t *testing.T) *program {
 func TestProfiles_renderedSettings(t *testing.T) {
 	got := renderInputSettings(profilesProgram(t))
 	for _, want := range []string{
-		`Profiles: &rotini.ProfilesDef{Under: "profiles", Flag: "profile", Env: "ACME_PROFILE,AWS_PROFILE", Default: "default"}`,
-		`Profiles: &rotini.ProfilesDef{Under: "contexts", Env: "ACME_CONTEXT", Default: "staging"}`,
+		`Profiles: &rotini.ProfilesDef{Under: "profiles", Flag: "profile", Env: []string{"ACME_PROFILE", "AWS_PROFILE"}, Default: "default"}`,
+		`Profiles: &rotini.ProfilesDef{Under: "contexts", Env: []string{"ACME_CONTEXT"}, Default: "staging"}`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("settings lack %s:\n%s", want, got)

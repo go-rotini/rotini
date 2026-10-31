@@ -32,7 +32,7 @@ func expandWindowsGlobs(p *parsedInputs, args []ArgDef, idx int) {
 		}
 		out = append(out, si.args[next:s[0]]...)
 		for _, word := range si.args[s[0]:s[1]] {
-			out = append(out, expandGlob(p.dir, word)...)
+			out = append(out, expandGlob(p.view, word)...)
 		}
 		next = s[1]
 	}
@@ -49,13 +49,14 @@ func hasGlobArg(args []ArgDef) bool {
 }
 
 // expandGlob expands one word as a Windows user expects a shell to: a word with `*`, `?` or `[`
-// becomes the sorted paths it matches, relative to dir (the run's directory, "" for the
-// process's) as the word was. `[[]`, `[*]` and `[?]` stand for the character itself: a word
+// becomes the sorted paths it matches in the run's file system, relative to the run's directory
+// (the process's when none is injected) as the word was. `[[]`, `[*]` and `[?]` stand for the character itself: a word
 // with no other metacharacter is that literal text, unexpanded, so ArgvOf's escaped values read
 // back exactly. "-" and a word naming an existing path are kept as written, and a pattern
 // matching nothing comes back with its escapes removed, so the path check reports a missing
 // match as it would on a POSIX shell.
-func expandGlob(dir, word string) []string {
+func expandGlob(view *osView, word string) []string {
+	dir := view.base()
 	if word == "-" || !strings.ContainsAny(word, "*?[") {
 		return []string{word}
 	}
@@ -63,11 +64,11 @@ func expandGlob(dir, word string) []string {
 	if !isPattern {
 		return []string{literal}
 	}
-	if _, err := os.Lstat(joinDir(dir, word)); err == nil {
+	if _, err := view.lstat(joinDir(dir, word)); err == nil {
 		return []string{word}
 	}
 	pattern := joinDir(dir, word)
-	matches, err := globFold(pattern)
+	matches, err := globFold(view, pattern)
 	if err != nil || len(matches) == 0 {
 		return []string{literal}
 	}
@@ -83,12 +84,12 @@ func expandGlob(dir, word string) []string {
 
 // globFold is [filepath.Glob] matching names regardless of case, as Windows file systems and
 // tools do: `*.TXT` matches a.txt.
-func globFold(pattern string) ([]string, error) {
+func globFold(view *osView, pattern string) ([]string, error) {
 	if _, err := filepath.Match(pattern, ""); err != nil {
 		return nil, err //nolint:wrapcheck // the caller keeps the word as written
 	}
 	if !strings.ContainsAny(pattern, "*?[") {
-		if _, err := os.Lstat(pattern); err != nil {
+		if _, err := view.lstat(pattern); err != nil {
 			return nil, nil //nolint:nilerr // a word naming no file matches nothing, as filepath.Glob reads it
 		}
 		return []string{pattern}, nil
@@ -96,18 +97,18 @@ func globFold(pattern string) ([]string, error) {
 	dir, file := filepath.Split(pattern)
 	dir = cleanGlobDir(dir)
 	if !strings.ContainsAny(dir[len(filepath.VolumeName(dir)):], "*?[") {
-		return globDirFold(dir, file, nil), nil
+		return globDirFold(view, dir, file, nil), nil
 	}
 	if dir == pattern {
 		return nil, filepath.ErrBadPattern
 	}
-	parents, err := globFold(dir)
+	parents, err := globFold(view, dir)
 	if err != nil {
 		return nil, err
 	}
 	var matches []string
 	for _, d := range parents {
-		matches = globDirFold(d, file, matches)
+		matches = globDirFold(view, d, file, matches)
 	}
 	return matches, nil
 }
@@ -130,8 +131,8 @@ func cleanGlobDir(dir string) string {
 
 // globDirFold appends to matches the entries of dir whose names match pattern regardless of
 // case, in name order.
-func globDirFold(dir, pattern string, matches []string) []string {
-	entries, err := os.ReadDir(dir)
+func globDirFold(view *osView, dir, pattern string, matches []string) []string {
+	entries, err := view.readDir(dir)
 	if err != nil {
 		return matches
 	}

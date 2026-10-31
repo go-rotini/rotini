@@ -146,8 +146,8 @@ func TestArgvOf_literalFreeSecret(t *testing.T) {
 	var v inputs
 	v.App.Flags.Token = "sk"
 	_, _, err := ArgvOf(def, v, PresenceOf(v), ArgvSecrets())
-	if ae, ok := err.(*ArgvError); !ok || !strings.Contains(ae.Reason, "file or stdin") {
-		t.Errorf("err = %v, want an *ArgvError asking for a file or stdin", err)
+	if ae, ok := err.(*ArgvOfError); !ok || !strings.Contains(ae.Reason, "file or stdin") {
+		t.Errorf("err = %v, want an *ArgvOfError asking for a file or stdin", err)
 	}
 }
 

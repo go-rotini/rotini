@@ -36,7 +36,7 @@ func (p *program) exitConstants() []exitConst {
 		}
 		for _, e := range entries {
 			if e.Name != "" {
-				out = append(out, exitConst{name: prefix + "Exit" + toPascalCase(e.Name), code: e.Code, owner: invocation, entry: e.Name})
+				out = append(out, exitConst{name: prefix + "Exit" + constCase(toPascalCase(e.Name)), code: e.Code, owner: invocation, entry: e.Name})
 			}
 		}
 	}

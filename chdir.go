@@ -160,7 +160,7 @@ func (rtx *Context) enterChdir(s chdirSite) (string, error) {
 	if err != nil {
 		return "", InternalError(err)
 	}
-	if err := checkPathExists(s.typed, "existingdir", s.value, base); err != nil {
+	if err := checkPathExists(s.typed, "existingdir", s.value, view); err != nil {
 		return "", err
 	}
 	dir := filepath.Clean(joinDir(base, s.value))

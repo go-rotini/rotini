@@ -9,14 +9,22 @@ import (
 
 // This file turns the spec's examples into tool input examples: the parameters a tool call
 // passes to run the same command line. MCP carries them as the input schema's `examples`; the
-// OpenAI and Gemini formats have no field for them.
+// OpenAI and Gemini formats have no field for them, so their descriptions list the same
+// examples' command lines.
+
+// toolExample is one example of a command, with what its command line sets.
+type toolExample struct {
+	Example
+
+	use exampleUse
+}
 
 // exampleUses returns what each example of the program's own spec sets, keyed by the path of
 // the command it runs below the root (space separated), in spec order. Only examples whose
 // first command running the program has literal words, parses, and runs a command of this
 // spec are kept.
-func (p *program) exampleUses() map[string][]exampleUse {
-	out := map[string][]exampleUse{}
+func (p *program) exampleUses() map[string][]toolExample {
+	out := map[string][]toolExample{}
 	if p.spec == nil {
 		return out
 	}
@@ -32,23 +40,50 @@ func (p *program) exampleUses() map[string][]exampleUse {
 				names = append(names, cmd.Name)
 			}
 			key := strings.Join(names, " ")
-			out[key] = append(out[key], *res.use)
+			out[key] = append(out[key], toolExample{Example: ex, use: *res.use})
 		}
 	})
 	return out
 }
 
-// inputExamples returns the tool calls that run uses, leaving out each one a call can't
-// express: an input that isn't a parameter, a literal secret, a required parameter it leaves
-// out, or a value the parameter's schema can't hold as written.
-func (t *tool) inputExamples(uses []exampleUse) []any {
-	var out []any
-	for _, u := range uses {
-		if params, ok := t.exampleParams(u); ok {
-			out = append(out, params)
+// inputExamples returns the tool calls that run the examples, and the examples they run,
+// leaving out each one a call can't express: an input that isn't a parameter, a literal
+// secret, a required parameter it leaves out, or a value the parameter's schema can't hold as
+// written.
+func (t *tool) inputExamples(examples []toolExample) (calls []any, shown []Example) {
+	for _, ex := range examples {
+		if params, ok := t.exampleParams(ex.use); ok {
+			calls = append(calls, params)
+			shown = append(shown, ex.Example)
 		}
 	}
-	return out
+	return calls, shown
+}
+
+// describedExamples is description followed by the examples' command lines, each with its
+// summary as a trailing comment, for the formats with no field for examples:
+//
+//	Examples:
+//	  taskr add "buy milk"  # add a task
+func describedExamples(description string, examples []Example) string {
+	if len(examples) == 0 {
+		return description
+	}
+	var b strings.Builder
+	if description != "" {
+		b.WriteString(description)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Examples:")
+	for _, ex := range examples {
+		b.WriteString("\n  ")
+		b.WriteString(strings.TrimSpace(ex.Run))
+		if ex.Summary != "" {
+			b.WriteString("  # ")
+			b.WriteString(ex.Summary)
+		}
+	}
+	return b.String()
 }
 
 // exampleParams writes what u sets as the tool's parameters.

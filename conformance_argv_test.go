@@ -30,7 +30,7 @@ func mrgDef() Definition {
 	}
 }
 
-var mrgFiles = []ConfigFile{
+var mrgFiles = []ConfigFileDef{
 	{Name: "user", Path: "user.yaml", Format: "yaml"},
 	{Name: "sys", Path: "sys.toml", Format: "toml"},
 	{Name: "base", Path: "base.json", Format: "json"},

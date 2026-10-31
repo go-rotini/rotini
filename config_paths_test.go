@@ -27,7 +27,7 @@ func configPathDef(dflt string) Definition {
 }
 
 func configPathSettings() InputSettings {
-	return InputSettings{ConfigFiles: []ConfigFile{{Name: "c", Path: "none.yaml", PathFrom: &PathFromDef{Flag: "config", Env: "APP_CONFIG"}}}}
+	return InputSettings{ConfigFiles: []ConfigFileDef{{Name: "c", Path: "none.yaml", PathFrom: &PathFromDef{Flag: "config", Env: []string{"APP_CONFIG"}}}}}
 }
 
 // A config_source path the user gave, on the command line or in a variable, is the file read
@@ -96,7 +96,7 @@ func TestConfigSource_userPathIsLiteral(t *testing.T) {
 // rotini's words, with the line and column of the repeated key.
 func TestConfigFile_problemWording(t *testing.T) {
 	dir := t.TempDir()
-	set := InputSettings{ConfigFiles: []ConfigFile{{Name: "c", Path: "~nosuchuser/x.yaml"}}}
+	set := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "c", Path: "~nosuchuser/x.yaml"}}}
 	_, err := NewContextFor(configPathDef(""), nil).WithInputSettings(set).Inputs[configPathInputs]()
 	if err == nil || !strings.Contains(err.Error(), `cannot expand "~nosuchuser": no such user`) || strings.Contains(err.Error(), "user: unknown") {
 		t.Errorf("~nosuchuser: %v", err)
@@ -104,7 +104,7 @@ func TestConfigFile_problemWording(t *testing.T) {
 
 	p := filepath.Join(dir, "c.toml")
 	writeTestFile(t, p, "name = 'a'\nname = 'b'\n")
-	set = InputSettings{ConfigFiles: []ConfigFile{{Name: "c", Path: p}}}
+	set = InputSettings{ConfigFiles: []ConfigFileDef{{Name: "c", Path: p}}}
 	_, err = NewContextFor(configPathDef(""), nil).WithInputSettings(set).Inputs[configPathInputs]()
 	// The column is the TOML reader's: where it places the repeated key.
 	want := regexp.MustCompile(`could not parse configuration file ` + regexp.QuoteMeta(p) + `:2:[1-9][0-9]*: duplicate key "name"`)
@@ -138,7 +138,7 @@ func TestPinnedConfig_expandedInEveryReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestFile(t, user, "dir: ~/x\ndirs: [~/a, ~/b]\nrel: data\n")
-	set := InputSettings{ConfigFiles: []ConfigFile{{Name: "user", Path: user}}}
+	set := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "user", Path: user}}}
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithInputSettings(set).WithEnviron([]string{"HOME=" + home, "USERPROFILE=" + home})
 	// ~ is replaced by the home directory as written, so the rest keeps its slash on Windows too.
 	want := home + "/x " + home + "/a," + home + "/b " + filepath.Join(dir, "sub", "data")
@@ -187,7 +187,7 @@ func TestConfigFile_decodedOncePerRead(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.count")
 	writeTestFile(t, p, "name: x\nport: 8\n")
 	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "port", Identifiers: []string{"--port"}, Type: "int"}}}
-	set := InputSettings{ConfigFiles: []ConfigFile{{Name: "c", Path: p, Schema: `{"type":"object"}`}}}
+	set := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "c", Path: p, Schema: `{"type":"object"}`}}}
 	decodes := 0
 	rtx := NewContextFor(def, nil).WithInputSettings(set)
 	counting := Feature{name: "codec:count", apply: func(s *featureSet) {

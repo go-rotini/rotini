@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"maps"
-	"os"
 	"slices"
 	"strings"
 )
@@ -21,7 +20,7 @@ type UnreadConfigKey struct {
 
 // UnreadConfigKeys lists the keys of the configuration files this read opened that no input
 // of the program reads, in the order the files were opened and each file's keys sorted. A key
-// is read when an input of any command reads it ([ConfigFile.Keys]), and everything under it
+// is read when an input of any command reads it ([ConfigFileDef.Keys]), and everything under it
 // with it, so a map or object input's own keys are never listed. An `as: env` file, whose
 // variables other programs may share, is left out, and so is a file no input of the command
 // reads, which is never opened.
@@ -97,7 +96,7 @@ func unreadKeys(d openedDoc) []UnreadConfigKey {
 	}
 	var data []byte
 	if d.codec != nil && d.codec.locate != nil {
-		if raw, err := os.ReadFile(d.src.Path()); err == nil {
+		if raw, err := sourceView(d.src).readFile(d.src.Path()); err == nil {
 			data = stripBOM(raw)
 		}
 	}

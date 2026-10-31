@@ -120,7 +120,7 @@ func TestSchemaCheck_timesAreText(t *testing.T) {
 			}
 		}
 	}
-	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Schema: schema}}}).
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Schema: schema}}}).
 		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err != nil || !in.App.Config.Dt.Equal(time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)) {
 		t.Errorf("config file: dt %v, err %v", in.App.Config.Dt, err)
@@ -161,7 +161,7 @@ func TestSchemaCheck_unfinishedIsNotInvalid(t *testing.T) {
 			}
 		}
 	}
-	err = NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Schema: schema}}}).
+	err = NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Schema: schema}}}).
 		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err == nil || !strings.Contains(err.Error(), "could not be fully checked against its schema") || strings.Contains(err.Error(), "invalid") {
 		t.Errorf("err = %v, want the file reported as not fully checked", err)

@@ -1,0 +1,26 @@
+# Declared channels: a reserved name, a name declared twice, a record that isn't an object, and
+# an error channel whose record has no required string message for its Error method.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    Word: { type: string }
+  channels:
+    - name: skipped
+      class: info
+      schema: { type: object, properties: { path: { type: string } } }
+    - name: warning
+      class: warning
+      schema: { type: object, properties: { text: { type: string } } }
+    - name: skipped
+      class: info
+      schema: { type: object, properties: { path: { type: string } } }
+    - name: word
+      class: info
+      schema: { $ref: Word }
+    - name: conflict
+      class: error
+      schema: { type: object, properties: { message: { type: string } } }
+    - name: clash
+      class: error
+      schema: { type: object, required: [message], properties: { message: { type: string } } }

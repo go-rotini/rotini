@@ -141,26 +141,27 @@ type agentDoc struct {
 }
 
 type agentContractCmd struct {
-	Name        string         `json:"name"`
-	Path        []string       `json:"path"`
-	Summary     string         `json:"summary"`
-	Description string         `json:"description"`
-	Aliases     []string       `json:"aliases"`
-	Hidden      bool           `json:"hidden"`
-	Deprecated  string         `json:"deprecated"`
-	Plugin      bool           `json:"plugin"`
-	Passthrough bool           `json:"passthrough"`
-	Arguments   []agentInput   `json:"arguments"`
-	Flags       []agentInput   `json:"flags"`
-	Env         []agentInput   `json:"env"`
-	Config      []agentInput   `json:"config"`
-	Stdin       *contractStdin `json:"stdin"`
-	Output      map[string]any `json:"output"`
-	Stream      bool           `json:"stream"`
-	ExitStatus  []contractExit `json:"exit_status"`
-	Stability   string         `json:"stability"`
-	Effects     *Effects       `json:"effects"`
-	Agent       *bool          `json:"agent"`
+	Name        string            `json:"name"`
+	Path        []string          `json:"path"`
+	Summary     string            `json:"summary"`
+	Description string            `json:"description"`
+	Aliases     []string          `json:"aliases"`
+	Hidden      bool              `json:"hidden"`
+	Deprecated  string            `json:"deprecated"`
+	Plugin      bool              `json:"plugin"`
+	Passthrough bool              `json:"passthrough"`
+	Arguments   []agentInput      `json:"arguments"`
+	Flags       []agentInput      `json:"flags"`
+	Env         []agentInput      `json:"env"`
+	Config      []agentInput      `json:"config"`
+	Stdin       *contractStdin    `json:"stdin"`
+	Output      map[string]any    `json:"output"`
+	Stream      bool              `json:"stream"`
+	ExitStatus  []contractExit    `json:"exit_status"`
+	Stability   string            `json:"stability"`
+	Effects     *Effects          `json:"effects"`
+	Agent       *bool             `json:"agent"`
+	Metadata    map[string]string `json:"metadata"`
 }
 
 // agentInput is an argument, flag, env or config input of the contract.

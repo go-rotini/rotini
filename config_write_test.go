@@ -13,8 +13,8 @@ import (
 )
 
 // cwKeys is the key table of the test file.
-func cwKeys() []ConfigKey {
-	return []ConfigKey{
+func cwKeys() []ConfigKeyDef {
+	return []ConfigKeyDef{
 		{Key: "deploy.replicas", Type: "int", Minimum: new(1.0), Maximum: new(9.0)},
 		{Key: "deploy.timeout", Type: "time.Duration"},
 		{Key: "level", Type: "string", Enum: []string{"debug", "info"}, IgnoreCase: true},
@@ -28,11 +28,11 @@ func cwKeys() []ConfigKey {
 	}
 }
 
-func cwFile(path string) ConfigFile {
-	return ConfigFile{Name: "app", Path: path, Keys: cwKeys()}
+func cwFile(path string) ConfigFileDef {
+	return ConfigFileDef{Name: "app", Path: path, Keys: cwKeys()}
 }
 
-func cwContext(dir string, env []string, files ...ConfigFile) *Context {
+func cwContext(dir string, env []string, files ...ConfigFileDef) *Context {
 	return pfContext(dir, env, pfSettings(files...))
 }
 
@@ -137,24 +137,24 @@ func TestSetConfigValue_refusesInvalidValues(t *testing.T) {
 // a flag and the writer's checks of a key declared alike: the messages agree after the label.
 func TestSetConfigValue_checksAsTheCommandLine(t *testing.T) {
 	tests := []struct {
-		key ConfigKey
+		key ConfigKeyDef
 		raw string
 	}{
-		{ConfigKey{Key: "n", Type: "int", Maximum: new(5.0)}, "7"},
-		{ConfigKey{Key: "n", Type: "int"}, "x"},
-		{ConfigKey{Key: "n", Type: "string", MinLength: 3}, "ab"},
-		{ConfigKey{Key: "n", Type: "string", Pattern: "^a", PatternMessage: "starts with a"}, "b"},
-		{ConfigKey{Key: "n", Type: "[]int", MinItems: 2}, "1"},
-		{ConfigKey{Key: "n", Type: "string", Enum: []string{"a", "b"}}, "c"},
-		{ConfigKey{Key: "n", Type: "rotini.ByteSize", Maximum: new(1024.0)}, "2KiB"},
-		{ConfigKey{Key: "n", Type: "time.Time", Layout: "2006-01-02"}, "yesterday"},
-		{ConfigKey{Key: "n", Type: "int", Base: basePrefixed, Maximum: new(255.0)}, "0x100"},
-		{ConfigKey{Key: "n", Type: "int", Base: basePrefixed}, "1__0"},
+		{ConfigKeyDef{Key: "n", Type: "int", Maximum: new(5.0)}, "7"},
+		{ConfigKeyDef{Key: "n", Type: "int"}, "x"},
+		{ConfigKeyDef{Key: "n", Type: "string", MinLength: 3}, "ab"},
+		{ConfigKeyDef{Key: "n", Type: "string", Pattern: "^a", PatternMessage: "starts with a"}, "b"},
+		{ConfigKeyDef{Key: "n", Type: "[]int", MinItems: 2}, "1"},
+		{ConfigKeyDef{Key: "n", Type: "string", Enum: []string{"a", "b"}}, "c"},
+		{ConfigKeyDef{Key: "n", Type: "rotini.ByteSize", Maximum: new(1024.0)}, "2KiB"},
+		{ConfigKeyDef{Key: "n", Type: "time.Time", Layout: "2006-01-02"}, "yesterday"},
+		{ConfigKeyDef{Key: "n", Type: "int", Base: basePrefixed, Maximum: new(255.0)}, "0x100"},
+		{ConfigKeyDef{Key: "n", Type: "int", Base: basePrefixed}, "1__0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key.Type+"="+tt.raw, func(t *testing.T) {
 			dir := t.TempDir()
-			rtx := cwContext(dir, nil, ConfigFile{Name: "app", Path: filepath.Join(dir, "a.yaml"), Keys: []ConfigKey{tt.key}})
+			rtx := cwContext(dir, nil, ConfigFileDef{Name: "app", Path: filepath.Join(dir, "a.yaml"), Keys: []ConfigKeyDef{tt.key}})
 			werr := SetConfigValue(rtx, "app", "n", tt.raw)
 			fd := tt.key.flagDef()
 			fd.Name, fd.Identifiers = "n", []string{"--n"}
@@ -222,7 +222,7 @@ func TestSetConfigValue_keepsTheMode(t *testing.T) {
 	if err := os.Chmod(path, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	rtx := cwContext(dir, nil, ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{{Key: "region", Type: "string"}}})
+	rtx := cwContext(dir, nil, ConfigFileDef{Name: "app", Path: path, Keys: []ConfigKeyDef{{Key: "region", Type: "string"}}})
 	if err := SetConfigValue(rtx, "app", "region", "us"); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestSetConfigValue_keepsTheMode(t *testing.T) {
 		t.Errorf("mode %#o, want 0640", info.Mode().Perm())
 	}
 	fresh := filepath.Join(dir, "fresh.yaml")
-	rtx = cwContext(dir, nil, ConfigFile{Name: "app", Path: fresh, Keys: []ConfigKey{{Key: "region", Type: "string"}}})
+	rtx = cwContext(dir, nil, ConfigFileDef{Name: "app", Path: fresh, Keys: []ConfigKeyDef{{Key: "region", Type: "string"}}})
 	if err := SetConfigValue(rtx, "app", "region", "us"); err != nil {
 		t.Fatal(err)
 	}
@@ -273,10 +273,10 @@ func TestSetConfigValue_symlink(t *testing.T) {
 }
 
 func TestSetConfigValue_createsByStrategy(t *testing.T) {
-	keys := []ConfigKey{{Key: "region", Type: "string"}}
+	keys := []ConfigKeyDef{{Key: "region", Type: "string"}}
 	t.Run("path", func(t *testing.T) {
 		dir := t.TempDir()
-		rtx := cwContext(dir, []string{"HOME=" + dir, "USERPROFILE=" + dir}, ConfigFile{Name: "app", Path: "~/a/b/app.yaml", Keys: keys})
+		rtx := cwContext(dir, []string{"HOME=" + dir, "USERPROFILE=" + dir}, ConfigFileDef{Name: "app", Path: "~/a/b/app.yaml", Keys: keys})
 		if err := SetConfigValue(rtx, "app", "region", "us"); err != nil {
 			t.Fatal(err)
 		}
@@ -288,7 +288,7 @@ func TestSetConfigValue_createsByStrategy(t *testing.T) {
 		dir := t.TempDir()
 		xdg := filepath.Join(dir, "xdg")
 		rtx := cwContext(dir, []string{"XDG_CONFIG_HOME=" + xdg, "HOME=" + dir},
-			ConfigFile{Name: "app", Discover: &DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "app"}, Keys: keys})
+			ConfigFileDef{Name: "app", Discover: &DiscoverDef{Strategy: "xdg", File: "config.yaml", App: "app"}, Keys: keys})
 		path, exists, err := ConfigFilePath(rtx, "app")
 		if err != nil || exists || path != filepath.Join(xdg, "app", "config.yaml") {
 			t.Fatalf("ConfigFilePath = %q, %v, %v", path, exists, err)
@@ -312,7 +312,7 @@ func TestSetConfigValue_createsByStrategy(t *testing.T) {
 			want = filepath.Join(dir, "lib", "app", "config.yaml")
 		}
 		env := []string{"HOME=" + dir, "home=" + dir, "XDG_CONFIG_HOME=" + filepath.Join(dir, "xdg"), "AppData=" + filepath.Join(dir, "roaming")}
-		rtx := cwContext(dir, env, ConfigFile{Name: "app", Discover: &DiscoverDef{Strategy: "native", File: "config.yaml", App: "app"}, Keys: keys})
+		rtx := cwContext(dir, env, ConfigFileDef{Name: "app", Discover: &DiscoverDef{Strategy: "native", File: "config.yaml", App: "app"}, Keys: keys})
 		path, exists, err := ConfigFilePath(rtx, "app")
 		if err != nil || exists || path != want {
 			t.Fatalf("ConfigFilePath = %q, %v, %v; want %q", path, exists, err, want)
@@ -330,7 +330,7 @@ func TestSetConfigValue_createsByStrategy(t *testing.T) {
 		if err := os.MkdirAll(run, 0o750); err != nil {
 			t.Fatal(err)
 		}
-		f := ConfigFile{Name: "app", Discover: &DiscoverDef{Strategy: "walk-up", File: ".app.yaml"}, Keys: keys}
+		f := ConfigFileDef{Name: "app", Discover: &DiscoverDef{Strategy: "walk-up", File: ".app.yaml"}, Keys: keys}
 		if err := SetConfigValue(cwContext(run, nil, f), "app", "region", "us"); err != nil {
 			t.Fatal(err)
 		}
@@ -350,7 +350,7 @@ func TestSetConfigValue_createsByStrategy(t *testing.T) {
 	})
 	t.Run("config_source", func(t *testing.T) {
 		dir := t.TempDir()
-		f := ConfigFile{Name: "app", Path: "default.yaml", PathFrom: &PathFromDef{Flag: "config"}, Keys: keys}
+		f := ConfigFileDef{Name: "app", Path: "default.yaml", PathFrom: &PathFromDef{Flag: "config"}, Keys: keys}
 		if err := SetConfigValue(cwContext(dir, nil, f), "app", "region", "us"); err == nil {
 			// the flag isn't set: the fixed path
 			if got := cwRead(t, filepath.Join(dir, "default.yaml")); got != "region: us\n" {
@@ -369,7 +369,7 @@ func TestSetConfigValue_createsByStrategy(t *testing.T) {
 	})
 	t.Run("xdg-system", func(t *testing.T) {
 		dir := t.TempDir()
-		f := ConfigFile{Name: "app", Discover: &DiscoverDef{Strategy: "xdg-system", File: "config.yaml", App: "app"}, Keys: keys}
+		f := ConfigFileDef{Name: "app", Discover: &DiscoverDef{Strategy: "xdg-system", File: "config.yaml", App: "app"}, Keys: keys}
 		rtx := cwContext(dir, []string{"XDG_CONFIG_DIRS=" + dir}, f)
 		err := SetConfigValue(rtx, "app", "region", "us")
 		if err == nil || !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), "system configuration directories") {
@@ -382,9 +382,9 @@ func TestSetConfigValue_createsByStrategy(t *testing.T) {
 }
 
 func TestSetConfigValue_profiles(t *testing.T) {
-	keys := []ConfigKey{{Key: "region", Type: "string"}, {Key: "db.host", Type: "string"}}
-	file := func(path string) ConfigFile {
-		return ConfigFile{Name: "app", Path: path, Profiles: pfProfiles(), Keys: keys}
+	keys := []ConfigKeyDef{{Key: "region", Type: "string"}, {Key: "db.host", Type: "string"}}
+	file := func(path string) ConfigFileDef {
+		return ConfigFileDef{Name: "app", Path: path, Profiles: pfProfiles(), Keys: keys}
 	}
 	const body = "region: eu\nprofiles:\n  prod:\n    region: us\n"
 	dir := t.TempDir()
@@ -431,7 +431,7 @@ func TestSetConfigValue_profiles(t *testing.T) {
 			t.Errorf("contradicting options: %v", err)
 		}
 	}
-	plain := ConfigFile{Name: "app", Path: path, Keys: keys}
+	plain := ConfigFileDef{Name: "app", Path: path, Keys: keys}
 	if err := SetConfigValue(cwContext(dir, nil, plain), "app", "region", "x", ConfigToProfile("a")); !errors.Is(err, ErrInternal) {
 		t.Errorf("ToProfile on a file without profiles: %v", err)
 	}
@@ -440,8 +440,8 @@ func TestSetConfigValue_profiles(t *testing.T) {
 func TestSetConfigValue_schema(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.yaml", "region: eu\n")
-	f := ConfigFile{
-		Name: "app", Path: path, Keys: []ConfigKey{{Key: "region", Type: "string"}},
+	f := ConfigFileDef{
+		Name: "app", Path: path, Keys: []ConfigKeyDef{{Key: "region", Type: "string"}},
 		Schema: `{"type":"object","properties":{"region":{"enum":["eu","us"]}}}`,
 	}
 	rtx := cwContext(dir, nil, f)
@@ -449,7 +449,7 @@ func TestSetConfigValue_schema(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := SetConfigValue(rtx, "app", "region", "ap")
-	if err == nil || !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), "config key region: configuration file "+path+" would be invalid:") {
+	if err == nil || !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), "config key region: configuration file "+path+`:1:9 would be invalid: region: value is not in enum (got "ap")`) {
 		t.Errorf("err = %v", err)
 	}
 	if got := cwRead(t, path); got != "region: us\n" {
@@ -482,7 +482,7 @@ func TestSetConfigValue_customTypes(t *testing.T) {
 }
 
 func TestSetConfigValue_formats(t *testing.T) {
-	keys := []ConfigKey{{Key: "a.b", Type: "int"}, {Key: "tags", Type: "[]string"}, {Key: "APP_NAME", Type: "string"}}
+	keys := []ConfigKeyDef{{Key: "a.b", Type: "int"}, {Key: "tags", Type: "[]string"}, {Key: "APP_NAME", Type: "string"}}
 	tests := []struct {
 		name, file, body, key, raw, want string
 		as                               string
@@ -499,7 +499,7 @@ func TestSetConfigValue_formats(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := pfWrite(t, dir, tt.file, tt.body)
-			f := ConfigFile{Name: "app", Path: path, As: tt.as, Keys: keys}
+			f := ConfigFileDef{Name: "app", Path: path, As: tt.as, Keys: keys}
 			if err := SetConfigValue(cwContext(dir, nil, f), "app", tt.key, tt.raw); err != nil {
 				t.Fatal(err)
 			}
@@ -513,13 +513,13 @@ func TestSetConfigValue_formats(t *testing.T) {
 func TestSetConfigValue_refusedLayout(t *testing.T) {
 	dir := t.TempDir()
 	path := pfWrite(t, dir, "app.yaml", "base: &b\n  region: eu\nother: *b\n")
-	f := ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{{Key: "other.region", Type: "string"}}}
+	f := ConfigFileDef{Name: "app", Path: path, Keys: []ConfigKeyDef{{Key: "other.region", Type: "string"}}}
 	err := SetConfigValue(cwContext(dir, nil, f), "app", "other.region", "us")
 	if err == nil || !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), "edit the file by hand") {
 		t.Errorf("err = %v", err)
 	}
 	broken := pfWrite(t, dir, "broken.yaml", "region: [\n")
-	f = ConfigFile{Name: "app", Path: broken, Keys: []ConfigKey{{Key: "region", Type: "string"}}}
+	f = ConfigFileDef{Name: "app", Path: broken, Keys: []ConfigKeyDef{{Key: "region", Type: "string"}}}
 	if err := SetConfigValue(cwContext(dir, nil, f), "app", "region", "us"); err == nil || !errors.Is(err, ErrUsage) {
 		t.Errorf("an unparsable file: %v", err)
 	}
@@ -541,7 +541,7 @@ func TestSetConfigValue_bigIntegers(t *testing.T) {
 		t.Run(tt.file+" "+tt.raw, func(t *testing.T) {
 			dir := t.TempDir()
 			path := pfWrite(t, dir, tt.file, "")
-			f := ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{{Key: "big", Type: tt.typ}}}
+			f := ConfigFileDef{Name: "app", Path: path, Keys: []ConfigKeyDef{{Key: "big", Type: tt.typ}}}
 			err := SetConfigValue(cwContext(dir, nil, f), "app", "big", tt.raw)
 			if err == nil {
 				if tt.always {
@@ -567,7 +567,7 @@ func TestSetConfigValue_envFileOnly(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")
 	def := Definition{Name: "app", Handler: "App"}
-	meta := pfSettings(ConfigFile{Name: "dotenv", As: "env", Format: "dotenv", Path: path, Keys: []ConfigKey{{Key: "APP_PORT", Type: "int"}}})
+	meta := pfSettings(ConfigFileDef{Name: "dotenv", As: "env", Format: "dotenv", Path: path, Keys: []ConfigKeyDef{{Key: "APP_PORT", Type: "int"}}})
 	rtx := wiredFor(NewContextFor(def, nil).WithDir(dir).WithInputSettings(meta), def, meta)
 	if rtx.features().config != nil {
 		t.Fatal("the fixture wires configuration files")
@@ -618,7 +618,7 @@ func TestTypeForName(t *testing.T) {
 func TestSetConfigValue_everyReaderOfTheKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "app.yaml")
-	f := ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{
+	f := ConfigFileDef{Name: "app", Path: path, Keys: []ConfigKeyDef{
 		{Key: "n", Type: "int", Maximum: new(10.0)},
 		{Key: "n", Type: "int", Minimum: new(5.0)},
 	}}
@@ -641,7 +641,7 @@ func TestSetConfigValue_float32(t *testing.T) {
 	for _, name := range []string{"app.yaml", "app.toml", "app.json"} {
 		dir := t.TempDir()
 		path := pfWrite(t, dir, name, "")
-		rtx := cwContext(dir, nil, ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{{Key: "ratio", Type: "float32"}}})
+		rtx := cwContext(dir, nil, ConfigFileDef{Name: "app", Path: path, Keys: []ConfigKeyDef{{Key: "ratio", Type: "float32"}}})
 		if err := SetConfigValue(rtx, "app", "ratio", "0.1"); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -679,9 +679,9 @@ func TestFloat32_typedChecks(t *testing.T) {
 // treats a key the file doesn't hold, or a file that doesn't exist, as done.
 func TestUnsetConfigValue_emptiesAndAbsences(t *testing.T) {
 	dir := t.TempDir()
-	keys := []ConfigKey{{Key: "region", Type: "string"}, {Key: "db.host", Type: "string"}}
+	keys := []ConfigKeyDef{{Key: "region", Type: "string"}, {Key: "db.host", Type: "string"}}
 	path := pfWrite(t, dir, "app.yaml", "# where\nregion: eu\ndb:\n  host: h\n")
-	rtx := cwContext(dir, nil, ConfigFile{Name: "app", Path: path, Keys: keys})
+	rtx := cwContext(dir, nil, ConfigFileDef{Name: "app", Path: path, Keys: keys})
 	if err := UnsetConfigValue(rtx, "app", "db.host"); err != nil {
 		t.Fatal(err)
 	}
@@ -690,7 +690,7 @@ func TestUnsetConfigValue_emptiesAndAbsences(t *testing.T) {
 	}
 
 	missing := filepath.Join(dir, "none", "app.yaml")
-	rtx = cwContext(dir, nil, ConfigFile{Name: "app", Path: missing, Keys: keys})
+	rtx = cwContext(dir, nil, ConfigFileDef{Name: "app", Path: missing, Keys: keys})
 	if err := UnsetConfigValue(rtx, "app", "region"); err != nil {
 		t.Errorf("unset in a missing file: %v", err)
 	}

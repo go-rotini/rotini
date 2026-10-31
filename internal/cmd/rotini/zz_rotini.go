@@ -775,18 +775,18 @@ type RotiniVersionOutput struct {
 
 // Named exit codes, from each command's exit_status, for rtx.HaltWithCode and rtx.Exit.
 const (
-	RotiniDiffExitOk       = 0 // "rotini diff": ok
+	RotiniDiffExitOK       = 0 // "rotini diff": ok
 	RotiniDiffExitError    = 1 // "rotini diff": error
 	RotiniDiffExitBreaking = 2 // "rotini diff": breaking
 )
 
 // The values of the format flag of rotini initialize.
 const (
-	RotiniInitializeFormatYaml  = "yaml"
+	RotiniInitializeFormatYAML  = "yaml"
 	RotiniInitializeFormatYml   = "yml"
 	RotiniInitializeFormatJSON  = "json"
-	RotiniInitializeFormatJsonc = "jsonc"
-	RotiniInitializeFormatToml  = "toml"
+	RotiniInitializeFormatJSONC = "jsonc"
+	RotiniInitializeFormatTOML  = "toml"
 )
 
 // The values of the template flag of rotini initialize.
@@ -829,7 +829,7 @@ const (
 	RotiniCompletionShellBash       = "bash"
 	RotiniCompletionShellZsh        = "zsh"
 	RotiniCompletionShellFish       = "fish"
-	RotiniCompletionShellPowershell = "powershell"
+	RotiniCompletionShellPowerShell = "powershell"
 	RotiniCompletionShellNushell    = "nushell"
 )
 
@@ -848,11 +848,11 @@ const (
 
 // The values of the format flag of flag set Import.
 const (
-	RotiniImportFormatYaml  = "yaml"
+	RotiniImportFormatYAML  = "yaml"
 	RotiniImportFormatYml   = "yml"
 	RotiniImportFormatJSON  = "json"
-	RotiniImportFormatJsonc = "jsonc"
-	RotiniImportFormatToml  = "toml"
+	RotiniImportFormatJSONC = "jsonc"
+	RotiniImportFormatTOML  = "toml"
 )
 
 // The values of the Severity field of RotiniDiffOutputFindingsItem.

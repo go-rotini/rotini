@@ -53,18 +53,21 @@ const (
 //     [Program.WithBufferedOutput] to buffer stdout
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
 //     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletionFormat],
-//     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions]; the environment
-//     and working directory a run reads, [Program.WithEnviron] and [Program.WithDir]; the clock
+//     [Program.WithCompletionMessages], [Program.WithCompletionDescriptions]; the environment,
+//     working directory and file system a run reads, [Program.WithEnviron], [Program.WithDir] and
+//     [Program.WithFS]; the clock
 //     relative times read, [Program.WithClock]; [Program.WithTerminationTimeout] bounds the
 //     wait after a signal, and [Program.WithArgv0] sets the name a multicall program dispatches
 //     on
-//   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter];
-//     [Program.Reporter] returns the reporter a run uses
+//   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter],
+//     [Program.WithReporterOnEmpty] to report runs that recorded nothing; [Program.Reporter]
+//     returns the reporter a run uses
 //   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
 //     against the command's declared contract
 //   - the program's dependencies — [Program.WithDependency], or [Program.With] with the
 //     [WithDependency] option to register several at once; [Program.WithProvider]
-//     for one built per run on first use
+//     for one built per run on first use, [Program.WithSharedProvider] for one built once for
+//     the program, and [Program.Close] to release what shared providers built
 //   - rotini's own settings — [Program.WithVersion], [Program.WithParser] (the [ArgvParser]
 //     that reads the command line), [Program.WithInputReader] (deprecated), and the ones the
 //     generated code sets, [Program.WithInputSettings], [Program.WithHelp] and
@@ -78,7 +81,8 @@ const (
 // be shadowed by a dependency name, and a wrong type is a compile error.
 //
 // A Program is reusable: [Program.Run] dispatches one invocation and returns, giving each
-// call a fresh [Context].
+// call a fresh [Context]. A host that runs it many times and uses shared providers calls
+// [Program.Close] when it is done.
 //
 // A nil argument to a With method restores that setting's default, as each method's doc says.
 // [Program.With] skips a nil [Option], and [Program.WithDependency] registers whatever value it
@@ -140,6 +144,9 @@ type Program struct {
 	bufferedOutput bool        // WithBufferedOutput: buffer stdout and flush it when the run settles
 
 	feats *featureSet // the features each run has: every one, or NewWiredProgram's and WithFeatures'
+
+	shared      sharedValues // the values WithSharedProvider providers built, released by Close
+	reportEmpty bool         // WithReporterOnEmpty: call the reporter for an empty Outcome
 }
 
 // NewProgram wires a command tree and its aggregate handler set to the runtime. Dispatch
@@ -343,8 +350,8 @@ func (p *Program) WithSignals(sigs ...os.Signal) *Program {
 	return p
 }
 
-// Option is one configuration step as a value, applied by [Program.With]. [WithDependency]
-// returns one; a program can define its own:
+// Option is one configuration step as a value, applied by [Program.With], so a program can
+// bundle settings it applies together:
 //
 //	func devDefaults() rotini.Option {
 //		return func(p *rotini.Program) { p.WithStdout(os.Stderr).WithoutSignalHandling() }
@@ -354,14 +361,11 @@ type Option func(*Program)
 // With applies each Option in order and returns the program:
 //
 //	cmd.NewProgram().
-//		With(
-//			rotini.WithDependency(tasks.Store, store),
-//			rotini.WithDependency(tasks.Client, client),
-//		).
+//		With(devDefaults(), withStores(store, client)).
 //		WithVersion(version).
 //		Execute()
 //
-// A later Option registering the same dependency replaces an earlier one. A nil Option is
+// Options apply in order, so a later one wins where two set the same thing. A nil Option is
 // skipped.
 func (p *Program) With(opts ...Option) *Program {
 	for _, opt := range opts {
@@ -471,6 +475,7 @@ func (p *Program) newRunContext() *Context {
 	rtx.meta, rtx.readerFn = p.meta, p.readerFn
 	rtx.version, rtx.parser, rtx.help, rtx.scripts = p.version, p.parser, p.help, p.scripts
 	rtx.program = p
+	rtx.declared = p.def.Channels
 	rtx.middleware = p.middleware
 	rtx.outputChecks = p.outputChecks
 	rtx.clock.fn = p.clock
@@ -529,9 +534,13 @@ func (p *Program) Execute() error {
 	var code int
 	var err error
 	if p.ctx != nil {
-		code, err = p.runWith(p.ctx, true, p.args, p.exitDefault)
+		code, err = p.runWith(p.ctx, true, p.args, p.exitDefault, true)
 	} else {
-		code, err = p.runWith(context.Background(), false, p.args, p.exitDefault)
+		code, err = p.runWith(context.Background(), false, p.args, p.exitDefault, true)
+	}
+	// Anything built after the run settled, such as by a completion request.
+	if cerr := p.Close(); cerr != nil {
+		err = errors.Join(err, cerr)
 	}
 	p.exit(code)
 	return err
@@ -566,9 +575,9 @@ func (p *Program) Execute() error {
 // trap with [Program.WithoutSignalHandling].
 func (p *Program) Run(argv []string) (int, error) {
 	if p.ctx != nil {
-		return p.runWith(p.ctx, true, argv, false)
+		return p.runWith(p.ctx, true, argv, false, false)
 	}
-	return p.runWith(context.Background(), false, argv, false)
+	return p.runWith(context.Background(), false, argv, false, false)
 }
 
 // RunContext is [Program.Run] under ctx, for this invocation only; the program is not
@@ -579,13 +588,14 @@ func (p *Program) RunContext(ctx context.Context, argv []string) (int, error) {
 	if ctx == nil {
 		return 1, InternalError(errors.New("rotini: RunContext called with a nil context"))
 	}
-	return p.runWith(ctx, true, argv, false)
+	return p.runWith(ctx, true, argv, false, false)
 }
 
 // runWith is the shared core of Execute, Run and RunContext. hasCtx reports whether the caller
 // supplied the context, which decides the default signal trap. oneShot reports that the process
-// exits when the run returns, so the trap is left registered rather than removed.
-func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, oneShot bool) (int, error) {
+// exits when the run returns, so the trap is left registered rather than removed. closes reports
+// that the run releases the program's shared values as it settles, as Execute's does.
+func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, oneShot, closes bool) (int, error) {
 	fs := p.features()
 	argv, complete, unwired := p.multicall(fs, argv)
 	if complete {
@@ -619,6 +629,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 	}
 
 	rtx := p.newRunContext()
+	rtx.closesShared = closes
 	// Runs after settle, where it has nothing left to do, and while a panic is re-raised, where
 	// it discards the output files left open and writes out what the handlers wrote.
 	defer rtx.endOutput()

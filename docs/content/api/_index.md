@@ -28,10 +28,13 @@ func main() {
 | `WithVersion(v)` | set the version `rtx.Version()` returns, which the `--version` flag and `version` command that `rotini init` declares print |
 | `WithDependency(dep, v)` | give handlers a dependency, such as a store or an API client |
 | `WithProvider(dep, fn)` | give handlers a dependency built per run the first time one asks, and cleaned up after the run by the cleanup `fn` returns; see [per-run dependencies](/docs#per-run-dependencies) |
+| `WithSharedProvider(dep, fn)` / `Close()` | give handlers a dependency built once for the program, the first time any run asks, and shared by every later run; `Close` (which `Execute` calls) runs its cleanup |
 | `WithStdin` / `WithStdout` / `WithStderr` | replace the program's streams |
 | `WithReporter(fn)` | replace how recorded outcomes are printed and which exit code is used |
+| `WithReporterOnEmpty(true)` | call the reporter for a run that recorded nothing too, with an empty `Outcome` |
 | `WithoutSignalHandling()` | turn off the default Ctrl+C and SIGTERM handling |
 | `WithEnviron(env)` / `WithDir(dir)` | give a run its own environment and working directory instead of the process's, so tests can run in parallel |
+| `WithFS(fsys)` | read and write the run's files through an `fs.FS` (writes need a `rotini.WriteFS`), such as files embedded in the binary or an in-memory one in a test; see [files from anywhere](/docs#files-your-program-reads-from-anywhere) |
 | `WithBufferedOutput(true)` | buffer stdout, flushed and checked before the reporter runs; see [buffered output](/docs#buffered-output) |
 | `WithTerminationTimeout(d)` | exit with the signal's code when a run is still going `d` after Ctrl+C or SIGTERM; see [a deadline after a signal](/docs#a-deadline-after-a-signal) |
 | `WithArgv0(name)` | set the name a `multicall` program dispatches on, for tests; see [one binary, several names](/docs#one-binary-several-names) |
@@ -44,7 +47,7 @@ func main() {
 | `WithCompletionFormat(format)` / `Complete(words, format)` | answer completion requests in another program's format; see [tab completion](/docs#tab-completion) |
 | `WithCompletionMessages(fn)` / `WithCompletionDescriptions(fn)` | decide when completion shows messages and descriptions |
 | `WithExit(fn)` / `WithArgs(argv)` | replace `os.Exit` and `os.Args` for `Execute`, for an embedding host |
-| `With(opts...)` | apply `rotini.Option` values, such as `rotini.WithDependency(dep, v)` |
+| `With(opts...)` | apply `rotini.Option` values, your own bundles of these settings |
 | `Definition()` | the command tree the program runs, for `rotini.ArgvOf` and your own tools |
 | `Execute()` | run with `os.Args` and exit with the resulting code |
 | `Run(argv)` | run once and return the exit code and error instead of exiting, for tests and embedding |
@@ -191,7 +194,7 @@ form of the command tree `rotini generate` produces from your spec. Building one
 supported for tests and for tooling; it is not a way to define a CLI, which the spec is. Fields
 are added as the spec gains keys, including in minor releases, so write them with field names
 (`rotini.FlagDef{Name: "verbose"}`), not positionally. `Context.WithStdin`, `WithStdout`, `WithStderr`, `WithEnviron`,
-`WithDir`, `WithClock` and `WithOutputChecks` set up such a context.
+`WithDir`, `WithFS`, `WithClock` and `WithOutputChecks` set up such a context.
 
 `rotinitest.Run` runs a command from its generated inputs type, each run with its own
 environment and directory, so tests can run in parallel. `rotinitest.Output` decodes stdout
@@ -208,7 +211,7 @@ checking it against the declared shape.
 | Package | What it is |
 |---|---|
 | `github.com/go-rotini/rotini/shape` | `shape.Template`, a flag type for a `--format '{{…}}'` Go template, and `shape.Render`, the renderer that runs it; see [templates](/docs#templates) |
-| `github.com/go-rotini/rotini/rotinitest` | `Run`, `Output`, `OutputAs` and `ExitDocumented` for tests with typed inputs, with the options `Env`, `Dir`, `Stdin`, `Context`, `Presence`, `Secrets`, `Clock`, `Argv0` and `Path`; see [testing with typed inputs](/docs#testing-with-typed-inputs). `CheckCodec` checks a decoder given to `rotini.Codec`; see [your own config format](/docs#your-own-config-format) |
+| `github.com/go-rotini/rotini/rotinitest` | `Run`, `Output`, `OutputAs` and `ExitDocumented` for tests with typed inputs, with the options `Env`, `Dir`, `Stdin`, `Context`, `Presence`, `Secrets`, `Clock`, `Argv0` and `Path`; see [testing with typed inputs](/docs#testing-with-typed-inputs). `CheckCodec` checks a decoder given to `rotini.Codec`, and `CheckCodecEncode` an encoder given to `rotini.CodecEncode`; see [your own config format](/docs#your-own-config-format) |
 
 Both are opt-in: a program that doesn't import them links none of their code.
 
@@ -222,9 +225,9 @@ Generated code and most programs never need these, but they are supported:
 | `rotini.NewWiredProgram(def, lookup, features...)` | the same with only the listed features linked; the generated `NewProgram` uses it. See [what a program links](/docs#what-a-program-links) |
 | `Program.WithFeatures(features...)` | add features to a wired program, for code its spec does not describe |
 | `rotini.Plugins`, `rotini.ResponseFiles`, `rotini.Chdir`, `rotini.Multicall` | program features: plugins, response files, `role: chdir`, `multicall` |
-| `rotini.Stdin(formats...)`, `rotini.Env`, `rotini.EnvFamilies`, `rotini.ConfigFiles`, `rotini.Profiles`, `rotini.EnvFiles`, `rotini.Fallbacks`, `rotini.PathExpansion`, `rotini.UserHomes`, `rotini.ObjectFlags`, `rotini.Schemas` | input features: stdin formats, env inputs, `nesting:` env families, configuration files and their profiles, `.env` files and `variable_file`, flag fallbacks, `expand` and `~user` paths, `~user` paths alone, object flags, schema checks |
+| `rotini.Stdin(formats...)`, `rotini.Env`, `rotini.NestedEnv`, `rotini.ConfigFiles`, `rotini.Profiles`, `rotini.EnvFiles`, `rotini.Fallbacks`, `rotini.PathExpansion`, `rotini.UserHomes`, `rotini.ObjectFlags`, `rotini.Schemas` | input features: stdin formats, env inputs, nested env inputs (`nesting:`), configuration files and their profiles, `.env` files and `variable_file`, flag fallbacks, `expand` and `~user` paths, `~user` paths alone, object flags, schema checks |
 | `rotini.JSON`, `rotini.YAML`, `rotini.TOML`, `rotini.JSONC`, `rotini.Dotenv` | document formats, each linking only its own decoder |
-| `rotini.Codec(name, decode, opts...)` with `rotini.CodecExtensions`, `rotini.CodecLocate` | a read-only document format of your own, for config files and stdin; see [your own config format](/docs#your-own-config-format) |
+| `rotini.Codec(name, decode, opts...)` with `rotini.CodecExtensions`, `rotini.CodecLocate`, `rotini.CodecEncode` | a document format of your own, for config files and stdin, written by config writes when it has an encoder; see [your own config format](/docs#your-own-config-format) |
 | `rotini.Bounds`, `rotini.UniqueItems`, `rotini.Patterns`, `rotini.FlagGroups`, `rotini.FlagDependencies`, `rotini.StreamPaths` | validation: bounds, `uniqueItems`, `pattern`, flag groups, flag dependencies, `inputfile`/`outputfile` |
 | `rotini.TimeValues`, `rotini.URLValues`, `rotini.EmailValues`, `rotini.TimeZoneValues`, `rotini.MACValues`, `rotini.IPValues`, `rotini.RegexpValues` | the value types `date` and times with `layout:` or `relative:`, `url`, `email`, `timezone`, `mac`, `ip`/`cidr`/`hostport`, `regexp` |
 | `WiringError.Feature` | the feature a run needed but its program does not wire |

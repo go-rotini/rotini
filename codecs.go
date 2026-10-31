@@ -114,8 +114,8 @@ func Dotenv() Feature {
 	}}
 }
 
-// Codec wires a document format of the program's own, read-only, for configuration files and
-// stdin documents. A config_files entry or a stdin declared with `format: <name>` reads with it,
+// Codec wires a document format of the program's own for configuration files and stdin
+// documents. A config_files entry or a stdin declared with `format: <name>` reads with it,
 // and so does a configuration file with no declared format whose extension [CodecExtensions]
 // lists. Given a built-in format's name ("yaml"), it replaces that format's codec, object flags
 // included. The spec names the format; the program adds the codec:
@@ -139,7 +139,7 @@ func Dotenv() Feature {
 //
 // Name must match ^[a-z][a-z0-9-]*$, and decode must not be nil; Codec panics otherwise.
 // Writing to a file in the format ([SetConfigValue], [UnsetConfigValue]) is refused with
-// [InputErrorKindWriteRefused].
+// [InputErrorKindWriteRefused], unless [CodecEncode] gives the codec an encoder.
 func Codec(name string, decode func(data []byte) (any, error), opts ...CodecOption) Feature {
 	if !validCodecName(name) {
 		panic(fmt.Sprintf("rotini: Codec: format name %q must match ^[a-z][a-z0-9-]*$", name))
@@ -153,7 +153,7 @@ func Codec(name string, decode func(data []byte) (any, error), opts ...CodecOpti
 			opt(c)
 		}
 	}
-	rc := &authorCodec{name: name, exts: c.exts, decode: decode}
+	rc := &authorCodec{name: name, exts: c.exts, decode: decode, encode: c.encode}
 	c.codec = func() recon.Codec { return rc }
 	c.decodeAny = func(data []byte) (any, error) {
 		v, err := decode(data)
@@ -195,6 +195,26 @@ func CodecLocate(locate func(data []byte, path []string) (line, col int, ok bool
 	return func(c *codecEntry) { c.locate = locate }
 }
 
+// CodecEncode lets [SetConfigValue] and [UnsetConfigValue] write configuration files in the
+// codec's format. The write decodes the file, changes the key in the decoded tree, with the
+// same checks, profiles, secret rules and schema check as a built-in format, and replaces the
+// file with encode's text for the whole edited tree.
+//
+// Unlike a built-in format, which is edited in place with its comments and layout kept, a file
+// in the codec's format is rewritten whole: what encode writes is all the file holds, so
+// keeping comments, key order and formatting is the encoder's work. encode is given the tree
+// decode returns, with the edit applied: a map[string]any at the top level, and values a
+// write adds as strings, bools, int64, uint64, float64, and []any or map[string]any of those.
+// A value it can't write is an error, which refuses the write. Decoding what encode returns
+// must give back the tree decode gave, which CheckCodecEncode in package rotinitest checks; a
+// value a write adds may come back as the format reads it (an INI decoder that reads every
+// value as a string reads 3 back as "3"), and is read like any other value of the file.
+//
+//	var INI = rotini.Codec("ini", decodeINI, rotini.CodecExtensions(".ini"), rotini.CodecEncode(encodeINI))
+func CodecEncode(encode func(doc any) ([]byte, error)) CodecOption {
+	return func(c *codecEntry) { c.encode = encode }
+}
+
 // validCodecName reports whether name matches ^[a-z][a-z0-9-]*$.
 func validCodecName(name string) bool {
 	if name == "" || name[0] < 'a' || name[0] > 'z' {
@@ -213,6 +233,7 @@ type authorCodec struct {
 	name   string
 	exts   []string
 	decode func([]byte) (any, error)
+	encode func(any) ([]byte, error) // nil: read-only
 }
 
 func (c *authorCodec) Name() string         { return c.name }
@@ -234,9 +255,16 @@ func (c *authorCodec) Decode(data []byte) (map[string]any, error) {
 	return nil, fmt.Errorf("%w: %s root must be a mapping, got %T", recon.ErrUnsupportedFormat, c.name, v)
 }
 
-// Encode refuses: a [Codec] format is read-only.
-func (c *authorCodec) Encode(map[string]any) ([]byte, error) {
-	return nil, fmt.Errorf("rotini: the %s format is read-only", c.name)
+// Encode encodes with the [CodecEncode] encoder, and refuses without one.
+func (c *authorCodec) Encode(m map[string]any) ([]byte, error) {
+	if c.encode == nil {
+		return nil, fmt.Errorf("rotini: the %s format is read-only", c.name)
+	}
+	data, err := c.encode(m)
+	if err != nil {
+		return nil, fmt.Errorf("encode %s: %w", c.name, err)
+	}
+	return data, nil
 }
 
 // codecCtor is the constructor that wires the codec of a known format, "" for any other.

@@ -65,7 +65,7 @@ func kdRead[T any](t *testing.T, env []string, stdin, body, schema string, argv 
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		meta.ConfigFiles = []ConfigFile{{Name: "app", Path: path, Format: "yaml", Schema: schema}}
+		meta.ConfigFiles = []ConfigFileDef{{Name: "app", Path: path, Format: "yaml", Schema: schema}}
 	}
 	rtx := NewContextFor(kdDef(), argv).WithDir(dir).WithEnviron(env).WithStdin(strings.NewReader(stdin))
 	var in T
@@ -137,7 +137,7 @@ func kindConformanceCases() []dataCase {
 		}},
 		{"KIND-07", func(t *testing.T) { // a configuration path that is a directory
 			dir := t.TempDir()
-			meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: dir, Format: "yaml"}}}
+			meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: dir, Format: "yaml"}}}
 			var in kdInputs
 			err := NewInputReader(meta).Read(NewContextFor(kdDef(), nil).WithDir(dir).WithEnviron(nil), &in)
 			wantKind(t, err, channelConfig, InputErrorKindFileAccess)

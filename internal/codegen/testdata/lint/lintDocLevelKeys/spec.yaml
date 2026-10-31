@@ -1,4 +1,4 @@
-# env_prefix, schemas and display_name are read only on the root; deeper they are a silent no-op.
+# env_prefix, schemas, exit_statuses and display_name are read only on the root; deeper they are a silent no-op.
 version: 0.0.0
 command:
   name: demo
@@ -7,3 +7,6 @@ command:
       env_prefix: DEMO
     - name: ship
       display_name: demo ship
+    - name: get
+      exit_statuses:
+        busy: { code: 4, summary: locked }

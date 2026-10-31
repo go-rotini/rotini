@@ -1,0 +1,32 @@
+# With validate.exit_status_drops_root, a command's own exit_status without `inherit: true`
+# should still list every code the root lists, since it replaces the root's list.
+version: 0.0.0
+command:
+  name: demo
+  # The root's own list is the program-wide one; it is never checked against itself.
+  exit_status:
+    - { code: 1, summary: an error }
+    - { code: 3, summary: partial }
+  commands:
+    # Correct: no list of its own, so it documents the root's. No problem.
+    - name: list
+    # Correct: it adds the root's with `inherit: true`. No problem.
+    - name: put
+      exit_status:
+        - inherit: true
+        - { code: 5, summary: conflict }
+    # Correct: it repeats every root code, documenting 3 its own way. No problem.
+    - name: get
+      exit_status:
+        - { code: 1, summary: an error }
+        - { code: 3, summary: some tasks were not found }
+        - { code: 4, summary: no such task }
+    # Leaves out 3.
+    - name: sync
+      exit_status:
+        - { code: 1, summary: an error }
+        - { code: 4, summary: busy }
+    # Leaves out 1 and 3.
+    - name: run
+      exit_status:
+        - { code: 2, summary: bad input }

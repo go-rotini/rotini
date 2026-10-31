@@ -165,8 +165,6 @@ import (
 	"os/signal"
 	"strings"
 
-	"github.com/go-rotini/rotini"
-
 	loop "example.com/loop/internal/cmd/loop"
 )
 
@@ -174,7 +172,7 @@ import (
 // Context, while the counter bound here reaches every line.
 func main() {
 	p := loop.NewProgram().
-		With(rotini.WithDependency(loop.CounterDep, &loop.Counter{}))
+		WithDependency(loop.CounterDep, &loop.Counter{})
 
 	// ^C cancels the running line, never the session. rotini installs no trap of its own for
 	// a supplied context, so this handler is the only one.

@@ -33,6 +33,7 @@ type contractDoc struct {
 	ResponseFiles *contractResponseFiles `json:"response_files,omitempty"`
 	Multicall     *contractMulticall     `json:"multicall,omitempty"`
 	Topics        []contractTopic        `json:"topics,omitempty"` // the root's help topics
+	Channels      []contractChannel      `json:"channels,omitempty"`
 }
 
 // contractResponseFiles is how the program reads response files: a word starting with Prefix
@@ -76,8 +77,8 @@ type contractCommand struct {
 	Parameters            map[string]any           `json:"parameters,omitempty"`
 	Output                any                      `json:"output,omitempty"`
 	Stream                bool                     `json:"stream,omitempty"`                // output declares one item of a stream
-	ExitStatus            []contractExit           `json:"exit_status,omitempty"`           // its own exit_status, else the root's
-	ExitStatusInherited   bool                     `json:"exit_status_inherited,omitempty"` // exit_status is the root's: the command declares none
+	ExitStatus            []contractExit           `json:"exit_status,omitempty"`           // see documentedExits
+	ExitStatusInherited   bool                     `json:"exit_status_inherited,omitempty"` // exit_status holds the root's entries
 
 	// Command facts from flag sets, hidden spellings and replacements; see contractParserFields.
 	HiddenAliases []string `json:"hidden_aliases,omitempty"` // names that run the command but are never listed
@@ -586,7 +587,7 @@ func outputDefLiteral(typeName string, shape *Schema, schemas map[string]Schema,
 	}
 	if tag, kinds := outputKinds(shape, schemas); kinds != nil {
 		qualifier := typeName[:strings.LastIndex(typeName, ".")+1] // a composed cli's package, or ""
-		fmt.Fprintf(&b, ", Tag: %q, Kinds: []%s.OutputKind{", tag, rotiniPkgName)
+		fmt.Fprintf(&b, ", Tag: %q, Kinds: []%s.OutputKindDef{", tag, rotiniPkgName)
 		for i, k := range kinds {
 			if i > 0 {
 				b.WriteString(", ")
@@ -670,6 +671,7 @@ func (p *program) contract(nodes []contractNode) ([]byte, error) {
 	if len(defs.pool) > 0 {
 		doc.Definitions = defs.pool
 	}
+	doc.Channels = p.contractChannels(defs)
 	for _, n := range nodes {
 		doc.Commands = append(doc.Commands, p.contractCommand(n, defs))
 		for _, pl := range n.plugins {
@@ -815,15 +817,19 @@ func (p *program) contractCommand(n contractNode, defs *contractDefs) contractCo
 	return c
 }
 
-// contractExitStatus records the exit codes a command documents: its own exit_status, else
-// the root's, which is program-wide, marked inherited.
+// contractExitStatus records the exit codes a command documents (see documentedExits), marked
+// inherited when they include the root's.
 func (p *program) contractExitStatus(c *contractCommand, n contractNode, defs *contractDefs) {
-	exits, scope := n.help.ExitStatus, n.scope
-	if len(exits) == 0 && len(n.path) > 0 && len(p.rootHelp.ExitStatus) > 0 {
-		// The root's outputs name the root spec's schemas.
-		exits, scope, c.ExitStatusInherited = p.rootHelp.ExitStatus, nil, true
+	root := p.rootHelp.ExitStatus
+	if len(n.path) == 0 {
+		root = nil
 	}
-	for _, e := range exits {
+	for _, e := range documentedExits(n.help.ExitStatus, root) {
+		scope := n.scope
+		if e.inherited {
+			// The root's outputs name the root spec's schemas.
+			scope, c.ExitStatusInherited = nil, true
+		}
 		x := contractExit{Code: e.Code, Name: e.Name, Summary: e.Summary, Retryable: e.Retryable, DocsURL: e.DocsUrl}
 		if e.Output != nil {
 			x.Output = defs.schemaDoc(scope, *e.Output)

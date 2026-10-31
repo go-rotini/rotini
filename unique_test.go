@@ -260,7 +260,7 @@ func TestUniqueItems_envAndConfigLists(t *testing.T) {
 			}
 		}
 	}
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	err = NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &conf)
 	if err == nil || !strings.Contains(err.Error(), `must not repeat a value (got "a" twice)`) {
 		t.Errorf("config: %v", err)

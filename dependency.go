@@ -48,16 +48,13 @@ func (d Dependency[T]) Name() string { return d.name }
 // String implements [fmt.Stringer], returning the dependency's name.
 func (d Dependency[T]) String() string { return d.name }
 
-// WithDependency returns an [Option] that registers value under dep for the whole program; it
-// is the composable form of [Program.WithDependency], for use with [Program.With]:
+// WithDependency returns an [Option] that registers value under dep for the whole program.
 //
-//	cmd.NewProgram().
-//		With(
-//			rotini.WithDependency(tasks.Store, store),
-//			rotini.WithDependency(tasks.Client, client),
-//		).
-//		WithVersion(version).
-//		Execute()
+// Deprecated: use [Program.WithDependency]. A bundle of settings is an [Option] that calls it:
+//
+//	func deps(s *store.Store) rotini.Option {
+//		return func(p *rotini.Program) { p.WithDependency(tasks.Store, s) }
+//	}
 func WithDependency[T any](dep Dependency[T], value T) Option {
 	return func(p *Program) { p.WithDependency(dep, value) }
 }

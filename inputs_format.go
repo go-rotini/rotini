@@ -227,7 +227,7 @@ func (r InputReport) secretFields() map[FieldPath]bool {
 // first), and the file each was read from, by logical name, once the files channel opened it.
 type inputNames struct {
 	envPrefix string
-	files     []ConfigFile
+	files     []ConfigFileDef
 	paths     map[string]string
 	dir       string // the run's directory, which a file inside is named relative to
 }
@@ -261,7 +261,7 @@ func (n *inputNames) merge(other *inputNames) *inputNames {
 }
 
 // file is the configuration file with logical name, or nil.
-func (n *inputNames) file(name string) *ConfigFile {
+func (n *inputNames) file(name string) *ConfigFileDef {
 	if n == nil {
 		return nil
 	}
@@ -311,7 +311,7 @@ func (n *inputNames) short(path string) string {
 
 // readsConfig reports whether a configuration file (not a .env file) is in scope.
 func (n *inputNames) readsConfig() bool {
-	return n != nil && slices.ContainsFunc(n.files, func(f ConfigFile) bool { return f.As != "env" })
+	return n != nil && slices.ContainsFunc(n.files, func(f ConfigFileDef) bool { return f.As != "env" })
 }
 
 // reportInput is one input of a report's inputs type, as its definitions and tags declare it.

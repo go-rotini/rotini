@@ -53,7 +53,7 @@ func ovDef() Definition {
 // InputReader.Read and InputsWithReport's merged value.
 func TestCollect(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: from-file\n  token: from-file-token\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("REGION", "from-env")
 
 	newRtx := func() *Context {
@@ -96,7 +96,7 @@ func TestCollect(t *testing.T) {
 
 	// Validation parity: a required config value missing errors in both forms.
 	bare := writeConfig(t, "api:\n  endpoint: only\n") // api.token (required) absent
-	bareMeta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: bare, Format: "yaml"}}}
+	bareMeta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: bare, Format: "yaml"}}}
 	rtx := NewContextFor(tbDef(), nil)
 	rtx.WithInputSettings(bareMeta)
 	if _, err := rtx.Inputs[tbInputs](); err == nil {
@@ -210,7 +210,7 @@ func ovLayers(t *testing.T, rtx *Context, meta InputSettings) []InputLayer[ovInp
 // sources vary.
 func TestOverlay_precedence(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	cases := []struct {
 		name      string
@@ -284,7 +284,7 @@ func TestOverlay_defaultsOnly(t *testing.T) {
 // value — disjoint fields from different layers all survive the merge.
 func TestOverlay_skipNotZero(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  retries: 5\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("REGION", "us-west")
 
 	rtx := NewContextFor(ovDef(), []string{"--out", "report.txt"})
@@ -368,7 +368,7 @@ func TestOverlay_handBuiltLayer(t *testing.T) {
 // the winner last; Fields enumerates everything any layer set, sorted.
 func TestOverlay_report(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("APP_COLOR", "teal")
 
 	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
@@ -484,7 +484,7 @@ func TestOverlay_validateRequiredAcrossLayers(t *testing.T) {
 // caught by the merged validation, exactly like InputReader.Read's locus.
 func TestOverlay_validateEnumOnFileSuppliedFlag(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: magenta\n") // not in the enum
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(ovDef(), nil)
 	got, rep := MergeInputsWithReport(ovLayers(t, rtx, meta)...)
@@ -531,7 +531,7 @@ func TestOverlay_stdinLayer(t *testing.T) {
 // machinery: on identical inputs they must produce identical structs.
 func TestOverlay_bindEquivalence(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  token: cfg-secret\n  retries: 5\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("REGION", "eu-central")
 
 	cases := []struct {
@@ -665,7 +665,7 @@ func ExampleMergeInputsWithReport() {
 // map bind element-wise, an env list splits on its separator, and a bad value is an error.
 func TestOverlay_flagFallbacksMatchTheInputReader(t *testing.T) {
 	cfg := writeConfig(t, "tags: [a, b]\nlabels: {k: v}\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(tbListDef(), nil)
 	rtx.WithInputSettings(meta)
@@ -826,7 +826,7 @@ func describeErr(err error) string {
 // precedence matrix.
 func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
-	withFiles := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	withFiles := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	for _, c := range []struct {
 		name string
@@ -895,7 +895,7 @@ func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 func TestCollect_isIdempotent(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
 	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
-	rtx.WithInputSettings(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	rtx.WithInputSettings(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	first, err1 := rtx.Inputs[ovInputs]()
 	second, err2 := rtx.Inputs[ovInputs]()

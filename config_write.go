@@ -10,9 +10,12 @@ import (
 	"github.com/go-rotini/rotini/internal/cfgedit"
 )
 
-// ConfigKey is one key a configuration file may hold, as the input that reads it declares it.
-// Generated code lists them in [ConfigFile.Keys].
-type ConfigKey struct {
+// Deprecated: use [ConfigKeyDef].
+type ConfigKey = ConfigKeyDef
+
+// ConfigKeyDef is one key a configuration file may hold, as the input that reads it declares it.
+// Generated code lists them in [ConfigFileDef.Keys].
+type ConfigKeyDef struct {
 	Constraints // the input's bounds, pattern and item counts
 
 	Key        string      // the dotted path as written in the file; a dotenv file's variable name
@@ -88,7 +91,8 @@ func ParseConfigValue(fn func(raw string) error) ConfigWriteOption { return Conf
 // key=value) and must parse as the key's type, and the enum, bounds, pattern and item counts
 // apply. An enum value is written in its declared spelling, numbers and booleans as such, and
 // everything else as a string. A key declared secret is refused without [ConfigAllowSecretWrite].
-// When the file declares a schema, the edited file must still match it.
+// When the file declares a schema, the edited file must still match it; a violation names
+// where the rejected value would be in the edited file (app.yaml:4:11 would be invalid: …).
 //
 // The file is the one the command reads: its config_source path, else its fixed path or its
 // discover search, from the run's environment and directory. A file that doesn't exist is
@@ -99,7 +103,8 @@ func ParseConfigValue(fn func(raw string) error) ConfigWriteOption { return Conf
 // The edit keeps the file's comments, key order and layout: only the value's text changes, or
 // the key's lines are added at the end of its parent mapping. A layout that can't be edited
 // safely, such as a key reached through a YAML alias, is refused. YAML, JSON, JSONC, TOML and
-// dotenv files are written. The new file replaces the old one atomically and keeps its
+// dotenv files are written, and files in a [Codec] format given [CodecEncode], which are
+// rewritten whole by its encoder rather than edited in place. The new file replaces the old one atomically and keeps its
 // permissions; a new file gets 0644, or 0600 when any of its keys is secret. Two commands
 // writing the same file at once can lose one of the changes.
 //
@@ -165,7 +170,7 @@ func writeConfigValue(rtx *Context, file, key string, raw *string, opts []Config
 	case w.toProfile:
 		profile = w.profile
 	}
-	format, err := t.format()
+	format, enc, err := t.format()
 	if err != nil {
 		return err
 	}
@@ -177,9 +182,9 @@ func writeConfigValue(rtx *Context, file, key string, raw *string, opts []Config
 		if profile != "" {
 			keep = 2 // the profiles key and the profile
 		}
-		edited, err = cfgedit.Unset(t.src, format, path, cfgedit.KeepParents(keep))
+		edited, err = t.unset(format, enc, path, keep)
 	} else {
-		secret := slices.ContainsFunc(keys, func(k ConfigKey) bool { return k.Secret })
+		secret := slices.ContainsFunc(keys, func(k ConfigKeyDef) bool { return k.Secret })
 		if secret && !w.allowSecret {
 			return usageBind(InputErrorKindWriteRefused, channelConfig, key, fmt.Sprintf("config key %s is secret and isn't written to a file", key), nil)
 		}
@@ -192,7 +197,7 @@ func writeConfigValue(rtx *Context, file, key string, raw *string, opts []Config
 				return err
 			}
 		}
-		edited, err = cfgedit.Set(t.src, format, path, value)
+		edited, err = t.set(format, enc, path, value)
 	}
 	if err != nil {
 		return t.editError(key, err)
@@ -213,7 +218,7 @@ func writeConfigValue(rtx *Context, file, key string, raw *string, opts []Config
 }
 
 // checkTarget rejects options that contradict each other or the file.
-func (w configWrite) checkTarget(f ConfigFile) error {
+func (w configWrite) checkTarget(f ConfigFileDef) error {
 	switch {
 	case w.toProfile && w.shared:
 		return internalBind(channelConfig, f.Name, "ToProfile and ConfigToSharedKeys can't be used together", nil)
@@ -226,8 +231,8 @@ func (w configWrite) checkTarget(f ConfigFile) error {
 }
 
 // configKeysFor is every entry of keys declaring key.
-func configKeysFor(keys []ConfigKey, key string) []ConfigKey {
-	var out []ConfigKey
+func configKeysFor(keys []ConfigKeyDef, key string) []ConfigKeyDef {
+	var out []ConfigKeyDef
 	for _, k := range keys {
 		if k.Key == key {
 			out = append(out, k)
@@ -238,7 +243,7 @@ func configKeysFor(keys []ConfigKey, key string) []ConfigKey {
 
 // unknownConfigKey is the usage error for a key no input reads from f. Its Token and
 // Candidates are the key and the file's keys, which [SuggestionFacts] reads.
-func unknownConfigKey(f ConfigFile, key string) *InputError {
+func unknownConfigKey(f ConfigFileDef, key string) *InputError {
 	var names []string
 	for _, k := range f.Keys {
 		if !slices.Contains(names, k.Key) {
@@ -256,7 +261,7 @@ func unknownConfigKey(f ConfigFile, key string) *InputError {
 
 // configKeyPath is where key sits in the file: its dotted segments, under the profile when
 // one is the target. A dotenv key is one variable name.
-func configKeyPath(format cfgedit.Format, f ConfigFile, profile, key string) []string {
+func configKeyPath(format cfgedit.Format, f ConfigFileDef, profile, key string) []string {
 	if format == cfgedit.Dotenv {
 		return []string{key}
 	}
@@ -276,7 +281,7 @@ func (t configFileTarget) editError(key string, err error) error {
 	case errors.Is(err, cfgedit.ErrVerify), errors.Is(err, cfgedit.ErrUnsupported):
 		return internalBind(channelConfig, key, fmt.Sprintf("could not write config key %s to configuration file %s: %v", key, t.path, err), err)
 	}
-	return usageBind(configFileKind(err), channelConfig, key, configFileProblem(t.path, err), err)
+	return usageBind(configFileKind(err), channelConfig, key, configFileProblem(t.view, t.path, err), err)
 }
 
 // shadowed is the warning for a value written to a profiled file's shared keys that the

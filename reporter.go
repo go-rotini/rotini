@@ -41,7 +41,7 @@ type Outcome struct {
 
 // Empty reports whether the run recorded nothing, in the built-in record fields or any
 // [Channel]; ExitCode and Signal are not records. The runtime does not call the reporter for an
-// empty Outcome.
+// empty Outcome unless [Program.WithReporterOnEmpty] asks it to.
 func (o Outcome) Empty() bool {
 	return len(o.Infos)+len(o.Successes)+len(o.Warnings)+len(o.Errors)+len(o.Panics)+len(o.channels) == 0
 }
@@ -54,7 +54,8 @@ func (o Outcome) Failed() bool {
 }
 
 // Reporter is the program's outcome reporter. The runtime calls it once per run, after the
-// lifecycle and its teardown finish, when the [Outcome] is not empty.
+// lifecycle and its teardown finish, when the [Outcome] is not empty, or on every run with
+// [Program.WithReporterOnEmpty].
 //
 // The reporter decides what to print and where, and sets the final exit code: [Context.Exit]
 // inside it overrides the code the lifecycle set, and [Context.HaltWithCode] is a no-op.
@@ -63,10 +64,8 @@ func (o Outcome) Failed() bool {
 // Outcome does not change it. Records made inside the reporter are dropped.
 //
 // A run that records nothing has an empty Outcome, and the reporter is not called. A program
-// that reports something on every run, such as a closing {"ok":true} line or the run's
-// timing, does it in the root command's CascadingPostRun (the last hook of every run that
-// reaches the hooks) or in a [Middleware] around that hook: it writes there directly, or
-// records a value its reporter handles, which makes the Outcome non-empty.
+// that reports something on every run, such as a closing {"ok":true} line or the run's timing,
+// turns on [Program.WithReporterOnEmpty], so its reporter is called with the empty Outcome too.
 //
 // A panic inside a reporter is not recovered. A reporter that can fail handles its own
 // failure, for example by writing to rtx.Stderr and setting a code with [Context.Exit].
@@ -86,6 +85,26 @@ type Reporter func(ctx context.Context, rtx *Context, out Outcome)
 // A nil fn restores the default reporter.
 func (p *Program) WithReporter(fn Reporter) *Program {
 	p.reporterFn = fn
+	return p
+}
+
+// WithReporterOnEmpty controls whether the reporter is called for a run that recorded nothing.
+// The default, false, skips it, so a clean run is silent. True calls it with the empty
+// [Outcome] on every run that settles, for a reporter that reports every run, such as one that
+// writes a closing {"ok":true} line or the run's timing:
+//
+//	p.WithReporterOnEmpty(true).WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+//		rotini.DefaultReporter(ctx, rtx, out)
+//		if out.Empty() {
+//			fmt.Fprintln(rtx.Stderr, `{"ok":true}`)
+//		}
+//	})
+//
+// [DefaultReporter] and [StructuredReporter] print nothing for an empty Outcome and leave the
+// exit code as the run set it. A completion request, and a plugin that ran without rotini
+// recording anything, are still not reported.
+func (p *Program) WithReporterOnEmpty(on bool) *Program {
+	p.reportEmpty = on
 	return p
 }
 
@@ -120,6 +139,9 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	// Every hook has finished: clean up what the run's providers built, so a cleanup error
 	// reaches the reporter.
 	rtx.cleanUpProvided()
+	if rtx.closesShared {
+		p.closeShared(rtx.RecordError, rtx.recordFault)
+	}
 
 	rtx.endStdin()
 	rtx.abortOutputs()
@@ -140,7 +162,7 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	// is read after the reporter, which is how the reporter controls the code.
 	err := joinOutcome(append(slices.Clip(out.Errors), out.channelErrors()...), out.Panics)
 
-	if !out.Empty() {
+	if p.reportEmpty || !out.Empty() {
 		fn := p.Reporter()
 		rtx.setReporterStage(true) // rtx.Exit now overrides; rtx.HaltWithCode is a no-op
 		fn(ctx, rtx, out)
@@ -175,8 +197,9 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 // ([CausedBySignal]), since a signal is a graceful stop and the exit code, 128+n, already says why
 // the run ended.
 //
-// Like any reporter, it is not called for an empty Outcome, so a clean run that recorded
-// nothing prints nothing; see [Reporter].
+// It prints nothing for an empty Outcome, and the runtime does not call it for one unless
+// [Program.WithReporterOnEmpty] asks it to, so a clean run that recorded nothing prints nothing;
+// see [Reporter].
 //
 // A custom reporter calls it to keep the default report and add to it; see
 // [Program.WithReporter].
@@ -246,11 +269,13 @@ func settleReported(ctx context.Context, rtx *Context, out Outcome) ([]error, in
 //	{"schema_version":1,"warning":{"command":"taskr list","message":"the cache is stale"}}
 //
 // Infos and successes are written the same way, as {"info":{…}} and {"success":{…}}. A
-// [Channel]'s records are written as lines of their class's kind, with the record's text (its
-// Error, String or %v) as the message, so a reader sees no kinds beyond these four. A field
-// is present only when rotini knows it: kind, flag and token come from a [*ParseError], kind
-// from an [*InputError] or a [*PluginError] too, and token from any error [SuggestionFacts]
-// reads. With such a token, candidates lists the words it was checked against, as
+// [Channel] the spec declares (a [ChannelDef] of the Definition) writes each record as a line of
+// its own kind, the record as JSON: {"schema_version":1,"skipped":{"path":"a.bin","reason":"binary"}}.
+// A record of a declared error channel is also an error line, so every failure has one. Any
+// other channel's records are written as lines of their class's kind, with the record's text
+// (its Error, String or %v) as the message. A field of an error line is present only when
+// rotini knows it: kind, flag and token come from a [*ParseError], kind from an [*InputError]
+// or a [*PluginError] too, and token from any error [SuggestionFacts] reads. With such a token, candidates lists the words it was checked against, as
 // SuggestionFacts returns them, unranked: a tool can offer the nearest, while rotini itself
 // suggests nothing. Each line's shape is described by schema-error.json in the rotini
 // repository, and the contract document includes it.
@@ -273,6 +298,32 @@ func StructuredReporter(structured func(rtx *Context) bool) Reporter {
 		}
 		reportStructured(ctx, rtx, out)
 	}
+}
+
+// channelLines returns the structured lines of the records of out's channels of class. A channel
+// the Definition declares writes each record as a line of its own kind, the record as JSON; any
+// other channel's records are messages of their class's kind, made by message. An error
+// channel's records are already error lines, so only a declared one adds lines.
+func (rtx *Context) channelLines(out Outcome, class ChannelClass, message func(kind, msg string) map[string]any) []map[string]any {
+	var lines []map[string]any
+	for _, c := range out.channels {
+		if c.class != class {
+			continue
+		}
+		declared := rtx.declaresChannel(c)
+		for _, v := range c.values {
+			if declared {
+				if b, err := json.Marshal(v); err == nil && len(b) > 0 && b[0] == '{' {
+					lines = append(lines, map[string]any{c.name: json.RawMessage(b)})
+					continue
+				}
+			}
+			if class != ChannelClassError {
+				lines = append(lines, message(class.String(), fmt.Sprint(v)))
+			}
+		}
+	}
+	return lines
 }
 
 // structuredSchemaVersion is the version of StructuredReporter's line format, written first on
@@ -312,7 +363,9 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 				body["kind"] = ie.Kind.String()
 			}
 		} else if pe, ok := asError[*PluginError](err); ok {
-			body["kind"] = pe.Kind.String()
+			if pe.Kind != PluginErrorKindUnspecified {
+				body["kind"] = pe.Kind.String()
+			}
 		}
 		// Candidates go with the token they were checked against, so both come from one error.
 		if token, candidates, ok := SuggestionFacts(err); ok {
@@ -323,35 +376,31 @@ func reportStructured(ctx context.Context, rtx *Context, out Outcome) {
 		}
 		return line
 	}
+	records := func(class ChannelClass) { lines = append(lines, rtx.channelLines(out, class, message)...) }
 	for _, s := range out.Infos {
 		lines = append(lines, message("info", s))
 	}
-	for _, v := range out.channelValues(ChannelClassInfo) {
-		lines = append(lines, message("info", fmt.Sprint(v)))
-	}
+	records(ChannelClassInfo)
 	for _, w := range out.Warnings {
 		lines = append(lines, message("warning", w.Error()))
 	}
-	for _, v := range out.channelValues(ChannelClassWarning) {
-		lines = append(lines, message("warning", fmt.Sprint(v)))
-	}
+	records(ChannelClassWarning)
 	for _, e := range errs {
 		lines = append(lines, failure(e))
 	}
+	records(ChannelClassError)
 	for _, pe := range out.Panics {
 		lines = append(lines, failure(pe))
 	}
 	for _, s := range out.Successes {
 		lines = append(lines, message("success", s))
 	}
-	for _, v := range out.channelValues(ChannelClassSuccess) {
-		lines = append(lines, message("success", fmt.Sprint(v)))
-	}
+	records(ChannelClassSuccess)
 	for _, line := range lines {
 		for kind, body := range line { // one kind per line
 			b, err := json.Marshal(body)
 			if err != nil {
-				continue // unreachable: every value is a string, an int or a []string
+				continue // unreachable: every value is a string, an int, a []string or marshaled JSON
 			}
 			fmt.Fprintf(rtx.Stderr, "{\"schema_version\":%d,%q:%s}\n", structuredSchemaVersion, kind, b)
 		}

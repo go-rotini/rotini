@@ -156,27 +156,27 @@ func TestWiring_inputs(t *testing.T) {
 		drop     string
 	}{
 		{"env", func() any { return &wrEnvOnly{} }, InputSettings{}, nil, "", []Feature{Env()}, "env"},
-		{"env families", func() any { return &wrEnvFamily{} }, InputSettings{}, nil, "", []Feature{Env(), EnvFamilies()}, "env-families"},
+		{"env families", func() any { return &wrEnvFamily{} }, InputSettings{}, nil, "", []Feature{Env(), NestedEnv()}, "nested-env"},
 		{"env time", func() any { return &wrEnvTime{} }, InputSettings{}, nil, "", []Feature{Env(), TimeValues()}, "values:time"},
-		{"config time", func() any { return &wrConfigTime{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: timeFile}}}, nil, "",
+		{"config time", func() any { return &wrConfigTime{} }, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: timeFile}}}, nil, "",
 			[]Feature{ConfigFiles(), YAML(), TimeValues()}, "values:time"},
-		{"config files", func() any { return &wrConfigOnly{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: yamlFile}}}, nil, "",
+		{"config files", func() any { return &wrConfigOnly{} }, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: yamlFile}}}, nil, "",
 			[]Feature{ConfigFiles(), YAML()}, "config-files"},
-		{"config codec", func() any { return &wrConfigOnly{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: yamlFile}}}, nil, "",
+		{"config codec", func() any { return &wrConfigOnly{} }, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: yamlFile}}}, nil, "",
 			[]Feature{ConfigFiles(), YAML()}, "codec:yaml"},
 		{"profiles", func() any { return &wrConfigOnly{} },
-			InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: yamlFile, Profiles: &ProfilesDef{Under: "profiles", Default: "dev"}}}}, nil, "",
+			InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: yamlFile, Profiles: &ProfilesDef{Under: "profiles", Default: "dev"}}}}, nil, "",
 			[]Feature{ConfigFiles(), YAML(), Profiles()}, "config-profiles"},
 		{"schemas", func() any { return &wrConfigOnly{} },
-			InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: yamlFile, Schema: `{"type":"object"}`}}}, nil, "",
+			InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: yamlFile, Schema: `{"type":"object"}`}}}, nil, "",
 			[]Feature{ConfigFiles(), YAML(), Schemas()}, "schemas"},
-		{"env files", func() any { return &wrEnvOnly{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "local", Path: envFile, As: "env"}}}, nil, "",
+		{"env files", func() any { return &wrEnvOnly{} }, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "local", Path: envFile, As: "env"}}}, nil, "",
 			[]Feature{Env(), EnvFiles(), Dotenv()}, "env-files"},
-		{"dotenv codec", func() any { return &wrEnvOnly{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "local", Path: envFile, As: "env"}}}, nil, "",
+		{"dotenv codec", func() any { return &wrEnvOnly{} }, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "local", Path: envFile, As: "env"}}}, nil, "",
 			[]Feature{Env(), EnvFiles(), Dotenv()}, "codec:dotenv"},
 		{"fallbacks", func() any { return &wrFallback{} }, InputSettings{}, nil, "", []Feature{Fallbacks()}, "fallbacks"},
 		{"argv expansion", func() any { return &wrExpand{} }, InputSettings{}, []string{"--root", "$WR_ROOT/x"}, "", []Feature{PathExpansion()}, "path-expansion"},
-		{"relative to config", func() any { return &wrRelative{} }, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: yamlFile}}}, nil, "",
+		{"relative to config", func() any { return &wrRelative{} }, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: yamlFile}}}, nil, "",
 			[]Feature{ConfigFiles(), YAML(), PathExpansion()}, "path-expansion"},
 		{"stdin", func() any { return &wrStdinYAML{} }, InputSettings{}, nil, "name: x\n", []Feature{Stdin("yaml"), YAML()}, "stdin:yaml"},
 		{"stdin codec", func() any { return &wrStdinYAML{} }, InputSettings{}, nil, "name: x\n", []Feature{Stdin("yaml"), YAML()}, "codec:yaml"},
@@ -236,7 +236,7 @@ func TestWiring_runtimeConfigPath(t *testing.T) {
 			}
 		}
 	}
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", PathFrom: &PathFromDef{Flag: "config"}}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", PathFrom: &PathFromDef{Flag: "config"}}}}
 	for name, body := range map[string]string{
 		"c.yaml": "endpoint: e\n", "c.json": `{"endpoint":"e"}`, "c.toml": "endpoint = \"e\"\n",
 		"c.jsonc": "{\"endpoint\": \"e\" // c\n}", "c.env": "endpoint=e\n",

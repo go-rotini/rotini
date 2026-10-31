@@ -136,7 +136,7 @@ func TestUsageErrorWording(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeConfig(t, tc.file)
 			var in wordingCfgInputs
-			err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path}}}).Read(stRTX(nil), &in)
+			err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: path}}}).Read(stRTX(nil), &in)
 			if want := fmt.Sprintf(tc.want, path); err == nil || err.Error() != want {
 				t.Errorf("err = %v, want %q", err, want)
 			}

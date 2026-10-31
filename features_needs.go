@@ -56,7 +56,7 @@ func (n *needs) features() []Feature {
 		out = append(out, Stdin(formats...))
 	}
 	add(n.env, Env)
-	add(n.families, EnvFamilies)
+	add(n.families, NestedEnv)
 	add(n.config, ConfigFiles)
 	add(n.profiles, Profiles)
 	add(n.envFiles, EnvFiles)
@@ -229,7 +229,7 @@ func (n *needs) settings(meta InputSettings) {
 
 // fileFormat records the codec a configuration file decodes with: its format, else its
 // extension; every document codec when its path is chosen at run time.
-func (n *needs) fileFormat(f ConfigFile) {
+func (n *needs) fileFormat(f ConfigFileDef) {
 	format := f.Format
 	if format == "" {
 		name := f.Path

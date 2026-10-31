@@ -230,6 +230,44 @@ generate:
 	}
 }
 
+// TestConstants_formatWords pins format and shell names in capitals in enum and exit
+// constants, and that two values these spellings join still clash in lint.
+func TestConstants_formatWords(t *testing.T) {
+	t.Parallel()
+	spec := decodeSpecYAML(t, `version: 0.0.0
+command:
+  name: acme
+  exit_status:
+    - { code: 0, name: ok }
+  flags:
+    - name: format
+      identifiers: [--format]
+      schema: { type: string, enum: [yaml, toml, jsonc, json, powershell, yamlish] }
+    - name: shape
+      identifiers: [--shape]
+      schema: { type: string, enum: [yaml, YAML] }
+`)
+	groups := mergeConstGroups(inputEnumGroups(spec))
+	kept, clashes := withoutClashes(groups, nil)
+	var names []string
+	for _, g := range kept {
+		for _, c := range g.consts {
+			names = append(names, c.name)
+		}
+	}
+	got := strings.Join(names, " ")
+	if want := "AcmeFormatYAML AcmeFormatTOML AcmeFormatJSONC AcmeFormatJSON AcmeFormatPowerShell AcmeFormatYamlish"; got != want {
+		t.Errorf("constants = %s, want %s", got, want)
+	}
+	if len(clashes) != 1 || !strings.Contains(clashes[0].msg, "would both get the constant AcmeShapeYAML") {
+		t.Errorf("clashes = %+v, want yaml and YAML to clash on AcmeShapeYAML", clashes)
+	}
+	taken := generatedGoNames(spec, nil, func(p *problem) { t.Errorf("unexpected problem: %v", p) })
+	if _, ok := taken["AcmeExitOK"]; !ok {
+		t.Errorf("the exit constant is not claimed as AcmeExitOK: %v", taken)
+	}
+}
+
 // parseCallForTest parses src as one call expression.
 func parseCallForTest(t *testing.T, src string) *ast.CallExpr {
 	t.Helper()

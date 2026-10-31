@@ -37,6 +37,8 @@ var crossLints = []func(*Spec, *Conf) []error{
 	lintUnshownMessages,
 	lintFlagsFirst,
 	lintPosixNames,
+	lintExitStatusOne,
+	lintExitStatusDropsRoot,
 	lintInputSummaries,
 	lintHelpWidth,
 	lintSeeAlso,

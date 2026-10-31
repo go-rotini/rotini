@@ -1,7 +1,8 @@
 # R16 — the guide's config strictness and "Your own config format": a schema with
 # additionalProperties: false makes a config file's typo an error naming where it is, a handler
-# warns about keys no input reads, and a program reads an INI file through its own rotini.Codec.
-# ini.go, main.go and the greet handler are the ones the guide shows.
+# warns about keys no input reads, and a program reads an INI file through its own rotini.Codec,
+# and writes it with config set through the codec's encoder. ini.go, ini_test.go, main.go and
+# the greet and set handlers are the ones the guide shows.
 
 gomodinit example.com/inidemo
 
@@ -17,6 +18,7 @@ cp check.go.txt internal/cmd/inidemo/inidemo_check.go
 cp ini.go.txt internal/cmd/inidemo/ini.go
 cp load.go.txt internal/cmd/inidemo/inidemo_load.go
 cp ini_test.go.txt internal/cmd/inidemo/ini_test.go
+cp set.go.txt internal/cmd/inidemo/inidemo_set.go
 exec go mod tidy
 
 # Without the codec, a run that reads the file fails naming what to add.
@@ -30,6 +32,17 @@ exec go build -o inidemo$exe ./cmd/inidemo
 exec ./inidemo$exe show
 stdout '^region: eu-west$'
 ! stderr .
+
+# The encoder lets config set write the file, rewritten whole: the comment is gone.
+exec ./inidemo$exe set deploy.region us-east
+cmp legacy.ini legacy-set.golden
+exec ./inidemo$exe show
+stdout '^region: us-east$'
+
+# A value the schema rejects names where it would be in the rewritten file.
+wantexit 1 ./inidemo$exe set deploy.region mars
+stderr '^Error: inidemo set: config key deploy.region: configuration file .*legacy.ini would be invalid: deploy.region: value is not in enum \(got "mars"\)$'
+cmp legacy.ini legacy-set.golden
 
 # A decode error in the program's format names the line.
 cp broken.ini legacy.ini
@@ -58,7 +71,7 @@ stdin piped-typo.ini
 wantexit 1 ./inidemo$exe load
 stderr 'Error: inidemo load: stdin field "deploy.regoin": unknown key$'
 
-# The decoder meets the rules rotinitest.CheckCodec checks.
+# The decoder and encoder meet what rotinitest.CheckCodec and CheckCodecEncode check.
 exec go test ./internal/cmd/inidemo
 stdout '^ok'
 
@@ -82,6 +95,12 @@ func TestDecodeINI(t *testing.T) {
 	rotinitest.CheckCodec(t, decodeINI, rotinitest.CodecDocuments{
 		Valid:        [][]byte{[]byte("; settings\n[deploy]\nregion = eu-west\n")},
 		DuplicateKey: []byte("[deploy]\nregion = a\nregion = b\n"),
+	})
+}
+
+func TestEncodeINI(t *testing.T) {
+	rotinitest.CheckCodecEncode(t, decodeINI, encodeINI, rotinitest.CodecDocuments{
+		Valid: [][]byte{[]byte("name = demo\n[deploy]\nregion = eu-west\nzone = b\n")},
 	})
 }
 -- load.go.txt --
@@ -115,6 +134,9 @@ func (*inidemoLoadHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 ; settings from the old tool
 [deploy]
 region = eu-west
+-- legacy-set.golden --
+[deploy]
+region = us-east
 -- broken.ini --
 [deploy]
 region = eu-west
@@ -138,13 +160,15 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/go-rotini/rotini"
 )
 
-// INI reads the spec's `format: ini` files, and any .ini file without one.
-var INI = rotini.Codec("ini", decodeINI, rotini.CodecExtensions(".ini"))
+// INI reads the spec's `format: ini` files, and any .ini file without one, and writes them.
+var INI = rotini.Codec("ini", decodeINI, rotini.CodecExtensions(".ini"), rotini.CodecEncode(encodeINI))
 
 // decodeINI reads `[section]` headers, `key = value` lines and `;` or `#` comments. Each
 // section is a mapping, and a section or key given twice is an error.
@@ -188,6 +212,43 @@ type iniError struct {
 func (e iniError) Error() string             { return fmt.Sprintf("line %d: %s", e.line, e.msg) }
 func (e iniError) Position() (line, col int) { return e.line, 1 }
 func (e iniError) Message() string           { return e.msg }
+
+// encodeINI writes what decodeINI reads back: the top-level keys, then each section, keys
+// sorted. A list, or a section inside a section, is an error, which refuses the write.
+func encodeINI(doc any) ([]byte, error) {
+	var top, sections bytes.Buffer
+	m, _ := doc.(map[string]any)
+	for _, name := range slices.Sorted(maps.Keys(m)) {
+		section, ok := m[name].(map[string]any)
+		if !ok {
+			if err := iniLine(&top, name, m[name]); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		fmt.Fprintf(&sections, "[%s]\n", name)
+		for _, key := range slices.Sorted(maps.Keys(section)) {
+			if err := iniLine(&sections, key, section[key]); err != nil {
+				return nil, fmt.Errorf("[%s] %w", name, err)
+			}
+		}
+	}
+	return append(top.Bytes(), sections.Bytes()...), nil
+}
+
+// iniLine writes one `key = value` line; a value that isn't one line of text is an error.
+func iniLine(b *bytes.Buffer, key string, value any) error {
+	text := fmt.Sprint(value)
+	switch value.(type) {
+	case map[string]any, []any:
+	default:
+		if !strings.ContainsAny(text, "\r\n") {
+			fmt.Fprintf(b, "%s = %s\n", key, text)
+			return nil
+		}
+	}
+	return fmt.Errorf("%s: an INI value is one line of text", key)
+}
 -- main.go.txt --
 package main
 
@@ -296,7 +357,7 @@ command:
         deploy:
           type: object
           properties:
-            region: { type: string }
+            region: { type: string, enum: [eu-west, us-east] }
           additionalProperties: false
   config_files:
     - name: main
@@ -344,6 +405,22 @@ command:
         - name: replicas
           summary: how many to run
           schema: { type: int, key: deploy.replicas, file: strict }
+    - name: set
+      summary: write a value into the INI file
+      config_files:
+        - name: legacy
+          path: legacy.ini
+          format: ini
+          schema: { $ref: Settings }
+      config:
+        - name: region
+          summary: the region to deploy to
+          schema: { type: string, key: deploy.region, file: legacy }
+      arguments:
+        - name: key
+          schema: { type: string, required: true }
+        - name: value
+          schema: { type: string, required: true }
     - name: load
       summary: read settings piped on stdin
       stdin:
@@ -363,3 +440,29 @@ generate:
   features:
     - type: help
       enabled: true
+-- set.go.txt --
+package inidemo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*inidemoSetHandler)(nil)
+
+type inidemoSetHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*inidemoSetHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.ArgvInputs[InidemoSetInputs]()
+	if err != nil {
+		return err
+	}
+	args := in.Values.InidemoSet.Arguments
+	return rotini.SetConfigValue(rtx, "legacy", args.Key, args.Value)
+}

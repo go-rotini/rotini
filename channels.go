@@ -55,6 +55,10 @@ func (c ChannelClass) String() string {
 //
 // Like any record, recording neither prints nor stops the lifecycle. The class decides what
 // rotini does with the records when the author's reporter doesn't: [ChannelClass].
+//
+// A channel declared in the spec's `channels:` is generated instead, with a record type from
+// its schema (SkippedRecord and SkippedChannel for `skipped`), and is part of the program's
+// contract: [StructuredReporter] writes its records as lines of their own kind ([ChannelDef]).
 type Channel[T any] struct {
 	name  string
 	class ChannelClass
@@ -154,6 +158,17 @@ func (rtx *Context) copyChannels() []*channelRecords {
 		out[i] = &cp
 	}
 	return out
+}
+
+// declaresChannel reports whether the run's Definition declares c: a [ChannelDef] with its
+// name and class.
+func (rtx *Context) declaresChannel(c *channelRecords) bool {
+	for _, d := range rtx.declared {
+		if d.Name == c.name && d.Class == c.class {
+			return true
+		}
+	}
+	return false
 }
 
 // failedChannel reports whether any ChannelClassError channel holds a record.

@@ -18,7 +18,7 @@ import (
 // them) and returns what to write: numbers and booleans as such, an enum value in its declared
 // spelling, anything else as the string given; a list as a list and a map as a map, except in
 // a dotenv file, where every value is one string.
-func configValue(rtx *Context, keys []ConfigKey, raw string, format cfgedit.Format, parse func(string) error) (any, error) {
+func configValue(rtx *Context, keys []ConfigKeyDef, raw string, format cfgedit.Format, parse func(string) error) (any, error) {
 	view := rtx.osView()
 	var value any
 	for i, k := range keys {
@@ -36,14 +36,14 @@ func configValue(rtx *Context, keys []ConfigKey, raw string, format cfgedit.Form
 // checkedValue is a value that passed a key's checks: its items as text, in the enum's
 // declared spelling, and as the key's type parsed them.
 type checkedValue struct {
-	key   ConfigKey
+	key   ConfigKeyDef
 	texts []string
 	typed reflect.Value // invalid for a key of a custom type
 }
 
 // checkConfigKey checks raw against one key's declaration, the way the command line checks a
 // flag's value.
-func checkConfigKey(k ConfigKey, raw string, view *osView, parse func(string) error) (checkedValue, error) {
+func checkConfigKey(k ConfigKeyDef, raw string, view *osView, parse func(string) error) (checkedValue, error) {
 	label := "config key " + k.Key
 	if k.Object {
 		return checkedValue{}, usageBind(InputErrorKindWriteRefused, channelConfig, k.Key, label+" holds an object; edit the configuration file by hand", nil)
@@ -57,7 +57,7 @@ func checkConfigKey(k ConfigKey, raw string, view *osView, parse func(string) er
 		}
 	}
 	texts = flagEnum(&fd).canonical(texts)
-	if err := checkFlagValues(&fd, label, texts, view.base(), view.clockRef()); err != nil {
+	if err := checkFlagValues(&fd, label, texts, view, view.clockRef()); err != nil {
 		return checkedValue{}, configValueError(k.Key, err)
 	}
 	out := checkedValue{key: k, texts: texts}
@@ -97,7 +97,7 @@ func configValueError(key string, err error) error {
 }
 
 // flagDef is the key's declaration in the form the command line's checks read.
-func (k ConfigKey) flagDef() FlagDef {
+func (k ConfigKeyDef) flagDef() FlagDef {
 	return FlagDef{
 		Name: k.Key, Type: k.Type, Enum: k.Enum, EnumValues: k.EnumValues, IgnoreCase: k.IgnoreCase,
 		Layout: k.Layout, Layouts: k.Layouts, Base: k.Base, Separator: k.separator(), Secret: k.Secret, Constraints: k.Constraints,
@@ -105,7 +105,7 @@ func (k ConfigKey) flagDef() FlagDef {
 }
 
 // separator is what splits a list or map value given as one string.
-func (k ConfigKey) separator() string {
+func (k ConfigKeyDef) separator() string {
 	if k.Separator == "" {
 		return ","
 	}

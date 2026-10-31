@@ -1,0 +1,3 @@
+warning: spec: .rotini.spec.yaml:8:5: command demo: exit_status leaves out 1, the code every recorded error exits with unless a handler sets another; list it (validate.exit_status_one)
+warning: spec: .rotini.spec.yaml:20:9: command demo/put: exit_status leaves out 1, the code every recorded error exits with unless a handler sets another; list it (validate.exit_status_one)
+warning: spec: .rotini.spec.yaml:25:9: command demo/run: exit_status leaves out 1, the code every recorded error exits with unless a handler sets another; list it (validate.exit_status_one)

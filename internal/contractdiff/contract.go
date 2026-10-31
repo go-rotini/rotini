@@ -22,6 +22,7 @@ type document struct {
 	ResponseFiles *responseFiles      `json:"response_files"`
 	Multicall     *multicall          `json:"multicall"`
 	Topics        []topic             `json:"topics"`
+	Channels      []channel           `json:"channels"`
 	legacy        bool                // written before rotini 1.4; see projectLegacy
 	byPath        map[string]*command // commands by their path joined with spaces
 }
@@ -42,6 +43,13 @@ type multicall struct {
 
 type topic struct {
 	Name string `json:"name"`
+}
+
+// channel is an outcome channel the spec declares; its records are structured lines.
+type channel struct {
+	Name   string `json:"name"`
+	Class  string `json:"class"`
+	Schema any    `json:"schema"`
 }
 
 type command struct {

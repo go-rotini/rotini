@@ -250,6 +250,7 @@ func smokeDocData() templateHelpData {
 		ExampleRows: []templateDocExample{{Run: "app generate ./src"}},
 		ExitStatus:  []templateDocExitRow{{Code: 0, Summary: "success"}, {Code: 1, Summary: "failure"}},
 		SeeAlso:     []string{"app(1)", "app-sub(1)"},
+		SeeAlsoRows: []templateDocSeeAlso{{Text: "app(1)"}, {Text: "app-sub(1)"}},
 	}
 }
 
@@ -411,15 +412,16 @@ func TestInputFieldTag(t *testing.T) {
 // caller's slices, and leaves examples untouched.
 func TestSanitizeDocData_copies(t *testing.T) {
 	in := templateHelpData{
-		Flags:    []templateDocFlagRow{{Summary: "a\tb"}},
-		SeeAlso:  []string{"x\ty"},
-		Examples: []string{"kept\tintact"},
+		Flags:       []templateDocFlagRow{{Summary: "a\tb"}},
+		SeeAlso:     []string{"x\ty"},
+		SeeAlsoRows: []templateDocSeeAlso{{Text: "x\ty"}},
+		Examples:    []string{"kept\tintact"},
 	}
 	out := sanitizeDocData(in)
-	if in.Flags[0].Summary != "a\tb" || in.SeeAlso[0] != "x\ty" {
+	if in.Flags[0].Summary != "a\tb" || in.SeeAlso[0] != "x\ty" || in.SeeAlsoRows[0].Text != "x\ty" {
 		t.Error("sanitizeDocData mutated the input")
 	}
-	if out.Flags[0].Summary != "a b" || out.SeeAlso[0] != "x y" {
+	if out.Flags[0].Summary != "a b" || out.SeeAlso[0] != "x y" || out.SeeAlsoRows[0].Text != "x y" {
 		t.Errorf("sanitizeDocData did not clean rows: %+v", out)
 	}
 	if out.Examples[0] != "kept\tintact" {

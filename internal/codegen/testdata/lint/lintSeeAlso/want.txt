@@ -1,2 +1,4 @@
 warning: spec: .rotini.spec.yaml:17:7: command demo: `see_also` entry "demo-lst(8)" names the page demo-lst, which no command or help topic of demo has; did you mean "demo-list"?
 warning: spec: .rotini.spec.yaml:18:7: command demo: `see_also` entry "demo-list(1)" names section 1, but the man pages are written in section 8; write demo-list(8)
+warning: spec: .rotini.spec.yaml:28:11: command demo/list: `see_also` names the command "remote ad", which demo doesn't have; did you mean "remote add"?
+warning: spec: .rotini.spec.yaml:29:11: command demo/list: `see_also` names the help topic "filter", which demo doesn't declare in `topics:`; did you mean "filters"?

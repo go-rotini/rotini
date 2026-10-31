@@ -44,15 +44,16 @@ type constGroup struct {
 }
 
 // identPart spells s as identifier words: each run of characters a Go identifier can't hold is
-// a word boundary, then the words are PascalCased ("dry-run" and "dry.run" give DryRun, "json"
-// JSON). "" when s has no letter or digit.
+// a word boundary, then the words are PascalCased, initialisms and format names in capitals
+// ("dry-run" and "dry.run" give DryRun, "json" JSON, "yaml" YAML). "" when s has no letter or
+// digit.
 func identPart(s string) string {
-	return toPascalCase(strings.Map(func(r rune) rune {
+	return constCase(toPascalCase(strings.Map(func(r rune) rune {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			return r
 		}
 		return '-'
-	}, s))
+	}, s)))
 }
 
 // enumConstType reports whether an input of schema gets enum constants: its value is a string,

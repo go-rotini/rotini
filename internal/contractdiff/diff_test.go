@@ -873,3 +873,58 @@ func TestDiff_inheritedExitStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestDiff_channels(t *testing.T) {
+	ch := func(name, class, props string) string {
+		return `{"name": "` + name + `", "class": "` + class + `", "schema": {"type": "object", "required": ["path"], "properties": {` + props + `}}}`
+	}
+	channels := func(list ...string) string { return `"channels": [` + strings.Join(list, ", ") + `]` }
+	path := `"path": {"type": "string"}`
+	pathReason := path + `, "reason": {"type": "string"}`
+	runRaw(t, []rawCase{
+		{
+			name: "removed and added",
+			old:  contract(root(""), channels(ch("skipped", "info", path))),
+			new:  contract(root(""), channels(ch("noted", "info", path))),
+			want: []string{"breaking CHANNEL_NO_DELETE channel skipped", "safe CHANNEL_ADDED channel noted"},
+		},
+		{
+			name: "first channel",
+			old:  contract(root("")),
+			new:  contract(root(""), channels(ch("skipped", "info", path))),
+			want: []string{"safe CHANNEL_ADDED channel skipped"},
+		},
+		{
+			name: "record field removed and added, as an output",
+			old:  contract(root(""), channels(ch("skipped", "info", pathReason))),
+			new:  contract(root(""), channels(ch("skipped", "info", path+`, "size": {"type": "integer"}`))),
+			want: []string{"breaking OUTPUT_PROPERTY_NO_DELETE channel skipped.reason", "safe OUTPUT_PROPERTY_ADDED channel skipped.size"},
+		},
+		{
+			name: "class between non-error classes",
+			old:  contract(root(""), channels(ch("skipped", "info", path))),
+			new:  contract(root(""), channels(ch("skipped", "warning", path))),
+			want: []string{"possibly_breaking CHANNEL_CLASS_CHANGED channel skipped"},
+		},
+		{
+			name: "class to error",
+			old:  contract(root(""), channels(ch("skipped", "warning", path))),
+			new:  contract(root(""), channels(ch("skipped", "error", path))),
+			want: []string{"breaking CHANNEL_CLASS_CHANGED channel skipped"},
+		},
+		{
+			name: "an experimental program's channel",
+			old:  contract(root(`"stability": "experimental"`), channels(ch("skipped", "info", path))),
+			new:  contract(root(`"stability": "experimental"`)),
+			want: []string{"safe CHANNEL_NO_DELETE channel skipped"},
+		},
+		{
+			name: "a definition only a channel uses",
+			old: contract(root(""), `"channels": [{"name": "c", "class": "info", "schema": {"$ref": "#/definitions/R"}}]`,
+				`"definitions": {"R": {"type": "object", "properties": {"x": {"type": "string"}}}}`),
+			new: contract(root(""), `"channels": [{"name": "c", "class": "info", "schema": {"$ref": "#/definitions/R"}}]`,
+				`"definitions": {"R": {"type": "object", "properties": {}}}`),
+			want: []string{"breaking OUTPUT_PROPERTY_NO_DELETE definitions.R.x"},
+		},
+	})
+}

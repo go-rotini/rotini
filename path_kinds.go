@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 )
 
@@ -21,18 +20,18 @@ func isStreamPathType(typ string) bool { return typ == typeInputFile || typ == t
 // An input file must exist and not be a directory, as an existingfile must. An output file
 // need not exist, but must not be a directory, and its directory must exist; whether it can be
 // written is left to [CreateOutput].
-func checkStreamPath(label, typ, value, dir string) error {
+func checkStreamPath(label, typ, value string, view *osView) error {
 	if value == "-" {
 		return nil
 	}
 	if typ == typeInputFile {
-		return checkPathExists(label, "existingfile", value, dir)
+		return checkPathExists(label, "existingfile", value, view)
 	}
-	full := joinDir(dir, value)
-	if info, err := os.Stat(full); err == nil && info.IsDir() {
+	full := joinDir(view.base(), value)
+	if info, err := view.stat(full); err == nil && info.IsDir() {
 		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s is a directory", label, quotePath(value)), Flag: label}
 	}
-	if info, err := os.Stat(filepath.Dir(full)); pathMissing(err) || (err == nil && !info.IsDir()) {
+	if info, err := view.stat(filepath.Dir(full)); pathMissing(err) || (err == nil && !info.IsDir()) {
 		parent := filepath.Dir(value) + string(filepath.Separator)
 		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: no such directory: %s", label, quotePath(parent)), Flag: label}
 	}

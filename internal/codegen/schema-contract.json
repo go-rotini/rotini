@@ -23,7 +23,7 @@
     },
     "errors": {
       "$ref": "#/definitions/JSONSchema",
-      "description": "The JSON Schema of one line rotini.StructuredReporter writes to stderr: an error, warning, info or success. A program uses that reporter only when its author opts in."
+      "description": "The JSON Schema of one line rotini.StructuredReporter writes to stderr: an error, warning, info or success, or a record of one of `channels`. A program uses that reporter only when its author opts in."
     },
     "completion": {
       "type": "object",
@@ -56,6 +56,11 @@
       "type": "array",
       "description": "The help topics the root declares: pages that aren't commands, shown by `<name> help <topic>` when the program has a help command that calls the generated Help function. Present only when the cli declares any.",
       "items": { "$ref": "#/definitions/Topic" }
+    },
+    "channels": {
+      "type": "array",
+      "description": "The outcome channels the spec declares, and those of the specs it composes. rotini.StructuredReporter writes each record of one as its own line, `{\"schema_version\":1,\"<name>\":{…}}`, shaped as the channel's schema. Present only when the cli declares any.",
+      "items": { "$ref": "#/definitions/Channel" }
     }
   },
   "definitions": {
@@ -98,8 +103,8 @@
         },
         "output": { "$ref": "#/definitions/JSONSchema", "description": "The shape of what the command writes to stdout when it succeeds, when it declares one. A command that writes a stream of items declares one item; when the items come in several kinds, it is `oneOf` one object schema per kind, each naming its kind in the same required string property, which holds a `const`. Self-contained." },
         "stream": { "type": "boolean", "description": "true when the command writes a stream of `output` items rather than one value: in JSON, one compact value per line; in YAML, one document per item, each starting `---`." },
-        "exit_status": { "type": "array", "items": { "$ref": "#/definitions/ExitStatus" }, "description": "The exit codes the command documents: its own exit_status, else the root's, which is program-wide. A command's own list replaces the root's." },
-        "exit_status_inherited": { "type": "boolean", "description": "true when `exit_status` is the root's: the command declares none of its own." },
+        "exit_status": { "type": "array", "items": { "$ref": "#/definitions/ExitStatus" }, "description": "The exit codes the command documents: its own exit_status, else the root's, which is program-wide. A command's own list replaces the root's, unless it adds to it with `inherit: true`." },
+        "exit_status_inherited": { "type": "boolean", "description": "true when `exit_status` holds the root's entries: the command declares no list of its own, or adds to the root's with `inherit: true`." },
         "hidden_aliases": { "type": "array", "items": { "type": "string" }, "description": "More names that run the command but that help, completion and suggestions never list." },
         "replaced_by": { "type": "string", "description": "With `deprecated`: the command to use instead, as its command names below the root joined by spaces (\"purge\", \"remote add\")." },
         "stability": { "$ref": "#/definitions/Stability", "description": "How settled the command is, as declared. Its inputs, sub-commands, output and exit codes are at most as stable as it is." },
@@ -430,6 +435,17 @@
     "Stability": {
       "enum": ["experimental", "beta"],
       "description": "How settled the item is, as declared. experimental: it may change or be removed in any release. beta: it may change in a minor release. Absent means stable. An item is at most as stable as its command and that command's ancestors."
+    },
+    "Channel": {
+      "type": "object",
+      "required": ["name", "class", "schema"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "The channel's name: the key of its structured lines." },
+        "class": { "enum": ["info", "success", "warning", "error"], "description": "How rotini treats a record its reporter doesn't handle. An error record is a failure: it counts toward the exit code, and the structured reporter also writes it as an error line." },
+        "summary": { "type": "string", "description": "What one record means." },
+        "schema": { "$ref": "#/definitions/JSONSchema", "description": "The JSON Schema of one record." }
+      }
     },
     "Topic": {
       "type": "object",

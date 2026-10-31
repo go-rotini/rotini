@@ -76,6 +76,8 @@ validate:
   help_width: 100
   flags_first: false
   posix_names: false
+  exit_status_drops_root: false
+  exit_status_one: false
   release_env: RELEASE
 diff:
   accept:

@@ -60,7 +60,7 @@ func TestInputReader_fillsEnvAndConfig(t *testing.T) {
 	t.Setenv("REGION", "us-west")
 
 	rtx := NewContextFor(tbDef(), []string{"--verbose"})
-	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	var in tbInputs
 	if err := reader.Read(rtx, &in); err != nil {
@@ -111,7 +111,7 @@ func TestInputReader_customSources(t *testing.T) {
 		rtx := NewContextFor(tbDef(), nil)
 		var in tbInputs
 		meta := InputSettings{
-			ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}},
+			ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}},
 			Sources:     []recon.Source{vault()},
 		}
 		if err := NewInputReader(meta).Read(rtx, &in); err != nil {
@@ -148,7 +148,7 @@ func TestInputReader_customSources(t *testing.T) {
 			{[]recon.Source{recon.NewMapSource("default", nil)}, `could not build the configuration registry: a custom source is named "default", which is reserved`},
 		} {
 			var in tbInputs
-			meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}, Sources: c.srcs}
+			meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}, Sources: c.srcs}
 			err := NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in)
 			ie, ok := errors.AsType[*InputError](err)
 			if !ok || ie.Msg != c.want || ie.Channel != channelConfig || CategoryOf(err) != CategoryInternal || !errors.Is(err, recon.ErrSourceConflict) {
@@ -161,7 +161,7 @@ func TestInputReader_customSources(t *testing.T) {
 func TestInputReader_requiredConfigMissing(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: https://api.example\n") // no api.token
 	rtx := NewContextFor(tbDef(), nil)
-	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	var in tbInputs
 	if err := reader.Read(rtx, &in); err == nil {
@@ -201,7 +201,7 @@ func TestInputReader_discoverWalkUp(t *testing.T) {
 	}
 	t.Chdir(nested)
 
-	meta := InputSettings{ConfigFiles: []ConfigFile{{
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{
 		Name: "project", Format: "yaml",
 		Discover: &DiscoverDef{Strategy: "walk-up", File: ".app.yaml"},
 	}}}
@@ -237,7 +237,7 @@ func TestInputReader_discoverXDG(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 
-	meta := InputSettings{ConfigFiles: []ConfigFile{{
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{
 		Name: "user", Format: "yaml",
 		Discover: &DiscoverDef{Strategy: "xdg", App: "acme", File: "config.yaml"},
 	}}}
@@ -282,7 +282,7 @@ func TestInputReader_discoverXDGWithoutWorkingDir(t *testing.T) {
 		t.Skip("this platform still reports a removed working directory")
 	}
 
-	meta := InputSettings{ConfigFiles: []ConfigFile{{
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{
 		Name: "user", Format: "yaml",
 		Discover: &DiscoverDef{Strategy: "xdg", App: "acme", File: "config.yaml"},
 	}}}
@@ -305,27 +305,27 @@ func TestInputReader_configSchemaValidation(t *testing.T) {
 		var in tbNoReqInputs
 		return NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in)
 	}
-	withSchema := func(cf ConfigFile) InputSettings {
+	withSchema := func(cf ConfigFileDef) InputSettings {
 		cf.Schema = tbCfgSchema
-		return InputSettings{ConfigFiles: []ConfigFile{cf}}
+		return InputSettings{ConfigFiles: []ConfigFileDef{cf}}
 	}
 
 	t.Run("conforming file passes", func(t *testing.T) {
 		cfg := writeConfig(t, "api:\n  endpoint: https://api.example\n")
-		if err := bind(t, withSchema(ConfigFile{Name: "app", Path: cfg, Format: "yaml"})); err != nil {
+		if err := bind(t, withSchema(ConfigFileDef{Name: "app", Path: cfg, Format: "yaml"})); err != nil {
 			t.Errorf("Bind = %v, want nil", err)
 		}
 	})
 	t.Run("non-conforming file errors naming the file", func(t *testing.T) {
 		cfg := writeConfig(t, "api:\n  retries: 3\n") // api.endpoint missing
-		err := bind(t, withSchema(ConfigFile{Name: "app", Path: cfg, Format: "yaml"}))
+		err := bind(t, withSchema(ConfigFileDef{Name: "app", Path: cfg, Format: "yaml"}))
 		if err == nil || !strings.Contains(err.Error(), cfg) || !strings.Contains(err.Error(), "app") {
 			t.Errorf("Bind = %v, want a violation naming the entry and the file", err)
 		}
 	})
 	t.Run("absent file passes vacuously", func(t *testing.T) {
 		missing := filepath.Join(t.TempDir(), "nope.yaml")
-		if err := bind(t, withSchema(ConfigFile{Name: "app", Path: missing, Format: "yaml"})); err != nil {
+		if err := bind(t, withSchema(ConfigFileDef{Name: "app", Path: missing, Format: "yaml"})); err != nil {
 			t.Errorf("Bind(absent) = %v, want nil — absence is required's concern", err)
 		}
 	})
@@ -338,7 +338,7 @@ func TestInputReader_configSchemaValidation(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("XDG_CONFIG_HOME", xdg)
-		meta := withSchema(ConfigFile{Name: "user", Format: "yaml",
+		meta := withSchema(ConfigFileDef{Name: "user", Format: "yaml",
 			Discover: &DiscoverDef{Strategy: "xdg", App: "acme", File: "config.yaml"}})
 		if err := bind(t, meta); err == nil {
 			t.Error("Bind(discovered non-conforming file) = nil, want the validation error")
@@ -346,8 +346,8 @@ func TestInputReader_configSchemaValidation(t *testing.T) {
 	})
 	t.Run("config_source-supplied file is validated", func(t *testing.T) {
 		bad := writeConfig(t, "api:\n  retries: 3\n")
-		meta := withSchema(ConfigFile{Name: "app", Path: filepath.Join(t.TempDir(), "declared.yaml"), Format: "yaml",
-			PathFrom: &PathFromDef{Env: "APP_CONFIG"}})
+		meta := withSchema(ConfigFileDef{Name: "app", Path: filepath.Join(t.TempDir(), "declared.yaml"), Format: "yaml",
+			PathFrom: &PathFromDef{Env: []string{"APP_CONFIG"}}})
 		t.Setenv("APP_CONFIG", bad)
 		if err := bind(t, meta); err == nil {
 			t.Error("Bind(config_source non-conforming file) = nil, want the validation error")
@@ -355,7 +355,7 @@ func TestInputReader_configSchemaValidation(t *testing.T) {
 	})
 	t.Run("a pinned input's registry validates too", func(t *testing.T) {
 		bad := writeConfig(t, "api:\n  retries: 3\n")
-		meta := withSchema(ConfigFile{Name: "app", Path: bad, Format: "yaml"})
+		meta := withSchema(ConfigFileDef{Name: "app", Path: bad, Format: "yaml"})
 		var in struct {
 			App struct {
 				Flags     struct{}
@@ -397,9 +397,9 @@ func TestInputReader_configSourceTwoPhase(t *testing.T) {
 	declared := writeConfig(t, "api:\n  endpoint: from-declared\n")
 	flagged := writeConfig(t, "api:\n  endpoint: from-flag\n")
 	fromEnv := writeConfig(t, "api:\n  endpoint: from-env\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{
 		Name: "app", Path: declared, Format: "yaml",
-		PathFrom: &PathFromDef{Flag: "config", Env: "APP_CONFIG"},
+		PathFrom: &PathFromDef{Flag: "config", Env: []string{"APP_CONFIG"}},
 	}}}
 	bind := func(t *testing.T, def Definition, argv []string) tbCfgSrcInputs {
 		t.Helper()
@@ -461,9 +461,9 @@ func TestInputReader_configSourceFlagNotFromFile(t *testing.T) {
 	}
 	other := writeConfig(t, "api:\n  endpoint: from-other\n")
 	declared := writeConfig(t, "config: "+other+"\napi:\n  endpoint: from-declared\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{
 		Name: "app", Path: declared, Format: "yaml",
-		PathFrom: &PathFromDef{Flag: "config", Env: "APP_CONFIG"},
+		PathFrom: &PathFromDef{Flag: "config", Env: []string{"APP_CONFIG"}},
 	}}}
 	reads := map[string]func(*Context) (inputs, error){
 		"Read": func(rtx *Context) (inputs, error) {
@@ -538,7 +538,7 @@ func TestInputReader_explicitEnvVar(t *testing.T) {
 func TestInputReader_configFilePinned(t *testing.T) {
 	system := writeConfig(t, "api:\n  endpoint: from-system\n  token: sys-token\n")
 	user := writeConfig(t, "api:\n  endpoint: from-user\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{
 		{Name: "system", Path: system, Format: "yaml"}, // higher precedence
 		{Name: "user", Path: user, Format: "yaml"},
 	}}
@@ -580,7 +580,7 @@ func TestInputReader_configFilePinned(t *testing.T) {
 	}
 	// A pinned file that doesn't exist is named by the path it would be read from.
 	absent := filepath.Join(t.TempDir(), "absent.yaml")
-	gone := InputSettings{ConfigFiles: []ConfigFile{{Name: "system", Path: system, Format: "yaml"}, {Name: "user", Path: absent, Format: "yaml"}}}
+	gone := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "system", Path: system, Format: "yaml"}, {Name: "user", Path: absent, Format: "yaml"}}}
 	err = NewInputReader(gone).Read(NewContextFor(tbAppDef(), nil), &in2)
 	if ie, ok := errors.AsType[*InputError](err); !ok || ie.Msg != "config key api.token is required in configuration file "+absent {
 		t.Errorf("Bind(absent pinned file) = %v, want the required error naming %s", err, absent)
@@ -770,7 +770,7 @@ func tbFbDef() Definition {
 
 func TestInputReader_flagFallbackPrecedence(t *testing.T) {
 	cfg := writeConfig(t, "create:\n  color: red\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	cases := []struct {
 		name string
@@ -884,7 +884,7 @@ func tbReqDef() Definition {
 
 func TestInputReader_requiredFlagSatisfiedByConfig(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  token: from-config\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(tbReqDef(), nil) // not on argv
 	var in tbReqInputs
@@ -937,7 +937,7 @@ func tbEnumDef() Definition {
 
 func TestInputReader_enumCheckedOnReconciledValue(t *testing.T) {
 	cfg := writeConfig(t, "create:\n  color: teal\n") // teal is not in the enum
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(tbEnumDef(), nil)
 	var in tbEnumInputs
@@ -969,7 +969,7 @@ func tbPortDef() Definition {
 
 func TestInputReader_constraintCheckedOnReconciledValue(t *testing.T) {
 	cfg := writeConfig(t, "create:\n  port: 70000\n") // above the declared maximum
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(tbPortDef(), nil)
 	var in tbPortInputs
@@ -1040,7 +1040,7 @@ func TestInputReader_channelConstraintAbsentSkipped(t *testing.T) {
 
 func TestInputReader_configConstraintEnforced(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  name: TOOLONG\n") // length 7 > maxlen 5 (and not lowercase)
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	var in tbCfgName
 	if err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in); err == nil {
 		t.Fatal("expected a constraint violation for the config value app.name")
@@ -1049,7 +1049,7 @@ func TestInputReader_configConstraintEnforced(t *testing.T) {
 
 func TestInputReader_configConstraintValid(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  name: abc\n")
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	var in tbCfgName
 	if err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in); err != nil {
 		t.Fatalf("Bind: %v", err)
@@ -1112,7 +1112,7 @@ type tbSecretCfg struct {
 
 func TestInputReader_secretChannelValueRedacted(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  token: short\n") // length 5 < minlen 8
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 	var in tbSecretCfg
 	err := NewInputReader(meta).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err == nil {
@@ -1199,7 +1199,7 @@ func TestParseStdinTag(t *testing.T) {
 // chain, nearest-wins (deepest command first), off-branch sources excluded, and unscoped
 // (Scope=="") sources always in scope, last.
 func TestInputReader_chainConfigFiles(t *testing.T) {
-	b := &InputReader{configFiles: []ConfigFile{
+	b := &InputReader{configFiles: []ConfigFileDef{
 		{Name: "rootA", Scope: "app"},
 		{Name: "rootB", Scope: "app"},
 		{Name: "deploy", Scope: "app/deploy"},
@@ -1349,7 +1349,7 @@ func TestWithInputReader_overridesTheDefault(t *testing.T) {
 
 // The override receives the program's InputSettings.
 func TestWithInputReader_receivesTheProgramsMeta(t *testing.T) {
-	meta := InputSettings{EnvPrefix: "ACME", ConfigFiles: []ConfigFile{{Name: "project", Scope: "app"}}}
+	meta := InputSettings{EnvPrefix: "ACME", ConfigFiles: []ConfigFileDef{{Name: "project", Scope: "app"}}}
 
 	var seen InputSettings
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { _ = readerFor(rtx) }}
@@ -1673,7 +1673,7 @@ func TestInputReader_badFallbackValueIsAUsageError(t *testing.T) {
 	t.Run("config", func(t *testing.T) {
 		cfg := writeConfig(t, "port: abc\n")
 		var in tbFallbackInputs
-		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).
 			Read(NewContextFor(tbFallbackDef(false), nil), &in)
 		if err == nil || !strings.Contains(err.Error(), "configuration file "+cfg+", key port") {
 			t.Fatalf("err = %v, want it to name the configuration file", err)
@@ -1729,7 +1729,7 @@ func TestInputReader_nullFallbackKeepsDefault(t *testing.T) {
 	} {
 		cfg := writeConfig(t, c.body)
 		var in nullFallbackInputs
-		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: c.format}}}).
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: c.format}}}).
 			Read(NewContextFor(def, nil), &in)
 		if err != nil {
 			t.Fatalf("%s %q: %v", c.format, c.body, err)
@@ -1742,7 +1742,7 @@ func TestInputReader_nullFallbackKeepsDefault(t *testing.T) {
 	// A null in a higher file lets a lower file's value through.
 	project, user := writeConfig(t, "mode:\nlevel: null\n"), writeConfig(t, "mode: slow\nlevel: debug\n")
 	var in nullFallbackInputs
-	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{
 		{Name: "project", Path: project, Format: "yaml"}, {Name: "user", Path: user, Format: "yaml"},
 	}}).Read(NewContextFor(def, nil), &in)
 	if err != nil || in.App.Flags.Mode != "slow" || in.App.Config.Level != "debug" {
@@ -1801,7 +1801,7 @@ func TestInputReader_channelEnumEnforced(t *testing.T) {
 	})
 	t.Run("config rejects a non-member", func(t *testing.T) {
 		cfg := writeConfig(t, "tier: bronze\n")
-		_, err := bind(t, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		_, err := bind(t, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}})
 		if err == nil || !strings.HasPrefix(err.Error(), `app: invalid value "bronze" for config key tier (one of: gold, silver) (from configuration file `+cfg+")") {
 			t.Fatalf("err = %v, want an enum violation for tier", err)
 		}
@@ -1849,7 +1849,7 @@ func TestInputReader_listAndMapFlagsWithAFallback(t *testing.T) {
 	})
 	t.Run("config list and map", func(t *testing.T) {
 		cfg := writeConfig(t, "tags: [a, b]\nlabels: {k: v, x: y}\nports: [8080, 9090]\n")
-		in := bind(t, nil, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		in := bind(t, nil, InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}})
 		if !slices.Equal(in.App.Flags.Tags, []string{"a", "b"}) || len(in.App.Flags.Labels) != 2 || in.App.Flags.Labels["x"] != "y" ||
 			!slices.Equal(in.App.Flags.Ports, []int{8080, 9090}) {
 			t.Errorf("tags=%q labels=%v ports=%v", in.App.Flags.Tags, in.App.Flags.Labels, in.App.Flags.Ports)
@@ -1921,7 +1921,7 @@ func TestInputReader_emptyEnvFallsThrough(t *testing.T) {
 	cfg := writeConfig(t, "port: 9090\n")
 	t.Setenv("PORT", "")
 	var in tbFallbackInputs
-	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).
 		Read(NewContextFor(tbFallbackDef(false), nil), &in)
 	if err != nil || in.App.Flags.Port != 9090 {
 		t.Fatalf("Port = %d, err = %v; want the config file's 9090", in.App.Flags.Port, err)
@@ -1948,7 +1948,7 @@ func TestInputReader_boolSpellingsOnEnvAndConfig(t *testing.T) {
 	t.Setenv("CACHE", "Yes")
 	t.Setenv("ANSWER", "yes")
 	var in inputs
-	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).
 		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err != nil {
 		t.Fatal(err)
@@ -1982,7 +1982,7 @@ func TestInputReader_channelTimeLayouts(t *testing.T) {
 	t.Setenv("SINCE", "2026-09-29")
 	t.Setenv("EPOCH", "1759104000")
 	var in inputs
-	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).
 		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err != nil {
 		t.Fatal(err)
@@ -2018,7 +2018,7 @@ func TestInputReader_channelDurationsAndBounds(t *testing.T) {
 		var in inputs
 		meta := InputSettings{}
 		if cfg != "" {
-			meta.ConfigFiles = []ConfigFile{{Name: "app", Path: writeConfig(t, cfg), Format: "yaml"}}
+			meta.ConfigFiles = []ConfigFileDef{{Name: "app", Path: writeConfig(t, cfg), Format: "yaml"}}
 		}
 		err := NewInputReader(meta).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 		return in, err
@@ -2292,7 +2292,7 @@ func TestInputReader_configValueWording(t *testing.T) {
 		if want != "" {
 			want += " (from configuration file " + cfg + ")"
 		}
-		set := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+		set := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}
 		for reader, err := range readerErrors[in](NewContextFor(tbAppDef(), nil).WithInputSettings(set), "files") {
 			if want == "" && err != nil {
 				t.Errorf("%q: %s: %v", body, reader, err)
@@ -2304,7 +2304,7 @@ func TestInputReader_configValueWording(t *testing.T) {
 	read := func(body string) (b bool, pins []uint8) {
 		var v in
 		cfg := writeConfig(t, body)
-		if err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(NewContextFor(tbAppDef(), nil), &v); err != nil {
+		if err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(NewContextFor(tbAppDef(), nil), &v); err != nil {
 			t.Fatal(err)
 		}
 		return v.App.Config.B, v.App.Config.Pins
@@ -2360,7 +2360,7 @@ func TestConfigSchema_reportsCauses(t *testing.T) {
 			}
 		}
 	}
-	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml", Schema: schema}}}).
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml", Schema: schema}}}).
 		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err == nil || !strings.Contains(err.Error(), "is invalid: db.port: ") || !strings.Contains(err.Error(), "integer") {
 		t.Fatalf("err = %v, want the failure under oneOf at db.port", err)
@@ -2400,7 +2400,7 @@ func TestConfigMap_takesJSONShape(t *testing.T) {
 			}
 		}
 	}
-	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg}}}).
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg}}}).
 		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err != nil {
 		t.Fatal(err)
@@ -2437,7 +2437,7 @@ func TestConfigFileProblem_readFailures(t *testing.T) {
 			}
 		}
 	}
-	err = NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: big}}}).
+	err = NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: big}}}).
 		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if want := fmt.Sprintf("app: could not open configuration file %s: is larger than the %d MiB limit", big, recon.MaxFileSize>>20); err == nil || err.Error() != want {
 		t.Errorf("too large: %v\nwant %s", err, want)
@@ -2445,7 +2445,7 @@ func TestConfigFileProblem_readFailures(t *testing.T) {
 
 	loop := filepath.Join(dir, "loop.yaml")
 	cause := fmt.Errorf("recon: read %q: %w", loop, &os.PathError{Op: "open", Path: loop, Err: errors.New("too many levels of symbolic links")})
-	if got, want := configFileProblem(loop, cause), "could not open configuration file "+loop+": cannot be read: too many levels of symbolic links"; got != want {
+	if got, want := configFileProblem(nil, loop, cause), "could not open configuration file "+loop+": cannot be read: too many levels of symbolic links"; got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
@@ -2480,7 +2480,7 @@ func TestInputs_tomlTimeAsText(t *testing.T) {
 		{Name: "s", Identifiers: []string{"--s"}, Type: "map[string]string"},
 		{Name: "l", Identifiers: []string{"--l"}, Type: "[]string"},
 	}}
-	set := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg}}}
+	set := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg}}}
 	in, err := NewContextFor(def, nil).WithInputSettings(set).Inputs[tomlTimeInputs]()
 	if err != nil {
 		t.Fatal(err)
@@ -2533,7 +2533,7 @@ func TestInputReader_customSourceNamedLikeAFile(t *testing.T) {
 	t.Parallel()
 	cfg := writeConfig(t, "api:\n  endpoint: e\n  token: t\n")
 	meta := InputSettings{
-		ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}},
+		ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}},
 		Sources:     []recon.Source{recon.NewMapSource("app", map[string]any{})},
 	}
 	var in tbInputs

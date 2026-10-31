@@ -13,8 +13,8 @@ import (
 // write a declared config file so that the input reader reads the value back.
 
 // wcKeys is the key table of pfInputs' configuration inputs and fallbacks.
-func wcKeys() []ConfigKey {
-	return []ConfigKey{
+func wcKeys() []ConfigKeyDef {
+	return []ConfigKeyDef{
 		{Key: "db.host", Type: "string"},
 		{Key: "db.port", Type: "int", Minimum: new(1.0)},
 		{Key: "labels", Type: "map[string]string"},
@@ -30,7 +30,7 @@ func writeConformanceCases() []dataCase {
 		t.Helper()
 		dir = t.TempDir()
 		path := pfWrite(t, dir, "app.yaml", body)
-		f := ConfigFile{Name: "app", Path: path, Keys: wcKeys()}
+		f := ConfigFileDef{Name: "app", Path: path, Keys: wcKeys()}
 		if profiles {
 			f.Profiles = pfProfiles()
 		}
@@ -102,7 +102,7 @@ func writeConformanceCases() []dataCase {
 		}},
 		{"WRITE-06", func(t *testing.T) { // a missing file is created where the reader looks
 			dir := t.TempDir()
-			meta := pfSettings(ConfigFile{Name: "app", Path: "sub/app.yaml", Keys: wcKeys()})
+			meta := pfSettings(ConfigFileDef{Name: "app", Path: "sub/app.yaml", Keys: wcKeys()})
 			if err := SetConfigValue(pfContext(dir, nil, meta), "app", "port", "8080"); err != nil {
 				t.Fatal(err)
 			}

@@ -68,7 +68,7 @@ func exBind(t *testing.T, work, conf, confBody string, env []string, argv ...str
 	if conf != "" {
 		idWrite(t, filepath.Dir(conf), filepath.Base(conf), confBody)
 	}
-	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "conf", Scope: "app", Path: conf, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "conf", Scope: "app", Path: conf, Format: "yaml"}}}
 	// --out's default reads $OUTDIR; a test overrides it with a later entry.
 	rtx := NewContextFor(exDef, argv).WithDir(work).WithEnviron(append([]string{"OUTDIR=/o"}, env...))
 	var in exInputs
@@ -112,7 +112,7 @@ func TestExpand_argvErrors(t *testing.T) {
 			t.Errorf("%s: err = %v, want usage error %q", argv, err, want)
 		}
 		// InputsWithReport names the value as Inputs does.
-		meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "conf", Scope: "app", Path: conf, Format: "yaml"}}}
+		meta := InputSettings{ConfigFiles: []ConfigFileDef{{Name: "conf", Scope: "app", Path: conf, Format: "yaml"}}}
 		rtx := NewContextFor(exDef, []string{argv}).WithDir(work).WithEnviron(append(env, "A=1")).WithInputSettings(meta)
 		if _, _, err := rtx.InputsWithReport[exInputs](); err == nil || err.Error() != want {
 			t.Errorf("%s: InputsWithReport err = %v, want %q", argv, err, want)

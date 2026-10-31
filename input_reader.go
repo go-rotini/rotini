@@ -33,7 +33,7 @@ import (
 // two channels use independent registries, so an env var never leaks into a config field or the
 // reverse. Flags and arguments may also fall back to env and config.
 type InputReader struct {
-	configFiles  []ConfigFile
+	configFiles  []ConfigFileDef
 	stdinSchemas map[string]string // "<Prefix>Stdin" type name → JSON Schema for payload validation
 	envPrefix    string            // InputSettings.EnvPrefix: scopes derived env-var names
 	sources      []recon.Source    // InputSettings.Sources: custom sources, after the declared files
@@ -356,6 +356,16 @@ func (r *InputReader) reconcileFlags(v reflect.Value, chain []Command, store *pa
 // spellings other tools use for the same thing.
 func firstSetEnv(view *osView, names string) string {
 	for name := range strings.SplitSeq(names, ",") {
+		if name != "" && view.inputGetenv(name) != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// firstSetVar returns the first of names that is set to a non-empty value, or "".
+func firstSetVar(view *osView, names []string) string {
+	for _, name := range names {
 		if name != "" && view.inputGetenv(name) != "" {
 			return name
 		}
@@ -895,7 +905,7 @@ func configChannelOf(v reflect.Value) bool {
 // configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. boot carries any config_source-supplied paths and the
 // selected profiles. A map several sources hold merges entry by entry ([mapMergeSource]).
-func (r *InputReader) configRegistry(files []ConfigFile, boot fileBootstrap, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
+func (r *InputReader) configRegistry(files []ConfigFileDef, boot fileBootstrap, keys valueKeys, waived bool, view *osView) (*recon.Registry, map[string]string, error) {
 	srcs, err := r.fileSources(files, boot, waived, view)
 	if err != nil {
 		return nil, nil, err
@@ -983,7 +993,7 @@ func sourceDesc(s recon.Source) string {
 // lazily-built single-file registries for inputs the spec pins to one file.
 type cfgRegs struct {
 	reader  *InputReader
-	files   []ConfigFile // sources in scope for the invoked chain, nearest-wins order
+	files   []ConfigFileDef // sources in scope for the invoked chain, nearest-wins order
 	boot    fileBootstrap
 	keys    valueKeys // how config fields' text is read; see spellings
 	merged  *recon.Registry
@@ -1010,11 +1020,11 @@ func (r *InputReader) configRegs(chain []Command, boot fileBootstrap, v reflect.
 // nearest-wins: the invoked command's sources first, then each ancestor up to the root, each
 // command's own declared order preserved. Off-branch sources are excluded; an unscoped source
 // is always in scope and appended last.
-func (r *InputReader) chainConfigFiles(chain []Command) []ConfigFile {
+func (r *InputReader) chainConfigFiles(chain []Command) []ConfigFileDef {
 	if len(r.configFiles) == 0 {
 		return nil
 	}
-	var out []ConfigFile
+	var out []ConfigFileDef
 	for n := len(chain); n > 0; n-- { // leaf → root
 		for _, f := range r.configFiles {
 			if scopeIs(f.Scope, chain[:n]) {
@@ -1346,7 +1356,7 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 // containing the file winning. A path supplied through config_source is not optional, so a
 // missing one is an error. Custom InputSettings.Sources follow the declared files and so rank
 // below them.
-func (r *InputReader) fileSources(files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+func (r *InputReader) fileSources(files []ConfigFileDef, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
 	srcs := make([]recon.Source, 0, len(files)+len(r.sources))
 	for _, f := range files {
 		var err error
@@ -1414,7 +1424,7 @@ func sourcePaths(srcs []recon.Source) map[string]string {
 
 // wiredFileSources is [InputReader.fileSources] through the configuration files hook: no
 // sources when no file is in scope and no custom source is declared.
-func (r *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+func (r *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []ConfigFileDef, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
 	if len(files) == 0 && len(r.sources) == 0 {
 		return nil, nil
 	}
@@ -1434,7 +1444,7 @@ func (r *InputReader) wiredFileSources(fs *featureSet, chain []Command, files []
 // then the shared keys. In a short-circuited run (waived) a file that cannot be located, read
 // or parsed is skipped, standing in as an empty source under its own name so precedence holds,
 // and no file is checked against its schema.
-func (r *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
+func (r *InputReader) readFileSource(dst []recon.Source, f ConfigFileDef, boot fileBootstrap, waived bool, view *osView) ([]recon.Source, error) {
 	skipped := func() []recon.Source {
 		return append(dst, namedSource{Source: recon.NewMapSource(f.Name, nil), name: f.Name})
 	}
@@ -1474,7 +1484,7 @@ func (r *InputReader) readFileSource(dst []recon.Source, f ConfigFile, boot file
 
 // profilesMissing is the error for a profiled configuration file in a program that does not
 // wire profiles.
-func profilesMissing(f ConfigFile) *WiringError {
+func profilesMissing(f ConfigFileDef) *WiringError {
 	return missingFeature("config-profiles", "Profiles()", fmt.Sprintf("configuration file %q has profiles", f.Name))
 }
 
@@ -1487,7 +1497,7 @@ func isWiringError(err error) bool {
 // openFileSource locates and parses one config_files entry, returning the source and the file
 // it resolved to. Rotini expands the path and runs the discover search itself, from the run's
 // view, so recon reads exactly the absolute path it is given.
-func (r *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOverride, view *osView) (recon.Source, string, error) {
+func (r *InputReader) openFileSource(f ConfigFileDef, overrides map[string]pathOverride, view *osView) (recon.Source, string, error) {
 	opts := []recon.FileOption{recon.WithPathExpansion(false)}
 	if f.Format != "" {
 		opts = append(opts, recon.WithFileFormat(f.Format))
@@ -1537,7 +1547,7 @@ func (r *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 		return nil, "", usageBind(InputErrorKindFileAccess, channelConfig, f.Name, fmt.Sprintf("could not resolve configuration file path %s: %v", path, err), err)
 	}
 	if dirs != nil {
-		resolved = searchFile(dirs, filepath.Base(resolved))
+		resolved = searchFile(view, dirs, filepath.Base(resolved))
 	}
 	fs := view.clockRef().features()
 	c, err := fs.codecFor(f.Format, resolved)
@@ -1548,15 +1558,20 @@ func (r *InputReader) openFileSource(f ConfigFile, overrides map[string]pathOver
 	if o, ok := view.files.opened(key); ok {
 		return o.src, resolved, o.err
 	}
-	src, err := newFileSource(fs, resolved, c, opts...)
+	var src recon.Source
+	if view.fileSystem() != nil {
+		src, err = newFSFileSource(view, fs, resolved, c, f.Format, !overridden)
+	} else {
+		src, err = newFileSource(fs, resolved, c, opts...)
+	}
 	if err != nil {
 		// The file's content or path is the user's to fix.
-		err = usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(resolved, err), err)
+		err = usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(view, resolved, err), err)
 		view.files.keep(key, openedFile{err: err})
 		return nil, "", err
 	}
 	view.files.keep(key, openedFile{src: src})
-	if fsrc, ok := src.(*recon.FileSource); ok && view.files != nil && f.As != "env" {
+	if fsrc, ok := src.(fileDoc); ok && view.files != nil && f.As != "env" {
 		view.files.docs = append(view.files.docs, openedDoc{file: f, src: fsrc, codec: c})
 	}
 	return src, resolved, nil
@@ -1576,8 +1591,8 @@ type fileCache struct {
 
 // openedDoc is one configuration file opened, and the entry it was opened for.
 type openedDoc struct {
-	file  ConfigFile
-	src   *recon.FileSource
+	file  ConfigFileDef
+	src   fileDoc
 	codec *codecEntry // what it was decoded with; nil when recon chose by its extension
 }
 
@@ -1648,13 +1663,13 @@ func (c *fileCache) check(k checkedKey, run func() error) error {
 
 // searchFile returns the first of dirs holding name, else name in the first directory, as a
 // discover search resolves it.
-func searchFile(dirs []string, name string) string {
+func searchFile(view *osView, dirs []string, name string) string {
 	if len(dirs) == 1 {
 		return filepath.Join(dirs[0], name) // found or not, the one directory is the answer
 	}
 	for _, d := range dirs {
 		p := filepath.Join(d, name)
-		if _, err := os.Stat(p); err == nil {
+		if _, err := view.stat(p); err == nil {
 			return p
 		}
 	}
@@ -1666,7 +1681,7 @@ func searchFile(dirs []string, name string) string {
 
 // configFileProblem says why a configuration file could not be used: where a syntax error is
 // and what it is, or why the file could not be read.
-func configFileProblem(path string, err error) string {
+func configFileProblem(view *osView, path string, err error) string {
 	if de, ok := asError[*toml.DuplicateKeyError](err); ok {
 		at := strconv.Itoa(de.Pos.Line)
 		if de.Pos.Column > 0 {
@@ -1682,7 +1697,7 @@ func configFileProblem(path string, err error) string {
 		return fmt.Sprintf("could not parse configuration file %s: %s", loc, decodeMessage(pe))
 	}
 	reason := "cannot be read: " + innermostCause(err).Error()
-	info, statErr := os.Stat(path)
+	info, statErr := view.stat(path)
 	switch {
 	case statErr == nil && info.IsDir():
 		reason = "is a directory"
@@ -1743,18 +1758,18 @@ func absPath(view *osView, p string) (string, error) {
 // declared schema — the same load-time gate stdin applies to its payload — against the file
 // recon actually resolved. An absent optional file passes vacuously: shape validation gates
 // what is loaded, and absence is the per-input required marker's concern.
-func validateConfigFile(fs *featureSet, f ConfigFile, src recon.Source) error {
+func validateConfigFile(fs *featureSet, f ConfigFileDef, src recon.Source) error {
 	return validateConfigFileAs(fs, f, src, "")
 }
 
 // validateConfigFileAs is [validateConfigFile] for a run that selected profile: a file with
 // profiles is checked as the run reads it, its shared keys merged with the selected profile's
 // (see effectiveDocument). Profiles that aren't selected are not checked.
-func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profile string) error {
+func validateConfigFileAs(fs *featureSet, f ConfigFileDef, src recon.Source, profile string) error {
 	if f.Schema == "" {
 		return nil
 	}
-	fsrc, ok := src.(*recon.FileSource)
+	fsrc, ok := src.(fileDoc)
 	if !ok {
 		return nil
 	}
@@ -1765,12 +1780,12 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 	var data []byte
 	if !decoded {
 		var err error
-		if data, err = os.ReadFile(path); err != nil {
+		if data, err = sourceView(src).readFile(path); err != nil {
 			if os.IsNotExist(err) {
 				return nil // absent: vacuous
 			}
 			// A present-but-unreadable file the user controls.
-			return usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(path, err), err)
+			return usageBind(configFileKind(err), channelConfig, f.Name, configFileProblem(sourceView(src), path, err), err)
 		}
 	}
 	if fs.schemas == nil {
@@ -1782,7 +1797,7 @@ func validateConfigFileAs(fs *featureSet, f ConfigFile, src recon.Source, profil
 // checkConfigDocument is the rest of validateConfigFileAs once the program is known to wire
 // Schemas(), which installs it: a program that doesn't, doesn't link it. m is the document the
 // source decoded when decoded, else data holds the file read again.
-func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m map[string]any, decoded bool, data []byte, profile string) error {
+func checkConfigDocument(fs *featureSet, f ConfigFileDef, fsrc fileDoc, m map[string]any, decoded bool, data []byte, profile string) error {
 	path := fsrc.Path()
 	c, err := fs.codecFor(fsrc.Format(), path)
 	if err != nil {
@@ -1794,7 +1809,7 @@ func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m
 	if !decoded {
 		if m, err = c.codec().Decode(stripBOM(data)); err != nil {
 			pe := fileParseError(path, err)
-			return usageBind(configFileKind(pe), channelConfig, f.Name, configFileProblem(path, pe), pe)
+			return usageBind(configFileKind(pe), channelConfig, f.Name, configFileProblem(sourceView(fsrc), path, pe), pe)
 		}
 	}
 	if f.Profiles != nil {
@@ -1809,7 +1824,7 @@ func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m
 		where, got := path, ""
 		ve, isVE := asError[*recon.ValidationError](err)
 		if isVE {
-			if at := violationAt(c, data, decoded, path, ve.Path, f, profile); at != "" {
+			if at := violationAt(sourceView(fsrc), c, data, decoded, path, ve.Path, f, profile); at != "" {
 				where += ":" + at
 			}
 			got = violationValue(m, ve, f)
@@ -1830,13 +1845,13 @@ func checkConfigDocument(fs *featureSet, f ConfigFile, fsrc *recon.FileSource, m
 // f (read from path) rejected, or "" when its codec gives no positions or the value isn't
 // found. data is the file as read, unless the document was decoded when it was opened. The
 // selected profile's section is looked in first, then the shared keys.
-func violationAt(c *codecEntry, data []byte, decoded bool, path string, at recon.Path, f ConfigFile, profile string) string {
+func violationAt(view *osView, c *codecEntry, data []byte, decoded bool, path string, at recon.Path, f ConfigFileDef, profile string) string {
 	if c.locate == nil || len(at) == 0 {
 		return ""
 	}
 	if decoded {
 		var err error
-		if data, err = os.ReadFile(path); err != nil {
+		if data, err = view.readFile(path); err != nil {
 			return ""
 		}
 	}
@@ -1856,7 +1871,7 @@ func violationAt(c *codecEntry, data []byte, decoded bool, path string, at recon
 // violationValue is the " (got <value>)" suffix naming the scalar value a schema check
 // rejected at ve's path in document m, or "" for a list, a map, a missing value, or a secret
 // key's value.
-func violationValue(m map[string]any, ve *recon.ValidationError, f ConfigFile) string {
+func violationValue(m map[string]any, ve *recon.ValidationError, f ConfigFileDef) string {
 	if ve.Secret || len(ve.Path) == 0 {
 		return ""
 	}
@@ -1916,8 +1931,8 @@ func (r *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *
 			out[f.Name] = pathOverride{emptyFlag: chainFlagLabel(chain, pf.Flag)}
 		case explicit != "":
 			out[f.Name] = pathOverride{path: explicit}
-		case firstSetEnv(view, pf.Env) != "":
-			out[f.Name] = pathOverride{path: view.inputGetenv(firstSetEnv(view, pf.Env))}
+		case firstSetVar(view, pf.Env) != "":
+			out[f.Name] = pathOverride{path: view.inputGetenv(firstSetVar(view, pf.Env))}
 		case defaulted != "":
 			out[f.Name] = pathOverride{path: defaulted, declared: true}
 		}
@@ -1927,7 +1942,7 @@ func (r *InputReader) pathOverrides(chain []Command, store *parsedInputs, view *
 
 // pathFlags is the set of files' config_source flags. A path that names a configuration file
 // is never read from one, so these flags fall back to the environment alone.
-func pathFlags(files []ConfigFile) map[string]bool {
+func pathFlags(files []ConfigFileDef) map[string]bool {
 	var out map[string]bool
 	for _, f := range files {
 		if f.PathFrom == nil || f.PathFrom.Flag == "" {
@@ -2427,7 +2442,7 @@ func fillEnv(s reflect.Value, envReg *recon.Registry, waived bool, labels channe
 	if err := bindReconWaived(envReg, s.Addr().Interface(), waived); err != nil {
 		return labels.bindStruct(channelEnv, err, envReg, s)
 	}
-	_, err := fillEnvFamilies(s, labels.view)
+	_, err := fillNestedEnv(s, labels.view)
 	return err
 }
 
@@ -2547,12 +2562,12 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs, v
 		// A list is checked element by element as bound, since an environment variable's list
 		// arrives as one string.
 		if elems, count, ok := typedElems(s.Field(j)); ok && isArrayType(typ) {
-			if err := checkTypedConstraints(view.clockRef().features(), label, typ, c, count, elems, secret, view.base()); err != nil {
+			if err := checkTypedConstraints(view.clockRef().features(), label, typ, c, count, elems, secret, view); err != nil {
 				return withOrigin(err, origin)
 			}
 			continue
 		}
-		if err := checkConstraints(view.clockRef().features(), label, typ, f.Tag.Get("base"), c, vals, secret, view.base()); err != nil {
+		if err := checkConstraints(view.clockRef().features(), label, typ, f.Tag.Get("base"), c, vals, secret, view); err != nil {
 			return withOrigin(err, origin)
 		}
 	}

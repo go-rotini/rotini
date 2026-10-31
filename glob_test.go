@@ -39,7 +39,7 @@ func TestExpandGlobs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			store, err := parseArgvTokens(chain, tt.argv, argvAcq{dir: dir, goos: tt.goos})
+			store, err := parseArgvTokens(chain, tt.argv, argvAcq{view: dirView(dir), goos: tt.goos})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -59,11 +59,11 @@ func TestExpandGlob_relativeToTheRunDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "src", "main.go"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := expandGlob(dir, filepath.Join("src", "*.go")), []string{filepath.Join("src", "main.go")}; !slices.Equal(got, want) {
+	if got, want := expandGlob(dirView(dir), filepath.Join("src", "*.go")), []string{filepath.Join("src", "main.go")}; !slices.Equal(got, want) {
 		t.Errorf("expandGlob = %q, want %q", got, want)
 	}
 	abs := filepath.Join(dir, "src", "*.go")
-	if got, want := expandGlob(dir, abs), []string{filepath.Join(dir, "src", "main.go")}; !slices.Equal(got, want) {
+	if got, want := expandGlob(dirView(dir), abs), []string{filepath.Join(dir, "src", "main.go")}; !slices.Equal(got, want) {
 		t.Errorf("an absolute pattern = %q, want %q", got, want)
 	}
 }
@@ -85,7 +85,7 @@ func TestExpandGlob_ignoresCase(t *testing.T) {
 		filepath.Join("s?c", "*.txt"): {filepath.Join("Src", "B.TXT"), filepath.Join("Src", "a.txt")},
 		filepath.Join("Src", "*.md"):  {filepath.Join("Src", "*.md")},
 	} {
-		if got := expandGlob(dir, word); !slices.Equal(got, want) {
+		if got := expandGlob(dirView(dir), word); !slices.Equal(got, want) {
 			t.Errorf("expandGlob(%q) = %q, want %q", word, got, want)
 		}
 	}

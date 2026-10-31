@@ -1,5 +1,5 @@
 # A see_also entry naming one of the program's own pages must name a page it writes, in the
-# section the man pages are written in.
+# section the man pages are written in, and a command or topic reference one the program has.
 version: 0.0.0
 command:
   name: demo
@@ -18,4 +18,15 @@ command:
     - demo-list(1)
   commands:
     - name: list
-      see_also: [demo(8)]
+      see_also:
+        # Correct: a command, a topic and a URL. No problem.
+        - demo(8)
+        - { command: remote add }
+        - { topic: filters }
+        - { url: https://example.com/demo }
+        # Wrong: no such command, and no such topic.
+        - { command: remote ad }
+        - { topic: filter }
+    - name: remote
+      commands:
+        - name: add

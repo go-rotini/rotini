@@ -22,7 +22,7 @@ type wiringFixture struct {
 // inputs type is local to its test records it in [Definition.Inputs] instead.
 var wiringFixtures = map[string]wiringFixture{
 	"acme": {
-		meta: InputSettings{ConfigFiles: []ConfigFile{
+		meta: InputSettings{ConfigFiles: []ConfigFileDef{
 			{Name: "main", Format: "yaml", PathFrom: &PathFromDef{}, Schema: "{}"},
 			{Name: "local", Format: "jsonc"},
 			{Name: "dotenv", Format: "dotenv"},
@@ -32,7 +32,7 @@ var wiringFixtures = map[string]wiringFixture{
 	},
 	"app": {
 		meta: InputSettings{
-			ConfigFiles: []ConfigFile{
+			ConfigFiles: []ConfigFileDef{
 				{Name: "app", Path: "app.yaml", Profiles: &ProfilesDef{}, Keys: wcKeys()},
 				{Name: "dotenv", As: "env", Path: ".env"},
 			},
@@ -42,15 +42,15 @@ var wiringFixtures = map[string]wiringFixture{
 			idEnvInputs{}, idListInputs{}, idSecretInputs{}, outFieldsInputs{}, pfInputs{}, ssBytesInputs{},
 			ssCatInputs{}, ssJSONLInputs{}, ssLinesInputs{}, ssNulSliceInputs{}, kdInputs{}, kdRequiredInputs{}, kdStdinInputs{}),
 	},
-	"calc":  {meta: InputSettings{ConfigFiles: []ConfigFile{{Name: "main", Format: "yaml"}}}, inputs: typesOf(acCalcInputs{})},
+	"calc":  {meta: InputSettings{ConfigFiles: []ConfigFileDef{{Name: "main", Format: "yaml"}}}, inputs: typesOf(acCalcInputs{})},
 	"cat":   {},
 	"cp":    {inputs: typesOf(cpListInputs{})},
 	"files": {inputs: typesOf(fileInputs{})},
 	"mrg":   {meta: InputSettings{ConfigFiles: mrgFiles}},
 	"bnd":   {},
-	"proj":  {meta: InputSettings{ConfigFiles: []ConfigFile{{Name: "proj", Format: "yaml"}}}, inputs: typesOf(pjShowInputs{})},
-	"set":   {meta: InputSettings{ConfigFiles: []ConfigFile{{Name: "main", Format: "yaml"}}}, inputs: typesOf(acSetInputs{})},
-	"ship":  {meta: InputSettings{ConfigFiles: []ConfigFile{{Name: "ship", Format: "yaml"}}}, inputs: typesOf(acShipInputs{})},
+	"proj":  {meta: InputSettings{ConfigFiles: []ConfigFileDef{{Name: "proj", Format: "yaml"}}}, inputs: typesOf(pjShowInputs{})},
+	"set":   {meta: InputSettings{ConfigFiles: []ConfigFileDef{{Name: "main", Format: "yaml"}}}, inputs: typesOf(acSetInputs{})},
+	"ship":  {meta: InputSettings{ConfigFiles: []ConfigFileDef{{Name: "ship", Format: "yaml"}}}, inputs: typesOf(acShipInputs{})},
 }
 
 // wired gives rtx exactly the features fs.
@@ -98,6 +98,7 @@ func wiringModes(t *testing.T, fn func(t *testing.T)) {
 		})
 		fallbackPaths(t, fn)
 	})
+	t.Run("fs", func(t *testing.T) { throughFS(t); fallbackPaths(t, fn) })
 }
 
 // typesOf is the reflect.Type of each value.

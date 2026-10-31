@@ -51,12 +51,14 @@ grep 'go:embed renders/pg-ship\.1$' internal/cmd/pg/zz_pg.go
 grep 'complete -o default -F _pg_complete pg\\n' internal/cmd/pg/zz_pg.go
 
 # exit_status and see_also: man and markdown pages, with the name, retryable, the output still
-# written and the docs link; help shows neither.
+# written and the docs link; help shows see_also but not exit_status. A {command: …} entry is the
+# command line in help, its page in man and a link to it in markdown.
 grep '^\.SH "EXIT STATUS"\n\.TP\n\\fB0\\fR\nshipped\n\.TP\n\\fB3\\fR \(partial\)\nsome failed \(retryable\) \(writes \\fBobject\\fR to standard output\)\n\.br\nSee \\fIhttps://example\.com/e/3\\fR\.$' internal/cmd/pg/renders/pg-ship.1
-grep '^\.SH "SEE ALSO"\n\\fBpg\\fR\(1\), pg\\-list\(1\), https://example\.com/ship$' internal/cmd/pg/renders/pg-ship.1
+grep '^\.SH "SEE ALSO"\n\\fBpg\\fR\(1\), pg\\-list\(1\), https://example\.com/ship, \\fBpg\\-list\\fR\(1\)$' internal/cmd/pg/renders/pg-ship.1
 grep '^- `3` \(`partial`\) — some failed \(retryable\) \(writes `object` to stdout\) \(\[docs\]\(https://example\.com/e/3\)\)$' internal/cmd/pg/renders/markdown_pg_Ship.md
-grep '^## See Also\n\n- \[pg\]\(pg\.md\)\n- pg-list\(1\)\n- https://example\.com/ship' internal/cmd/pg/renders/markdown_pg_Ship.md
-! grep 'shipped|example\.com/e/3|See Also|SEE ALSO' internal/cmd/pg/renders/help_pg_Ship.txt
+grep '^## See Also\n\n- \[pg\]\(pg\.md\)\n- pg-list\(1\)\n- https://example\.com/ship\n- \[pg tool list\]\(pg-list\.md\)$' internal/cmd/pg/renders/markdown_pg_Ship.md
+grep '^See Also:\n  pg-list\(1\)\n  https://example\.com/ship\n  pg tool list\z' internal/cmd/pg/renders/help_pg_Ship.txt
+! grep 'shipped|example\.com/e/3|SEE ALSO' internal/cmd/pg/renders/help_pg_Ship.txt
 grep 'PgShipExitPartial = 3' internal/cmd/pg/zz_pg.go
 grep '"name": "partial"' cli-contract.json
 grep '"retryable": true' cli-contract.json
@@ -207,7 +209,7 @@ command:
       description: Ship long description.
       group: Manage
       usage: "pg Ship [opts] SERVICE"
-      see_also: ["pg-list(1)", "https://example.com/ship"]
+      see_also: ["pg-list(1)", "https://example.com/ship", { command: list }]
       exit_status:
         - {code: 0, summary: shipped}
         - {code: 3, name: partial, summary: some failed, retryable: true, docs_url: "https://example.com/e/3", output: {type: object, properties: {done: {type: array, items: {type: string}}}}}

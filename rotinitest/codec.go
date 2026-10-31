@@ -100,6 +100,52 @@ func CheckCodec(tb testing.TB, decode func(data []byte) (any, error), docs Codec
 	}
 }
 
+// CheckCodecEncode checks encode, the encoder a [rotini.CodecEncode] gives a format, against
+// its decoder: for each of docs.Valid, encoding the decoded tree must succeed, leave the tree
+// as it was, and decode back to the same tree. The other fields of docs are not used.
+//
+//	func TestINIEncode(t *testing.T) {
+//		rotinitest.CheckCodecEncode(t, decodeINI, encodeINI, rotinitest.CodecDocuments{
+//			Valid: [][]byte{[]byte("name = web\n[deploy]\nreplicas = 3\n")},
+//		})
+//	}
+func CheckCodecEncode(tb testing.TB, decode func(data []byte) (any, error), encode func(doc any) ([]byte, error), docs CodecDocuments) {
+	tb.Helper()
+	if decode == nil || encode == nil {
+		tb.Fatalf("rotinitest.CheckCodecEncode: nil decode or encode")
+	}
+	for i, doc := range docs.Valid {
+		name := "Valid[" + strconv.Itoa(i) + "]"
+		tree, err := decode(slices.Clone(doc))
+		if err != nil {
+			tb.Errorf("%s: decode failed: %v", name, err)
+			continue
+		}
+		want, err := decode(slices.Clone(doc))
+		if err != nil {
+			tb.Errorf("%s: decode failed the second time: %v", name, err)
+			continue
+		}
+		out, err := encode(tree)
+		if err != nil {
+			tb.Errorf("%s: encode failed: %v", name, err)
+			continue
+		}
+		if !reflect.DeepEqual(tree, want) {
+			tb.Errorf("%s: encode changed the tree it was given:\n%#v\nwant\n%#v", name, tree, want)
+			continue
+		}
+		back, err := decode(slices.Clone(out))
+		if err != nil {
+			tb.Errorf("%s: what encode wrote doesn't decode: %v\n%s", name, err, out)
+			continue
+		}
+		if !reflect.DeepEqual(back, want) {
+			tb.Errorf("%s: what encode wrote decodes to a different tree:\n%#v\nwant\n%#v\nencoded:\n%s", name, back, want, out)
+		}
+	}
+}
+
 // genericTree describes the first value in v that isn't part of the generic tree, with its
 // path, or returns "".
 func genericTree(v any, path string) string {

@@ -246,7 +246,7 @@ func TestPrefixedBase_acquiredAndFallbacks(t *testing.T) {
 	read := func(env string) (inputs, error) {
 		var in inputs
 		rtx := NewContextFor(def, nil).WithEnviron([]string{env})
-		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
+		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
 	}
 	if in, err := read("N=0o17"); err != nil || in.App.Flags.N != 15 || in.App.Flags.M != 5 {
 		t.Errorf("fallbacks: %+v, %v", in.App.Flags, err)
@@ -281,7 +281,7 @@ func TestPrefixedBase_envAndConfigInputs(t *testing.T) {
 		var in ibChannelInputs
 		cfg := writeConfig(t, cfgBody)
 		rtx := NewContextFor(def, nil).WithEnviron(env)
-		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
+		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
 	}
 	in, err := read("mode: '0o755'\nbits: ['0b1', '010', 3]\ncount: 12\n", "PORT=0x1F", "MASKS=0xF:010:0b1", "PLAIN=7")
 	if err != nil {
@@ -306,8 +306,8 @@ func TestPrefixedBase_envAndConfigInputs(t *testing.T) {
 func TestPrefixedBase_configWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a.yaml")
-	key := ConfigKey{Key: "mode", Type: "uint32", Base: basePrefixed}
-	rtx := cwContext(dir, nil, ConfigFile{Name: "app", Path: path, Keys: []ConfigKey{key}})
+	key := ConfigKeyDef{Key: "mode", Type: "uint32", Base: basePrefixed}
+	rtx := cwContext(dir, nil, ConfigFileDef{Name: "app", Path: path, Keys: []ConfigKeyDef{key}})
 	if err := SetConfigValue(rtx, "app", "mode", "0o755"); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestPlainBase_envAndConfigAreDecimal(t *testing.T) {
 		var in ibDecimalInputs
 		cfg := writeConfig(t, cfgBody)
 		rtx := NewContextFor(def, nil).WithEnviron(env)
-		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
+		return in, NewInputReader(InputSettings{ConfigFiles: []ConfigFileDef{{Name: "app", Path: cfg, Format: "yaml"}}}).Read(rtx, &in)
 	}
 	in, err := read("count: '010'\n", "PLAIN=010", "LIST=010,-007")
 	if err != nil {

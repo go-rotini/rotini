@@ -20,8 +20,12 @@ import (
 // (unless `agent: true`), and the machine-output flag, which the caller adds itself. Env and
 // config inputs are the server's configuration, never parameters.
 
-// toolsMetaKey is the MCP `_meta` key a tool's invocation facts live under.
-const toolsMetaKey = "dev.rotini/invoke"
+// toolsMetaKey is the MCP `_meta` key a tool's invocation facts live under, and
+// toolsMetadataKey the one its command's `metadata` labels live under.
+const (
+	toolsMetaKey     = "dev.rotini/invoke"
+	toolsMetadataKey = "dev.rotini/metadata"
+)
 
 // Tool name limits per target.
 func toolNameLimits() map[string]int {
@@ -54,7 +58,8 @@ type tool struct {
 	output      map[string]any // the output schema without its own definitions; nil for none
 	outputDefs  map[string]any
 	invoke      toolInvoke
-	examples    []any // calls that run the spec's examples of the command, as parameter objects
+	examples    []any     // calls that run the spec's examples of the command, as parameter objects
+	shown       []Example // the examples those calls run, in the same order
 }
 
 // toolInvoke is what a server needs to turn a tool call back into a command line. It rides in
@@ -114,7 +119,7 @@ func renderToolExports(p *program, f *Feature, a *agentProgram, _ *template.Temp
 	}
 	uses := p.exampleUses()
 	for i := range tools {
-		tools[i].examples = tools[i].inputExamples(uses[strings.Join(tools[i].invoke.Path, " ")])
+		tools[i].examples, tools[i].shown = tools[i].inputExamples(uses[strings.Join(tools[i].invoke.Path, " ")])
 	}
 	for _, t := range tools {
 		for _, target := range targets {
@@ -579,12 +584,16 @@ func mcpTools(tools []tool) map[string]any {
 		if len(t.examples) > 0 {
 			in["examples"] = jsonCopy(t.examples)
 		}
+		meta := map[string]any{toolsMetaKey: t.invoke}
+		if len(t.cmd.c.Metadata) > 0 {
+			meta[toolsMetadataKey] = t.cmd.c.Metadata
+		}
 		m := map[string]any{
 			"name":        t.name,
 			"title":       t.title,
 			"description": t.description,
 			"inputSchema": in,
-			"_meta":       map[string]any{toolsMetaKey: t.invoke},
+			"_meta":       meta,
 		}
 		if t.output != nil {
 			o, _ := jsonCopy(t.output).(map[string]any)
@@ -663,7 +672,7 @@ func openAITools(tools []tool) (any, []error) {
 		list = append(list, map[string]any{
 			"type":        "function",
 			"name":        t.name,
-			"description": t.description,
+			"description": describedExamples(t.description, t.shown),
 			"parameters":  params,
 			"strict":      true,
 		})
@@ -936,7 +945,7 @@ func geminiTools(tools []tool) (any, []error) {
 				}
 			}
 		}
-		list = append(list, map[string]any{"name": t.name, "description": t.description, "parametersJsonSchema": params})
+		list = append(list, map[string]any{"name": t.name, "description": describedExamples(t.description, t.shown), "parametersJsonSchema": params})
 	}
 	return map[string]any{"functionDeclarations": list}, notices
 }

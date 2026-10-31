@@ -31,14 +31,14 @@ func TestCreateOutput_categories(t *testing.T) {
 }
 
 // TestAppDirsAndArgvOf_internal pins that AppDirs and ArgvOf errors are internal, and that an
-// ArgvError unwraps to ErrInternal.
+// ArgvOfError unwraps to ErrInternal.
 func TestAppDirsAndArgvOf_internal(t *testing.T) {
 	if _, err := AppDirs(nil, "app", "bogus"); !errors.Is(err, ErrInternal) {
 		t.Errorf("AppDirs: %v", err)
 	}
-	var ae error = &ArgvError{Field: "App.Flags.X", Reason: "no"}
+	var ae error = &ArgvOfError{Field: "App.Flags.X", Reason: "no"}
 	if !errors.Is(ae, ErrInternal) || CategoryOf(ae) != CategoryInternal {
-		t.Errorf("ArgvError category %v", CategoryOf(ae))
+		t.Errorf("ArgvOfError category %v", CategoryOf(ae))
 	}
 	type notInputs struct{ X int }
 	if _, _, err := ArgvOf(Definition{Name: "app"}, notInputs{}, nil); !errors.Is(err, ErrInternal) {

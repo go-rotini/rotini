@@ -12,6 +12,7 @@ field Result.Stderr []byte
 field Result.Stdout []byte
 func Argv0(name string) Option
 func CheckCodec(tb testing.TB, decode func(data []byte) (any, error), docs CodecDocuments)
+func CheckCodecEncode(tb testing.TB, decode func(data []byte) (any, error), encode func(doc any) ([]byte, error), docs CodecDocuments)
 func Clock(now time.Time) Option
 func Context(ctx context.Context) Option
 func Dir(dir string) Option

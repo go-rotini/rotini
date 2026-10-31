@@ -68,3 +68,52 @@ func ExampleProgram_WithProvider() {
 	// read todo.db cache hits: 2
 	// closed todo.db
 }
+
+// examplePool is a dependency one process builds once and every run shares.
+type examplePool struct{ opened int }
+
+func (p *examplePool) Close() error {
+	fmt.Println("pool closed")
+	return nil
+}
+
+var examplePoolDep = NewDependency[*examplePool]("example.pool")
+
+type examplePoolApp struct{}
+
+func (examplePoolApp) App() HandlerE { return examplePoolCmd{} }
+
+type examplePoolCmd struct{ NoHooksE }
+
+func (examplePoolCmd) Run(_ context.Context, rtx *Context) error {
+	pool, err := rtx.Dependency(examplePoolDep)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(rtx.Stdout, "query on pool", pool.opened)
+	return nil
+}
+
+// A shared provider builds its value on the first request in any run, and every later run
+// reuses it. A host that runs the program repeatedly releases it with Close when it is done.
+func ExampleProgram_WithSharedProvider() {
+	opens := 0
+	p := NewProgram(Definition{Name: "app", Handler: "App"}, examplePoolApp{}).
+		WithStdout(os.Stdout).
+		WithSharedProvider(examplePoolDep, func(context.Context, *Context) (*examplePool, func() error, error) {
+			opens++
+			pool := &examplePool{opened: opens}
+			return pool, pool.Close, nil
+		})
+	defer p.Close()
+
+	for range 2 {
+		if _, err := p.Run(nil); err != nil {
+			fmt.Println(err)
+		}
+	}
+	// Output:
+	// query on pool 1
+	// query on pool 1
+	// pool closed
+}

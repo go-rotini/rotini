@@ -104,7 +104,19 @@ Optional: where to write rotini's conf and spec JSON Schemas into this project, 
 
 ## ValidateConfig
 
-Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. The rules are fixed, apart from the opt-in `flags_first`, `posix_names`, `input_summaries` and `help_width` warnings. `rotini validate --fail` overrides `fail`.
+Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. The rules are fixed, apart from the opt-in `flags_first`, `posix_names`, `exit_status_one`, `exit_status_drops_root`, `input_summaries` and `help_width` warnings. `rotini validate --fail` overrides `fail`.
+
+### `exit_status_drops_root`
+
+`boolean` · default `false`
+
+Opt-in: warn about each command whose own `exit_status`, without `inherit: true`, leaves out a code the root command's lists. Such a list replaces the root's, so the command's pages, tool definitions and contract stop documenting the codes it doesn't repeat. Warnings never fail validation.
+
+### `exit_status_one`
+
+`boolean` · default `false`
+
+Opt-in: warn about each command whose own `exit_status` leaves out 1, the code every recorded error, and a recovered panic, exits with when no handler sets another. A command without its own list, which documents the root's, isn't checked, and a list with `inherit: true` is checked with the root's codes in it. Warnings never fail validation.
 
 ### `fail`
 

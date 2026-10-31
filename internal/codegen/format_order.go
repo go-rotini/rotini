@@ -30,6 +30,7 @@ var commandKeyOrder = []string{
 	"topics",
 	"see_also",
 	"exit_status",
+	"exit_statuses",
 	"stability",
 	"deprecated",
 	"deprecated_since",
@@ -60,6 +61,7 @@ var commandKeyOrder = []string{
 	// What it writes.
 	"output",
 	"output_stream",
+	"channels",
 
 	// What it is made of.
 	"commands",

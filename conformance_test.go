@@ -200,9 +200,9 @@ func acmeDef() Definition {
 // project config (CFG-03), and an xdg user config (CFG-02), in that
 // precedence order.
 func acmeMeta(dir string) InputSettings {
-	return InputSettings{ConfigFiles: []ConfigFile{
+	return InputSettings{ConfigFiles: []ConfigFileDef{
 		{Name: "main", Path: filepath.Join(dir, "acme.yaml"), Format: "yaml",
-			PathFrom: &PathFromDef{Flag: "config", Env: "ACME_CONFIG"}},
+			PathFrom: &PathFromDef{Flag: "config", Env: []string{"ACME_CONFIG"}}},
 		{Name: "project", Format: "yaml",
 			Discover: &DiscoverDef{Strategy: "walk-up", File: ".acme.yaml"}},
 		{Name: "user", Format: "yaml",
@@ -718,8 +718,8 @@ func conformanceCases() []inputCase {
 				// format passthrough as yaml/json/toml. jsonc keeps dotted keys,
 				// so the ordinary flag fallback reads it…
 				meta.ConfigFiles = append(meta.ConfigFiles,
-					ConfigFile{Name: "extra-jsonc", Path: "../app.jsonc", Format: "jsonc"},
-					ConfigFile{Name: "extra-env", Path: "../app.env", Format: "dotenv"},
+					ConfigFileDef{Name: "extra-jsonc", Path: "../app.jsonc", Format: "jsonc"},
+					ConfigFileDef{Name: "extra-env", Path: "../app.env", Format: "dotenv"},
 				)
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Output != "from-jsonc" {
 					t.Errorf("output = %q, want from-jsonc through the declared-format jsonc entry", in.Deploy.Flags.Output)

@@ -74,7 +74,7 @@ func (*rotiniDiffHandler) Run(ctx context.Context, rtx *rotini.Context) error {
 		rtx.HaltWithCode(RotiniDiffExitBreaking)
 		return nil
 	}
-	rtx.HaltWithCode(RotiniDiffExitOk)
+	rtx.HaltWithCode(RotiniDiffExitOK)
 	return nil
 }
 

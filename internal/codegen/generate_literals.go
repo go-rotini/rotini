@@ -51,13 +51,14 @@ func renderDefinition(gp *program) string {
 	writeInputDefsLiteral(&b, gp.rootInputs, gp.schemas, len(gp.tree) > 0)
 	b.WriteString(outputDefLiteral(gp.rootPascal+"Output", gp.rootOutput, gp.schemas, gp.rootStream))
 	b.WriteString(inputsTypeLiteral(gp.rootPascal + "Inputs"))
-	b.WriteString(exitStatusLiteral(gp.rootHelp.ExitStatus))
+	b.WriteString(exitStatusLiteral(effectiveExitStatus(gp.rootHelp.ExitStatus, nil)))
 	fmt.Fprintf(&b, "Usage: %q,\n", rootUsage(gp))
 	b.WriteString(effectsField(gp.rootHelp.Effects))
 	if gp.rootHelp.Stability != "" {
 		fmt.Fprintf(&b, "Stability: %q,\n", gp.rootHelp.Stability)
 	}
 	writeMetadataField(&b, "%s: %s,\n", gp.rootHelp.Metadata)
+	b.WriteString(channelsLiteral(gp))
 	b.WriteString(multicallLiteral(gp))
 	if cl := rnodesLiteral(gp.rootName, gp.rootDisplay, gp.tree, gp.schemas, gp.rootHelp.ExitStatus); cl != "" {
 		fmt.Fprintf(&b, "Commands: %s,\n", cl)
@@ -100,13 +101,13 @@ func renderInputSettings(gp *program) string {
 }
 
 // renderConfigFiles renders the InputSettings literal's ConfigFiles field, one
-// rotini.ConfigFile per scoped configuration_files entry, or nothing when there are none.
+// rotini.ConfigFileDef per scoped configuration_files entry, or nothing when there are none.
 func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile) {
 	if len(files) == 0 {
 		return
 	}
 	pathFrom := collectPathFrom(gp)
-	fmt.Fprintf(b, "ConfigFiles: []%s.ConfigFile{\n", rotiniPkgName)
+	fmt.Fprintf(b, "ConfigFiles: []%s.ConfigFileDef{\n", rotiniPkgName)
 	for _, f := range files {
 		fmt.Fprintf(b, "{Name: %q", f.Name)
 		fmt.Fprintf(b, ", Scope: %q", f.Scope)
@@ -154,12 +155,12 @@ func renderPathFrom(b *strings.Builder, c pathFromClaim) {
 	env := c.variables()
 	if c.flag != "" {
 		fmt.Fprintf(b, "Flag: %q", c.flag)
-		if env != "" {
+		if len(env) > 0 {
 			b.WriteString(", ")
 		}
 	}
-	if env != "" {
-		fmt.Fprintf(b, "Env: %q", env)
+	if len(env) > 0 {
+		fmt.Fprintf(b, "Env: %s", goStringSlice(env))
 	}
 	b.WriteString("}")
 }
@@ -591,7 +592,8 @@ func flagDependenciesLiteral(in *Inputs) string {
 // rnodesLiteral renders the []rotini.CommandDef literal for a resolved command tree,
 // recursively, or "" when nodes is empty. host prefixes plugin binary names unless a node
 // carries its own pluginHost; invocation is the parent's, which each usage line starts with.
-// rootExits is the root's exit_status, which a command without its own documents.
+// rootExits is the root's exit_status, which a command without its own documents, and a
+// command with `inherit: true` adds to its own.
 func rnodesLiteral(host, invocation string, nodes []rnode, schemas map[string]Schema, rootExits []ExitStatusEntry) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
 		fmt.Fprintf(b, "Name: %q,\n", n.name)
@@ -711,7 +713,7 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 }
 
 // constraintFields renders a schema's declared bounds as the promoted rotini.Constraints fields of
-// a FlagDef, ArgDef or ConfigKey literal, or "" when none are set. Numeric bounds are emitted as
+// a FlagDef, ArgDef or ConfigKeyDef literal, or "" when none are set. Numeric bounds are emitted as
 // new(v) literals, so a declared 0 is kept; length and count bounds treat 0 as unset.
 func constraintFields(schema *InputSchema) string {
 	var parts []string

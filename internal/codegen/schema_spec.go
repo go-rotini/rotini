@@ -130,6 +130,18 @@ type BaseSchema struct {
 	UniqueItems bool `json:"uniqueItems,omitempty"`
 }
 
+// One outcome channel: a name, a class and the shape of its records.
+type Channel struct {
+	// How rotini treats the records when the program's reporter doesn't: info, success and warning records print where infos, successes and warnings print; error records are failures, which print with the errors and count toward the exit code, `rtx.Failed()` and the error Run returns. An error channel's schema must declare a required string property `message`: the generated type's Error method returns it.
+	Class string `json:"class"`
+	// The channel's name, unique among the program's channels and not a built-in outcome (info, success, warning, error, panic) or `schema_version`. It names the structured line (`{"skipped":{...}}`) and, PascalCased, the generated SkippedRecord type and SkippedChannel handle.
+	Name string `json:"name"`
+	// The shape of one record: an object schema, written here or a `$ref` to a named one (`type SkippedRecord File`). The generated record type is built from it, the structured line carries the record as this JSON object, and the contract carries the schema.
+	Schema Schema `json:"schema"`
+	// What one record means, one line. It becomes the doc comment of the generated type and handle, and the contract carries it.
+	Summary string `json:"summary,omitempty"`
+}
+
 // A command node in the CLI command tree — the root command (under the document's 'command' key) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The two root-command-level keys (env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
 type Command struct {
 	// The spec file whose root command is mounted here as this sub-command. Not valid on the root command. Two forms are accepted:
@@ -155,6 +167,8 @@ type Command struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Positional argument inputs for this command
 	Arguments []ArgumentInput `json:"arguments,omitempty"`
+	// Document-level (root only): the program's own outcome channels, each a kind of record a handler hands the reporter with `rtx.Record`, beside the built-in infos, successes, warnings and errors. Each becomes a generated record type `<Name>Record` and a channel handle `<Name>Channel` (the name PascalCased) in the cmd package, the type in the models package when the conf declares one. rotini.StructuredReporter writes each record as its own line, `{"schema_version":1,"<name>":{...}}`, and the contract lists the channels, so a record's shape is part of the contract `rotini diff` compares.
+	Channels []Channel `json:"channels,omitempty"`
 	// Sub-commands of this command, declared inline or composed with $ref. On a $ref command, an entry named like one of the composed child's sub-commands overrides it, and the others are added to them (see '$ref'); a name or alias that collides across the combined list is an error.
 	Commands []Command `json:"commands,omitempty"`
 	// Config-value inputs for this command, bound by key from an in-scope config_files source (declared on this command or any ancestor — see config_files). `rotini validate` warns about one when no `config_files` entry is in scope on the command, its ancestors or the commands below it, since the default input reader then has no file to read it from.
@@ -183,8 +197,10 @@ type Command struct {
 	EnvPrefix string `json:"env_prefix,omitempty"`
 	// Example command-line invocations, rendered one per line on the help page and in the man and markdown pages' EXAMPLES section. Each is a command line (`taskr list --status open`), or an object with the line as `run` and a one-line `summary`, which the pages show as a `# summary` line above it. `rotini validate` parses each command in an example that runs this program against the spec, and rejects one that doesn't parse (an unknown command or flag, a bad value, a missing argument); it warns about one that uses a deprecated command, flag, alias or value, a hidden alias or identifier, or a literal value for a secret input. The contract lists each example with the words it passes to the program, the MCP tool definitions carry them as input examples, and the generated cmd package lists them in `Examples` for a test to run. A page given verbatim leaves them out.
 	Examples []any `json:"examples,omitempty"`
-	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. The root's list is program-wide: a command without its own exit_status documents the root's, on its pages, on the agent skill page, in its tool definitions and in the exit-code check below, and a command's own list replaces the root's rather than adding to it. The same list is what the contract records for the command (marked `exit_status_inherited` when it is the root's), what `rotini diff` compares, what the runtime Definition's ExitStatus holds and what rotinitest.ExitDocumented checks against. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. A page given verbatim ('man' or 'markdown') leaves the section out.
+	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. An entry is a code written out (`{code: 3, name: not_found, summary: no such task}`), a `$ref` to one of the root command's named `exit_statuses` (`{$ref: not_found}`), or `{inherit: true}`. The root's list is program-wide: a command without its own exit_status documents the root's, on its pages, on the agent skill page, in its tool definitions and in the exit-code check below. A command's own list replaces the root's, unless it holds `{inherit: true}`: the root's entries then stand in that item's place, less any code the command lists itself, so a command that needs one more code writes `[{inherit: true}, {code: 4, summary: conflict}]` rather than copying the root's list. The same list is what the contract records for the command (marked `exit_status_inherited` when it holds the root's entries), what `rotini diff` compares, what the runtime Definition's ExitStatus holds and what rotinitest.ExitDocumented checks against. The runtime does not check it, and sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. `rotini generate` warns when a command's handler sets an exit code (a literal or constant passed to rtx.HaltWithCode or rtx.Exit) that this list doesn't include, and `rotini validate` reports a code listed twice and warns about a code above 128, which a signal exit also uses; with the conf's `validate.exit_status_one`, it also warns about a command's own list that leaves out 1, the code every recorded error exits with, and with `validate.exit_status_drops_root`, about a command's own list, without `inherit: true`, that leaves out a code the root lists. Code 0 needs no entry, and a command that prints its help when called without a sub-command exits 1, so list 1 for it. A page given verbatim ('man' or 'markdown') leaves the section out.
 	ExitStatus []ExitStatusEntry `json:"exit_status,omitempty"`
+	// Document-level (root only): reusable exit statuses, keyed by snake_case name, which a command's `exit_status` lists by reference (`- $ref: not_found`, or `- $ref: '#/exit_statuses/not_found'`) instead of writing the entry out again. Each takes the keys of an `exit_status` entry except `name`: its key is its name. A named exit status documents nothing until a command lists it, the root included, and a command that lists one documents it as if written out there, its constant included. A composed spec's references name its own `exit_statuses`.
+	ExitStatuses map[string]NamedExitStatus `json:"exit_statuses,omitempty"`
 	// Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
 	Filename string `json:"filename,omitempty"`
 	// Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).
@@ -251,8 +267,8 @@ type Command struct {
 	ResponseFiles *ResponseFiles `json:"response_files,omitempty"`
 	// Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
 	Schemas map[string]Schema `json:"schemas,omitempty"`
-	// Cross-references rendered as a SEE ALSO section in the man and markdown pages (e.g. related commands or man pages like 'rotini-generate(1)', or URLs); the man page also links the parent and sub-commands. A page given verbatim ('man' or 'markdown') leaves it out.
-	SeeAlso []string `json:"see_also,omitempty"`
+	// Cross-references rendered as a See Also section in the help, man and markdown pages; the man page also links the parent and sub-commands, and the markdown page the parent. Each is text written as it is shown (another program's man page like 'git(1)', or a note), or one of the program's own pages or a URL as an object: `{command: remote add}` names a command by its path below the root, `{topic: filters}` a help topic, and `{url: https://example.com/docs}` a link. Each page shows a reference in its own form: help the command line (`taskr remote add`, `taskr help filters`) or the URL, man the page name and section (`taskr-remote-add(1)`), markdown a link to the page (`[taskr remote add](taskr-remote-add.md)`) or the URL. In a spec composed with `$ref`, a command path is below that spec's own root. `rotini validate` warns about a command or topic the program doesn't have. A page given verbatim ('help', 'man' or 'markdown') leaves it out.
+	SeeAlso []any `json:"see_also,omitempty"`
 	// How settled this command is. 'experimental': it may change or be removed in any release. 'beta': it may change in a minor release. Unset means stable. Help, man and markdown show (experimental) or (beta) beside it in the parent's command list, and a line on its own pages; the contract carries it. Its inputs, sub-commands, output and exit codes are as unstable as it is. `rotini diff` rates any change to an experimental item as safe, and a breaking change to a beta item as possibly breaking. Nothing changes at run time: to gate an experimental command, check in its handler.
 	Stability string `json:"stability,omitempty"`
 	// Declares expected stdin format and schema for this command
@@ -311,7 +327,7 @@ type ConfigurationFile struct {
 	Discover *ConfigurationFileDiscover `json:"discover,omitempty"`
 	// The file's format. When omitted, the format is inferred from the file extension; declare it when the extension is missing or misleading. The built-in formats are json, yaml, toml, jsonc and dotenv. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys are used as written: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
 	//
-	// Any other name (`format: ini`) is a format of the program's own: the program adds its decoder with `WithFeatures(rotini.Codec("ini", decode))`, since `rotini generate` can't wire it, and a run that reads the file without it fails with a WiringError naming `rotini.Codec("ini", …)`. `rotini validate` warns about a name that isn't built in, so a typo doesn't go unnoticed. Such a file is read-only: SetConfigValue refuses to write it. A file with no declared format is read with a program's own format when its extension is one the codec lists (`rotini.CodecExtensions(".ini")`).
+	// Any other name (`format: ini`) is a format of the program's own: the program adds its decoder with `WithFeatures(rotini.Codec("ini", decode))`, since `rotini generate` can't wire it, and a run that reads the file without it fails with a WiringError naming `rotini.Codec("ini", …)`. `rotini validate` warns about a name that isn't built in, so a typo doesn't go unnoticed. SetConfigValue writes such a file only when the codec has an encoder (`rotini.CodecEncode`), which rewrites the whole file. A file with no declared format is read with a program's own format when its extension is one the codec lists (`rotini.CodecExtensions(".ini")`).
 	Format string `json:"format,omitempty"`
 	// Logical name for the config file (e.g. 'app-config'). It anchors per-input pins (schema 'file:') and config_source claims, so it must be unique within its chain (this command and its ancestors) — a name collision in scope is an error. `explicit` and `default` are reserved for the reader's own layers.
 	Name string `json:"name"`
@@ -393,11 +409,16 @@ type Example struct {
 	Summary string `json:"summary,omitempty"`
 }
 
+// One entry of a command's `exit_status`: a code written out (with `code`), a named exit status (`$ref`), or the root's list (`inherit: true`).
 type ExitStatusEntry struct {
+	// A named exit status under the root command's `exit_statuses`, by its name (`$ref: not_found`) or as a pointer (`$ref: '#/exit_statuses/not_found'`). The two mean the same. The entry is the named one, with its key as its `name`, so nothing else may sit beside `$ref`; to change a summary for one command, write its entry out. Resolved when you generate, against the spec file the reference is written in.
+	Ref string `json:"$ref,omitempty"`
 	// The exit status code being documented (0-255 — the range a process can actually return).
-	Code int `json:"code"`
+	Code int `json:"code,omitempty"`
 	// An absolute http or https link to more about this exit code, shown in the man and markdown EXIT STATUS sections and carried into the contract. Help and the default reporter don't show it; a reporter of your own can print it, from the generated Definition's ExitStatusDef.DocsURL.
 	DocsUrl string `json:"docs_url,omitempty"`
+	// `inherit: true`, alone in its item, puts the root command's exit_status in this list at this point, less any code the list gives itself, so the command documents the root's codes and its own. Not valid on the root command, and at most once per list.
+	Inherit bool `json:"inherit,omitempty"`
 	// A snake_case name for the code, unique within the command. `rotini generate` writes a constant for it, `<Command>Exit<Name>` (`not_found` on `taskr get` gives TaskrGetExitNotFound), so a handler writes rtx.HaltWithCode(TaskrGetExitNotFound) instead of a bare number; the exit-code check reads the constant like the number. The man and markdown EXIT STATUS sections and the contract show the name too.
 	Name string `json:"name,omitempty"`
 	// The shape stdout still carries when the command exits with this code, for an outcome that is not plain success but prints data anyway (`3: some tasks failed; stdout lists what succeeded`). Documented in the EXIT STATUS section and described in the output schema files and the contract document.
@@ -535,6 +556,8 @@ type HelpHeadings struct {
 	Flags string `json:"flags,omitempty"`
 	// Heading rendered above the Output section, which describes what the command writes when it declares `output:`. Rendered verbatim — include any trailing ':' you want. Default: "Output:".
 	Output string `json:"output,omitempty"`
+	// Heading rendered above the See Also section (`see_also:`) of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "See Also:".
+	SeeAlso string `json:"see_also,omitempty"`
 	// Heading rendered above the Stdin section, which describes what the command reads from standard input when it declares `stdin:`. Rendered verbatim — include any trailing ':' you want. Default: "Stdin:".
 	Stdin string `json:"stdin,omitempty"`
 	// Heading rendered above the root page's list of help topics (`topics:`). Rendered verbatim — include any trailing ':' you want. Default: "Help Topics:".
@@ -644,6 +667,20 @@ type Multicall struct {
 	Prefix string `json:"prefix,omitempty"`
 }
 
+// A reusable exit status under the root's `exit_statuses`: an `exit_status` entry without `name`, since its key names it.
+type NamedExitStatus struct {
+	// The exit status code being documented (0-255 — the range a process can actually return).
+	Code int `json:"code"`
+	// An absolute http or https link to more about this exit code, shown in the man and markdown EXIT STATUS sections and carried into the contract. Help and the default reporter don't show it; a reporter of your own can print it, from the generated Definition's ExitStatusDef.DocsURL.
+	DocsUrl string `json:"docs_url,omitempty"`
+	// The shape stdout still carries when the command exits with this code, for an outcome that is not plain success but prints data anyway (`3: some tasks failed; stdout lists what succeeded`). Documented in the EXIT STATUS section and described in the output schema files and the contract document.
+	Output *Schema `json:"output,omitempty"`
+	// When true, running the same command again may succeed (a timeout, a busy lock). Carried into the contract for agents and other callers that decide whether to retry; rotini itself never retries.
+	Retryable bool `json:"retryable,omitempty"`
+	// What this exit code means.
+	Summary string `json:"summary,omitempty"`
+}
+
 // Auto-expose external '<prefix>*' executables as plugin sub-commands (kubectl/git/gh plugin style), alongside any declared plugins. Presence enables discovery; a discovered name that collides with a declared command or plugin is skipped.
 type PluginDiscovery struct {
 	// When true, discovered plugins still dispatch but are omitted from completion listings.
@@ -686,6 +723,16 @@ type Schema struct {
 	OneOf []Schema `json:"oneOf,omitempty"`
 	// Required property names for object schemas (standard JSON Schema semantics). On an output shape, each must be one of its `properties`, or no output could pass.
 	Required []string `json:"required,omitempty"`
+}
+
+// A cross-reference to one of the program's own commands or help topics, or to a URL. Exactly one key is set.
+type SeeAlso struct {
+	// A command, by the names on its path below the root, separated by spaces.
+	Command string `json:"command,omitempty"`
+	// A help topic the root declares in `topics:`, by name.
+	Topic string `json:"topic,omitempty"`
+	// An absolute http or https link.
+	Url string `json:"url,omitempty"`
 }
 
 type StdinSpec struct {

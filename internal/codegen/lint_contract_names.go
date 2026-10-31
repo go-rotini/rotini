@@ -76,17 +76,21 @@ func seeAlsoPage() *regexp.Regexp {
 
 var seeAlsoPageOnce lazy[*regexp.Regexp]
 
-// lintSeeAlso warns about a `see_also` entry that names one of the program's own man pages
-// (its name is the root's, or starts with the root's and "-") but matches no command or help
-// topic page, or names it in another section than the man feature's. Pages of commands
-// composed by `$ref` are named after the mounted command, so any page below one is accepted.
+// lintSeeAlso warns about a `see_also` entry that names a command or help topic the program
+// doesn't have: a `{command: …}` or `{topic: …}` reference, or a text entry naming one of the
+// program's own man pages (its name is the root's, or starts with the root's and "-") that
+// matches no command or help topic page, or names it in another section than the man
+// feature's. Commands composed by `$ref` are declared in their own spec, so any command or
+// page below one is accepted.
 func lintSeeAlso(spec *Spec, conf *Conf) []error {
 	if spec == nil || spec.Command.Name == "" {
 		return nil
 	}
 	root := strings.ToLower(spec.Command.Name)
 	pages := map[string]bool{}
-	var mounted []string // the page names of $ref commands, whose pages below them the spec can't list
+	commands := map[string]bool{} // command paths below the root, space separated
+	var mounted []string          // the page names of $ref commands, whose pages below them the spec can't list
+	var mountedPaths []string     // the same commands' paths
 	walkChainsAt(spec, func(chain []*Command, _, _ string) {
 		names := make([]string, 0, len(chain))
 		for _, c := range chain {
@@ -97,30 +101,52 @@ func lintSeeAlso(spec *Spec, conf *Conf) []error {
 		}
 		page := manPageName(names[0], names[1:])
 		pages[page] = true
+		path := strings.Join(names[1:], " ")
+		commands[path] = true
 		if chain[len(chain)-1].Ref != "" {
 			mounted = append(mounted, page)
+			mountedPaths = append(mountedPaths, path)
 		}
 	})
+	topics := map[string]bool{}
 	for _, t := range spec.Command.Topics {
 		pages[manPageName(spec.Command.Name, []string{t.Name})] = true
+		topics[t.Name] = true
 	}
 	section := manSection(conf)
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, cmdPath, ptr string) {
-		for i, entry := range c.SeeAlso {
-			m := seeAlsoPage().FindStringSubmatch(strings.TrimSpace(entry))
-			if len(m) < 3 || (m[1] != root && !strings.HasPrefix(m[1], root+"-")) {
-				continue
-			}
+		for i, entry := range seeAlsoOf(c.SeeAlso) {
 			at := &problem{kind: "spec", ptr: ptr + "/see_also/" + strconv.Itoa(i), loc: "command " + cmdPath, sev: severityWarning}
-			underMount := slices.ContainsFunc(mounted, func(page string) bool { return strings.HasPrefix(m[1], page+"-") })
 			switch {
-			case !pages[m[1]] && !underMount:
-				at.msg = didYouMean(fmt.Sprintf("`see_also` entry %q names the page %s, which no command or help topic of %s has", entry, m[1], spec.Command.Name), m[1], slices.Sorted(maps.Keys(pages)))
-			case m[2] != section:
-				at.msg = fmt.Sprintf("`see_also` entry %q names section %s, but the man pages are written in section %s; write %s(%s)", entry, m[2], section, m[1], section)
-			default:
+			case entry.command != nil:
+				path := strings.Join(entry.command, " ")
+				underMount := slices.ContainsFunc(mountedPaths, func(m string) bool { return strings.HasPrefix(path, m+" ") })
+				if commands[path] || underMount {
+					continue
+				}
+				at.msg = didYouMean(fmt.Sprintf("`see_also` names the command %q, which %s doesn't have", path, spec.Command.Name), path, slices.Sorted(maps.Keys(commands)))
+			case entry.topic != "":
+				if topics[entry.topic] {
+					continue
+				}
+				at.msg = didYouMean(fmt.Sprintf("`see_also` names the help topic %q, which %s doesn't declare in `topics:`", entry.topic, spec.Command.Name), entry.topic, slices.Sorted(maps.Keys(topics)))
+			case entry.url != "":
 				continue
+			default:
+				m := seeAlsoPage().FindStringSubmatch(strings.TrimSpace(entry.text))
+				if len(m) < 3 || (m[1] != root && !strings.HasPrefix(m[1], root+"-")) {
+					continue
+				}
+				underMount := slices.ContainsFunc(mounted, func(page string) bool { return strings.HasPrefix(m[1], page+"-") })
+				switch {
+				case !pages[m[1]] && !underMount:
+					at.msg = didYouMean(fmt.Sprintf("`see_also` entry %q names the page %s, which no command or help topic of %s has", entry.text, m[1], spec.Command.Name), m[1], slices.Sorted(maps.Keys(pages)))
+				case m[2] != section:
+					at.msg = fmt.Sprintf("`see_also` entry %q names section %s, but the man pages are written in section %s; write %s(%s)", entry.text, m[2], section, m[1], section)
+				default:
+					continue
+				}
 			}
 			problems = append(problems, at)
 		}

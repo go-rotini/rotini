@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"unsafe"
@@ -97,5 +100,50 @@ func TestCheckCodec_failures(t *testing.T) {
 	}
 	if got := failure(t, func(tb testing.TB) { rotinitest.CheckCodec(tb, nil, kvDocs) }); got != "rotinitest.CheckCodec: nil decode" {
 		t.Errorf("nil decode: %q", got)
+	}
+}
+
+// encodeKV writes what decodeKV reads, keys sorted.
+func encodeKV(doc any) ([]byte, error) {
+	m, _ := doc.(map[string]any)
+	var b bytes.Buffer
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		v := m[k]
+		if v == nil {
+			v = "null"
+		}
+		fmt.Fprintf(&b, "%s = %v\n", k, v)
+	}
+	return b.Bytes(), nil
+}
+
+func TestCheckCodecEncode(t *testing.T) {
+	rotinitest.CheckCodecEncode(t, decodeKV, encodeKV, kvDocs)
+	tests := []struct {
+		name   string
+		encode func(any) ([]byte, error)
+		want   string
+	}{
+		{"fails", func(any) ([]byte, error) { return nil, errors.New("boom") }, "Valid[0]: encode failed: boom"},
+		{"writes what doesn't decode", func(any) ([]byte, error) { return []byte("a = 1\n---\n"), nil }, "Valid[0]: what encode wrote doesn't decode: a second document"},
+		{"loses a key", func(doc any) ([]byte, error) {
+			out, _ := encodeKV(doc)
+			return bytes.ReplaceAll(out, []byte("b = two\n"), nil), nil
+		}, "Valid[0]: what encode wrote decodes to a different tree"},
+		{"changes its input", func(doc any) ([]byte, error) {
+			doc.(map[string]any)["c"] = "x"
+			return encodeKV(doc)
+		}, "Valid[0]: encode changed the tree it was given"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := failure(t, func(tb testing.TB) { rotinitest.CheckCodecEncode(tb, decodeKV, tt.encode, kvDocs) })
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("failure = %q\nwant it to contain %q", got, tt.want)
+			}
+		})
+	}
+	if got := failure(t, func(tb testing.TB) { rotinitest.CheckCodecEncode(tb, decodeKV, nil, kvDocs) }); got != "rotinitest.CheckCodecEncode: nil decode or encode" {
+		t.Errorf("nil encode: %q", got)
 	}
 }

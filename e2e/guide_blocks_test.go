@@ -20,6 +20,9 @@ type pinnedBlock struct{ title, script, file string }
 var guideBlocks = []pinnedBlock{
 	{"scan.go", "r16_hooks_channels.txtar", "scan.go.txt"},
 	{"scan/report.go", "r16_hooks_channels.txtar", "report.go.txt"},
+	{".rotini.spec.yaml (channels)", "r16_declared_channels.txtar", "spec.yaml.txt"},
+	{"scan.go (channels)", "r16_declared_channels.txtar", "scan.go.txt"},
+	{"scan a.txt a.bin a.md --json", "r16_declared_channels.txtar", "lines.txt"},
 	{"store.go", "r12_recipe_lazy_dep.txtar", "store.go.txt"},
 	{"lazydemo_get.go", "r12_recipe_lazy_dep.txtar", "get.go.txt"},
 	{"cmd/lazydemo/main.go", "r12_recipe_lazy_dep.txtar", "main.go.txt"},
@@ -40,9 +43,11 @@ var guideBlocks = []pinnedBlock{
 	{"hello.txtar", "r12_recipe_testscript.txtar", "hello.txtar.txt"},
 	{"binary coverage", "r12_recipe_cover.txtar", "cover.sh.txt"},
 	{"fuzz_test.go", "r12_recipe_fuzz.txtar", "fuzz_test.go.txt"},
-	{"logdemo.go", "r12_recipe_verbosity.txtar", "root.go.txt"},
+	{"logdemo/log.go", "r12_recipe_verbosity.txtar", "log.go.txt"},
+	{"logdemo/main.go", "r12_recipe_verbosity.txtar", "main.go.txt"},
 	{"logdemo_run.go", "r12_recipe_verbosity.txtar", "run.go.txt"},
-	{"profdemo.go", "r12_recipe_profile.txtar", "root.go.txt"},
+	{"profdemo/profile.go", "r12_recipe_profile.txtar", "profile.go.txt"},
+	{"profdemo/main.go", "r12_recipe_profile.txtar", "main.go.txt"},
 	{"crashdemo/report.go", "r12_recipe_crash.txtar", "report.go.txt"},
 	{"crashdemo/main.go", "r12_recipe_crash.txtar", "main.go.txt"},
 	{"secdemo_sync.go", "r12_recipe_secrets.txtar", "sync.go.txt"},
@@ -102,6 +107,10 @@ var guideBlocks = []pinnedBlock{
 	{"ini.go", "r16_guide_codecs.txtar", "ini.go.txt"},
 	{"main.go (own format)", "r16_guide_codecs.txtar", "main.go.txt"},
 	{"ini_test.go", "r16_guide_codecs.txtar", "ini_test.go.txt"},
+	{"inidemo_set.go", "r16_guide_codecs.txtar", "set.go.txt"},
+	{"todo/.rotini.spec.yaml (reuse)", "r17_exit_status_reuse.txtar", "guide.yaml.txt"},
+	{".rotini.spec.yaml (embedded defaults)", "r16_guide_files_anywhere.txtar", "cmd/todo/.rotini.spec.yaml"},
+	{"main.go (embedded defaults)", "r16_guide_files_anywhere.txtar", "main.go.txt"},
 }
 
 func TestGuideBlocksMatchScripts(t *testing.T) {

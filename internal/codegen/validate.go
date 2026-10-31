@@ -225,6 +225,12 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 			}
 			return msg
 		}
+	case "const":
+		if m, ok := schemaNode(strings.TrimSuffix(loc, "/const")).(map[string]any); ok {
+			if want, err := json.Marshal(m["const"]); err == nil {
+				return fmt.Sprintf("%s must be %s", patternSubject(ve.InstanceLocation), want)
+			}
+		}
 	case "oneOf":
 		// A choice between forms of one value says what the forms are in its `x-hint`.
 		if hint := schemaHint(strings.TrimSuffix(loc, "/oneOf")); hint != "" {
@@ -600,14 +606,36 @@ func (w *schemaBlockWalker) command(node any, ptr string) {
 			}
 		}
 	}
+	w.documentBlocks(c, ptr)
+	subs, _ := c["commands"].([]any)
+	for i, sub := range subs {
+		w.command(sub, fmt.Sprintf("%s/commands/%d", ptr, i))
+	}
+}
+
+// documentBlocks checks the schema blocks a command declares for the whole document: its named
+// schemas, named exit statuses' outputs and channels' record schemas.
+func (w *schemaBlockWalker) documentBlocks(c map[string]any, ptr string) {
 	if named, ok := c["schemas"].(map[string]any); ok {
 		for _, n := range slices.Sorted(maps.Keys(named)) {
 			w.block(named[n], false, ptr+"/schemas/"+escapePointer(n), "a named schema", "")
 		}
 	}
-	subs, _ := c["commands"].([]any)
-	for i, sub := range subs {
-		w.command(sub, fmt.Sprintf("%s/commands/%d", ptr, i))
+	if named, ok := c["exit_statuses"].(map[string]any); ok {
+		for _, n := range slices.Sorted(maps.Keys(named)) {
+			if e, ok := named[n].(map[string]any); ok {
+				if out, ok := e["output"]; ok {
+					w.block(out, false, ptr+"/exit_statuses/"+escapePointer(n)+"/output", "an exit status output schema", "")
+				}
+			}
+		}
+	}
+	if channels, ok := c["channels"].([]any); ok {
+		for i, ch := range channels {
+			if m, ok := ch.(map[string]any); ok {
+				w.block(m["schema"], false, fmt.Sprintf("%s/channels/%d/schema", ptr, i), "a channel's schema", "")
+			}
+		}
 	}
 }
 

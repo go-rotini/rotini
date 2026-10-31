@@ -1,0 +1,113 @@
+# R16 — the guide's "Files your program reads, from anywhere": main.go gives the program a file
+# system that puts the configuration file embedded in the binary at /usr/share/todo, beneath the
+# real files. The shipped defaults are read until the user's own file sets a key. The spec and
+# main.go are the ones the guide shows.
+
+gomodinit example.com/todo
+
+exec rotini generate cmd/todo/.rotini.spec.yaml --config cmd/todo/.rotini.conf.yaml
+cp main.go.txt cmd/todo/main.go
+exec go mod tidy
+exec go build -o todo$exe ./cmd/todo
+
+env XDG_CONFIG_HOME=$WORK/xdg
+
+# With no file of the user's, the shipped defaults are read.
+exec ./todo$exe
+stdout '^region=eu level=info$'
+! stderr .
+
+# The user's file comes first, key by key.
+mkdir xdg/todo
+cp user.yaml xdg/todo/config.yaml
+exec ./todo$exe
+stdout '^region=us level=info$'
+
+# The defaults are part of the binary: they are read from any directory, with no file on disk.
+mkdir elsewhere
+cd elsewhere
+env XDG_CONFIG_HOME=$WORK/none
+exec ../todo$exe
+stdout '^region=eu level=info$'
+
+-- user.yaml --
+region: us
+-- cmd/todo/config.yaml --
+region: eu
+level: info
+-- main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	"embed"
+
+	cmd "example.com/todo/internal/cmd/todo"
+	"github.com/go-rotini/rotini"
+)
+
+// shipped is the default configuration, read at /usr/share/todo/config.yaml until a file is
+// installed there.
+//
+//go:embed config.yaml
+var shipped embed.FS
+
+func main() {
+	cmd.NewProgram().
+		WithFS(rotini.LayerFS(rotini.OSFS(), "/usr/share/todo", shipped)).
+		Execute()
+}
+-- cmd/todo/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: track tasks
+  config_files:
+    - name: user
+      discover: { strategy: xdg, app: todo, file: config.yaml }
+    - name: defaults
+      path: /usr/share/todo/config.yaml
+  config:
+    - name: region
+      schema: { type: string }
+    - name: level
+      schema: { type: string }
+-- cmd/todo/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/todo/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/todo/zz_todo.go
+      package: todo
+      hook_returns: error
+-- internal/cmd/todo/todo.go --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.HandlerE = (*todoHandler)(nil)
+
+type todoHandler struct {
+	rotini.NoCascadingPreRunE
+	rotini.NoPreRunE
+	rotini.NoPostRunE
+	rotini.NoCascadingPostRunE
+}
+
+func (*todoHandler) Run(ctx context.Context, rtx *rotini.Context) error {
+	in, err := rtx.Inputs[TodoInputs]()
+	if err != nil {
+		return err
+	}
+	c := in.Todo.Config
+	fmt.Fprintf(rtx.Stdout, "region=%s level=%s\n", c.Region, c.Level)
+	return nil
+}
