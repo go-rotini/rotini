@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -192,6 +193,9 @@ func TestChannels_structuredOutput(t *testing.T) {
 		t.Fatalf("build:\n%s", out)
 	}
 	bin := filepath.Join(dir, "scan-bin")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // go build adds it, and exec looks for the name as given
+	}
 	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/scan").CombinedOutput(); err != nil {
 		t.Fatalf("build:\n%s", out)
 	}
