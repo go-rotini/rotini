@@ -53,18 +53,18 @@ stdout '^OpsctlDeploy\.Flags\.Region = "us-east-1" from config:user#profiles\.pr
 stdout '^OpsctlDeploy\.Flags\.Label = "team=core, tier=api" from config:user#deploy\.labels\.team, config:user#profiles\.prod\.deploy\.labels\.tier; overrides config:user#deploy\.labels\.tier "web"$'
 env OPS_PROFILE=lcoal
 wantexit 1 $WORK/opsctl$exe deploy api
-stderr '^Error: OPS_PROFILE: profile "lcoal" is not defined in configuration file .*config\.yaml \(profiles: default, prod\)$'
+stderr '^Error: opsctl deploy: OPS_PROFILE: profile "lcoal" is not defined in configuration file .*config\.yaml \(profiles: default, prod\)$'
 env OPS_PROFILE=
 
 # A value names the identifier the user typed, also when the handler asks for a report and the
 # flag has fallbacks, and says where a value from elsewhere came from.
 wantexit 1 $WORK/opsctl$exe deploy api -r 0
-stderr '^Error: -r must be >= 1 \(got 0\)$'
+stderr '^Error: opsctl deploy: -r must be >= 1 \(got 0\)$'
 wantexit 1 $WORK/opsctl$exe deploy api -l x
-stderr '^Error: -l expects key=value pairs \(got "x"\)$'
+stderr '^Error: opsctl deploy: -l expects key=value pairs \(got "x"\)$'
 env OPS_REGION=mars
 wantexit 1 $WORK/opsctl$exe deploy api
-stderr '^Error: invalid value "mars" for --region \(one of: eu-west-1, us-east-1\) \(from environment variable OPS_REGION\)$'
+stderr '^Error: opsctl deploy: invalid value "mars" for --region \(one of: eu-west-1, us-east-1\) \(from environment variable OPS_REGION\)$'
 env OPS_REGION=
 env AWS_REGION=US-EAST-1
 exec $WORK/opsctl$exe deploy api -o yml
@@ -73,19 +73,19 @@ env AWS_REGION=
 
 # Durations, sizes, times and dependencies.
 wantexit 1 $WORK/opsctl$exe deploy api --timeout 2h
-stderr '^Error: --timeout must be <= 1h \(got 2h\)$'
+stderr '^Error: opsctl deploy: --timeout must be <= 1h \(got 2h\)$'
 wantexit 1 $WORK/opsctl$exe deploy api --max-size 3Gi
-stderr '^Error: --max-size must be <= 2Gi \(got 3Gi\)$'
+stderr '^Error: opsctl deploy: --max-size must be <= 2Gi \(got 3Gi\)$'
 exec $WORK/opsctl$exe deploy api --max-size 1.5GiB
 stderr 'max-size=1536Mi'
 wantexit 1 $WORK/opsctl$exe deploy api --at yesterday
-stderr '^Error: --at: "yesterday" is not a valid time \(yesterday is in the past; this input takes future times\)$'
+stderr '^Error: opsctl deploy: --at: "yesterday" is not a valid time \(yesterday is in the past; this input takes future times\)$'
 wantexit 1 $WORK/opsctl$exe deploy api --strategy canary
-stderr '^Error: flag --canary-percent is required when --strategy is canary$'
+stderr '^Error: opsctl deploy: flag --canary-percent is required when --strategy is canary$'
 wantexit 1 $WORK/opsctl$exe deploy api --canary-percent 5
-stderr '^Error: flag --strategy is required when --canary-percent is set$'
+stderr '^Error: opsctl deploy: flag --strategy is required when --canary-percent is set$'
 wantexit 1 $WORK/opsctl$exe delete svc --grace 1500ms
-stderr '^Error: --grace must be a multiple of 1s \(got 1500ms\)$'
+stderr '^Error: opsctl delete: --grace must be a multiple of 1s \(got 1500ms\)$'
 
 # --config names a JSON file, which must exist and is read before the files it replaces.
 cp $WORK/alt.json alt.json
@@ -93,9 +93,9 @@ exec $WORK/opsctl$exe deploy api --config alt.json -o json
 stdout '"region": "us-east-1"'
 stderr '^timeout=1m0s '
 wantexit 1 $WORK/opsctl$exe deploy api --config nope.json
-stderr '^Error: could not open configuration file .*nope\.json: no such file$'
+stderr '^Error: opsctl deploy: could not open configuration file .*nope\.json: no such file$'
 wantexit 1 $WORK/opsctl$exe deploy api --config=
-stderr '^Error: --config was given an empty path; name a configuration file$'
+stderr '^Error: opsctl deploy: --config was given an empty path; name a configuration file$'
 
 # Output: a table by default, the declared formats, sorting and field selection.
 exec $WORK/opsctl$exe pods api --sort-by restarts --reverse
@@ -103,13 +103,13 @@ cmp stdout $WORK/want-pods.txt
 exec $WORK/opsctl$exe pods api --fields name,status --sort-by name
 cmp stdout $WORK/want-fields.json
 wantexit 1 $WORK/opsctl$exe pods api --fields bogus
-stderr '^Error: invalid value "bogus" for --fields \(one of: name, restarts, started, status\)$'
+stderr '^Error: opsctl pods: invalid value "bogus" for --fields \(one of: name, restarts, started, status\)$'
 exec $WORK/opsctl$exe pods api --limit 0b1 -o yaml
 stdout '^total: 1$'
 
 # The secret comes only from a file or stdin.
 wantexit 1 $WORK/opsctl$exe login --token sk_live
-stderr '^Error: --token takes @file or -, not a value$'
+stderr '^Error: opsctl login: --token takes @file or -, not a value$'
 cp $WORK/tok.txt tok.txt
 exec $WORK/opsctl$exe login --token @tok.txt
 stdout 'a 7-character token'

@@ -39,10 +39,10 @@ stdin f1.txt
 exec ./dp$exe count - f1.txt
 stdout '"lines": 6'
 wantexit 2 ./dp$exe count - -
-stderr '^dp: error: <files>: "-" \(stdin\) can be given only once; <files> already reads it$'
+stderr '^dp: error: dp count: <files>: "-" \(stdin\) can be given only once; <files> already reads it$'
 stderr '^dp: run ''dp count --help'' for usage$'
 wantexit 2 ./dp$exe count nope.txt
-stderr '^dp: error: <files>: no such file: "nope\.txt"$'
+stderr '^dp: error: dp count: <files>: no such file: "nope\.txt"$'
 
 # A response file holds one argument per line, the command's name included; @@ is a literal @.
 exec ./dp$exe @args.rsp
@@ -58,13 +58,13 @@ cmp stdout want-sum.jsonl
 stdin bad.jsonl
 wantexit 2 ./dp$exe sum
 stdout '^\{"n":1,"total":1\}$'
-stderr '^dp: error: stdin line 3: missing required property "value"$'
+stderr '^dp: error: dp sum: stdin line 3: missing required property "value"$'
 stdin badtype.jsonl
 wantexit 2 ./dp$exe sum
-stderr '^dp: error: stdin line 1: field "value": value is not of type number$'
+stderr '^dp: error: dp sum: stdin line 1: field "value": value is not of type number$'
 stdin empty.txt
 wantexit 2 ./dp$exe sum
-stderr '^dp: error: required stdin payload is empty; pipe JSON Lines$'
+stderr '^dp: error: dp sum: required stdin payload is empty; pipe JSON Lines$'
 # --help never waits for stdin.
 exec ./dp$exe sum --help
 stdout '^  jsonl Record \(streamed\) \(required\)$'
@@ -75,7 +75,7 @@ exec ./dp$exe stats
 stdout '^n=3 min=1 max=4 mean=2\.6666666666666665$'
 stdin nonumbers.json
 wantexit 2 ./dp$exe stats
-stderr '^dp: error: stdin: array length 0 is below minItems 1$'
+stderr '^dp: error: dp stats: stdin: array length 0 is below minItems 1$'
 
 # An output file is written whole, refused when it exists, replaced with --force; - is stdout.
 exec ./dp$exe convert doc.json -o out.json -t compact
@@ -100,7 +100,7 @@ wantexit 70 ./dp$exe fail --internal
 wantexit 70 ./dp$exe fail --panic --trace
 cmp stderr want-panic.txt
 wantexit 2 ./dp$exe fail --code 300
-stderr '^dp: error: --code must be <= 255 \(got 300\)$'
+stderr '^dp: error: dp fail: --code must be <= 255 \(got 300\)$'
 
 # Ctrl-C while the output file is open: teardown runs, the reporter says so, the run exits 130
 # and no file is left behind.

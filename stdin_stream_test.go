@@ -326,11 +326,11 @@ func TestStdinStream_jsonlSlice(t *testing.T) {
 		t.Fatalf("records = %+v, %v", in.App.Stdin, err)
 	}
 	_, err = ssRead[ssJSONLSliceInputs](t, strings.NewReader("{\"name\":\"a\"}\n{}\n"), ssRecMeta)
-	if err == nil || !strings.HasPrefix(err.Error(), "stdin line 2: ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "app: stdin line 2: ") {
 		t.Errorf("a bad record = %v, want it named by line", err)
 	}
 	_, err = ssRead[ssJSONLSliceInputs](t, strings.NewReader("\n \n"), ssRecMeta)
-	if err == nil || err.Error() != "required stdin payload is empty; pipe JSON Lines" {
+	if err == nil || err.Error() != "app: required stdin payload is empty; pipe JSON Lines" {
 		t.Errorf("only blank lines, required = %v", err)
 	}
 }
@@ -346,7 +346,7 @@ func TestStdinStream_jsonlSliceCheckInputs(t *testing.T) {
 	}
 	in.App.Stdin = &[]ssRec{{Name: "a"}, {Name: ""}}
 	err := rtx.CheckInputs(in, PresenceOf(in))
-	if err == nil || !strings.HasPrefix(err.Error(), "stdin record 2: ") || !errors.Is(err, ErrUsage) {
+	if err == nil || !strings.HasPrefix(err.Error(), "app: stdin record 2: ") || !errors.Is(err, ErrUsage) {
 		t.Errorf("a bad record = %v, want a usage error naming record 2", err)
 	}
 	if err := wired(stRTX(nil).WithInputSettings(ssRecMeta)).CheckInputs(in, PresenceOf(in)); !isWiringError(err) {
@@ -447,7 +447,7 @@ func TestStdinUnlessArgument(t *testing.T) {
 	}
 
 	_, err = readWithin(t, strings.NewReader(""), nil, 2*time.Second)
-	if err == nil || err.Error() != "required stdin payload is empty; pipe a text payload or give <files>" {
+	if err == nil || err.Error() != "app: required stdin payload is empty; pipe a text payload or give <files>" {
 		t.Errorf("no file and an empty pipe = %v", err)
 	}
 }

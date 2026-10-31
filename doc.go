@@ -213,7 +213,9 @@
 // flush of buffered stdout at the end of a run ([Program.WithBufferedOutput]), and an I/O
 // failure [CreateOutput] meets other than a missing directory or a denied permission (those
 // two are usage errors). Rotini's own messages expose no decoder or OS internals and no secret
-// values:
+// values. A [*ParseError] or usage [*InputError] starts its message with the path of the
+// command the input belongs to, as typed (`todo add: missing required input: <title>`); its
+// Msg field is the message alone, for a reporter that words its own:
 //
 //   - [*ParseError] — the argv channel. [ParseError.Kind] identifies the failure; Token and
 //     Candidates are the facts a "did you mean" needs.

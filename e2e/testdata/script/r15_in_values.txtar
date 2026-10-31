@@ -17,7 +17,7 @@ stdout '^lim=4 '
 exec ./app$exe --lim x --lim 4
 stdout '^lim=4 '
 ! exec ./app$exe --lim 4 --lim 99
-stderr '^Error: --lim must be <= 9 \(got 99\)$'
+stderr '^Error: app: --lim must be <= 9 \(got 99\)$'
 
 # ── a config map across two files merges per entry, credited per entry ──────
 
@@ -39,9 +39,9 @@ rm .env
 # ── floats: hex floats and _ need base: prefixed; inf and nan are numbers ────
 
 ! exec ./app$exe --rate 0x1p4
-stderr '^Error: --rate: "0x1p4" is not a valid number$'
+stderr '^Error: app: --rate: "0x1p4" is not a valid number$'
 ! exec ./app$exe --rate 1_000
-stderr '^Error: --rate: "1_000" is not a valid number$'
+stderr '^Error: app: --rate: "1_000" is not a valid number$'
 exec ./app$exe --rate -Inf --hex 0x1p4
 stdout ' rate=-Inf hex=16 '
 exec ./app$exe --hex 1_000.5
@@ -70,11 +70,11 @@ stdout ' day=2023-11-14T00:00:00Z '
 # ── messages name what was typed and declared ───────────────────────────────
 
 ! exec ./app$exe -46
-stderr '^Error: flags -4 and -6 are mutually exclusive$'
+stderr '^Error: app: flags -4 and -6 are mutually exclusive$'
 ! exec ./app$exe --big 9007199254740993
-stderr '^Error: --big must be <= 9007199254740992 \(got 9007199254740993\)$'
+stderr '^Error: app: --big must be <= 9007199254740992 \(got 9007199254740993\)$'
 ! exec ./app$exe --token @
-stderr '^Error: --token: "@" names no file; write @path to read a file, or @@ for a literal @$'
+stderr '^Error: app: --token: "@" names no file; write @path to read a file, or @@ for a literal @$'
 
 -- user.yaml --
 labels: {team: core, tier: api}

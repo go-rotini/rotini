@@ -21,7 +21,7 @@ A mistyped command, flag or value names the nearest one the tool accepts:
 
 {{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
 $ go tool rotini genrate
-Error: unknown command "genrate" for "rotini"; did you mean "generate"?
+Error: rotini: unknown command "genrate"; did you mean "generate"?
 {{< /code >}}
 
 The companion CLI opts into these suggestions with rotini's `Suggestor`. A CLI you build with

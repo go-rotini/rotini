@@ -45,7 +45,7 @@ stderr '^Error: no such task 7$'
 
 # Another failure exits 1, with no link.
 wantexit 1 ./todo$exe get
-stderr '^Error: missing required input: <id>$'
+stderr '^Error: todo get: missing required input: <id>$'
 ! stderr 'See'
 
 -- links.txt --

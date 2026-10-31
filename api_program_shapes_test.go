@@ -129,10 +129,10 @@ func TestProgramShapes_constructorsAgree(t *testing.T) {
 		{argv: []string{"-v", "hi", "--name=x", "-c", "3", "ada"}, want: "ada x x3 verbose=true\n"},
 		{argv: []string{"greet", "ada"}, env: []string{"APP_NAME=env"}, want: "ada env x1 verbose=false\n"},
 		{argv: []string{"greet", "--name", "flag", "ada"}, env: []string{"APP_NAME=env"}, want: "ada flag x1 verbose=false\n"},
-		{argv: []string{"greet"}, want: "Error: missing required input: <who>\n", code: 1},
-		{argv: []string{"greet", "-c", "0", "ada"}, want: "Error: -c must be >= 1 (got 0)\n", code: 1},
-		{argv: []string{"greet", "--bogus", "ada"}, want: "Error: unknown flag \"--bogus\"\n", code: 1},
-		{argv: []string{"nope"}, want: "Error: unknown command \"nope\" for \"app\"\n", code: 1},
+		{argv: []string{"greet"}, want: "Error: app greet: missing required input: <who>\n", code: 1},
+		{argv: []string{"greet", "-c", "0", "ada"}, want: "Error: app greet: -c must be >= 1 (got 0)\n", code: 1},
+		{argv: []string{"greet", "--bogus", "ada"}, want: "Error: app greet: unknown flag \"--bogus\"\n", code: 1},
+		{argv: []string{"nope"}, want: "Error: app: unknown command \"nope\"\n", code: 1},
 	}
 	for _, c := range cases {
 		var first string

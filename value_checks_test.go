@@ -180,7 +180,7 @@ func TestInputs_nonFiniteFromEnvironment(t *testing.T) {
 	}
 	t.Setenv("RATIO", "nan")
 	err := NewInputReader(InputSettings{}).Read(NewContextFor(def, nil), &in)
-	if want := "--ratio must be a finite number (got nan) (from environment variable RATIO)"; err == nil || err.Error() != want {
+	if want := "app: --ratio must be a finite number (got nan) (from environment variable RATIO)"; err == nil || err.Error() != want {
 		t.Errorf("Read = %v, want %q", err, want)
 	}
 }

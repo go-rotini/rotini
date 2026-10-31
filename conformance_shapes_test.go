@@ -78,13 +78,13 @@ func shpContext(t *testing.T, config, dotenv string, env []string, argv ...strin
 }
 
 // shpWantError checks that every reader reports a usage *InputError on channel whose message
-// starts with want and names app.yaml.
+// starts with app's path and want, and names app.yaml.
 func shpWantError(t *testing.T, rtx *Context, channel, want string) {
 	t.Helper()
 	for reader, err := range readerErrors[shpInputs](rtx, "files") {
 		var ie *InputError
 		if !errors.As(err, &ie) || ie.Channel != channel || !errors.Is(err, ErrUsage) ||
-			!strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), "app.yaml") {
+			!strings.HasPrefix(err.Error(), "app: "+want) || !strings.Contains(err.Error(), "app.yaml") {
 			t.Errorf("%s = %v, want a %s usage error starting %q", reader, err, channel, want)
 		}
 	}

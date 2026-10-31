@@ -12,7 +12,7 @@ wantexit 1 rotini validate app/.rotini.spec.yaml
 stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:11:18: command app/db/status: overrides the mounted command `app db status`, so it can''t set `stdin`; '
 stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:13:15: command app/db/status: overrides `app db status`, which declares no command "deep"; '
 stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:15:21: command app/db/status: mounts "\.\./db/\.rotini\.spec\.yaml" inside an override of a mounted command; '
-stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:7:18: command app: \$ref "\.\./db/\.rotini\.spec\.yaml": example "app db status --bogus" does not parse: unknown flag "--bogus"$'
+stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:7:18: command app: \$ref "\.\./db/\.rotini\.spec\.yaml": example "app db status --bogus" does not parse: app db status: unknown flag "--bogus"$'
 stderr '^Error: spec: app[/\\]\.rotini\.spec\.yaml:8:17: command app: \$ref "\.\./db/\.rotini\.spec\.yaml": sets `filename` on a `\$ref` node; '
 stderr '^Error: spec: db[/\\]\.rotini\.spec\.yaml:7:25: command db/status: sets `deprecated_since` without `deprecated`; '
 ! stderr 'app[/\\]\.rotini\.spec\.yaml:1[0-9]:[0-9]+: .*deprecated_since'

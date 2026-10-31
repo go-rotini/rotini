@@ -25,11 +25,11 @@ exec ./scope$exe --verbose db migrate
 # A local flag with a sub-command is a usage error naming its command, before or after the
 # sub-command's name.
 wantexit 1 ./scope$exe db migrate --init
-stderr '^Error: --init belongs to "scope", not "scope db migrate"$'
+stderr '^Error: scope db migrate: --init belongs to "scope"$'
 wantexit 1 ./scope$exe --init db migrate
-stderr '^Error: --init belongs to "scope", not "scope db migrate"$'
+stderr '^Error: scope db migrate: --init belongs to "scope"$'
 wantexit 1 ./scope$exe db migrate --dsn x
-stderr '^Error: --dsn belongs to "scope db", not "scope db migrate"$'
+stderr '^Error: scope db migrate: --dsn belongs to "scope db"$'
 
 # A sub-command's help lists the cascading flag only.
 exec ./scope$exe db migrate --help

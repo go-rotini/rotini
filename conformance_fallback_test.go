@@ -304,6 +304,9 @@ func cloneStore(s *parsedInputs) *parsedInputs {
 	if s.lateFlag != nil {
 		c.lateFlag = new(*s.lateFlag)
 	}
+	if s.spelled != nil {
+		c.spelled = new(*s.spelled)
+	}
 	c.pool = make([]string, len(s.pool), cap(s.pool))
 	copy(c.pool, s.pool)
 	return &c
@@ -326,8 +329,8 @@ func TestCloneStore_coversEveryField(t *testing.T) {
 	if n := reflect.TypeFor[scopeInputs]().NumField(); n != 12 {
 		t.Errorf("scopeInputs has %d fields; cloneStore copies 12", n)
 	}
-	if n := reflect.TypeFor[parsedInputs]().NumField(); n != 14 {
-		t.Errorf("parsedInputs has %d fields; cloneStore copies 14", n)
+	if n := reflect.TypeFor[parsedInputs]().NumField(); n != 15 {
+		t.Errorf("parsedInputs has %d fields; cloneStore copies 15", n)
 	}
 }
 

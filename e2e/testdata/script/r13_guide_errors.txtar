@@ -17,7 +17,7 @@ exec go build -o override$exe ./cmd/override
 wantexit 2 ./todo$exe add
 cmp stderr missing.txt
 wantexit 2 ./todo$exe add --bogus x
-stderr '^Error: unknown flag "--bogus"$'
+stderr '^Error: todo add: unknown flag "--bogus"$'
 exec ./todo$exe add milk
 stdout '^added milk$'
 
@@ -57,7 +57,7 @@ stderr '^reported 1 errors$'
 wantexit 9 ./override$exe keep
 
 -- missing.txt --
-missing required input: <title>
+todo add: missing required input: <title>
 Run 'todo add --help' for usage.
 -- boom.txt --
 Fatal Error: boom

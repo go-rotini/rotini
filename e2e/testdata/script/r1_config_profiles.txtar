@@ -27,10 +27,10 @@ stdout '^region=eu-west-1 host=db.shared profile=default$'
 env ACME_PROFILE=prdo
 ! exec ./app$exe
 ! stdout .
-stderr '^Error: ACME_PROFILE: profile "prdo" is not defined in configuration file .*app\.yaml \(profiles: default, prod\)$'
+stderr '^Error: app: ACME_PROFILE: profile "prdo" is not defined in configuration file .*app\.yaml \(profiles: default, prod\)$'
 stderr '^did you mean "prod"\?$'
 ! exec ./app$exe --profile stage
-stderr '^Error: --profile: profile "stage" is not defined'
+stderr '^Error: app: --profile: profile "stage" is not defined'
 
 # --help doesn't fail on a bad profile.
 exec ./app$exe --help

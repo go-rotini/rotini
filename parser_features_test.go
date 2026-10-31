@@ -110,7 +110,7 @@ func TestSecretLiteral_arguments(t *testing.T) {
 		}
 	}
 	err := NewParser().Parse(NewContextFor(def, []string{"sk_live"}), &in)
-	if err == nil || err.Error() != "<token> takes -, not a value" {
+	if err == nil || err.Error() != "app: <token> takes -, not a value" {
 		t.Errorf("err = %v, want the refusal naming only stdin", err)
 	}
 }
@@ -163,10 +163,10 @@ func TestFlagDependencies_messages(t *testing.T) {
 		argv []string
 		want string
 	}{
-		{FlagDependency{Unless: []string{"a", "b"}, Requires: []string{"c"}}, nil, "flag --c is required unless --a or --b is set"},
-		{FlagDependency{When: "a", Unless: []string{"b"}, Forbids: []string{"c", "d"}}, []string{"--a", "--c", "--d"}, "flags --c and --d can't be used when --a is set, unless --b is set"},
+		{FlagDependency{Unless: []string{"a", "b"}, Requires: []string{"c"}}, nil, "app: flag --c is required unless --a or --b is set"},
+		{FlagDependency{When: "a", Unless: []string{"b"}, Forbids: []string{"c", "d"}}, []string{"--a", "--c", "--d"}, "app: flags --c and --d can't be used when --a is set, unless --b is set"},
 		{FlagDependency{When: "a", Unless: []string{"b"}, Forbids: []string{"c"}}, []string{"--a", "--b", "--c"}, ""},
-		{FlagDependency{When: "d", Equals: []string{"false"}, Requires: []string{"c"}}, []string{"--no-d"}, "flag --c is required when --d is false"},
+		{FlagDependency{When: "d", Equals: []string{"false"}, Requires: []string{"c"}}, []string{"--no-d"}, "app: flag --c is required when --d is false"},
 		{FlagDependency{When: "d", Equals: []string{"false"}, Requires: []string{"c"}}, []string{"--d=yes"}, ""},
 	}
 	for _, c := range cases {

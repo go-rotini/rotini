@@ -166,9 +166,9 @@ func TestInputsWithReport_namesTypedIdentifier(t *testing.T) {
 		{Name: "workers", Identifiers: []string{"-w", "--workers"}, Type: "int", Minimum: &one},
 	}}
 	for flag, want := range map[string]string{
-		"-r":         "-r must be >= 1 (got 0)",
-		"--replicas": "--replicas must be >= 1 (got 0)",
-		"-w":         "-w must be >= 1 (got 0)",
+		"-r":         "app: -r must be >= 1 (got 0)",
+		"--replicas": "app: --replicas must be >= 1 (got 0)",
+		"-w":         "app: -w must be >= 1 (got 0)",
 	} {
 		rtx := NewContextFor(def, []string{flag, "0"}).WithEnviron([]string{"APP_REPLICAS=5"})
 		_, err := rtx.Inputs[in]()

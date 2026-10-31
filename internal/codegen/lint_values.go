@@ -98,6 +98,9 @@ func parseAsRuntime(rt reflect.Type, fd rotini.FlagDef, text string) (field refl
 	out := reflect.New(reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}}))
 	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{fd}}
 	if err := rotini.NewParser().Parse(lintContext(def, []string{"--v=" + text}), out.Interface()); err != nil {
+		if pe, ok := errors.AsType[*rotini.ParseError](err); ok {
+			return reflect.Value{}, pe.Msg // the placeholder command "app" is no part of the complaint
+		}
 		return reflect.Value{}, err.Error()
 	}
 	return out.Elem().Field(0).Field(0).Field(0), ""

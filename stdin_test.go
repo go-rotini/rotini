@@ -323,7 +323,7 @@ func TestInputReader_stdinBOM(t *testing.T) {
 	t.Run("UTF-16 is named", func(t *testing.T) {
 		var in stDocInputs
 		err := NewInputReader(InputSettings{}).Read(stRTX(strings.NewReader("\xff\xfe{\x00}\x00")), &in)
-		if err == nil || err.Error() != "stdin is UTF-16 encoded; pipe UTF-8 instead" || !errors.Is(err, ErrUsage) {
+		if err == nil || err.Error() != "app: stdin is UTF-16 encoded; pipe UTF-8 instead" || !errors.Is(err, ErrUsage) {
 			t.Errorf("err = %v, want the UTF-16 usage error", err)
 		}
 	})
@@ -425,8 +425,8 @@ func TestInputErrorTexts_stdinPosition(t *testing.T) {
 		body string
 		want string
 	}{
-		{"json", &stDocInputs{}, "{\"name\":\n  \"x\",\n", `could not parse stdin as json at line 3, column 1: unexpected end of JSON input`},
-		{"yaml", &stYAMLInputs{}, "name: [\n", "could not parse stdin as yaml at line "},
+		{"json", &stDocInputs{}, "{\"name\":\n  \"x\",\n", `app: could not parse stdin as json at line 3, column 1: unexpected end of JSON input`},
+		{"yaml", &stYAMLInputs{}, "name: [\n", "app: could not parse stdin as yaml at line "},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -462,7 +462,7 @@ func TestInputErrorTexts_configParse(t *testing.T) {
 			var in tbInputs
 			err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path}}}).
 				Read(NewContextFor(tbDef(), nil), &in)
-			want := "could not parse configuration file " + path + tc.want
+			want := "app: could not parse configuration file " + path + tc.want
 			if err == nil || !strings.HasPrefix(err.Error(), want) {
 				t.Errorf("err = %v, want prefix %q", err, want)
 			}
@@ -496,7 +496,7 @@ func TestInputErrorTexts_configValue(t *testing.T) {
 	var in stCfgInputs
 	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: path}}}).
 		Read(stRTX(nil), &in)
-	want := `config key api.port: "abc" is not a valid integer (from configuration file ` + path + ")"
+	want := `app: config key api.port: "abc" is not a valid integer (from configuration file ` + path + ")"
 	if err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %q", err, want)
 	}
@@ -529,10 +529,10 @@ func TestInputErrorTexts_env(t *testing.T) {
 		env  []string
 		want string
 	}{
-		{"required names every spelling", nil, "environment variable APP_REGION (or REGION) is required"},
-		{"coercion names the variable set", []string{"REGION=us", "APP_PORT=abc"}, `environment variable APP_PORT: "abc" is not a valid integer`},
-		{"a map entry needs key=value", []string{"APP_REGION=us", "APP_LABELS=a=1,bad"}, `environment variable APP_LABELS expects key=value pairs (got "bad")`},
-		{"a map entry needs a key", []string{"APP_REGION=us", "APP_LABELS==v"}, `environment variable APP_LABELS needs a key before "=" (got "=v")`},
+		{"required names every spelling", nil, "app: environment variable APP_REGION (or REGION) is required"},
+		{"coercion names the variable set", []string{"REGION=us", "APP_PORT=abc"}, `app: environment variable APP_PORT: "abc" is not a valid integer`},
+		{"a map entry needs key=value", []string{"APP_REGION=us", "APP_LABELS=a=1,bad"}, `app: environment variable APP_LABELS expects key=value pairs (got "bad")`},
+		{"a map entry needs a key", []string{"APP_REGION=us", "APP_LABELS==v"}, `app: environment variable APP_LABELS needs a key before "=" (got "=v")`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -553,7 +553,7 @@ func TestInputErrorTexts_env(t *testing.T) {
 func TestCheckInputs_envRequiredNamesVariable(t *testing.T) {
 	rtx := stRTX(nil)
 	err := rtx.CheckInputs(stEnvInputs{}, Presence{})
-	want := "environment variable APP_REGION (or REGION) is required"
+	want := "app: environment variable APP_REGION (or REGION) is required"
 	if err == nil || err.Error() != want {
 		t.Errorf("CheckInputs = %v, want %q", err, want)
 	}

@@ -36,7 +36,7 @@ env 'VCS_AUTHOR=Ada <ada@example.com>'
 exec ./vcs$exe -C repo ci -m second --date '2026-01-03 04:05'
 env VCS_AUTHOR=
 wantexit 1 ./vcs$exe -C repo commit
-stderr '^Error: flag --message is required unless --amend is set$'
+stderr '^Error: vcs commit: flag --message is required unless --amend is set$'
 exec ./vcs$exe -C repo commit --amend
 stdout '^\[2\] second$'
 wantexit 1 ./vcs$exe -C repo commit -m WIP
@@ -53,9 +53,9 @@ stderr '^Error: not a vcs repository \(run vcs init\)$'
 exec ./vcs$exe -C repo -vv --color log -n 1 --oneline
 stderr '^debug: dir=.*repo color=always$'
 wantexit 1 ./vcs$exe --color never log
-stderr '^Error: unknown command "never" for "vcs"; --color takes its value attached: --color=never$'
+stderr '^Error: vcs: unknown command "never"; --color takes its value attached: --color=never$'
 wantexit 1 ./vcs$exe --verbose=3 log
-stderr '^Error: --verbose counts occurrences and takes no value$'
+stderr '^Error: vcs: --verbose counts occurrences and takes no value$'
 
 # Enum values: a hidden one is accepted but never offered, a deprecated one is reported by the
 # root's loop with its replacement.
@@ -63,19 +63,19 @@ exec ./vcs$exe -C repo log --format raw -n 1
 exec ./vcs$exe -C repo log --format full -n 1
 stderr '^Warning: flag "--format" value "full" is deprecated: use medium; use medium instead$'
 wantexit 1 ./vcs$exe log --format bogus
-stderr '^Error: invalid value "bogus" for --format \(one of: short, medium\)$'
+stderr '^Error: vcs log: invalid value "bogus" for --format \(one of: short, medium\)$'
 exec ./vcs$exe log --help
 stdout '^      --format string    how to print each commit \(default medium\) \[short\|medium\]$'
 
 # Digit options and their group, a URL argument, a pattern in words, too many arguments.
 wantexit 1 ./vcs$exe clone https://example.com/r -46
-stderr '^Error: flags -4 and -6 are mutually exclusive$'
+stderr '^Error: vcs clone: flags -4 and -6 are mutually exclusive$'
 wantexit 1 ./vcs$exe clone example.com/r
-stderr '^Error: <url>: "example\.com/r" is not a valid URL'
+stderr '^Error: vcs clone: <url>: "example\.com/r" is not a valid URL'
 wantexit 1 ./vcs$exe clone https://example.com/r -b Main
-stderr '^Error: -b must be lowercase letters, digits, /, _ or - \(got "Main"\)$'
+stderr '^Error: vcs clone: -b must be lowercase letters, digits, /, _ or - \(got "Main"\)$'
 wantexit 1 ./vcs$exe clone https://example.com/r d extra
-stderr '^Error: vcs clone accepts at most 2 arguments \(got 3\)$'
+stderr '^Error: vcs clone: accepts at most 2 arguments \(got 3\)$'
 
 # The passthrough argument takes words as typed from its first word on, and `--` is counted.
 exec ./vcs$exe run -e A=1 ls -- -x --help
@@ -1270,8 +1270,8 @@ Error: spec: bad.spec.yaml:27:41: command vcs/commit: flag "size": `minimum` 10 
 Error: spec: bad.spec.yaml:24:44: command vcs/commit: flag "level": `enum` value "two" is not a valid integer, so no value can match both; fix the value or the type
 Error: spec: bad.spec.yaml:30:60: command vcs/commit: flag "name": sets `required` and a `default`; the default always supplies a value, so the requirement can never fire. Drop `default` to make it required, or drop `required`
 Error: spec: bad.spec.yaml:39:20: command vcs/log: sets `replaced_by: history`, which names no command; write the path below the root command, without the program's name (`purge`, `remote add`)
-Error: spec: bad.spec.yaml:6:7: command vcs: example "vcs comit -m x" does not parse: unknown command "comit" for "vcs"
-Error: spec: bad.spec.yaml:7:7: command vcs: example "vcs log --format nope" does not parse: invalid value "nope" for --format (one of: short, long)
+Error: spec: bad.spec.yaml:6:7: command vcs: example "vcs comit -m x" does not parse: vcs: unknown command "comit"
+Error: spec: bad.spec.yaml:7:7: command vcs: example "vcs log --format nope" does not parse: vcs log: invalid value "nope" for --format (one of: short, long)
 -- want-diff.txt --
 Breaking:
   INPUT_BOUND_NARROWED       vcs clone --depth  narrowed: minimum 1 → 2

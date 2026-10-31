@@ -15,23 +15,23 @@ stdout '^name=n host=h target=t labels=map\[team:core\] owner=map\[team:core\] r
 
 # Each is a usage error naming the input, the file and the key, through both readers.
 ! exec ./app$exe --need x --conf flaglist.yaml
-stderr '^Error: --name takes one value, not a list \(from configuration file .*flaglist.yaml, key name\)$'
+stderr '^Error: app: --name takes one value, not a list \(from configuration file .*flaglist.yaml, key name\)$'
 ! exec ./app$exe --need x --conf flaglist.yaml --plain
-stderr '^Error: --name takes one value, not a list \(from configuration file .*flaglist.yaml, key name\)$'
+stderr '^Error: app: --name takes one value, not a list \(from configuration file .*flaglist.yaml, key name\)$'
 ! exec ./app$exe --need x --conf argmap.yaml
-stderr '^Error: <target> takes one value, not a map \(from configuration file .*argmap.yaml, key target\)$'
+stderr '^Error: app: <target> takes one value, not a map \(from configuration file .*argmap.yaml, key target\)$'
 ! exec ./app$exe --need x --conf argmap.yaml --plain
-stderr '^Error: <target> takes one value, not a map \(from configuration file .*argmap.yaml, key target\)$'
+stderr '^Error: app: <target> takes one value, not a map \(from configuration file .*argmap.yaml, key target\)$'
 ! exec ./app$exe --need x --conf configlist.yaml
-stderr '^Error: config key host takes one value, not a list \(from configuration file .*configlist.yaml\)$'
+stderr '^Error: app: config key host takes one value, not a list \(from configuration file .*configlist.yaml\)$'
 ! exec ./app$exe --need x --conf configlist.yaml --plain
-stderr '^Error: config key host takes one value, not a list \(from configuration file .*configlist.yaml\)$'
+stderr '^Error: app: config key host takes one value, not a list \(from configuration file .*configlist.yaml\)$'
 ! exec ./app$exe --need x --conf mapleaf.yaml
-stderr '^Error: --label takes one value per key, not a list \(key team\) \(from configuration file .*mapleaf.yaml, key labels\)$'
+stderr '^Error: app: --label takes one value per key, not a list \(key team\) \(from configuration file .*mapleaf.yaml, key labels\)$'
 ! exec ./app$exe --need x --conf mapleaf.yaml --plain
-stderr '^Error: --label takes one value per key, not a list \(key team\) \(from configuration file .*mapleaf.yaml, key labels\)$'
+stderr '^Error: app: --label takes one value per key, not a list \(key team\) \(from configuration file .*mapleaf.yaml, key labels\)$'
 ! exec ./app$exe --need x --conf configmapleaf.yaml
-stderr '^Error: config key owner takes one value per key, not a list \(key team\) \(from configuration file .*configmapleaf.yaml\)$'
+stderr '^Error: app: config key owner takes one value per key, not a list \(key team\) \(from configuration file .*configmapleaf.yaml\)$'
 
 # The command line overrides the value, which is then never read, and a repeated flag keeps
 # its last value.
@@ -64,10 +64,10 @@ env APP_REGION=
 # ── an unknown profile beside a missing required flag ────────────────────────
 
 ! exec ./app$exe --conf prof.yaml --profile nope
-stderr '^Error: --profile: profile "nope" is not defined in configuration file .*prof.yaml \(profiles: broken, prod\)$'
+stderr '^Error: app: --profile: profile "nope" is not defined in configuration file .*prof.yaml \(profiles: broken, prod\)$'
 ! stderr need
 ! exec ./app$exe --conf prof.yaml --profile nope --plain
-stderr '^Error: --profile: profile "nope" is not defined in configuration file .*prof.yaml \(profiles: broken, prod\)$'
+stderr '^Error: app: --profile: profile "nope" is not defined in configuration file .*prof.yaml \(profiles: broken, prod\)$'
 ! stderr need
 ! exec ./app$exe --conf prof.yaml --profile prod
 stderr '--need'
@@ -81,7 +81,7 @@ stdout '^App.Flags.Labels = "team=core, tier=api" from config:main#labels.team, 
 stdout '^App.Config.Owner = "team=core, tier=api" from config:main#owner.team, config:main#profiles.prod.owner.tier; overrides config:main#owner.tier "web"$'
 # A list in the chosen profile for a flag that takes one value names the profile.
 ! exec ./app$exe --need x --conf prof.yaml --profile broken
-stderr '^Error: --name takes one value, not a list \(from configuration file .*prof.yaml \(profile broken\), key name\)$'
+stderr '^Error: app: --name takes one value, not a list \(from configuration file .*prof.yaml \(profile broken\), key name\)$'
 
 -- good.yaml --
 name: n

@@ -93,7 +93,7 @@ func TestExpand_argv(t *testing.T) {
 
 	// The process environment is not read: OUTDIR is set (non-empty) only there.
 	t.Setenv("OUTDIR", "/process")
-	if _, err := exBind(t, work, conf, "", []string{"HOME=" + home, "OUTDIR="}); err == nil || err.Error() != `--out: $OUTDIR is not set (in "$OUTDIR/out.txt")` {
+	if _, err := exBind(t, work, conf, "", []string{"HOME=" + home, "OUTDIR="}); err == nil || err.Error() != `app: --out: $OUTDIR is not set (in "$OUTDIR/out.txt")` {
 		t.Errorf("default with an unset variable = %v", err)
 	}
 }
@@ -102,9 +102,9 @@ func TestExpand_argvErrors(t *testing.T) {
 	_, home, work, conf := exSetup(t)
 	env := []string{"HOME=" + home, "USERPROFILE=" + home, "OUTDIR=" + work}
 	for argv, want := range map[string]string{
-		"--paths=$A,$NOPE":   `--paths: $NOPE is not set (in "$NOPE")`,
-		"--out=${OUTDIR:-x}": `--out: only $NAME and ${NAME} are expanded (in "${OUTDIR:-x}")`,
-		"-f=~/missing":       `-f: no such file: ` + quotePath(home+"/missing") + ` (written as "~/missing")`,
+		"--paths=$A,$NOPE":   `app: --paths: $NOPE is not set (in "$NOPE")`,
+		"--out=${OUTDIR:-x}": `app: --out: only $NAME and ${NAME} are expanded (in "${OUTDIR:-x}")`,
+		"-f=~/missing":       `app: -f: no such file: ` + quotePath(home+"/missing") + ` (written as "~/missing")`,
 	} {
 		_, err := exBind(t, work, conf, "", append(env, "A=1"), argv)
 		var pe *ParseError
@@ -171,11 +171,11 @@ func TestExpand_envAndConfig(t *testing.T) {
 func TestExpand_envErrors(t *testing.T) {
 	_, home, work, conf := exSetup(t)
 	_, err := exBind(t, work, conf, "", []string{"HOME=" + home, "APP_HOME=$NOPE"})
-	if err == nil || err.Error() != `APP_HOME: $NOPE is not set (in "$NOPE")` || !errors.Is(err, ErrUsage) {
+	if err == nil || err.Error() != `app: APP_HOME: $NOPE is not set (in "$NOPE")` || !errors.Is(err, ErrUsage) {
 		t.Errorf("env expansion = %v", err)
 	}
 	_, err = exBind(t, work, conf, "", []string{"APP_CACHE=~/x"})
-	if err == nil || !strings.HasPrefix(err.Error(), `--cache: cannot expand "~/x": `) || !strings.HasSuffix(err.Error(), "(from environment variable APP_CACHE)") {
+	if err == nil || !strings.HasPrefix(err.Error(), `app: --cache: cannot expand "~/x": `) || !strings.HasSuffix(err.Error(), "(from environment variable APP_CACHE)") {
 		t.Errorf("fallback expansion = %v", err)
 	}
 	// A configuration value that cannot be expanded is skipped under a short-circuit flag.
@@ -195,7 +195,7 @@ func TestChannelPaths_checked(t *testing.T) {
 		t.Errorf("a relative file in the run's directory = %v", err)
 	}
 	_, err := exBind(t, work, conf, "", []string{"HOME=" + home, "APP_LOG=/nonexistent"})
-	if err == nil || err.Error() != `environment variable APP_LOG: no such file: "/nonexistent"` || !errors.Is(err, ErrUsage) {
+	if err == nil || err.Error() != `app: environment variable APP_LOG: no such file: "/nonexistent"` || !errors.Is(err, ErrUsage) {
 		t.Errorf("missing env file = %v", err)
 	}
 	_, err = exBind(t, work, conf, "", []string{"HOME=" + home, "APP_LOG=" + work})

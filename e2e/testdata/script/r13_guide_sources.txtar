@@ -38,7 +38,7 @@ stdout '^file=.*notes\.txt$'
 ! exec ./todo$exe show --file '$NOTES/today.txt'
 cmp stderr want-unset.txt
 ! exec ./todo$exe show --file '~/x'
-stderr '^Error: --file: no such file: ".*x" \(written as "~/x"\)$'
+stderr '^Error: todo show: --file: no such file: ".*x" \(written as "~/x"\)$'
 
 # $$ is a literal $, and text a variable supplies is never expanded again.
 env TODO_X='$HOME'
@@ -60,7 +60,7 @@ stderr 'flag "dir": has role chdir and sets `from`'
 stderr 'flag "work": has role chdir, which flag "dir" already has'
 
 -- want-unset.txt --
-Error: --file: $NOTES is not set (in "$NOTES/today.txt")
+Error: todo show: --file: $NOTES is not set (in "$NOTES/today.txt")
 -- home/notes.txt --
 notes
 -- todo.yaml --

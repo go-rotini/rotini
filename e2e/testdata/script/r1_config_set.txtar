@@ -35,9 +35,9 @@ stdout '^region= level=warn timeout=1m30s$'
 
 # A value the spec doesn't allow, or a key it doesn't declare, changes nothing.
 ! exec ./cfgctl$exe config set level loud
-stderr '^Error: invalid value "loud" for config key level \(one of: debug, info, warn\)$'
+stderr '^Error: cfgctl config set: invalid value "loud" for config key level \(one of: debug, info, warn\)$'
 ! exec ./cfgctl$exe config set regoin x
-stderr '^Error: unknown config key regoin \(keys: deploy.timeout, level, region\)$'
+stderr '^Error: cfgctl config set: unknown config key regoin \(keys: deploy.timeout, level, region\)$'
 cmp xdg/cfgctl/config.yaml commented.golden
 
 # With a profile selected, the value goes into it.

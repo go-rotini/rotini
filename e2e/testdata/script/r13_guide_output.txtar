@@ -98,7 +98,7 @@ ID  STATUS  TITLE
 -- check.txt --
 Error: todo list: output does not match its contract: output.tasks[2].status: value is not in enum
 -- structured.txt --
-{"schema_version":1,"error":{"candidates":["--json","--sort-by","--reverse","-h","--help","--version","-o","--output","--format"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"unknown flag \"--bogus\"","token":"--bogus"}}
+{"schema_version":1,"error":{"candidates":["--json","--sort-by","--reverse","-h","--help","--version","-o","--output","--format"],"category":"usage","command":"todo list","exit_code":1,"flag":"--bogus","kind":"unknown-flag","message":"todo list: unknown flag \"--bogus\"","token":"--bogus"}}
 -- template.txt --
 1 write docs
 2 ship

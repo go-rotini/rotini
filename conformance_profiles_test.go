@@ -87,9 +87,9 @@ func profileConformanceCases() []dataCase {
 				rtx := NewContextFor(def, argv).WithDir(dir).WithInputSettings(meta)
 				_, err := rtx.Inputs[pfInputs]()
 				_, _, rerr := rtx.InputsWithReport[pfInputs]()
-				want := `--profile: profile "nope" is not defined in configuration file `
+				want := `app: --profile: profile "nope" is not defined in configuration file `
 				if argv[1] == "prod" {
-					want = "missing required input: --need"
+					want = "app: missing required input: --need"
 				}
 				for reader, e := range map[string]error{"Inputs": err, "InputsWithReport": rerr} {
 					if e == nil || !strings.HasPrefix(e.Error(), want) || !errors.Is(e, ErrUsage) {

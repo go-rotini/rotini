@@ -49,13 +49,13 @@ cmp stdout want-environment.txt
 
 # The child's inputs and rules work under the parent.
 wantexit 1 ./acme$exe db migrate -n 1 --to 20260101
-stderr '^Error: flags -n and --to are mutually exclusive$'
+stderr '^Error: acme db migrate: flags -n and --to are mutually exclusive$'
 env DB_DSN=nota
 wantexit 1 ./acme$exe db status
-stderr '^Error: --dsn: "nota" is not a valid URL .*\(from environment variable DB_DSN\)$'
+stderr '^Error: acme db status: --dsn: "nota" is not a valid URL .*\(from environment variable DB_DSN\)$'
 env DB_DSN=
 wantexit 1 ./acme$exe cache flush --pattern '[a'
-stderr '^Error: --pattern: '
+stderr '^Error: acme cache flush: --pattern: '
 
 # Plugins: a declared one under its alias, a discovered one, its exit code passed through, a
 # timeout, and a missing one with the places searched.

@@ -1580,7 +1580,7 @@ func TestParse_fromFile(t *testing.T) {
 	// never the OS error text.
 	var in3 fromInputs
 	err := NewParser().Parse(NewContextFor(fromDef(), []string{"--token", "@/nonexistent/nope"}), &in3)
-	if err == nil || err.Error() != `--token: no such file: "/nonexistent/nope"` {
+	if err == nil || err.Error() != `app: --token: no such file: "/nonexistent/nope"` {
 		t.Errorf("Parse(missing file) = %v, want the flag and the path named", err)
 	}
 	locked := filepath.Join(t.TempDir(), "locked")

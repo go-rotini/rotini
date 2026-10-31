@@ -36,10 +36,10 @@ func TestLocalFlag_parse(t *testing.T) {
 		{[]string{"db", "--dsn", "x"}, ""},
 		{[]string{"db", "migrate", "--verbose"}, ""},
 		{[]string{"-v", "db", "migrate", "--steps", "2"}, ""},
-		{[]string{"db", "migrate", "--init"}, `--init belongs to "app", not "app db migrate"`},
-		{[]string{"--init", "db", "migrate"}, `--init belongs to "app", not "app db migrate"`},
-		{[]string{"db", "--dsn=x", "migrate"}, `--dsn belongs to "app db", not "app db migrate"`},
-		{[]string{"db", "migrate", "--dsn", "x"}, `--dsn belongs to "app db", not "app db migrate"`},
+		{[]string{"db", "migrate", "--init"}, `app db migrate: --init belongs to "app"`},
+		{[]string{"--init", "db", "migrate"}, `app db migrate: --init belongs to "app"`},
+		{[]string{"db", "--dsn=x", "migrate"}, `app db migrate: --dsn belongs to "app db"`},
+		{[]string{"db", "migrate", "--dsn", "x"}, `app db migrate: --dsn belongs to "app db"`},
 	} {
 		rtx := NewContextFor(localDef(), tc.argv)
 		_, err := parseInto(rtx.CommandChain(), tc.argv, rtx.argvAcq())
@@ -50,7 +50,7 @@ func TestLocalFlag_parse(t *testing.T) {
 			continue
 		}
 		var pe *ParseError
-		if !errors.As(err, &pe) || pe.Kind != ParseKindMisplacedFlag || pe.Msg != tc.want {
+		if !errors.As(err, &pe) || pe.Kind != ParseKindMisplacedFlag || err.Error() != tc.want {
 			t.Errorf("%q: %v, want a misplaced-flag error %q", tc.argv, err, tc.want)
 		}
 		if CategoryOf(err) != CategoryUsage {

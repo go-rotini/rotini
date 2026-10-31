@@ -87,13 +87,13 @@ func argvConformanceCases() []dataCase {
 				want string
 			}{
 				{nil, []string{"--id", "9007199254740992"}, ""},
-				{nil, []string{"--id", "9007199254740993"}, "--id must be <= "},
-				{[]string{"BND_ID=9007199254740993"}, nil, "--id must be <= "},
-				{nil, []string{"--even", "9007199254740993"}, "--even must be a multiple of 2"},
-				{nil, []string{"--even", "0x20000000000001"}, "--even must be a multiple of 2"},
+				{nil, []string{"--id", "9007199254740993"}, "bnd: --id must be <= "},
+				{[]string{"BND_ID=9007199254740993"}, nil, "bnd: --id must be <= "},
+				{nil, []string{"--even", "9007199254740993"}, "bnd: --even must be a multiple of 2"},
+				{nil, []string{"--even", "0x20000000000001"}, "bnd: --even must be a multiple of 2"},
 				{nil, []string{"--even", "9007199254740994"}, ""},
 				{nil, []string{"--cap", "9223372036854775807"}, ""},
-				{nil, []string{"--cap", "9223372036854775808"}, "--cap must be < "},
+				{nil, []string{"--cap", "9223372036854775808"}, "bnd: --cap must be < "},
 			} {
 				if err := read(c.env, c.argv...); (c.want == "") != (err == nil) || (err != nil && !strings.HasPrefix(err.Error(), c.want)) {
 					t.Errorf("%v %q: err = %v, want %q", c.env, c.argv, err, c.want)
@@ -101,7 +101,7 @@ func argvConformanceCases() []dataCase {
 			}
 			var typed bndInputs
 			typed.Bnd.Flags.ID = 1<<53 + 1
-			if err := NewContextFor(bndDef(), nil).CheckInputs(typed, PresenceOf(typed)); err == nil || !strings.HasPrefix(err.Error(), "--id must be <= ") {
+			if err := NewContextFor(bndDef(), nil).CheckInputs(typed, PresenceOf(typed)); err == nil || !strings.HasPrefix(err.Error(), "bnd: --id must be <= ") {
 				t.Errorf("CheckInputs: err = %v", err)
 			}
 		}},

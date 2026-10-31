@@ -22,7 +22,7 @@ exists internal/cmd/todo/todo_version.go
 grep '^      identifiers: \[--version\]$' cmd/todo/.rotini.spec.yaml
 exec go build -o todo$exe ./cmd/todo
 wantexit 1 ./todo$exe -v
-stderr '^Error: unknown flag "-v"$'
+stderr '^Error: todo: unknown flag "-v"$'
 exec ./todo$exe version
 stdout '^todo 0\.0\.0$'
 exec ./todo$exe help version
@@ -58,7 +58,7 @@ wantexit 1 rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rot
 cmp stderr stale.txt
 
 -- stale.txt --
-Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst" does not parse: unknown command "lst" for "todo"
+Error: spec: ./cmd/todo/.rotini.spec.yaml:12:7: command todo: example "todo lst" does not parse: todo: unknown command "lst"
 -- examples.yaml --
 $schema: ./.rotini-schema.spec.json
 version: 0.0.0

@@ -125,13 +125,13 @@ type PluginDispatch struct {
 func (p *Program) execPlugin(ctx context.Context, rtx *Context, chain []Command, r *PluginDispatch) (int, error) {
 	if r.Discovered && len(chain) > 0 {
 		if leaf := &chain[len(chain)-1]; foldsToDeclared(leaf, r.Def.Name) {
-			rtx.RecordError(&ParseError{
+			rtx.RecordError(atCommand(&ParseError{
 				Kind:       ParseKindUnknownCommand,
-				Msg:        fmt.Sprintf("unknown command %q for %q", r.Def.Name, leaf.Name),
+				Msg:        fmt.Sprintf("unknown command %q", r.Def.Name),
 				Command:    leaf.Name,
 				Token:      r.Def.Name,
 				Candidates: childCommandNames(leaf),
-			})
+			}, chain))
 			return p.settle(ctx, rtx)
 		}
 	}

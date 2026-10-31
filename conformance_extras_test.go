@@ -258,10 +258,10 @@ func confPrefixedBase(t *testing.T, _ *Context, _ InputSettings) {
 	if f.Mode != 0o644 || f.Mask != 255 || f.N != -16 || f.Raw != 10 || e.Port != 10 || c.Bits != 5 {
 		t.Errorf("bound %+v %+v %+v", f, e, c)
 	}
-	if _, err := read("--n", "0x100"); err == nil || err.Error() != "--n must be <= 255 (got 0x100)" {
+	if _, err := read("--n", "0x100"); err == nil || err.Error() != "app: --n must be <= 255 (got 0x100)" {
 		t.Errorf("bound: %v", err)
 	}
-	if _, err := read("--raw", "0x10"); err == nil || err.Error() != `--raw: "0x10" is not a valid integer` {
+	if _, err := read("--raw", "0x10"); err == nil || err.Error() != `app: --raw: "0x10" is not a valid integer` {
 		t.Errorf("undeclared: %v", err)
 	}
 }

@@ -257,7 +257,7 @@ func Example_branchingOnErrors() {
 	// Output:
 	// added "buy milk"
 	// exit: 0
-	// missing required input: <title>
+	// todo add: missing required input: <title>
 	// Run 'todo add --help' for usage.
 	// exit: 2
 }

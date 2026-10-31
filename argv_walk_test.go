@@ -215,7 +215,7 @@ func TestParse_subCommandAfterDoubleDash(t *testing.T) {
 	if !ok || pe.Kind != ParseKindUnknownCommand {
 		t.Fatalf("-- run: err = %v, want an unknown-command error", err)
 	}
-	if want := `"run" after "--" is not read as a command, and "app" takes no arguments`; pe.Msg != want {
+	if want := `takes no arguments, got "run" after "--", which ends command lookup`; pe.Msg != want {
 		t.Errorf("message = %q, want %q", pe.Msg, want)
 	}
 	if want := []string{"r", "stop"}; !slices.Equal(pe.Candidates, want) {
@@ -224,7 +224,7 @@ func TestParse_subCommandAfterDoubleDash(t *testing.T) {
 
 	// A mistyped word keeps the usual message, "--" or not.
 	err = NewParser().Parse(NewContextFor(def, []string{"--", "rnu"}), &in)
-	if err == nil || err.Error() != `unknown command "rnu" for "app"` {
+	if err == nil || err.Error() != `app: unknown command "rnu"` {
 		t.Errorf("-- rnu: err = %v, want the unknown-command message", err)
 	}
 }
@@ -252,7 +252,7 @@ func TestParse_unknownCommandBeforeLaterFlags(t *testing.T) {
 		if !ok || pe.Kind != ParseKindUnknownCommand || CategoryOf(err) != CategoryUsage {
 			t.Fatalf("%q: err = %v, want an unknown-command usage error", argv, err)
 		}
-		if want := `unknown command "lst" for "todo"`; pe.Msg != want || pe.Token != "lst" {
+		if want := `unknown command "lst"`; pe.Msg != want || pe.Token != "lst" {
 			t.Errorf("%q: message = %q, token = %q; want %q", argv, pe.Msg, pe.Token, want)
 		}
 		if want := []string{"list", "add"}; !slices.Equal(pe.Candidates, want) {
@@ -265,7 +265,7 @@ func TestParse_unknownCommandBeforeLaterFlags(t *testing.T) {
 		t.Errorf("--bogus lst: err = %v, want the unknown flag before the word", err)
 	}
 	err = NewParser().Parse(NewContextFor(def, []string{"lst", "--", "--all"}), &in)
-	if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Kind != ParseKindUnknownCommand || pe.Msg != `unknown command "lst" for "todo"` {
+	if pe, ok := errors.AsType[*ParseError](err); !ok || pe.Kind != ParseKindUnknownCommand || err.Error() != `todo: unknown command "lst"` {
 		t.Errorf("lst -- --all: err = %v, want the unknown command", err)
 	}
 }
