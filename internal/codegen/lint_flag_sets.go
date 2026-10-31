@@ -10,10 +10,10 @@ import (
 	"strings"
 )
 
-// lintFlagSets checks `flag_sets` and `use`: sets are declared on the root and used by name,
-// not beside `$ref`; a set's groups and dependencies name only its own flags; a command's own
-// flags and the sets it uses don't declare the same flag name or generated field name twice;
-// and a declared set is used somewhere.
+// lintFlagSets checks the root's `flag_sets` and each `use`: sets are used by name, not beside
+// `$ref`; a set's groups and dependencies name only its own flags; a command's own flags and
+// the sets it uses don't declare the same flag name or generated field name twice; and a
+// declared set is used somewhere. [lintDocLevelKeys] keeps the sets on the root.
 func lintFlagSets(spec *Spec) []error {
 	var problems []error
 	sets := spec.Command.FlagSets
@@ -22,9 +22,6 @@ func lintFlagSets(spec *Spec) []error {
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		add := func(at, msg string) {
 			problems = append(problems, &problem{kind: "spec", ptr: at, loc: "command " + path, msg: msg})
-		}
-		if c != &spec.Command && len(c.FlagSets) > 0 {
-			add(ptr+"/flag_sets", "declares `flag_sets`, which only the root command can; move them to the root, where every command of the spec can `use` them")
 		}
 		if len(c.Use) == 0 {
 			return

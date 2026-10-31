@@ -44,11 +44,6 @@ command:
       aliases: [r]
       hidden_aliases: [go]
       summary: run it
-      # Topics are root-only.
-      topics:
-        - name: inner
-          summary: inner topic
-          body: Inner.
     # A mounted spec's own topics are not part of this program.
     - name: db
       $ref: ./child.spec.yaml

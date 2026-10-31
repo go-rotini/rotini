@@ -17,8 +17,8 @@ type Effects struct {
 
 // EffectsOf returns what this run does: the invoked command's [Command.Effects] combined with the
 // effects of every flag given on the command line, of the invoked command or a cascading flag
-// of an ancestor. A bool flag counts only when it is set true, so --no-force adds nothing. The
-// rule is the spec's:
+// of an ancestor. A bool flag counts only when it is set true, read as its bound value is: so
+// --force=yes counts and --no-force adds nothing. The rule is the spec's:
 //
 //   - Kind is the highest stated: read, then write, then destructive;
 //   - Idempotent is true only when every stated value says so, false when one says not;
@@ -50,7 +50,7 @@ func EffectsOf(rtx *Context) Effects {
 			if fd.Effects == nil || !store.setOnArgv(i, fd.Name) {
 				continue
 			}
-			if vals := store.scopes[i].flags[fd.Name]; fd.Type == "bool" && (len(vals) == 0 || vals[len(vals)-1] != "true") {
+			if vals := store.scopes[i].flags[fd.Name]; fd.Type == "bool" && (len(vals) == 0 || !boolSetTrue(vals[len(vals)-1])) {
 				continue
 			}
 			out.add(fd.Effects)

@@ -1,15 +1,15 @@
 the configuration files and keys ops reads
 
-Configuration:
-  deploy.registry string    the registry to push to (in .ops.yaml) (used by: ops deploy)
-  deploy.replicas int       how many to run (default 1) (used by: ops deploy)
-  deploy.retries int        how many times to retry (default 1, 0..9) (used by: ops deploy)
-  profile string            the output profile [short|long] (used by: ops)
-                              short    one line each
-                              long     every field
-  region string             the default region (beta) (used by: ops)
-
 Files:
   ~/.ops.yaml
   .ops.yaml         in the working directory or the nearest parent holding one
   ./secrets.json    or the file --secrets names; profiles under "stages", chosen by --stage (default dev)
+
+Configuration:
+  deploy.registry string    the registry to push to (in .ops.yaml, used by: ops deploy)
+  deploy.replicas int       how many to run (default 1, used by: ops deploy)
+  deploy.retries int        how many times to retry (default 1, 0..9, used by: ops deploy)
+  profile string            the output profile (used by: ops) [short|long]
+                              short    one line each
+                              long     every field
+  region string             the default region (beta, used by: ops)

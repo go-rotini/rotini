@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -542,8 +541,7 @@ func (cc *completionContext) mark(idx int, fd *FlagDef, value string) {
 	}
 	cc.set[idx][fd.Name] = true
 	if fd.ShortCircuit {
-		on, err := strconv.ParseBool(value)
-		cc.shortCircuit = cc.shortCircuit || fd.Type != "bool" || (err == nil && on)
+		cc.shortCircuit = cc.shortCircuit || fd.Type != "bool" || boolSetTrue(value)
 	}
 }
 
@@ -1265,7 +1263,7 @@ func (p *Program) complete(ctx context.Context, words []string, format Completio
 		words = []string{""}
 	}
 	rtx := p.newRunContext()
-	defer rtx.cleanUpProvided() // a completer may ask for a provided dependency
+	defer rtx.cleanUpProvided(rtx.RecordError, rtx.recordFault) // a completer may ask for a provided dependency
 	rtx.ctx = ctx
 	// The answer owns stdout: a completer's own writes go to stderr, which the scripts discard.
 	rtx.Stdout, rtx.bufOut = rtx.Stderr, nil

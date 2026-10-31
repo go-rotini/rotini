@@ -168,6 +168,10 @@ type NoHooksE struct {
 
 // FromHandlerE returns h as a [Handler], applying the rules [HandlerE] describes to
 // each returned error. A nil h returns nil.
+//
+// [Program.WithMiddleware]'s middleware sees each returned error, before it is recorded, when
+// the program runs the Handler FromHandlerE returned, as generated wiring does. A Handler that
+// wraps it records the error inside its own hook instead, so the middleware sees nil.
 func FromHandlerE(h HandlerE) Handler {
 	if h == nil {
 		return nil
@@ -179,21 +183,26 @@ func FromHandlerE(h HandlerE) Handler {
 type handlerE struct{ h HandlerE }
 
 func (a handlerE) CascadingPreRun(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
 	rtx.returned(a.h.CascadingPreRun(ctx, rtx), true)
 }
 
 func (a handlerE) PreRun(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
 	rtx.returned(a.h.PreRun(ctx, rtx), true)
 }
 
 func (a handlerE) Run(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
 	rtx.returned(a.h.Run(ctx, rtx), true)
 }
 
 func (a handlerE) PostRun(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
 	rtx.returned(a.h.PostRun(ctx, rtx), false)
 }
 
 func (a handlerE) CascadingPostRun(ctx context.Context, rtx *Context) {
+	rtx.hookStarts()
 	rtx.returned(a.h.CascadingPostRun(ctx, rtx), false)
 }

@@ -309,7 +309,8 @@
 //
 // A dependency that is costly to open, or built from the command line, is provided instead:
 // [Program.WithProvider] registers a function that builds it on the first request in a run,
-// once for that run, and calls the cleanup the function returns after teardown (nil for none).
+// once for that run, and calls the cleanup the function returns after the reporter (nil for
+// none).
 // A command that never asks, or a --help that halts first, never builds it.
 // [Context.Dependency] returns the provider's error as is, so a [UsageError] stays a usage
 // error, and a value registered with WithDependency or SetDependency, such as a test's double,

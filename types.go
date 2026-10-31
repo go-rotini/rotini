@@ -335,6 +335,14 @@ func parseBool(s string) (bool, error) {
 	return false, fmt.Errorf("%q is not a boolean; use true/false, t/f, yes/no, y/n, on/off or 1/0", s)
 }
 
+// boolSetTrue reports whether s is a bool value [parseBool] reads as true: how the runtime
+// decides a bool flag's truth outside binding (effects, short circuits), so it always agrees
+// with the bound value.
+func boolSetTrue(s string) bool {
+	on, err := parseBool(s)
+	return err == nil && on
+}
+
 // Time layouts beyond Go's reference-time layouts: a Unix timestamp in seconds (fractions
 // allowed) or in milliseconds, each with an optional leading "-" and never a "+".
 const (

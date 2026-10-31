@@ -918,7 +918,7 @@ func shortCircuited(chain []Command, store *parsedInputs) bool {
 			if len(vals) == 0 {
 				continue
 			}
-			if on, err := strconv.ParseBool(vals[len(vals)-1]); err == nil && on {
+			if boolSetTrue(vals[len(vals)-1]) {
 				return true
 			}
 		}

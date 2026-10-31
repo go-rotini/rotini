@@ -53,7 +53,9 @@ func (p *Program) WithDir(dir string) *Program {
 // without the leading separator: /work/app.yaml is "work/app.yaml" and the root is ".". On
 // Windows the volume is the first element: C:\work\app.yaml is "C:/work/app.yaml", and
 // \\host\share\app.yaml is "host/share/app.yaml". An [fs.FS] that also implements
-// [fs.ReadLinkFS] has its symbolic links followed where rotini follows them.
+// [fs.ReadLinkFS] has its symbolic links followed where rotini follows them. A Windows device
+// (NUL, CON, COM1, …) is never fsys's: it is read and written through the operating system, as
+// with no file system set.
 //
 // Writes need a [WriteFS]. With any other fsys, the config writes fail with an [*InputError] of
 // kind [InputErrorKindWriteRefused], and CreateOutput with an error matching

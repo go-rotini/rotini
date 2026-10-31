@@ -22,7 +22,8 @@ type configFileTarget struct {
 	path    string      // the file as resolved; a symbolic link is followed only when writing
 	target  string      // the file written: path with symbolic links resolved
 	exists  bool        // the file exists
-	mode    fs.FileMode // an existing file's permissions
+	own     bool        // a write replaces it, keeping its mode; not when a [LayerFS] shows it from lower
+	mode    fs.FileMode // an own file's permissions
 	src     []byte      // its content; nil when it doesn't exist
 	feats   *featureSet // the run's features, whose codecs read and check the file
 	view    *osView     // the run's view, whose file system holds the file
@@ -101,7 +102,7 @@ func (t *configFileTarget) read() error {
 	if t.src, err = t.view.readFile(t.target); err != nil {
 		return usageBind(configFileKind(err), channelConfig, t.file.Name, configFileProblem(t.view, t.path, err), err)
 	}
-	t.exists, t.mode = true, info.Mode().Perm()
+	t.exists, t.own, t.mode = true, t.view.ownFile(t.target), info.Mode().Perm()
 	return nil
 }
 
@@ -117,7 +118,9 @@ func (t configFileTarget) format() (format cfgedit.Format, enc *codecEntry, err 
 		return "", nil, err
 	}
 	if c == nil {
-		return "", nil, internalBind(channelConfig, t.file.Name, fmt.Sprintf("configuration file %s has no format rotini can write; declare its format", t.path), nil)
+		// As a read reports it, as the user's to fix: a config_source input may name the path.
+		err := recon.ErrUnsupportedFormat
+		return "", nil, usageBind(InputErrorKindFileAccess, channelConfig, t.file.Name, configFileProblem(t.view, t.path, err), err)
 	}
 	if c.author {
 		if c.encode == nil {
@@ -163,7 +166,7 @@ func (t configFileTarget) holdsSecrets() bool {
 
 // checkPrivate refuses to write a secret into an existing file other users can read.
 func (t configFileTarget) checkPrivate(key string) error {
-	if !t.exists || runtime.GOOS == "windows" || t.mode&0o077 == 0 {
+	if !t.own || runtime.GOOS == "windows" || t.mode&0o077 == 0 {
 		return nil
 	}
 	return usageBind(InputErrorKindWriteRefused, channelConfig, key, fmt.Sprintf("config key %s is secret, but configuration file %s is readable by others (%#o); chmod 600 it first", key, t.path, t.mode), nil)
@@ -230,14 +233,15 @@ func (t configFileTarget) checkSchema(key string, edited []byte, profile string)
 }
 
 // write replaces the file with data atomically: data goes to a temporary file beside it,
-// which is renamed into place. An existing file keeps its permissions; a new one gets 0644, or
-// 0600 when the file may hold a secret, and missing directories are created 0755 (0700).
+// which is renamed into place. An existing file keeps its permissions; a new one, or one a
+// [LayerFS] shows from its lower layer, gets 0644, or 0600 when the file may hold a secret, and
+// missing directories are created 0755 (0700).
 func (t configFileTarget) write(key string, data []byte) error {
 	perm, dirPerm := fs.FileMode(0o644), fs.FileMode(0o755)
 	if t.holdsSecrets() {
 		perm, dirPerm = 0o600, 0o700
 	}
-	if t.exists {
+	if t.own {
 		perm = t.mode
 	}
 	fail := func(what string, err error) error {
@@ -254,7 +258,7 @@ func (t configFileTarget) write(key string, data []byte) error {
 	if err != nil {
 		return fail("write", err)
 	}
-	if t.exists {
+	if t.own {
 		// The temporary file was created through the umask; give it the replaced file's mode.
 		err = chmodFile(f, perm)
 	}

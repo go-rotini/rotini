@@ -77,7 +77,12 @@
                 title, trim, trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
                 hasPrefix, hasSuffix, first, last, alsoSetBy, deprecation, stabilityNote, listed,
                 described, notes (the non-empty notes in one parenthetical: " (a, b)"). */ -}}
-{{- define "notes"}}{{notes (and .Required "required") (and .Default (printf "default %s" (roff .Default))) (and .Accepts (roff .Accepts)) .Stability}}{{template "enum" .}}{{end -}}
+{{- define "files"}}{{with .Files}}.SH FILES
+The first file listed that sets a key supplies it.
+{{range .}}.TP
+\fI{{roff .File}}\fR
+{{with .Note}}{{roff .}}{{else}}A configuration file.{{end}}
+{{end}}{{end}}{{end -}}
 {{- define "enum"}}{{with listed .Enum .EnumValues}} [{{roff (join . "|")}}]{{end}}{{if .Deprecated}} ({{roff (deprecation .Deprecated .DeprecatedSince .RemovedIn)}}){{end}}{{end -}}
 {{- define "rules"}}{{with .Rules}}.br
 {{roffCode (join . "; ")}}
@@ -152,20 +157,14 @@ A word starting with \fB{{roff .}}\fR names a response file (\fB{{roff .}}args\f
 {{with .Environment}}.SH ENVIRONMENT
 {{range .}}.TP
 \fB{{roff .Var}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
-{{roff .Summary}}{{with .Commands}} (used by: {{roff (join . ", ")}}){{end}}{{template "notes" .}}
+{{roff .Summary}}{{notes (and .Required "required") (and .Default (printf "default %s" (roff .Default))) (and .Accepts (roff .Accepts)) .Stability (and .Commands (printf "used by: %s" (roff (join .Commands ", "))))}}{{template "enum" .}}
 {{template "description" .}}{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
-{{with .Configuration}}.SH CONFIGURATION
+{{if .Topic}}{{template "files" .}}{{end}}{{with .Configuration}}.SH CONFIGURATION
 {{range .}}.TP
 \fB{{roff .Key}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
-{{roff .Summary}}{{notes (and .File (printf "in %s" (roff .File))) (and .Required "required") (and .Default (printf "default %s" (roff .Default))) (and .Accepts (roff .Accepts)) .Stability}}{{with .Commands}} (used by: {{roff (join . ", ")}}){{end}}{{template "enum" .}}
+{{roff .Summary}}{{notes (and .File (printf "in %s" (roff .File))) (and .Required "required") (and .Default (printf "default %s" (roff .Default))) (and .Accepts (roff .Accepts)) .Stability (and .Commands (printf "used by: %s" (roff (join .Commands ", "))))}}{{template "enum" .}}
 {{template "description" .}}{{template "rules" .}}{{template "values" .}}{{end}}{{end}}
-{{with .Files}}.SH FILES
-The first file listed that sets a key supplies it.
-{{range .}}.TP
-\fI{{roff .File}}\fR
-{{with .Note}}{{roff .}}{{else}}A configuration file.{{end}}
-{{end}}{{end}}
-{{with .Stdin}}.SH STDIN
+{{if not .Topic}}{{template "files" .}}{{end}}{{with .Stdin}}.SH STDIN
 {{with .Description}}{{roffBlock .}}
 .PP
 {{end}}Reads {{if eq .Format "text"}}text{{else if eq .Format "lines"}}lines of text{{if .NUL}} separated by NUL bytes{{end}}{{else if eq .Format "bytes"}}raw bytes{{else if eq .Format "jsonl"}}JSON Lines, one \fB{{roff .Type}}\fR record per line,{{else}}a \fB{{roff .Format}}\fR document{{with .Type}} (\fB{{roff .}}\fR){{end}}{{end}} from standard input{{if .Stream}}, one at a time{{end}}{{with .Unless}}, when no {{roff .}} is given{{end}}.{{if .Required}} Required.{{end}}

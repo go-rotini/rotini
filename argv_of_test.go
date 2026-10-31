@@ -433,6 +433,8 @@ func TestArgvOfRules(t *testing.T) {
 			paths: []string{"Run.Flags.MAC"}, err: "Run.Flags.MAC"},
 		{name: "nested env key with the separator", fill: func(c *argvRunCI) { c.Env.HTTP = map[string]any{"a__b": "c"} },
 			paths: []string{"Run.Env.HTTP"}, err: "Run.Env.HTTP"},
+		{name: "nested env key whose case doesn't round-trip", fill: func(c *argvRunCI) { c.Env.HTTP = map[string]any{"ς": "0"} },
+			paths: []string{"Run.Env.HTTP"}, err: "Run.Env.HTTP"},
 		{name: "config", fill: func(c *argvRunCI) { c.Config.Region = "eu" },
 			paths: []string{"Run.Config.Region"}, err: "Run.Config.Region"},
 		{name: "stdin", fill: func(c *argvRunCI) { c.Stdin = new("x") },

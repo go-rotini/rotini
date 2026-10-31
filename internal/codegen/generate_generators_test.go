@@ -285,3 +285,74 @@ func TestGeneratorManifestIgnoresUnsafeLines(t *testing.T) {
 		t.Errorf("a file without the header listed %q", got)
 	}
 }
+
+// TestGeneratorPruneRemovesEmptiedDirs checks that removing a file a generator stopped
+// returning also removes each directory below the generator's dir that it leaves empty, and no
+// directory that still holds a file.
+func TestGeneratorPruneRemovesEmptiedDirs(t *testing.T) {
+	mod, ctl := fakeGeneratorModule(t, "")
+	gen := filepath.Join(mod, "docs", "gen")
+	writeTestFile(t, ctl, "stdout", generatorDoc(t, map[string]string{"a/b/c.md": "c\n", "a/d.md": "d\n", "mine/e.md": "e\n"}))
+	runGenerate(t, mod)
+	writeTestFile(t, gen, "mine/notes.md", "mine\n")
+
+	writeTestFile(t, ctl, "stdout", generatorDoc(t, map[string]string{"a/d.md": "d\n"}))
+	runGenerate(t, mod)
+	if _, err := os.Stat(filepath.Join(gen, "a", "b")); !os.IsNotExist(err) {
+		t.Errorf("a/b, emptied, is still there: %v", err)
+	}
+	for _, kept := range []string{"a/d.md", "mine/notes.md"} {
+		if _, err := os.Stat(filepath.Join(gen, filepath.FromSlash(kept))); err != nil {
+			t.Errorf("%s was removed: %v", kept, err)
+		}
+	}
+
+	writeTestFile(t, ctl, "stdout", generatorDoc(t, nil))
+	runGenerate(t, mod)
+	if _, err := os.Stat(filepath.Join(gen, "a")); !os.IsNotExist(err) {
+		t.Errorf("a, emptied, is still there: %v", err)
+	}
+	if _, err := os.Stat(gen); err != nil {
+		t.Errorf("the generator's dir was removed: %v", err)
+	}
+}
+
+// TestGeneratorCaseOnlyRename checks that a file a generator renames only in case ends up as
+// one file spelled the new way, on a case-sensitive file system as on a case-insensitive one,
+// and that the manifest lists only the new spelling.
+func TestGeneratorCaseOnlyRename(t *testing.T) {
+	mod, ctl := fakeGeneratorModule(t, "")
+	gen := filepath.Join(mod, "docs", "gen")
+	writeTestFile(t, ctl, "stdout", generatorDoc(t, map[string]string{"Foo.md": "old\n"}))
+	runGenerate(t, mod)
+
+	writeTestFile(t, ctl, "stdout", generatorDoc(t, map[string]string{"foo.md": "new\n"}))
+	changes := strings.Join(dryRunChanges(t), "\n")
+	for _, want := range []string{"delete docs/gen/Foo.md", "create docs/gen/foo.md"} {
+		if !strings.Contains(changes, want) {
+			t.Errorf("dry run changes lack %q:\n%s", want, changes)
+		}
+	}
+	runGenerate(t, mod)
+	entries, err := os.ReadDir(gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if want := []string{generatorManifest, "foo.md"}; !slices.Equal(names, want) {
+		t.Errorf("files = %q, want %q", names, want)
+	}
+	if got := readTestFile(t, filepath.Join(gen, "foo.md")); got != "new\n" {
+		t.Errorf("foo.md = %q", got)
+	}
+	wantManifest := generatorManifestHeader + `"docs", and removes one it stops writing. Do not edit.` + "\nfoo.md\n"
+	if got := readTestFile(t, filepath.Join(gen, generatorManifest)); got != wantManifest {
+		t.Errorf("manifest =\n%s\nwant\n%s", got, wantManifest)
+	}
+	if changes := dryRunChanges(t); len(changes) != 0 {
+		t.Errorf("a regenerate would change %q; want nothing", changes)
+	}
+}

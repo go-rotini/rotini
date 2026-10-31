@@ -976,7 +976,8 @@ which file a write goes to and whether it exists yet. The
   none), a map's entries are `key=value`, and an enum value is written in its declared spelling.
   A failed check is a usage error and leaves the file as it was:
   `invalid value "loud" for config key level (one of: debug, info, warn)`. A schema violation
-  names where the value would be in the edited file, and the value unless it is secret:
+  names where the value would be in the edited file, and the value unless it is secret or lies
+  below a secret key (a secret list's item, map's entry or object's field):
   `app.yaml:3:11 would be invalid: deploy.region: value is not in enum (got "ap")`.
 - **Which file:** the one the command reads, through its `config_source` path, fixed `path` or
   `discover` search. A missing file is created there, with its directories: `walk-up` creates it
@@ -992,7 +993,8 @@ which file a write goes to and whether it exists yet. The
 - **Secrets:** a key declared `secret: true` is refused unless the call passes
   `rotini.ConfigAllowSecretWrite()`. A new file holding any secret key gets mode `0600`, and an existing
   file that others can read is refused rather than changed. On Windows, file modes don't control
-  who can read a file, so the file gets its directory's access rules and nothing is refused.
+  who can read a file, so the file gets its directory's access rules and nothing is refused. An
+  error from your own codec's encoder is not quoted for a secret key, since it may hold the value.
 - **Profiles:** in a file with [profiles](#profiles), the value goes into the chosen profile,
   which is created if the file doesn't define it yet. `rotini.ConfigToProfile(name)` and
   `rotini.ConfigToSharedKeys()` pick another target. A shared key that the chosen profile overrides is
@@ -2326,8 +2328,11 @@ client, err := rtx.Dependency(clientDep)       // in a handler
   such as `--help`, never builds it.
 - **A registered value wins:** a value set with `WithDependency`, `SetDependency` or
   `SetDependencyIfAbsent` is returned instead, so a test's double needs nothing more.
-- **Cleaned up after teardown:** the cleanup the provider returned runs after every hook has
-  finished, before the reporter, newest first. A cleanup error is recorded as an error. Rotini
+- **Cleaned up after the reporter:** the cleanup the provider returned runs after every hook
+  and the reporter have finished, newest first, so the reporter can use the value too. A run
+  that recorded nothing skips the reporter, so its cleanups run first and a cleanup error is
+  recorded as an error and reported. Once the reporter has run, a cleanup error can't be
+  reported: it joins the error `Run` returns, and a run that would exit 0 exits 1. Rotini
   closes nothing on its own: a provider that hands out a value it doesn't own, such as a
   `*sql.DB` opened in `main.go`, returns `nil` for the cleanup, and the value outlives the run.
   When the provider returns an error, its cleanup is discarded.
@@ -2346,8 +2351,9 @@ process that runs the program many times.
 - **The value outlives the run:** the provider gets the context and `rtx` of the run that asked
   first, so it must not keep either.
 - **Released by `Close`:** `Program.Close` calls the cleanups shared providers returned, newest
-  first, and returns their errors. `Execute` calls it for its run after the last hook, before
-  the reporter, so a cleanup error is reported. `Run` and `RunContext` never release a shared
+  first, and returns their errors. `Execute` calls it for its run when it cleans up the run's
+  per-run values: after the reporter, which can still use a shared value, or before it in a
+  run that recorded nothing, so a cleanup error is reported. `Run` and `RunContext` never release a shared
   value, so a long-running host that calls them repeatedly closes the program itself when it
   is done:
 
@@ -3026,7 +3032,8 @@ Paths keep their meaning. A relative path resolves against the run's directory, 
 system is given the absolute path without its leading `/`: `/etc/todo/config.yaml` is
 `etc/todo/config.yaml`. On Windows the volume comes first: `C:\todo\config.yaml` is
 `C:/todo/config.yaml`. Symbolic links are followed when the file system implements
-`fs.ReadLinkFS`.
+`fs.ReadLinkFS`. A Windows device such as `NUL` or `CON` is always the operating system's, read
+and written as if no file system were set.
 
 Writes need a `rotini.WriteFS`, an `fs.FS` that also has `OpenFile`, `MkdirAll`, `Rename` and
 `Remove`. `rotini.OSFS()` is the operating system's file system as one. With a file system that
@@ -3082,7 +3089,14 @@ func main() {
 {{< /code >}}
 
 Every write goes to `upper`, so a config write to the `defaults` entry would create a real
-file at that path. In a test, `WithFS` with `WithDir` runs a command against files that exist
+file at that path. A file written over one of `lower`'s gets the mode Rotini gives a new file
+(0644, or 0600 for a config file that may hold a secret), not the embedded file's 0444; only a
+file `upper` already holds keeps its own mode. A file created in a directory only `lower` has
+gets that directory in `upper` first. `dir` is listed in its parent directory even when only
+`lower` provides it. Names match `dir` without regard to case on Windows, and exactly
+elsewhere, macOS included.
+
+In a test, `WithFS` with `WithDir` runs a command against files that exist
 only in memory:
 
 ```go
@@ -5045,8 +5059,9 @@ func main() {
 - **Same contract, same files.** A generator must be deterministic and write no files itself;
   it runs in a dry run too.
 - **What it owns.** Rotini lists the files a generator returned in `<dir>/.rotini-generated`, and
-  removes only files on that list. Other files in `dir` stay unless the generator returns their
-  path, and a path in the generator's `keep:` is never removed.
+  removes only files on that list, with any directory below `dir` a removal leaves empty. Other
+  files in `dir` stay unless the generator returns their path, and a path in the generator's
+  `keep:` is never removed.
 - **Paths are checked.** A path that is absolute, holds `.` or `..`, or names one file twice in
   any case fails generate, as does output that isn't the document above.
 - **Errors.** Generators run before anything is written. One that exits non-zero fails generate,

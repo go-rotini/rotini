@@ -1868,18 +1868,20 @@ func violationAt(view *osView, c *codecEntry, data []byte, decoded bool, path st
 	return ""
 }
 
+// secretAt reports whether the value at dotted path key of the file is secret: the value of a
+// key declared secret, or any value below one (a list's item, a map's entry, an object's field).
+func (f ConfigFileDef) secretAt(key string) bool {
+	return slices.ContainsFunc(f.Keys, func(k ConfigKeyDef) bool {
+		return k.Secret && (key == k.Key || strings.HasPrefix(key, k.Key+"."))
+	})
+}
+
 // violationValue is the " (got <value>)" suffix naming the scalar value a schema check
 // rejected at ve's path in document m, or "" for a list, a map, a missing value, or a secret
-// key's value.
+// key's value or a value below one.
 func violationValue(m map[string]any, ve *recon.ValidationError, f ConfigFileDef) string {
-	if ve.Secret || len(ve.Path) == 0 {
+	if ve.Secret || len(ve.Path) == 0 || f.secretAt(strings.Join(ve.Path, ".")) {
 		return ""
-	}
-	key := strings.Join(ve.Path, ".")
-	for _, k := range f.Keys {
-		if k.Key == key && k.Secret {
-			return ""
-		}
 	}
 	var v any = m
 	for _, seg := range ve.Path {

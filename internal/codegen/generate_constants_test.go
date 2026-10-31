@@ -225,8 +225,15 @@ generate:
       file: internal/cmd/acme/zz_acme.go
       package: acme
 `, nil)
-	if !strings.Contains(strings.Join(notices, "\n"), "would both get the constant AcmeModeDryRun") {
-		t.Errorf("generate gave no notice: %q", notices)
+	// Validation reports the clash with its position, so generate doesn't report it again.
+	var got []string
+	for _, n := range notices {
+		if strings.Contains(n, "would both get the constant AcmeModeDryRun") {
+			got = append(got, n)
+		}
+	}
+	if len(got) != 1 || !strings.HasPrefix(got[0], "spec: .rotini.spec.yaml:") {
+		t.Errorf("generate notices = %q, want the clash once, positioned", got)
 	}
 }
 

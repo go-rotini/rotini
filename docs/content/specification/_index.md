@@ -8,7 +8,7 @@ title: "specification"
 
 # .rotini.spec.yaml
 
-The spec describes your CLI: its commands, their inputs and what they write. The document holds a top-level `version` and one root `command` (the program itself), and every sub-command below it has the same shape. `env_prefix` and `schemas` are valid only on the root command, and `$schema` is an optional key for editor tooling.
+The spec describes your CLI: its commands, their inputs and what they write. The document holds a top-level `version` and one root `command` (the program itself), and every sub-command below it has the same shape. The keys marked Root only (`env_prefix`, `schemas`, `exit_statuses`, `channels`, `display_name`, `response_files`, `flag_sets`, `multicall` and `topics`) are valid only on the root command, and `$schema` is an optional key for editor tooling.
 
 {{< code title="every key" language="yaml" file="examples/rotini.spec.yaml" open="true" copy="true" >}}{{< /code >}}
 
@@ -29,7 +29,7 @@ The minimum rotini version this spec requires (X.Y.Z): the feature set it was wr
 
 [`Command`](#command) · **required**
 
-The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/arguments/env/config/config_files/stdin) and sub-commands. The root must use 'name' (not '$ref'). The root-command-level keys `env_prefix` and `schemas` live here.
+The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/arguments/env/config/config_files/stdin) and sub-commands. The root must use 'name' (not '$ref'). The root-only keys (`env_prefix`, `schemas`, `exit_statuses`, `channels`, `display_name`, `response_files`, `flag_sets`, `multicall` and `topics`) live here.
 
 ### `$schema`
 
@@ -40,7 +40,7 @@ Optional URI identifying the rotini spec schema, for editor tooling only: rotini
 
 ## Command
 
-A command node in the CLI command tree — the root command (under the document's 'command' key) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The two root-command-level keys (env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
+A command node in the CLI command tree — the root command (under the document's 'command' key) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The root-only keys (`env_prefix`, `schemas`, `exit_statuses`, `channels`, `display_name`, `response_files`, `flag_sets`, `multicall` and `topics`) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
 
 ### Identity and visibility
 
@@ -317,7 +317,7 @@ Exit codes this command documents, rendered as an EXIT STATUS section in the man
 
 `object`
 
-Document-level (root only): reusable exit statuses, keyed by snake_case name, which a command's `exit_status` lists by reference (`- $ref: not_found`, or `- $ref: '#/exit_statuses/not_found'`) instead of writing the entry out again. Each takes the keys of an `exit_status` entry except `name`: its key is its name. A named exit status documents nothing until a command lists it, the root included, and a command that lists one documents it as if written out there, its constant included. A composed spec's references name its own `exit_statuses`.
+Root only: reusable exit statuses, keyed by snake_case name, which a command's `exit_status` lists by reference (`- $ref: not_found`, or `- $ref: '#/exit_statuses/not_found'`) instead of writing the entry out again. Each takes the keys of an `exit_status` entry except `name`: its key is its name. A named exit status documents nothing until a command lists it, the root included, and a command that lists one documents it as if written out there, its constant included. A composed spec's references name its own `exit_statuses`.
 
 #### `see_also`
 
@@ -385,7 +385,7 @@ Root only: help topics, pages that aren't commands. `<program> help <topic>` sho
 
 [`Schema`](#schema)
 
-The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '&lt;Prefix&gt;Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type &lt;Prefix&gt;Output Task', so convert a value with &lt;Prefix&gt;Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item, and a stream whose items come in several kinds declares them with `oneOf`.
+The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '&lt;Prefix&gt;Output' Go type (when the shape is a '$ref' to one of the root's named `schemas`, a new named type defined on that schema's type, such as 'type &lt;Prefix&gt;Output Task', so convert a value with &lt;Prefix&gt;Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item, and a stream whose items come in several kinds declares them with `oneOf`.
 
 #### `output_stream`
 
@@ -397,13 +397,13 @@ When true, the command writes a stream of items rather than one value, and `outp
 
 `object`
 
-Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
+Root only: reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
 
 #### `channels`
 
 array of [`Channel`](#channel)
 
-Document-level (root only): the program's own outcome channels, each a kind of record a handler hands the reporter with `rtx.Record`, beside the built-in infos, successes, warnings and errors. Each becomes a generated record type `<Name>Record` and a channel handle `<Name>Channel` (the name PascalCased) in the cmd package, the type in the models package when the conf declares one. rotini.StructuredReporter writes each record as its own line, `{"schema_version":1,"<name>":{...}}`, and the contract lists the channels, so a record's shape is part of the contract `rotini diff` compares.
+Root only: the program's own outcome channels, each a kind of record a handler hands the reporter with `rtx.Record`, beside the built-in infos, successes, warnings and errors. Each becomes a generated record type `<Name>Record` and a channel handle `<Name>Channel` (the name PascalCased) in the cmd package, the type in the models package when the conf declares one. rotini.StructuredReporter writes each record as its own line, `{"schema_version":1,"<name>":{...}}`, and the contract lists the channels, so a record's shape is part of the contract `rotini diff` compares.
 
 ### Generated code
 
@@ -875,7 +875,7 @@ Named sets of settings in this file, one chosen per run by a declared input (`--
 
 [`Schema`](#schema)
 
-Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). Every value in a dotenv file is a string, so a schema for one uses string types; a TOML date or time is checked as its text (`2024-01-02T03:04:05Z`), as in YAML or JSON. The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/&lt;Name&gt;". No typed struct is generated from this — typed access to config values is the config: inputs channel.
+Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). Every value in a dotenv file is a string, so a schema for one uses string types; a TOML date or time is checked as its text (`2024-01-02T03:04:05Z`), as in YAML or JSON. The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). The root's named `schemas` resolve via "$ref": "#/schemas/&lt;Name&gt;". No typed struct is generated from this — typed access to config values is the config: inputs channel.
 
 
 ## FlagGroup

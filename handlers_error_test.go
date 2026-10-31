@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -137,6 +139,40 @@ func TestHandlerE_noDoubleRecord(t *testing.T) {
 			_, _, stderr := runErrHooks(t, FromHandlerE(&errHooks{name: "app", log: &log}), FromHandlerE(sub))
 			if stderr != tt.want {
 				t.Errorf("stderr = %q, want %q", stderr, tt.want)
+			}
+		})
+	}
+}
+
+// TestHandlerE_earlierHookRecordNotSkipped pins that only an error the same hook recorded is
+// skipped: a sentinel the root recorded and moved past, then returned by the sub's Run, is
+// recorded again, with and without middleware.
+func TestHandlerE_earlierHookRecordNotSkipped(t *testing.T) {
+	t.Parallel()
+	errLocked := errors.New("database is locked")
+	for _, withMW := range []bool{false, true} {
+		t.Run("middleware="+strconv.FormatBool(withMW), func(t *testing.T) {
+			t.Parallel()
+			var log []string
+			root := &errHooks{name: "app", log: &log, do: map[string]func(*Context){
+				"CascadingPreRun": func(rtx *Context) { rtx.RecordError(errLocked) },
+			}}
+			sub := &errHooks{name: "sub", log: &log, errs: map[string]error{"Run": errLocked}}
+			def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "sub", Handler: "Sub"}}}
+			p := NewProgramFunc(def, func(name string) (Handler, bool) {
+				if name == "App" {
+					return FromHandlerE(root), true
+				}
+				return FromHandlerE(sub), true
+			}).WithStdout(io.Discard).WithStderr(io.Discard)
+			if withMW {
+				p.WithMiddleware(func(_ Hook, next HookFunc) HookFunc { return next })
+			}
+			var out Outcome
+			p.WithReporter(func(_ context.Context, _ *Context, o Outcome) { out = o })
+			p.Run([]string{"sub"})
+			if len(out.Errors) != 2 || !errors.Is(out.Errors[0], errLocked) || !errors.Is(out.Errors[1], errLocked) {
+				t.Errorf("errors = %q, want the root's record and the sub's return", out.Errors)
 			}
 		})
 	}

@@ -283,6 +283,9 @@ func (p *Program) WithTeardownOnPanic(enabled bool) *Program {
 //   - recover=false, teardown=false: the hook runs unguarded, so the panic propagates
 //     immediately with its original stack and no teardown.
 //
+// A re-raised panic skips the reporter, but the cleanups of what the run's providers built
+// ([Program.WithProvider]) still run as it propagates.
+//
 // Only panics on the hook goroutine are recovered; a panic in a goroutine a handler started
 // crashes the process.
 func (p *Program) WithPanicRecover(enabled bool) *Program {
@@ -633,6 +636,10 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string, on
 	// Runs after settle, where it has nothing left to do, and while a panic is re-raised, where
 	// it discards the output files left open and writes out what the handlers wrote.
 	defer rtx.endOutput()
+	// Runs after settle, which already cleaned up, and while a panic is re-raised
+	// ([Program.WithPanicRecover] false), where it calls the providers' cleanups; their
+	// failures have no reporter left to reach.
+	defer rtx.cleanUpProvided(func(error) {}, func(*PanicError) {})
 	if trap {
 		sigCh, done := p.installTrap(cancel, rtx)
 		defer removeTrap(sigCh, done, oneShot)

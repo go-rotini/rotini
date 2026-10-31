@@ -1235,8 +1235,9 @@ func alsoSetBy(env []string, configKey, before, after string) string {
 }
 
 // notesText joins the notes beside a row into one parenthetical, " (default 1, 1..100)", skipping
-// the empty ones: "" and false, as `and .Required "required"` gives for an optional input. It
-// returns "" when every note is empty.
+// the empty ones: "", false and an empty list, as `and .Required "required"` gives for an
+// optional input and `and .Commands …` for a row no command reads. It returns "" when every
+// note is empty.
 func notesText(notes ...any) string {
 	var parts []string
 	for _, n := range notes {
@@ -1246,6 +1247,10 @@ func notesText(notes ...any) string {
 				parts = append(parts, v)
 			}
 		case bool, nil:
+		case []string:
+			if len(v) > 0 {
+				parts = append(parts, strings.Join(v, ", "))
+			}
 		default:
 			if s := fmt.Sprint(v); s != "" {
 				parts = append(parts, s)

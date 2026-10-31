@@ -698,3 +698,95 @@ func TestUnsetConfigValue_emptiesAndAbsences(t *testing.T) {
 		t.Errorf("unset in a missing file created it: %v", err)
 	}
 }
+
+// A value a schema rejects below a secret key (a list's item, a map's entry, an object's
+// field) is as secret as the key's own, on a read and on a write.
+func TestSecretKey_valuesBelowItStayHidden(t *testing.T) {
+	keys := []ConfigKeyDef{
+		{Key: "tokens", Type: "[]string", Secret: true},
+		{Key: "creds", Type: "map[string]string", Secret: true},
+		{Key: "db", Type: "DB", Secret: true, Object: true},
+		{Key: "region", Type: "string"},
+	}
+	schema := `{"type":"object","properties":{
+		"tokens":{"type":"array","items":{"minLength":10}},
+		"creds":{"type":"object","additionalProperties":{"minLength":10}},
+		"db":{"type":"object","properties":{"password":{"minLength":10}}},
+		"region":{"type":"string"}}}`
+	for _, c := range []struct{ name, doc, key, raw, at string }{
+		{"list item", "tokens: [hunter2]\n", "tokens", "hunter2", "tokens.0"},
+		{"map entry", "creds: {db: hunter2}\n", "creds", "db=hunter2", "creds.db"},
+		{"object field", "db: {password: hunter2}\n", "region", "us", "db.password"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := pfWrite(t, dir, "app.yaml", c.doc)
+			f := ConfigFileDef{Name: "app", Path: path, Keys: keys, Schema: schema}
+			rtx := cwContext(dir, nil, f)
+			var in struct {
+				App struct {
+					Config struct {
+						Region string `rotini:"region"`
+					}
+				}
+			}
+			err := NewInputReader(pfSettings(f)).Read(rtx, &in)
+			if err == nil || !strings.Contains(err.Error(), c.at+":") || strings.Contains(err.Error(), "hunter2") {
+				t.Errorf("read: %v", err)
+			}
+			if c.key != "region" {
+				if err := os.WriteFile(path, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = SetConfigValue(rtx, "app", c.key, c.raw, ConfigAllowSecretWrite())
+			if err == nil || !strings.Contains(err.Error(), c.at+":") || strings.Contains(err.Error(), "hunter2") {
+				t.Errorf("write: %v", err)
+			}
+		})
+	}
+}
+
+// A key declared below a secret one is written as a secret.
+func TestSetConfigValue_keyBelowASecretKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.yaml")
+	rtx := cwContext(dir, nil, ConfigFileDef{Name: "app", Path: path, Keys: []ConfigKeyDef{
+		{Key: "db", Type: "DB", Secret: true, Object: true},
+		{Key: "db.password", Type: "string", Pattern: "^x"},
+	}})
+	err := SetConfigValue(rtx, "app", "db.password", "hunter2")
+	if ie, ok := asError[*InputError](err); !ok || ie.Kind != InputErrorKindWriteRefused {
+		t.Errorf("without ConfigAllowSecretWrite: %v", err)
+	}
+	err = SetConfigValue(rtx, "app", "db.password", "hunter2", ConfigAllowSecretWrite())
+	if err == nil || strings.Contains(err.Error(), "hunter2") {
+		t.Errorf("an invalid value: %v", err)
+	}
+}
+
+// A config_source path in a format rotini doesn't know is the user's to fix, as when it's read.
+func TestSetConfigValue_unknownFormat(t *testing.T) {
+	dir := t.TempDir()
+	pfWrite(t, dir, "app.conf", "region: eu\n")
+	f := ConfigFileDef{Name: "app", Path: "default.yaml", PathFrom: &PathFromDef{Flag: "config"}, Keys: []ConfigKeyDef{{Key: "region", Type: "string"}}}
+	rtx := pfContext(dir, nil, pfSettings(f), "--config", "app.conf")
+	var in struct {
+		App struct {
+			Config struct {
+				Region string `rotini:"region"`
+			}
+		}
+	}
+	rerr := NewInputReader(pfSettings(f)).Read(rtx, &in)
+	werr := SetConfigValue(rtx, "app", "region", "us")
+	for _, err := range []error{rerr, werr} {
+		ie, ok := asError[*InputError](err)
+		if !ok || !errors.Is(err, ErrUsage) || ie.Kind != InputErrorKindFileAccess || !strings.HasSuffix(ie.Msg, "app.conf: unsupported format") {
+			t.Errorf("err = %v (%T)", err, err)
+		}
+	}
+	if got := cwRead(t, filepath.Join(dir, "app.conf")); got != "region: eu\n" {
+		t.Errorf("the file changed:\n%s", got)
+	}
+}

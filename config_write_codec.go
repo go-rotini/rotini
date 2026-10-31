@@ -51,10 +51,10 @@ func (t configFileTarget) rewrite(c *codecEntry, path []string, value any, set b
 	}
 	out, err := c.codec().Encode(doc)
 	if err != nil {
-		return nil, &encodeError{path: strings.Join(path, "."), err: err}
+		return nil, &encodeError{path: strings.Join(path, "."), codec: c.name, err: err}
 	}
 	if _, err := c.codec().Decode(stripBOM(out)); err != nil {
-		return nil, fmt.Errorf("%w: the %s encoder wrote a document its decoder can't read: %w", cfgedit.ErrVerify, c.name, err)
+		return nil, &encodeError{codec: c.name, verify: true, err: err}
 	}
 	return out, nil
 }
@@ -108,12 +108,46 @@ func unsetTreePath(doc map[string]any, path []string, keep int) bool {
 	return true
 }
 
-// encodeError is a value a [Codec] format's encoder can't write. It matches [cfgedit.ErrValue].
+// encodeError is a value a [Codec] format's encoder can't write, which matches
+// [cfgedit.ErrValue], or, when verify is set, a document it wrote that its decoder can't read
+// back, which matches [cfgedit.ErrVerify]. err is the codec's own error, nil once dropped.
 type encodeError struct {
-	path string
-	err  error
+	path   string
+	codec  string
+	verify bool
+	err    error
 }
 
-func (e *encodeError) Error() string      { return fmt.Sprintf("can't write %q: %v", e.path, e.err) }
-func (e *encodeError) Unwrap() error      { return e.err }
-func (*encodeError) Is(target error) bool { return target == cfgedit.ErrValue }
+func (e *encodeError) Error() string {
+	var msg string
+	if e.verify {
+		msg = fmt.Sprintf("%v: the %s encoder wrote a document its decoder can't read", cfgedit.ErrVerify, e.codec)
+	} else {
+		msg = fmt.Sprintf("can't write %q", e.path)
+	}
+	switch {
+	case e.err != nil:
+		return msg + ": " + e.err.Error()
+	case e.verify:
+		return msg
+	}
+	return msg + ": the " + e.codec + " encoder failed"
+}
+
+func (e *encodeError) Unwrap() error { return e.err }
+
+func (e *encodeError) Is(target error) bool {
+	if e.verify {
+		return target == cfgedit.ErrVerify
+	}
+	return target == cfgedit.ErrValue
+}
+
+// withoutCodecText is err with any [Codec] error's own text dropped, which may quote a value
+// of the document: for the write of a secret key.
+func withoutCodecText(err error) error {
+	if ee, ok := asError[*encodeError](err); ok {
+		return &encodeError{path: ee.path, codec: ee.codec, verify: ee.verify}
+	}
+	return err
+}

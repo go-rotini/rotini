@@ -256,8 +256,9 @@ func TestSharedProvider_closeOrderErrorsAndReplacement(t *testing.T) {
 	}
 }
 
-// Execute releases shared values after the hooks and before the reporter, which reports a
-// cleanup error; a Run never does.
+// Execute releases shared values after the hooks; a run that records nothing skips the
+// reporter, so they are released first and the reporter reports a cleanup error. A Run never
+// releases them.
 func TestSharedProvider_executeCloses(t *testing.T) {
 	errFlush := errors.New("flush failed")
 	dep := NewDependency[int]("shared.exec")
@@ -286,5 +287,31 @@ func TestSharedProvider_executeCloses(t *testing.T) {
 	}
 	if len(reported.Errors) != 1 || !strings.Contains(errs.String(), `Error: closing the shared dependency "shared.exec": flush failed`) {
 		t.Errorf("reported %v, stderr %q", reported.Errors, errs.String())
+	}
+}
+
+// Execute releases shared values after the reporter of a run that reports, so the reporter
+// can still use them.
+func TestSharedProvider_executeClosesAfterReporter(t *testing.T) {
+	dep := NewDependency[*sharedDB]("shared.report")
+	db := &sharedDB{}
+	var log []string
+	p, _ := sharedProgram(func(_ context.Context, rtx *Context) error {
+		rtx.MustDependency(dep)
+		rtx.RecordSuccess("done")
+		return nil
+	})
+	p.WithSharedProvider(dep, func(context.Context, *Context) (*sharedDB, func() error, error) {
+		return db, func() error { log = append(log, "closed"); return db.Close() }, nil
+	})
+	var queryErr error
+	p.WithReporter(func(_ context.Context, rtx *Context, _ Outcome) {
+		queryErr = rtx.MustDependency(dep).Query()
+		log = append(log, "reported")
+	})
+	code := -1
+	err := p.WithArgs(nil).WithExit(func(c int) { code = c }).Execute()
+	if code != 0 || err != nil || queryErr != nil || !slices.Equal(log, []string{"reported", "closed"}) {
+		t.Errorf("Execute = %d, %v, query %v, log %q; want the value open in the reporter, closed after", code, err, queryErr, log)
 	}
 }

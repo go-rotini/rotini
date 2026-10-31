@@ -720,3 +720,161 @@ func subFS(t *testing.T, fsys fs.FS, dir string) fs.FS {
 	}
 	return sub
 }
+
+// TestLayerFS_copyUp pins that a write over a file only lower has creates upper's with
+// rotini's own modes, not lower's, and that upper's own file keeps its mode.
+func TestLayerFS_copyUp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes")
+	}
+	mode := func(t *testing.T, p string) fs.FileMode {
+		t.Helper()
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Mode().Perm()
+	}
+	for _, c := range []struct {
+		name string
+		mode fs.FileMode
+	}{{"embedded", 0o444}, {"a MapFS zero mode", 0}} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			lower := fstest.MapFS{"app.yaml": {Data: []byte("region: eu\n"), Mode: c.mode}, "out.txt": {Data: []byte("x"), Mode: c.mode}}
+			cfg := filepath.Join(dir, "app.yaml")
+			plain := ConfigFileDef{Name: "app", Path: cfg, Keys: []ConfigKeyDef{{Key: "level", Type: "string"}, {Key: "region", Type: "string"}}}
+			rtx := cwContext(dir, nil, plain).WithFS(LayerFS(OSFS(), dir, lower))
+			if err := SetConfigValue(rtx, "app", "level", "info"); err != nil {
+				t.Fatal(err)
+			}
+			if got := mode(t, cfg); got != 0o644 {
+				t.Errorf("config copied up with mode %#o, want 0644", got)
+			}
+			if err := SetConfigValue(rtx, "app", "region", "us"); err != nil {
+				t.Errorf("the second write: %v", err)
+			}
+
+			out, err := CreateOutput(rtx, "out.txt", OutputOverwrite(true))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := out.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if got := mode(t, filepath.Join(dir, "out.txt")); got != 0o644 {
+				t.Errorf("output copied up with mode %#o, want 0644", got)
+			}
+		})
+	}
+
+	// A secret over an embedded default: lower's 0444 is no reason to refuse, and the file
+	// upper gets is private.
+	dir := t.TempDir()
+	lower := fstest.MapFS{"app.yaml": {Data: []byte("region: eu\n"), Mode: 0o444}}
+	cfg := filepath.Join(dir, "app.yaml")
+	rtx := cwContext(dir, nil, cwFile(cfg)).WithFS(LayerFS(OSFS(), dir, lower))
+	if err := SetConfigValue(rtx, "app", "token", "s3cret", ConfigAllowSecretWrite()); err != nil {
+		t.Fatal(err)
+	}
+	if got := mode(t, cfg); got != 0o600 {
+		t.Errorf("secret copied up with mode %#o, want 0600", got)
+	}
+	if got := cwRead(t, cfg); got != "region: eu\ntoken: s3cret\n" {
+		t.Errorf("file:\n%s", got)
+	}
+
+	// Upper's own file keeps its mode, and a secret write to one others can read is refused.
+	if err := os.Chmod(cfg, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetConfigValue(rtx, "app", "region", "us"); err != nil {
+		t.Fatal(err)
+	}
+	if got := mode(t, cfg); got != 0o640 {
+		t.Errorf("upper's file mode %#o, want 0640 kept", got)
+	}
+	err := SetConfigValue(rtx, "app", "token", "other", ConfigAllowSecretWrite())
+	if err == nil || !strings.Contains(err.Error(), "is readable by others (0640)") {
+		t.Errorf("a secret into upper's readable file: %v", err)
+	}
+}
+
+// TestLayerFS_mkdirOnWrite pins that a file created in a directory only lower has, or in a
+// mount upper lacks, gets its directories in upper first.
+func TestLayerFS_mkdirOnWrite(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "app") // not in upper
+	lower := fstest.MapFS{"sub/a.txt": {Data: []byte("x"), Mode: 0o644}}
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithDir(dir).WithFS(LayerFS(OSFS(), dir, lower))
+	for _, name := range []string{"new.txt", filepath.Join("sub", "a.txt"), filepath.Join("sub", "b.txt")} {
+		out, err := CreateOutput(rtx, name, OutputOverwrite(true))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		_, _ = io.WriteString(out, "y")
+		if err := out.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if data, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(data) != "y" {
+			t.Errorf("%s in upper = %q, %v", name, data, err)
+		}
+	}
+	// Not under the mount, a missing directory is still an error.
+	if _, err := CreateOutput(rtx, filepath.Join("..", "nowhere", "x.txt")); err == nil || !errors.Is(err, ErrUsage) {
+		t.Errorf("a missing directory outside the mount: %v", err)
+	}
+}
+
+// TestLayerFS_listing pins that a mount only lower has is listed in its parent directory.
+func TestLayerFS_listing(t *testing.T) {
+	root := vroot(t)
+	upper := newMemFS(map[string]string{filepath.Join(root, "share", "other.txt"): "x"})
+	lower := fstest.MapFS{"defaults.yaml": {Data: []byte("x")}}
+	l := LayerFS(upper, filepath.Join(root, "share", "app"), lower)
+	entries, err := fs.ReadDir(l, fsNameOf(filepath.Join(root, "share")))
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+		if e.Name() == "app" && !e.IsDir() {
+			t.Error("the mount is listed as a file")
+		}
+	}
+	if err != nil || !slices.Equal(names, []string{"app", "other.txt"}) {
+		t.Errorf("ReadDir(parent) = %q, %v", names, err)
+	}
+	matches, err := fs.Glob(l, fsNameOf(filepath.Join(root, "share", "*", "*.yaml")))
+	if err != nil || len(matches) != 1 {
+		t.Errorf("Glob = %q, %v", matches, err)
+	}
+}
+
+// TestLayerFS_case pins the mount's matching: with case folded, as on Windows, any case of
+// the mount reaches lower; without, as elsewhere, only the mount's own.
+func TestLayerFS_case(t *testing.T) {
+	lower := fstest.MapFS{"a.yaml": {Data: []byte("x")}}
+	for _, fold := range []bool{false, true} {
+		l := layerFS{upper: fstest.MapFS{}, lower: lower, mount: "Share/App", fold: fold}
+		for _, name := range []string{"Share/App/a.yaml", "share/app/a.yaml", "SHARE/APP"} {
+			_, err := fs.Stat(l, name)
+			if want := fold || name == "Share/App/a.yaml"; (err == nil) != want {
+				t.Errorf("fold %v: Stat(%s) = %v", fold, name, err)
+			}
+		}
+	}
+}
+
+// TestWindowsDevice pins which names are Windows devices, which a run's file system never
+// reads or writes.
+func TestWindowsDevice(t *testing.T) {
+	for p, want := range map[string]bool{
+		"NUL": true, "nul": true, `C:\work\NUL`: true, `\\.\NUL`: true,
+		`\\.\pipe\app`: true, "CON": true, "aux": true, "COM1": true, "LPT9": true, "COM\u00b9": true,
+		"CONOUT$": true, "C:/work/prn": true,
+		"NULL": false, "NUL1": false, "COM0": false, "COM10": false, "LPT": false, "out.txt": false,
+		`C:\NUL\out.txt`: false, "": false, `\\?\C:\x`: false, "a.nul": false, "NUL.txt": false,
+	} {
+		if got := windowsDevice(p); got != want {
+			t.Errorf("windowsDevice(%q) = %v, want %v", p, got, want)
+		}
+	}
+}

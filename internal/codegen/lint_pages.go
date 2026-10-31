@@ -100,17 +100,11 @@ func lintStability(spec *Spec) []error {
 	return problems
 }
 
-// lintTopics checks help topics: they are declared on the root, each name once, with exactly
-// one of `body` and `generate`, and no name a root command, alias or declared plugin also
-// answers to (`help <name>` would be ambiguous).
+// lintTopics checks the root's help topics: each name once, with exactly one of `body` and
+// `generate`, and no name a root command, alias or declared plugin also answers to (`help
+// <name>` would be ambiguous). [lintDocLevelKeys] keeps them on the root.
 func lintTopics(spec *Spec) []error {
 	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		if c != &spec.Command && len(c.Topics) > 0 {
-			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/topics", loc: "command " + path,
-				msg: "sets `topics`, which only the root command declares; move the topics to the root"})
-		}
-	})
 	root := &spec.Command
 	taken := map[string]string{}
 	for _, c := range root.Commands {

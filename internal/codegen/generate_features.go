@@ -248,12 +248,29 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 	}
 	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs, gp.envPrefix), true, gp.rootHelp.Stability)
 	out = append(out, topicNodes(gp, feat, section, date)...)
+	for i := range out {
+		d := &out[i].data
+		d.SeeAlsoRows = uniqueSeeAlsoRows(d.SeeAlsoRows, feat.listedPages(*d))
+		d.SeeAlso = seeAlsoTexts(d.SeeAlsoRows)
+	}
 	if feat.name == manFeatureDesc.name || feat.name == markdownFeatureDesc.name {
 		for i := range out {
 			withStructuredDefaults(&out[i].data)
 		}
 	}
 	return out
+}
+
+// listedPages returns the pages this feature's built-in page cross-references beside its
+// see_also entries: man pages list RelatedPages, markdown pages the parent's page, help none.
+func (f docFeature) listedPages(d templateHelpData) []string {
+	switch {
+	case f.manPages:
+		return d.RelatedPages
+	case f.name == markdownFeatureDesc.name && d.ParentPage != "":
+		return []string{d.ParentPage}
+	}
+	return nil
 }
 
 // stabilityRank orders stability markers from least to most stable; "" is stable.

@@ -663,6 +663,11 @@ func (w *argvWriter) envNested(p FieldPath, nest string, f reflect.Value) error 
 			if k == "" || k != strings.ToLower(k) || strings.Contains(k, strings.ToLower(sep)) || strings.Contains(k, ".") {
 				return fmt.Errorf("the key %q can't be written: keys must be lowercase and hold neither %q nor \".\"", k, sep)
 			}
+			// The variable's name is upper case and reads back lower-cased, so a key whose case
+			// doesn't round-trip (final sigma "ς" reads back as "σ") would come back as another key.
+			if strings.ToLower(strings.ToUpper(k)) != k {
+				return fmt.Errorf("the key %q can't be written: it doesn't read back the same from an upper-case variable name", k)
+			}
 			name := prefix + sep + strings.ToUpper(k)
 			switch v := v.(type) {
 			case map[string]any:

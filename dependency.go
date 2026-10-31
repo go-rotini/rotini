@@ -28,7 +28,7 @@ import (
 //     every run
 //   - one run: [Context.SetDependency] or [Context.SetDependencyIfAbsent] from a hook, visible
 //     to the hooks that run after it, or a provider registered with [Program.WithProvider],
-//     which builds the run's value on first request and cleans it up after teardown
+//     which builds the run's value on first request and cleans it up when the run ends
 //
 // A handle whose name is known only at run time can be built as
 // rotini.NewDependency[any](name).

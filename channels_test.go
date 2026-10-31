@@ -143,11 +143,20 @@ func TestChannels_nilIgnoredAndMismatchFaults(t *testing.T) {
 	t.Parallel()
 	var nilConflict *conflictError
 	errCh := NewChannel[error]("errs", ChannelClassError)
+	nilSlices := NewChannel[[]string]("slices", ChannelClassInfo)
+	nilMaps := NewChannel[map[string]int]("maps", ChannelClassInfo)
+	nilFuncs := NewChannel[func()]("funcs", ChannelClassInfo)
+	nilChans := NewChannel[chan int]("chans", ChannelClassInfo)
 	sameName := NewChannel[int]("skipped", ChannelClassInfo)
 	var out Outcome
 	code, _, _ := runChannels(t, func(rtx *Context) {
 		rtx.Record(errCh, nil)
-		rtx.Record(chConflict, nilConflict) // a typed nil pointer is a value, and is kept
+		rtx.Record(chConflict, nilConflict) // a typed nil is ignored like an untyped one
+		rtx.Record(nilSlices, nil)
+		rtx.Record(nilMaps, map[string]int(nil))
+		rtx.Record(nilFuncs, (func())(nil))
+		rtx.Record(nilChans, (chan int)(nil))
+		rtx.Record(nilSlices, []string{}) // empty but not nil: kept
 		rtx.Record(chSkipped, skippedFile{Path: "a"})
 		rtx.Record(sameName, 1)
 		rtx.Record(Channel[string]{}, "zero channel")
@@ -158,8 +167,12 @@ func TestChannels_nilIgnoredAndMismatchFaults(t *testing.T) {
 	if n := len(out.Records(errCh)); n != 0 {
 		t.Errorf("nil error recorded %d times", n)
 	}
-	if n := len(out.Records(chConflict)); n != 1 {
-		t.Errorf("typed nil pointer: %d records, want 1", n)
+	if n := len(out.Records(chConflict)); n != 0 {
+		t.Errorf("typed nil pointer: %d records, want 0", n)
+	}
+	if len(out.Records(nilMaps))+len(out.Records(nilFuncs))+len(out.Records(nilChans)) != 0 || len(out.Records(nilSlices)) != 1 {
+		t.Errorf("nil map/func/chan or slice recorded: %v %d %d %d", out.Records(nilSlices),
+			len(out.Records(nilMaps)), len(out.Records(nilFuncs)), len(out.Records(nilChans)))
 	}
 	if len(out.Records(sameName)) != 0 || len(out.Records(chSkipped)) != 1 {
 		t.Errorf("a same-named channel of another type shared records")
@@ -287,11 +300,23 @@ func TestChannels_declaredNotAnObject(t *testing.T) {
 	}
 }
 
+// A typed nil recorded into a ChannelClassError channel is ignored, so the run neither fails
+// nor hands the default reporter a nil error to print.
+func TestChannels_typedNilErrorIgnored(t *testing.T) {
+	t.Parallel()
+	var nilConflict *conflictError
+	code, err, stderr := runChannels(t, func(rtx *Context) { rtx.Record(chConflict, nilConflict) }, nil)
+	if code != 0 || err != nil || stderr != "" {
+		t.Errorf("Run = %d, %v, stderr %q; want a clean run", code, err, stderr)
+	}
+}
+
 func TestNewChannel_panics(t *testing.T) {
 	t.Parallel()
 	for name, fn := range map[string]func(){
 		"empty name":                  func() { NewChannel[string]("", ChannelClassInfo) },
 		"built-in name":               func() { NewChannel[string]("warning", ChannelClassInfo) },
+		"schema_version":              func() { NewChannel[string]("schema_version", ChannelClassInfo) },
 		"unknown class":               func() { NewChannel[string]("x", ChannelClass(9)) },
 		"ChannelClassError non-error": func() { NewChannel[string]("x", ChannelClassError) },
 	} {

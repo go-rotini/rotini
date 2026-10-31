@@ -64,8 +64,9 @@ type Channel[T any] struct {
 	class ChannelClass
 }
 
-// NewChannel returns the channel named name, of class class. It panics when name is empty or
-// is one of the built-in outcome names (info, success, warning, error, panic), when class is
+// NewChannel returns the channel named name, of class class. It panics when name is empty, is
+// one of the built-in outcome names (info, success, warning, error, panic) or is
+// schema_version, the key [StructuredReporter] gives every line, when class is
 // not a declared ChannelClass, or when class is [ChannelClassError] and T does not implement
 // error. A channel is identified by its name: two channels with one name must have the same
 // type and class, or recording into the second is a [*WiringError].
@@ -75,6 +76,8 @@ func NewChannel[T any](name string, class ChannelClass) Channel[T] {
 		panic("rotini: NewChannel: empty channel name")
 	case "info", "success", "warning", "error", "panic":
 		panic(fmt.Sprintf("rotini: NewChannel: %q is a built-in outcome name", name))
+	case "schema_version":
+		panic(fmt.Sprintf("rotini: NewChannel: %q is the structured report's own key", name))
 	}
 	if class > ChannelClassError {
 		panic(fmt.Sprintf("rotini: NewChannel %q: unknown class %s", name, class))
@@ -95,6 +98,19 @@ func (c Channel[T]) Class() ChannelClass { return c.class }
 // String returns the channel's name.
 func (c Channel[T]) String() string { return c.name }
 
+// isNil reports whether v is nil, or holds a nil pointer, map, slice, func, channel or
+// interface.
+func isNil(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface, reflect.UnsafePointer:
+		return rv.IsNil()
+	}
+	return false
+}
+
 // channelRecords holds one channel's records for a run.
 type channelRecords struct {
 	name   string
@@ -104,14 +120,15 @@ type channelRecords struct {
 }
 
 // Record records v into ch for the reporter, in recording order. A nil v (a nil error or other
-// nil interface value) is ignored, as the built-in record methods ignore one, and so is any v
+// interface, or a nil pointer, map, slice, func or channel, typed or not) is ignored, as the
+// built-in record methods ignore a nil error, and so is any v
 // recorded into the zero Channel, one [NewChannel] did not make. It is safe for concurrent
 // use.
 //
 // Recording into a channel whose name another channel of a different type or class already
 // used in this run records a [*WiringError] fault instead.
 func (rtx *Context) Record[T any](ch Channel[T], v T) {
-	if any(v) == nil || ch.name == "" {
+	if isNil(any(v)) || ch.name == "" {
 		return
 	}
 	typ := reflect.TypeFor[T]()

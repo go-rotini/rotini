@@ -65,6 +65,13 @@
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last,
                 alsoSetBy, deprecation, stabilityNote, listed, described, code, notes (the
                 non-empty notes in one parenthetical: " (a, b)"). */ -}}
+{{- define "files"}}{{with .Files}}## Files
+
+The first file listed that sets a key supplies it.
+
+{{range .}}- {{code .File}}{{with .Note}} — {{.}}{{end}}
+{{end}}
+{{end}}{{end -}}
 # {{.Invocation}}
 
 {{with .Header}}{{.}}
@@ -147,29 +154,24 @@
 {{end -}}
 {{- with .Environment}}## Environment
 
-{{range .}}- `{{.Var}}`{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{notes (and .Required "required") (and .Default (printf "default %s" (code .Default))) .Accepts .Stability}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{with .Commands}} (used by: {{join . ", "}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
+{{range .}}- `{{.Var}}`{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{notes (and .Required "required") (and .Default (printf "default %s" (code .Default))) .Accepts .Stability (and .Commands (printf "used by: %s" (join .Commands ", ")))}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 
 {{end}}{{range .EnumValues}}  - {{code .Value}}{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
 {{end}}{{end}}
 {{end -}}
+{{- if .Topic}}{{template "files" .}}{{end -}}
 {{- with .Configuration}}## Configuration
 
-{{range .}}- {{code .Key}}{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{notes (and .File (printf "in %s" (code .File))) (and .Required "required") (and .Default (printf "default %s" (code .Default))) .Accepts .Stability}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{with .Commands}} (used by: {{join . ", "}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
+{{range .}}- {{code .Key}}{{with .Type}} {{code .}}{{end}}{{with .Summary}} — {{.}}{{end}}{{notes (and .File (printf "in %s" (code .File))) (and .Required "required") (and .Default (printf "default %s" (code .Default))) .Accepts .Stability (and .Commands (printf "used by: %s" (join .Commands ", ")))}}{{with listed .Enum .EnumValues}} (one of {{range $i, $v := .}}{{if $i}}, {{end}}{{code $v}}{{end}}){{end}}{{if .Deprecated}} *({{deprecation .Deprecated .DeprecatedSince .RemovedIn}})*{{end}}{{with .Rules}}; {{join . "; "}}{{end}}
 {{with .Description}}
 {{indent 2 .}}
 
 {{end}}{{range .EnumValues}}  - {{code .Value}}{{with .Summary}} — {{.}}{{end}}{{with .Note}} {{.}}{{end}}
 {{end}}{{end}}
 {{end -}}
-{{- with .Files}}## Files
-
-The first file listed that sets a key supplies it.
-
-{{range .}}- {{code .File}}{{with .Note}} — {{.}}{{end}}
-{{end}}
-{{end -}}
+{{- if not .Topic}}{{template "files" .}}{{end -}}
 {{- with .ExampleRows}}## Examples
 
 ```

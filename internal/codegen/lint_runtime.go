@@ -15,17 +15,11 @@ func lintUsageSchemaName(spec *Spec) []error {
 		msg: "names a schema `Usage`, which collides with the generated Usage function; rename the schema"}}
 }
 
-// lintMulticall keeps `multicall` on the root, where it is read, and requires something to
-// route to: a root with neither sub-commands nor plugins can only answer completion.
+// lintMulticall requires the root's `multicall` to have something to route to: a root with
+// neither sub-commands nor plugins can only answer completion. [lintDocLevelKeys] keeps it on
+// the root.
 func lintMulticall(spec *Spec) []error {
 	var problems []error
-	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		if c.Multicall == nil || c == &spec.Command {
-			return
-		}
-		problems = append(problems, &problem{kind: "spec", ptr: ptr + "/multicall", loc: "command " + path,
-			msg: "sets `multicall`, a root-command-level key valid only on the root command; remove it (it is read only at the root, so here it is silently ignored)"})
-	})
 	on, prefix, complete := multicallOf(&spec.Command)
 	routes := prefix != "" || complete == ""
 	if on && routes && len(spec.Command.Commands) == 0 && len(spec.Command.Plugins) == 0 {

@@ -263,3 +263,42 @@ func TestCodecEncode_secrets(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// A secret key's write doesn't print what the author's codec says, which may quote the value.
+func TestCodecEncode_secretErrors(t *testing.T) {
+	quoting := CodecEncode(func(doc any) ([]byte, error) {
+		return nil, fmt.Errorf("can't hold %v", doc.(map[string]any)["token"])
+	})
+	garbage := CodecEncode(func(doc any) ([]byte, error) {
+		return fmt.Appendf(nil, "[%v\n", doc.(map[string]any)["token"]), nil
+	})
+	for _, c := range []struct {
+		name     string
+		opt      CodecOption
+		kind     InputErrorKind
+		internal bool
+		want     string
+	}{
+		{"the encoder fails", quoting, InputErrorKindWriteRefused, false, `can't write "token": the ini encoder failed`},
+		{"the encoder writes what doesn't decode", garbage, InputErrorKindInternal, true, "the ini encoder wrote a document its decoder can't read"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "app.ini")
+			rtx := iniWriteContext(dir, []CodecOption{c.opt}, ConfigFileDef{Name: "app", Path: path, Keys: iniKeys()})
+			err := SetConfigValue(rtx, "app", "token", "hunter2", ConfigAllowSecretWrite())
+			if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), "hunter2") {
+				t.Fatalf("err = %v\nwant it to contain %s, without the value", err, c.want)
+			}
+			ie, ok := asError[*InputError](err)
+			if !ok || ie.Kind != c.kind || errors.Is(err, ErrInternal) != c.internal {
+				t.Errorf("err = %v, want kind %v (internal %v)", err, c.kind, c.internal)
+			}
+			for e := ie.Cause; e != nil; e = errors.Unwrap(e) {
+				if strings.Contains(e.Error(), "hunter2") {
+					t.Errorf("a cause prints the value: %v", e)
+				}
+			}
+		})
+	}
+}

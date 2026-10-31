@@ -376,9 +376,28 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prun
 	for _, name := range prog.restored {
 		notices = append(notices, fmt.Errorf("restored %s; its command is back in the spec", name))
 	}
-	notices = append(notices, prog.auditWarnings...)
+	notices = append(notices, withoutReported(prog.auditWarnings, warnings)...)
 	notices = append(notices, prog.agentNotices...)
 	return notices, err
+}
+
+// withoutReported returns the generate notices that no validation warning already reports:
+// a finding both make (two enum values that would get one constant) is shown once, with the
+// validation warning's position.
+func withoutReported(notices, warnings []error) []error {
+	reported := map[string]bool{}
+	for _, w := range warnings {
+		if pr := (*problem)(nil); errors.As(w, &pr) {
+			reported[pr.msg] = true
+		}
+	}
+	out := make([]error, 0, len(notices))
+	for _, n := range notices {
+		if !reported[n.Error()] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // failFast reports whether validation stops at the first problem: failMode if set, else the

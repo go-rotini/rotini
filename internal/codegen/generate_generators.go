@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -87,7 +88,10 @@ func (p *program) writeGeneratorFiles() error {
 	return nil
 }
 
-// writeGenerated plans one generator's files.
+// writeGenerated plans one generator's files. A file the previous manifest lists is kept when
+// the generator returned it again, spelled exactly the same. One it returned only in another
+// case is removed, unless the file system finds both spellings as one file (macOS and Windows
+// by default), where writing the new spelling has already replaced it.
 func (p *program) writeGenerated(run generatorRun) error {
 	dir, err := underModule(p.module.root, "dir", run.gen.Dir)
 	if err != nil {
@@ -99,7 +103,7 @@ func (p *program) writeGenerated(run generatorRun) error {
 		if err := p.plan.write(filepath.Join(dir, filepath.FromSlash(f.Path)), []byte(*f.Content)); err != nil {
 			return err
 		}
-		current[strings.ToLower(f.Path)] = true
+		current[f.Path] = true
 		owned = append(owned, f.Path)
 	}
 	prior, err := p.readGeneratorManifest(dir)
@@ -107,18 +111,39 @@ func (p *program) writeGenerated(run generatorRun) error {
 		return err
 	}
 	for _, rel := range prior {
-		if current[strings.ToLower(rel)] || slices.Contains(run.gen.Keep, rel) {
+		if current[rel] || slices.Contains(run.gen.Keep, rel) || sameFileAsOneOf(dir, rel, owned) {
 			continue
 		}
 		if p.skipPrune {
 			owned = append(owned, rel) // still the generator's, for a later run to remove
 			continue
 		}
-		if err := p.plan.remove(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
+		if err := p.plan.removeWithEmptyDirs(filepath.Join(dir, filepath.FromSlash(rel)), dir); err != nil {
 			return fmt.Errorf("remove %s, which it no longer writes: %w", rel, err)
 		}
 	}
 	return p.plan.write(filepath.Join(dir, generatorManifest), generatorManifestContent(run.gen.Name, owned))
+}
+
+// sameFileAsOneOf reports whether rel, under dir, is on disk the same file as one of returned
+// that differs from it only in case: true only on a case-insensitive file system.
+func sameFileAsOneOf(dir, rel string, returned []string) bool {
+	var info os.FileInfo
+	for _, r := range returned {
+		if r == rel || !strings.EqualFold(r, rel) {
+			continue
+		}
+		if info == nil {
+			var err error
+			if info, err = os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
+				return false
+			}
+		}
+		if other, err := os.Stat(filepath.Join(dir, filepath.FromSlash(r))); err == nil && os.SameFile(info, other) {
+			return true
+		}
+	}
+	return false
 }
 
 // generatorRun is one generator and the files it returned.

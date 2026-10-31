@@ -11,6 +11,7 @@ stderr '^Error: spec: meta.spec.yaml:6:23: /command/commands/0/metadata/: string
 -- want.txt --
 Error: spec: .rotini.spec.yaml:5:27: command demo: the root command cannot declare `deprecated_identifiers` ("dm"); with no routing token, a deprecated root alias can never be detected; declare them on sub-commands
 Error: spec: .rotini.spec.yaml:10:9: command demo/sub: sets `schemas`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)
+Error: spec: .rotini.spec.yaml:11:18: command demo/sub: sets `multicall`, a root-command-level key valid only on the root command; remove it (it is read only at the root, so here it is silently ignored)
 Error: spec: .rotini.spec.yaml:13:31: command demo/sub: `deprecated_identifiers` entry "x" is not one of its aliases; it could never be reported as deprecated; did you mean "s"?
 Error: spec: .rotini.spec.yaml:21:9: command demo/run: sets `passthrough` and declares `commands`, but a passthrough command never descends; a child token is a raw positional
 Error: spec: .rotini.spec.yaml:16:20: command demo/run: sets `passthrough` and declares `plugins` or `plugin_discovery`, but a passthrough command never dispatches; the token is a raw positional
@@ -18,7 +19,6 @@ Error: spec: .rotini.spec.yaml:35:23: command demo/old: flag "--out": removed_in
 Error: spec: .rotini.spec.yaml:33:46: command demo/old: flag "--out": deprecated_identifiers_removed_in names "--out", which deprecated_identifiers does not list; deprecate it first
 Error: spec: .rotini.spec.yaml:38:29: command demo/old: flag "--fresh": sets `deprecated_since` without `deprecated`; say why it is deprecated, or drop `deprecated_since`
 Error: spec: .rotini.spec.yaml:45:23: command demo/old: config "color": sets `removed_in` without `deprecated`; say why it is deprecated, or drop `removed_in`
-Error: spec: .rotini.spec.yaml:11:18: command demo/sub: sets `multicall`, a root-command-level key valid only on the root command; remove it (it is read only at the root, so here it is silently ignored)
 -- meta.spec.yaml --
 version: 0.0.0
 command:

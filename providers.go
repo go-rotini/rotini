@@ -46,11 +46,16 @@ import (
 //   - A set value wins: a value registered with [Program.WithDependency],
 //     [Context.SetDependency] or [Context.SetDependencyIfAbsent] is returned instead, and fn
 //     is not called, so a test's double needs nothing more.
-//   - Cleaned up after teardown: the cleanup fn returned is called once every hook has
-//     finished, before the reporter runs, in reverse order of construction. A cleanup error
-//     is recorded as an error and a cleanup panic as a fault. Rotini releases nothing else:
-//     a value with a nil cleanup is left as it is. When fn returns an error, its value and
-//     cleanup are discarded, so a provider that fails releases what it built itself.
+//   - Cleaned up after the reporter: the cleanup fn returned is called once every hook and the
+//     reporter have finished, so the reporter can use the value too, in reverse order of
+//     construction. A value first asked for in the reporter is cleaned up as well. A run that
+//     recorded nothing, and so skips the reporter, is cleaned up before it instead: a cleanup
+//     error or panic is then recorded (as an error or a fault) and reported. Otherwise the
+//     reporter has run, so the failure is not reported: it joins the error the run returns,
+//     and a run that would exit 0 exits 1. A cleanup also runs when [Program.WithPanicRecover]
+//     re-raises a panic. Rotini releases nothing else: a value with a nil cleanup is left as
+//     it is. When fn returns an error, its value and cleanup are discarded, so a provider that
+//     fails releases what it built itself.
 //   - Errors keep their category: [Context.Dependency] returns fn's error as is, so
 //     [UsageError] from fn is a usage error.
 //
@@ -176,27 +181,35 @@ func (rtx *Context) provide(name string, fn providerFunc, pv *providedValue) {
 }
 
 // cleanUpProvided calls the cleanups the run's providers returned, in reverse order of
-// construction, recording each error as an error and each panic as a fault. Each cleanup is
-// called at most once.
-func (rtx *Context) cleanUpProvided() {
+// construction, passing each error to record and each panic to fault. Each cleanup is called
+// at most once.
+func (rtx *Context) cleanUpProvided(record func(error), fault func(*PanicError)) {
 	rtx.mu.Lock()
 	cleanups := rtx.cleanups
 	rtx.cleanups = nil
 	rtx.mu.Unlock()
 	for _, pc := range slices.Backward(cleanups) {
-		rtx.cleanUpOne(pc)
+		cleanUpOne(pc, record, fault)
 	}
 }
 
-func (rtx *Context) cleanUpOne(pc providedCleanup) {
+func cleanUpOne(pc providedCleanup, record func(error), fault func(*PanicError)) {
 	defer func() {
 		if r := recover(); r != nil {
-			rtx.recordFault(&PanicError{Value: r, Stack: debug.Stack()})
+			fault(&PanicError{Value: r, Stack: debug.Stack()})
 		}
 	}()
 	if err := pc.cleanup(); err != nil {
-		rtx.RecordError(fmt.Errorf("cleaning up the dependency %q: %w", pc.name, err))
+		record(fmt.Errorf("cleaning up the dependency %q: %w", pc.name, err))
 	}
+}
+
+// forgetProvided drops the run's provided values once they are released, so a later request
+// builds its value again rather than getting one already cleaned up or closed.
+func (rtx *Context) forgetProvided() {
+	rtx.mu.Lock()
+	rtx.provided = nil
+	rtx.mu.Unlock()
 }
 
 // provide registers fn as the provider of name, replacing any prior one; a nil fn removes it.
@@ -276,9 +289,11 @@ func (p *Program) WithSharedProvider[T any](dep Dependency[T], fn func(ctx conte
 // panicking cleanup as a [*PanicError]. A shared dependency asked for after Close is built
 // again, by its provider, on the first request.
 //
-// [Program.Execute] calls Close for its run after every hook has finished, before the
-// reporter, so a cleanup error is reported as a recorded error, and again before it exits, for
-// anything built later; a second trapped signal, which exits at once, skips it. A host that
+// [Program.Execute] calls Close for its run when it releases the run's per-run values (see
+// [Program.WithProvider]): after the reporter, which can still use a shared value, or before
+// it in a run that recorded nothing, so a cleanup error is reported. It calls Close again
+// before it exits, for anything built later; a second trapped signal, which exits at once,
+// skips it. A host that
 // calls [Program.Run] or [Program.RunContext] repeatedly calls Close once the last run has
 // returned:
 //

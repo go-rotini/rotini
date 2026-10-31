@@ -105,6 +105,20 @@ func (pl *planner) remove(path string) error {
 	return pl.apply(fs.PlanOp{Action: fs.PlanActionDelete, Path: path})
 }
 
+// removeWithEmptyDirs plans deleting path when it exists and, in a real run, then removes each
+// directory between path and stop (stop itself is kept) that the deletion leaves empty. A dry
+// run lists only the file.
+func (pl *planner) removeWithEmptyDirs(path, stop string) error {
+	if err := pl.remove(path); err != nil || pl.dry {
+		return err
+	}
+	// os.Remove fails on a directory that isn't empty, which ends the climb.
+	for dir := filepath.Dir(path); strings.HasPrefix(dir, stop+string(filepath.Separator)) && os.Remove(dir) == nil; dir = filepath.Dir(dir) {
+		delete(pl.names, dir)
+	}
+	return nil
+}
+
 // exists reports whether path exists, as the plan so far leaves it.
 func (pl *planner) exists(path string) (bool, error) {
 	_, _, exists, err := pl.read(path)

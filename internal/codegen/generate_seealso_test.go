@@ -101,3 +101,52 @@ func TestSeeAlso_composedCommandsNameTheirOwnSpec(t *testing.T) {
 		}
 	}
 }
+
+// TestSeeAlso_pagesListEachPageOnce pins that a see_also entry naming a page the man or markdown
+// page already cross-references (the parent or a child), or naming a page twice, shows it once.
+func TestSeeAlso_pagesListEachPageOnce(t *testing.T) {
+	t.Parallel()
+	gp, err := resolveTree(decodeSpecYAML(t, `version: 0.0.0
+command:
+  name: taskr
+  commands:
+    - name: widget
+      summary: manage widgets
+      see_also: [{ command: widget add }, { command: widget add }, { command: remote }]
+      commands:
+        - name: add
+          summary: add a widget
+          see_also: [{ command: widget }, git(1)]
+    - name: remote
+      summary: manage remotes
+`), filepath.Join(t.TempDir(), ".rotini.spec.yaml"), "example.com/taskr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		feat docFeature
+		text string
+		path []string
+		want string
+	}{
+		{manFeatureDesc, templateMan, []string{"widget"}, `.SH "SEE ALSO"` + "\n" + `\fBtaskr\fR(1), \fBtaskr\-widget\-add\fR(1), \fBtaskr\-remote\fR(1)`},
+		{manFeatureDesc, templateMan, []string{"widget", "add"}, `.SH "SEE ALSO"` + "\n" + `\fBtaskr\-widget\fR(1), git(1)`},
+		{markdownFeatureDesc, templateMarkdown, []string{"widget"}, "## See Also\n\n- [taskr](taskr.md)\n- [taskr widget add](taskr-widget-add.md)\n- [taskr remote](taskr-remote.md)"},
+		{markdownFeatureDesc, templateMarkdown, []string{"widget", "add"}, "## See Also\n\n- [taskr-widget](taskr-widget.md)\n- git(1)"},
+		{helpFeatureDesc, templateHelp, []string{"widget"}, "See Also:\n  taskr widget add\n  taskr remote"},
+	} {
+		tmpl, err := parseDocTemplate(tt.feat.name, tt.text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nodes := flattenFeature(gp, tt.feat)
+		i := slices.IndexFunc(nodes, func(n helpNode) bool { return slices.Equal(n.path, tt.path) })
+		page, err := renderDocText(tmpl, nodes[i].data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(page, tt.want) {
+			t.Errorf("%s %v page lacks\n%s\n--- page\n%s", tt.feat.name, tt.path, tt.want, page)
+		}
+	}
+}

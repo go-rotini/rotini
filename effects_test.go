@@ -43,6 +43,15 @@ func TestRunEffects(t *testing.T) {
 		{"by its short identifier", []string{"rm", "-f"}, Effects{Kind: "destructive", Idempotent: no, OpenWorld: no}},
 		{"a bool flag set false adds nothing", []string{"rm", "--no-force"}, Effects{Kind: "write", Idempotent: yes, OpenWorld: no}},
 		{"a bool flag set false inline adds nothing", []string{"rm", "--force=false"}, Effects{Kind: "write", Idempotent: yes, OpenWorld: no}},
+		{"a bool flag set 1 inline counts", []string{"rm", "--force=1"}, Effects{Kind: "destructive", Idempotent: no, OpenWorld: no}},
+		{"a bool flag set t inline counts", []string{"rm", "--force=t"}, Effects{Kind: "destructive", Idempotent: no, OpenWorld: no}},
+		{"a bool flag set yes inline counts", []string{"rm", "--force=yes"}, Effects{Kind: "destructive", Idempotent: no, OpenWorld: no}},
+		{"a bool flag set y inline counts", []string{"rm", "--force=y"}, Effects{Kind: "destructive", Idempotent: no, OpenWorld: no}},
+		{"a bool flag set on inline counts", []string{"rm", "--force=on"}, Effects{Kind: "destructive", Idempotent: no, OpenWorld: no}},
+		{"a bool flag set TRUE inline counts", []string{"rm", "--force=TRUE"}, Effects{Kind: "destructive", Idempotent: no, OpenWorld: no}},
+		{"a bool flag set 0 inline adds nothing", []string{"rm", "--force=0"}, Effects{Kind: "write", Idempotent: yes, OpenWorld: no}},
+		{"a bool flag set no inline adds nothing", []string{"rm", "--force=no"}, Effects{Kind: "write", Idempotent: yes, OpenWorld: no}},
+		{"a bool flag set off inline adds nothing", []string{"rm", "--force=off"}, Effects{Kind: "write", Idempotent: yes, OpenWorld: no}},
 		{"a count flag counts", []string{"rm", "--again", "--again"}, Effects{Kind: "write", Idempotent: no, OpenWorld: no}},
 		{"a cascading flag of an ancestor", []string{"rm", "--purge"}, Effects{Kind: "destructive", Idempotent: yes, OpenWorld: no}},
 		{"any open-world value reaches outside", []string{"rm", "--remote", "x"}, Effects{Kind: "write", Idempotent: yes, OpenWorld: yes}},
@@ -70,6 +79,18 @@ func TestRunEffects_commandLineOnly(t *testing.T) {
 	rtx := NewContextFor(def, []string{"rm"}).WithEnviron([]string{"APP_FORCE=true"})
 	if got := EffectsOf(rtx); got.Kind != "write" {
 		t.Errorf("Kind = %q, want write", got.Kind)
+	}
+}
+
+// A bool flag an [ArgvParser] reads as "yes" is set true, as the binder reads it.
+func TestRunEffects_argvParserBoolValue(t *testing.T) {
+	for _, tc := range []struct {
+		value, kind string
+	}{{"yes", "destructive"}, {"on", "destructive"}, {"no", "write"}} {
+		rtx := NewContextFor(effectsDef(), []string{"rm", "force=" + tc.value}).WithParser(kvParser{})
+		if got := EffectsOf(rtx); got.Kind != tc.kind {
+			t.Errorf("force=%s: Kind = %q, want %q", tc.value, got.Kind, tc.kind)
+		}
 	}
 }
 

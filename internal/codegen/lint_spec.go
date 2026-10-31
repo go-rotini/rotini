@@ -185,38 +185,53 @@ func rootLabel(spec *Spec) string {
 	return "command " + spec.Command.Name
 }
 
-// lintDocLevelKeys rejects env_prefix, schemas, exit_statuses, display_name, response_files and
-// channels on a non-root command: codegen reads them only on the root, so elsewhere they would be
-// silently ignored.
+// rootOnlyKey is a command key rotini reads only on the root command.
+type rootOnlyKey struct {
+	key string
+	set func(*Command) bool
+	msg string // the problem's message on a sub-command; "" for the usual one
+}
+
+// rootOnlyKeys are the command keys rotini reads only on the root command, in the order
+// lintDocLevelKeys reports them. The spec schema describes each as "Root only:".
+func rootOnlyKeys() []rootOnlyKey {
+	return rootOnlyKeysOnce.value(func() []rootOnlyKey {
+		return []rootOnlyKey{
+			{key: "env_prefix", set: func(c *Command) bool { return c.EnvPrefix != "" }},
+			{key: "schemas", set: func(c *Command) bool { return c.Schemas != nil }},
+			{key: "exit_statuses", set: func(c *Command) bool { return c.ExitStatuses != nil }},
+			{key: "display_name", set: func(c *Command) bool { return c.DisplayName != "" }},
+			{key: "response_files", set: func(c *Command) bool { return c.ResponseFiles != nil }},
+			{key: "channels", set: func(c *Command) bool { return c.Channels != nil }},
+			{key: "flag_sets", set: func(c *Command) bool { return len(c.FlagSets) > 0 },
+				msg: "declares `flag_sets`, which only the root command can; move them to the root, where every command of the spec can `use` them"},
+			{key: "multicall", set: func(c *Command) bool { return c.Multicall != nil },
+				msg: "sets `multicall`, a root-command-level key valid only on the root command; remove it (it is read only at the root, so here it is silently ignored)"},
+			{key: "topics", set: func(c *Command) bool { return len(c.Topics) > 0 },
+				msg: "sets `topics`, which only the root command declares; move the topics to the root"},
+		}
+	})
+}
+
+var rootOnlyKeysOnce lazy[[]rootOnlyKey]
+
+// lintDocLevelKeys rejects each of [rootOnlyKeys] on a non-root command: rotini reads them
+// only on the root, so elsewhere they would be silently ignored.
 func lintDocLevelKeys(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if c == &spec.Command {
 			return
 		}
-		add := func(key string) {
-			problems = append(problems, &problem{
-				kind: "spec", ptr: ptr + "/" + key, loc: "command " + path,
-				msg: fmt.Sprintf("sets %#q, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)", key),
-			})
-		}
-		if c.EnvPrefix != "" {
-			add("env_prefix")
-		}
-		if c.Schemas != nil {
-			add("schemas")
-		}
-		if c.ExitStatuses != nil {
-			add("exit_statuses")
-		}
-		if c.DisplayName != "" {
-			add("display_name")
-		}
-		if c.ResponseFiles != nil {
-			add("response_files")
-		}
-		if c.Channels != nil {
-			add("channels")
+		for _, k := range rootOnlyKeys() {
+			if !k.set(c) {
+				continue
+			}
+			msg := k.msg
+			if msg == "" {
+				msg = fmt.Sprintf("sets %#q, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)", k.key)
+			}
+			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/" + k.key, loc: "command " + path, msg: msg})
 		}
 	})
 	return problems

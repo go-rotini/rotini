@@ -114,7 +114,7 @@ type Context struct {
 	faults        []*PanicError
 	channels      []*channelRecords // author channels, in first-recorded order
 	declared      []ChannelDef      // the channels the Definition declares (read-only)
-	lastErr       error             // the error RecordError last recorded, as given
+	lastErr       error             // the error RecordError last recorded in the current hook, as given
 
 	// frame is the chain index of the command whose hook is running, or frameUnset outside a
 	// hook (resolving to the leaf). [AsCommand] sets it around every step; [Context.Command]
@@ -587,6 +587,14 @@ func (rtx *Context) RecordError(err error) {
 	defer rtx.mu.Unlock()
 	rtx.errs = append(rtx.errs, err)
 	rtx.lastErr = given
+}
+
+// hookStarts forgets the error an earlier hook recorded, so [Context.returned] skips only one
+// the starting hook records itself.
+func (rtx *Context) hookStarts() {
+	rtx.mu.Lock()
+	rtx.lastErr = nil
+	rtx.mu.Unlock()
 }
 
 // returned applies an [HandlerE] hook's result: it records err unless it is the error the

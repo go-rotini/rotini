@@ -201,10 +201,44 @@ func (v *osView) fileSystem() fs.FS {
 	return defaultFS
 }
 
+// fsFor is the file system p is read and written through: the run's, except for a Windows
+// device (NUL, CON, …), which no FS names and which is the operating system's, through os:
+// a reserved name, or a path Windows itself resolves to a device (NUL.txt, on some versions).
+func (v *osView) fsFor(p string) fs.FS {
+	if runtime.GOOS == "windows" {
+		if abs, err := filepath.Abs(p); windowsDevice(p) || (err == nil && windowsDevice(abs)) {
+			return nil
+		}
+	}
+	return v.fileSystem()
+}
+
+// windowsDevice reports whether p names a Windows device, by Windows' rules on any platform: a
+// \\.\ path, or one whose last element is a reserved name (NUL, CON, PRN, AUX, COM1 to COM9,
+// LPT1 to LPT9, CONIN$, CONOUT$) in any case, without an extension.
+func windowsDevice(p string) bool {
+	if strings.HasPrefix(p, `\\.\`) || strings.HasPrefix(p, `//./`) {
+		return true
+	}
+	base := strings.ToUpper(p[strings.LastIndexAny(p, `\/:`)+1:])
+	switch base {
+	case "NUL", "CON", "PRN", "AUX", "CONIN$", "CONOUT$":
+		return true
+	}
+	if len(base) < 4 || (base[:3] != "COM" && base[:3] != "LPT") {
+		return false
+	}
+	switch base[3:] {
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "\u00b9", "\u00b2", "\u00b3":
+		return true
+	}
+	return false
+}
+
 // The file helpers take an OS path, absolute or relative to the process working directory, as
 // the os function of the same name does. With no FS they are that function; with one, the path
 // is made absolute and read or written as its [fs.FS] name, and an [*fs.PathError] the FS
-// returns names the path again.
+// returns names the path again. A Windows device is always the operating system's (fsFor).
 
 // fsName maps p to fsys's name for it.
 func fsName(op, p string) (string, error) {
@@ -232,7 +266,7 @@ func relabel(err error, p string) error {
 
 // open is os.Open through the run's file system.
 func (v *osView) open(p string) (fs.File, error) {
-	fsys := v.fileSystem()
+	fsys := v.fsFor(p)
 	if fsys == nil {
 		f, err := os.Open(p)
 		if err != nil {
@@ -253,7 +287,7 @@ func (v *osView) open(p string) (fs.File, error) {
 
 // stat is os.Stat through the run's file system.
 func (v *osView) stat(p string) (fs.FileInfo, error) {
-	fsys := v.fileSystem()
+	fsys := v.fsFor(p)
 	if fsys == nil {
 		return os.Stat(p) //nolint:wrapcheck // os names the path
 	}
@@ -268,7 +302,7 @@ func (v *osView) stat(p string) (fs.FileInfo, error) {
 // lstat is os.Lstat through the run's file system: [fs.Lstat], which is stat for an FS that
 // has no symbolic links.
 func (v *osView) lstat(p string) (fs.FileInfo, error) {
-	fsys := v.fileSystem()
+	fsys := v.fsFor(p)
 	if fsys == nil {
 		return os.Lstat(p) //nolint:wrapcheck // os names the path
 	}
@@ -282,7 +316,7 @@ func (v *osView) lstat(p string) (fs.FileInfo, error) {
 
 // readDir is os.ReadDir through the run's file system.
 func (v *osView) readDir(p string) ([]fs.DirEntry, error) {
-	fsys := v.fileSystem()
+	fsys := v.fsFor(p)
 	if fsys == nil {
 		return os.ReadDir(p) //nolint:wrapcheck // os names the path
 	}
@@ -296,7 +330,7 @@ func (v *osView) readDir(p string) ([]fs.DirEntry, error) {
 
 // readFile is os.ReadFile through the run's file system.
 func (v *osView) readFile(p string) ([]byte, error) {
-	fsys := v.fileSystem()
+	fsys := v.fsFor(p)
 	if fsys == nil {
 		return os.ReadFile(p) //nolint:wrapcheck // os names the path
 	}
@@ -315,7 +349,7 @@ const maxLinks = 255
 // last element is followed, link by link through [fs.ReadLink]: a relative link is relative to
 // the directory holding it, and an absolute one is an OS path.
 func (v *osView) evalSymlinks(p string) (string, error) {
-	fsys := v.fileSystem()
+	fsys := v.fsFor(p)
 	if fsys == nil {
 		return filepath.EvalSymlinks(p) //nolint:wrapcheck // os names the path
 	}
@@ -365,9 +399,20 @@ func (v *osView) writable() bool {
 	return ok
 }
 
+// ownFile reports whether the existing file p is one a write replaces, whose mode it keeps:
+// false for a file a [LayerFS] shows from its lower layer, where a write creates the file.
+func (v *osView) ownFile(p string) bool {
+	l, ok := v.fileSystem().(layered)
+	if !ok {
+		return true
+	}
+	name, err := fsName("lstat", p)
+	return err == nil && l.inUpper(name)
+}
+
 // writeFS is the run's [WriteFS] and its name for p, or nil for the operating system's.
 func (v *osView) writeFS(op, p string) (WriteFS, string, error) {
-	fsys := v.fileSystem()
+	fsys := v.fsFor(p)
 	if fsys == nil {
 		return nil, "", nil
 	}

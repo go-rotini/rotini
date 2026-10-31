@@ -160,7 +160,7 @@ command:
     - name: sub
       multicall: true
 `)
-	problems := lintMulticall(spec)
+	problems := lintDocLevelKeys(spec) // the rule that keeps every root-only key on the root
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "root-command-level key") {
 		t.Errorf("problems = %v", problems)
 	}

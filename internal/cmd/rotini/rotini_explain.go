@@ -27,7 +27,8 @@ func (*rotiniExplainHandler) Run(_ context.Context, rtx *rotini.Context) error {
 	explain := rtx.MustDependency(explainDep)
 	infos, err := explain(inputs.RotiniExplain.Arguments.Key)
 	if err != nil {
-		return rotini.UsageError(err)
+		// The key is the user's input, so the error names the command, as input errors do.
+		return rotini.UsageError(fmt.Errorf("%s: %w", rtx.CommandPath(), err))
 	}
 	var b strings.Builder
 	for i, info := range infos {

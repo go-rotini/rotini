@@ -37,8 +37,3 @@ command:
           schema: { type: bool }
     - name: show
       use: [Paging, Outptu]
-      flag_sets:
-        Local:
-          flags:
-            - name: y
-              schema: { type: bool }

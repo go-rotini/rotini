@@ -90,8 +90,8 @@ func ParseConfigValue(fn func(raw string) error) ConfigWriteOption { return Conf
 // reads from the file, raw is split on the key's separator for a list (map entries are
 // key=value) and must parse as the key's type, and the enum, bounds, pattern and item counts
 // apply. An enum value is written in its declared spelling, numbers and booleans as such, and
-// everything else as a string. A key declared secret is refused without [ConfigAllowSecretWrite].
-// When the file declares a schema, the edited file must still match it; a violation names
+// everything else as a string. A key declared secret, or declared below one, is refused without
+// [ConfigAllowSecretWrite]. When the file declares a schema, the edited file must still match it; a violation names
 // where the rejected value would be in the edited file (app.yaml:4:11 would be invalid: …).
 //
 // The file is the one the command reads: its config_source path, else its fixed path or its
@@ -104,9 +104,10 @@ func ParseConfigValue(fn func(raw string) error) ConfigWriteOption { return Conf
 // the key's lines are added at the end of its parent mapping. A layout that can't be edited
 // safely, such as a key reached through a YAML alias, is refused. YAML, JSON, JSONC, TOML and
 // dotenv files are written, and files in a [Codec] format given [CodecEncode], which are
-// rewritten whole by its encoder rather than edited in place. The new file replaces the old one atomically and keeps its
-// permissions; a new file gets 0644, or 0600 when any of its keys is secret. Two commands
-// writing the same file at once can lose one of the changes.
+// rewritten whole by its encoder rather than edited in place. The new file replaces the old one
+// atomically and keeps its permissions; a new file, or one a [LayerFS] shows from its lower
+// layer, gets 0644, or 0600 when any of its keys is secret. Two commands writing the same file
+// at once can lose one of the changes.
 //
 // In a file that declares profiles, the value goes into the profile the run selects, unless
 // [ConfigToProfile] or [ConfigToSharedKeys] says otherwise; with no profile selected it goes into the
@@ -177,6 +178,7 @@ func writeConfigValue(rtx *Context, file, key string, raw *string, opts []Config
 	path := configKeyPath(format, f, profile, key)
 
 	var edited []byte
+	secret := f.secretAt(key)
 	if raw == nil {
 		keep := 0
 		if profile != "" {
@@ -184,9 +186,11 @@ func writeConfigValue(rtx *Context, file, key string, raw *string, opts []Config
 		}
 		edited, err = t.unset(format, enc, path, keep)
 	} else {
-		secret := slices.ContainsFunc(keys, func(k ConfigKeyDef) bool { return k.Secret })
-		if secret && !w.allowSecret {
-			return usageBind(InputErrorKindWriteRefused, channelConfig, key, fmt.Sprintf("config key %s is secret and isn't written to a file", key), nil)
+		if secret {
+			if !w.allowSecret {
+				return usageBind(InputErrorKindWriteRefused, channelConfig, key, fmt.Sprintf("config key %s is secret and isn't written to a file", key), nil)
+			}
+			keys = asSecret(keys)
 		}
 		value, verr := configValue(rtx, keys, *raw, format, w.parse)
 		if verr != nil {
@@ -200,7 +204,7 @@ func writeConfigValue(rtx *Context, file, key string, raw *string, opts []Config
 		edited, err = t.set(format, enc, path, value)
 	}
 	if err != nil {
-		return t.editError(key, err)
+		return t.editError(key, err, secret)
 	}
 	if bytes.Equal(edited, t.src) {
 		return nil // nothing changes: the file isn't touched
@@ -272,9 +276,23 @@ func configKeyPath(format cfgedit.Format, f ConfigFileDef, profile, key string) 
 	return path
 }
 
+// asSecret is keys, each marked secret: a key declared below a secret one is as secret, so its
+// value checks redact it too.
+func asSecret(keys []ConfigKeyDef) []ConfigKeyDef {
+	keys = slices.Clone(keys)
+	for i := range keys {
+		keys[i].Secret = true
+	}
+	return keys
+}
+
 // editError reports a failed edit: a layout the user edits by hand, a value the file's format
-// can't hold, a file that can't be parsed, or a bug that left the file untouched.
-func (t configFileTarget) editError(key string, err error) error {
+// can't hold, a file that can't be parsed, or a bug that left the file untouched. For a secret
+// key, a [Codec]'s own error text, which may quote the value, is left out.
+func (t configFileTarget) editError(key string, err error, secret bool) error {
+	if secret {
+		err = withoutCodecText(err)
+	}
 	switch {
 	case errors.Is(err, cfgedit.ErrRefused), errors.Is(err, cfgedit.ErrValue):
 		return usageBind(InputErrorKindWriteRefused, channelConfig, key, fmt.Sprintf("configuration file %s: %v", t.path, err), err)

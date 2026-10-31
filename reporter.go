@@ -125,28 +125,66 @@ func (p *Program) Reporter() Reporter {
 
 // settle is the single run tail every run path ends in: it discards output files left open,
 // flushes buffered stdout (recording a failed flush as an error), hands the recorded outcome to
-// the reporter and resolves the exit code.
+// the reporter, releases what the run's providers built, and resolves the exit code.
 //
 // A handler's exit code is already in rtx.exitCode when the reporter runs; the reporter is
 // the final authority, since rtx.Exit overrides it during the reporter stage. The exit floor
 // lives in DefaultReporter, so a custom reporter does not inherit it.
-func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
+//
+// The providers' values are released after the reporter, so it can use them; a run the
+// reporter would skip, having recorded nothing, releases them first, so a cleanup failure
+// is reported. A cleanup failure after the reporter joins the returned error and turns exit
+// code 0 into 1, the one exit floor that outranks the reporter: the failure was never shown
+// to it.
+func (p *Program) settle(ctx context.Context, rtx *Context) (code int, err error) {
 	// A signal that arrived after the last forward step (during teardown, say) still ends
 	// the run with its code, however forward progress stopped, unless a hook exited.
 	if _, exitNow := rtx.stopState(); !exitNow && signalCanceled(ctx) {
 		rtx.HaltWithCode(canceledExitCode(ctx))
 	}
-	// Every hook has finished: clean up what the run's providers built, so a cleanup error
-	// reaches the reporter.
-	rtx.cleanUpProvided()
-	if rtx.closesShared {
-		p.closeShared(rtx.RecordError, rtx.recordFault)
-	}
 
 	rtx.endStdin()
 	rtx.abortOutputs()
 	rtx.settleOutput()
-	out := Outcome{
+	out := rtx.outcome(ctx)
+	report := p.reportEmpty || !out.Empty()
+	if !report {
+		// Nothing to report: release now, so a cleanup failure is recorded and reported. A
+		// value the reporter then asks for is built again and released after it.
+		p.releaseProvided(rtx, rtx.RecordError, rtx.recordFault)
+		rtx.forgetProvided()
+		out = rtx.outcome(ctx)
+		report = !out.Empty()
+	}
+	// Released after the reporter, and while a panic from it unwinds.
+	defer func() {
+		var late []error
+		p.releaseProvided(rtx, func(e error) { late = append(late, e) }, func(pe *PanicError) { late = append(late, pe) })
+		if len(late) > 0 {
+			err = errors.Join(append([]error{err}, late...)...)
+			if code == 0 {
+				code = 1
+			}
+		}
+	}()
+
+	// Build the run's error before the reporter runs: it shares the Outcome's backing arrays,
+	// so a reporter writing to out.Errors[i] must not change what Run returns. rtx.exitCode
+	// is read after the reporter, which is how the reporter controls the code.
+	err = joinOutcome(append(slices.Clip(out.Errors), out.channelErrors()...), out.Panics)
+
+	if report {
+		fn := p.Reporter()
+		rtx.setReporterStage(true) // rtx.Exit now overrides; rtx.HaltWithCode is a no-op
+		fn(ctx, rtx, out)
+		rtx.setReporterStage(false)
+	}
+	return rtx.code(), err
+}
+
+// outcome is what the run recorded so far, copied for the reporter.
+func (rtx *Context) outcome(ctx context.Context) Outcome {
+	return Outcome{
 		Infos:     rtx.copyInfos(),
 		Successes: rtx.copySuccesses(),
 		Warnings:  rtx.copyWarnings(),
@@ -156,19 +194,16 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 		Signal:    runSignal(ctx),
 		channels:  rtx.copyChannels(),
 	}
+}
 
-	// Build the run's error before the reporter runs: it shares the Outcome's backing arrays,
-	// so a reporter writing to out.Errors[i] must not change what Run returns. rtx.exitCode
-	// is read after the reporter, which is how the reporter controls the code.
-	err := joinOutcome(append(slices.Clip(out.Errors), out.channelErrors()...), out.Panics)
-
-	if p.reportEmpty || !out.Empty() {
-		fn := p.Reporter()
-		rtx.setReporterStage(true) // rtx.Exit now overrides; rtx.HaltWithCode is a no-op
-		fn(ctx, rtx, out)
-		rtx.setReporterStage(false)
+// releaseProvided calls the cleanups of what the run's providers built and, for
+// [Program.Execute]'s run, releases the program's shared values, passing each cleanup error
+// to record and each cleanup panic to fault.
+func (p *Program) releaseProvided(rtx *Context, record func(error), fault func(*PanicError)) {
+	rtx.cleanUpProvided(record, fault)
+	if rtx.closesShared {
+		p.closeShared(record, fault)
 	}
-	return rtx.code(), err
 }
 
 // joinOutcome is the error a run returns to its caller: every recorded error and captured

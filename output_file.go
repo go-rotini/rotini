@@ -62,8 +62,9 @@ func OutputOverwrite(enabled bool) OutputOption {
 }
 
 // OutputFileMode sets the permissions of a file [CreateOutput] creates or replaces, before the
-// umask. The default is 0644 for a new file, and the replaced file's own permissions when
-// overwriting; OutputFileMode(0o600) keeps secret output private.
+// umask. The default is 0644 for a new file (and for one a [LayerFS] shows from its lower
+// layer), and the replaced file's own permissions when overwriting; OutputFileMode(0o600) keeps
+// secret output private.
 func OutputFileMode(perm fs.FileMode) OutputOption {
 	return func(c *outputConfig) { c.mode, c.modeSet = perm.Perm(), true }
 }
@@ -116,7 +117,7 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 
 	view := rtx.osView()
 	target := view.abs(path)
-	if !view.writable() {
+	if !view.writable() && view.fsFor(target) != nil {
 		return nil, outputOpenError(fmt.Sprintf("could not create output file %s", quotePath(path)), &fs.PathError{Op: "open", Path: target, Err: readOnlyError{}})
 	}
 	info, err := view.lstat(target)
@@ -152,7 +153,7 @@ func CreateOutput(rtx *Context, path string, opts ...OutputOption) (*OutputFile,
 	switch {
 	case cfg.modeSet:
 		perm = cfg.mode
-	case exists:
+	case exists && view.ownFile(target):
 		perm, keepMode = info.Mode().Perm(), true
 	}
 	f, tmp, err := createTemp(view, target, perm)

@@ -111,6 +111,29 @@ func seeAlsoRows(entries []seeAlsoEntry, rootName, rootDisplay string) []templat
 	return out
 }
 
+// uniqueSeeAlsoRows returns rows without the entries naming a page in listed or one an earlier
+// entry names, so a page cross-references each page once.
+func uniqueSeeAlsoRows(rows []templateDocSeeAlso, listed []string) []templateDocSeeAlso {
+	if rows == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(listed)+len(rows))
+	for _, p := range listed {
+		seen[p] = true
+	}
+	out := make([]templateDocSeeAlso, 0, len(rows))
+	for _, r := range rows {
+		if r.Page != "" {
+			if seen[r.Page] {
+				continue
+			}
+			seen[r.Page] = true
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 // sanitizeSeeAlso returns copies of a page's see_also texts and rows with their text cleaned.
 func sanitizeSeeAlso(texts []string, rows []templateDocSeeAlso, clean func(string) string) ([]string, []templateDocSeeAlso) {
 	texts = append([]string(nil), texts...)

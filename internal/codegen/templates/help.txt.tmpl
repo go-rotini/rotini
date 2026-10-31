@@ -124,6 +124,10 @@
                 non-empty notes in one parenthetical: notes "default 1" "" "1..100" gives
                 " (default 1, 1..100)"; false counts as empty, for `and .Required "required"`).
                 All deterministic (no clock/entropy) to keep rendering byte-stable. */ -}}
+{{- define "files"}}{{- with .Files}}{{$.Headings.Files}}
+{{range .}}  {{.File}}	{{.Note}}
+{{end}}
+{{end -}}{{end -}}
 {{- define "values"}}{{if described .EnumValues}}{{range .EnumValues}}{{if not .Deprecated}}  	  {{.Value}}	{{.Summary}}
 {{end}}{{end}}{{end}}{{end -}}
 {{- define "flag"}}  {{.Label}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{notes .Effects (and .Required "required") (and .Default (printf "default %s" .Default)) (and .Implicit (printf "implicit: %s" .Implicit)) .Constraints .Accepts .Stability}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
@@ -177,17 +181,15 @@
 {{end}}
 {{end -}}
 {{- with .Environment}}{{$.Headings.Environment}}
-{{range .}}  {{.Var}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{notes (and .Required "required") (and .Default (printf "default %s" .Default)) .Constraints .Accepts .Stability}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Commands}} (used by: {{join . ", "}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
+{{range .}}  {{.Var}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{notes (and .Required "required") (and .Default (printf "default %s" .Default)) .Constraints .Accepts .Stability (and .Commands (printf "used by: %s" (join .Commands ", ")))}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{template "values" .}}{{end}}
 {{end -}}
+{{- if .Topic}}{{template "files" .}}{{end -}}
 {{- with .Configuration}}{{$.Headings.Configuration}}
-{{range .}}  {{.Key}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{notes (and .File (printf "in %s" .File)) (and .Required "required") (and .Default (printf "default %s" .Default)) .Constraints .Accepts .Stability}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{with .Commands}} (used by: {{join . ", "}}){{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
+{{range .}}  {{.Key}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{notes (and .File (printf "in %s" .File)) (and .Required "required") (and .Default (printf "default %s" .Default)) .Constraints .Accepts .Stability (and .Commands (printf "used by: %s" (join .Commands ", ")))}}{{with listed .Enum .EnumValues}} [{{join . "|"}}]{{end}}{{if .Deprecated}} ({{deprecation .Deprecated .DeprecatedSince .RemovedIn}}){{end}}
 {{template "values" .}}{{end}}
 {{end -}}
-{{- with .Files}}{{$.Headings.Files}}
-{{range .}}  {{.File}}	{{.Note}}
-{{end}}
-{{end -}}
+{{- if not .Topic}}{{template "files" .}}{{end -}}
 {{- with .Cascading}}{{$.Headings.Cascading}}
 {{range .}}{{template "flag" .}}{{end}}
 {{end -}}

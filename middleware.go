@@ -47,7 +47,8 @@ type Hook struct {
 }
 
 // HookFunc runs a hook, or the rest of the middleware chain around it, and returns its error:
-// what an [HandlerE] hook returned, or nil for a [Handler] hook, which records through rtx.
+// what an [HandlerE] hook returned, when the program's handler is the one [FromHandlerE]
+// returned for it, or nil for a [Handler] hook, which records through rtx.
 type HookFunc func(ctx context.Context, rtx *Context) error
 
 // Middleware wraps a hook invocation: it returns the function rotini calls in place of next.
@@ -62,6 +63,11 @@ type HookFunc func(ctx context.Context, rtx *Context) error
 //
 // An error a hook has just recorded itself, with [Context.HaltWith] or [Context.RecordError],
 // isn't recorded twice when a middleware returns it.
+//
+// A middleware sees an [HandlerE] hook's error when the program's handler is the [Handler]
+// [FromHandlerE] returned for it, as generated wiring is. A Handler of the author's own that
+// wraps that one, such as a decorator around it, runs as a Handler: the HandlerE's error is
+// recorded inside it, and next returns nil.
 //
 // A middleware with nothing to do for a hook returns next itself; it never returns nil, which
 // panics:
@@ -89,7 +95,8 @@ type Middleware func(h Hook, next HookFunc) HookFunc
 // Middleware runs inside the run's panic handling: a panic in it is handled as a panic in the
 // hook it wraps. Under a custom [Program.WithLifecycle] plan it wraps the [Handler] hooks the
 // plan takes from [DefaultLifecycle]; a step function the plan writes itself is not a hook and
-// runs as it is, so [Hook.Kind] always names one of a Handler's hooks.
+// runs as it is, so [Hook.Kind] always names one of a Handler's hooks. A hook's returned error
+// reaches the middleware only from a handler [FromHandlerE] returned; see [Middleware].
 //
 //	cmd.NewProgram().
 //		WithMiddleware(timing, confirmDestructive).
@@ -106,6 +113,7 @@ func (p *Program) WithMiddleware(mw ...Middleware) *Program {
 // callWrapped runs hook kind of h inside the run's middleware, then applies its error as an
 // [HandlerE]'s is applied, so the middleware sees the error before it is recorded.
 func callWrapped(ctx context.Context, rtx *Context, h Handler, kind HookKind) {
+	rtx.hookStarts()
 	next := HookFunc(func(ctx context.Context, rtx *Context) error {
 		restore := rtx.hookContext(ctx)
 		defer restore()

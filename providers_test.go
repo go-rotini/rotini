@@ -145,7 +145,7 @@ func TestProvider_setValueWins(t *testing.T) {
 	}
 }
 
-// Cleanups run after every hook, before the reporter, in reverse order of construction; set
+// Cleanups run after every hook and after the reporter, in reverse order of construction; set
 // values, values the run never built, and values provided with a nil cleanup are left alone,
 // even when they have a Close method.
 func TestProvider_cleanedUpAfterTeardownInReverse(t *testing.T) {
@@ -181,8 +181,150 @@ func TestProvider_cleanedUpAfterTeardownInReverse(t *testing.T) {
 	if code, err := p.Run(argv); code != 0 || err != nil {
 		t.Fatalf("Run = %d, %v", code, err)
 	}
-	if want := []string{"teardown", "b", "a", "reporter"}; !slices.Equal(log, want) {
+	if want := []string{"teardown", "reporter", "b", "a"}; !slices.Equal(log, want) {
 		t.Errorf("order = %q, want %q", log, want)
+	}
+}
+
+// The reporter can use what the run's providers built: it gets the value the hooks used, still
+// open, and a dependency first asked for in the reporter is built and cleaned up too.
+func TestProvider_reporterUsesProvided(t *testing.T) {
+	var log []string
+	used, late := NewDependency[*provClient]("used"), NewDependency[*provClient]("late")
+	var hookValue, reporterValue *provClient
+	p, argv, _, _ := comboTree(1, map[string]comboHook{
+		"c0.Run": func(_ context.Context, rtx *Context) {
+			hookValue = rtx.MustDependency(used)
+			rtx.RecordSuccess("done")
+		},
+	})
+	mk := func(name string) func(context.Context, *Context) (*provClient, func() error, error) {
+		return func(context.Context, *Context) (*provClient, func() error, error) {
+			pc := &provClient{name: name, closeLog: &log}
+			return pc, pc.Close, nil
+		}
+	}
+	p.WithProvider(used, mk("used")).WithProvider(late, mk("late"))
+	p.WithReporter(func(_ context.Context, rtx *Context, _ Outcome) {
+		reporterValue = rtx.MustDependency(used)
+		rtx.MustDependency(late)
+		log = append(log, "reporter")
+	})
+	if code, err := p.Run(argv); code != 0 || err != nil {
+		t.Fatalf("Run = %d, %v", code, err)
+	}
+	if reporterValue != hookValue {
+		t.Error("the reporter got a different value from the one the hook used")
+	}
+	if want := []string{"reporter", "late", "used"}; !slices.Equal(log, want) {
+		t.Errorf("order = %q, want %q", log, want)
+	}
+}
+
+// A cleanup error after the reporter has reported can't reach it: it joins the error Run
+// returns, and a run that would exit 0 exits 1 instead. A non-zero code stays.
+func TestProvider_cleanupErrorAfterReporter(t *testing.T) {
+	errClose := errors.New("flush failed")
+	for _, tc := range []struct {
+		name     string
+		halt     int
+		wantCode int
+	}{{"a clean run exits 1", 0, 1}, {"a set code stays", 3, 3}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var log []string
+			dep := NewDependency[*provClient]("db")
+			p, argv, _, errs := comboTree(1, map[string]comboHook{
+				"c0.Run": func(_ context.Context, rtx *Context) {
+					rtx.MustDependency(dep)
+					rtx.RecordSuccess("done")
+					if tc.halt != 0 {
+						rtx.HaltWithCode(tc.halt)
+					}
+				},
+			})
+			p.WithProvider(dep, func(context.Context, *Context) (*provClient, func() error, error) {
+				pc := &provClient{name: "db", closeLog: &log, closeErr: errClose}
+				return pc, pc.Close, nil
+			})
+			var reported Outcome
+			p.WithReporter(func(ctx context.Context, rtx *Context, out Outcome) {
+				reported = out
+				DefaultReporter(ctx, rtx, out)
+			})
+			code, err := p.Run(argv)
+			if code != tc.wantCode || !errors.Is(err, errClose) {
+				t.Errorf("Run = %d, %v; want %d and the cleanup error", code, err, tc.wantCode)
+			}
+			if len(reported.Errors) != 0 || strings.Contains(errs.String(), "Error:") {
+				t.Errorf("reported %v, stderr %q; want the cleanup error unreported", reported.Errors, errs.String())
+			}
+		})
+	}
+}
+
+// A run that records nothing skips the reporter, so its cleanups run first and a cleanup error
+// is reported; a dependency the reporter then asks for is built again, open, and cleaned up.
+func TestProvider_cleanupErrorOnQuietRunReported(t *testing.T) {
+	var log []string
+	errClose := errors.New("flush failed")
+	dep := NewDependency[*provClient]("db")
+	var values []*provClient
+	p, argv, _, _ := comboTree(1, map[string]comboHook{
+		"c0.Run": func(_ context.Context, rtx *Context) { values = append(values, rtx.MustDependency(dep)) },
+	})
+	p.WithProvider(dep, func(context.Context, *Context) (*provClient, func() error, error) {
+		pc := &provClient{name: "db" + strconv.Itoa(len(values)), closeLog: &log}
+		if len(values) == 0 {
+			pc.closeErr = errClose
+		}
+		return pc, pc.Close, nil
+	})
+	var reported Outcome
+	var reporterClosed int
+	p.WithReporter(func(_ context.Context, rtx *Context, out Outcome) {
+		reported = out
+		values = append(values, rtx.MustDependency(dep))
+		reporterClosed = len(log)
+	})
+	code, err := p.Run(argv)
+	if code != 0 || !errors.Is(err, errClose) || len(reported.Errors) != 1 {
+		t.Fatalf("Run = %d, %v, reported %v; want the first cleanup error reported (exit left to the reporter)", code, err, reported.Errors)
+	}
+	if len(values) != 2 || values[0] == values[1] || reporterClosed != 1 || !slices.Equal(log, []string{"db0", "db1"}) {
+		t.Errorf("values %v, closed before the reporter's %d, log %q; want a fresh value for the reporter, cleaned up after it", values, reporterClosed, log)
+	}
+}
+
+// A panic re-raised by WithPanicRecover(false), after teardown or unguarded, still cleans up
+// what the run's providers built.
+func TestProvider_cleanedUpWhenPanicReraised(t *testing.T) {
+	for _, teardown := range []bool{true, false} {
+		t.Run("teardown="+strconv.FormatBool(teardown), func(t *testing.T) {
+			var log []string
+			dep := NewDependency[*provClient]("db")
+			p, argv, _, _ := comboTree(1, map[string]comboHook{
+				"c0.Run": func(_ context.Context, rtx *Context) {
+					rtx.MustDependency(dep)
+					panic("boom")
+				},
+			})
+			p.WithProvider(dep, func(context.Context, *Context) (*provClient, func() error, error) {
+				pc := &provClient{name: "db", closeLog: &log}
+				return pc, pc.Close, nil
+			})
+			p.WithPanicRecover(false).WithTeardownOnPanic(teardown)
+			func() {
+				defer func() {
+					if r := recover(); r != "boom" {
+						t.Errorf("recovered %v, want the hook's panic", r)
+					}
+				}()
+				p.Run(argv)
+			}()
+			if !slices.Equal(log, []string{"db"}) {
+				t.Errorf("cleanups = %q, want the provided value cleaned up", log)
+			}
+		})
 	}
 }
 
