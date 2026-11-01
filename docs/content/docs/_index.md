@@ -3401,7 +3401,10 @@ generate:
   command path (`todo_remote_add`), its parameters are the command's arguments and flags, plus a
   `stdin` parameter when it reads stdin, and its `outputSchema` is the declared output (an array
   of items for a stream). Annotations come from `effects`, and the description lists the exit
-  codes and the variables the server's environment must supply. Each tool's
+  codes and the variables the server's environment must supply. A command with a `role: dry-run`
+  or `role: confirm` flag that agents are offered also says, in its description, which parameter
+  previews the run and which one to set to go ahead: a model reads the description, not
+  `_meta`. Each tool's
   `_meta["dev.rotini/invoke"]` holds what a server needs to rebuild the command line: the
   command path, each parameter's identifier and kind (and whether it is secret or read `from:` a
   file or stdin), whether the command is passthrough, and the machine-output flag to add. It also

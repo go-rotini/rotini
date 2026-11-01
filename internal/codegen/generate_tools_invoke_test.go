@@ -136,3 +136,38 @@ func TestBuildTool_leftOutReasons(t *testing.T) {
 		t.Errorf("a required secret the server's environment supplies left the tool out: %s", skip)
 	}
 }
+
+// The model reads the description, not the invoke facts, so a tool names its dry-run and confirm
+// parameters there, as each target spells them; a flag kept out of the tool isn't named.
+func TestToolDescription_roleParams(t *testing.T) {
+	no := false
+	cmd := agentContractCmd{
+		Path:    []string{"purge"},
+		Summary: "delete everything",
+		Flags: []agentInput{
+			{Name: "dry-run", Identifiers: []string{"--dry-run"}, Kind: "scalar", Type: "bool", Role: "dry-run"},
+			{Name: "yes", Identifiers: []string{"--yes"}, Kind: "scalar", Type: "bool", Role: "confirm"},
+		},
+	}
+	a := &agentProgram{doc: agentDoc{Name: "app"}}
+	tl, skip, _ := buildTool(a, agentCommand{c: cmd, leaf: true, offered: true, invocation: "app purge"}, false)
+	if skip != "" {
+		t.Fatal(skip)
+	}
+	for _, want := range []string{"Set the dry-run parameter to true to preview it", "Set the yes parameter to true to go ahead"} {
+		if !strings.Contains(tl.description, want) {
+			t.Errorf("description %q lacks %q", tl.description, want)
+		}
+	}
+	gemini, _ := geminiTools([]tool{tl})
+	b, _ := json.Marshal(gemini)
+	if !strings.Contains(string(b), "Set the dry_run parameter") {
+		t.Errorf("gemini.json names the parameter as declared: %s", b)
+	}
+
+	cmd.Flags[1].Agent = &no
+	tl, _, _ = buildTool(a, agentCommand{c: cmd, leaf: true, offered: true, invocation: "app purge"}, false)
+	if strings.Contains(tl.description, "yes parameter") {
+		t.Errorf("a flag kept from agents is named: %q", tl.description)
+	}
+}
