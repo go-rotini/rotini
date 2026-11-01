@@ -3448,10 +3448,13 @@ stdio, running the program for each call and returning what it prints:
 
 ```console
 $ go install github.com/go-rotini/mcp/cmd/rotini-mcp@latest
-$ rotini-mcp serve --tools tools/mcp.json --bin ./todo
+$ rotini-mcp serve ./todo
 ```
 
-`rotini-mcp config enable` adds the server to an MCP client's configuration. A program can serve
+`serve` reads `tools/mcp.json` unless `--tools` names another file. `rotini-mcp add claude-code ./todo`
+adds the server to an MCP client's configuration (`claude-code`, `claude-desktop`, `cursor` or
+`vscode`); `list` and `remove` show and undo it. The [companion](/cli#rotini-mcp) runs the same
+commands as `rotini mcp …`. A program can serve
 itself instead: with the feature's `go: true`, declare an `mcp` command with `agent: false` and
 pass `ToolsMCP` to `mcp.Serve` in its handler, as the module's README shows. A call that is
 canceled or runs past `--timeout` gets SIGTERM, so the program's signal handling runs, and is

@@ -232,6 +232,7 @@ Generated code and most programs never need these, but they are supported:
 | `rotini.TimeValues`, `rotini.URLValues`, `rotini.EmailValues`, `rotini.TimeZoneValues`, `rotini.MACValues`, `rotini.IPValues`, `rotini.RegexpValues` | the value types `date` and times with `layout:` or `relative:`, `url`, `email`, `timezone`, `mac`, `ip`/`cidr`/`hostport`, `regexp` |
 | `WiringError.Feature` | the feature a run needed but its program does not wire |
 | `Program.WithResolver` / `rotini.DefaultResolver` | replace how the command line is resolved to a command or a plugin |
+| `Program.WithPluginLookup` / `rotini.PluginLookup` | add a place to find plugin binaries, asked before `PATH`; see [plugins](/docs#plugins) |
 | `Program.WithLifecycle` / `rotini.DefaultLifecycle` / `rotini.AsCommand` | replace which hooks run and in what order |
 | `Program.WithParser` / `rotini.ArgvParser`, `rtx.Parser()` | read the command line in a syntax of your own, keeping env, config, defaults and validation |
 | `rotini.NewParser().Parse` | bind the command line alone into a struct |
